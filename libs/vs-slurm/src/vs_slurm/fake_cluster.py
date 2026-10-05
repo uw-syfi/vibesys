@@ -58,11 +58,21 @@ class _ScriptOptions(TypedDict, total=False):
     on_accept: Callable[[], None]
     on_dispatch: Callable[[], None]
     rejected_reason: str
+    pending_polls: int
+    teardown_lag: int
+
+
+# Production Slurm keeps a finished or cancelled job in COMPLETING (reported as
+# RUNNING by the public status mapping) while the node tears it down. A real
+# cluster showed 30 to 40 s of it at a 10 s poll interval, so the default lag is
+# a few inspections, never zero.
+DEFAULT_TEARDOWN_LAG = 3
 
 
 @dataclass
 class _Script:
     states: tuple[SlurmJobStatus, ...] = (SlurmJobStatus.PENDING,)
+    teardown_lag: int = DEFAULT_TEARDOWN_LAG
     pending_reason: str | None = None
     estimated_start: str | None = None
     result: ClusterResult | None = None
@@ -82,6 +92,7 @@ class _Job:
     handle: ClusterHandle
     result: ClusterResult
     cancelled: bool = False
+    teardown_left: int | None = None
     acceptance_observed: bool = False
     accepted_published: bool = False
 
@@ -128,14 +139,26 @@ class FakeCluster:
         states: tuple[SlurmJobStatus, ...] = (SlurmJobStatus.PENDING,),
         **options: Unpack[_ScriptOptions],
     ) -> None:
-        """Supply deterministic observations and lost acknowledgement after acceptance."""
+        """Supply deterministic observations and lost acknowledgement after acceptance.
+
+        ``states`` is the scheduler sequence up to the job script's exit or a
+        cancellation. ``pending_polls`` prepends that many PENDING observations
+        (queue wait). ``teardown_lag`` is how many inspections report the
+        non-terminal COMPLETING state, which the public mapping reports as
+        RUNNING, between the job script's exit or a cancellation and the
+        terminal state.
+        """
         validate_operation_id(operation_id)
+        pending_polls = options.pop("pending_polls", 0)
+        if pending_polls < 0 or options.get("teardown_lag", 0) < 0:
+            raise SlurmError.invalid_script_states()
         if not states or any(not isinstance(state, SlurmJobStatus) for state in states):
             raise SlurmError.invalid_script_states()
         for path, content in options.get("artifact_contents", {}).items():
             _safe_relative_path(path, SlurmError.invalid_artifact_path)
             if not isinstance(content, str):
                 raise SlurmError.invalid_artifact_path()
+        states = (SlurmJobStatus.PENDING,) * pending_polls + states
         self._scripts[operation_id] = _Script(states=states, **options)
 
     def submit(self, request: Request, *, operation_id: str) -> ClusterSubmitOutcome:
@@ -290,6 +313,7 @@ class FakeCluster:
             if job.cancelled
             else script.states[min(script.index, len(script.states) - 1)]
         )
+        status = self._through_teardown(job, script, status)
         script.index += 1
         if job.operation_id in self._cancelled and status in {
             SlurmJobStatus.PENDING,
@@ -313,6 +337,22 @@ class FakeCluster:
             estimated_start=script.estimated_start if status == SlurmJobStatus.PENDING else None,
             handle=job.handle,
         )
+
+    @staticmethod
+    def _through_teardown(job: _Job, script: _Script, status: SlurmJobStatus) -> SlurmJobStatus:
+        """Hold a terminal state back behind COMPLETING (public RUNNING) for the lag."""
+        if status not in {
+            SlurmJobStatus.COMPLETED,
+            SlurmJobStatus.FAILED,
+            SlurmJobStatus.CANCELLED,
+        }:
+            return status
+        if job.teardown_left is None:
+            job.teardown_left = script.teardown_lag
+        if job.teardown_left == 0:
+            return status
+        job.teardown_left -= 1
+        return SlurmJobStatus.RUNNING
 
     def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
         """Record cancellation intent, leaving confirmation to inspect."""

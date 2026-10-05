@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import subprocess
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,6 +23,7 @@ from vs_evaluation.api import (
     EvaluationState,
     EvaluationStep,
     EvaluationStepResult,
+    ExecutorCancellationUnconfirmedError,
     ExecutorCancellationUnknownError,
     ExecutorObservation,
     ExecutorPoll,
@@ -65,6 +68,85 @@ if TYPE_CHECKING:
     )
 
 _LOG = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _SchedulerView:
+    """What one scheduler state means for the lifecycle and for a pure poll.
+
+    This is the only place that interprets a scheduler state. ``lifecycle`` is
+    None when the state carries no lifecycle information (collection owns the
+    terminal result, or the state is unknown). ``staged`` says whether a workload
+    stage is known to be running.
+    """
+
+    lifecycle: EvaluationState | None
+    phase: PollPhase
+    staged: bool = False
+
+
+def _scheduler_view(status: SlurmJobStatus) -> _SchedulerView:
+    match status:
+        case SlurmJobStatus.PENDING:
+            # An accepted job still queued in the scheduler is an active
+            # evaluation. Queueing is a poll-phase fact, never a lifecycle
+            # regression to local-admission QUEUED, and no stage is running yet.
+            return _SchedulerView(EvaluationState.RUNNING, PollPhase.QUEUED)
+        case SlurmJobStatus.RUNNING:
+            return _SchedulerView(EvaluationState.RUNNING, PollPhase.RUNNING, staged=True)
+        case SlurmJobStatus.CANCELLED:
+            return _SchedulerView(EvaluationState.CANCELED, PollPhase.ENDED)
+        case SlurmJobStatus.COMPLETED | SlurmJobStatus.FAILED:
+            return _SchedulerView(None, PollPhase.ENDED)
+        case SlurmJobStatus.UNKNOWN:
+            return _SchedulerView(None, PollPhase.UNKNOWN)
+        case _:
+            assert_never(status)
+
+
+def _lifecycle_observation(
+    status: SlurmJobStatus, request: EvaluationRequest
+) -> ExecutorObservation | None:
+    """The lifecycle observation a scheduler state implies, if it implies one."""
+    view = _scheduler_view(status)
+    if view.lifecycle is None:
+        return None
+    return ExecutorObservation(
+        state=view.lifecycle,
+        current_stage=request.stages[0].name if view.staged else None,
+    )
+
+
+# Lifecycle states in the order an evaluation may move through them. A later,
+# lower reading never lowers a published state: publication joins by maximum.
+_LIFECYCLE_RANK = {
+    EvaluationState.QUEUED: 0,
+    EvaluationState.STARTING: 1,
+    EvaluationState.RUNNING: 2,
+}
+_TERMINAL_RANK = 3
+
+
+def _rank(state: EvaluationState) -> int:
+    return _LIFECYCLE_RANK.get(state, _TERMINAL_RANK)
+
+
+@dataclass(frozen=True)
+class _CancelConfirmed:
+    """The job is observed ended, or was never dispatched."""
+
+
+@dataclass(frozen=True)
+class _CancelRequested:
+    """Cancellation was sent to a known job that has not been seen ending."""
+
+    job_id: str | None
+
+
+_CancelOutcome = _CancelConfirmed | _CancelRequested
+
+# Real clusters keep a cancelled job in COMPLETING for tens of seconds.
+_DEFAULT_CANCEL_CONFIRMATION_SECONDS = 120.0
 
 
 class SlurmTargetLifecycle(StrEnum):
@@ -203,6 +285,7 @@ class SlurmEvaluationExecutor:
         cluster: Cluster | None = None,
         pause: Callable[[float], None] | None = None,
         deadline_clock: Callable[[], float] = time.time,
+        cancel_confirmation_seconds: float = _DEFAULT_CANCEL_CONFIRMATION_SECONDS,
     ) -> None:
         """Bind scheduler policy, durable intent, and the cluster interface."""
         self._cluster = (
@@ -212,6 +295,11 @@ class SlurmEvaluationExecutor:
         )
         self._pause = pause
         self._poll_interval = config.poll_interval_seconds
+        # Confirmation is bounded by an inspection count so that it follows the
+        # same pacing as the wait loop (and an injected pause), not the wall clock.
+        self._cancel_confirmations = max(
+            1, math.ceil(cancel_confirmation_seconds / config.poll_interval_seconds)
+        )
         self._deadline_clock = deadline_clock
         self._job_timeout_seconds = config.job_timeout_seconds
         self._workspace = workspace
@@ -311,25 +399,10 @@ class SlurmEvaluationExecutor:
             if isinstance(inspected, ClusterObservation)
             else SlurmJobStatus.UNKNOWN
         )
-        match status:
-            case SlurmJobStatus.PENDING:
-                # RUNNING means the accepted evaluation is active. Scheduler
-                # queueing cannot regress that lifecycle to local admission QUEUED.
-                # No current stage implies that no workload stage is known to run.
-                result = ExecutorObservation(state=EvaluationState.RUNNING)
-            case SlurmJobStatus.RUNNING:
-                result = ExecutorObservation(
-                    state=EvaluationState.RUNNING,
-                    current_stage=durable.request.stages[0].name,
-                )
-            case SlurmJobStatus.CANCELLED:
-                result = ExecutorObservation(state=EvaluationState.CANCELED)
-            case SlurmJobStatus.FAILED | SlurmJobStatus.COMPLETED | SlurmJobStatus.UNKNOWN:
-                # Scheduler terminality cannot replace collected stage evidence.
-                # Normal recovery owns collection; deadline inspection cannot
-                # start it or discard partial results by settling prematurely.
-                result = None
-        return result
+        # Scheduler terminality cannot replace collected stage evidence. Normal
+        # recovery owns collection; deadline inspection cannot start it or
+        # discard partial results by settling prematurely.
+        return _lifecycle_observation(status, durable.request)
 
     async def poll(self, handle_id: str) -> ExecutorPoll:
         """Inspect durable work once: no submission, recovery task or workspace.
@@ -358,17 +431,19 @@ class SlurmEvaluationExecutor:
         inspected = await asyncio.to_thread(self._cluster.inspect, target)
         if not isinstance(inspected, ClusterObservation):
             return ExecutorPoll(phase=PollPhase.UNKNOWN, detail=inspected.reason)
-        first = durable.request.stages[0].name
-        match inspected.status:
-            case SlurmJobStatus.PENDING:
+        view = _scheduler_view(inspected.status)
+        match view.phase:
+            case PollPhase.QUEUED:
                 return ExecutorPoll(
                     phase=PollPhase.QUEUED,
                     pending_reason=inspected.pending_reason,
                     estimated_start=inspected.estimated_start,
                 )
-            case SlurmJobStatus.RUNNING:
-                return ExecutorPoll(phase=PollPhase.RUNNING, current_stage=first)
-            case SlurmJobStatus.CANCELLED:
+            case PollPhase.RUNNING:
+                return ExecutorPoll(
+                    phase=PollPhase.RUNNING, current_stage=durable.request.stages[0].name
+                )
+            case PollPhase.ENDED if view.lifecycle is EvaluationState.CANCELED:
                 return ExecutorPoll(
                     phase=PollPhase.ENDED,
                     terminal=ExecutorObservation(state=EvaluationState.CANCELED),
@@ -459,7 +534,7 @@ class SlurmEvaluationExecutor:
             )
             unsubmitted = not handle_known and durable is not None and not durable.dispatch_started
             if handle_id in self._handles:
-                await self._cancel_running(handle_id)
+                self._require_confirmed(handle_id, await self._cancel_running(handle_id))
             # Drain acceptance before canceling by operation identity. A
             # conflicting payload can prove this executor owns no allocation.
             task.cancel()
@@ -469,9 +544,9 @@ class SlurmEvaluationExecutor:
             if observation is not None and observation.state is EvaluationState.FAILED:
                 return
             if not unsubmitted:
-                await self._cancel_running(handle_id)
+                self._require_confirmed(handle_id, await self._cancel_running(handle_id))
         elif self._read_evaluation(handle_id) is not None:
-            await self._cancel_running(handle_id)
+            self._require_confirmed(handle_id, await self._cancel_running(handle_id))
         elif handle_id not in self._handles:
             raise ExecutorCancellationUnknownError(handle_id)
         self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
@@ -780,23 +855,19 @@ class SlurmEvaluationExecutor:
                     SlurmJobStatus.CANCELLED,
                 }:
                     return handle
-                self._publish(
-                    handle_id,
-                    ExecutorObservation(
-                        state=EvaluationState.QUEUED
-                        if observed.status is SlurmJobStatus.PENDING
-                        else EvaluationState.RUNNING,
-                        current_stage=request.stages[0].name,
-                    ),
-                )
+                active = _lifecycle_observation(observed.status, request)
+                if active is not None:
+                    self._publish(handle_id, active)
             remaining = wait_deadline_epoch_s - self._deadline_clock()
             if remaining <= 0:
                 raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
-            interval = min(self._poll_interval, remaining)
-            if self._pause is None:
-                await asyncio.sleep(interval)
-            else:
-                await asyncio.to_thread(self._pause, interval)
+            await self._pace(min(self._poll_interval, remaining))
+
+    async def _pace(self, interval: float) -> None:
+        if self._pause is None:
+            await asyncio.sleep(interval)
+        else:
+            await asyncio.to_thread(self._pause, interval)
 
     async def _inspect_cancellation_safe(
         self, handle_id: str, handle: SlurmBatchHandle
@@ -826,14 +897,36 @@ class SlurmEvaluationExecutor:
             )
         return stages
 
-    async def _cancel_running(self, handle_id: str) -> None:
+    @staticmethod
+    def _require_confirmed(handle_id: str, outcome: _CancelOutcome) -> None:
+        match outcome:
+            case _CancelConfirmed():
+                return
+            case _CancelRequested(job_id=None):
+                raise ExecutorCancellationUnknownError(handle_id)
+            case _CancelRequested(job_id=str() as job_id):
+                raise ExecutorCancellationUnconfirmedError(handle_id, job_id)
+            case _:
+                assert_never(outcome)
+
+    async def _cancel_running(self, handle_id: str) -> _CancelOutcome:
+        """Send scancel, then confirm termination within a bounded wait.
+
+        A job that still reads active right after scancel is "cancel requested",
+        not an unknown identity: Slurm keeps a cancelled job in COMPLETING while
+        it tears down. Confirmation inspects at the wait loop's pacing for a
+        bounded number of inspections.
+        """
         durable = self._read_evaluation(handle_id)
         if durable is not None and durable.submission_rejection is not None:
-            return
+            return _CancelConfirmed()
         handle = self._handles.get(handle_id) or (durable.handle if durable is not None else None)
         target = handle if handle is not None else handle_id
         if handle is not None and handle.job.job_id in self._terminated_jobs:
-            return
+            return _CancelConfirmed()
+        job_id = handle.job.job_id if handle is not None else None
+        # Every request sends scancel: it is idempotent, and a retry after an
+        # unconfirmed outcome must reach a scheduler that lost the first one.
         cancelled = await _finish_in_thread(self._cluster.cancel, target)
         if isinstance(cancelled, ClusterUnknown):
             raise ExecutorCancellationUnknownError(handle_id)
@@ -846,26 +939,42 @@ class SlurmEvaluationExecutor:
             # The durable preparation proves this executor never dispatched.
             # The cluster retained cancellation intent and has no accepted job
             # identity, so there is no allocation termination to confirm.
-            return
-        observed = await _finish_in_thread(self._cluster.inspect, target)
-        if not isinstance(observed, ClusterObservation) or observed.status not in {
-            SlurmJobStatus.COMPLETED,
-            SlurmJobStatus.FAILED,
-            SlurmJobStatus.CANCELLED,
-        }:
-            raise ExecutorCancellationUnknownError(handle_id)
-        self._terminated_jobs.add(observed.job_id)
+            return _CancelConfirmed()
+        job_id = job_id or cancelled.job_id
+        for attempt in range(self._cancel_confirmations):
+            observed = await _finish_in_thread(self._cluster.inspect, target)
+            if isinstance(observed, ClusterObservation) and observed.status in {
+                SlurmJobStatus.COMPLETED,
+                SlurmJobStatus.FAILED,
+                SlurmJobStatus.CANCELLED,
+            }:
+                self._terminated_jobs.add(observed.job_id)
+                return _CancelConfirmed()
+            if attempt + 1 < self._cancel_confirmations:
+                await self._pace(self._poll_interval)
+        return _CancelRequested(job_id)
 
     async def _cancel_running_best_effort(self, handle_id: str) -> bool:
         """Report confirmed cleanup, retaining nonterminal ownership on failure."""
         try:
-            await self._cancel_running(handle_id)
+            outcome = await self._cancel_running(handle_id)
         except (ExecutorCancellationUnknownError, SlurmError, OSError, subprocess.SubprocessError):
             _LOG.exception("could not cancel the Slurm job of evaluation %s", handle_id)
             return False
-        return True
+        match outcome:
+            case _CancelConfirmed():
+                return True
+            case _CancelRequested():
+                _LOG.warning("cancellation of evaluation %s is not yet confirmed", handle_id)
+                return False
+            case _:
+                assert_never(outcome)
 
     def _publish(self, handle_id: str, observation: ExecutorObservation) -> None:
+        held = self._observations.get(handle_id)
+        if held is not None and _rank(observation.state) < _rank(held.state):
+            # Join by maximum: a later, lower reading is not news.
+            return
         self._observations[handle_id] = observation
         self._changes.setdefault(handle_id, asyncio.Event()).set()
 
