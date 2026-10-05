@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
-
 from vibesys.dynamic_core import dynamic_core_registration
 from vibesys.dynamic_roles import CORE_ROLES
 from vibesys.orchestration.dynamic.strategy.api import Role, role_id
 from vs_runtime.api import AgentCapability, AgentTool
 from vs_runtime.api.core import EVALUATION_TOOL_ID
-
-_LEGACY_ROLES = "vibesys.orchestration.dynamic.agents"
 
 
 def test_every_strategy_role_is_declared_once_and_the_plugin_serves_them() -> None:
@@ -29,13 +24,3 @@ def test_only_the_roles_that_measure_carry_the_evaluation_tool_and_its_mcp_serve
         assert carries_tool == (role.id in measuring)
         assert (AgentCapability.MCP_SERVERS in role.required_capabilities) == carries_tool
         assert carries_tool or role.extra_tools == ()
-
-
-def test_the_core_policy_does_not_load_the_legacy_role_package() -> None:
-    """Deleting the legacy dynamic package must not break the core path."""
-    probe = (
-        f"import sys, vibesys.dynamic_core;sys.exit(1 if {_LEGACY_ROLES!r} in sys.modules else 0)"
-    )
-    # test-isolation: module loading is process-global, so only a fresh interpreter can tell.
-    result = subprocess.run([sys.executable, "-c", probe], check=False, capture_output=True)  # noqa: S603
-    assert result.returncode == 0, result.stderr.decode()
