@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 import pytest
 from jinja2 import Environment, meta
 
+from vs_core.api import RevisionId, RevisionRef
+
 if __name__ != "packaged_prompt_contract":
     from tests.support import run_test_command
 
@@ -33,6 +35,7 @@ from vibesys.orchestration.dynamic.prompts import (
     FailureTail,
     RepeatedFailureLine,
 )
+from vibesys.orchestration.dynamic.strategy.api import PlannerPrompt
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
@@ -254,6 +257,8 @@ def representative_context() -> dict[str, object]:
         "scheduled",
     ]:
         context[name] = 2
+    # True renders the optional evaluation section of the core-policy prompts.
+    context["agent_evaluation"] = True
     for name in [
         "framework_benchmark_enabled",
         "framework_revert_applied",
@@ -428,8 +433,14 @@ def render_packaged_prompts(installed: Path) -> int:
             root = shared
         search_roots = (root, shared, common)
         free, _ = resolve_free_variables(path, search_roots=search_roots)
-        assert free <= context.keys() | {"response"}, (path, sorted(free - context.keys()))
-        values = template_context(path, context, mounted_context, free)
+        template_inputs = context
+        if "core_policy" in parts:
+            template_inputs = context | core_policy_context()
+        assert free <= template_inputs.keys() | {"response"}, (
+            path,
+            sorted(free - template_inputs.keys()),
+        )
+        values = template_context(path, template_inputs, mounted_context, free)
         rendered = render_template(path.relative_to(root).as_posix(), template_dir=root, **values)
         assert not re.search(r"{{|{%|{#", rendered), path
         citation_workspace, citation_resources = workspace, resource_roots
@@ -466,6 +477,41 @@ def render_packaged_prompts(installed: Path) -> int:
     assert origins
     assert all(path.is_relative_to(installed) for path in origins.values()), origins
     return len(templates)
+
+
+def core_policy_context() -> dict[str, object]:
+    """Typed inputs of the dynamic core policy's templates (its own prompt context models)."""
+    revision = RevisionRef(revision_id=RevisionId(root="a1"), digest="git-commit:a1")
+    planner = PlannerPrompt(
+        capacity=1,
+        in_flight=0,
+        remaining=3,
+        base_revision=revision,
+        base_accuracy_passed=True,
+        offer_snapshot="fixture-offer",
+        older_ids=(),
+        baseline=(),
+        input_failure=None,
+        profiling=False,
+    )
+    return {
+        "planner": planner,
+        "base_revision": revision,
+        "parent_revision": revision,
+        "worktree_revision": revision,
+        "prior_revision": revision,
+        "retained_revision": revision,
+        "candidate": revision,
+        "target": revision,
+        "baseline": (),
+        "buildable": (),
+        "history": (),
+        "evidence": (),
+        "offer_snapshot": "fixture-offer",
+        "base_accuracy_passed": True,
+        "repeated_failure": None,
+        "required_fields": (),
+    }
 
 
 def template_context(
