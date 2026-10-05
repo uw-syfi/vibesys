@@ -1074,7 +1074,7 @@ expose = ["ResolvedRun", "dynamic_core_registration", "dynamic_operation_catalog
 # place that stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.dynamic_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.dynamic_roles", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.run.evaluation_backend"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.dynamic_roles", "vibesys.errors", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.run.evaluation_backend"]
 
 [[interfaces]]
 from = ["vibesys.dynamic_roles"]

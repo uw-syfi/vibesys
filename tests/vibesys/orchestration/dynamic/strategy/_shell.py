@@ -22,6 +22,7 @@ from vs_core.api import (
     AdoptionObserved,
     AdoptRevision,
     CloseSession,
+    CollectEvidence,
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
@@ -101,7 +102,12 @@ def _status(answer: Answer | _InvalidReply) -> tuple[ObservationStatus, bool, bo
         return ObservationStatus.UNKNOWN, False, False
     if isinstance(answer, Retryable):
         return ObservationStatus.FAILED, False, False
-    return ObservationStatus.FAILED, False, True
+    return ObservationStatus.FAILED, answer.accepted, True
+
+
+def _reports_job(answer: Answer | _InvalidReply) -> bool:
+    """Whether an executor that took a job request reports the job's own state with it."""
+    return isinstance(answer, Succeeded) or (isinstance(answer, Failed) and answer.accepted)
 
 
 def _lifecycle_event(request: Request, observed: RequestObserved) -> OwnerEvent | None:
@@ -230,7 +236,7 @@ class ScriptedExecutors:
                 return (self._turn_event(request, answer, observed),)
             case SubmitMeasurement():
                 return self._submission_events(answer, observed)
-            case ObserveOwnedJob() if isinstance(answer, Succeeded):
+            case ObserveOwnedJob() | CollectEvidence() if _reports_job(answer):
                 return (self._job_event(request, observed),)
             case _:
                 event = _lifecycle_event(request, observed)
@@ -277,7 +283,9 @@ class ScriptedExecutors:
             ),
         )
 
-    def _job_event(self, request: ObserveOwnedJob, observed: RequestObserved) -> JobObserved:
+    def _job_event(
+        self, request: ObserveOwnedJob | CollectEvidence, observed: RequestObserved
+    ) -> JobObserved:
         """The job's own observation, carrying its submission's identity as production does."""
         job = next(
             row
@@ -286,11 +294,14 @@ class ScriptedExecutors:
         )
         key = job.submission_id.root
         sequence = self._next(key)
-        view = observed.observation.model_copy(
+        # A collection reports the job as it stands, not the collection's own outcome.
+        source = job.observation if isinstance(request, CollectEvidence) else None
+        view = (source or observed.observation).model_copy(
             update={
                 "event_id": EventId(root=f"{key}:observation:{sequence}"),
                 "request_id": job.submission_id,
                 "sequence": sequence,
+                "observed_at": observed.observation.observed_at,
                 "resource_id": request.resource_id,
             }
         )
