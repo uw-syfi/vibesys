@@ -41,7 +41,11 @@ def test_current_main_persisted_state_requires_selected_migration_and_roundtrips
     )
     old = json.loads(source)
     assert loaded.core.run.model_dump(mode="json") == old["core"]["run"] | {
-        "limits": old["core"]["run"]["limits"] | {"pool_capacities": []},
+        "limits": old["core"]["run"]["limits"]
+        | {"pool_capacities": []}
+        | core.Limits().model_dump(
+            mode="json", include={"observe_interval", "observe_backoff_cap"}
+        ),
     }
     attempt = loaded.core.attempts.attempts[0]
     assert attempt.charges[0].charged == 1

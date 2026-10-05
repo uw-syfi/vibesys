@@ -165,6 +165,18 @@ class EvidenceRef(Value):
         return self
 
 
+class ObservePacing(Value):
+    """When core next polls one job.
+
+    next_at is the core time at which the next ObserveOwnedJob is issued, or None
+    while a poll is outstanding or the job needs none. retries counts consecutive
+    unknown polls, and sets the backoff delay.
+    """
+
+    next_at: Seconds | None = None
+    retries: Count = 0
+
+
 class OwnedJob(Value):
     """Built-in job ownership tied to its canonical submission request.
 
@@ -184,6 +196,7 @@ class OwnedJob(Value):
     terminal: bool = False
     released: bool = False
     evidence: tuple[EvidenceRef, ...] = ()
+    pacing: ObservePacing = ObservePacing()
 
 
 class RegisteredOwnedJob(Value):
@@ -209,6 +222,7 @@ class RegisteredOwnedJob(Value):
     released: bool = False
     children: tuple[ResourceId, ...] = ()
     evidence: tuple[EvidenceRef, ...] = ()
+    pacing: ObservePacing = ObservePacing()
 
 
 class ContinuationPhase(StrEnum):
@@ -542,6 +556,16 @@ class DeadlineReached(Value):
     now_at: Seconds
 
 
+class ObservationsDue(Value):
+    """Core time reached now_at: poll every job whose next_at has come.
+
+    Internal signal raised whenever the clock advances, never shell input.
+    """
+
+    kind: Literal["observations_due"] = "observations_due"
+    now_at: Seconds
+
+
 class ResumeAuthorized(Value):
     """One strategy feedback authorization for the canonical next invocation.
 
@@ -775,6 +799,7 @@ type EvaluationEvent = Annotated[
     | JobObserved
     | TurnSuspended
     | DeadlineReached
+    | ObservationsDue
     | ContinuationJobsChanged
     | JobTerminationRequested
     | ContinuationRetireRequested
