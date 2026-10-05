@@ -39,12 +39,15 @@ from vs_runtime.api.core import (
     drive_core,
     start_core,
 )
-from vs_runtime.api.infrastructure import RuntimeRunControlChannel
+from vs_runtime.api.infrastructure import RunStopped, RuntimeRunControlChannel
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_core.api import RunView, StrategyEvent
+
+#: Event loop turns a stuck fake turn lasts, standing for "longer than anything the run waits".
+_TURN_BOUND = 1000
 
 INERT = SkeletonStrategy(state=SkeletonState(schema_version=1, phase="done"), measured=False)
 
@@ -257,6 +260,46 @@ async def test_a_dispatch_longer_than_the_lease_does_not_lose_the_lease(
         outcome = await drive_core(host, _config())
         assert process.shell.holds_lease(now_at=clock.now())
     assert outcome.status == RunStatus.TERMINAL
+
+
+@pytest.mark.parametrize("lease_durations_first", [0, 1, 5])
+@pytest.mark.asyncio
+async def test_a_stop_during_a_turn_that_never_ends_cancels_it_once_without_waiting(
+    tmp_path: Path, lease_durations_first: int
+) -> None:
+    """A stop that arrives while one dispatch (an agent turn) is in flight is acted on then.
+
+    The submission stands for a turn that never ends on its own. The loop reads controls
+    between drains, so before the fix it never saw the stop: the run ended only when the
+    host's grace bound cancelled it. Now the loop cancels the dispatch once and ends the
+    run as stopped, with no run-clock time spent waiting for a bound.
+    """
+    clock = FakeRunClock(at=1.0)
+    channel = _channel()
+    cancellations: list[str] = []
+
+    async def turn_that_never_ends() -> None:
+        for _ in range(lease_durations_first * 4):
+            clock.at += LEASE / 4
+            await asyncio.sleep(0)
+        channel.request_stop()
+        try:
+            # Never ends on its own as far as the run is concerned. The bound counts event
+            # loop turns, not time: a loop that ignores the stop lets it elapse and fails.
+            for _ in range(_TURN_BOUND):
+                await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            cancellations.append("cancelled")
+            raise
+
+    with open_skeleton_world(tmp_path, BaselineOnly(), timed=(clock, 0.0)) as world:
+        world.during_submit = turn_that_never_ends
+        _, host = _host(world, clock, channel)
+        start_core(host, _config())
+        with pytest.raises(RunStopped):
+            await drive_core(host, _config())
+    assert cancellations == ["cancelled"]
+    assert clock.sleeps == []
 
 
 @pytest.mark.asyncio

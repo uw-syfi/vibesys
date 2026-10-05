@@ -44,8 +44,11 @@ from vs_core.api import (
     RunStatus,
     project,
 )
+from vs_runtime._run_control import RunStopped
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_core.api import CoreEvent
     from vs_runtime._core_loop import CoreRuntime, PublicationDelivery
     from vs_runtime._core_requests import ExecutorRefusal
@@ -179,6 +182,14 @@ class RunControlBridge:
         self._paused = False
         self._stopped = False
 
+    def stop_undelivered(self) -> bool:
+        """Whether the operator asked to stop and no poll has turned that into a core event."""
+        return self._channel.stop_requested() and not self._stopped
+
+    def watch_stop(self, listener: Callable[[], object]) -> Callable[[], None]:
+        """Call ``listener`` (on the requesting thread) at each stop request; returns unsubscribe."""
+        return self._channel.on_stop_requested(listener)
+
     def poll(self, core: CoreState, now_at: float) -> tuple[RunControlEvent, ...]:
         """Controls requested since the last poll, in submission order."""
         if not self._started:
@@ -243,7 +254,8 @@ async def drive_core(
     Each iteration: renew the lease when a third of it has passed, submit controls and
     the deadline stop, deliver the clock, drain the shell, ask the strategy once recovery
     is READY, drain again. An iteration that changed nothing sleeps (see the module
-    docstring); one that cannot be woken by time raises ``RunStalledError``.
+    docstring); one that cannot be woken by time raises ``RunStalledError``. A stop that
+    arrives while a dispatch is in flight cancels it and raises ``RunStopped``.
     """
     return await _Loop(host, config, next_wake).run()
 
@@ -303,14 +315,52 @@ class _Loop:
         # iterate while it runs, so the lease is renewed from beside the drain.
         heartbeat = asyncio.create_task(self._heartbeat(), name=HEARTBEAT_TASK)
         try:
-            return await self._shell.run_until_idle(
-                self._delivery, now_at=now, max_dispatches=remaining
-            )
+            return await self._run_until_stop(now, remaining)
         finally:
             heartbeat.cancel()
             await asyncio.gather(heartbeat, return_exceptions=True)
             if not heartbeat.cancelled() and (failure := heartbeat.exception()) is not None:
                 raise failure
+
+    async def _run_until_stop(self, now: float, remaining: int) -> ExecutorRefusal | None:
+        """Drain the shell, but cancel the in-flight dispatch when the operator stops.
+
+        Controls are otherwise read between drains, so a stop that arrives during an agent
+        turn would wait for the turn to end, or for the host's grace bound to cancel the
+        run. A stop first seen here cancels the dispatch at once and ends the run as
+        stopped, the same end the grace bound produces, without waiting for it. Work that
+        does not end on cancel is still bounded by the host's grace.
+        """
+        work = asyncio.ensure_future(
+            self._shell.run_until_idle(self._delivery, now_at=now, max_dispatches=remaining)
+        )
+        if self._controls is None:
+            return await work
+        stop: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        loop = asyncio.get_running_loop()
+
+        def notify() -> None:
+            loop.call_soon_threadsafe(_resolve, stop)
+
+        unsubscribe = self._controls.watch_stop(notify)
+        try:
+            if self._controls.stop_undelivered():
+                _resolve(stop)
+            await asyncio.wait({work, stop}, return_when=asyncio.FIRST_COMPLETED)
+            if work.done():
+                return work.result()
+            work.cancel()
+            await asyncio.wait({work})
+            if work.cancelled():
+                raise RunStopped
+            return work.result()
+        finally:
+            unsubscribe()
+            if not work.done():
+                work.cancel()
+                await asyncio.gather(work, return_exceptions=True)
+            if not stop.done():
+                stop.cancel()
 
     async def _heartbeat(self) -> None:
         """Renew the lease every third of its duration until cancelled."""
@@ -370,6 +420,11 @@ class _Loop:
         if not self._deadline_stop:
             wake.append(core.run.deadline_at)
         await self._clock.sleep(max(min(wake) - now, self._config.min_sleep))
+
+
+def _resolve(future: asyncio.Future[None]) -> None:
+    if not future.done():
+        future.set_result(None)
 
 
 def _describe(core: CoreState) -> str:
