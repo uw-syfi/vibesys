@@ -363,8 +363,11 @@ jobs:
   # Several tests read clients/ directly (packaging, theme, and distribution
   # tests), so a TypeScript-only change still needs this job. Documentation-only
   # changes do not.
-  # The suite is split by test file across three runners (`VIBESYS_TEST_SHARD`,
-  # see tests/support/sharding.py) so the job fits the five-minute CI budget.
+  # The suite is split by test file across the runners listed in `matrix.shard`
+  # (`VIBESYS_TEST_SHARD`, see tests/support/sharding.py) so the job fits the
+  # five-minute CI budget. The shard count is the length of that list
+  # (`strategy.job-total`), so growing the suite means extending the list and
+  # nothing else; `coverage` downloads whatever `coverage-data-*` artifacts exist.
   # Each shard uploads its coverage data; `coverage` combines them.
   test:
     needs: changes
@@ -375,7 +378,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -396,9 +399,9 @@ jobs:
         with:
           go-version-file: support/repoctl/go.mod
 
-      - name: Run Python tests (shard ${{ matrix.shard }} of 3)
+      - name: Run Python tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
         env:
-          VIBESYS_TEST_SHARD: ${{ matrix.shard }}/3
+          VIBESYS_TEST_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           COVERAGE_FILE: .coverage.shard-${{ matrix.shard }}
         run: ./support/repoctl/repoctl run-checks --group python_ci_tests_shard
 
