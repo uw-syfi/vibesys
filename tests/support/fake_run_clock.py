@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
-from vs_runtime.api.core import HEARTBEAT_TASK
+from vs_runtime.api.core import HEARTBEAT_TASK, WAIT_TASK
 
 #: Event-loop turns ``sleep`` lets background tasks run before logical time moves.
 SETTLE_TURNS = 200
@@ -43,6 +43,18 @@ class FakeRunClock:
         if current is not None and current.get_name() == HEARTBEAT_TASK:
             await asyncio.sleep(0)
             return
+        if current is not None and current.get_name() == WAIT_TASK:
+            # The loop sleeps beside running requests and a real sleep would end when one
+            # finishes: no logical time passes until they are done (they may need threads), and
+            # none passes after, since the loop stops waiting then.
+            running = [
+                task
+                for task in asyncio.all_tasks()
+                if task.get_name().startswith("dispatch:") and not task.done()
+            ]
+            if running:
+                await asyncio.wait(running)
+                return
         background = [
             task
             for task in asyncio.all_tasks()

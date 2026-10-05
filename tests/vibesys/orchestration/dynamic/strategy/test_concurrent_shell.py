@@ -48,6 +48,8 @@ from vs_core.api import (
 from vs_core.testing.drive import Harness, Running, new_run
 from vs_project.api import FakeStateStore
 from vs_runtime.api.core import (
+    HEARTBEAT_TASK,
+    WAIT_TASK,
     CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
@@ -74,6 +76,15 @@ class _YieldingClock(FakeRunClock):
     """Logical time that passes without waiting for other tasks, so turns can overlap."""
 
     async def sleep(self, seconds: float) -> None:
+        task = asyncio.current_task()
+        if task is not None and task.get_name() == HEARTBEAT_TASK:
+            # Logical time is moved by the turns and the loop, never by the heartbeat.
+            await asyncio.sleep(0)
+            return
+        if task is not None and task.get_name() == WAIT_TASK:
+            # The loop waiting beside running turns: their delays are loop yields, so no
+            # time passes until a turn finishes (the loop cancels this sleep then).
+            await asyncio.get_running_loop().create_future()
         await asyncio.sleep(0)
         self.sleeps.append(seconds)
         self.at += seconds

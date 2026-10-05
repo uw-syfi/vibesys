@@ -232,7 +232,9 @@ async def test_a_running_job_is_polled_at_the_observe_interval(
     core = process.shell.record.envelope.core
     assert [job.status for job in core.evaluation.jobs] == ["succeeded"]
     assert len(world.cluster.submissions) == 1
-    assert runtime / interval - 1 <= len(world.polls) <= runtime / interval + 4
+    # The Fake clock advances while a poll runs in its thread (the loop now waits for it
+    # beside the clock instead of not at all), so fewer polls fit than at the real cadence.
+    assert runtime / interval / 4 <= len(world.polls) <= runtime / interval + 4
 
 
 @pytest.mark.parametrize("leases", [1, 3, 10])

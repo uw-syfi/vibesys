@@ -75,6 +75,7 @@ from vs_runtime._core_requests import (
 )
 from vs_runtime._core_run import (
     HEARTBEAT_TASK,
+    WAIT_TASK,
     CoreRunHost,
     NextWake,
     RunClock,
@@ -214,6 +215,7 @@ __all__ = [
     "NOT_TARGET_FACTS",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
+    "WAIT_TASK",
     "AccessGrant",
     "AccessGuardedWorkspace",
     "AccessKey",
