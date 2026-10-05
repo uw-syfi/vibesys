@@ -7,7 +7,8 @@ receipt. Continuation wakes carry the exact facts before the atomic job update.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from ._evaluation_history import produce_history
 from ._proofs import (
@@ -372,7 +373,8 @@ def _requested(
     )
 
 
-class _Origin(NamedTuple):
+@dataclass(frozen=True, slots=True)
+class _Origin:
     """Who a submission is charged to: the scope and the Measure decision, if any."""
 
     scope: Scope
@@ -451,7 +453,7 @@ def _allocate(
     plan: MeasurementPlan,
     budget: SubmissionBudget | None,
 ) -> AreaChange[EvaluationState]:
-    scope, decision_id = origin
+    scope, decision_id = origin.scope, origin.decision_id
     identity = _identity(plan)
     authority = _current(context, scope)
     if not isinstance(identity, Proven) or not isinstance(authority, Proven):
