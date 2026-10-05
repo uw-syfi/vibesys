@@ -31,6 +31,13 @@ from ._session_scope import (
     turn_request_id,
     write_turn_authority,
 )
+from ._turn_outcomes import (
+    acceptance_signals,
+    acceptance_unresolved,
+    is_terminal,
+    observed_phase,
+    turn_result,
+)
 from .types.attempts import (
     AttemptPhase,
     AttemptSetupFailed,
@@ -66,7 +73,6 @@ from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import ExecuteRegisteredOperation, InspectRequest, IntentPhase
 from .types.kernel import AreaChange, DecisionCompleted
 from .types.sessions import (
-    TURN_FAILURE_DETAIL_LIMIT,
     Access,
     CancelTurn,
     CloseSession,
@@ -92,16 +98,14 @@ from .types.sessions import (
     SessionsAcquireRequested,
     SessionsState,
     SessionView,
-    TurnFailureKind,
     TurnInputsReserved,
     TurnObserved,
     TurnRequested,
-    TurnResult,
 )
 from .types.strategy import Accepted, Operation, Rejected, RequestTurn
 
 if TYPE_CHECKING:
-    from .types.common import Observation, SchemaRef, SessionId
+    from .types.common import Observation, SessionId
     from .types.evaluation_history import EvaluationHistoryCursor
     from .types.intents import Intent, Request
     from .types.kernel import SessionsContext, Signal
@@ -260,7 +264,7 @@ def _validate_correction(
         or predecessor.scope != scope
         or predecessor.turn.session != turn.session
         or predecessor.observation is None
-        or not _terminal(predecessor)
+        or not is_terminal(predecessor)
         or predecessor.phase == SessionPhase.SUSPENDED
     ):
         raise ContractValidationError(
@@ -290,7 +294,7 @@ def _validate_interruption_fence(state: SessionsState, ref: InvocationRef, turn:
         ),
         None,
     )
-    if previous is not None and _acceptance_unresolved(previous):
+    if previous is not None and acceptance_unresolved(previous):
         raise ContractValidationError(
             "turn.session", "session requires invocation acceptance inspection"
         )
@@ -328,7 +332,7 @@ def _validate_successor(
             predecessor is None
             or predecessor.scope != scope
             or predecessor.observation is None
-            or not _terminal(predecessor)
+            or not is_terminal(predecessor)
             or predecessor.phase == SessionPhase.SUSPENDED
         ):
             raise ContractValidationError(
@@ -1090,7 +1094,7 @@ def _abandon_turn_acquisition(
     return AreaChange(
         state=state,
         signals=tuple(signals),
-        events=(_turn_result(ref, observation),),
+        events=(turn_result(ref, observation),),
     )
 
 
@@ -1302,25 +1306,6 @@ def _session_observed(
     return AreaChange(state=state)
 
 
-def _terminal(invocation: Invocation) -> bool:
-    observation = invocation.observation
-    return (
-        observation is not None
-        and observation.terminal
-        and observation.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
-    )
-
-
-def _acceptance_unresolved(invocation: Invocation) -> bool:
-    observation = invocation.observation
-    return (
-        observation is not None
-        and observation.terminal
-        and observation.status == ObservationStatus.SUCCEEDED
-        and not observation.accepted
-    )
-
-
 def _terminal_signals(
     state: SessionsState, context: SessionsContext, invocation: Invocation, event: TurnObserved
 ) -> tuple[Signal, ...]:
@@ -1374,59 +1359,6 @@ def _terminal_signals(
         # Checkpoint failure preserves the yielded decision dependency fence.
         signals.append(DecisionCompleted(decision_id=intent.request.decision_id, status=status))
     return tuple(signals)
-
-
-def _turn_result(
-    ref: InvocationRef,
-    observation: Observation,
-    *,
-    output_schema: SchemaRef | None = None,
-    output_json: str | None = None,
-    lost: bool = False,
-) -> TurnResult:
-    """The terminal result of a turn, with its failure kind and bounded executor text."""
-    if observation.status == ObservationStatus.SUCCEEDED:
-        return TurnResult(
-            invocation=ref,
-            observation=observation,
-            output_schema=output_schema,
-            output_json=output_json,
-        )
-    if lost:
-        failure = TurnFailureKind.TRANSPORT_LOST
-    elif observation.status == ObservationStatus.CANCELLED:
-        failure = TurnFailureKind.CANCELLED
-    else:
-        failure = TurnFailureKind.PROVIDER_FAILED
-    return TurnResult(
-        invocation=ref,
-        observation=observation,
-        output_schema=output_schema,
-        output_json=output_json,
-        failure=failure,
-        detail=observation.diagnostic[:TURN_FAILURE_DETAIL_LIMIT],
-    )
-
-
-def _observed_phase(invocation: Invocation, event: TurnObserved) -> SessionPhase:
-    observation = event.observation
-    if event.output_schema is not None and event.output_schema != invocation.turn.output_schema:
-        raise ContractValidationError("output_schema", "result differs from declared turn schema")
-    phase = SessionPhase.EXECUTING
-    if observation.status == ObservationStatus.UNKNOWN:
-        phase = SessionPhase.UNKNOWN
-    elif observation.terminal and observation.status != ObservationStatus.PENDING:
-        phase = SessionPhase.SUSPENDED if event.suspension is not None else SessionPhase.TERMINAL
-    if event.suspension is not None and (
-        not observation.accepted
-        or not observation.terminal
-        or observation.status in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
-        or event.suspension.invocation != event.invocation
-    ):
-        raise ContractValidationError(
-            "suspension", "yield requires exact accepted terminal invocation"
-        )
-    return phase
 
 
 def _inspect_turn(context: SessionsContext, invocation: Invocation) -> InspectTurn:
@@ -1556,13 +1488,13 @@ def _late_turn_observed(
             "phase": _physical_turn_phase(
                 session,
                 context,
-                SessionPhase.UNKNOWN if _acceptance_unresolved(invocation) else invocation.phase,
+                SessionPhase.UNKNOWN if acceptance_unresolved(invocation) else invocation.phase,
             ),
         }
     )
     state = _replace_session(state, session)
     cleanup = _after_turn_cleanup(state, context, invocation, session)
-    requests = (_inspect_turn(context, invocation),) if _acceptance_unresolved(invocation) else ()
+    requests = (_inspect_turn(context, invocation),) if acceptance_unresolved(invocation) else ()
     return cleanup.model_copy(
         update={
             "signals": (*signals, *cleanup.signals),
@@ -1628,27 +1560,13 @@ def _turn_observed(
     if _unresolved_after_inspection(context, invocation, event):
         return _release_unknown(state, context, event)
     event, inspected = _correlated_turn_observation(context, invocation, event)
-    if _terminal(invocation):
+    if is_terminal(invocation):
         return _late_turn_observed(state, context, invocation, event, inspected=inspected)
     if (
         not inspected and previous is not None and event.observation.sequence <= previous.sequence
     ) or invocation.phase == SessionPhase.ACQUIRING:
         return AreaChange(state=state)
     return _apply_turn_observation(state, context, event, invocation)
-
-
-def _acceptance_signals(
-    invocation: Invocation, event: TurnObserved, observation: Observation
-) -> tuple[Signal, ...]:
-    if observation.accepted and observation.status != ObservationStatus.UNKNOWN:
-        return (InputAcceptanceObserved(invocation=event.invocation, observation=observation),)
-    if _terminal(invocation) and observation.status in (
-        ObservationStatus.REJECTED,
-        ObservationStatus.FAILED,
-        ObservationStatus.CANCELLED,
-    ):
-        return (InputReservationReleased(invocation=event.invocation, observation=observation),)
-    return ()
 
 
 def _unresolved_after_inspection(
@@ -1695,7 +1613,7 @@ def _apply_turn_observation(
     observation = event.observation
     if event.suspension is not None and observation.status != ObservationStatus.SUCCEEDED:
         event = event.model_copy(update={"suspension": None})
-    phase = _observed_phase(invocation, event)
+    phase = observed_phase(invocation, event)
     invocation = invocation.model_copy(
         update={
             "observation": observation,
@@ -1717,20 +1635,20 @@ def _apply_turn_observation(
             "phase": _physical_turn_phase(
                 session,
                 context,
-                SessionPhase.UNKNOWN if _acceptance_unresolved(invocation) else phase,
+                SessionPhase.UNKNOWN if acceptance_unresolved(invocation) else phase,
             ),
         }
     )
     state = _replace_session(state, session)
-    signals = _acceptance_signals(invocation, event, observation)
+    signals = acceptance_signals(invocation, event, observation)
     requests: tuple[Request, ...] = ()
-    if phase == SessionPhase.UNKNOWN or _acceptance_unresolved(invocation):
+    if phase == SessionPhase.UNKNOWN or acceptance_unresolved(invocation):
         requests = (_inspect_turn(context, invocation),)
-    if not _terminal(invocation):
+    if not is_terminal(invocation):
         return AreaChange(state=state, signals=signals, requests=requests)
     signals = (*signals, *_terminal_signals(state, context, invocation, event))
     events = (
-        _turn_result(
+        turn_result(
             event.invocation,
             observation,
             output_schema=event.output_schema,
@@ -1751,7 +1669,7 @@ def _cancel(
     state: SessionsState, context: SessionsContext, event: InvocationCancellationRequested
 ) -> AreaChange[SessionsState]:
     invocation = _invocation(state, event.invocation)
-    if invocation is None or _terminal(invocation):
+    if invocation is None or is_terminal(invocation):
         return AreaChange(state=state)
     session = _session(state, event.invocation.session_id)
     if session is None or session.invocation != event.invocation.invocation_id:
@@ -1898,7 +1816,7 @@ def _drain_session(
         and invocation.observation is None
     ):
         return _drain_lease(state, context, session, event.authority)
-    if invocation is not None and not _terminal(invocation):
+    if invocation is not None and not is_terminal(invocation):
         return _cancel(
             state,
             context,
@@ -2050,7 +1968,7 @@ def _run_drain(
         invocation = _current_invocation(state, session)
         if invocation is not None and invocation.phase == SessionPhase.ACQUIRING:
             change = _drain_acquiring(state, context, session, invocation)
-        elif invocation is not None and not _terminal(invocation):
+        elif invocation is not None and not is_terminal(invocation):
             change = _cancel(
                 state,
                 context,
