@@ -67,8 +67,8 @@ _TURN_PHASES = {
 
 
 def key_of(record: AttemptRecord) -> str:
-    """Stable subject of one workstream."""
-    return f"{ids.component(record.plan.work_id)}.{record.sequence}"
+    """Stable raw subject of one workstream; the id constructors encode it."""
+    return f"{record.plan.work_id}.{record.sequence}"
 
 
 def subject_of(record: AttemptRecord, role: Role) -> str:
