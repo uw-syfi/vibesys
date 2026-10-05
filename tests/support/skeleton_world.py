@@ -74,7 +74,7 @@ from vs_slurm.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Awaitable, Callable, Iterator
 
     from vs_agent.api import AgentSessionSpec, AgentTurnRequest
     from vs_core.api import CoreState
@@ -107,6 +107,8 @@ class TimedPolls:
     clock: FakeRunClock
     runtime: float
     polls: list[str]
+    during_submit: Callable[[], Awaitable[None]] | None = None
+    """Work that takes place while a submission is in flight, such as the run clock passing."""
     _seen: dict[str, float] = field(default_factory=dict)
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
@@ -114,7 +116,9 @@ class TimedPolls:
         return await self.inner.availability(requirements)
 
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
-        """The real submission."""
+        """The real submission, taking as long as ``during_submit`` lets it."""
+        if self.during_submit is not None:
+            await self.during_submit()
         await self.inner.submit(request, handle_id=handle_id)
 
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
@@ -157,6 +161,7 @@ class World:
     operations: OperationCatalog = field(default_factory=empty_catalog)
     timed: tuple[FakeRunClock, float] | None = None
     polls: list[str] = field(default_factory=list)
+    during_submit: Callable[[], Awaitable[None]] | None = None
     limits: Limits = field(default_factory=Limits)
     yields: Callable[[RuntimeWorkspaces, StateNamespace], TurnYields] | None = None
     """Builds the turn-yield source from the host's workspaces and receipts, per process."""
@@ -215,7 +220,7 @@ class World:
         )
         if self.timed is not None:
             clock, runtime = self.timed
-            evaluation = TimedPolls(evaluation, clock, runtime, self.polls)
+            evaluation = TimedPolls(evaluation, clock, runtime, self.polls, self.during_submit)
         receipts = self.env.receipts_namespace()
         if self.gate is not None:
             # The gated namespace delegates all but the execution-record writes to the real one.
