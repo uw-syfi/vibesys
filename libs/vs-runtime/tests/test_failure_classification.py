@@ -52,10 +52,37 @@ def test_a_process_that_died_with_no_record_is_retried_at_most_once(exit_code: i
     assert kind is BenchmarkFailureKind.AMBIGUOUS
 
 
-def test_a_server_that_never_became_ready_is_the_candidates() -> None:
-    signal = signal_of(None, service_not_ready=True)
+_CANDIDATE_LOGS = (
+    "torch.OutOfMemoryError: CUDA out of memory",
+    "HIP error: out of memory",
+    "ValueError: No available memory for the cache blocks",
+    "error: unrecognized arguments: --max-batch 99",
+)
+_NODE_LOGS = (
+    "HSA_STATUS_ERROR_OUT_OF_RESOURCES: hip device lost",
+    "OSError: [Errno 5] Input/output error: '/shared/model/model.safetensors'",
+    "hipErrorNoDevice: no ROCm-capable device is detected",
+)
+_OTHER_LOGS = ("", "Traceback (most recent call last):\nKeyError: 'x'", "waiting for the server")
+
+
+@given(log=st.sampled_from(_CANDIDATE_LOGS), noise=st.text(max_size=40))
+def test_a_server_that_died_of_the_candidates_own_cause_is_the_candidates(
+    log: str, noise: str
+) -> None:
+    signal = signal_of(None, service_not_ready=True, service_log=f"{noise}\n{log}")
     for record in RecordState:
         assert classify(signal, record) is BenchmarkFailureKind.WORKLOAD
+
+
+@given(log=st.sampled_from(_NODE_LOGS + _OTHER_LOGS), cause=st.sampled_from(_CANDIDATE_LOGS))
+def test_a_server_that_never_became_ready_without_a_candidate_cause_is_ambiguous(
+    log: str, cause: str
+) -> None:
+    for text in (log, f"{cause}\n{log}" if log in _NODE_LOGS else log):
+        signal = signal_of(None, service_not_ready=True, service_log=text)
+        for record in RecordState:
+            assert classify(signal, record) is BenchmarkFailureKind.AMBIGUOUS
 
 
 @given(kinds=st.lists(st.sampled_from((*_KINDS, None)), max_size=5))

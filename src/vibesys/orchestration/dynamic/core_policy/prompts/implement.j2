@@ -31,9 +31,9 @@ Feedback from the prior attempt:
 {% if prior_failure_tail %}
 
 The trusted check of your earlier attempt failed. Its output ends with:
-```
+{{ prior_failure_fence }}
 {{ prior_failure_tail }}
-```
+{{ prior_failure_fence }}
 {% endif %}
 
 Inspect referenced artifacts only as needed. Keep evidence in files and return compact

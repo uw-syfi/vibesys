@@ -93,8 +93,6 @@ if TYPE_CHECKING:
 
 __all__ = ["advance"]
 
-_RETRYABLE = (MeasurementFailure.INFRASTRUCTURE, MeasurementFailure.AMBIGUOUS)
-
 
 def _current(context: EvaluationContext, scope: Scope) -> Verdict[DecisionId | None]:
     if context.run.status != RunStatus.RUNNING:
@@ -210,9 +208,13 @@ def _budget_ready(
         or not observation.terminal
     ):
         return Missing(ProofReason.UNRESOLVED)
-    if latest.failure not in _RETRYABLE or (
-        observation.accepted
-        and not isinstance(_submission_released(state, context, latest), Proven)
+    if (
+        latest.failure is None
+        or not latest.failure.retryable
+        or (
+            observation.accepted
+            and not isinstance(_submission_released(state, context, latest), Proven)
+        )
     ):
         return Missing(ProofReason.UNRESOLVED)
     if not may_resubmit(latest.failure, submissions=len(budget.receipts), limit=budget.limit):
@@ -665,7 +667,7 @@ def _canonical_failure(
     if observation.accepted:
         if observation.status == ObservationStatus.SUCCEEDED:
             return None
-        if claim in _RETRYABLE and has_facts:
+        if claim is not None and claim.retryable and has_facts:
             return MeasurementFailure.UNKNOWN
     return claim
 

@@ -6,6 +6,7 @@ prompt text.
 """
 
 import hashlib
+import re
 
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._parents import ParentOption, options
@@ -102,8 +103,16 @@ def _tail(text: str, limit: int) -> str:
     return text if len(text) <= limit else f"{_CUT.strip()} {text[-limit:]}"
 
 
+def _fence(text: str) -> str:
+    """A Markdown code fence that no line of ``text`` can close: longer than its longest
+    run of backticks (at least three)."""
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    return "`" * max(3, longest + 1)
+
+
 def _history_row(record: HypothesisRecord, running: frozenset[str]) -> HistoryRow:
     last = record.rounds[-1] if record.rounds else None
+    tail = "" if last is None else _tail(last.failure_tail, _HISTORY_FAILURE_CHARS)
     return HistoryRow(
         hypothesis_id=record.hypothesis_id,
         sequence=record.first_sequence,
@@ -118,7 +127,8 @@ def _history_row(record: HypothesisRecord, running: frozenset[str]) -> HistoryRo
         candidate=None if last is None else last.candidate,
         metrics=() if last is None else last.metrics,
         partial=None if last is None else last.partial,
-        failure_tail="" if last is None else _tail(last.failure_tail, _HISTORY_FAILURE_CHARS),
+        failure_tail=tail,
+        failure_fence=_fence(tail),
     )
 
 
@@ -168,6 +178,7 @@ def implement_prompt(record: AttemptRecord, state: DynamicStrategyState) -> Impl
         (item for item in state.hypotheses if item.hypothesis_id == record.plan.work_id), None
     )
     last = prior.rounds[-1] if prior is not None and prior.rounds else None
+    tail = "" if last is None else _tail(last.failure_tail, _HISTORY_FAILURE_CHARS)
     return ImplementPrompt(
         hypothesis_id=record.plan.work_id,
         hypothesis=record.plan.hypothesis,
@@ -178,7 +189,8 @@ def implement_prompt(record: AttemptRecord, state: DynamicStrategyState) -> Impl
         worktree_revision=None if last is None else last.candidate,
         prior_revision=None if last is None else last.candidate,
         feedback=record.feedback,
-        prior_failure_tail="" if last is None else _tail(last.failure_tail, _HISTORY_FAILURE_CHARS),
+        prior_failure_tail=tail,
+        prior_failure_fence=_fence(tail),
     )
 
 
