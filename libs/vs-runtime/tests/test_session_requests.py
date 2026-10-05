@@ -82,6 +82,7 @@ async def test_ensure_binds_one_resource_and_replays_it() -> None:
         again = await w.execute(ensure_request())
         assert status(first) is ObservationStatus.SUCCEEDED
         assert first.observation.observation.accepted
+        assert first.observation.observation.children_complete
         assert again == first
         assert first.observation.observation.resource_id is not None
 
