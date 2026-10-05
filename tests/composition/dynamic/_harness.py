@@ -31,7 +31,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from tests.support.loop_invariants import RunRecords, check
+from tests.support.liveness import Budget, End, Journal, assert_live
+from tests.support.loop_invariants import RunRecords, check, terminal_event
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
@@ -45,8 +46,13 @@ from vibesys.api import (
     RunStopped,
 )
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.strategy.api import (
+    DynamicStrategyState,
+    dynamic_operation_registry,
+)
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
+from vs_core.api import RunEnvelope
 from vs_project.api import Project, StoredEnvelope
 from vs_runtime.api.testing import FakeStopTimer
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
@@ -585,6 +591,20 @@ def _assert_invariants(request: RunRequest, run: LoopRun) -> None:
     )
     violations = check(records)
     assert not violations, [f"{v.invariant}: {v.detail}" for v in violations]
+    ended = terminal_event(records)
+    stopped = ended is not None and ended.get("status") == "interrupted"
+    assert_run_live(records.envelope, End.STOPPED if stopped else End.TERMINAL)
+
+
+def assert_run_live(envelope: Mapping[str, Any] | None, end: End = End.TERMINAL) -> None:
+    """Fail when the committed core record shows a run that did not make bounded progress.
+
+    The record is the run's intent ledger and final state (`tests.support.liveness`).
+    """
+    assert envelope is not None, "a run that ended committed no core record"
+    codec = dynamic_operation_registry()
+    core = codec.decode_envelope(RunEnvelope[DynamicStrategyState], json.dumps(envelope)).core
+    assert_live(Journal.from_ledger(core), core, Budget(retries=core.run.limits.max_retries), end)
 
 
 def load_envelope(root: Path, run_id: str) -> dict[str, Any] | None:

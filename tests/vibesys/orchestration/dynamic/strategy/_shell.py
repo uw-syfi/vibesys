@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 from tests.support.fake_run_clock import FakeRunClock
+from tests.support.liveness import Journal
 
 from vs_core.api import (
     AdoptionObserved,
@@ -50,10 +51,12 @@ from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
+    DispatchCapExceededError,
     ExecutionResult,
     OwnerEvent,
     RequestExecutors,
     RunLoopConfig,
+    RunStalledError,
     drive_core,
     start_core,
 )
@@ -137,8 +140,13 @@ class ScriptedExecutors:
         core: Callable[[], CoreState],
         registry: OperationRegistry,
         schemas: Mapping[SchemaRef, type[BaseModel]],
+        journal: Journal | None = None,
     ) -> None:
-        """Bind the script, a read of core's state, the operation codec and the reply types."""
+        """Bind the script, a read of core's state, the operation codec and the reply types.
+
+        ``journal`` records every request the executors receive and every observation they return.
+        """
+        self.journal = journal if journal is not None else Journal()
         self._script = script
         self._core = core
         self._registry = registry
@@ -147,11 +155,15 @@ class ScriptedExecutors:
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionResult:
         """What the executor reports for ``request``: one observation and its owner events."""
+        self.journal.issue(request)
         answer = self._parsed(request, self._script(request, self._core()))
         observed = self._observed(request, answer, context.now_at)
-        return ExecutionResult(
-            observation=observed, owner_events=self._owner_events(request, answer, observed)
-        )
+        owner_events = self._owner_events(request, answer, observed)
+        self.journal.observe_event(observed)
+        for event in owner_events:
+            if isinstance(event, JobObserved):
+                self.journal.observe(event.observation, event.evidence)
+        return ExecutionResult(observation=observed, owner_events=owner_events)
 
     def _parsed(self, request: Request, answer: Answer) -> Answer | _InvalidReply:
         """A turn's reply is what the schema parses it to, as the session executor does."""
@@ -351,6 +363,10 @@ class Run:
 
     core: CoreState
     decisions: list[Decision] = field(default_factory=list)
+    journal: Journal = field(default_factory=Journal)
+    # The loop gave up on the run: its dispatch cap was hit (it never went idle) or it
+    # stalled (open work and nothing to wake it).
+    halted: DispatchCapExceededError | RunStalledError | None = None
 
 
 LEASE = 1000.0
@@ -367,6 +383,7 @@ def drive_shell[S: StrategyState](
     decisions: list[Decision] = []
     recorded = RecordingStrategy(strategy, decisions)
     store = FakeStateStore()
+    journal = Journal()
     shell: CoreRuntime[S] = CoreRuntime(
         store,
         recorded,
@@ -375,7 +392,7 @@ def drive_shell[S: StrategyState](
             registry=harness.registry,
             executors=_executors(
                 ScriptedExecutors(
-                    script, lambda: shell.record.envelope.core, harness.registry, schemas
+                    script, lambda: shell.record.envelope.core, harness.registry, schemas, journal
                 )
             ),
         ),
@@ -384,8 +401,14 @@ def drive_shell[S: StrategyState](
     host = CoreRunHost(shell, FakePublicationDelivery(store), clock)
     config = RunLoopConfig(host_id="scenario", lease_duration=LEASE, max_dispatches=MAX_DISPATCHES)
     start_core(host, config)
-    asyncio.run(drive_core(host, config))
-    return Run(core=shell.record.envelope.core, decisions=decisions)
+    halted = None
+    try:
+        asyncio.run(drive_core(host, config))
+    except (DispatchCapExceededError, RunStalledError) as error:
+        # These are the loop's backstops. Return the run so the liveness check names the
+        # invariant it broke and the requests that led there.
+        halted = error
+    return Run(core=shell.record.envelope.core, decisions=decisions, journal=journal, halted=halted)
 
 
 def _executors(executor: ScriptedExecutors) -> RequestExecutors:
