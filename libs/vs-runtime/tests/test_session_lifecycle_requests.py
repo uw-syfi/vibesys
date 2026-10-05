@@ -24,7 +24,11 @@ from tests.support.session_lifecycle_world import (
     resume_request,
     run_snapshot_request,
 )
-from tests.support.session_world import SessionHost, dispatch_request, ensure_request
+from tests.support.session_world import (
+    SessionHost,
+    dispatch_request,
+    ensure_request,
+)
 
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_agent.api.testing import FakeAgentSessions
@@ -204,6 +208,24 @@ async def test_close_of_a_session_that_was_never_ensured_is_rejected() -> None:
         assert status(closed) is ObservationStatus.REJECTED
         assert closed.observation.observation.terminal
         assert released_keys(w.host) == 0
+
+
+def in_episode[R: RequestBase](request: R, generation: int) -> R:
+    """The same request issued under another admission episode."""
+    scope = request.scope.model_copy(update={"generation": generation})
+    return request.model_copy(update={"scope": scope})
+
+
+@pytest.mark.asyncio
+async def test_close_releases_only_the_episode_that_holds_the_lease() -> None:
+    async with world() as w:
+        await w.started()
+        stale = await w.execute(in_episode(close_request("req-stale"), 1))
+        assert status(stale) is ObservationStatus.REJECTED
+        assert released_keys(w.host) == 0
+        owner = await w.execute(close_request())
+        assert status(owner) is ObservationStatus.SUCCEEDED
+        assert released_keys(w.host) == 1
 
 
 # ResumeSessionTurn

@@ -119,6 +119,15 @@ def load_session_binding(store: ReceiptStore, bkey: str) -> SessionBinding | Non
     return store.load(_BINDINGS, "binding", bkey, SessionBinding)
 
 
+def conversation_established(
+    sessions: ClientAgentSessions, binding: SessionBinding, *, excluding: str | None = None
+) -> bool:
+    """Whether the journal shows a completed turn, so the provider conversation exists."""
+    key = AgentSessionKey.parse(binding.session_key)
+    others = (i for i in reversed(binding.dispatched) if i != excluding)
+    return any(isinstance(sessions.inspect(key, i), Completed) for i in others)
+
+
 def load_dispatch_record(
     store: ReceiptStore, bkey: str, invocation_id: InvocationId
 ) -> DispatchRecord | None:
@@ -616,12 +625,9 @@ class RuntimeSessionRequests:
         binding = load_session_binding(self._store, bkey)
         if binding is None:
             return False
-        key = AgentSessionKey.parse(binding.session_key)
-        others = tuple(i for i in reversed(binding.dispatched) if i != excluding)
-        outcomes = await asyncio.gather(
-            *(asyncio.to_thread(self._sessions.inspect, key, i) for i in others)
+        return await asyncio.to_thread(
+            conversation_established, self._sessions, binding, excluding=excluding
         )
-        return any(isinstance(outcome, Completed) for outcome in outcomes)
 
     def _note_dispatch(self, bkey: str, invocation: str) -> None:
         """Record, in the binding and before the provider call, that this invocation may run."""
