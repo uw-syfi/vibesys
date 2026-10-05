@@ -10,16 +10,25 @@ a module: a missing piece shows up as the real interface failing.
 
 from __future__ import annotations
 
+import dataclasses
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel
 from tests.support.runtime_evaluation import ScenarioCluster, stage_failure_text
-from tests.support.session_world import Reply, SessionHost, open_host
+from tests.support.session_world import (
+    FakeSessionResolver,
+    ProviderFaults,
+    SessionHost,
+)
 from tests.support.skeleton_strategy import DECLARATION, SkeletonState, SkeletonStrategy
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
 
+from vs_agent.api import AgentClient
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
 from vs_core.api import (
     ClockAdvanced,
     IntentPhase,
@@ -29,7 +38,10 @@ from vs_core.api import (
     RunFacts,
     RunStatus,
     SchemaRef,
+    TurnSpec,
 )
+from vs_project.api import run_git
+from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.core import (
     CoreRuntime,
     CoreRuntimeBindings,
@@ -51,8 +63,8 @@ from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
+    from vs_agent.api import AgentSessionSpec, AgentTurnRequest
     from vs_core.api import CoreState
 
 DIGEST = "ab" * 32
@@ -68,11 +80,14 @@ class World:
     cluster: ScenarioCluster
     agents: SessionHost
     measured: bool = True
+    keeps_candidate: bool = True
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
         host = self.env.hosts[0]
-        commit = host.root.revision
+        # The run's baseline is the trusted input baseline: that is what adoption of the
+        # baseline is checked against.
+        commit = host.root.trusted_input_baseline
         assert commit is not None
         facts = RunFacts(
             objective="make candidate.py faster",
@@ -120,7 +135,11 @@ class World:
         )
 
     def _strategy(self) -> SkeletonStrategy:
-        return SkeletonStrategy() if self.measured else SkeletonStrategy.unmeasured()
+        return (
+            SkeletonStrategy()
+            if self.measured
+            else SkeletonStrategy.unmeasured(keeps_candidate=self.keeps_candidate)
+        )
 
     def runtime(self) -> Process:
         """A shell over this run's durable store, as one new process would start it.
@@ -182,6 +201,8 @@ async def drive(process: Process, *, start: float, rounds: int = 40) -> Executor
             refusal = await process.shell.run_until_idle(process.delivery, now_at=now)
         if refusal is not None:
             return refusal
+        if finished(process):
+            return None
         if _stalled(process, before):
             raise StalledError(_describe(process))
         now += 1.0
@@ -240,17 +261,97 @@ async def run_until_crash(process: Process, point: CrashPoint, *, start: float) 
     raise AssertionError(message)
 
 
+class Implementation(BaseModel):
+    """The implementer's structured reply: the commit it made in its workspace."""
+
+    commit: str
+
+
+IMPLEMENTATION = SchemaRef(name="implementation", version=1)
+IMPLEMENTER = RoleId(root="implementer")
+
+
+@dataclass
+class CandidateWriter:
+    """The Fake provider's implementer: each turn commits one change in its candidate worktree.
+
+    The worktree is found through Git (the one that is not the root checkout), so
+    nothing here reaches into the executors. The reply names the new commit.
+    """
+
+    root: Path
+    answer: dict[str, object] = field(default_factory=lambda: {"commit": ""})
+    turns: int = 0
+
+    def worktree(self) -> Path:
+        """The path of the run's single candidate worktree."""
+        listing = self._git(self.root, "worktree", "list", "--porcelain")
+        paths = [
+            Path(line.removeprefix("worktree "))
+            for line in listing.splitlines()
+            if line.startswith("worktree ")
+        ]
+        candidates = [path for path in paths if path.resolve() != self.root.resolve()]
+        assert len(candidates) == 1, f"expected one candidate worktree, found {candidates}"
+        return candidates[0]
+
+    def __call__(self, request: AgentTurnRequest) -> None:
+        """Write and commit one change, then name the commit in the reply."""
+        del request
+        self.turns += 1
+        tree = self.worktree()
+        (tree / "candidate.py").write_text(f"VALUE = {self.turns + 1}\n", encoding="utf-8")
+        self._git(tree, "add", "-A")
+        self._git(tree, "commit", "-m", f"implement {self.turns}")
+        self.answer["commit"] = self._git(tree, "rev-parse", "HEAD").strip()
+
+    @staticmethod
+    def _git(cwd: Path, *args: str) -> str:
+        identity = ["-c", "user.name=agent", "-c", "user.email=agent@example.com"]
+        result = run_git([*identity, *args], cwd=cwd)
+        assert result.returncode == 0, result.stderr
+        return result.stdout.decode()
+
+
+@dataclass
+class CandidateResolver(FakeSessionResolver):
+    """Resolves turns to the candidate worktree the writer commits in."""
+
+    writer: CandidateWriter | None = None
+
+    def agent_spec(self, turn: TurnSpec) -> AgentSessionSpec | None:
+        """The Fake provider's session configuration over the live candidate worktree."""
+        assert self.writer is not None
+        spec = super().agent_spec(turn)
+        assert spec is not None
+        return dataclasses.replace(spec, workspace=self.writer.worktree())
+
+
+def _open_agents(root: Path) -> SessionHost:
+    writer = CandidateWriter(root)
+    client = AgentClient(FakeDriver(answer=writer.answer, on_turn=writer))
+    resolver = CandidateResolver(
+        root,
+        TemplateRenderer(root),
+        roles=frozenset({IMPLEMENTER}),
+        schemas={IMPLEMENTATION: Implementation},
+        writer=writer,
+    )
+    return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
+
+
 @contextmanager
-def open_skeleton_world(tmp_path: Path, *, measured: bool = True) -> Iterator[World]:
+def open_skeleton_world(
+    tmp_path: Path, *, measured: bool = True, keeps_candidate: bool = True
+) -> Iterator[World]:
     """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
     with open_workspace_env(tmp_path) as env:
-        agents = open_host(tmp_path / "project")
-        agents.resolver.roles = frozenset({RoleId(root="implementer")})
-        agents.resolver.schemas = {SchemaRef(name="implementation", version=1): Reply}
+        agents = _open_agents(tmp_path / "project")
         yield World(
             env=env,
             root=tmp_path / "project",
             cluster=ScenarioCluster(),
             agents=agents,
             measured=measured,
+            keeps_candidate=keeps_candidate,
         )

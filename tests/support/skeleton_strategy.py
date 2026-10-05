@@ -9,6 +9,7 @@ phase advances on the strategy event that proves the previous one.
 
 from __future__ import annotations
 
+import json
 from typing import Literal
 
 from vs_core.api import (
@@ -48,6 +49,7 @@ from vs_core.api import (
     StrategyEvent,
     StrategyId,
     StrategyState,
+    TrustedBaseline,
     TurnResult,
     TurnSpec,
     Value,
@@ -109,11 +111,28 @@ class SkeletonStrategy(Value):
     state: SkeletonState = SkeletonState(schema_version=1)
     declaration: StrategyDeclaration = DECLARATION
     measured: bool = True
+    keeps_candidate: bool = True
 
     @classmethod
-    def unmeasured(cls) -> SkeletonStrategy:
-        """The scenario without the baseline and candidate measurements."""
-        return cls(state=SkeletonState(schema_version=1, phase="start"), measured=False)
+    def unmeasured(cls, *, keeps_candidate: bool = True) -> SkeletonStrategy:
+        """The scenario without the baseline and candidate measurements.
+
+        With ``keeps_candidate=False`` the attempt is discarded and the trusted
+        baseline is adopted, which needs no retained revision.
+        """
+        return cls(
+            state=SkeletonState(schema_version=1, phase="start"),
+            measured=False,
+            keeps_candidate=keeps_candidate,
+        )
+
+    def _selection(self, view: RunView) -> RetainedCandidate | TrustedBaseline:
+        state = self.state
+        if self.keeps_candidate:
+            assert state.candidate is not None
+            assert state.settlement is not None
+            return RetainedCandidate(settlement_id=state.settlement, revision=state.candidate)
+        return TrustedBaseline(revision=view.facts.baseline)
 
     def bind(self, state: SkeletonState) -> SkeletonStrategy:
         return self.model_copy(update={"state": state})
@@ -178,25 +197,19 @@ class SkeletonStrategy(Value):
                     target=ATTEMPT,
                     disposition=Settle(
                         assessments=(),
-                        eligible=True,
-                        retention="candidate",
-                        outcome="succeeded",
-                        candidate=state.candidate,
+                        eligible=self.keeps_candidate,
+                        retention="candidate" if self.keeps_candidate else "discard",
+                        outcome="succeeded" if self.keeps_candidate else "failed",
+                        candidate=state.candidate if self.keeps_candidate else None,
                     ),
                 )
             case "propose":
-                assert state.candidate is not None
-                assert state.settlement is not None
                 decision = ProposeWinner(
                     decision_id=DecisionId(root="winner"),
                     scope=run,
-                    selection=RetainedCandidate(
-                        settlement_id=state.settlement, revision=state.candidate
-                    ),
+                    selection=self._selection(view),
                 )
             case "stop":
-                assert state.candidate is not None
-                assert state.settlement is not None
                 decision = Stop(
                     decision_id=DecisionId(root="stop"),
                     scope=run,
@@ -204,9 +217,7 @@ class SkeletonStrategy(Value):
                     result=RunResultProposal(
                         outcome="success",
                         reason="one attempt measured, settled and adopted",
-                        selection=RetainedCandidate(
-                            settlement_id=state.settlement, revision=state.candidate
-                        ),
+                        selection=self._selection(view),
                     ),
                 )
             case "failed":
@@ -235,10 +246,18 @@ class SkeletonStrategy(Value):
             return {}
         update: dict[str, object] = {"phase": phase}
         if isinstance(event, TurnResult):
-            update["candidate"] = event.observation.revision
+            update["candidate"] = _committed(event)
         if isinstance(event, AttemptSettled):
             update["settlement"] = event.settlement.settlement_id
         return update
+
+
+def _committed(event: TurnResult) -> RevisionRef | None:
+    """The commit the implementer reports in its structured reply, if the turn produced one."""
+    if event.output_json is None:
+        return None
+    commit = json.loads(event.output_json).get("commit")
+    return RevisionRef.of_git_commit(commit) if commit else None
 
 
 # The one event that proves each phase done: (event type, phase) -> next phase.

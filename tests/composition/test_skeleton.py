@@ -134,12 +134,31 @@ async def test_skeleton(tmp_path: Path, crash: CrashPoint | None) -> None:
     await _play(tmp_path, crash, measured=True)
 
 
+# Gaps found behind SESSION_OUTCOME. Each was reproduced by a local, unpushed edit that
+# fixed the gap in front of it (the patch is in the skeleton-2 handoff); with all of them
+# applied the discarded-attempt scenario passes straight through. In the order met:
+#   G2 owner SESSION-WIRING: a terminal DispatchTurn observation is never released
+#      (_session_requests.py:301 _result), but attempt retirement drains a writer only from a
+#      released invocation observation (_attempt_retirement.py:392 _invocation_drained), so a
+#      closing attempt never reaches RetainRevision or DiscardWorkspace.
+#   G3 owner CORE-P2: for CloseSession, the ledger (_intent_forward.py:209) and Sessions
+#      (_session_turns.py:1025) both emit the same ReleaseDependencyObserved, and step raises
+#      SignalCycleError (_step.py:634) on the duplicate.
+#   G4 owner CORE-P2: _closure_event (_attempt_retirement.py:1680) makes progress only if the
+#      released edge is still listed, but _discover has already dropped it once Sessions marked
+#      the session TERMINAL, so the closing attempt stalls with nothing left to wait for.
+#   G5 owner unassigned (CORE-P2 and the workspace executor): no request retains the commit a
+#      plain write turn made. Core snapshots only on suspension or interrupt
+#      (_session_turns.py:1316), and RetainRevision rejects a commit the run never minted
+#      (_workspace_requests.py:376 _known_revision, :542), so a kept candidate cannot be
+#      settled. The discarded-attempt scenario sidesteps it by adopting the trusted baseline.
+
 SESSION_OUTCOME = pytest.mark.xfail(
     raises=ObservationRejectedError,
     strict=True,
     reason=(
         "core rejects the DispatchTurn observation: the executor puts the turn's output on "
-        "RequestObserved (outcome_schema, outcome_json; _session_requests.py:327) and core's "
+        "RequestObserved (outcome_schema, outcome_json; _session_requests.py:329) and core's "
         "ingress requires a registered outcome proof for those fields "
         "(vs_core/_step.py:1202); the output belongs on the TurnObserved owner event only; "
         "owner SESSION-WIRING (_session_requests.py), probe "
@@ -164,8 +183,26 @@ async def test_skeleton_without_measurements(tmp_path: Path, crash: CrashPoint |
     await _play(tmp_path, crash, measured=False)
 
 
-async def _play(tmp_path: Path, crash: CrashPoint | None, *, measured: bool) -> None:
-    with open_skeleton_world(tmp_path, measured=measured) as world:
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "crash",
+    [
+        pytest.param(None, id="straight-through", marks=SESSION_OUTCOME),
+        pytest.param(CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=INSPECT_OF_SUBMIT),
+        pytest.param(
+            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=INSPECT_OF_SUBMIT
+        ),
+    ],
+)
+async def test_skeleton_discarded_attempt(tmp_path: Path, crash: CrashPoint | None) -> None:
+    """One attempt is discarded and the trusted baseline adopted: no retained revision needed."""
+    await _play(tmp_path, crash, measured=False, keeps_candidate=False)
+
+
+async def _play(
+    tmp_path: Path, crash: CrashPoint | None, *, measured: bool, keeps_candidate: bool = True
+) -> None:
+    with open_skeleton_world(tmp_path, measured=measured, keeps_candidate=keeps_candidate) as world:
         process = _start(world, "host-a", 0.0)
         now = 1.0
         if crash is not None:
@@ -369,7 +406,7 @@ async def test_inspect_reports_a_recorded_measurement_submit(tmp_path: Path) -> 
     strict=True,
     reason=(
         "the DispatchTurn observation carries the turn's output (outcome_schema, outcome_json; "
-        "_session_requests.py:327), which core's ingress rejects without a registered outcome "
+        "_session_requests.py:329), which core's ingress rejects without a registered outcome "
         "proof (vs_core/_step.py:1202); the output belongs on TurnObserved only; owner "
         "SESSION-WIRING (_session_requests.py)"
     ),
