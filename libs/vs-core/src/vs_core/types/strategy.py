@@ -10,6 +10,7 @@ from pydantic import (
     PrivateAttr,
     SerializeAsAny,
     ValidationInfo,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -23,7 +24,7 @@ from .common import (
     DependencyRef,
     InvocationRef,
     ItemId,
-    LifecycleCapabilities,
+    LifecycleCapability,
     LifecycleClass,
     OperationRef,
     OperationSchemaRef,
@@ -260,8 +261,13 @@ class StrategyDeclaration(Value):
     state_schema: SchemaRef
     required_operations: tuple[OperationSchemaRef, ...] = ()
     optional_operations: tuple[OperationSchemaRef, ...] = ()
-    required: LifecycleCapabilities = frozenset()
-    optional: LifecycleCapabilities = frozenset()
+    required: frozenset[LifecycleCapability] = frozenset()
+    optional: frozenset[LifecycleCapability] = frozenset()
+
+    @field_serializer("required", "optional", when_used="json")
+    def _sorted_abilities(self, value: frozenset[LifecycleCapability]) -> list[str]:
+        """Write the sets in sorted order, as `Capabilities.lifecycle` does."""
+        return sorted(value)
 
 
 class Accepted(Value):
