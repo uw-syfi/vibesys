@@ -282,8 +282,8 @@ class SessionHost:
     journal: FakeAgentInvocationStore
     turns: list[AgentTurnRequest]
     faults: ProviderFaults
-    driver: FakeDriver
-    turn_started: threading.Event
+    driver: FakeDriver | None = None
+    turn_started: threading.Event = field(default_factory=threading.Event)
 
     def executor(self, store: ReceiptStore) -> RuntimeSessionRequests:
         """A freshly started host over the same journal and provider conversation."""

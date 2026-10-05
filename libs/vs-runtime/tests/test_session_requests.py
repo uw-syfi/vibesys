@@ -399,4 +399,5 @@ async def test_cancelling_a_dispatch_cancels_the_hung_provider_turn_exactly_once
         dispatch.cancel()
         with pytest.raises(asyncio.CancelledError):
             await dispatch
+        assert host.driver is not None
         assert host.driver.cancel_count == 1
