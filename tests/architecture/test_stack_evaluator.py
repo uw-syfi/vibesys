@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.shared_build import shared_build
 
 from vibesys.inputs import load_input_bundle
 
@@ -88,9 +89,12 @@ def compiled_stack_candidate(tmp_path_factory) -> Path:  # noqa: ANN001  # lint-
 
     project_root = Path(__file__).parents[2]
     starter = project_root / "examples" / "starters" / "stack-rs"
-    build_dir = tmp_path_factory.mktemp("stack-rs-build") / "starter"
-    _copy_input_bundle(starter, build_dir)
-    subprocess.run(["make"], cwd=build_dir, check=True)  # noqa: S607  # lint-waiver: LW-994619 [S607]; Executable name is a project tool resolved from PATH in tests.
+
+    def build(directory: Path) -> None:
+        _copy_input_bundle(starter, directory / "starter")
+        subprocess.run(["make"], cwd=directory / "starter", check=True)  # noqa: S607  # lint-waiver: LW-994619 [S607]; Executable name is a project tool resolved from PATH in tests.
+
+    build_dir = shared_build(tmp_path_factory, "stack-rs-build", build) / "starter"
 
     candidate = build_dir / "stack-candidate.so"
     assert candidate.is_file()
@@ -105,22 +109,25 @@ def stack_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: ANN001  # 
 
     project_root = Path(__file__).parents[2]
     source = project_root / "examples" / "evaluators" / "stack" / "native_runner"
-    target_dir = tmp_path_factory.mktemp("stack-native-runner") / "target"
-    subprocess.run(  # noqa: S603  # lint-waiver: LW-994621 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
-        [  # noqa: S607  # lint-waiver: LW-994622 [S607]; Executable name is a project tool resolved from PATH in tests.
-            "cargo",
-            "build",
-            "--quiet",
-            "--release",
-            "--locked",
-            "--manifest-path",
-            str(source / "Cargo.toml"),
-            "--target-dir",
-            str(target_dir),
-        ],
-        cwd=source,
-        check=True,
-    )
+
+    def build(directory: Path) -> None:
+        subprocess.run(  # noqa: S603  # lint-waiver: LW-994621 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
+            [  # noqa: S607  # lint-waiver: LW-994622 [S607]; Executable name is a project tool resolved from PATH in tests.
+                "cargo",
+                "build",
+                "--quiet",
+                "--release",
+                "--locked",
+                "--manifest-path",
+                str(source / "Cargo.toml"),
+                "--target-dir",
+                str(directory / "target"),
+            ],
+            cwd=source,
+            check=True,
+        )
+
+    target_dir = shared_build(tmp_path_factory, "stack-native-runner", build) / "target"
     runner = target_dir / "release" / "vibesys-stack-native-runner"
     assert runner.is_file()
 
