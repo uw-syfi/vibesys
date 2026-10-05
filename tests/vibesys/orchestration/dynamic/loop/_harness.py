@@ -39,12 +39,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from launch import built_in_orchestrations
 from launch.testing import FakeStopTimer, create_session
 from vibesys.api import (
     ComputeBackend,
     Config,
     OrchestrationDescriptor,
+    OrchestrationRegistry,
     ResumeRef,
     RunRequest,
     RunStatus,
@@ -52,8 +52,10 @@ from vibesys.api import (
 )
 from vibesys.events import CoreEventType
 from vibesys.inputs import load_input_bundle
-from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions
+from vibesys.orchestration.dynamic import DynamicOptions
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_REGISTRATION
 from vibesys.orchestration.dynamic.models import DynamicState
 from vibesys.orchestration.profilers import ProfilerKind
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
@@ -813,7 +815,7 @@ def run_request(
         session = create_session(
             request,
             sink=sink,
-            registry=built_in_orchestrations(),
+            registry=_legacy_registry(),
             agent_client_factory=client_factory or scripted_client,
             backend_factory=create_compute_backend,
             stop_timer=stop_timer or FakeStopTimer(),
@@ -834,6 +836,13 @@ def run_request(
         return LoopRun(result.run_id, result.succeeded, None, events, result.status)
 
     return asyncio.run(run())
+
+
+def _legacy_registry() -> OrchestrationRegistry:
+    """A catalog of only the legacy dynamic loop: no built-in catalog registers it."""
+    registry = OrchestrationRegistry()
+    registry.register(LEGACY_REGISTRATION)
+    return registry
 
 
 def _run_id(events: list[CoreEvent]) -> str:

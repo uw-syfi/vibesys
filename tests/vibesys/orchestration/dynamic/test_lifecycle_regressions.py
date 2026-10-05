@@ -16,9 +16,10 @@ from tests.vibesys.orchestration.dynamic._support import (
 )
 
 from vibesys.hypothesis import CandidateDisposition
-from vibesys.orchestration.dynamic import PLUGIN, DynamicState
+from vibesys.orchestration.dynamic import DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
 from vibesys.orchestration.dynamic.control import Withdrawal
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.models import PortfolioPlan, WorkstreamPhase
 
 # test-isolation: DynamicRun is the current public Workers port; agent actions

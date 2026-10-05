@@ -22,8 +22,8 @@ from tests.vibesys.orchestration.dynamic.test_suspension_shell import (
     _submit_failures,
 )
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.lifecycle import awaiting_evaluation
 from vibesys.orchestration.dynamic.models import WaitingForEvaluation
 from vibesys.run.dynamic_suspension import EvaluationAttemptBoundError

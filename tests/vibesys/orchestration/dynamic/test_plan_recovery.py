@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions, DynamicPlanningError, DynamicState
+from vibesys.orchestration.dynamic import DynamicOptions, DynamicPlanningError, DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vs_runtime.api import (
     AgentCapability,
     AgentTurnTimeoutError,

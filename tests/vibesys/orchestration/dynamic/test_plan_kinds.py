@@ -24,7 +24,7 @@ from tests.support.evaluation_scenarios import (
     build_scenario,
 )
 
-from vibesys.orchestration.dynamic import PLUGIN
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.models import (
     DynamicProfile,
     DynamicState,

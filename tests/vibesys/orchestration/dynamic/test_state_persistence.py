@@ -22,13 +22,9 @@ from tests.vibesys.orchestration.dynamic._support import (
     throughput,
 )
 
-from vibesys.orchestration.dynamic import (
-    PLUGIN,
-    DynamicState,
-    EvidenceReference,
-    ImplementerResult,
-)
+from vibesys.orchestration.dynamic import DynamicState, EvidenceReference, ImplementerResult
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.models import WorkstreamPhase, WorkstreamPlan
 from vs_project.api import (
     OrchestrationDescriptor,

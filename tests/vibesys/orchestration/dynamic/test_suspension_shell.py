@@ -20,8 +20,8 @@ from tests.vibesys.orchestration.dynamic.test_suspension_deadline import (
     _park_shared_wait,
 )
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
     CompleteIntent,

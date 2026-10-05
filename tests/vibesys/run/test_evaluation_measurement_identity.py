@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, PROFILER
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.run.evaluation_backend import (
     EvidenceReusingEvaluation,
     SemanticEvaluationBackend,

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.orchestration.dynamic import PLUGIN
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.run.evaluation_backend import (
     EvidenceReusingEvaluation,
     SemanticEvaluationBackend,

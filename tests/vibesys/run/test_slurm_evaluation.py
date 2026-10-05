@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import PROFILER
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.run.evaluation_backend import EvidenceReusingEvaluation, SemanticEvaluationStage
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_evaluation.api import (

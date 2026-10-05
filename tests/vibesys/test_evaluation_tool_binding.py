@@ -8,8 +8,8 @@ import pytest
 
 from launch.composition import AGENT_TOOL_BINDINGS
 from vibesys.api.wiring import AgentToolContext
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, PROFILER
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.single.agents import IMPLEMENTER as SINGLE_IMPLEMENTER
 from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity
 from vs_evaluation.api import ContentDigest, EvaluationAgentRole, EvaluationAgentService

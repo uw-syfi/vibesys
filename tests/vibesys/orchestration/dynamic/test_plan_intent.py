@@ -18,7 +18,6 @@ from tests.vibesys.orchestration.dynamic._support import (
 )
 
 from vibesys.orchestration.dynamic import (
-    PLUGIN,
     DynamicPlanningError,
     DynamicState,
     EvidenceReference,
@@ -28,6 +27,7 @@ from vibesys.orchestration.dynamic import (
     WorkstreamPlan,
 )
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vs_runtime.api import StructuredResponseError
 
 if TYPE_CHECKING:

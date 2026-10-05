@@ -14,8 +14,8 @@ from tests.vibesys.orchestration.dynamic._support import (
 )
 from tests.vibesys.orchestration.dynamic.test_scheduler import _FlakyWorkspaces
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vs_runtime.api import Run
 from vs_runtime.api.testing import FakeWorkspace
 

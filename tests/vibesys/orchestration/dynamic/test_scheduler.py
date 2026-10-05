@@ -24,13 +24,10 @@ from tests.vibesys.orchestration.dynamic._support import (
     throughput,
 )
 
-from vibesys.orchestration.dynamic import (
-    PLUGIN,
-    REGISTRATION,
-    DynamicState,
-    WorkstreamBudget,
-)
+from vibesys.orchestration.dynamic import DynamicState, WorkstreamBudget
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_REGISTRATION as REGISTRATION
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,

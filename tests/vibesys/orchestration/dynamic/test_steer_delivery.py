@@ -21,8 +21,9 @@ from tests.vibesys.orchestration.dynamic._support import (
     throughput,
 )
 
-from vibesys.orchestration.dynamic import PLUGIN, DynamicState, WorkstreamPlan
+from vibesys.orchestration.dynamic import DynamicState, WorkstreamPlan
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.lifecycle import IntentKind, IntentStage
 from vibesys.orchestration.dynamic.models import AgentLoopState, DynamicWorkstream, SteerNote
 

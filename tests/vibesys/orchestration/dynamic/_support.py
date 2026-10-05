@@ -5,11 +5,9 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.dynamic import (
-    PLUGIN,
-    DynamicOptions,
-)
+from vibesys.orchestration.dynamic import DynamicOptions
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,

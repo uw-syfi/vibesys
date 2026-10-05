@@ -14,8 +14,8 @@ from tests.vibesys.orchestration.dynamic._support import (
     portfolio,
 )
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vs_evaluation.api import (
     ContentDigest,
     EvaluationRequest,

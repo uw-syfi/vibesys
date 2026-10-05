@@ -19,11 +19,9 @@ from tests.vibesys.orchestration.dynamic._support import (
     two_epoch_script,
 )
 
-from vibesys.orchestration.dynamic import (
-    PLUGIN,
-    DynamicState,
-)
+from vibesys.orchestration.dynamic import DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.models import (
     DurableStateCommitError,
     EvaluationResult,

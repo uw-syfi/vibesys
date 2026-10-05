@@ -12,8 +12,8 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.test_plugin_suspension import _open
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.models import DynamicState
 from vibesys.run.evaluation_backend import (
     SemanticEvaluationBackend,

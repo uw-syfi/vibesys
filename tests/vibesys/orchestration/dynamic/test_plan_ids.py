@@ -24,8 +24,9 @@ from tests.vibesys.orchestration.dynamic._support import (
     throughput,
 )
 
-from vibesys.orchestration.dynamic import PLUGIN, DynamicPlanningError, DynamicState
+from vibesys.orchestration.dynamic import DynamicPlanningError, DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.models import PortfolioPlan, planned_id
 from vs_runtime.api import AgentId, RunStatus
 

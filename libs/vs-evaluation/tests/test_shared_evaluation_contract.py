@@ -16,7 +16,7 @@ from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue, RootModel
 from tests.support.evaluation_scenarios import ScenarioSpec, build_scenario
 
-from vibesys.orchestration.dynamic import PLUGIN
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.run.evaluation_backend import (
     EvidenceReusingEvaluation,
     SemanticEvaluationBackend,

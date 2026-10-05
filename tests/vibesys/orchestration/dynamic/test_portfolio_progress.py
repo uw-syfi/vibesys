@@ -19,9 +19,9 @@ from tests.vibesys.orchestration.dynamic._support import (
 )
 
 from vibesys.metrics import MetricComparison
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.input_gate import InputGate
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.models import (
     DynamicState,
     DynamicWorkstream,

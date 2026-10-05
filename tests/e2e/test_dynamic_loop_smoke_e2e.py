@@ -61,10 +61,9 @@ import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from entrypoints.run import run_headless
 from launch import LaunchSettings
-from vibesys.api import ComputeBackend, OrchestrationRegistry, ProfilerKind, RunStatus
-from vibesys.dynamic_core import dynamic_core_registration
-from vibesys.orchestration.dynamic import PLUGIN
+from vibesys.api import ComputeBackend, ProfilerKind, RunStatus
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools
@@ -605,10 +604,9 @@ def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
 ) -> None:
     """The product launcher drives a dynamic run on the core path, and no legacy loop code runs.
 
-    The core policy is selected by test wiring only: the built-in DYNAMIC stays legacy
-    until the switch. Everything else is production: the CLI-built request, the launcher,
-    the host composition, the runtime loop, the executing Fake Slurm cluster and the
-    trusted evaluation scripts.
+    Nothing is substituted but the agents' scripted replies: the built-in catalog, the
+    CLI-built request, the launcher, the host composition, the runtime loop, the executing
+    Fake Slurm cluster and the trusted evaluation scripts.
     """
     loop_input = LoopInput.create(tmp_path)
     (tmp_path / "agent.toml").write_text(
@@ -640,9 +638,7 @@ def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
             ]
         )
     )
-    registry = OrchestrationRegistry()
-    registry.register(dynamic_core_registration())
-    runs = launch.default_runs(LaunchSettings(registry=registry, agent_client_factory=_core_agents))
+    runs = launch.default_runs(LaunchSettings(agent_client_factory=_core_agents))
 
     with _executed_legacy_files() as executed:
         result = run_headless(request, runs)
