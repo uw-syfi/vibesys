@@ -15,12 +15,9 @@ from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 from vs_evaluation.api import (
     EVALUATION_ACCESS_STATE_PATH,
     MAX_AGENT_AWAIT_S,
-    MAX_EVIDENCE_SUMMARY_CHARS,
     MAX_STAGE_SUMMARY_TAIL_CHARS,
     AvailabilitySnapshot,
-    AvailabilityState,
     ContentDigest,
-    CostClass,
     EvaluationAdmissionStoppedError,
     EvaluationAgentState,
     EvaluationAwaitResult,
@@ -35,13 +32,10 @@ from vs_evaluation.api import (
     EvaluationStageOutcome,
     EvaluationState,
     EvaluationStep,
-    EvaluationStepResult,
     EvidenceFingerprints,
     EvidenceKind,
-    EvidenceMetric,
     EvidenceOutcome,
     EvidenceResultIdentity,
-    ExecutorObservation,
     HandleAccess,
     HandleAssociation,
     ProfilerAgentCapacityError,
@@ -53,7 +47,6 @@ from vs_evaluation.api import (
     ProfilerWorkKey,
     ProfilerWorkPurpose,
     ResourceRequirements,
-    ReuseStatus,
     RevisionConflictError,
     ScopeClosingError,
     ScopeLifecycleStore,
@@ -62,7 +55,6 @@ from vs_evaluation.api import (
     ScopeSubmissionTracker,
     SemanticEvaluationStage,
     SettlementErrorCode,
-    StageFailureKind,
     StageState,
     StoredEvaluation,
     SubmittedSemanticEvaluation,
@@ -81,29 +73,29 @@ from vs_runtime.api import (
     AgentEvaluationStageOutcome,
     AgentEvaluationStatus,
     BenchmarkEvaluation,
-    BenchmarkFailureKind,
     BenchmarkObjective,
     CandidateProfile,
     CandidateProfileComponent,
     CandidateProfileStatus,
-    CandidateWorkspace,
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
+    PollingEvaluationExecutor,
     ProfileField,
     ReleasedJobs,
     RuntimeContractError,
     Workspace,
     Workspaces,
     member_workspace_id,
+    render_evaluation_failure,
+    render_rejected_evidence,
 )
 from vs_runtime.api.infrastructure import RunStopped, TrustedEvaluationPlan
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
+    from collections.abc import Awaitable, Callable
 
     from vs_evaluation.api import EvaluationStateNamespace
-    from vs_prompts.api import RenderedPrompt
     from vs_runtime.api.infrastructure import AgentToolBindingContext
 
 _STATE_DIRECTORY = "semantic-evaluations"
@@ -203,239 +195,6 @@ class _NamespaceEvaluationStore:
         return f"{_STATE_DIRECTORY}/{handle_id}.json"
 
 
-@dataclass(frozen=True, slots=True)
-class _SemanticStageObservation:
-    evidence: TrustedEvidence
-    completed: bool
-
-
-class _LocalSemanticExecutor:
-    """Execute immutable candidate snapshots through the trusted runtime API."""
-
-    def __init__(self, evaluation: Evaluation, workspaces: Workspaces) -> None:
-        self._evaluation = evaluation
-        self._workspaces = workspaces
-        self._tasks: dict[str, asyncio.Task[None]] = {}
-        self._observations: dict[str, ExecutorObservation] = {}
-        self._changes: dict[str, asyncio.Event] = {}
-
-    async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
-        del requirements
-        active = sum(not task.done() for task in self._tasks.values())
-        return AvailabilitySnapshot(
-            state=AvailabilityState.IMMEDIATE if active == 0 else AvailabilityState.BUSY,
-            capacity=1,
-            in_flight=active,
-            queue_depth=max(0, active - 1),
-            reuse_status=ReuseStatus.UNKNOWN,
-            cost_class=CostClass.UNKNOWN,
-            observed_at=time.monotonic(),
-            fresh_for_s=1.0,
-            supported_evidence_kinds=(EvidenceKind.ACCURACY.value, EvidenceKind.BENCHMARK.value),
-        )
-
-    async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
-        if handle_id in self._tasks or handle_id in self._observations:
-            return
-        self._publish(handle_id, ExecutorObservation(state=EvaluationState.QUEUED))
-        self._tasks[handle_id] = asyncio.create_task(self._run(handle_id, request))
-
-    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
-        """Read process-local evidence without starting recovery tasks."""
-        return self._observations.get(handle_id)
-
-    async def inspect(self, handle_id: str) -> ExecutorObservation | None:
-        return self._observations.get(handle_id)
-
-    async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
-        event = self._changes.setdefault(handle_id, asyncio.Event())
-        if event.is_set():
-            event.clear()
-            return
-        try:
-            await asyncio.wait_for(event.wait(), timeout_s)
-        except TimeoutError:
-            return
-        event.clear()
-
-    async def cancel(self, handle_id: str) -> None:
-        task = self._tasks.get(handle_id)
-        if task is not None and not task.done():
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        observed = self._observations.get(handle_id)
-        self._publish(
-            handle_id,
-            ExecutorObservation(
-                state=EvaluationState.CANCELED,
-                stage_results=observed.stage_results if observed is not None else (),
-            ),
-        )
-
-    async def close(self) -> None:
-        tasks = tuple(task for task in self._tasks.values() if not task.done())
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-    async def _run(self, handle_id: str, request: EvaluationRequest) -> None:
-        first = SemanticEvaluationStage.model_validate(request.stages[0].payload)
-        workspace: CandidateWorkspace | None = None
-        results: list[EvaluationStepResult] = []
-        failure: str | None = None
-        try:
-            workspace = await self._workspaces.create_candidate(first.snapshot)
-            self._publish(
-                handle_id,
-                ExecutorObservation(
-                    state=EvaluationState.RUNNING, current_stage=request.stages[0].name
-                ),
-            )
-            for step in request.stages:
-                stage = SemanticEvaluationStage.model_validate(step.payload)
-                observed = await self._evaluate(workspace, stage, handle_id)
-                evidence = observed.evidence
-                results.append(
-                    EvaluationStepResult(
-                        name=step.name,
-                        state=StageState.SUCCEEDED if observed.completed else StageState.FAILED,
-                        result=evidence.model_dump(mode="json"),
-                        failure_kind=None if observed.completed else StageFailureKind.EXECUTION,
-                        failure=(
-                            None
-                            if observed.completed
-                            else render_stage_failure(
-                                ((evidence.semantic_summary, evidence.kind),), None
-                            )
-                        ),
-                    )
-                )
-                if not observed.completed or (
-                    evidence.kind is EvidenceKind.ACCURACY
-                    and evidence.outcome is EvidenceOutcome.FAILED
-                ):
-                    skipped = request.stages[len(results) :]
-                    results.extend(
-                        EvaluationStepResult(name=remaining.name, state=StageState.SKIPPED)
-                        for remaining in skipped
-                    )
-                    if not observed.completed or skipped:
-                        # Infrastructure failure or skipped stages prevent completion.
-                        # Preserve diagnostics for the submitting agent.
-                        failure = render_stage_failure(
-                            ((evidence.semantic_summary, evidence.kind),), None
-                        )
-                    break
-                if len(results) < len(request.stages):
-                    # A waiting agent sees each finished stage and the one now running.
-                    self._publish(
-                        handle_id,
-                        ExecutorObservation(
-                            state=EvaluationState.RUNNING,
-                            current_stage=request.stages[len(results)].name,
-                            stage_results=tuple(results),
-                        ),
-                    )
-            self._publish(
-                handle_id,
-                ExecutorObservation(
-                    state=EvaluationState.SUCCEEDED if failure is None else EvaluationState.FAILED,
-                    stage_results=tuple(results),
-                    failure=failure,
-                ),
-            )
-        except asyncio.CancelledError:
-            self._publish(
-                handle_id,
-                ExecutorObservation(
-                    state=EvaluationState.CANCELED,
-                    stage_results=tuple(results),
-                ),
-            )
-            raise
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-930049 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
-            self._publish(
-                handle_id,
-                ExecutorObservation(
-                    state=EvaluationState.FAILED,
-                    stage_results=tuple(results),
-                    # Extensions may raise an exception without a message.
-                    # Its type is still a failure fact; the existing template
-                    # guarantees the terminal diagnostic stays nonempty.
-                    failure=render_evaluation_failure(str(error) or None, type(error).__name__),
-                ),
-            )
-        finally:
-            if workspace is not None:
-                await workspace.discard()
-
-    async def _evaluate(
-        self, workspace: Workspace, stage: SemanticEvaluationStage, handle_id: str
-    ) -> _SemanticStageObservation:
-        completed = True
-        if stage.kind is EvidenceKind.ACCURACY:
-            result = await self._evaluation.accuracy(workspace)
-            outcome = EvidenceOutcome.PASSED if result.passed else EvidenceOutcome.FAILED
-            summary = result.feedback
-            metrics: tuple[EvidenceMetric, ...] = ()
-            partial = None
-        elif stage.kind is EvidenceKind.BENCHMARK:
-            result = await self._evaluation.benchmark(workspace)
-            completed = result.failure_kind is not BenchmarkFailureKind.INFRASTRUCTURE
-            outcome = (
-                EvidenceOutcome.PASSED if completed and result.passed else EvidenceOutcome.FAILED
-            )
-            summary = result.feedback
-            partial = result.partial_measurement
-            metrics = tuple(
-                EvidenceMetric(
-                    name=name,
-                    value=value,
-                    direction=(
-                        result.metric_direction.value
-                        if name == result.metric_name and result.metric_direction is not None
-                        else None
-                    ),
-                    unit=result.metric_unit if name == result.metric_name else None,
-                )
-                for name, value in sorted((result.row or {}).items())
-            )
-        else:
-            message = "direct profile evaluation is not supported by the trusted runtime"
-            raise ValueError(message)
-        if summary is not None:
-            summary = summary[-MAX_EVIDENCE_SUMMARY_CHARS:]
-        evidence_id = evidence_identity(
-            stage,
-            EvidenceResultIdentity(
-                evaluation_id=handle_id,
-                outcome=outcome,
-                summary=summary,
-                metrics=metrics,
-                partial=partial,
-            ),
-        )
-        evidence = TrustedEvidence(
-            evidence_id=evidence_id,
-            evaluation_id=handle_id,
-            stage_name=stage.kind.value,
-            kind=stage.kind,
-            fingerprints=stage.fingerprints,
-            trusted_inputs=stage.fingerprints.candidate,
-            outcome=outcome,
-            semantic_summary=summary,
-            metrics=metrics,
-            partial_measurement=partial,
-            accepted_round=0,
-        )
-        return _SemanticStageObservation(evidence=evidence, completed=completed)
-
-    def _publish(self, handle_id: str, observation: ExecutorObservation) -> None:
-        self._observations[handle_id] = observation
-        self._changes.setdefault(handle_id, asyncio.Event()).set()
-
-
 class SemanticEvaluationExecutor(EvaluationExecutor, Protocol):
     """Owned executor accepted by the semantic evaluation service."""
 
@@ -500,7 +259,7 @@ class SemanticEvaluationBackend:
         self._plan = plan
         self._queue_allowance_seconds = queue_allowance_seconds
         self._submitted_time = submitted_time
-        self._executor = executor or _LocalSemanticExecutor(evaluation, workspaces)
+        self._executor = executor or PollingEvaluationExecutor(evaluation, workspaces)
         self._namespace = namespace
         self._store = _NamespaceEvaluationStore(namespace)
         self._scope_ledger = ScopeLifecycleStore(namespace)
@@ -1041,35 +800,6 @@ class SemanticEvaluationBackend:
 
 # Evaluation failure text is read by the agent that submitted the evaluation.
 _RENDERER = TemplateRenderer(Path(__file__).with_name("prompts"))
-
-
-def render_rejected_evidence(
-    rejected: Sequence[tuple[str | None, EvidenceKind]],
-) -> RenderedPrompt:
-    """One line per rejected ``(semantic summary, kind)``: the summary, else ``<kind> failed``."""
-    return _RENDERER.render_template("rejected_evidence.j2", rejected=rejected)
-
-
-def render_evaluation_failure(
-    record_failure: str | None, stage_failure: str | None
-) -> RenderedPrompt:
-    """A failed evaluation's own message, else its first stage failure, else a generic one."""
-    return _RENDERER.render_template(
-        "evaluation_failure.j2", record_failure=record_failure, stage_failure=stage_failure
-    )
-
-
-def render_stage_failure(
-    rejected: Sequence[tuple[str | None, EvidenceKind]], observed_failure: str | None
-) -> RenderedPrompt:
-    """The failure of an evaluation whose failed stage skipped the rest.
-
-    One line per failed check (its summary, else ``<kind> check failed``), else
-    the executor's own failure, else a generic stage failure.
-    """
-    return _RENDERER.render_template(
-        "stage_failure.j2", rejected=rejected, observed_failure=observed_failure
-    )
 
 
 def agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:

@@ -24,6 +24,7 @@ from vs_core.api import (
     SubmitMeasurement,
 )
 from vs_project.api import StateNamespace
+from vs_runtime.api import render_stage_failure
 from vs_runtime.api.infrastructure import (
     ScalarBenchmarkContract,
     SemanticSlurmEvaluationExecutor,
@@ -44,10 +45,8 @@ from vs_slurm.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from pathlib import Path
 
-    from vs_evaluation.api import EvidenceKind
     from vs_runtime.contracts import CandidateWorkspace
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
@@ -140,15 +139,6 @@ def _config() -> SlurmConfig:
     )
 
 
-def stage_failure_text(
-    rejected: Sequence[tuple[str | None, EvidenceKind]], observed_failure: str | None
-) -> str:
-    """Stand-in for the product's rendered failure text."""
-    return "\n".join(summary or f"{kind.value} check failed" for summary, kind in rejected) or (
-        observed_failure or "a stage failed"
-    )
-
-
 async def build_stack(root: Path, cluster: ScenarioCluster | None = None) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root."""
     cluster = cluster or ScenarioCluster()
@@ -175,7 +165,7 @@ async def build_stack(root: Path, cluster: ScenarioCluster | None = None) -> Sta
         workspaces,
         namespace,  # type: ignore[arg-type]  # the evaluation namespace is a StateNamespace
         root / "handles",
-        stage_failure_text=stage_failure_text,
+        stage_failure_text=render_stage_failure,
         cluster=cluster,
     )
     return Stack(executor, cluster, snapshot)
