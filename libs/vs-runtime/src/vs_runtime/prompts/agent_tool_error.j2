@@ -4,6 +4,7 @@
 {%- elif reason == "invalid_plan" %}the candidate has no revision to evaluate; commit your change, then submit again
 {%- elif reason == "not_allowed" %}the run's submission budget for this exact candidate is spent, or the plan exceeds a run limit or its deadline; change the candidate before submitting again
 {%- elif reason == "workspace_gone" %}this workspace no longer exists; finish your turn without evaluating
+{%- elif reason == "turn_ended" %}this turn has ended, so the run takes no more evaluation calls from it; do not call this tool again
 {%- elif reason == "unknown_handles" %}handles {{ handles | join(", ") }} were not submitted by this agent in this turn; wait only on handles that submit_evaluation returned to you in this turn
 {%- elif reason == "wait_open" %}this workspace already has an evaluation wait that the run has not resumed yet, so a second wait cannot be recorded; do not call validate_evaluation_wait, and finish your turn with your normal reply. Your submission still runs and its result reaches the run
 {%- elif reason == "wait_not_active" %}the run no longer accepts a wait for this workspace (the run is stopping or this workspace was retired); finish your turn with your normal reply

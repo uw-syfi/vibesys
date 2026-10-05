@@ -18,6 +18,7 @@ from vs_runtime._agent_evaluation import (
     AgentEvaluationPolicy,
     AgentWorkspaces,
     ScopeWorkspaces,
+    SnapshotWorkspace,
 )
 from vs_runtime._core_loop import (
     CommitObserver,
@@ -97,6 +98,7 @@ from vs_runtime._core_wiring import (
     empty_catalog,
     new_core_state,
 )
+from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
 from vs_runtime._evidence_ledger import (
     EvidenceEntry,
@@ -340,6 +342,7 @@ __all__ = [
     "SessionServices",
     "SessionSpecFactory",
     "Settled",
+    "SnapshotWorkspace",
     "StageMetric",
     "StageSettled",
     "StageStarted",
@@ -361,6 +364,7 @@ __all__ = [
     "core_next_wake",
     "drive_core",
     "empty_catalog",
+    "handle_for",
     "new_core_state",
     "open_session_requests",
     "owner_key",
