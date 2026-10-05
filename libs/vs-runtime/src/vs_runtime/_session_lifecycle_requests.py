@@ -174,6 +174,15 @@ def _writer_ended(row: AgentInvocationRecord | None) -> bool:
     return row.interrupted and isinstance(row.outcome, Unknown)
 
 
+def _call_returned(row: AgentInvocationRecord | None) -> bool:
+    """Whether the dispatch call of the row returned, so releasing the key ended its turn.
+
+    An Unknown row was written by a call that returned; a Pending row (a call in
+    flight, or one a restart cannot account for) never qualifies.
+    """
+    return _writer_ended(row) or (row is not None and isinstance(row.outcome, Unknown))
+
+
 class ReleasedRunInvocations:
     """Run-invocation proof that also accepts a turn CancelTurn interrupted and released.
 
@@ -360,15 +369,23 @@ class SessionLifecycleRequests:
         if binding is None:
             return facts
         try:
-            await self._settle_ended(bkey, binding, invocation_id)
+            await self._settle_ended(
+                bkey, binding, invocation_id, closed=isinstance(request, CloseSession)
+            )
         except AccessSettlementError as error:
             return _unknown(str(error), binding)
         except (ReceiptCorruptError, *_SESSION_ERRORS) as error:
             return _unknown(f"access cannot be settled: {error}", binding)
         return facts
 
-    async def _settle_ended(self, bkey: str, binding: SessionBinding, only: str | None) -> None:
-        """Settle the receipts of the session's invocations whose writers provably ended."""
+    async def _settle_ended(
+        self, bkey: str, binding: SessionBinding, only: str | None, *, closed: bool = False
+    ) -> None:
+        """Settle the receipts of the session's invocations whose writers provably ended.
+
+        A closed session also ends every turn whose dispatch call returned: no
+        provider resource of the key remains.
+        """
         key = AgentSessionKey.parse(binding.session_key)
         for invocation_id in binding.dispatched if only is None else (only,):
             access_key = AccessKey(binding=bkey, invocation=invocation_id)
@@ -376,7 +393,7 @@ class SessionLifecycleRequests:
             if receipt is None or receipt.settled:
                 continue
             row = await asyncio.to_thread(_journal_row, self._sessions, key, invocation_id)
-            if _writer_ended(row):
+            if (_call_returned if closed else _writer_ended)(row):
                 await self._settlement.settle(access_key)
 
     # cancel

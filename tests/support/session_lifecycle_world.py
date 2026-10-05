@@ -41,6 +41,7 @@ from vs_runtime.api.core import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from vs_agent.api import SessionStore
@@ -88,6 +89,7 @@ def open_lifecycle_host(
     *,
     answer: dict[str, object] | None = None,
     gate: TurnGate | None = None,
+    effect: Callable[[], None] | None = None,
 ) -> SessionHost:
     """Like ``open_host`` but over a ``RecordingClient`` with a durable checkpoint store."""
     turns: list[AgentTurnRequest] = []
@@ -95,6 +97,8 @@ def open_lifecycle_host(
 
     def on_turn(request: AgentTurnRequest) -> None:
         turns.append(request)
+        if effect is not None:
+            effect()
         if gate is not None:
             gate.hold()
         if faults.down:
