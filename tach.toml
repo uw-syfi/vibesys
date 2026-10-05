@@ -916,7 +916,7 @@ from = ["vs_runtime._fake_agent_invocations"]
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._session_checkpoints", "vs_core._session_scope", "vs_core._proofs", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
+depends_on = ["vs_core._session_checkpoints", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -1094,7 +1094,16 @@ depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common"]
 
 [[interfaces]]
 from = ["vs_core._session_scope"]
-expose = ["attempt_for", "encode_identity", "proven_invocation", "retains_write_turn", "scope_active", "turn_request_id", "write_turn_authority"]
+expose = ["attempt_for", "encode_identity", "lost_turn_authority", "proven_invocation", "retains_write_turn", "scope_active", "turn_request_id", "write_turn_authority"]
+
+[[modules]]
+path = "vs_core._turn_outcomes"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core.types", "vs_core.types.common"]
+
+[[interfaces]]
+from = ["vs_core._turn_outcomes"]
+expose = ["acceptance_signals", "acceptance_unresolved", "is_terminal", "observed_phase", "turn_result"]
 
 [[modules]]
 path = "vs_core._session_checkpoints"

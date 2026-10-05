@@ -135,6 +135,31 @@ def test_reusing_explicit_request_id_with_conflicting_payload_is_rejected() -> N
         trace_step(state, clock, trace)
 
 
+@given(later=st.floats(min_value=0.0, max_value=1e6, allow_nan=False))
+def test_a_request_proposed_again_with_another_deadline_is_the_same_request(later: float) -> None:
+    """The deadline belongs to the attempt, not the identity: the prepared request keeps its own."""
+    state = initial_state()
+    clock = ClockAdvanced(now_at=1.0)
+    request = InspectRequest(
+        request_id=RequestId(root="stable"),
+        scope=Scope(owner=state.run.run_id, generation=0),
+        deadline_at=10.0,
+        target=RequestId(root="one"),
+    )
+    again = request.model_copy(update={"deadline_at": later})
+    trace = ReducerTrace(
+        frames=(
+            TraceFrame(
+                signal=clock,
+                change=SchedulingChange(state=state.scheduling, requests=(request, again)),
+            ),
+        )
+    )
+    result = trace_step(state, clock, trace)
+    prepared = [row for row in result.state.intents.intents if row.request_id == request.request_id]
+    assert [row.request.deadline_at for row in prepared] == [10.0]
+
+
 def test_kernel_projects_time_and_persisted_controls_without_turning_steer_into_pause() -> None:
     state = initial_state()
     clock = ClockAdvanced(now_at=5.0)

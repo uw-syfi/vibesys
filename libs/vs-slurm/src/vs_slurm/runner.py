@@ -16,7 +16,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol, assert_never
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
@@ -167,6 +167,33 @@ class SlurmJobStatus(StrEnum):
 _PUBLIC_TERMINAL_STATES = frozenset(
     {SlurmJobStatus.COMPLETED, SlurmJobStatus.FAILED, SlurmJobStatus.CANCELLED}
 )
+
+
+class SlurmPhase(StrEnum):
+    """Where a scheduler state sits on a job's path, in order within one attempt.
+
+    The public status folds COMPLETING into RUNNING; this finer order keeps it, so
+    a reader can tell a job that is tearing down from one that is computing.
+    Within one attempt the phases only advance. A requeue starts a new attempt,
+    which restarts the order at PENDING.
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETING = "completing"
+    ENDED = "ended"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class SchedulerReading:
+    """One scheduler observation: the only product of the raw-state mapping."""
+
+    status: SlurmJobStatus
+    phase: SlurmPhase
+    reason: str | None = None
+    estimated_start: str | None = None
+    attempt: int = 0
 
 
 class SlurmArtifactTarget(BaseModel):
@@ -772,11 +799,17 @@ class SlurmJobRunner:
         """Cancel the single Slurm job that owns all batch stages."""
         self.cancel(handle.job)
 
-    def collect_batch(self, handle: SlurmBatchHandle) -> SlurmBatchResult:
-        """Collect ordered stage outcomes and only artifacts from passed stages."""
+    def collect_batch(
+        self, handle: SlurmBatchHandle, *, observed: SlurmJobStatus | None = None
+    ) -> SlurmBatchResult:
+        """Collect ordered stage outcomes and only artifacts from passed stages.
+
+        ``observed`` is the terminal status the caller just read; it saves a second
+        scheduler query (two remote commands).
+        """
         self._validate_batch_handle(handle)
         collection_started = self._clock()
-        job_result = self.collect_evidence(handle.job)
+        job_result = self.collect_evidence(handle.job, observed=observed)
         stage_results: list[SlurmBatchStageResult] = []
         timings: dict[str, float] = {
             "staging": handle.job.staging_seconds,
@@ -889,20 +922,7 @@ class SlurmJobRunner:
     def poll(self, handle: SlurmJobHandle) -> SlurmJobStatus:
         """Read the scheduler state for a submitted or recovered handle."""
         self._validate_handle(handle)
-        active = self._transport.exec(f"squeue -h -j {handle.job_id} -o %T").stdout.strip()
-        if active:
-            state = active.splitlines()[0].strip().split()[0].upper()
-            return _public_status(state)
-        accounting = self._transport.exec(
-            f"sacct -n -X -j {handle.job_id} --format=State,ExitCode"
-        ).stdout.strip()
-        parsed = _accounting_state(accounting)
-        if parsed is None:
-            return SlurmJobStatus.UNKNOWN
-        state, exit_code = parsed
-        if state == "COMPLETED":
-            return SlurmJobStatus.COMPLETED if exit_code.startswith("0:") else SlurmJobStatus.FAILED
-        return _public_status(state)
+        return self.inspect_job(handle.job_id).status
 
     def wait(
         self,
@@ -1122,31 +1142,37 @@ class SlurmJobRunner:
             raise SlurmError.operation_identity_ambiguous()
         return next(iter(ids), None)
 
-    def inspect_job(self, job_id: str) -> tuple[SlurmJobStatus, str | None, str | None]:
+    def inspect_job(self, job_id: str) -> SchedulerReading:
         """Read scheduler state with queue reason and estimated start evidence."""
         if re.fullmatch(r"[0-9]+", job_id) is None:
             raise SlurmError.invalid_job_id()
         active = self._transport.exec(f"squeue -h -j {job_id} -o '%T|%r|%S'").stdout.strip()
         if active:
             fields = active.splitlines()[0].split("|")
-            status = _public_status(fields[0].strip().upper())
             reason = fields[1].strip() if len(fields) > 1 else None
             start = fields[2].strip() if len(fields) > _ACCOUNTING_FIELD_COUNT else None
-            return status, reason or None, None if start in {None, "", "N/A", "Unknown"} else start
+            return _reading(
+                fields[0].strip().upper(),
+                reason=reason or None,
+                estimated_start=None if start in {None, "", "N/A", "Unknown"} else start,
+            )
         accounting = self._transport.exec(f"sacct -n -X -j {job_id} --format=State,ExitCode").stdout
         parsed = _accounting_state(accounting)
         if parsed is None:
-            return SlurmJobStatus.UNKNOWN, None, None
+            return _reading("UNKNOWN")
         state, code = parsed
-        status = _public_status(state)
-        if state == "COMPLETED" and not code.startswith("0:"):
-            status = SlurmJobStatus.FAILED
-        return status, None, None
+        return _reading(state, exit_code=code)
 
-    def collect_evidence(self, handle: SlurmJobHandle) -> SlurmJobResult:
-        """Preserve available evidence even when terminal status artifacts are absent."""
+    def collect_evidence(
+        self, handle: SlurmJobHandle, *, observed: SlurmJobStatus | None = None
+    ) -> SlurmJobResult:
+        """Preserve available evidence even when terminal status artifacts are absent.
+
+        ``observed`` is a terminal status the caller just read; without it the scheduler
+        is queried.
+        """
         self._validate_handle(handle)
-        status = self.poll(handle)
+        status = observed if observed is not None else self.poll(handle)
         if status not in _PUBLIC_TERMINAL_STATES:
             raise SlurmError.job_not_terminal(handle.job_id)
         failures: list[str] = []
@@ -1784,18 +1810,46 @@ def _accounting_state(output: str) -> tuple[str, str] | None:
     return None
 
 
-def _public_status(state: str) -> SlurmJobStatus:
-    if state in {"PENDING", "CONFIGURING", "REQUEUED", "RESV_DEL_HOLD"}:
-        return SlurmJobStatus.PENDING
-    if state in {"RUNNING", "COMPLETING", "SUSPENDED", "STAGE_OUT"}:
-        return SlurmJobStatus.RUNNING
-    if state == "COMPLETED":
-        return SlurmJobStatus.COMPLETED
-    if state in {"CANCELLED", "PREEMPTED"}:
-        return SlurmJobStatus.CANCELLED
-    if state in _TERMINAL_STATES:
-        return SlurmJobStatus.FAILED
-    return SlurmJobStatus.UNKNOWN
+def phase_of(raw_state: str) -> SlurmPhase:
+    """Map one raw Slurm job state to its phase. Total: unknown states are UNKNOWN."""
+    if raw_state in {"PENDING", "CONFIGURING", "REQUEUED", "RESV_DEL_HOLD"}:
+        return SlurmPhase.PENDING
+    if raw_state in {"RUNNING", "SUSPENDED", "STAGE_OUT"}:
+        return SlurmPhase.RUNNING
+    if raw_state == "COMPLETING":
+        return SlurmPhase.COMPLETING
+    if raw_state in _TERMINAL_STATES:
+        return SlurmPhase.ENDED
+    return SlurmPhase.UNKNOWN
+
+
+def _reading(
+    raw_state: str, *, exit_code: str | None = None, **evidence: str | None
+) -> SchedulerReading:
+    """The single raw-state to public-status and phase mapping every read path uses."""
+    phase = phase_of(raw_state)
+    match phase:
+        case SlurmPhase.PENDING:
+            status = SlurmJobStatus.PENDING
+        case SlurmPhase.RUNNING | SlurmPhase.COMPLETING:
+            status = SlurmJobStatus.RUNNING
+        case SlurmPhase.UNKNOWN:
+            status = SlurmJobStatus.UNKNOWN
+        case SlurmPhase.ENDED if raw_state == "COMPLETED":
+            ok = exit_code is None or exit_code.startswith("0:")
+            status = SlurmJobStatus.COMPLETED if ok else SlurmJobStatus.FAILED
+        case SlurmPhase.ENDED if raw_state in {"CANCELLED", "PREEMPTED"}:
+            status = SlurmJobStatus.CANCELLED
+        case SlurmPhase.ENDED:
+            status = SlurmJobStatus.FAILED
+        case _:
+            assert_never(phase)
+    return SchedulerReading(
+        status=status,
+        phase=phase,
+        reason=evidence.get("reason"),
+        estimated_start=evidence.get("estimated_start"),
+    )
 
 
 def _read_exit_code(path: Path) -> int:

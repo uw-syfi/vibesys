@@ -31,6 +31,7 @@ from vs_core.api import (
     Strategy,
     StrategyState,
     Transition,
+    orphan_waits,
     project,
     step,
     validate_startup,
@@ -51,7 +52,7 @@ from vs_runtime._core_requests import (
 )
 
 if TYPE_CHECKING:
-    from vs_core.api import Request
+    from vs_core.api import Request, Wait
     from vs_project.api import Project
 
 
@@ -149,6 +150,19 @@ class OwnerEventRejectedError(RuntimeCommitError):
         )
 
 
+class OrphanWaitError(RuntimeCommitError):
+    """A wait in core state that nothing will end: no request in flight, no event in the outbox.
+
+    The run would sit until its deadline. The shell fails at the commit that created the wait
+    (or at start, for a restored one), naming each waiter, instead.
+    """
+
+    def __init__(self, orphans: tuple[Wait, ...]) -> None:
+        self.orphans = orphans
+        named = ", ".join(f"{wait.waiter.value} {wait.subject}" for wait in orphans)
+        super().__init__(f"orphan waits, nothing will end them: {named}")
+
+
 class DispatchCapExceededError(RuntimeCommitError):
     """``run_until_idle`` executed more requests than its cap: a request cycle that never ends.
 
@@ -240,6 +254,8 @@ class CoreRuntimeBindings:
     executors: RequestExecutors = field(default_factory=RequestExecutors)
     transitions: CoreTransitions = field(default_factory=ProductionCoreTransitions)
     commits: CommitObserver = field(default_factory=IgnoreCommits)
+    check_liveness: bool = False
+    """Check ``orphan_waits`` after every commit, not only at start. Linear in state size."""
 
 
 class CoreRuntime[S: StrategyState]:
@@ -269,6 +285,7 @@ class CoreRuntime[S: StrategyState]:
         self._executors = selected.executors
         self._transitions = selected.transitions
         self._commits = selected.commits
+        self._check_liveness = selected.check_liveness
         self._record_model = cast(
             "type[RuntimeRecord[S]]", RuntimeRecord.__class_getitem__(type(strategy.state))
         )
@@ -404,6 +421,7 @@ class CoreRuntime[S: StrategyState]:
             self._consume(
                 _Input[S](event=RecoveryStarted(epoch=fence.epoch, now_at=now_at), now_at=now_at)
             )
+            self._require_no_orphan_waits()
         except BaseException:
             self._halted = True
             if self._storage_revision == previous_revision:
@@ -600,6 +618,8 @@ class CoreRuntime[S: StrategyState]:
             self._storage_revision = stored.revision
             self._time_floor = stamp
             self._commits.committed(previous, validated)
+            if self._check_liveness:
+                self._halt_on_orphan_waits()
             return
         self._halted = True
         reloaded = self._load()
@@ -608,6 +628,19 @@ class CoreRuntime[S: StrategyState]:
             raise RuntimeCommitUncertainError(candidate_visible=reloaded == stored)
         message = f"runtime commit conflict: {result.reason}"
         raise RuntimeCommitError(message)
+
+    def _require_no_orphan_waits(self) -> None:
+        record = self.record
+        orphans = orphan_waits(record.envelope.core, record.pending_inputs)
+        if orphans:
+            raise OrphanWaitError(orphans)
+
+    def _halt_on_orphan_waits(self) -> None:
+        try:
+            self._require_no_orphan_waits()
+        except OrphanWaitError:
+            self._halted = True
+            raise
 
     def _require_active(self, *, queue_only: bool = False) -> None:
         if self._halted or self._fence is None or (self._busy and not queue_only):

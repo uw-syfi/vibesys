@@ -73,6 +73,59 @@ cancelling, and keep ownership until termination is confirmed or explicitly
 unresolved. Use `vs_project.api.Project` to open persistence and workspace
 layout, never rebuild its paths.
 
+## Crash consistency
+
+Recovery bugs cluster where the core meets an external system, so these rules
+make recovery run on every start and keep one path for each fact.
+
+- **One fact, one event; recovery is replay.** Each external fact enters the
+  core as exactly one event or atomically recorded record. Live execution,
+  post-restart inspection, and replay feed it through the same step. There is
+  no separate recovery reducer, and an inspection result carries everything a
+  live result does (the durable observation and the owner events with the
+  reply). A projection between two record types either copies each field or
+  lists it as omitted; a property over the fields checks that.
+- **Crash-only startup.** Startup always runs recovery; a fresh run is recovery
+  over an empty log. Stop, cancel, deadline, and crash converge on one path,
+  so the recovery path runs every time and cannot rot.
+- **Single commit point.** One logical transition (observation, owner events,
+  successor intents) is one atomic durable record. The shell API accepts only
+  whole records, so committing in pieces is impossible by the API's shape, not
+  by convention.
+- **No orphan waits.** Every waiting entity (a dispatched intent, an executing
+  session, a recovery check) has an outstanding request or timer that will
+  produce the event it waits for. A pure function derives the waits and their
+  producers from core state; tests check it after every step and startup
+  checks it, so a stall fails where it is created, not at the run deadline.
+  Match every phase exhaustively so a new phase must name its producer.
+- **Recovery is idempotent.** A crash during recovery followed by a restart
+  converges. Tests crash inside recovery.
+- **Durable effects have durable guards.** Volatile state never guards a
+  durable effect: a fence held only in memory is lost on restart. Replace
+  files atomically (write a temp file, fsync it, rename, fsync the directory),
+  never rewrite in place. Check the ledger's consistency on load, like fsck.
+- **Fencing epochs.** A restarted host takes a new epoch, recorded durably.
+  Executors and external writes carry it and reject a stale one, so a still
+  running old host cannot write.
+
+Limits: these rules do not encode an external system's semantics, which come
+from real runs (see the testing skill's
+[fakes-and-contracts.md](../../testing/references/fakes-and-contracts.md)).
+Python checks protocol order only at runtime. Bounded waits remain policy, but
+"unconfirmed" must be a value the caller handles.
+
+## Outcomes say what is known
+
+Give each operation on an external system a closed union with a variant for
+every real state of that system, including intermediate ones. Cancel is
+`Confirmed | Requested(job_id) | Lost`, not done or error: a cancelled Slurm
+job stays COMPLETING for 30 to 40 seconds and reports as running, and an
+outcome with no "requested, unconfirmed" variant forced an error that ended a
+user-stopped run. Match unions exhaustively with `assert_never`; `ty` enforces
+it. Parse, do not validate: the boundary parses a response into a proof type,
+and guards accept only proof types, never raw caller-supplied fields. See
+[python.md](python.md).
+
 ## Interface contracts
 
 Follow [rule 3](../SKILL.md#rules): a caller written once must stay correct for
@@ -141,5 +194,7 @@ or async shell when there is no stateful transition to recover.
 - A request whose outcome never returns as an event.
 - `or 0` or other defaults that turn missing evidence into success.
 - Implementation kind checks or I/O imports in the core.
+- Inspection or replay rebuilding a record through a different path than live
+  execution (see [red-flags.md](red-flags.md)).
 
 See [red-flags.md](red-flags.md) for substitution and module-shape checks.

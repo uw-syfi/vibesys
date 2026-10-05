@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 from tests.support.fake_run_clock import FakeRunClock
@@ -25,6 +25,7 @@ from tests.support.session_world import (
     ProviderFaults,
     SessionHost,
 )
+from tests.support.skeleton_faults import FaultingExecutors, FaultingReceipts, FaultingStore
 from tests.support.skeleton_strategy import DECLARATION, DIGEST, SkeletonState, SkeletonStrategy
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
 
@@ -85,7 +86,8 @@ if TYPE_CHECKING:
         PollingEvaluationExecutor,
         ResourceRequirements,
     )
-    from vs_project.api import StateNamespace
+    from vs_faults.api import FaultGate
+    from vs_project.api import StateNamespace, StateStore
     from vs_runtime.api.core import AccessGuardedWorkspace, CommitObserver, TurnYields
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
 
@@ -161,6 +163,7 @@ class World:
     """Builds the turn-yield source from the host's workspaces and receipts, per process."""
     commits: CommitObserver | None = None
     """Told of every confirmed commit of each shell this world starts."""
+    gate: FaultGate | None = None
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -216,8 +219,12 @@ class World:
         if self.timed is not None:
             clock, runtime = self.timed
             evaluation = TimedPolls(evaluation, clock, runtime, self.polls)
-        return core_bindings(
-            receipts=self.env.receipts_namespace(),
+        receipts = self.env.receipts_namespace()
+        if self.gate is not None:
+            # The gated namespace delegates all but the execution-record writes to the real one.
+            receipts = cast("StateNamespace", FaultingReceipts(receipts, self.gate))
+        bindings = core_bindings(
+            receipts=receipts,
             workspaces=workspaces,
             measurement=MeasurementServices(evaluation),
             sessions=SessionServices(
@@ -229,6 +236,13 @@ class World:
             ),
             operations=self.operations,
         )
+        # The skeleton checks for orphan waits after every commit, so a stall fails where it starts.
+        bindings = dataclasses.replace(bindings, check_liveness=True)
+        if self.gate is None:
+            return bindings
+        return dataclasses.replace(
+            bindings, executors=FaultingExecutors.around(bindings.executors, self.gate)
+        )
 
     def runtime(self) -> Process:
         """A shell over this run's durable store, as one new process would start it.
@@ -238,7 +252,9 @@ class World:
         bindings = self.bindings()
         if self.commits is not None:
             bindings = dataclasses.replace(bindings, commits=self.commits)
-        store = self.env.project.state_store(RUN_ID)
+        store: StateStore = self.env.project.state_store(RUN_ID)
+        if self.gate is not None:
+            store = FaultingStore(store, self.gate)
         shell: CoreRuntime[SkeletonState] = CoreRuntime(
             store, self.strategy, self.initial(), bindings=bindings
         )
@@ -346,6 +362,7 @@ class CandidateWriter:
     root: Path
     answer: dict[str, object] = field(default_factory=lambda: {"commit": ""})
     turns: int = 0
+    invocations: list[str | None] = field(default_factory=list)
 
     def worktree(self) -> Path:
         """The path of the run's single candidate worktree."""
@@ -365,7 +382,7 @@ class CandidateWriter:
 
     def __call__(self, request: AgentTurnRequest) -> None:
         """Write and commit one change, then name the commit in the reply."""
-        del request
+        self.invocations.append(request.invocation_id)
         self.turns += 1
         tree = self.worktree()
         (tree / "candidate.py").write_text(f"VALUE = {self.turns + 1}\n", encoding="utf-8")

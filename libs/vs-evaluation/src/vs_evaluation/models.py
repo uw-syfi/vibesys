@@ -28,6 +28,10 @@ class EvaluationState(StrEnum):
     QUEUED = "queued"
     STARTING = "starting"
     RUNNING = "running"
+    # Cancellation was requested for known work that is not yet seen ending
+    # (for example a cluster job tearing down). Not terminal: a later reading
+    # confirms CANCELED, or the work finishes first and reports its own outcome.
+    CANCELING = "canceling"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELED = "canceled"
@@ -44,6 +48,7 @@ class EvaluationLifecyclePhase(StrEnum):
     QUEUED = "queued"
     STARTING = "starting"
     RUNNING = "running"
+    CANCELING = "canceling"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELED = "canceled"
@@ -264,6 +269,9 @@ class ExecutorPoll(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     phase: PollPhase
+    # Scheduler attempt (restart count). Phases are ordered per attempt: a
+    # requeue raises the attempt and may legitimately drop RUNNING to QUEUED.
+    attempt: int = 0
     current_stage: str | None = None
     pending_reason: str | None = None
     estimated_start: str | None = None

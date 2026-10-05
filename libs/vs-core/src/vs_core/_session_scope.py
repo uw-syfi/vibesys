@@ -31,6 +31,11 @@ def turn_request_id(ref: InvocationRef, action: str) -> RequestId:
     return RequestId(root=encode_identity("invocation", *parts))
 
 
+def lost_turn_authority(ref: InvocationRef) -> RequestId:
+    """Authority of the cancellation that releases a turn whose acceptance stayed unknown."""
+    return turn_request_id(ref, "lost")
+
+
 def write_turn_authority(ref: InvocationRef) -> RequestId:
     """Authority and request identity of the checkpoint a terminal write turn earns.
 

@@ -277,7 +277,14 @@ class _ScenarioCluster(FakeCluster):
             return observed.model_copy(update={"job_id": handle.job.job_id})
         return observed
 
-    def collect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCollectOutcome:
+    def collect(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCollectOutcome:
+        del observed  # the reading names the producer's job; re-inspect the translated one
         translated, by_job_id = self._shadow_target(target, by_job_id=by_job_id)
         collected = super().collect(translated, by_job_id=by_job_id)
         if collected.operation_id not in self._producer_handles:
@@ -405,6 +412,9 @@ def _config() -> SlurmConfig:
         name="fake-cluster",
         remote_workspace_root="/runs",
         transport=SlurmSshTransport(host="fake-cluster"),
+        # The Fake scheduler reports teardown for a few inspections; pace the
+        # wait loop tightly so those inspections do not cost real seconds.
+        poll_interval_seconds=0.001,
     )
 
 
@@ -1116,6 +1126,8 @@ class _PendingCancellationCluster(_BlockingCluster):
         if self.terminate:
             return super().cancel(target, by_job_id=by_job_id)
         observed = _ScenarioCluster.inspect(self, target, by_job_id=by_job_id)
+        # Like _BlockingCluster.cancel, the acknowledgement frees the blocked inspection.
+        self._release_wait.set()
         if isinstance(observed, ClusterObservation):
             self.cancellations += 1
             self.cancelled_job_ids.append(observed.job_id)
@@ -1140,15 +1152,15 @@ async def test_scancel_acknowledgement_does_not_complete_release_or_suppress_ret
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        cancel_confirmation_seconds=3 * config.poll_interval_seconds,
     )
     try:
         await executor.submit(_request(), handle_id="eval-pending-cancel")
         await asyncio.to_thread(runner.wait_started.wait)
-        with pytest.raises(ExecutorCancellationUnknownError):
-            await executor.cancel("eval-pending-cancel")
+        await executor.cancel("eval-pending-cancel")
         observed = await executor.inspect("eval-pending-cancel")
         assert observed is not None
-        assert observed.state is EvaluationState.RUNNING
+        assert observed.state is EvaluationState.CANCELING
         assert runner.cancellations == 1
         runner.terminate = True
         await executor.cancel("eval-pending-cancel")
@@ -1615,7 +1627,8 @@ async def test_read_only_pending_scheduler_does_not_regress_active_evaluation(
     inspected = await coordinator.inspect_snapshot(handle.id)
     assert inspected is not None
     assert inspected.state is EvaluationState.RUNNING
-    assert inspected.current_stage is None
+    # An unstaged reading at the same state is not news: the stage already reported stays.
+    assert inspected.current_stage == "accuracy"
     assert runner.submissions == 1
     assert runner.cancellations == 0
     await executor.close()

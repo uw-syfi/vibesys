@@ -22,6 +22,15 @@ from vs_core._registry import (
 )
 from vs_core._session_scope import write_turn_authority
 from vs_core._step import CoreReducers, dependency_status, step, validate_terminal_inputs
+from vs_core._waits import (
+    Producer,
+    Wait,
+    WaitingPhase,
+    WaitKind,
+    orphan_waits,
+    phase_waits,
+    waits,
+)
 from vs_core.api.routing import EVENT_ROUTES
 from vs_core.attempts import advance_attempt
 from vs_core.evaluation import advance_evaluation
@@ -252,6 +261,7 @@ from vs_core.types.intents import (
     RecoveryReady,
     RecoveryStarted,
     RegisteredOperationRequest,
+    ReissueProof,
     Request,
     RequestObserved,
     RequestPrepared,
@@ -327,6 +337,7 @@ from vs_core.types.session_inputs import (
     SessionInput,
 )
 from vs_core.types.sessions import (
+    TURN_FAILURE_DETAIL_LIMIT,
     Access,
     CancelTurn,
     CloseSession,
@@ -364,6 +375,7 @@ from vs_core.types.sessions import (
     SessionView,
     SnapshotAndRetainRun,
     SteerReceived,
+    TurnFailureKind,
     TurnInputsReserved,
     TurnObserved,
     TurnRequested,
@@ -425,6 +437,7 @@ from vs_core.types.strategy import (
 __all__ = [
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
+    "TURN_FAILURE_DETAIL_LIMIT",
     "Accepted",
     "Access",
     "AdmissionControl",
@@ -649,6 +662,7 @@ __all__ = [
     "PoolCapacity",
     "PoolId",
     "PreparedSubmissionReceipt",
+    "Producer",
     "Proposal",
     "ProposalSubmitted",
     "ProposeWinner",
@@ -669,6 +683,7 @@ __all__ = [
     "RegisteredOperationRequest",
     "RegisteredOwnedJob",
     "RegisteredTurnRequested",
+    "ReissueProof",
     "Rejected",
     "RejectionCode",
     "ReleaseDependency",
@@ -779,6 +794,7 @@ __all__ = [
     "TraceFrame",
     "Transition",
     "TrustedBaseline",
+    "TurnFailureKind",
     "TurnInputsReserved",
     "TurnObserved",
     "TurnRequested",
@@ -788,6 +804,9 @@ __all__ = [
     "UnobservedJobFacts",
     "Value",
     "VerifyAdoption",
+    "Wait",
+    "WaitKind",
+    "WaitingPhase",
     "WinnerProposed",
     "Withdraw",
     "WorkspaceMode",
@@ -806,7 +825,9 @@ __all__ = [
     "initial_state",
     "operation_result",
     "operation_trace",
+    "orphan_waits",
     "pending_requests",
+    "phase_waits",
     "project",
     "recover",
     "schedule",
@@ -819,5 +840,6 @@ __all__ = [
     "v2_to_v3_migration",
     "validate_startup",
     "validate_terminal_inputs",
+    "waits",
     "write_turn_authority",
 ]

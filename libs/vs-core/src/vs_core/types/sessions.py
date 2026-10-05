@@ -22,6 +22,7 @@ from .common import (
     InvocationId,
     InvocationRef,
     Observation,
+    ObservationStatus,
     OperationId,
     RequestBase,
     RequestId,
@@ -375,14 +376,45 @@ class InterruptRequested(Value):
     authority: RequestId
 
 
+TURN_FAILURE_DETAIL_LIMIT = 4000
+"""Longest failure text a TurnResult carries, in characters."""
+
+
+class TurnFailureKind(StrEnum):
+    """Why a turn ended without a usable reply, as a closed set strategies match on."""
+
+    PROVIDER_FAILED = "provider_failed"
+    """The executor ended the turn: the provider refused it, or its reply broke the schema."""
+    TRANSPORT_LOST = "transport_lost"
+    """Acceptance stayed unknown after inspection, so core released the turn unfinished."""
+    CANCELLED = "cancelled"
+    """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
+
+
 class TurnResult(Value):
-    """Turn result lifecycle contract."""
+    """Terminal result of one turn, with the failure text when it did not succeed.
+
+    ``failure`` is None exactly when the turn succeeded; ``detail`` is the executor's
+    diagnostic, cut to ``TURN_FAILURE_DETAIL_LIMIT`` characters, so a correction
+    prompt can name the error without reading the raw observation.
+    """
 
     kind: Literal["turn_result"] = "turn_result"
     invocation: InvocationRef
     observation: Observation
     output_schema: SchemaRef | None = None
     output_json: str | None = None
+    failure: TurnFailureKind | None = None
+    detail: str = Field(default="", max_length=TURN_FAILURE_DETAIL_LIMIT)
+
+    @model_validator(mode="after")
+    def failure_matches_status(self) -> TurnResult:
+        """A failure kind and its text belong to a turn that did not succeed."""
+        if self.observation.status == ObservationStatus.SUCCEEDED and (
+            self.failure is not None or self.detail
+        ):
+            raise ContractValidationError("failure", "a succeeded turn carries no failure")
+        return self
 
 
 class EnsureSession(RequestBase):

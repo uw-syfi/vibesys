@@ -290,6 +290,9 @@ class SkeletonStrategy(Value):
         update: dict[str, object] = {"phase": phase}
         if isinstance(event, TurnResult):
             update["candidate"] = _committed(event)
+            if update["candidate"] is None:
+                # A turn that never ran (or committed nothing) has no revision to measure.
+                update.update(phase="failed", failure="the implementer turn produced no commit")
         if isinstance(event, AttemptSettled):
             update["settlement"] = event.settlement.settlement_id
         return update

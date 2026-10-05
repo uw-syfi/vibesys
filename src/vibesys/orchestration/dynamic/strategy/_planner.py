@@ -42,7 +42,14 @@ from vibesys.orchestration.dynamic.strategy._state import (
     WorkPhase,
     WorkPlan,
 )
-from vs_core.api import Access, ObservationStatus, RevisionRef, RunView, TurnResult
+from vs_core.api import (
+    Access,
+    ObservationStatus,
+    RevisionRef,
+    RunView,
+    TurnFailureKind,
+    TurnResult,
+)
 
 SUBJECT = "run"
 
@@ -72,6 +79,8 @@ def decide(draft: Draft) -> None:
                 "active": True,
                 "step": Step.NEEDED,
                 "blocked_at_done": None,
+                "retries": 0,
+                "capacity": context.capacity(draft.state, draft.config),
                 "turn": TurnRecord(role=Role.PLANNER, serial=serial, charge="free"),
             }
         )
@@ -128,7 +137,9 @@ def _parse(
     state: DynamicStrategyState, view: RunView, config: DynamicConfig, event: TurnResult
 ) -> tuple[PortfolioPlan | None, str]:
     if event.observation.status is not ObservationStatus.SUCCEEDED or event.output_json is None:
-        return None, f"the planner turn did not complete ({event.observation.status.value})"
+        return None, event.detail or (
+            f"the planner turn did not complete ({event.observation.status.value})"
+        )
     revisions = tuple(
         item.snapshot.revision.revision_id.root for item in context.offered(state, view)
     )
@@ -180,6 +191,8 @@ def on_turn(
     turn = planner.turn
     if turn is None:
         return state
+    if event.failure is TurnFailureKind.TRANSPORT_LOST:
+        return _ask_again(state, planner, turn, config, event)
     plan, parse_error = _parse(state, view, config, event)
     check = (
         None
@@ -192,44 +205,129 @@ def on_turn(
             profiling=config.profiling,
         )
     )
-    want = context.capacity(state, config)
+    # The planner was asked to fill the slots free when the call began. A workstream that
+    # finished while it was answering frees another slot, and the next call fills that one;
+    # judging the reply against the later capacity would spend a correction turn on a slot
+    # the planner was never offered.
+    free = context.capacity(state, config)
+    want = min(planner.capacity, free) if planner.capacity else free
     complete = check is not None and check.valid and len(check.accepted) >= want
     if complete and check is not None:
         return schedule(state, view, check)
     if turn.corrections < config.max_corrections:
         held = event.output_json if check is not None and check.valid and check.accepted else None
-        if check is None:
-            error = parse_error
-        elif check.valid:
-            error = (
-                f"the plan scheduled {len(check.accepted)} of {want} free slots; fill every slot"
+        return _corrected(state, turn, event, held, _correction_error(check, parse_error, want))
+    return _exhausted(state, view, config, check, parse_error)
+
+
+def _correction_error(check: PlanCheck | None, parse_error: str, want: int) -> str:
+    """What was wrong with the planner's reply, as the correction names it."""
+    if check is None:
+        return parse_error
+    if check.valid:
+        return f"the plan scheduled {len(check.accepted)} of {want} free slots; fill every slot"
+    return "; ".join(item.render() for item in check.violations)
+
+
+def _corrected(
+    state: DynamicStrategyState, turn: TurnRecord, event: TurnResult, held: str | None, error: str
+) -> DynamicStrategyState:
+    """Ask the planner to fix its reply, naming what was wrong."""
+    planner = state.planner
+    return state.model_copy(
+        update={
+            "planner": planner.model_copy(
+                update={
+                    "step": Step.NEEDED,
+                    "awaiting": None,
+                    "held_plan_json": held or planner.held_plan_json,
+                    "last_error": error,
+                    "turn": turn.model_copy(
+                        update={
+                            "serial": turn.serial + 1,
+                            "corrections": turn.corrections + 1,
+                            "charge": "correction",
+                            "invocation": event.invocation,
+                        }
+                    ),
+                }
             )
-        else:
-            error = "; ".join(item.render() for item in check.violations)
-        return state.model_copy(
-            update={
-                "planner": planner.model_copy(
-                    update={
-                        "step": Step.NEEDED,
-                        "awaiting": None,
-                        "held_plan_json": held or planner.held_plan_json,
-                        "last_error": error,
-                        "turn": turn.model_copy(
-                            update={
-                                "serial": turn.serial + 1,
-                                "corrections": turn.corrections + 1,
-                                "charge": "correction",
-                                "invocation": event.invocation,
-                            }
-                        ),
-                    }
-                )
-            }
-        )
+        }
+    )
+
+
+def _exhausted(
+    state: DynamicStrategyState,
+    view: RunView,
+    config: DynamicConfig,
+    check: PlanCheck | None,
+    parse_error: str,
+) -> DynamicStrategyState:
+    """Corrections ran out: keep the best valid plan, else ask a fresh turn, else give up."""
+    planner = state.planner
     chosen = _final_choice(state, view, config, check)
     if chosen is not None:
         return schedule(state, view, chosen)
+    turn = planner.turn
+    if turn is not None and planner.retries < config.max_retries_per_round:
+        return _fresh_turn(state, planner, turn, parse_error, check)
     return _nothing_valid(state, planner, parse_error, check)
+
+
+def _ask_again(
+    state: DynamicStrategyState,
+    planner: PlannerState,
+    turn: TurnRecord,
+    config: DynamicConfig,
+    event: TurnResult,
+) -> DynamicStrategyState:
+    """The transport lost the planning turn: ask the same question again, within the budget.
+
+    The new turn corrects the lost one, so it spends no correction and no fresh-turn retry.
+    Past ``max_turn_drops`` this planning call ends empty, as when corrections run out.
+    """
+    if turn.drops >= config.max_turn_drops:
+        return _nothing_valid(state, planner, event.detail or "the planner turn was lost", None)
+    again = turn.model_copy(
+        update={
+            "serial": turn.serial + 1,
+            "drops": turn.drops + 1,
+            "charge": "correction",
+            "invocation": event.invocation,
+        }
+    )
+    return state.model_copy(
+        update={
+            "planner": planner.model_copy(
+                update={"step": Step.NEEDED, "awaiting": None, "turn": again}
+            )
+        }
+    )
+
+
+def _fresh_turn(
+    state: DynamicStrategyState,
+    planner: PlannerState,
+    turn: TurnRecord,
+    parse_error: str,
+    check: PlanCheck | None,
+) -> DynamicStrategyState:
+    """Corrections ran out: ask a new planning turn, within the call's retry budget."""
+    detail = parse_error or "; ".join(item.render() for item in (check.violations if check else ()))
+    return state.model_copy(
+        update={
+            "planner": planner.model_copy(
+                update={
+                    "step": Step.NEEDED,
+                    "awaiting": None,
+                    "held_plan_json": None,
+                    "last_error": detail or planner.last_error,
+                    "retries": planner.retries + 1,
+                    "turn": TurnRecord(role=Role.PLANNER, serial=turn.serial + 1, charge="free"),
+                }
+            )
+        }
+    )
 
 
 def _nothing_valid(

@@ -322,12 +322,15 @@ class RegisteredOperationRequests:
                 ObservationStatus.REJECTED,
                 "registered operations own no child resources",
             )
-        target = await self._inspector.answer(request, context)
+        inspected = await self._inspector.answer(request, context)
         observed = RequestObserved(
             observation=self._observe(request, context, ObservationStatus.SUCCEEDED, ""),
-            target=target,
+            target=inspected.target,
         )
-        return ExecutionResult(observation=self._catalog.registry.validate_event(observed))
+        return ExecutionResult(
+            observation=self._catalog.registry.validate_event(observed),
+            owner_events=inspected.owner_events,
+        )
 
     async def answer(
         self,

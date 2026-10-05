@@ -69,6 +69,7 @@ from vs_core.api import (
     ResumeAuthorized,
     RevisionRef,
     RunView,
+    TurnFailureKind,
     TurnResult,
     TurnSuspended,
 )
@@ -351,6 +352,42 @@ def _correct(
     )
 
 
+def _ask_again(
+    state: DynamicStrategyState, index: int, config: DynamicConfig, event: TurnResult
+) -> DynamicStrategyState:
+    """The transport lost the turn: ask the role again, or fail the workstream.
+
+    The new turn is a correction of the lost one (it consumes no paid retry), asks the
+    same question, and counts against ``max_turn_drops`` for this logical turn. A resume
+    cannot be asked again: core authorizes each continuation's resume once.
+    """
+    record = state.attempts[index]
+    turn = record.turn
+    role = role_of(record.phase)
+    reason = f"{role.value if role else 'agent'} turn was lost ({event.detail or 'transport'})"
+    if (
+        turn is None
+        or role is None
+        or turn.charge == "resume"
+        or turn.drops >= config.max_turn_drops
+    ):
+        return fail(state, index, reason)
+    again = turn.model_copy(
+        update={
+            "serial": turn.serial + 1,
+            "drops": turn.drops + 1,
+            "charge": "correction",
+            "invocation": event.invocation,
+            "prompts": (),
+        }
+    )
+    return _put(
+        state,
+        index,
+        record.model_copy(update={"turn": again, "step": Step.NEEDED, "awaiting": None}),
+    )
+
+
 def _retry(
     state: DynamicStrategyState, index: int, config: DynamicConfig, feedback: str, reason: str
 ) -> DynamicStrategyState:
@@ -535,6 +572,22 @@ def _decode(
         return str(error)
 
 
+def _unfinished(
+    state: DynamicStrategyState,
+    index: int,
+    config: DynamicConfig,
+    role: Role,
+    event: TurnResult,
+) -> DynamicStrategyState:
+    """A turn ended without a usable reply: ask again if lost, retry the implementer or fail."""
+    if event.failure is TurnFailureKind.TRANSPORT_LOST:
+        return _ask_again(state, index, config, event)
+    reason = f"{role.value} turn did not complete ({event.observation.status.value})"
+    if role is Role.IMPLEMENTER:
+        return _retry(state, index, config, event.detail or reason, reason)
+    return fail(state, index, reason)
+
+
 def on_turn(
     state: DynamicStrategyState, view: RunView, config: DynamicConfig, event: TurnResult
 ) -> DynamicStrategyState:
@@ -547,10 +600,7 @@ def on_turn(
     if role is None:
         return state
     if event.observation.status is not ObservationStatus.SUCCEEDED or event.output_json is None:
-        reason = f"{role.value} turn did not complete ({event.observation.status.value})"
-        if role is Role.IMPLEMENTER:
-            return _retry(state, index, config, reason, reason)
-        return fail(state, index, reason)
+        return _unfinished(state, index, config, role, event)
     if role is Role.PROFILER:
         return _put(state, index, _profiled(record, config))
     return _answered(state, index, view, config, event)
