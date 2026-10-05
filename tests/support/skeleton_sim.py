@@ -83,7 +83,8 @@ async def simulate(
     """Run to a terminal state through every crash ``plan`` schedules, restarting each time."""
     gate = FaultGate(plan)
     cluster = CountingCluster()
-    with open_skeleton_world(root, strategy or SkeletonStrategy(), cluster, gate=gate) as world:
+    with open_skeleton_world(root, strategy or SkeletonStrategy(), cluster) as world:
+        world.gate = gate
         now = 0.0
         crashes = 0
         for _ in range(len(plan.rules) + 1):

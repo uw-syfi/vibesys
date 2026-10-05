@@ -425,7 +425,6 @@ def open_skeleton_world(
     cluster: ScenarioCluster | None = None,
     timed: tuple[FakeRunClock, float] | None = None,
     agents: Callable[[Path], SessionHost] | None = None,
-    gate: FaultGate | None = None,
 ) -> Iterator[World]:
     """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
     with open_workspace_env(tmp_path) as env:
@@ -437,5 +436,4 @@ def open_skeleton_world(
             agents=hosted,
             strategy=strategy or SkeletonStrategy(),
             timed=timed,
-            gate=gate,
         )
