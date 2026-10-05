@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import replace
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import pytest
-from tests.support.skeleton_strategy import SkeletonStrategy
+from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
 from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
 
 from vibesys.api._session import run_plugin
@@ -17,8 +18,8 @@ from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_registration import OrchestrationRegistration
 from vibesys.run.contracts import RunRequest
-from vibesys.run.core_run import CoreRunLoopUnavailableError
 from vibesys.run.core_services import CoreCompositionError
+from vibesys.run.evaluation_backend import semantic_evaluation_identity
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import AgentCapabilities
@@ -35,13 +36,15 @@ from vs_core.api import (
     Value,
     validate_startup,
 )
-from vs_project.api import OrchestrationDescriptor
+from vs_project.api import OrchestrationDescriptor, Project, StoredEnvelope
 from vs_runtime.api import (
     AgentRole,
     CoreOperation,
+    CorePlan,
     CorePolicy,
     CoreRunContext,
     OrchestrationPlugin,
+    RunStatus,
 )
 from vs_runtime.api.core import OperationRole
 from vs_sandbox.api.testing import FakeComputeBackend
@@ -51,6 +54,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.api import AgentClientProtocol
+    from vs_core.api import Strategy
 
 DIGEST_LENGTH = 64
 
@@ -85,23 +89,30 @@ def _resumable_client(**_kwargs: object) -> FakeAgentClient:
     return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
 
 
-def _policy(templates: Path) -> CorePolicy:
-    def run_facts(context: CoreRunContext) -> RunFacts:
-        return RunFacts(
-            objective=context.facts.objective,
-            baseline=context.baseline,
-            evaluator_digest=context.evaluator_digest,
-            workload_digest=context.workload_digest,
-            environment_digest=context.environment_digest,
+def _policy(
+    templates: Path, strategy: Strategy[Any] | None = None, deadline_seconds: float = 1000.0
+) -> CorePolicy:
+    def plan(context: CoreRunContext) -> CorePlan:
+        identity = semantic_evaluation_identity(
+            context.evaluation_plan, context.facts, context.environment
+        )
+        return CorePlan(
+            strategy=SkeletonStrategy() if strategy is None else strategy,
+            reply_schemas={},
+            facts=RunFacts(
+                objective=context.facts.objective,
+                baseline=context.baseline,
+                evaluator_digest=identity.evaluator.value,
+                workload_digest=identity.workload.value,
+                environment_digest=identity.environment.value,
+            ),
+            limits=Limits(),
+            deadline_seconds=deadline_seconds,
         )
 
     return CorePolicy(
-        strategy=lambda _options: SkeletonStrategy(),
+        plan=plan,
         operations=(CoreOperation(OperationRole.RENDER_ARTIFACTS, _render_registration()),),
-        reply_schemas={},
-        run_facts=run_facts,
-        limits=lambda _context: Limits(),
-        deadline_at=lambda _context: 1000.0,
         retention_label="selected",
         prompt_templates=templates,
     )
@@ -205,10 +216,8 @@ def test_missing_resource_fails_at_composition_naming_it(
 @pytest.mark.parametrize(
     ("change", "key"),
     [
-        ({"strategy": None}, "core.strategy"),
-        ({"limits": 3}, "core.limits"),
+        ({"plan": None}, "core.plan"),
         ({"retention_label": ""}, "core.retention_label"),
-        ({"reply_schemas": {"bad": _Rendered}}, "core.reply_schemas"),
         ({"prompt_templates": "missing-directory"}, "core.prompt_templates"),
         ({"artifact_directories": ("../escape",)}, "core.artifact_directories[0]"),
         ({"artifact_directories": ("/absolute",)}, "core.artifact_directories[0]"),
@@ -239,23 +248,30 @@ def test_a_plugin_needs_exactly_one_of_orchestrate_and_core(tmp_path: Path) -> N
         replace(legacy, core=_policy(tmp_path))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=CoreRunLoopUnavailableError,
-    reason="SW-1 (vs_runtime._core_run) has not landed, so the shell is not driven yet",
-)
 def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> None:
+    """The loop runs a core plugin to its terminal record, and the session sees the outcome."""
     project_root = tmp_path / "project"
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
     integration = LocalRunIntegration()
+    request = _request(project_root).model_copy(update={"run_id": "core-run"})
+    plugin = replace(
+        _plugin(templates),
+        core=_policy(
+            templates,
+            SkeletonStrategy(
+                state=SkeletonState(schema_version=1, phase="failed", failure="scripted"),
+                measured=False,
+            ),
+        ),
+    )
 
-    async def exercise() -> None:
-        await run_plugin(
-            _request(project_root),
+    async def exercise() -> object:
+        return await run_plugin(
+            request,
             integration,
-            _plugin(templates),
+            plugin,
             EmptyOptions(),
             agent_client_factory=_resumable_client,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
@@ -264,6 +280,13 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
         )
 
     try:
-        asyncio.run(exercise())
+        status = asyncio.run(exercise())
     finally:
         integration.close()
+
+    # The scenario stops the run with a failure result: terminal, and not a success.
+    assert status is RunStatus.FAILED
+    stored = Project.open(project_root).state_store("core-run").load()
+    assert isinstance(stored, StoredEnvelope)
+    core = json.loads(stored.payload)["envelope"]["core"]["run"]
+    assert (core["status"], core["result"]["outcome"]) == ("terminal", "failure")

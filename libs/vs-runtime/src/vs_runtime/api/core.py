@@ -77,6 +77,7 @@ from vs_runtime._core_run import (
     start_core,
 )
 from vs_runtime._core_wiring import (
+    CoreStartup,
     SessionServices,
     core_bindings,
     empty_catalog,
@@ -202,6 +203,7 @@ __all__ = [
     "CoreRunHost",
     "CoreRuntime",
     "CoreRuntimeBindings",
+    "CoreStartup",
     "CoreTransitions",
     "Declined",
     "DispatchCapExceededError",

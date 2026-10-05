@@ -71,6 +71,7 @@ from vs_core.api import (
 )
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
+    CoreStartup,
     ExecutionResult,
     ExecutorRole,
     RefusingRequestExecution,
@@ -357,7 +358,13 @@ def test_a_declaration_requiring_an_unoffered_operation_is_refused_by_name() -> 
         environment_digest=DIGEST,
     )
     with pytest.raises(ContractError, match="required operation unavailable") as refused:
-        new_core_state("run", facts, declaration, offered=empty_catalog(), deadline_at=10.0)
+        new_core_state(
+            "run",
+            facts,
+            declaration,
+            offered=empty_catalog(),
+            startup=CoreStartup(deadline_at=10.0),
+        )
     assert "needs-this-operation" in str(refused.value)
 
 
