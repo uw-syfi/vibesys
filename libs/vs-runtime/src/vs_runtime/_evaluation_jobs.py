@@ -192,7 +192,9 @@ def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, id
                 terminal=terminal,
                 accepted=accepted,
                 released=terminal,
-                children_complete=terminal,
+                # A measurement job has no child resources, so once the executor owns it the
+                # (empty) child set is complete; recovery resolves a live job only on that.
+                children_complete=accepted,
                 resource_id=ResourceId(root=handle_id),
                 diagnostic=diagnostic,
             )
