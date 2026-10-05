@@ -154,10 +154,6 @@ class ScriptExhaustedError(AssertionError):
     """An agent turn arrived that the scenario did not script."""
 
 
-class HostCrash(BaseException):
-    """A scripted host crash: the process dies mid-turn, which no retry policy absorbs."""
-
-
 class AgentTransportError(RuntimeError):
     """A scripted agent CLI failure (the process died mid-turn)."""
 
@@ -536,7 +532,7 @@ def run_request(
         # > failure together with its events. pytest.raises at each call site would
         # > lose the events and run id the assertions need, and naming one type would
         # > couple the harness to how the host wraps a failure.
-        except (Exception, RunStopped, HostCrash) as error:  # noqa: BLE001
+        except (Exception, RunStopped) as error:  # noqa: BLE001
             await asyncio.gather(collector, return_exceptions=True)
             return LoopRun(handle.run_id, None, error, events)
         await asyncio.gather(collector, return_exceptions=True)

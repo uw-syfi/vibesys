@@ -8,8 +8,8 @@ import pytest
 from tests.composition.dynamic._harness import (
     LEASE_GAP,
     PASS,
+    AgentTransportError,
     CoreRecords,
-    HostCrash,
     LoopInput,
     ScriptedAgents,
     edit_to,
@@ -86,7 +86,7 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
     loop_input = LoopInput.create(tmp_path)
     _failing_input(loop_input)
     request = loop_input.request(max_rounds=1)
-    first = ScriptedAgents().plan(HostCrash("planner died"))
+    first = ScriptedAgents().plan(AgentTransportError("planner died"))
     crashed = run_request(request, first)
     assert crashed.error is not None
     assert loop_input.sbatch_count() == _input_jobs()

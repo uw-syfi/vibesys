@@ -17,7 +17,6 @@ from tests.composition.dynamic._harness import (
     PASS,
     AgentTransportError,
     CoreRecords,
-    HostCrash,
     LoopInput,
     ScriptedAgents,
     Turn,
@@ -517,7 +516,7 @@ def test_a_crashed_run_resumes_from_its_committed_record_and_finishes(tmp_path: 
     request = loop_input.request(max_rounds=2)
     first = (
         ScriptedAgents()
-        .plan(portfolio(workstream("H1")), HostCrash("planner died"))
+        .plan(portfolio(workstream("H1")), AgentTransportError("planner died"))
         .implement("H1", edit_to(2, "H1"))
         .judge("H1", PASS)
     )
