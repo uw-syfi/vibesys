@@ -149,9 +149,9 @@ class RunView(Value):
     artifacts: tuple[ArtifactRef, ...]
     controls: tuple[ControlInput, ...]
     inputs: tuple[InputRecord, ...]
+    adoption: AdoptionView | None = None
     # Earliest core time a paced job poll comes due, None when none is scheduled.
     next_observe_at: Seconds | None = None
-    adoption: AdoptionView | None = None
 
 
 class DecisionSubmitted(Value):

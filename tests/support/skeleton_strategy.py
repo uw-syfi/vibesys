@@ -61,7 +61,7 @@ from vs_core.api import (
 )
 
 ATTEMPT = AttemptRef(attempt_id=AttemptId(root="attempt-0"), generation=0)
-DIGEST = "cd" * 32
+DIGEST = "ab" * 32
 DECLARATION = StrategyDeclaration(
     strategy_id=StrategyId(root="skeleton"), state_schema=SchemaRef(name="skeleton", version=1)
 )
@@ -95,8 +95,9 @@ def measurement(
         policy="ordered",
         recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest=DIGEST),
         submitted_at=0.0,
-        queue_allowance=10.0,
-        deadline_at=30.0,
+        queue_allowance=880.0,
+        # Absolute run-clock time, past any restart the scenarios make (the run ends at 1000 s).
+        deadline_at=900.0,
         accuracy_stage="accuracy",
     )
 
@@ -106,7 +107,8 @@ class SkeletonStrategy(Value):
 
     The unmeasured variant starts at the attempt and settles right after the turn, so
     the workspace, session, retirement and adoption interfaces can be driven while the
-    measurement interfaces are still missing pieces.
+    measurement interfaces are still missing pieces. Its settlement keeps the candidate
+    but is ineligible (no evidence), so the run adopts the trusted baseline.
     """
 
     state: SkeletonState = SkeletonState(schema_version=1)
@@ -143,10 +145,17 @@ class SkeletonStrategy(Value):
 
     def _selection(self, view: RunView) -> RetainedCandidate | TrustedBaseline:
         state = self.state
-        if self.keeps_candidate:
+        settlement = next(
+            (row for row in view.settlements if row.settlement_id == state.settlement), None
+        )
+        # A retained candidate wins only on an eligible settlement, and core makes one eligible
+        # only with accepted evidence for that candidate. Without a measurement there is none,
+        # so the trusted baseline is the only revision this strategy may adopt.
+        if self.keeps_candidate and settlement is not None and settlement.eligible:
             assert state.candidate is not None
-            assert state.settlement is not None
-            return RetainedCandidate(settlement_id=state.settlement, revision=state.candidate)
+            return RetainedCandidate(
+                settlement_id=settlement.settlement_id, revision=state.candidate
+            )
         return TrustedBaseline(revision=view.facts.baseline)
 
     def bind(self, state: SkeletonState) -> SkeletonStrategy:
