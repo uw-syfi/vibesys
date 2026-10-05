@@ -12,13 +12,20 @@ from tests.support.executor_harness import ProcessKilledError
 from tests.support.observation_contract import assert_core_accepts
 
 from vs_core.api import ObservationStatus
-from vs_runtime.api.core import receipt_executor_kinds
+from vs_runtime.api.core import (
+    ExecutionResult,
+    ReceiptStore,
+    SealedExecution,
+    Settled,
+    receipt_executor_kinds,
+    result_type_name,
+    settle,
+)
 
 if TYPE_CHECKING:
     from tests.support.executor_harness import ExecutorCase, Scenario
 
-    from vs_core.api import Observation
-    from vs_runtime.api.core import ExecutionResult
+    from vs_core.api import Observation, RequestBase
 
 pytestmark = pytest.mark.asyncio
 
@@ -152,3 +159,31 @@ async def test_inspect_after_completion_reports_the_executed_result(
             want.request_id,
         )
         assert_core_accepts([done, answer], expect_retry=False)
+
+
+def request_key(request: RequestBase) -> str:
+    assert request.request_id is not None
+    return request.request_id.root
+
+
+@pytest.mark.parametrize(("case", "scenario"), PARAMS)
+async def test_every_sealed_result_is_definitive_at_every_crash_point(
+    case: ExecutorCase, scenario: Scenario
+) -> None:
+    """A result that run_once seals is replayed forever, so it must never be one to revisit."""
+    async with case.world() as probe:
+        request = await probe.prepare(scenario)
+        await probe.execute(request, lease=RevocableLease(), crash_at=None)
+        boundaries = 2 * probe.writes()
+    for crash_at in range(boundaries):
+        async with case.world() as world:
+            request = await world.prepare(scenario)
+            with contextlib.suppress(ProcessKilledError):
+                await world.execute(request, lease=RevocableLease(), crash_at=crash_at)
+            await world.execute(request, lease=RevocableLease(), crash_at=None)
+            history = ReceiptStore(world.receipts_namespace()).history(request_key(request))
+            if isinstance(history, SealedExecution) and history.result_type == result_type_name(
+                ExecutionResult
+            ):
+                sealed = ExecutionResult.model_validate_json(history.result_json)
+                assert isinstance(settle(sealed), Settled), f"boundary {crash_at}"

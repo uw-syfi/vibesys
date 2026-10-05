@@ -53,6 +53,7 @@ from vs_runtime._core_requests import (
     SessionRequests,
     WorkspaceRequests,
     receipt_executor_kinds,
+    settle,
 )
 from vs_runtime._core_run import (
     CoreRunHost,
@@ -282,4 +283,5 @@ __all__ = [
     "result_type_name",
     "revision_ref",
     "start_core",
+    "settle",
 ]
