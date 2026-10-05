@@ -520,6 +520,16 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         help="Maximum independent dynamic workstreams dispatched concurrently (default: 2).",
     )
     parser.add_argument(
+        "--turn-drop-backoff-seconds",
+        type=float,
+        default=5.0,
+        metavar="SECONDS",
+        help=(
+            "Dynamic loop: wait this long before asking an agent again after the provider "
+            "dropped its turn; doubles with each further drop of the same turn (default: 5)."
+        ),
+    )
+    parser.add_argument(
         "--constraint",
         action="append",
         default=[],

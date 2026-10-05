@@ -10,6 +10,8 @@ from tests.composition.dynamic._harness import (
     PASS,
     AgentTransportError,
     CoreRecords,
+    CrashGapError,
+    InfraRetryGapError,
     LoopInput,
     ScriptedAgents,
     edit_to,
@@ -81,14 +83,15 @@ def _candidate_jobs(rounds: int) -> int:
     return rounds
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=LEASE_GAP)
+@pytest.mark.xfail(strict=True, raises=CrashGapError, reason=LEASE_GAP)
 def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     _failing_input(loop_input)
     request = loop_input.request(max_rounds=1)
     first = ScriptedAgents().plan(AgentTransportError("planner died"))
     crashed = run_request(request, first)
-    assert crashed.error is not None
+    if crashed.error is None:
+        raise CrashGapError
     assert loop_input.sbatch_count() == _input_jobs()
     second = (
         ScriptedAgents()
@@ -140,7 +143,7 @@ _INFRA_GAP = (
 )
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_INFRA_GAP)
+@pytest.mark.xfail(strict=True, raises=InfraRetryGapError, reason=_INFRA_GAP)
 @pytest.mark.parametrize("failures", [1, 5])
 def test_transient_input_failure_is_retried_within_its_bound(tmp_path: Path, failures: int) -> None:
     loop_input = LoopInput.create(tmp_path)
@@ -153,7 +156,9 @@ def test_transient_input_failure_is_retried_within_its_bound(tmp_path: Path, fai
     assert run.succeeded is True
     assert agents.unscripted == []
     attempts = min(failures + 1, MAX_INPUT_ATTEMPTS)
-    assert int(counter.read_text(encoding="utf-8")) == attempts
+    measured = int(counter.read_text(encoding="utf-8"))
+    if measured != attempts:
+        raise InfraRetryGapError(measured, attempts)
     assert loop_input.sbatch_count() == attempts + _candidate_jobs(1)
     baseline = CoreRecords(loop_input, run.run_id).strategy["baseline"]
     assert baseline["attempts"] == attempts
