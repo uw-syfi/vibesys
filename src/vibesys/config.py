@@ -172,6 +172,20 @@ class EvaluationCfg(_Strict):
     )
 
 
+class RunCfg(_Strict):
+    """Bounds on one whole run, independent of the orchestration."""
+
+    max_run_seconds: int | None = Field(
+        default=None,
+        strict=True,
+        gt=0,
+        description=(
+            "Optional wall-clock budget for one run, in seconds. When omitted the run is "
+            "bounded only by its round budget."
+        ),
+    )
+
+
 class RepositoryCfg(_Strict):
     """Default GitHub owner and repository visibility."""
 
@@ -218,6 +232,10 @@ class Config(_Strict):
     evaluation: EvaluationCfg = Field(
         default_factory=EvaluationCfg,
         description="[evaluation] — evaluation suspension bounds.",
+    )
+    run: RunCfg = Field(
+        default_factory=RunCfg,
+        description="[run] — whole-run bounds.",
     )
     repository: RepositoryCfg = Field(
         default_factory=RepositoryCfg,

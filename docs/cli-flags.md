@@ -57,6 +57,19 @@ framework setup when requested. Requested stages without a declared timeout
 cannot produce a suspension deadline. Queue estimates inform planning; they do
 not extend the deadline.
 
+### Run time budget
+
+Optionally bound the wall-clock time of one run in `agent.toml`:
+
+```toml
+[run]
+max_run_seconds = 86400
+```
+
+The value must be a positive integer. It is omitted by default, and the run is
+then unbounded in time (the round budget still applies). The core-driven
+`dynamic` strategy reads it as the run deadline.
+
 ## Mental Model
 
 Several flags look independent, but they combine into one execution contract:
