@@ -89,7 +89,7 @@ class DynamicStrategy:
         attempts.decide(draft)
         planner.decide(draft)
         run.decide(draft)
-        return Proposal(state=draft.state, decisions=tuple(draft.decisions))
+        return Proposal(state=draft.state, decisions=tuple(draft.decisions), wake_at=draft.wake_at)
 
     def on_event(self, view: RunView, event: StrategyEvent) -> DynamicStrategyState:
         """Fold one core feedback into the scientific state."""

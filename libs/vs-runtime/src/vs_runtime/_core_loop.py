@@ -278,6 +278,7 @@ class CoreRuntime[S: StrategyState]:
         self._storage_revision: int | None = None
         self._fence: StoreFence | None = None
         self._halted = False
+        self._strategy_wake_at: float | None = None
         self._busy = False
         self._dispatched = 0
         self._last_kind: str | None = None
@@ -505,6 +506,11 @@ class CoreRuntime[S: StrategyState]:
         self._tail = (self._storage_revision, transition.state)
         return transition
 
+    @property
+    def strategy_wake_at(self) -> float | None:
+        """The time the strategy's latest proposal waits for, or None when it waits for none."""
+        return self._strategy_wake_at
+
     def decide(self, *, now_at: float) -> None:
         """Queue a strategy call against the revision observed when it is consumed."""
         self._require_active(queue_only=True)
@@ -533,6 +539,7 @@ class CoreRuntime[S: StrategyState]:
             proposal = self._strategy.bind(self.record.envelope.strategy).decide(
                 project(self.record.envelope.core)
             )
+            self._strategy_wake_at = proposal.wake_at
             item = _Input[S](
                 event=ProposalSubmitted(
                     decisions=tuple(
@@ -606,6 +613,11 @@ class CoreRuntime[S: StrategyState]:
         # on every load by `_decode`. `model_copy` skips validators, so the record's own
         # invariants are rechecked here.
         self._registry.validate_envelope(candidate.envelope)
+        # A strategy state built with `model_copy(update=...)` never ran its field validators;
+        # validating it on the value keeps an invalid state from becoming a durable record
+        # that no later process can load.
+        strategy = candidate.envelope.strategy
+        type(strategy).model_validate(strategy.model_dump(warnings=False))
         candidate.check_publications()
         self._check_identity(candidate.envelope)
         stored = StoredEnvelope(

@@ -389,6 +389,9 @@ class _Loop:
     async def _wait(self, now: float) -> None:
         core = self._core()
         due = self._next_wake(core)
+        asked = self._shell.strategy_wake_at
+        if asked is not None and asked > now:
+            due = asked if due is None else min(due, asked)
         paused = core.run.status == RunStatus.PAUSED
         recovering = core.intents.recovery.phase != RecoveryPhase.READY
         past_deadline = now >= core.run.deadline_at

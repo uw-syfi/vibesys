@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import tempfile
 import unicodedata
 from pathlib import Path
@@ -30,7 +31,7 @@ from tests.composition.dynamic._harness import (
 from tests.support.fake_run_clock import HostCrashedError
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vs_agent.api import AgentOutputSchemaError
+from vs_agent.api import AgentOutputSchemaError, AgentSpawnError, AgentTurnTimeoutError
 from vs_project.api import Project
 from vs_runtime.api.core import RunStalledError
 
@@ -585,3 +586,29 @@ def test_a_lease_that_cannot_be_released_does_not_replace_the_runs_own_error(
     # The release in the run's ``finally`` fails to read the lease document; the run's
     # own failure is the one reported.
     assert isinstance(crashed.error, HostCrashedError)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        AgentSpawnError("claude", "exit status 1"),
+        AgentTurnTimeoutError(30),
+        OSError("broken pipe"),
+        subprocess.CalledProcessError(1, ["claude"]),
+        RuntimeError("claude exited with code 1"),
+    ],
+    ids=lambda failure: type(failure).__name__,
+)
+def test_a_planner_turn_killed_by_any_cli_failure_ends_the_run_without_a_stall(
+    tmp_path: Path, failure: Exception
+) -> None:
+    loop_input = LoopInput.create(tmp_path)
+    agents = ScriptedAgents().plan(*[failure] * (_DROP_BUDGET + 1))
+
+    run = run_request(loop_input.request(), agents)
+
+    assert not isinstance(run.error, RunStalledError), run.error
+    assert agents.unscripted == []
+    status, outcome = CoreRecords(loop_input, run.run_id).outcome
+    assert status == "terminal"
+    assert outcome != "success"

@@ -53,10 +53,20 @@ class Draft:
     config: DynamicConfig
     state: DynamicStrategyState
     decisions: list[Decision] = field(default_factory=list)
+    wake_at: float | None = None
+    """Earliest run-clock time a held-back turn becomes due."""
 
     def emit(self, decision: Decision) -> None:
         """Append one decision in proposal order."""
         self.decisions.append(decision)
+
+    def due(self, turn: TurnRecord) -> bool:
+        """Whether the turn may be asked now; otherwise note when to be asked again."""
+        until = turn.ask_not_before
+        if until is None or self.view.run.now_at >= until:
+            return True
+        self.wake_at = until if self.wake_at is None else min(self.wake_at, until)
+        return False
 
     def update(self, **fields: object) -> None:
         """Replace state fields without mutating the previous state."""

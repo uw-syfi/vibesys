@@ -147,6 +147,30 @@ class _SharedCancelClient(FakeAgentClient):
         self._seen.set()
 
 
+class KnownGapError(AssertionError):
+    """A scenario step that fails today for a tracked gap in another owner's code.
+
+    Each gap has its own subclass so an expected failure names the gap it waits on: an xfail
+    with ``raises=<subclass>`` still fails on any other mistake in the scenario.
+    """
+
+
+class InfraRetryGapError(KnownGapError):
+    """A benchmark process that dies without a result is not measured again."""
+
+    def __init__(self, measured: int, expected: int) -> None:
+        """Say how often the input was measured."""
+        super().__init__(f"input measured {measured} times, expected {expected}")
+
+
+class CancelGapError(KnownGapError):
+    """A stuck provider turn is not cancelled when the stop grace bound ends the run."""
+
+    def __init__(self) -> None:
+        """Say what was not cancelled."""
+        super().__init__("the stuck provider turn was never cancelled")
+
+
 class ScriptExhaustedError(AssertionError):
     """An agent turn arrived that the scenario did not script."""
 
@@ -449,13 +473,18 @@ class LoopInput:
         """Return the cluster's pending-job announcement path (create a FIFO there)."""
         return self.cluster / SUBMITTED_FILE
 
-    def request(self, **flags: int | str) -> RunRequest:
+    def request(self, **flags: float | str) -> RunRequest:
         """Build the run request from the command line, as the operator's CLI does.
 
         ``flags`` are long options without the dashes, underscores for hyphens:
         ``max_rounds=2`` is ``--max-rounds 2``.
         """
-        chosen: dict[str, int | str] = {"max_rounds": 1, "max_in_flight": 1, **flags}
+        chosen: dict[str, float | str] = {
+            "max_rounds": 1,
+            "max_in_flight": 1,
+            "turn_drop_backoff_seconds": 0.01,
+            **flags,
+        }
         argv = [
             "--outer-loop", "dynamic",
             "--input", str(self.root),
