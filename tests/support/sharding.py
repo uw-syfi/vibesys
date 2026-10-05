@@ -35,10 +35,11 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
-    import pytest
     from _pytest.terminal import TerminalReporter
     from xdist.workermanage import WorkerController
 
@@ -220,25 +221,43 @@ def pytest_configure_node(node: WorkerController) -> None:
     node.workerinput["duration_order"] = node.config.getoption("dist") == "load"
 
 
-def _discovered(config: pytest.Config) -> list[str]:
-    return discover_test_files(
-        config.rootpath, config.getini("testpaths"), config.getini("python_files")
-    )
+_PLAN = pytest.StashKey["_Plan"]()
+
+
+class _Plan:
+    """What every collection decision of one session needs, computed once.
+
+    ``pytest_ignore_collect`` runs for every path, so walking the tree and parsing
+    the record for each call cost minutes per shard.
+    """
+
+    def __init__(self, config: pytest.Config) -> None:
+        self.durations: dict[str, float] = json.loads(
+            Path(config.getoption("--shard-durations")).read_text()
+        )
+        self.files = discover_test_files(
+            config.rootpath, config.getini("testpaths"), config.getini("python_files")
+        )
+        self.index, self.count = parse_shard(config.getoption("--shard"))
+        self.whole = assign_shards(self.files, self.durations, self.count)
+
+
+def _plan(config: pytest.Config) -> _Plan:
+    if _PLAN not in config.stash:
+        config.stash[_PLAN] = _Plan(config)
+    return config.stash[_PLAN]
 
 
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
     """Skip, before importing it, a whole file that another shard owns."""
-    spec = config.getoption("--shard")
-    if spec is None or collection_path.suffix != ".py":
+    if config.getoption("--shard") is None or collection_path.suffix != ".py":
         return None
     try:
         name = collection_path.relative_to(config.rootpath).as_posix()
     except ValueError:
         return None
-    durations = json.loads(Path(config.getoption("--shard-durations")).read_text())
-    index, count = parse_shard(spec)
-    assignment = assign_shards(_discovered(config), durations, count)
-    if name in assignment and assignment[name] != index:
+    plan = _plan(config)
+    if name in plan.whole and plan.whole[name] != plan.index:
         return True
     return None
 
@@ -251,9 +270,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         return
     durations = json.loads(Path(config.getoption("--shard-durations")).read_text())
     if spec is not None:
-        index, count = parse_shard(spec)
+        plan = _plan(config)
+        index, count = plan.index, plan.count
         files = [_file_of(item.nodeid) for item in items]
-        assignment, loads = shard_loads({*_discovered(config), *files}, durations, count)
+        assignment, loads = shard_loads({*plan.files, *files}, durations, count)
         seen: Counter[str] = Counter(files)
         heavy, _ = assign_heavy_items(seen, durations, loads)
         position: Counter[str] = Counter()
