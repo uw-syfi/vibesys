@@ -131,11 +131,6 @@ class FakeCancels:
         self._event.set()
 
     @property
-    def requested(self) -> bool:
-        """Whether any request arrived."""
-        return self._event.is_set()
-
-    @property
     def count(self) -> int:
         """How many requests arrived."""
         with self._lock:
@@ -218,9 +213,6 @@ class FakeSession:
         try:
             if self._on_turn is not None:
                 self._on_turn(request)
-            if self._cancels.requested:
-                # A production driver ends a cancelled in-flight turn with an error.
-                raise FakeDriverError.cancelled()
             self._invocations += 1
             events = self._turns[min(self._invocations, len(self._turns)) - 1]
             for event in events:
@@ -261,7 +253,7 @@ class FakeSession:
 
         Scripted turns finish on their own; only a turn an ``on_turn`` barrier holds
         open can be in flight, and the barrier learns of the cancel through
-        :meth:`FakeDriver.wait_cancelled`.
+        :meth:`FakeDriver.hold_until_cancelled`.
         """
         with self._state_lock:
             running = self._turns_in_progress > 0
@@ -342,9 +334,14 @@ class FakeDriver:
         """Cancellation requests received by every session of this driver."""
         return self._cancels.count
 
-    def wait_cancelled(self, timeout: float) -> bool:
-        """Hold an ``on_turn`` barrier open until a cancel arrives (``timeout`` guards a lost one)."""
-        return self._cancels.wait(timeout)
+    def hold_until_cancelled(self, timeout: float) -> None:
+        """Hold an ``on_turn`` barrier open until a cancel arrives, then end the turn with an error.
+
+        A production driver ends a cancelled in-flight turn with an error. ``timeout``
+        only guards a lost cancel, which returns without raising.
+        """
+        if self._cancels.wait(timeout):
+            raise FakeDriverError.cancelled()
 
     @property
     def resumed_session_ids(self) -> tuple[str, ...]:

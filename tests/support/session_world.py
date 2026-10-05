@@ -344,7 +344,7 @@ def open_host(
         if hang_until_cancelled:
             started.set()
             # The timeout only bounds a test whose cancel never arrives.
-            driver.wait_cancelled(_HANG_GUARD_S)
+            driver.hold_until_cancelled(_HANG_GUARD_S)
         if faults.down:
             message = "provider died after accepting the turn"
             raise ConnectionError(message)
