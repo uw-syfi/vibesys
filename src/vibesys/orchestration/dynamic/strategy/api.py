@@ -8,6 +8,10 @@ from vibesys.orchestration.dynamic.strategy._evidence import (
     turn_candidate,
 )
 from vibesys.orchestration.dynamic.strategy._operations import (
+    INTERPRET_KIND,
+    RENDER_KIND,
+    RETAIN_KIND,
+    VERIFY_KIND,
     EvidenceReadings,
     InterpretEvidence,
     ParentVerification,
@@ -35,17 +39,38 @@ from vibesys.orchestration.dynamic.strategy._rows import (
     MetricRow,
     PartialRow,
 )
-from vibesys.orchestration.dynamic.strategy._state import STATE_SCHEMA, DynamicStrategyState
+from vibesys.orchestration.dynamic.strategy._schemas import (
+    IMPLEMENTER_REPLY,
+    JUDGE_REPLY,
+    PLANNER_REPLY,
+    PROFILER_REPLY,
+)
+from vibesys.orchestration.dynamic.strategy._state import (
+    STATE_SCHEMA,
+    DynamicStrategyState,
+    HypothesisRecord,
+    RoundRecord,
+    Winner,
+)
 from vibesys.orchestration.dynamic.strategy._strategy import DynamicStrategy
 
 __all__ = [
+    "IMPLEMENTER_REPLY",
+    "INTERPRET_KIND",
+    "JUDGE_REPLY",
+    "PLANNER_REPLY",
+    "PROFILER_REPLY",
+    "RENDER_KIND",
+    "RETAIN_KIND",
     "STATE_SCHEMA",
+    "VERIFY_KIND",
     "AcceptedReading",
     "DynamicConfig",
     "DynamicStrategy",
     "DynamicStrategyState",
     "EvidenceReading",
     "EvidenceReadings",
+    "HypothesisRecord",
     "InterpretEvidence",
     "MetricRow",
     "ParentConflictError",
@@ -61,7 +86,9 @@ __all__ = [
     "RenderedArtifacts",
     "RetainVerifiedRevision",
     "RetentionReceipt",
+    "RoundRecord",
     "VerifyParentRevision",
+    "Winner",
     "accept_readings",
     "dynamic_operation_registrations",
     "dynamic_operation_registry",

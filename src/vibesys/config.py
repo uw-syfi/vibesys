@@ -170,6 +170,42 @@ class EvaluationCfg(_Strict):
         gt=0,
         description="Queue allowance added to declared execution budgets for suspension deadlines.",
     )
+    observe_interval_seconds: int = Field(
+        default=10,
+        strict=True,
+        gt=0,
+        description="How often the core polls a running evaluation job, in seconds.",
+    )
+    observe_backoff_cap_seconds: int = Field(
+        default=120,
+        strict=True,
+        gt=0,
+        description=(
+            "Upper bound of the poll delay, in seconds, after the job's state could not be "
+            "read. Must be at least the observe interval."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _cap_covers_interval(self) -> Self:
+        if self.observe_backoff_cap_seconds < self.observe_interval_seconds:
+            message = "observe_backoff_cap_seconds must be at least observe_interval_seconds"
+            raise ValueError(message)
+        return self
+
+
+class RunCfg(_Strict):
+    """Bounds on one whole run, independent of the orchestration."""
+
+    max_run_seconds: int | None = Field(
+        default=None,
+        strict=True,
+        gt=0,
+        description=(
+            "Optional wall-clock budget for one run, in seconds. When omitted the run is "
+            "bounded only by its round budget."
+        ),
+    )
 
 
 class RepositoryCfg(_Strict):
@@ -218,6 +254,10 @@ class Config(_Strict):
     evaluation: EvaluationCfg = Field(
         default_factory=EvaluationCfg,
         description="[evaluation] — evaluation suspension bounds.",
+    )
+    run: RunCfg = Field(
+        default_factory=RunCfg,
+        description="[run] — whole-run bounds.",
     )
     repository: RepositoryCfg = Field(
         default_factory=RepositoryCfg,

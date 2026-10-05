@@ -750,6 +750,45 @@ def test_plugin_registration_derives_projection_only_when_declared() -> None:
     assert stateless_registration.plugin.state is None
 
 
+class _OwnProjector:
+    """A projector that reads durable state this registration does not declare."""
+
+    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+        del project
+        return RunView(run_id=run_id, loop=loop, status=status, experiment_revision=7)
+
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+        del namespace, state, run_id
+        return None
+
+
+def test_stateless_plugin_registers_its_own_projector() -> None:
+    plugin = OrchestrationPlugin(
+        id="own-projector",
+        agents=(),
+        options=_PluginOptions,
+        orchestrate=_run_plugin,
+    )
+    projector = _OwnProjector()
+
+    registration = OrchestrationRegistration(plugin=plugin, projector=projector)
+
+    assert registration.projector is projector
+
+
+def test_registration_rejects_a_projection_and_a_projector_together() -> None:
+    plugin = OrchestrationPlugin(
+        id="two-sources",
+        agents=(),
+        options=_PluginOptions,
+        state=_PluginState,
+        orchestrate=_run_plugin,
+    )
+
+    with pytest.raises(ValueError, match="not both"):
+        OrchestrationRegistration(plugin=plugin, project=_project_plugin, projector=_OwnProjector())
+
+
 def test_registration_rejects_projection_without_declared_state() -> None:
     plugin = OrchestrationPlugin(
         id="stateless-projector",
