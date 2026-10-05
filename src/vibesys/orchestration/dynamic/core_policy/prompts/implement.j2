@@ -36,7 +36,7 @@ turn{{ 's' if turns_without_candidate != 1 }} so far). The blocker you stated:
 {% if narrowed_step %}
 The narrower step you named for this turn:
 {{ narrowed_step }}
-Do that step and submit it for trusted evaluation. Do not retry the whole task.
+Do that step and {% if agent_evaluation %}send it for trusted evaluation{% else %}nominate it{% endif %}. Do not retry the whole task.
 {% endif %}
 Another turn that ends without a candidate settles this workstream as failed.
 {% endif %}

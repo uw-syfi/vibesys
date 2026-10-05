@@ -25,7 +25,7 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
 )
 from tests.vibesys.orchestration.dynamic.strategy._run import config, run_shell
 
-from vs_core.api import ProposeWinner, RequestTurn
+from vs_core.api import ProposeWinner, RequestTurn, Withdraw
 
 if TYPE_CHECKING:
     from tests.vibesys.orchestration.dynamic.strategy._shell import Run
@@ -141,3 +141,30 @@ def test_unmeasured_turns_never_exceed_the_bound_and_the_run_terminates(
     assert len(turns) == 2
     assert all(count <= bound for count in turns.values())
     assert _planner_turns(finished) == 2
+
+
+def test_the_planner_is_not_re_asked_while_nothing_it_sees_has_changed() -> None:
+    """A free slot beside a running workstream costs one planning call, not a retry loop.
+
+    live-2: four planner turns in 45 s for one free slot, each repeating a plan the run
+    could not accept. One planning call is its first reply plus `max_corrections`
+    corrections; another needs a workstream to finish, which changes what the planner sees.
+    """
+    executors = Executors(
+        planner=deque(
+            [plan_reply(implement("h1"), implement("h2")), *[plan_reply(implement("h1"))] * 12]
+        ),
+        implementer=deque([_failed("a"), implemented()]),
+        judge=deque([reviewed()]),
+    )
+    finished = run_shell(
+        executors, max_rounds=3, max_in_flight=2, max_retries_per_round=3, max_unmeasured_turns=1
+    )
+    ends = [i for i, item in enumerate(finished.decisions) if isinstance(item, Withdraw)]
+    assert len(ends) >= 2
+    between = [
+        item
+        for item in finished.decisions[ends[0] : ends[1]]
+        if isinstance(item, RequestTurn) and item.turn.session.role_id.root.endswith("orchestrator")
+    ]
+    assert len(between) <= 1 + config().max_corrections
