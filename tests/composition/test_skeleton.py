@@ -49,7 +49,6 @@ from vs_core.api import (
     CloseSession,
     ContinuationId,
     ContractError,
-    ContractValidationError,
     DecisionId,
     DispatchTurn,
     EnsureSession,
@@ -108,34 +107,13 @@ def _assert_adopted(process: Process, world: World) -> None:
     assert len(world.cluster.submissions) == (2 if world.strategy.measured else 0)
 
 
-TURN_OUTPUT_DROPPED = pytest.mark.xfail(
-    raises=(AssertionError, ContractValidationError),
-    strict=True,
-    reason=(
-        "a write turn's structured reply never reaches the strategy: the turn output cannot ride "
-        "RequestObserved (core's ingress needs a registered outcome proof, vs_core/_step.py), so "
-        "it travels on the executor's TurnObserved owner event; but core derives its own "
-        "TurnObserved from the intent ledger (vs_core/_intent_forward.py, DispatchTurn case) with "
-        "output_json=None, applies it first, and drops the executor's event as a replay of the "
-        "same sequence (vs_core/_session_turns.py _turn_observed). TurnResult.output_json is "
-        "None, so the candidate commit is unknown and the retained settlement is refused. "
-        "Owner CORE-P2 (core derives the output-less event) with SESSION-WIRING "
-        "(_session_requests.py owes the output on the observation the ledger sees)"
-    ),
-)
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "crash",
     [
-        pytest.param(None, id="straight-through", marks=TURN_OUTPUT_DROPPED),
-        pytest.param(
-            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=TURN_OUTPUT_DROPPED
-        ),
-        pytest.param(
-            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=TURN_OUTPUT_DROPPED
-        ),
+        pytest.param(None, id="straight-through"),
+        pytest.param(CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch"),
+        pytest.param(CrashPoint.AFTER_OBSERVATION, id="crash-after-observation"),
     ],
 )
 async def test_skeleton(tmp_path: Path, crash: CrashPoint | None) -> None:
@@ -146,13 +124,9 @@ async def test_skeleton(tmp_path: Path, crash: CrashPoint | None) -> None:
 @pytest.mark.parametrize(
     "crash",
     [
-        pytest.param(None, id="straight-through", marks=TURN_OUTPUT_DROPPED),
-        pytest.param(
-            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=TURN_OUTPUT_DROPPED
-        ),
-        pytest.param(
-            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=TURN_OUTPUT_DROPPED
-        ),
+        pytest.param(None, id="straight-through"),
+        pytest.param(CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch"),
+        pytest.param(CrashPoint.AFTER_OBSERVATION, id="crash-after-observation"),
     ],
 )
 async def test_skeleton_without_measurements(tmp_path: Path, crash: CrashPoint | None) -> None:

@@ -74,6 +74,7 @@ from .types.evaluation import (
     UnobservedJobFacts,
 )
 from .types.evaluation_history import EvaluationStageOutcome
+from .types.intents import IntentPhase, RequestObserved
 from .types.job_observations import MeasurementFailure
 from .types.kernel import AreaChange
 from .types.strategy import Measure
@@ -82,7 +83,7 @@ if TYPE_CHECKING:
     from .types.common import DecisionId, Observation, ResourceId, Scope
     from .types.evaluation import EvaluationEvent, EvaluationState, EvidenceRef, MeasurementPlan
     from .types.intents import Intent, Request
-    from .types.kernel import EvaluationContext
+    from .types.kernel import EvaluationContext, Signal
 
 __all__ = ["advance"]
 
@@ -1048,10 +1049,37 @@ def _job_observed(
             requests = (_job_request(CollectEvidence, updated, context, "evidence"),)
     return AreaChange(
         state=state,
-        signals=(*_history_signals(state, context, job.scope), wake),
+        signals=(*_history_signals(state, context, job.scope), wake, *_ended(context, job, event)),
         requests=requests if context.run.status != RunStatus.TERMINAL else (),
         events=events,
     )
+
+
+def _ended(
+    context: EvaluationContext,
+    job: OwnedJob | RegisteredOwnedJob,
+    event: JobObserved | RegisteredJobObserved,
+) -> tuple[Signal, ...]:
+    """The job's first conclusive observation, handed to the ledger as its submission's own.
+
+    A job's observations carry its submission's request id and sequence, so the end of
+    the job is a fact about the submit request. When the submit's own view was taken
+    while the job still ran, nothing else completes that intent, and a closing run waits
+    for every open one. A submission the ledger already closed needs nothing, and one it
+    never dispatched cannot have been observed.
+    """
+    if (
+        not isinstance(job, OwnedJob)
+        or not _conclusive(event.observation)
+        or _conclusive(job.observation)
+    ):
+        return ()
+    intent = next(
+        (row for row in context.intents.intents if row.request_id == job.submission_id), None
+    )
+    if intent is None or intent.phase in (IntentPhase.PREPARED, IntentPhase.COMPLETED):
+        return ()
+    return (RequestObserved(observation=event.observation),)
 
 
 def _next_poll(
