@@ -1,0 +1,351 @@
+"""One production-shaped core run, built the way a launch will build it.
+
+``open_skeleton_world`` gives a real Git project with durable state under a
+temporary Project, the real workspace and evaluation executors (evaluation runs
+on the Fake Slurm cluster), and the scripted strategy. ``World.runtime`` builds a
+new shell over that same disk, so a test can drop one shell mid-run and start
+another, as after a process crash. Nothing here replaces core logic or patches
+a module: a missing piece shows up as the real interface failing.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from enum import StrEnum
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from pydantic import BaseModel
+from tests.support.runtime_evaluation import ScenarioCluster
+from tests.support.session_world import (
+    FakeSessionResolver,
+    ProviderFaults,
+    SessionHost,
+)
+from tests.support.skeleton_strategy import DECLARATION, SkeletonState, SkeletonStrategy
+from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
+
+from vs_agent.api import AgentClient
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
+from vs_core.api import (
+    Capabilities,
+    ClockAdvanced,
+    IntentPhase,
+    RecoveryPhase,
+    RoleId,
+    RunFacts,
+    RunStatus,
+    SchemaRef,
+    TurnSpec,
+)
+from vs_project.api import run_git
+from vs_prompts.api import TemplateRenderer
+from vs_runtime.api import render_stage_failure
+from vs_runtime.api.core import (
+    CoreRuntime,
+    CoreRuntimeBindings,
+    DispatchProgress,
+    ExecutorRefusal,
+    JournalPublicationDelivery,
+    SessionServices,
+    core_bindings,
+    new_core_state,
+    revision_ref,
+)
+from vs_runtime.api.infrastructure import (
+    ScalarBenchmarkContract,
+    SemanticSlurmEvaluationExecutor,
+    TrustedEvaluationPlan,
+)
+from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
+from vs_slurm.api import SlurmConfig, SlurmSshTransport
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from vs_agent.api import AgentSessionSpec, AgentTurnRequest
+    from vs_core.api import CoreState
+
+DIGEST = "ab" * 32
+LEASE = 100.0
+
+
+@dataclass
+class World:
+    """The disk state of one run and every shell started over it."""
+
+    env: WorkspaceEnv
+    root: Path
+    cluster: ScenarioCluster
+    agents: SessionHost
+    strategy: SkeletonStrategy = field(default_factory=SkeletonStrategy)
+
+    def initial(self) -> CoreState:
+        """The state of a run that has not started, from the real baseline commit."""
+        host = self.env.hosts[0]
+        # The run's baseline is the trusted input baseline: that is what adoption of the
+        # baseline is checked against.
+        commit = host.root.trusted_input_baseline
+        assert commit is not None
+        facts = RunFacts(
+            objective="make candidate.py faster",
+            baseline=revision_ref(commit),
+            evaluator_digest=DIGEST,
+            workload_digest=DIGEST,
+            environment_digest=DIGEST,
+        )
+        return new_core_state(
+            RUN_ID, facts, DECLARATION, offered=Capabilities(), deadline_at=1000.0
+        )
+
+    def bindings(self) -> CoreRuntimeBindings:
+        """Executors for one host process: new workspaces and evaluation over the shared disk."""
+        workspaces = self.env.start_host()
+        namespace = self.env.project.state.local_namespace(RUN_ID, "evaluation")
+        evaluation = SemanticSlurmEvaluationExecutor(
+            SlurmConfig(
+                name="test",
+                remote_workspace_root="/runs",
+                transport=SlurmSshTransport(host="test"),
+            ),
+            SlurmExecutionPolicy(),
+            SlurmEvaluationPlan(
+                config_path=self.root / "slurm.toml",
+                accuracy_command=("python", "accuracy.py"),
+                benchmark_command=("python", "benchmark.py"),
+            ),
+            TrustedEvaluationPlan(
+                accuracy_command="unused",
+                benchmark_command="unused",
+                benchmark_contract=ScalarBenchmarkContract(
+                    output_argument="--output", metric="throughput"
+                ),
+            ),
+            workspaces,
+            namespace,  # type: ignore[arg-type]  # the evaluation namespace is a StateNamespace
+            self.root / "handles",
+            stage_failure_text=render_stage_failure,
+            cluster=self.cluster,
+        )
+        return core_bindings(
+            receipts=self.env.receipts_namespace(),
+            workspaces=workspaces,
+            evaluation=evaluation,
+            sessions=SessionServices(self.agents.sessions(), self.agents.resolver),
+        )
+
+    def runtime(self) -> Process:
+        """A shell over this run's durable store, as one new process would start it.
+
+        A fresh run when the store is empty, a recovery of the durable envelope otherwise.
+        """
+        bindings = self.bindings()
+        store = self.env.project.state_store(RUN_ID)
+        shell: CoreRuntime[SkeletonState] = CoreRuntime(
+            store, self.strategy, self.initial(), bindings=bindings
+        )
+        delivery = JournalPublicationDelivery(
+            self.env.project.state.portable_namespace(RUN_ID, "publications"),
+            bindings.registry,
+            store,
+        )
+        return Process(shell, delivery)
+
+
+@dataclass
+class Process:
+    """One host process: a shell and the publication delivery it runs with."""
+
+    shell: CoreRuntime[SkeletonState]
+    delivery: JournalPublicationDelivery
+
+
+def finished(process: Process) -> bool:
+    """Whether the run reached its terminal status."""
+    return process.shell.record.envelope.core.run.status == RunStatus.TERMINAL
+
+
+def _recovered(process: Process) -> bool:
+    """Whether core finished reconciling unfinished work, so the strategy may be asked."""
+    barrier = process.shell.record.envelope.core.intents.recovery
+    return barrier.phase == RecoveryPhase.READY
+
+
+class StalledError(AssertionError):
+    """The run is not terminal, nothing is dispatchable and the strategy has nothing to add."""
+
+
+async def drive(process: Process, *, start: float, rounds: int = 40) -> ExecutorRefusal | None:
+    """Deliver the clock, ask the strategy once recovered, and run to idle, until terminal.
+
+    Time is a logical counter the caller supplies; no sleeps and no wall clock.
+    Raises ``StalledError`` when a round changes nothing, which names a request
+    nobody issues rather than burning the remaining rounds.
+    """
+    now = start
+    for _ in range(rounds):
+        if finished(process):
+            return None
+        before = process.shell.record.envelope.core.revision
+        process.shell.submit(ClockAdvanced(now_at=now), now_at=now)
+        refusal = await process.shell.run_until_idle(process.delivery, now_at=now)
+        if refusal is None and _recovered(process):
+            process.shell.decide(now_at=now)
+            refusal = await process.shell.run_until_idle(process.delivery, now_at=now)
+        if refusal is not None:
+            return refusal
+        if finished(process):
+            return None
+        if _stalled(process, before):
+            raise StalledError(_describe(process))
+        now += 1.0
+    message = f"run did not finish in {rounds} rounds"
+    raise AssertionError(message)
+
+
+def _stalled(process: Process, before: int) -> bool:
+    core = process.shell.record.envelope.core
+    return core.revision - before <= 2 and not any(
+        intent.phase == IntentPhase.PREPARED for intent in core.intents.intents
+    )
+
+
+def _describe(process: Process) -> str:
+    core = process.shell.record.envelope.core
+    open_intents = [
+        f"{intent.request.kind}:{intent.phase.value}"
+        for intent in core.intents.intents
+        if intent.phase != IntentPhase.COMPLETED
+    ]
+    return f"stalled at core revision {core.revision}; open intents {open_intents}"
+
+
+class CrashPoint(StrEnum):
+    """Where the scenario drops its shell, as a process crash would."""
+
+    AFTER_DISPATCH = "after-dispatch"
+    AFTER_OBSERVATION = "after-observation"
+
+
+async def run_until_crash(process: Process, point: CrashPoint, *, start: float) -> float:
+    """Drive to the first executed request, then stop where ``point`` says and drop the shell.
+
+    After dispatch: the executor ran, its observation is not yet committed.
+    After observation: the observation is committed, nothing after it is.
+    Returns the logical time of the crash. The caller starts another process.
+    """
+    now = start
+    shell = process.shell
+    for _ in range(40):
+        shell.submit(ClockAdvanced(now_at=now), now_at=now)
+        shell.decide(now_at=now)
+        while shell.advance():
+            pass
+        outcome = await shell.dispatch_one(now_at=now)
+        if outcome == DispatchProgress.DISPATCHED:
+            if point == CrashPoint.AFTER_OBSERVATION:
+                assert shell.advance()
+            return now
+        if outcome != DispatchProgress.IDLE:
+            message = f"refused before the crash point: {outcome}"
+            raise RuntimeError(message)
+        now += 1.0
+    message = "no request was dispatched"
+    raise AssertionError(message)
+
+
+class Implementation(BaseModel):
+    """The implementer's structured reply: the commit it made in its workspace."""
+
+    commit: str
+
+
+IMPLEMENTATION = SchemaRef(name="implementation", version=1)
+IMPLEMENTER = RoleId(root="implementer")
+
+
+@dataclass
+class CandidateWriter:
+    """The Fake provider's implementer: each turn commits one change in its candidate worktree.
+
+    The worktree is found through Git (the one that is not the root checkout), so
+    nothing here reaches into the executors. The reply names the new commit.
+    """
+
+    root: Path
+    answer: dict[str, object] = field(default_factory=lambda: {"commit": ""})
+    turns: int = 0
+
+    def worktree(self) -> Path:
+        """The path of the run's single candidate worktree."""
+        listing = self._git(self.root, "worktree", "list", "--porcelain")
+        paths = [
+            Path(line.removeprefix("worktree "))
+            for line in listing.splitlines()
+            if line.startswith("worktree ")
+        ]
+        candidates = [path for path in paths if path.resolve() != self.root.resolve()]
+        assert len(candidates) == 1, f"expected one candidate worktree, found {candidates}"
+        return candidates[0]
+
+    def __call__(self, request: AgentTurnRequest) -> None:
+        """Write and commit one change, then name the commit in the reply."""
+        del request
+        self.turns += 1
+        tree = self.worktree()
+        (tree / "candidate.py").write_text(f"VALUE = {self.turns + 1}\n", encoding="utf-8")
+        self._git(tree, "add", "-A")
+        self._git(tree, "commit", "-m", f"implement {self.turns}")
+        self.answer["commit"] = self._git(tree, "rev-parse", "HEAD").strip()
+
+    @staticmethod
+    def _git(cwd: Path, *args: str) -> str:
+        identity = ["-c", "user.name=agent", "-c", "user.email=agent@example.com"]
+        result = run_git([*identity, *args], cwd=cwd)
+        assert result.returncode == 0, result.stderr
+        return result.stdout.decode()
+
+
+@dataclass
+class CandidateResolver(FakeSessionResolver):
+    """Resolves turns to the candidate worktree the writer commits in."""
+
+    writer: CandidateWriter | None = None
+
+    def agent_spec(self, turn: TurnSpec) -> AgentSessionSpec | None:
+        """The Fake provider's session configuration over the live candidate worktree."""
+        assert self.writer is not None
+        spec = super().agent_spec(turn)
+        assert spec is not None
+        return dataclasses.replace(spec, workspace=self.writer.worktree())
+
+
+def _open_agents(root: Path) -> SessionHost:
+    writer = CandidateWriter(root)
+    client = AgentClient(FakeDriver(answer=writer.answer, on_turn=writer))
+    resolver = CandidateResolver(
+        root,
+        TemplateRenderer(root),
+        roles=frozenset({IMPLEMENTER}),
+        schemas={IMPLEMENTATION: Implementation},
+        writer=writer,
+    )
+    return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
+
+
+@contextmanager
+def open_skeleton_world(
+    tmp_path: Path, strategy: SkeletonStrategy | None = None
+) -> Iterator[World]:
+    """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
+    with open_workspace_env(tmp_path) as env:
+        agents = _open_agents(tmp_path / "project")
+        yield World(
+            env=env,
+            root=tmp_path / "project",
+            cluster=ScenarioCluster(),
+            agents=agents,
+            strategy=strategy or SkeletonStrategy(),
+        )

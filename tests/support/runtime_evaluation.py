@@ -8,6 +8,7 @@ ends with, and counts real submissions so tests can prove "exactly once".
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -70,6 +71,7 @@ class ScenarioCluster(FakeCluster):
         self.benchmark_exit = 0
         self.benchmark_output = BENCHMARK_OUTPUT
         self.submissions: list[str] = []
+        self.accepted = threading.Event()
 
     @property
     def cancelled(self) -> list[str]:
@@ -83,7 +85,9 @@ class ScenarioCluster(FakeCluster):
         if isinstance(request, SlurmBatchRequest) and operation_id not in self.submissions:
             self.submissions.append(operation_id)
             self.script(operation_id, states=self.states, result=self._result(request))
-        return super().submit(request, operation_id=operation_id)
+        outcome = super().submit(request, operation_id=operation_id)
+        self.accepted.set()
+        return outcome
 
     def _result(self, request: SlurmBatchRequest) -> SlurmBatchResult:
         stages = []
