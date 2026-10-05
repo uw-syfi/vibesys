@@ -402,7 +402,13 @@ class SlurmEvaluationExecutor:
         # Scheduler terminality cannot replace collected stage evidence. Normal
         # recovery owns collection; deadline inspection cannot start it or
         # discard partial results by settling prematurely.
-        return _lifecycle_observation(status, durable.request)
+        observation = _lifecycle_observation(status, durable.request)
+        if observation is None:
+            return None
+        # Join with what inspect() reports, so a later inspect() or the
+        # background task's own publication can never read lower than this.
+        self._publish(handle_id, observation)
+        return self._observations[handle_id]
 
     async def poll(self, handle_id: str) -> ExecutorPoll:
         """Inspect durable work once: no submission, recovery task or workspace.
