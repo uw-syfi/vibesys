@@ -421,7 +421,7 @@ class SemanticSlurmEvaluationExecutor:
             failure=None if state is EvaluationState.SUCCEEDED else failure,
         )
 
-    def _evidence(
+    def _evidence(  # noqa: PLR0913  # lint-waiver: LW-518204 [PLR0913]; the stage, its raw result, its failure text, and the job's completion and readiness facts are independent inputs, and a wrapper type would only rename them.
         self,
         stage: SemanticEvaluationStage,
         raw: SlurmCommandResult,

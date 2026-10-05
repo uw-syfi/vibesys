@@ -31,7 +31,7 @@ def test_every_signal_and_record_has_a_class(signal: TerminalSignal, record: Rec
 
 
 @given(exit_code=st.none() | st.integers(min_value=-300, max_value=300), ready=st.booleans())
-def test_every_exit_status_reads_as_a_signal(exit_code: int | None, ready: bool) -> None:
+def test_every_exit_status_reads_as_a_signal(exit_code: int | None, *, ready: bool) -> None:
     assert signal_of(exit_code, service_not_ready=not ready) in set(TerminalSignal)
 
 

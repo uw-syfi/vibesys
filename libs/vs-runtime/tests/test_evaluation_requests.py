@@ -959,7 +959,7 @@ async def test_a_server_that_never_became_ready_is_the_candidates_failure_with_i
     cluster = ScenarioCluster()
     cluster.job_exit_code = 70
     cluster.benchmark_output = _CRASH_TAIL
-    target, jobs = await _failed_target(cluster)
+    target, _jobs = await _failed_target(cluster)
     assert target.measurement_failure is MeasurementFailure.WORKLOAD
     assert target.evidence
     assert _CRASH_TAIL in target.observation.diagnostic

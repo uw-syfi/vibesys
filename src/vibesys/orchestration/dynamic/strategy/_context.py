@@ -178,9 +178,7 @@ def implement_prompt(record: AttemptRecord, state: DynamicStrategyState) -> Impl
         worktree_revision=None if last is None else last.candidate,
         prior_revision=None if last is None else last.candidate,
         feedback=record.feedback,
-        prior_failure_tail=""
-        if last is None
-        else _tail(last.failure_tail, _HISTORY_FAILURE_CHARS),
+        prior_failure_tail="" if last is None else _tail(last.failure_tail, _HISTORY_FAILURE_CHARS),
     )
 
 

@@ -33,11 +33,14 @@ means only the evaluator's ``hello`` record (it started and stated its schema),
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from vs_core.api import MeasurementFailure
 from vs_runtime.contracts import BenchmarkFailureKind
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 __all__ = [
     "RecordState",
