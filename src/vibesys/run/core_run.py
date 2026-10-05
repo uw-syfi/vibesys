@@ -48,6 +48,7 @@ LEASE_SECONDS = 60.0
 
 _STOP_RESULT = RunResultProposal(outcome="cancelled", reason="stop requested by the operator")
 _DEADLINE_RESULT = RunResultProposal(outcome="cancelled", reason="run deadline reached")
+_UNFINISHED_REASON = "the run ended without recording a result"
 
 
 @dataclass(frozen=True)
@@ -178,27 +179,33 @@ def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatu
     return RunStatus.SUCCEEDED if result.outcome == "success" or kept else RunStatus.FAILED
 
 
-def _failure_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunFailure | None:
+def _failure_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunFailure:
     """Why a failed run stopped, read from the result and the counts core kept.
 
     A run ends in failure with nothing to keep when its time ran out, when every
     workstream it was allowed had run, or when its strategy gave up earlier. A run that
-    recorded no result at all (an unfinished record) has no reason to report.
+    recorded no result at all (an unfinished record) is reported as ``NO_RESULT`` with a
+    fixed reason. ``BUDGET_EXHAUSTED`` is inferred from the counts (``started >= budget``),
+    so a strategy that gives up on its last permitted workstream is labelled the same.
     """
-    if result is None:
-        return None
     core = shell.record.envelope.core
     started = len(core.attempts.attempts)
     budget = core.run.limits.max_attempts
-    if result == _DEADLINE_RESULT:
+    if result is None:
+        kind = RunFailureKind.NO_RESULT
+        reason = _UNFINISHED_REASON
+    elif result == _DEADLINE_RESULT:
         kind = RunFailureKind.DEADLINE
+        reason = result.reason
     elif started >= budget:
         kind = RunFailureKind.BUDGET_EXHAUSTED
+        reason = result.reason
     else:
         kind = RunFailureKind.NO_RESULT
+        reason = result.reason
     return RunFailure(
         kind=kind,
-        reason=result.reason,
+        reason=reason,
         workstreams_started=started,
         workstream_budget=budget,
         candidates_kept=sum(1 for item in core.settlement.settlements if item.eligible),

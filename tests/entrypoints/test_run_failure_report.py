@@ -6,7 +6,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from entrypoints.cli.loops import _describe_failure
+from entrypoints.cli.loops import describe_failure
 from vibesys.api import RunFailure, RunFailureKind
 
 
@@ -28,7 +28,7 @@ def test_every_failure_kind_prints_its_counts_and_the_cores_account(
         candidates_kept=kept,
     )
 
-    line = _describe_failure(failure)
+    line = describe_failure(failure)
 
     assert "\n" not in line
     assert line.startswith("Reason: ")
@@ -39,7 +39,7 @@ def test_every_failure_kind_prints_its_counts_and_the_cores_account(
 
 def test_each_kind_reads_differently() -> None:
     lines = {
-        _describe_failure(
+        describe_failure(
             RunFailure(
                 kind=kind,
                 reason="r",
@@ -66,3 +66,19 @@ def test_failure_models_reject_unknown_fields(kind: RunFailureKind) -> None:
                 "extra": 1,
             }
         )
+
+
+@given(kept=st.integers(min_value=0, max_value=50), kind=st.sampled_from(RunFailureKind))
+def test_the_headline_claims_no_result_only_when_nothing_was_kept(
+    kept: int, kind: RunFailureKind
+) -> None:
+    line = describe_failure(
+        RunFailure(
+            kind=kind,
+            reason="r",
+            workstreams_started=1,
+            workstream_budget=2,
+            candidates_kept=kept,
+        )
+    )
+    assert ("no result to keep" in line) == (kept == 0)

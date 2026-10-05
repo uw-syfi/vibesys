@@ -131,7 +131,7 @@ def test_a_failed_run_reports_a_typed_reason_with_its_counts(tmp_path: Path) -> 
     assert failure.kind is RunFailureKind.BUDGET_EXHAUSTED
     assert failure.reason.startswith("no trusted result")
     assert failure.workstreams_started == 1
-    assert failure.workstream_budget >= failure.workstreams_started
+    assert failure.workstream_budget == failure.workstreams_started
     assert failure.candidates_kept == 0
     published = [event.data for event in run.events if event.type is CoreEventType.RUN_FAILED]
     assert [getattr(data, "failure", None) for data in published] == [failure]

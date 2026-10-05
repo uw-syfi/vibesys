@@ -68,6 +68,8 @@ if TYPE_CHECKING:
     import argparse
     from collections.abc import Callable
 
+    from vibesys.api import Runs
+
 # Aliases the tests reach for by name; the submodules use the imported names.
 _load_objective = load_objective
 _with_operator_constraints = with_operator_constraints
@@ -178,14 +180,14 @@ def parse_cli_invocation(argv: list[str]) -> CliInvocation:
     return CliInvocation(loop_kind=loop_kind, args=args)
 
 
-def dispatch(argv: list[str]) -> None:
-    """Parse and run one headless VibeSys invocation."""
+def dispatch(argv: list[str], runs: Runs | None = None) -> None:
+    """Parse and run one headless VibeSys invocation, on ``runs`` or the default launcher."""
     if argv and argv[0] == "validate":
         _run_validate(argv[1:])
         return
     with boot_trace.span("dispatch"), boot_trace.span("parse_cli_invocation"):
         invocation = parse_cli_invocation(argv)
-    _run_request(invocation.args)
+    _run_request(invocation.args, runs)
 
 
 def _option_from_argv(argv: list[str], option: str) -> str | None:
