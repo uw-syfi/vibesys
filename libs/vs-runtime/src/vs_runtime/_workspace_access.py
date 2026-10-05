@@ -81,15 +81,15 @@ class WorkspaceAccessRecovery:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._checkpoint: tuple[str, str, tuple[str, ...], tuple[str, ...]] | None = None
-        self._holds: set[str] = set()
+        self._fenced_by: Callable[[], tuple[str, ...]] = tuple
 
-    def hold(self, key: str) -> None:
-        """Fence the workspace: an invocation's writer may still run, so no snapshot may baseline it."""
-        self._holds.add(key)
+    def guard(self, fenced_by: Callable[[], tuple[str, ...]]) -> None:
+        """Refuse snapshots while *fenced_by* names invocations whose writes are not judged.
 
-    def release(self, key: str) -> None:
-        """Lift the fence of *key* once its writes were judged."""
-        self._holds.discard(key)
+        The answer comes from durable state, read on every snapshot, so a restarted
+        host refuses before any executor has seen the unsettled invocation again.
+        """
+        self._fenced_by = fenced_by
 
     def begin(
         self,
@@ -120,10 +120,10 @@ class WorkspaceAccessRecovery:
         caller can record the violation durably ahead of the revert. A snapshot goes
         through here, so it is refused while any invocation holds the workspace.
         """
-        if self._holds:
+        if fenced := self._fenced_by():
             message = (
                 "workspace is fenced: a writer may still run or its writes are not judged "
-                f"({', '.join(sorted(self._holds))})"
+                f"({', '.join(sorted(fenced))})"
             )
             raise RuntimeContractError(message)
         return await self.settle(workspace, observer=observer)

@@ -23,6 +23,7 @@ from vs_agent.api import AgentTurnRequest, ClientAgentSessions
 from vs_core.api import Access
 from vs_prompts.api import TemplateRenderer
 from vs_runtime._artifact_store import ArtifactStoreError
+from vs_runtime._session_lifecycle_requests import SessionLifecycleRequests
 from vs_runtime._session_requests import RuntimeSessionRequests
 from vs_runtime._workspace_access import AccessGrant
 from vs_runtime._workspace_lookup import find_scope_workspace
@@ -106,6 +107,10 @@ class ProductionSessionResolver:
             self._inputs.workspaces, self._inputs.workspace_receipts, ref
         )
 
+    def guard_snapshots(self, fenced_by: Callable[[Path], tuple[str, ...]]) -> None:
+        """Install the durable fence on the run's workspaces, root and candidates."""
+        self._inputs.workspaces.guard_access(fenced_by)
+
     def access_grant(self, turn: TurnSpec) -> AccessGrant | None:
         """What the turn may write: the requested access, never more than the role declares."""
         role = self._role(turn.session.role_id)
@@ -174,28 +179,43 @@ class _MissingArtifactError(Exception):
     """An artifact reference names no stored object."""
 
 
+@dataclass(frozen=True)
+class SessionExecutors:
+    """The session executors of one run, built over one shared access settlement."""
+
+    turns: RuntimeSessionRequests
+    """EnsureSession, DispatchTurn and InspectTurn."""
+    lifecycle: SessionLifecycleRequests
+    """CancelTurn, CloseSession and ResumeSessionTurn."""
+
+
 def open_session_requests(
     inputs: ResolverInputs,
     *,
     client: AgentTurnExecutor,
     invocation_slot: AgentInvocationStore,
     store: ReceiptStore,
-) -> RuntimeSessionRequests:
+) -> SessionExecutors:
     """The session executors over the run's agent client, journal slot and receipt store.
 
     The one entry point run wiring calls to give core real agent turns: build the
     ``ResolverInputs`` from the run's declarations, pass the machine-local invocation
-    journal slot and the shared receipt store, and register the result for the session
-    request kinds.
+    journal slot and the shared receipt store, and register each executor for its
+    request kinds. Both executors share the one access settlement, and building them
+    installs its durable snapshot fence on the run's workspaces, so no executor can
+    exist without it.
     """
-    return RuntimeSessionRequests(
-        ClientAgentSessions(client, invocation_slot), ProductionSessionResolver(inputs), store
+    sessions = ClientAgentSessions(client, invocation_slot)
+    turns = RuntimeSessionRequests(sessions, ProductionSessionResolver(inputs), store)
+    return SessionExecutors(
+        turns, SessionLifecycleRequests(sessions, turns, store, turns.settlement)
     )
 
 
 __all__ = [
     "ProductionSessionResolver",
     "ResolverInputs",
+    "SessionExecutors",
     "SessionSpecFactory",
     "open_session_requests",
 ]
