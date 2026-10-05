@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.dynamic.agents import AGENTS
 from vibesys.orchestration.dynamic.core_policy.api import (
+    CORE_ROLES,
     PolicyInputs,
     RunBounds,
     build_core_policy,
@@ -35,8 +35,6 @@ from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecord
 from vibesys.run.evaluation_backend import semantic_evaluation_identity
 from vs_core.api import ArtifactId, ArtifactRef
 from vs_runtime.api import (
-    AgentCapability,
-    AgentRole,
     CoreOperation,
     CorePlan,
     CorePolicy,
@@ -187,24 +185,6 @@ def dynamic_core_policy() -> CorePolicy:
     )
 
 
-def core_agent_roles() -> tuple[AgentRole, ...]:
-    """The dynamic roles as a core session serves them: replies only, no agent tools.
-
-    A core turn ends with a typed reply that the strategy folds, and trusted
-    measurement is the strategy's own decision, so no role carries the evaluation or
-    profiler tool and none needs an MCP server.
-    """
-    return tuple(
-        role.model_copy(
-            update={
-                "extra_tools": (),
-                "required_capabilities": role.required_capabilities - {AgentCapability.MCP_SERVERS},
-            }
-        )
-        for role in AGENTS
-    )
-
-
 def _project_max_rounds(options: BaseModel) -> int:
     parsed = DynamicOptions.model_validate(options)
     return parsed.max_rounds * parsed.max_in_flight
@@ -214,7 +194,7 @@ def dynamic_core_registration() -> OrchestrationRegistration:
     """The dynamic search registered as a core run (selected by test wiring until the switch)."""
     plugin = OrchestrationPlugin(
         id=_PLUGIN_ID,
-        agents=core_agent_roles(),
+        agents=CORE_ROLES,
         options=DynamicOptions,
         core=dynamic_core_policy(),
     )

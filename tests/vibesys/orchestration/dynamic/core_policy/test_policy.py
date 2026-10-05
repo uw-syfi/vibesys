@@ -24,8 +24,8 @@ from vibesys.dynamic_core import (
     resolve_core_policy,
 )
 from vibesys.orchestration.dynamic import REGISTRATION, DynamicOptions
-from vibesys.orchestration.dynamic.agents import JUDGE
 from vibesys.orchestration.dynamic.core_policy.api import (
+    JUDGE,
     UNBOUNDED_DEADLINE_AT,
     RunBounds,
     run_deadline_at,

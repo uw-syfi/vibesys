@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.orchestration.dynamic.agents import JUDGE
 from vibesys.orchestration.dynamic.core_policy._limits import limits_for, run_deadline_at
 from vibesys.orchestration.dynamic.core_policy._replies import reply_schemas
+from vibesys.orchestration.dynamic.core_policy._roles import JUDGE
 from vibesys.orchestration.dynamic.strategy.api import JUDGE_REPLY, DynamicConfig, DynamicStrategy
 from vs_core.api import (
     ArtifactRef,
