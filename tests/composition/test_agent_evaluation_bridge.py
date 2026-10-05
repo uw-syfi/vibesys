@@ -354,3 +354,17 @@ def test_synthesized_tool_calls_never_exceed_the_budget_or_cross_tokens(
     root = tmp_path / uuid.uuid4().hex
     root.mkdir()
     asyncio.run(_synthesized(root, calls))
+
+
+@pytest.mark.asyncio
+async def test_resubmitting_an_unchanged_candidate_is_refused_with_the_reason(
+    tmp_path: Path,
+) -> None:
+    async with scenario(tmp_path, submissions=3) as played:
+        process, _ = await run(played)
+        state = process.shell.record.envelope.core
+        assert state.run.status == RunStatus.TERMINAL
+        assert len(played.writer.handles) == 1
+        assert len(played.writer.refusals) == 2
+        assert all("submission budget" in text for text in played.writer.refusals)
+        assert len(played.world.cluster.submissions) == 3, "no duplicate measurement was started"
