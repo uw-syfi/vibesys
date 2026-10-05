@@ -16,6 +16,8 @@ from vs_slurm.api import (
     FakeCluster,
     ManualClock,
     SecondsRange,
+    SlurmBatchRequest,
+    SlurmBatchStage,
     SlurmJobRequest,
     SlurmJobStatus,
     SlurmPhase,
@@ -124,3 +126,34 @@ def test_a_range_can_be_pinned_to_one_value() -> None:
     """Tests pin a timing to a point to make an expectation exact."""
     pinned = SecondsRange.exactly(31.0)
     assert pinned.low == pinned.high == 31.0
+
+
+@given(
+    stages=st.integers(2, 5),
+    seed=st.integers(0, 20),
+    steps=st.lists(st.floats(0, 120, allow_nan=False), min_size=1, max_size=30),
+)
+def test_a_computing_batch_reports_stages_finished_in_order_and_never_all(
+    stages: int, seed: int, steps: list[float]
+) -> None:
+    """Finished stages only grow while the batch computes, and the last stage is still running."""
+    clock = ManualClock()
+    cluster = FakeCluster(clock=clock, timing=_PROFILE, seed=seed)
+    with tempfile.TemporaryDirectory() as raw:
+        request = SlurmBatchRequest(
+            workspace=Path(raw),
+            stages=tuple(SlurmBatchStage(name=f"s{i}", command=("true",)) for i in range(stages)),
+        )
+        cluster.script("job")
+        assert isinstance(cluster.submit(request, operation_id="job"), ClusterSubmitted)
+    seen: list[int] = []
+    for step in steps:
+        clock.advance(step)
+        observed = _read(cluster)
+        if observed.phase is SlurmPhase.RUNNING:
+            assert observed.completed_stages is not None
+            assert 0 <= observed.completed_stages < stages
+            seen.append(observed.completed_stages)
+        else:
+            assert observed.completed_stages is None
+    assert seen == sorted(seen)

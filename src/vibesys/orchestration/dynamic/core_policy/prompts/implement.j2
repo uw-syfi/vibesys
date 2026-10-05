@@ -32,7 +32,16 @@ Feedback from the prior attempt:
 Inspect referenced artifacts only as needed. Keep evidence in files and return compact
 references with their applicable revision. Implement and run the cheapest checks that
 cover the changed behavior. The framework runs trusted evaluation on the candidate you
-nominate; do not duplicate it. Return only schema-valid JSON: `summary`, `outcome`
-(use `nominated` only when the candidate is ready for independent review and framework
-gates) and `evidence`.
+nominate; do not duplicate it.
+
+Local checks catch crashes before the slow trusted evaluation; they do not tune the
+candidate. Once the candidate builds and one local check passes, stop checking and
+{% if agent_evaluation %}submit it for trusted evaluation{% else %}nominate it{% endif %}:
+the trusted result arrives sooner than another round of local polish would end. Never
+rerun a local check on files that already passed it. When a check output is long, write
+it to a file and read the file, instead of rerunning the check to see another part of it.
+After a failure, change the code before you run the check again.
+
+Return only schema-valid JSON: `summary`, `outcome` (use `nominated` only when the
+candidate is ready for independent review and framework gates) and `evidence`.
 {% include 'agent_evaluation.j2' %}

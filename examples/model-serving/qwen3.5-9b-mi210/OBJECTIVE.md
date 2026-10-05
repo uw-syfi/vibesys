@@ -175,6 +175,11 @@ the same code on both devices; a server that falls back to the reference
 worker on CPU passes the check without testing the engine. Passing this check is necessary, not
 sufficient: the accuracy checker on the 9B model stays the gate.
 
+Run the check once the engine starts. The verdict of an unchanged tree is stored: running it
+again without editing a file replays the stored report in under a second, and its last line
+names the report file to grep. Read that file instead of rerunning to see another slice. Once
+it passes, submit; do not rerun it. Reviewers read the evidence and the diff and do not run it.
+
 Numerics: weights and activations stay bf16. Weights, KV cache, and GDN
 recurrent state are never quantized or stored below bf16 (e.g. no int8/fp8).
 Outputs may differ from the reference only at rounding level, as judged by

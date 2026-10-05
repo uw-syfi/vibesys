@@ -341,6 +341,8 @@ class SlurmEvaluationExecutor:
         self._cancel_sent: set[str] = set()
         self._confirmations_left: dict[str, int] = {}
         self._changes: dict[str, asyncio.Event] = {}
+        # Highest stage index reported per evaluation: a running job's stage never goes back.
+        self._stage_floor: dict[str, int] = {}
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         """Report normalized process-local capacity without probing credentials."""
@@ -471,7 +473,9 @@ class SlurmEvaluationExecutor:
                 return ExecutorPoll(
                     phase=PollPhase.RUNNING,
                     attempt=merged.attempt,
-                    current_stage=durable.request.stages[0].name if view.staged else None,
+                    current_stage=self._running_stage(handle_id, durable.request, inspected)
+                    if view.staged
+                    else None,
                 )
             case PollPhase.ENDED if view.lifecycle is EvaluationState.CANCELED:
                 return ExecutorPoll(
@@ -525,7 +529,7 @@ class SlurmEvaluationExecutor:
             handle_id,
             ExecutorObservation(
                 state=EvaluationState.RUNNING,
-                current_stage=durable.request.stages[0].name,
+                current_stage=self._reported_stage(handle_id, durable.request),
             ),
         )
         stages = self._parse_stages(durable.request)
@@ -761,7 +765,7 @@ class SlurmEvaluationExecutor:
             handle_id,
             ExecutorObservation(
                 state=EvaluationState.RUNNING,
-                current_stage=request.stages[0].name,
+                current_stage=self._reported_stage(handle_id, request),
             ),
         )
         durable = self._read_evaluation(handle_id)
@@ -945,8 +949,30 @@ class SlurmEvaluationExecutor:
             return None
         return ExecutorObservation(
             state=view.lifecycle,
-            current_stage=request.stages[0].name if view.staged else None,
+            current_stage=self._running_stage(handle_id, request, observed)
+            if view.staged
+            else None,
         )
+
+    def _reported_stage(self, handle_id: str, request: EvaluationRequest) -> str:
+        """The stage already reported for a running evaluation, or the first."""
+        return request.stages[self._stage_floor.get(handle_id, 0)].name
+
+    def _running_stage(
+        self, handle_id: str, request: EvaluationRequest, observed: ClusterObservation
+    ) -> str:
+        """The stage a computing job is in, never earlier than one already reported.
+
+        Stages run in order, so the cluster's count of finished stages names the
+        running one. A reading without the count (not observed) says nothing new:
+        it keeps the stage already reported, or the first stage if none was.
+        """
+        last = len(request.stages) - 1
+        floor = self._stage_floor.get(handle_id, 0)
+        reported = observed.completed_stages
+        index = floor if reported is None else max(floor, min(reported, last))
+        self._stage_floor[handle_id] = index
+        return request.stages[index].name
 
     async def _pace(self, interval: float) -> None:
         if self._pause is None:

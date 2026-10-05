@@ -482,7 +482,8 @@ class LoopInput:
         """Build the run request from the command line, as the operator's CLI does.
 
         ``flags`` are long options without the dashes, underscores for hyphens:
-        ``max_rounds=2`` is ``--max-rounds 2``.
+        ``max_rounds=2`` is ``--max-rounds 2``. The run environment is the Fake Slurm
+        cluster unless ``run_environment`` says otherwise.
         """
         chosen: dict[str, float | str] = {
             "max_rounds": 1,
@@ -494,11 +495,11 @@ class LoopInput:
             "--outer-loop", "dynamic",
             "--input", str(self.root),
             "--config", str(self.agent_config),
-            "--run-environment", "slurm",
-            "--slurm-config", str(self.slurm_config),
             "--profiler", "none",
             "--backend", "cpu",
         ]  # fmt: skip
+        if "run_environment" not in chosen:
+            argv += ["--run-environment", "slurm", "--slurm-config", str(self.slurm_config)]
         for name, value in chosen.items():
             argv += [f"--{name.replace('_', '-')}", str(value)]
         return build_run_request(parse_cli_invocation(argv))

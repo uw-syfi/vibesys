@@ -41,6 +41,7 @@ from .fake_cluster import FakeCluster, ManualClock, SecondsRange, SlurmTimingPro
 from .fake_connector import REQUESTS_FILE, FakeConnector
 from .identity import runtime_content_identity
 from .phase_register import MergedPhase, PhaseAnomaly, PhaseRegister
+from .recorded_traces import CANCEL_REACTIONS, LIFETIMES
 from .runner import (
     SchedulerReading,
     SlurmArtifactTarget,
@@ -65,8 +66,18 @@ from .runner import (
     phase_of,
 )
 from .staging import tree_content_identity
+from .trace_replay import (
+    DEFAULT_COMMAND_SECONDS,
+    IssuedCommand,
+    SchedulerTrace,
+    TraceConnector,
+    TraceStep,
+)
 
 __all__ = [
+    "CANCEL_REACTIONS",
+    "DEFAULT_COMMAND_SECONDS",
+    "LIFETIMES",
     "PORT_PLACEHOLDER",
     "REQUESTS_FILE",
     "Cluster",
@@ -86,11 +97,13 @@ __all__ = [
     "ClusterUnknown",
     "FakeCluster",
     "FakeConnector",
+    "IssuedCommand",
     "ManualClock",
     "MergedPhase",
     "PhaseAnomaly",
     "PhaseRegister",
     "SchedulerReading",
+    "SchedulerTrace",
     "SecondsRange",
     "SlurmArtifactTarget",
     "SlurmBatchHandle",
@@ -119,6 +132,8 @@ __all__ = [
     "SlurmTimingProfile",
     "SlurmTransport",
     "SlurmTreeArtifact",
+    "TraceConnector",
+    "TraceStep",
     "load_slurm_config",
     "phase_of",
     "runtime_content_identity",

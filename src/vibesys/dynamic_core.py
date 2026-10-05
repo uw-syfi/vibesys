@@ -13,10 +13,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.dynamic_roles import CORE_ROLES
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration.dynamic.core_policy.api import (
     PolicyInputs,
     RunBounds,
     build_core_policy,
+    planner_reply_example,
     project_strategy_state,
     prompts,
 )
@@ -138,8 +140,30 @@ def dynamic_projector() -> RuntimeRecordProjector[DynamicStrategyState]:
 RETENTION_LABEL = "verified"
 
 
+def _require_candidate_sandboxes(environment: RunEnvironmentView) -> None:
+    """Refuse a run environment that cannot open isolated candidate sandboxes.
+
+    Every workstream runs in its own candidate sandbox, so without them the input
+    measurement would fail and the planner would be paid for work that cannot start.
+    """
+    if not environment.supports_parallel_candidate_evaluation:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="dynamic_run_environment_unsupported",
+                stage="run_environment_validation",
+                message=(
+                    f"the dynamic loop cannot run on the {environment.env_kind!r} run "
+                    "environment: it cannot open isolated candidate sandboxes (parallel "
+                    "candidate evaluation); choose a run environment that can, such as "
+                    "slurm, docker, modal or skypilot"
+                ),
+            )
+        )
+
+
 def _core_plan(context: CoreRunContext) -> CorePlan:
     """The plan of one run: the policy resolved from what the host opened for it."""
+    _require_candidate_sandboxes(context.environment)
     options = DynamicOptions.model_validate(context.options)
     commit = context.baseline.git_commit
     if commit is None:
@@ -168,7 +192,11 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         facts=policy.facts,
         limits=policy.limits,
         deadline_seconds=policy.deadline_at,
-        prompt_variables={"objective": policy.facts.objective, "agent_evaluation": True},
+        prompt_variables={
+            "objective": policy.facts.objective,
+            "agent_evaluation": True,
+            "plan_example": planner_reply_example(),
+        },
         requirements=policy.requirements,
         agent_evaluation=_agent_evaluation(policy),
     )

@@ -52,6 +52,9 @@ if TYPE_CHECKING:
 Request: TypeAlias = SlurmJobRequest | SlurmBatchRequest
 
 
+_MULTI_STAGE = 2
+
+
 class Clock(Protocol):
     """The time source a Fake cluster reads. Tests advance it; nothing sleeps."""
 
@@ -192,6 +195,14 @@ class _Timeline:
                     return SlurmJobStatus.RUNNING, SlurmPhase.COMPLETING, index
                 return self.terminal, SlurmPhase.ENDED, index
         raise AssertionError  # unreachable: the loop returns on the last attempt
+
+    def progress(self, now: float) -> float:
+        """How far through its run the current attempt is, from 0 up to but excluding 1."""
+        attempt = next((item for item in self.attempts if now < item.ends_at), self.attempts[-1])
+        length = attempt.ends_at - attempt.running_from
+        if not 0 < length < float("inf"):
+            return 0.0
+        return min(max(0.0, (now - attempt.running_from) / length), 1 - 1e-9)
 
     def state(
         self, now: float, cancelled_at: float | None
@@ -508,7 +519,20 @@ class FakeCluster:
             pending_reason=script.pending_reason if status == SlurmJobStatus.PENDING else None,
             estimated_start=script.estimated_start if status == SlurmJobStatus.PENDING else None,
             handle=job.handle,
+            completed_stages=self._completed_stages(job, phase),
         )
+
+    def _completed_stages(self, job: _Job, phase: SlurmPhase) -> int | None:
+        """Stages finished so far, spread evenly over the run, for a computing batch."""
+        if (
+            job.timeline is None
+            or phase is not SlurmPhase.RUNNING
+            or not isinstance(job.handle, SlurmBatchHandle)
+            or len(job.handle.stages) < _MULTI_STAGE
+        ):
+            return None
+        stages = len(job.handle.stages)
+        return min(stages - 1, int(job.timeline.progress(self.clock.now()) * stages))
 
     def _observe(self, job: _Job, script: _Script) -> tuple[SlurmJobStatus, SlurmPhase, int]:
         """The job's state now: from the clock, or the next scripted observation."""
