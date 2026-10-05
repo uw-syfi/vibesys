@@ -61,6 +61,11 @@ class RuntimeRecord[S: StrategyState](BaseModel):
     @model_validator(mode="after")
     def publication_order(self) -> RuntimeRecord[S]:
         """Reject gaps, duplicates and unacknowledged sequence loss."""
+        self.check_publications()
+        return self
+
+    def check_publications(self) -> None:
+        """The publication invariants, for records built by ``model_copy`` (no validators)."""
         if self.next_publication_sequence != self.envelope.event_cursor.sequence + 1:
             message = "next_publication_sequence: must follow the envelope event_cursor"
             raise ValueError(message)
@@ -80,7 +85,6 @@ class RuntimeRecord[S: StrategyState](BaseModel):
         ):
             message = "pending_publications: publication_id must match run and sequence"
             raise ValueError(message)
-        return self
 
     @classmethod
     def fresh(cls, envelope: RunEnvelope[S]) -> Self:
