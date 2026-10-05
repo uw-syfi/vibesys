@@ -58,7 +58,6 @@ class _ScriptOptions(TypedDict, total=False):
     on_accept: Callable[[], None]
     on_dispatch: Callable[[], None]
     rejected_reason: str
-    pending_polls: int
     teardown_lag: int
 
 
@@ -137,6 +136,7 @@ class FakeCluster:
         operation_id: str,
         *,
         states: tuple[SlurmJobStatus, ...] = (SlurmJobStatus.PENDING,),
+        pending_polls: int = 0,
         **options: Unpack[_ScriptOptions],
     ) -> None:
         """Supply deterministic observations and lost acknowledgement after acceptance.
@@ -149,7 +149,6 @@ class FakeCluster:
         terminal state.
         """
         validate_operation_id(operation_id)
-        pending_polls = options.pop("pending_polls", 0)
         if pending_polls < 0 or options.get("teardown_lag", 0) < 0:
             raise SlurmError.invalid_script_states()
         if not states or any(not isinstance(state, SlurmJobStatus) for state in states):

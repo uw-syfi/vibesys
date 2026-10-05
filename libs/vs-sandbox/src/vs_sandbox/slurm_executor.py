@@ -917,12 +917,10 @@ class SlurmEvaluationExecutor:
         match outcome:
             case _CancelConfirmed():
                 return
-            case _CancelRequested(job_id=None):
-                raise ExecutorCancellationUnknownError(handle_id)
-            case _CancelRequested(job_id=str() as job_id):
+            case _CancelRequested(job_id=job_id):
+                if job_id is None:
+                    raise ExecutorCancellationUnknownError(handle_id)
                 raise ExecutorCancellationUnconfirmedError(handle_id, job_id)
-            case _:
-                assert_never(outcome)
 
     async def _cancel_running(self, handle_id: str) -> _CancelOutcome:
         """Send scancel, then confirm termination within a bounded wait.
@@ -979,7 +977,7 @@ class SlurmEvaluationExecutor:
         match outcome:
             case _CancelConfirmed():
                 return True
-            case _CancelRequested():
+            case _CancelRequested(job_id=_):
                 _LOG.warning("cancellation of evaluation %s is not yet confirmed", handle_id)
                 return False
             case _:
