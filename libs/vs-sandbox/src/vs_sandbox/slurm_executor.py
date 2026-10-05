@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import math
 import subprocess
@@ -479,15 +480,22 @@ class SlurmEvaluationExecutor:
                 )
             case _:
                 return await self._poll_terminal(
-                    handle_id, durable, durable.handle or inspected.handle
+                    handle_id, durable, durable.handle or inspected.handle, inspected
                 )
 
     async def _poll_terminal(
-        self, handle_id: str, durable: _DurableSlurmEvaluation, handle: object
+        self,
+        handle_id: str,
+        durable: _DurableSlurmEvaluation,
+        handle: object,
+        inspected: ClusterObservation,
     ) -> ExecutorPoll:
         if not isinstance(handle, SlurmBatchHandle):
             return ExecutorPoll(phase=PollPhase.UNKNOWN, detail="missing batch identity")
-        collected = await asyncio.to_thread(self._cluster.collect, handle)
+        # The poll just read this job's terminal state; collecting reuses that reading.
+        collected = await asyncio.to_thread(
+            functools.partial(self._cluster.collect, handle, observed=inspected)
+        )
         try:
             terminal = self._collected_observation(handle_id, durable.request, handle, collected)
         except SlurmError as error:

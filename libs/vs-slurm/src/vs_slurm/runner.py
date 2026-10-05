@@ -799,11 +799,17 @@ class SlurmJobRunner:
         """Cancel the single Slurm job that owns all batch stages."""
         self.cancel(handle.job)
 
-    def collect_batch(self, handle: SlurmBatchHandle) -> SlurmBatchResult:
-        """Collect ordered stage outcomes and only artifacts from passed stages."""
+    def collect_batch(
+        self, handle: SlurmBatchHandle, *, observed: SlurmJobStatus | None = None
+    ) -> SlurmBatchResult:
+        """Collect ordered stage outcomes and only artifacts from passed stages.
+
+        ``observed`` is the terminal status the caller just read; it saves a second
+        scheduler query (two remote commands).
+        """
         self._validate_batch_handle(handle)
         collection_started = self._clock()
-        job_result = self.collect_evidence(handle.job)
+        job_result = self.collect_evidence(handle.job, observed=observed)
         stage_results: list[SlurmBatchStageResult] = []
         timings: dict[str, float] = {
             "staging": handle.job.staging_seconds,
@@ -1157,10 +1163,16 @@ class SlurmJobRunner:
         state, code = parsed
         return _reading(state, exit_code=code)
 
-    def collect_evidence(self, handle: SlurmJobHandle) -> SlurmJobResult:
-        """Preserve available evidence even when terminal status artifacts are absent."""
+    def collect_evidence(
+        self, handle: SlurmJobHandle, *, observed: SlurmJobStatus | None = None
+    ) -> SlurmJobResult:
+        """Preserve available evidence even when terminal status artifacts are absent.
+
+        ``observed`` is a terminal status the caller just read; without it the scheduler
+        is queried.
+        """
         self._validate_handle(handle)
-        status = self.poll(handle)
+        status = observed if observed is not None else self.poll(handle)
         if status not in _PUBLIC_TERMINAL_STATES:
             raise SlurmError.job_not_terminal(handle.job_id)
         failures: list[str] = []

@@ -565,9 +565,17 @@ class FakeCluster:
             operation_id=job.operation_id, job_id=job_handle(job.handle).job_id
         )
 
-    def collect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCollectOutcome:
+    def collect(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCollectOutcome:
         """Collect terminal evidence, preserving partial results as Unknown."""
-        observation = self.inspect(target, by_job_id=by_job_id)
+        observation = (
+            observed if observed is not None else self.inspect(target, by_job_id=by_job_id)
+        )
         if isinstance(observation, ClusterUnknown):
             return observation
         job = self._find(target, by_job_id=by_job_id)

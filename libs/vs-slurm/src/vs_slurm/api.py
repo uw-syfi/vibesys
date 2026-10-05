@@ -149,6 +149,12 @@ class Cluster(Protocol):
         """Record cancellation intent, leaving confirmation to inspect."""
         ...
 
-    def collect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCollectOutcome:
+    def collect(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCollectOutcome:
         """Collect terminal evidence, preserving partial results as Unknown."""
         ...

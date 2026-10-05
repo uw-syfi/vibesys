@@ -277,7 +277,14 @@ class _ScenarioCluster(FakeCluster):
             return observed.model_copy(update={"job_id": handle.job.job_id})
         return observed
 
-    def collect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCollectOutcome:
+    def collect(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCollectOutcome:
+        del observed  # the reading names the producer's job; re-inspect the translated one
         translated, by_job_id = self._shadow_target(target, by_job_id=by_job_id)
         collected = super().collect(translated, by_job_id=by_job_id)
         if collected.operation_id not in self._producer_handles:

@@ -406,9 +406,20 @@ class SlurmCluster:
             self._runner.cancel_job(job_id)
         return ClusterCancelRequested(operation_id=None, job_id=job_id)
 
-    def collect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCollectOutcome:
-        """Collect terminal evidence, preserving partial results as Unknown."""
-        observed = self.inspect(target, by_job_id=by_job_id)
+    def collect(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCollectOutcome:
+        """Collect terminal evidence, preserving partial results as Unknown.
+
+        ``observed`` is a reading the caller just took of this target; passing it saves
+        the scheduler and manifest queries a fresh inspection would make.
+        """
+        if observed is None:
+            observed = self.inspect(target, by_job_id=by_job_id)
         if isinstance(observed, ClusterUnknown):
             return observed
         if observed.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
@@ -430,9 +441,9 @@ class SlurmCluster:
     ) -> ClusterCollectOutcome:
         try:
             result = (
-                self._runner.collect_batch(handle)
+                self._runner.collect_batch(handle, observed=observed.status)
                 if isinstance(handle, SlurmBatchHandle)
-                else self._runner.collect_evidence(handle)
+                else self._runner.collect_evidence(handle, observed=observed.status)
             )
         except (
             SlurmError,
