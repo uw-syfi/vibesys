@@ -30,7 +30,10 @@ if TYPE_CHECKING:
     from vs_evaluation.api import EvaluationSettlements
     from vs_project.api import OrchestrationDescriptor, StateModels
     from vs_prompts.api import RenderedPrompt
+    from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._operation_wiring import OperationRole
+    from vs_runtime._run_environment import RunEnvironmentView
+    from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 _CONTROL_CHARACTER_LIMIT = 32
@@ -1235,25 +1238,32 @@ class OrchestrationResumeDecision:
 
 @dataclass(frozen=True, slots=True)
 class CoreRunContext:
-    """What the host resolved before a core run starts, for the policy's per-run factories.
+    """What the host resolved before a core run starts, for the policy's per-run plan.
 
     Everything here is a fact about this run, never a choice: the validated options,
-    the prompt-visible run facts, the trusted baseline revision, the three digests that
-    identify the evaluator, the workload and the environment, and the evaluation limits
-    of the run environment.
+    the prompt-visible run facts, the trusted baseline revision, the trusted evaluation
+    plan and the run environment it was resolved for, the run's artifact store, and the
+    limits of the run environment and product config.
     """
 
     run_id: str
     options: BaseModel
     facts: RunFacts
     baseline: RevisionRef
-    evaluator_digest: str
-    workload_digest: str
-    environment_digest: str
+    evaluation_plan: TrustedEvaluationPlan
+    environment: RunEnvironmentView
+    artifacts: ArtifactStore
+    """The run's content-addressed artifact store, where a plan may store its recipe."""
     evaluation_capacity: int
     """How many evaluation jobs the run environment executes at once (at least 1)."""
-    queue_allowance_seconds: float
+    queue_allowance_seconds: int
     """How long a submitted evaluation may wait for capacity before it counts as stuck."""
+    observe_interval_seconds: int
+    """How often a running evaluation job is polled."""
+    observe_backoff_cap_seconds: int
+    """The longest wait after a poll that could not read the job."""
+    max_run_seconds: int | None
+    """Wall-clock budget of the run, or ``None`` for no deadline."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1265,24 +1275,32 @@ class CoreOperation:
 
 
 @dataclass(frozen=True, slots=True)
-class CorePolicy:
-    """Declarative data that makes a plugin a core run: a pure strategy and what it needs.
+class CorePlan:
+    """What a policy resolves for one run: the pure strategy and the facts it starts from.
 
-    The runtime owns the loop. The policy supplies the strategy (built from the validated
-    options before any resource opens, so startup can check its declaration), the
-    operations it registers and the runtime role behind each, the schema of every agent
-    reply it expects, and the per-run values only the host can resolve: facts, limits
-    and the run deadline. No field is an async loop or a service; the host builds those
-    from the run's resources.
+    ``deadline_seconds`` is the run's budget, counted from the moment the run first
+    starts; the host places it on the run clock's timeline.
     """
 
-    strategy: Callable[[BaseModel], Strategy[Any]]
-    operations: tuple[CoreOperation, ...]
+    strategy: Strategy[Any]
     reply_schemas: Mapping[SchemaRef, type[BaseModel]]
-    run_facts: Callable[[CoreRunContext], CoreRunFacts]
-    limits: Callable[[CoreRunContext], Limits]
-    deadline_at: Callable[[CoreRunContext], float]
-    """Run deadline in seconds on the run's logical clock, which starts at zero."""
+    facts: CoreRunFacts
+    limits: Limits
+    deadline_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class CorePolicy:
+    """Declarative data that makes a plugin a core run: a pure plan and what it needs.
+
+    The runtime owns the loop. The policy supplies the plan (resolved from the host's
+    ``CoreRunContext`` once resources are open), the operations it registers and the
+    runtime role behind each, and the labels and directories the operations use. No
+    field is an async loop or a service; the host builds those from the run's resources.
+    """
+
+    plan: Callable[[CoreRunContext], CorePlan]
+    operations: tuple[CoreOperation, ...]
     retention_label: str
     """Label of the snapshot that retains a verified revision."""
     prompt_templates: Path

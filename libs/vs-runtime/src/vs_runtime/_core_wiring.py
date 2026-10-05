@@ -42,6 +42,7 @@ from vs_runtime._workspace_requests import RuntimeWorkspaceRequests
 
 if TYPE_CHECKING:
     from vs_agent.api import ClientAgentSessions
+    from vs_core.api import LifecycleCapability
     from vs_evaluation.api import PollingEvaluationExecutor
     from vs_project.api import StateNamespace
     from vs_runtime._session_requests import SessionResolver
@@ -65,33 +66,50 @@ def empty_catalog() -> OperationCatalog:
     return OperationCatalog(OperationRegistry(), ())
 
 
+@dataclasses.dataclass(frozen=True)
+class CoreStartup:
+    """The run-wide bounds a new core state starts with.
+
+    ``deadline_at`` is on the run clock's timeline. ``lifecycle`` names the lifecycle
+    capabilities (suspend, park, ...) the host's executors serve; none is offered unless
+    the caller says so.
+    """
+
+    deadline_at: float
+    limits: Limits = dataclasses.field(default_factory=Limits)
+    lifecycle: frozenset[LifecycleCapability] = frozenset()
+
+
 def new_core_state(
     run_id: str,
     facts: RunFacts,
     declaration: StrategyDeclaration,
     *,
     offered: OperationCatalog,
-    deadline_at: float,
+    startup: CoreStartup,
 ) -> CoreState:
     """Build the state of a run that has not started, validated against its declaration.
 
     ``offered`` is the catalog the run's executors are bound from (``core_bindings``
     takes the same object), so the operations core is told it may use are exactly the
-    ones with an owner; there is no default. No executor serves a lifecycle capability
-    (park, interrupt, ...) yet, so none is offered. A strategy that requires something
-    not offered fails here, naming it, instead of mid-run.
+    ones with an owner; there is no default. ``startup`` carries the run's deadline and
+    limits and the lifecycle capabilities the host's executors serve. A strategy that
+    requires something not offered fails here, naming it, instead of mid-run.
     """
-    selected = validate_startup(declaration, Capabilities(operations=offered.offered_operations))
+    selected = validate_startup(
+        declaration,
+        Capabilities(lifecycle=startup.lifecycle, operations=offered.offered_operations),
+    )
     return CoreState(
         registry=selected.operations,
         intents=IntentsState(recovery=RecoveryBarrier(phase=RecoveryPhase.READY)),
         run=RunState(
             run_id=RunId(root=run_id),
             now_at=0.0,
-            deadline_at=deadline_at,
+            deadline_at=startup.deadline_at,
             facts=facts,
             capabilities=selected,
-            limits=Limits(),
+            limits=startup.limits,
             declaration=declaration,
         ),
     )

@@ -13,24 +13,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from pydantic import BaseModel
+
 from vs_agent.api import (
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnExecutor,
     ClientAgentSessions,
 )
-from vs_core.api import Capabilities, ContractError
-from vs_evaluation.api import (
-    EvaluationState,
-    ExecutorPoll,
-    PollPhase,
-)
-from vs_evaluation.api import (
-    PollingEvaluationExecutor as PollingEvaluation,
-)
+from vs_core.api import ContractError, SchemaRef
+from vs_evaluation.api import PollingEvaluationExecutor as PollingEvaluation
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api import ArtifactStore, CoreRunContext, PollingEvaluationExecutor
+from vs_runtime.api import ArtifactStore, CorePlan, CoreRunContext
 from vs_runtime.api.core import (
+    CoreStartup,
     OperationPorts,
     ProductionSessionResolver,
     ReceiptEvidenceLedger,
@@ -50,17 +46,22 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
 
-    from pydantic import BaseModel
-
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
     from vs_core.api import CoreState, LifecycleCapability, Strategy
     from vs_project.api import Project, StateNamespace, StateStore
     from vs_runtime.api import AgentRole, CorePolicy, RunFacts
-    from vs_runtime.api.core import CoreRuntimeBindings, OperationCatalog, SessionSpecFactory
+    from vs_runtime.api.core import (
+        CoreRuntimeBindings,
+        OperationCatalog,
+        RunClock,
+        SessionSpecFactory,
+    )
     from vs_runtime.api.infrastructure import (
         AgentConfigurationResolver,
         AgentExecutionEnvironment,
+        RunEnvironmentView,
         RuntimeWorkspaces,
+        TrustedEvaluationPlan,
     )
 
 
@@ -83,13 +84,15 @@ class ClosableEvaluation(PollingEvaluation, Protocol):
 
 @dataclass(frozen=True, slots=True)
 class CoreEnvironment:
-    """The run's evaluation environment, as facts the policy's factories read."""
+    """The run's evaluation environment and product bounds, as facts the plan reads."""
 
-    evaluator_digest: str
-    workload_digest: str
-    environment_digest: str
+    view: RunEnvironmentView
+    evaluation_plan: TrustedEvaluationPlan
     evaluation_capacity: int
-    queue_allowance_seconds: float
+    queue_allowance_seconds: int
+    observe_interval_seconds: int
+    observe_backoff_cap_seconds: int
+    max_run_seconds: int | None
     lifecycle: frozenset[LifecycleCapability]
     """Lifecycle capabilities this host offers the strategy."""
 
@@ -111,6 +114,8 @@ class CoreResources:
     invocation_slot: AgentInvocationStore
     configuration: AgentConfigurationResolver
     session_spec: SessionSpecFactory
+    clock: RunClock
+    """The run's clock: it places the deadline and later paces the loop on one timeline."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,39 +138,12 @@ class CoreServices:
     publications: StateNamespace
     receipts: StateNamespace
     evaluation: ClosableEvaluation
+    artifacts: ArtifactStore
+    clock: RunClock
 
     async def close(self) -> None:
         """Release the evaluation executor; workspaces and the client close with the host."""
         await self.evaluation.close()
-
-
-_ENDED = frozenset(
-    {
-        EvaluationState.SUCCEEDED,
-        EvaluationState.FAILED,
-        EvaluationState.CANCELED,
-        EvaluationState.SUPERSEDED,
-    }
-)
-
-
-class LocalPollingEvaluationExecutor(PollingEvaluationExecutor):
-    """The local executor with the pure ``poll`` the core measurement requests call.
-
-    Delete this class once ``vs_runtime.PollingEvaluationExecutor`` implements ``poll``
-    itself (SW-3 handoff item for the executor owner); until then the core path would
-    otherwise see every local poll as unknown.
-    """
-
-    async def poll(self, handle_id: str) -> ExecutorPoll:
-        """Read process-local evidence once; never submit, resume or cancel."""
-        observed = await self.inspect_only(handle_id)
-        if observed is None:
-            return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
-        if observed.state in _ENDED:
-            return ExecutorPoll(phase=PollPhase.ENDED, terminal=observed)
-        phase = PollPhase.QUEUED if observed.state is EvaluationState.QUEUED else PollPhase.RUNNING
-        return ExecutorPoll(phase=phase)
 
 
 def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreServices:
@@ -178,13 +156,14 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     artifacts = ArtifactStore(state_dir.portable_namespace(run_id, "artifacts"))
     receipt_store = ReceiptStore(receipts)
     try:
-        strategy = policy.strategy(resources.options)
+        plan = policy.plan(_context(resources, artifacts))
+        _validate_plan(plan)
         catalog = _catalog(policy, resources, artifacts, ReceiptEvidenceLedger(receipt_store))
-        catalog.require_owned(strategy.declaration)
+        catalog.require_owned(plan.strategy.declaration)
         resolver = ProductionSessionResolver(
             ResolverInputs(
                 roles=resources.roles,
-                schemas=policy.reply_schemas,
+                schemas=plan.reply_schemas,
                 workspaces=resources.workspaces,
                 workspace_receipts=StoreWorkspaceReceipts(receipt_store),
                 artifacts=artifacts,
@@ -193,7 +172,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
                 artifact_directories=policy.artifact_directories,
             )
         )
-        state = _initial_state(policy, resources, strategy, catalog)
+        state = _initial_state(plan, resources, catalog)
     except ContractError as error:
         raise CoreCompositionError(".".join(map(str, error.path)), error.detail) from error
     bindings = core_bindings(
@@ -205,7 +184,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     )
     return CoreServices(
         run_id=run_id,
-        strategy=strategy,
+        strategy=plan.strategy,
         state=state,
         bindings=bindings,
         catalog=catalog,
@@ -213,45 +192,69 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         publications=publications,
         receipts=receipts,
         evaluation=resources.evaluation,
+        artifacts=artifacts,
+        clock=resources.clock,
     )
 
 
-def _initial_state(
-    policy: CorePolicy,
-    resources: CoreResources,
-    strategy: Strategy[Any],
-    catalog: OperationCatalog,
-) -> CoreState:
-    """The state of a run that has not started, from the policy's per-run factories."""
+def _context(resources: CoreResources, artifacts: ArtifactStore) -> CoreRunContext:
+    """The facts of this run the policy's plan reads."""
     commit = resources.workspaces.root.trusted_input_baseline
     if commit is None:
         detail = "the run's root workspace has no baseline revision to measure against"
         resource = "root workspace trusted input baseline"
         raise CoreCompositionError(resource, detail)
     environment = resources.environment
-    context = CoreRunContext(
+    return CoreRunContext(
         run_id=resources.run_id,
         options=resources.options,
         facts=resources.facts,
         baseline=revision_ref(commit),
-        evaluator_digest=environment.evaluator_digest,
-        workload_digest=environment.workload_digest,
-        environment_digest=environment.environment_digest,
+        evaluation_plan=environment.evaluation_plan,
+        environment=environment.view,
+        artifacts=artifacts,
         evaluation_capacity=environment.evaluation_capacity,
         queue_allowance_seconds=environment.queue_allowance_seconds,
+        observe_interval_seconds=environment.observe_interval_seconds,
+        observe_backoff_cap_seconds=environment.observe_backoff_cap_seconds,
+        max_run_seconds=environment.max_run_seconds,
     )
-    state = new_core_state(
+
+
+def _validate_plan(plan: CorePlan) -> None:
+    """Reject a malformed plan naming the key; dataclass annotations are not enforced."""
+    for schema, model in plan.reply_schemas.items():
+        if not isinstance(schema, SchemaRef):
+            raise CoreCompositionError("plan.reply_schemas", f"key {schema!r} must be a SchemaRef")
+        if not (isinstance(model, type) and issubclass(model, BaseModel)):
+            raise CoreCompositionError(
+                f"plan.reply_schemas[{schema.name}]", "must be a BaseModel class"
+            )
+    if not plan.deadline_seconds > 0:
+        raise CoreCompositionError(
+            "plan.deadline_seconds", f"must be positive, got {plan.deadline_seconds!r}"
+        )
+
+
+def _initial_state(
+    plan: CorePlan, resources: CoreResources, catalog: OperationCatalog
+) -> CoreState:
+    """The state of a run that has not started.
+
+    The run's deadline is its budget counted from now on the run clock's timeline (seconds
+    since the epoch), the same timeline the loop reads, so a stored deadline stays valid
+    for every host that resumes the run.
+    """
+    return new_core_state(
         resources.run_id,
-        policy.run_facts(context),
-        strategy.declaration,
-        offered=Capabilities(
-            lifecycle=environment.lifecycle, operations=catalog.offered_operations
+        plan.facts,
+        plan.strategy.declaration,
+        offered=catalog,
+        startup=CoreStartup(
+            deadline_at=resources.clock.now() + plan.deadline_seconds,
+            limits=plan.limits,
+            lifecycle=resources.environment.lifecycle,
         ),
-        deadline_at=policy.deadline_at(context),
-    )
-    # ``new_core_state`` starts from core's default limits; the policy's bound replaces them.
-    return state.model_copy(
-        update={"run": state.run.model_copy(update={"limits": policy.limits(context)})}
     )
 
 
@@ -337,7 +340,6 @@ __all__ = [
     "CoreEnvironment",
     "CoreResources",
     "CoreServices",
-    "LocalPollingEvaluationExecutor",
     "agent_session_spec",
     "build_core_services",
 ]

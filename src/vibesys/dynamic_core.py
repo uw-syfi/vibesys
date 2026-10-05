@@ -8,14 +8,19 @@ a run's committed record.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+import vibesys.orchestration.dynamic.prompts as prompt_templates
+from vibesys.orchestration.dynamic.agents import AGENTS
 from vibesys.orchestration.dynamic.core_policy.api import (
     PolicyInputs,
+    RunBounds,
     build_core_policy,
     project_strategy_state,
 )
+from vibesys.orchestration.dynamic.models import DynamicOptions
 from vibesys.orchestration.dynamic.strategy.api import (
     INTERPRET_KIND,
     RENDER_KIND,
@@ -26,9 +31,17 @@ from vibesys.orchestration.dynamic.strategy.api import (
     dynamic_operation_registrations,
     dynamic_operation_registry,
 )
-from vibesys.plugin_registration import RuntimeRecordProjector
+from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
 from vibesys.run.evaluation_backend import semantic_evaluation_identity
 from vs_core.api import ArtifactId, ArtifactRef
+from vs_runtime.api import (
+    AgentCapability,
+    AgentRole,
+    CoreOperation,
+    CorePlan,
+    CorePolicy,
+    OrchestrationPlugin,
+)
 from vs_runtime.api.core import (
     OperationCatalog,
     OperationPorts,
@@ -39,9 +52,10 @@ from vs_runtime.api.core import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.dynamic.core_policy.api import DynamicCorePolicy, RunBounds
-    from vibesys.orchestration.dynamic.models import DynamicOptions
-    from vs_runtime.api import ArtifactStore, RunFacts
+    from pydantic import BaseModel
+
+    from vibesys.orchestration.dynamic.core_policy.api import DynamicCorePolicy
+    from vs_runtime.api import ArtifactStore, CoreRunContext, RunFacts
     from vs_runtime.api.infrastructure import RunEnvironmentView, TrustedEvaluationPlan
 
 # The runtime role that performs each operation kind the strategy requires.
@@ -118,4 +132,89 @@ def dynamic_projector() -> RuntimeRecordProjector[DynamicStrategyState]:
         record_type=RuntimeRecord[DynamicStrategyState],
         operations=dynamic_operation_registry(),
         project=lambda state, revision: project_strategy_state(state, experiment_revision=revision),
+    )
+
+
+# The label of the snapshot that retains a verified revision.
+RETENTION_LABEL = "verified"
+
+
+def _core_plan(context: CoreRunContext) -> CorePlan:
+    """The plan of one run: the policy resolved from what the host opened for it."""
+    options = DynamicOptions.model_validate(context.options)
+    commit = context.baseline.git_commit
+    if commit is None:
+        message = "the dynamic core policy needs a Git baseline revision"
+        raise ValueError(message)
+    bounds = RunBounds(
+        queue_allowance_seconds=context.queue_allowance_seconds,
+        observe_interval_seconds=context.observe_interval_seconds,
+        observe_backoff_cap_seconds=context.observe_backoff_cap_seconds,
+        max_run_seconds=context.max_run_seconds,
+    )
+    policy = resolve_core_policy(
+        options,
+        bounds,
+        ResolvedRun(
+            facts=context.facts,
+            evaluation_plan=context.evaluation_plan,
+            environment=context.environment,
+            baseline_commit=commit,
+            artifacts=context.artifacts,
+        ),
+    )
+    return CorePlan(
+        strategy=policy.strategy,
+        reply_schemas=policy.reply_schemas,
+        facts=policy.facts,
+        limits=policy.limits,
+        deadline_seconds=policy.deadline_at,
+    )
+
+
+def dynamic_core_policy() -> CorePolicy:
+    """The dynamic search as a core run: its plan, operations and the roles that perform them."""
+    registrations = dynamic_operation_registrations()
+    return CorePolicy(
+        plan=_core_plan,
+        operations=tuple(
+            CoreOperation(_ROLE_OF_KIND[item.descriptor.kind], item) for item in registrations
+        ),
+        retention_label=RETENTION_LABEL,
+        prompt_templates=Path(prompt_templates.__file__).parent,
+    )
+
+
+def core_agent_roles() -> tuple[AgentRole, ...]:
+    """The dynamic roles as a core session serves them: replies only, no agent tools.
+
+    A core turn ends with a typed reply that the strategy folds, and trusted
+    measurement is the strategy's own decision, so no role carries the evaluation or
+    profiler tool and none needs an MCP server.
+    """
+    return tuple(
+        replace(
+            role,
+            extra_tools=(),
+            required_capabilities=role.required_capabilities - {AgentCapability.MCP_SERVERS},
+        )
+        for role in AGENTS
+    )
+
+
+def _project_max_rounds(options: BaseModel) -> int:
+    parsed = DynamicOptions.model_validate(options)
+    return parsed.max_rounds * parsed.max_in_flight
+
+
+def dynamic_core_registration() -> OrchestrationRegistration:
+    """The dynamic search registered as a core run (selected by test wiring until the switch)."""
+    plugin = OrchestrationPlugin(
+        id=_PLUGIN_ID,
+        agents=core_agent_roles(),
+        options=DynamicOptions,
+        core=dynamic_core_policy(),
+    )
+    return OrchestrationRegistration(
+        plugin=plugin, projector=dynamic_projector(), project_max_rounds=_project_max_rounds
     )

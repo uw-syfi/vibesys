@@ -46,6 +46,7 @@ from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
+    CoreStartup,
     DispatchProgress,
     ExecutorRefusal,
     JournalPublicationDelivery,
@@ -167,7 +168,11 @@ class World:
             environment_digest=DIGEST,
         )
         return new_core_state(
-            RUN_ID, facts, DECLARATION, offered=self.operations, deadline_at=1000.0
+            RUN_ID,
+            facts,
+            DECLARATION,
+            offered=self.operations,
+            startup=CoreStartup(deadline_at=1000.0),
         )
 
     def bindings(self) -> CoreRuntimeBindings:

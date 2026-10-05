@@ -7,15 +7,15 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
-from pydantic import BaseModel
-
 from vibesys.run.contracts import PluginProjection, RunStatus, RunView
-from vs_core.api import ContractError, OperationRegistration, SchemaRef
+from vs_core.api import ContractError, OperationRegistration
 from vs_project.api import StoredEnvelope
 from vs_runtime.api.core import OperationRole, RuntimeRecord
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from pydantic import BaseModel
 
     from vs_core.api import OperationRegistry, StrategyState
     from vs_project.api import OrchestrationDescriptor, Project
@@ -204,17 +204,9 @@ def _validate_core_policy(plugin_id: str, core: CorePolicy) -> None:
     Dataclass annotations are not enforced at runtime, so a policy built with a wrong
     value would otherwise fail deep inside a run, after resources opened.
     """
-    for name in ("strategy", "run_facts", "limits", "deadline_at"):
-        if not callable(getattr(core, name)):
-            raise _core_error(plugin_id, name, "must be a callable factory")
+    if not callable(core.plan):
+        raise _core_error(plugin_id, "plan", "must be a callable factory")
     _validate_core_operations(plugin_id, core)
-    for schema, model in core.reply_schemas.items():
-        if not isinstance(schema, SchemaRef):
-            raise _core_error(plugin_id, "reply_schemas", f"key {schema!r} must be a SchemaRef")
-        if not (isinstance(model, type) and issubclass(model, BaseModel)):
-            raise _core_error(
-                plugin_id, f"reply_schemas[{schema.name}]", "must be a BaseModel class"
-            )
     templates = core.prompt_templates
     if not isinstance(templates, Path) or not templates.is_dir():
         detail = f"must be an existing directory, got {templates!r}"

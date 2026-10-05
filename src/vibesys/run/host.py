@@ -27,7 +27,6 @@ from vibesys.run.core_services import (
     CoreEnvironment,
     CoreResources,
     CoreServices,
-    LocalPollingEvaluationExecutor,
     agent_session_spec,
     build_core_services,
 )
@@ -49,7 +48,8 @@ from vs_evaluation.api import (
     ProfilerLifecycleEvent,
     ServiceEvaluationSettlements,
 )
-from vs_runtime.api import RunCleanupError
+from vs_runtime.api import PollingEvaluationExecutor, RunCleanupError
+from vs_runtime.api.core import WallRunClock
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
@@ -562,13 +562,14 @@ class _ProductHostFactory:
                 evaluation=(
                     executor
                     if executor is not None
-                    else LocalPollingEvaluationExecutor(evaluation, workspaces)
+                    else PollingEvaluationExecutor(evaluation, workspaces)
                 ),
                 environment=self._core_environment(resources),
                 roles=self.plugin.agents,
                 agent_client=client,
                 invocation_slot=invocations,
                 configuration=partial(self._agent_configuration, resources),
+                clock=WallRunClock(),
                 session_spec=agent_session_spec(
                     client=client,
                     environment=environment,
@@ -579,11 +580,7 @@ class _ProductHostFactory:
         )
 
     def _core_environment(self, resources: _PreparedRun) -> CoreEnvironment:
-        """The evaluation environment as facts: identity digests, capacity and lifecycle."""
-
-        def digest(value: str) -> str:
-            return ContentDigest.sha256(value.encode()).value
-
+        """The evaluation environment and product bounds as facts: capacity, pacing, lifecycle."""
         view = resources.environment_resources.view
         capacity = 1
         lifecycle: frozenset[LifecycleCapability] = frozenset()
@@ -594,12 +591,15 @@ class _ProductHostFactory:
             capacity = load_slurm_config(plan.config_path).evaluation_capacity
             if plan.profile_command is not None:
                 lifecycle = frozenset({"profile-capture"})
+        config = self.request.config
         return CoreEnvironment(
-            evaluator_digest=digest(repr(resources.evaluation_plan)),
-            workload_digest=digest(resources.facts.model_dump_json()),
-            environment_digest=digest(repr(view)),
+            view=view,
+            evaluation_plan=resources.evaluation_plan,
             evaluation_capacity=capacity,
-            queue_allowance_seconds=float(self.request.config.evaluation.queue_allowance_seconds),
+            queue_allowance_seconds=config.evaluation.queue_allowance_seconds,
+            observe_interval_seconds=config.evaluation.observe_interval_seconds,
+            observe_backoff_cap_seconds=config.evaluation.observe_backoff_cap_seconds,
+            max_run_seconds=config.run.max_run_seconds,
             lifecycle=lifecycle,
         )
 
