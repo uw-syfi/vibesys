@@ -44,6 +44,7 @@ from vs_core.api import (
     RunStatus,
     project,
 )
+from vs_runtime._core_loop import LeaseUnavailableError
 from vs_runtime._run_control import RunStopped
 
 if TYPE_CHECKING:
@@ -84,6 +85,31 @@ class WallRunClock:
     async def sleep(self, seconds: float) -> None:
         """Sleep on the event loop."""
         await asyncio.sleep(seconds)
+
+
+# How long a run's state-store lease stays valid without renewal. The loop renews it every
+# third of this; a restart after a crash waits at most this long (see
+# ``start_core_awaiting_lease``).
+PRODUCTION_LEASE_SECONDS = 60.0
+
+
+@dataclass(frozen=True)
+class RunTiming:
+    """The time source and lease length one run is composed with."""
+
+    clock: RunClock
+    lease_seconds: float
+
+    def __post_init__(self) -> None:
+        """Reject a lease that could never be held."""
+        if self.lease_seconds <= 0:
+            message = "lease_seconds must be positive"
+            raise ValueError(message)
+
+    @classmethod
+    def production(cls) -> RunTiming:
+        """Wall time and the production lease."""
+        return cls(WallRunClock(), PRODUCTION_LEASE_SECONDS)
 
 
 class NextWake(Protocol):
@@ -246,6 +272,33 @@ class CoreRunHost:
 def start_core(host: CoreRunHost, config: RunLoopConfig) -> None:
     """Take the lease and commit the new-epoch recovery, at the clock's current time."""
     host.shell.start(config.host_id, now_at=host.clock.now(), lease_duration=config.lease_duration)
+
+
+async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) -> None:
+    """Start the shell, waiting out a lease a crashed host left behind.
+
+    A host that died keeps its lease until it expires, and a restart cannot tell a dead
+    holder from a live one, so it waits on the run clock, at most one lease duration
+    (a live holder renews, so it would still hold the lease after that). The wait is
+    in clock time: a simulated clock makes it instant. Raises ``LeaseUnavailableError``
+    naming the bound when the lease is still held after it.
+    """
+    give_up_at = host.clock.now() + config.lease_duration
+    while True:
+        try:
+            start_core(host, config)
+        except LeaseUnavailableError as error:
+            remaining = give_up_at - host.clock.now()
+            if remaining <= 0:
+                message = (
+                    f"the run's lease is still held {config.lease_duration:g} s after this "
+                    "host started waiting for it: another host is running this run, or the "
+                    "clock is behind the run's last recorded time"
+                )
+                raise LeaseUnavailableError(message) from error
+            await host.clock.sleep(min(config.recovery_poll_interval, remaining))
+        else:
+            return
 
 
 async def drive_core(

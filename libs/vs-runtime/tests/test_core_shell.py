@@ -39,7 +39,7 @@ from vs_core.api import (
     StrategyState,
     initial_state,
 )
-from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope
+from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope, StoreFence
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
     CoreRuntime,
@@ -323,6 +323,48 @@ def test_a_host_that_starts_over_a_run_with_an_orphan_wait_refuses_it() -> None:
     shell = CoreRuntime(store, CounterStrategy(), initial_state())
     with pytest.raises(OrphanWaitError):
         shell.start("reader", now_at=1, lease_duration=1)
+    with pytest.raises(RuntimeCommitError):
+        shell.decide(now_at=2)
+
+
+class _ReleaseFails(FakeStateStore):
+    """A store whose lease release raises ``error``, as a corrupt lease document does."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self._error = error
+
+    def release(self, fence: StoreFence, now: float) -> bool:
+        del fence, now
+        raise self._error
+
+
+def _validation_error() -> ValidationError:
+    try:
+        StoredEnvelope.model_validate_json("{not json")
+    except ValidationError as error:
+        return error
+    message = "invalid JSON validated"
+    raise AssertionError(message)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError("disk gone"),
+        ValueError("corrupt lease"),
+        _validation_error(),
+        RuntimeError("store closed"),
+        KeyError("fence"),
+    ],
+    ids=lambda error: type(error).__name__,
+)
+def test_a_failed_lease_release_never_raises_and_ends_the_shell(error: Exception) -> None:
+    shell = runtime(_ReleaseFails(error))
+    shell.start("host", now_at=0, lease_duration=10)
+
+    shell.release_lease(now_at=1)
+
     with pytest.raises(RuntimeCommitError):
         shell.decide(now_at=2)
 
