@@ -563,6 +563,7 @@ class _ProductHostFactory:
         )
         namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
         executor = self._semantic_executor(resources, workspaces, namespace)
+        configuration = partial(self._agent_configuration, resources)
         return build_core_services(
             policy,
             CoreResources(
@@ -580,7 +581,7 @@ class _ProductHostFactory:
                 roles=self.plugin.agents,
                 agent_client=client,
                 invocation_slot=invocations,
-                configuration=partial(self._agent_configuration, resources),
+                configuration=configuration,
                 clock=WallRunClock(),
                 agent_lifecycle=self.integration.agent_execution_event,
                 measurement_observer=CoreMeasurementEvents(self.integration.events),
@@ -592,6 +593,7 @@ class _ProductHostFactory:
                     environment=environment,
                     specs=specs,
                     variables=scope.environment_variables,
+                    configuration=configuration,
                 ),
             ),
         )

@@ -371,8 +371,13 @@ def agent_session_spec(
     environment: AgentExecutionEnvironment,
     specs: Mapping[str, AgentSpec],
     variables: Callable[[], Mapping[str, str]],
+    configuration: AgentConfigurationResolver,
 ) -> SessionSpecFactory:
-    """Provider session configuration for each role, from the run's one agent environment."""
+    """Provider session configuration for each role, from the run's one agent environment.
+
+    A role's own mounts (the evaluation tool socket, profiler files) come from its
+    `configuration`; without them a confined agent cannot reach the tools it is offered.
+    """
 
     def spec_for(role: AgentRole, workspace: Path) -> AgentSessionSpec:
         spec = specs[role.id]
@@ -383,7 +388,7 @@ def agent_session_spec(
             workspace=workspace,
             policy=AgentExecutionPolicy(
                 project_paths=environment.project_path_policy,
-                host_resources=environment.host_resources,
+                host_resources=(*environment.host_resources, *configuration(role).resources),
                 require_enforcement=not environment.use_docker,
                 containerized=environment.use_docker,
             ),

@@ -74,6 +74,7 @@ from vs_runtime._core_requests import (
     settle,
 )
 from vs_runtime._core_run import (
+    HEARTBEAT_TASK,
     CoreRunHost,
     NextWake,
     RunClock,
@@ -209,6 +210,7 @@ from vs_runtime._workspace_requests import (
 __all__ = [
     "EVALUATION_TOOL_ID",
     "HAND_ROLLED_ROLES",
+    "HEARTBEAT_TASK",
     "NOT_TARGET_FACTS",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",

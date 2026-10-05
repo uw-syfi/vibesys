@@ -459,9 +459,11 @@ class CoreRuntime[S: StrategyState]:
         if self._halted or self._fence is None:
             message = "runtime inactive, busy or commit unconfirmed"
             raise RuntimeCommitError(message)
+        # Like every commit and check, renewal never stamps earlier than the last commit:
+        # the store rejects a stamp below its watermark, which the commit raised.
         self._time_floor = max(self._time_floor, now_at)
         try:
-            renewed = self._store.renew(self._fence, now=now_at, duration=lease_duration)
+            renewed = self._store.renew(self._fence, now=self._time_floor, duration=lease_duration)
         except OSError:
             self._halted = True
             raise
