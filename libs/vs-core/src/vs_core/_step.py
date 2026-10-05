@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, assert_never
 from pydantic import TypeAdapter
 
 from . import attempts, evaluation, intents, scheduling, sessions, settlement
+from ._continuations import SuspensionRefusal, suspension_refusal_in
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
 from ._proofs import (
@@ -202,6 +203,15 @@ def _event_adapter[E](event_type: type[E]) -> TypeAdapter[E]:
 
 def _context[C: AreaContext](state: CoreState, model: type[C]) -> C:
     return model(**{name: getattr(state, name) for name in model.model_fields})
+
+
+def suspension_refusal(state: CoreState, scope: Scope) -> SuspensionRefusal | None:
+    """Why ``scope`` cannot take a new suspension now, or None when it can.
+
+    The same rule core applies when it commits a suspension, so a host can refuse an
+    agent's request to wait with a typed reason before the turn ends.
+    """
+    return suspension_refusal_in(_context(state, EvaluationContext), state.evaluation, scope)
 
 
 def _dispatch(
