@@ -694,7 +694,7 @@ expose = ["ProfilerEvaluationAccess", "RuntimeProfilerTurnProvision"]
 from = ["vibesys.run.profiler_agent"]
 
 [[interfaces]]
-expose = ["EvidenceResultIdentity", "EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "agent_evaluation", "evidence_identity", "render_evaluation_failure", "render_rejected_evidence", "render_stage_failure"]
+expose = ["EvidenceResultIdentity", "EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "agent_evaluation", "evidence_identity", "render_evaluation_failure", "render_rejected_evidence", "render_stage_failure", "semantic_evaluation_identity"]
 from = ["vibesys.run.evaluation_backend"]
 
 [[interfaces]]

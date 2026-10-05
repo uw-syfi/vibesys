@@ -26,7 +26,7 @@ from vibesys.run.evaluation import create_evaluation
 from vibesys.run.evaluation_backend import (
     EvidenceReusingEvaluation,
     SemanticEvaluationBackend,
-    SemanticEvaluationIdentity,
+    semantic_evaluation_identity,
 )
 from vibesys.run.profiler_agent import ProfilerEvaluationAccess, RuntimeProfilerTurnProvision
 from vibesys.run.resources import _StateBinding, open_run_resources
@@ -34,7 +34,6 @@ from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vibesys.steering import splice_steering
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_evaluation.api import (
-    ContentDigest,
     EvaluationAgentService,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
@@ -375,17 +374,14 @@ class _ProductHostFactory:
         )
         run_id = resources.project_resources.state.run_id
 
-        def digest(value: str) -> ContentDigest:
-            return ContentDigest.sha256(value.encode())
-
         backend = SemanticEvaluationBackend(
             evaluation,
             workspaces,
             namespace,
-            SemanticEvaluationIdentity(
-                evaluator=digest(repr(resources.evaluation_plan)),
-                workload=digest(resources.facts.model_dump_json()),
-                environment=digest(repr(resources.environment_resources.view)),
+            semantic_evaluation_identity(
+                resources.evaluation_plan,
+                resources.facts,
+                resources.environment_resources.view,
             ),
             executor=self._semantic_executor(resources, workspaces, namespace),
             events=self._evaluation_lifecycle_event,
