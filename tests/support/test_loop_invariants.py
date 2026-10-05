@@ -11,6 +11,7 @@ from hypothesis import strategies as st
 from tests.support.loop_invariants import Invariant, RunRecords, check, summarize
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from tests.support.loop_invariants import Record
@@ -255,7 +256,7 @@ def _envelope(
     }
 
 
-def _violations(events: list[Record], envelope: dict[str, object]) -> set[Invariant]:
+def _violations(events: Sequence[Record], envelope: dict[str, object]) -> set[Invariant]:
     return {v.invariant for v in check(RunRecords.from_core(events, envelope))}
 
 

@@ -635,9 +635,11 @@ class CoreRecords:
 
     def publications(self) -> bytes:
         """Return the run's journaled publications."""
-        return self.project.state.portable_namespace(self.run_id, "publications").read_bytes(
+        journal = self.project.state.portable_namespace(self.run_id, "publications").read_bytes(
             "publications.json"
         )
+        assert journal is not None, "the run journaled no publications"
+        return journal
 
 
 def logs_dir(loop_input: LoopInput, run_id: str) -> Path:
