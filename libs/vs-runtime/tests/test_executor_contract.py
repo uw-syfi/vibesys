@@ -6,7 +6,7 @@ import contextlib
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.executor_cases import CASES
+from tests.support.executor_cases import CASES, inspect_request_of
 from tests.support.executor_context import RevocableLease
 from tests.support.executor_harness import ProcessKilledError
 from tests.support.observation_contract import assert_core_accepts
@@ -16,6 +16,9 @@ from vs_runtime.api.core import receipt_executor_kinds
 
 if TYPE_CHECKING:
     from tests.support.executor_harness import ExecutorCase, Scenario
+
+    from vs_core.api import Observation
+    from vs_runtime.api.core import ExecutionResult
 
 pytestmark = pytest.mark.asyncio
 
@@ -93,3 +96,59 @@ async def test_another_payload_under_one_request_identity_is_rejected(
         assert other.observation.observation.status is ObservationStatus.REJECTED
         assert world.effects() == effects
         assert_core_accepts([first, other], expect_retry=False)
+
+
+def _answer(result: ExecutionResult) -> Observation:
+    assert result.observation.target is not None, "an inspection must answer with target facts"
+    return result.observation.target.observation
+
+
+@pytest.mark.parametrize(("case", "scenario"), PARAMS)
+async def test_inspect_never_claims_never_started_once_an_effect_happened(
+    case: ExecutorCase, scenario: Scenario
+) -> None:
+    """At every crash boundary, "never started" (REJECTED) implies zero effects (S2)."""
+    async with case.world() as probe:
+        request = await probe.prepare(scenario)
+        await probe.execute(request, lease=RevocableLease(), crash_at=None)
+        boundaries = 2 * probe.writes()
+    for crash_at in range(boundaries):
+        async with case.world() as world:
+            request = await world.prepare(scenario)
+            before = world.effects()
+            with contextlib.suppress(ProcessKilledError):
+                await world.execute(request, lease=RevocableLease(), crash_at=crash_at)
+            answer = await inspect_request_of(world, request)
+            if _answer(answer).status is ObservationStatus.REJECTED:
+                assert world.effects() == before, f"boundary {crash_at}"
+            recovered = await world.execute(request, lease=RevocableLease(), crash_at=None)
+            after = await inspect_request_of(world, request)
+            assert_core_accepts([answer, recovered, after], expect_retry=False)
+
+
+@pytest.mark.parametrize(
+    ("case", "scenario"),
+    [
+        pytest.param(case, scenario, id=f"{case.name}-{scenario.name}")
+        for case in CASES
+        for scenario in case.scenarios
+        if scenario.effectful
+    ],
+)
+async def test_inspect_after_completion_reports_the_executed_result(
+    case: ExecutorCase, scenario: Scenario
+) -> None:
+    async with case.world() as world:
+        request = await world.prepare(scenario)
+        done = await world.execute(request, lease=RevocableLease(), crash_at=None)
+        answer = await inspect_request_of(world, request)
+        got = _answer(answer)
+        want = done.observation.observation
+        assert (got.status, got.terminal, got.accepted, got.released, got.request_id) == (
+            want.status,
+            want.terminal,
+            want.accepted,
+            want.released,
+            want.request_id,
+        )
+        assert_core_accepts([done, answer], expect_retry=False)

@@ -35,6 +35,7 @@ from vs_runtime._core_record import (
     RuntimeRecord,
 )
 from vs_runtime._core_requests import (
+    HAND_ROLLED_ROLES,
     REQUEST_DISPATCH,
     EvaluationRequests,
     ExecutionContext,
@@ -79,18 +80,24 @@ from vs_runtime._operation_receipts import (
 )
 from vs_runtime._operation_requests import RegisteredOperationRequests
 from vs_runtime._receipt_store import (
+    BegunUnsealed,
     Conflict,
     Declined,
+    ExecutionHistory,
+    NeverBegun,
     Performed,
     Performer,
     ReceiptCorruptError,
     ReceiptStore,
     Replayed,
+    SealedExecution,
     Settled,
     Transient,
     owner_key,
+    result_type_name,
 )
 from vs_runtime._render_operation import RenderArtifactsOwner
+from vs_runtime._request_inspection import RecordedRequestInspector
 from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
 from vs_runtime._session_lifecycle_requests import (
     ContinuationBinding,
@@ -119,10 +126,12 @@ from vs_runtime._workspace_requests import (
 )
 
 __all__ = [
+    "HAND_ROLLED_ROLES",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
     "Applied",
     "AttemptBinding",
+    "BegunUnsealed",
     "BlockDiagnostic",
     "CancellableOwner",
     "Cancelled",
@@ -137,6 +146,7 @@ __all__ = [
     "DispatchProgress",
     "EvaluationRequests",
     "ExecutionContext",
+    "ExecutionHistory",
     "ExecutionLease",
     "ExecutionOutcome",
     "ExecutionResult",
@@ -151,6 +161,7 @@ __all__ = [
     "JournalSemanticEvents",
     "MeasurementRequests",
     "NamespaceOperationReceipts",
+    "NeverBegun",
     "NotApplied",
     "ObservationFactory",
     "ObservationFacts",
@@ -175,6 +186,7 @@ __all__ = [
     "ReceiptCorruptError",
     "ReceiptCorruptError",
     "ReceiptStore",
+    "RecordedRequestInspector",
     "RefusalReason",
     "RefusingRequestExecution",
     "RegisteredOperationRequests",
@@ -193,6 +205,7 @@ __all__ = [
     "RuntimeRecord",
     "RuntimeSessionRequests",
     "RuntimeWorkspaceRequests",
+    "SealedExecution",
     "SemanticEvents",
     "SessionBinding",
     "SessionLifecycleRequests",
@@ -209,5 +222,6 @@ __all__ = [
     "owner_key",
     "receipt_executor_kinds",
     "resolve_core_resume",
+    "result_type_name",
     "revision_ref",
 ]
