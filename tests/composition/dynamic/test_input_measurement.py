@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.composition.dynamic._harness import (
-    LEASE_GAP,
     PASS,
+    RECOVERY_GAP,
     AgentTransportError,
     CoreRecords,
     LoopInput,
@@ -16,8 +16,10 @@ from tests.composition.dynamic._harness import (
     portfolio,
     resume_request,
     run_request,
+    simulated_clock,
     workstream,
 )
+from tests.support.fake_run_clock import ClockLimitError
 
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
 
@@ -81,13 +83,14 @@ def _candidate_jobs(rounds: int) -> int:
     return rounds
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=LEASE_GAP)
+@pytest.mark.xfail(strict=True, raises=ClockLimitError, reason=RECOVERY_GAP)
 def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     _failing_input(loop_input)
     request = loop_input.request(max_rounds=1)
     first = ScriptedAgents().plan(AgentTransportError("planner died"))
-    crashed = run_request(request, first)
+    clock = simulated_clock()
+    crashed = run_request(request, first, clock=clock)
     assert crashed.error is not None
     assert loop_input.sbatch_count() == _input_jobs()
     second = (
@@ -97,8 +100,9 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
         .judge("H2", PASS)
     )
 
-    resumed = run_request(resume_request(request, crashed.run_id), second)
+    resumed = run_request(resume_request(request, crashed.run_id), second, clock=clock)
 
+    resumed.raise_error()
     assert resumed.error is None
     assert resumed.succeeded is True
     assert first.unscripted == second.unscripted == []

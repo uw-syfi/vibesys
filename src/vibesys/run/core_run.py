@@ -23,7 +23,7 @@ from vs_runtime.api.core import (
     RunControlBridge,
     RunLoopConfig,
     drive_core,
-    start_core,
+    start_core_awaiting_lease,
 )
 from vs_runtime.api.infrastructure import RunStopped
 
@@ -33,10 +33,6 @@ if TYPE_CHECKING:
     from vs_core.api import ArtifactRef
     from vs_runtime.api import ArtifactStore
     from vs_runtime.api.core import ExecutorRefusal
-
-# How long the run's state-store lease is valid without renewal. The loop renews it every
-# third of this, so a host that dies is replaced after at most this long.
-LEASE_SECONDS = 60.0
 
 _STOP_RESULT = RunResultProposal(outcome="cancelled", reason="stop requested by the operator")
 
@@ -71,11 +67,11 @@ class _SteerTexts:
             raise RuntimeError(message)
 
 
-def _loop_config(run_id: str) -> RunLoopConfig:
+def _loop_config(run_id: str, lease_seconds: float) -> RunLoopConfig:
     # One lease holder per process: a restart of the same run is a new host.
     return RunLoopConfig(
         host_id=f"vibesys:{run_id}:{os.getpid()}:{uuid.uuid4().hex[:8]}",
-        lease_duration=LEASE_SECONDS,
+        lease_duration=lease_seconds,
     )
 
 
@@ -99,8 +95,8 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         stop_result=_STOP_RESULT,
     )
     loop = CoreRunHost(shell, delivery, services.clock, controls)
-    config = _loop_config(services.run_id)
-    start_core(loop, config)
+    config = _loop_config(services.run_id, host.timing.lease_seconds)
+    await start_core_awaiting_lease(loop, config)
     bridge = services.agent_evaluation
     if bridge is not None:
         bridge.attach(shell, services.clock)
@@ -108,8 +104,13 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     try:
         outcome = await drive_core(loop, config)
     finally:
-        if bridge is not None:
-            await bridge.close()
+        try:
+            if bridge is not None:
+                await bridge.close()
+        finally:
+            # A crashed process cannot reach this line, so its restart waits out the lease
+            # (see ``start_core_awaiting_lease``); any return or raise here frees it.
+            shell.release_lease(now_at=services.clock.now())
     if outcome.refusal is not None:
         raise CoreRunRefusedError(services.run_id, outcome.refusal)
     result = outcome.result
@@ -120,4 +121,4 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     return RunStatus.FAILED
 
 
-__all__ = ["LEASE_SECONDS", "CoreRunRefusedError", "drive_core_run"]
+__all__ = ["CoreRunRefusedError", "drive_core_run"]

@@ -157,7 +157,11 @@ _CANCEL_GAP = (
 )
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_CANCEL_GAP)
+class _TurnOutlivedGraceError(Exception):
+    """The provider turn was never cancelled at the grace bound (the gap's one symptom)."""
+
+
+@pytest.mark.xfail(strict=True, raises=_TurnOutlivedGraceError, reason=_CANCEL_GAP)
 def test_a_stop_mid_turn_ends_at_the_grace_bound_and_starts_no_evaluation(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     handles = _Handles()
@@ -189,6 +193,9 @@ def test_a_stop_mid_turn_ends_at_the_grace_bound_and_starts_no_evaluation(tmp_pa
         stop_timer=timer,
     )
 
+    if seen.get("cancelled") is False:
+        message = "the stuck provider turn was still running after the grace bound"
+        raise _TurnOutlivedGraceError(message)
     assert run.error is None, run.error
     assert run.status is RunStatus.STOPPED
     assert seen["armed"] is True

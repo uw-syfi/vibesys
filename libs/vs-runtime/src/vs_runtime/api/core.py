@@ -26,6 +26,7 @@ from vs_runtime._core_loop import (
     CoreTransitions,
     DispatchCapExceededError,
     DispatchProgress,
+    LeaseUnavailableError,
     ObservationRejectedError,
     OwnerEventRejectedError,
     ProductionCoreTransitions,
@@ -70,6 +71,7 @@ from vs_runtime._core_requests import (
     settle,
 )
 from vs_runtime._core_run import (
+    PRODUCTION_LEASE_SECONDS,
     CoreRunHost,
     NextWake,
     RunClock,
@@ -77,11 +79,13 @@ from vs_runtime._core_run import (
     RunLoopConfig,
     RunOutcome,
     RunStalledError,
+    RunTiming,
     SteerArtifacts,
     WallRunClock,
     core_next_wake,
     drive_core,
     start_core,
+    start_core_awaiting_lease,
 )
 from vs_runtime._core_wiring import (
     CoreStartup,
@@ -191,6 +195,7 @@ from vs_runtime._workspace_requests import (
 __all__ = [
     "EVALUATION_TOOL_ID",
     "HAND_ROLLED_ROLES",
+    "PRODUCTION_LEASE_SECONDS",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
     "AccessGrant",
@@ -240,6 +245,7 @@ __all__ = [
     "JournalPublicationDelivery",
     "JournalRunInvocations",
     "JournalSemanticEvents",
+    "LeaseUnavailableError",
     "MeasurementRequests",
     "NamespaceOperationReceipts",
     "NeverBegun",
@@ -291,6 +297,7 @@ __all__ = [
     "RunLoopConfig",
     "RunOutcome",
     "RunStalledError",
+    "RunTiming",
     "RuntimeCommitError",
     "RuntimeCommitUncertainError",
     "RuntimeExecutionError",
@@ -337,4 +344,5 @@ __all__ = [
     "session_executors",
     "settle",
     "start_core",
+    "start_core_awaiting_lease",
 ]

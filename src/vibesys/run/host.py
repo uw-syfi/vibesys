@@ -50,7 +50,6 @@ from vs_evaluation.api import (
     ServiceEvaluationSettlements,
 )
 from vs_runtime.api import PollingEvaluationExecutor, RunCleanupError
-from vs_runtime.api.core import WallRunClock
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
@@ -98,6 +97,7 @@ if TYPE_CHECKING:
         WorkspaceAgentSessions,
         Workspaces,
     )
+    from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
         RunState,
@@ -155,6 +155,7 @@ class _ProductHostFactory:
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None
     plugin: OrchestrationPlugin
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore] | None
+    timing: RunTiming | None
     resume_policy: (
         Callable[
             [OrchestrationDescriptor, OrchestrationDescriptor],
@@ -513,6 +514,8 @@ class _ProductHostFactory:
             raise CoreCompositionError(
                 "invocation_store_factory", "a core run needs a durable invocation journal"
             )
+        if self.timing is None:
+            raise CoreCompositionError("timing", "a core run needs its clock and lease length")
         project = resources.project_resources
         workspaces = agent_runtime.workspaces
         scope = workspace_resources.root.agent_scope()
@@ -580,7 +583,7 @@ class _ProductHostFactory:
                 agent_client=client,
                 invocation_slot=invocations,
                 configuration=partial(self._agent_configuration, resources),
-                clock=WallRunClock(),
+                clock=self.timing.clock,
                 session_spec=agent_session_spec(
                     client=client,
                     environment=environment,
@@ -754,6 +757,7 @@ class CoreHost:
 
     run: Run
     services: CoreServices
+    timing: RunTiming
 
 
 @asynccontextmanager
@@ -801,6 +805,7 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
         agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
         invocation_store_factory=invocation_store_factory,
+        timing=None,
         resume_policy=resume_policy,
     )
     async with _open_factory_host(factory, integration, stop_timer) as host:
@@ -827,6 +832,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,
     stop_timer: StopTimer = asyncio.sleep,
+    timing: RunTiming,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
     | None = None,
 ) -> AsyncIterator[CoreHost]:
@@ -851,6 +857,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
         agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
         invocation_store_factory=invocation_store_factory,
+        timing=timing,
         resume_policy=resume_policy,
         options=options,
     )
@@ -859,7 +866,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
         if services is None:
             message = "core host composition produced no services"
             raise CoreCompositionError("services", message)
-        yield CoreHost(run, services)
+        yield CoreHost(run, services, timing)
 
 
 @asynccontextmanager

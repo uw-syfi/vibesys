@@ -13,8 +13,8 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.composition.dynamic._harness import (
-    LEASE_GAP,
     PASS,
+    RECOVERY_GAP,
     AgentTransportError,
     CoreRecords,
     LoopInput,
@@ -25,8 +25,10 @@ from tests.composition.dynamic._harness import (
     portfolio,
     resume_request,
     run_request,
+    simulated_clock,
     workstream,
 )
+from tests.support.fake_run_clock import ClockLimitError
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_agent.api import AgentOutputSchemaError
@@ -470,7 +472,7 @@ def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
         assert item["rounds"][0]["eligible"]
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=LEASE_GAP)
+@pytest.mark.xfail(strict=True, raises=ClockLimitError, reason=RECOVERY_GAP)
 def test_a_crashed_run_resumes_from_its_committed_record_and_finishes(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     request = loop_input.request(max_rounds=2)
@@ -480,7 +482,8 @@ def test_a_crashed_run_resumes_from_its_committed_record_and_finishes(tmp_path: 
         .implement("H1", edit_to(2, "H1"))
         .judge("H1", PASS)
     )
-    crashed = run_request(request, first)
+    clock = simulated_clock()
+    crashed = run_request(request, first, clock=clock)
     assert crashed.error is not None
     seen: dict[str, int] = {}
 
@@ -496,8 +499,9 @@ def test_a_crashed_run_resumes_from_its_committed_record_and_finishes(tmp_path: 
         .judge("H2", PASS)
     )
 
-    resumed = run_request(resume_request(request, crashed.run_id), second)
+    resumed = run_request(resume_request(request, crashed.run_id), second, clock=clock)
 
+    resumed.raise_error()
     assert resumed.error is None
     assert resumed.succeeded is True
     assert first.unscripted == second.unscripted == []
