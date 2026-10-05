@@ -76,7 +76,7 @@ if TYPE_CHECKING:
         StrategyState,
     )
     from vs_core.testing.drive import Answer
-    from vs_runtime.api.core import ExecutionContext
+    from vs_runtime.api.core import ExecutionContext, OwnerEvent
 
 type Script = Callable[[Request, CoreState], Answer]
 """What the executors answer for one request, given core's state when it runs."""
@@ -380,8 +380,8 @@ def drive_shell[S: StrategyState](
 def _executors(executor: ScriptedExecutors) -> RequestExecutors:
     return RequestExecutors(
         workspaces=executor,  # type: ignore[arg-type]  # one scripted object serves every role
-        sessions=executor,  # type: ignore[arg-type]
-        evaluation=executor,  # type: ignore[arg-type]
-        operations=executor,  # type: ignore[arg-type]
-        semantic_events=executor,  # type: ignore[arg-type]
+        sessions=executor,  # type: ignore[arg-type]  # the same scripted object serves this role
+        evaluation=executor,  # type: ignore[arg-type]  # the same scripted object serves this role
+        operations=executor,  # type: ignore[arg-type]  # the same scripted object serves this role
+        semantic_events=executor,  # type: ignore[arg-type]  # the same scripted object serves this role
     )

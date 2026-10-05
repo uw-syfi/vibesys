@@ -203,6 +203,9 @@ def measurement_plan(
         accuracy_stage="accuracy" if "accuracy" in stages else None,
         policy="ordered",
         recipe=config.recipe,
+        # Core retries a submission only after an infrastructure failure, and only within
+        # this bound, which core's own run limit repeats (`limits_for`).
+        submission_limit=config.max_input_measurement_attempts,
         submitted_at=now,
         queue_allowance=config.queue_allowance_seconds,
         deadline_at=now

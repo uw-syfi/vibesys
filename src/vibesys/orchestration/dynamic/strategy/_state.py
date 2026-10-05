@@ -265,6 +265,9 @@ class AttemptRecord(Value):
     ready: bool = False
     # Implementer turns charged so far, bounded by `max_retries_per_round`.
     turns_spent: int = Field(default=0, ge=0)
+    # Measurements submitted for this attempt, bounded by `max_input_measurement_attempts`
+    # when infrastructure interrupts them.
+    measurements: int = Field(default=0, ge=0)
     # The serial the next first turn of a role takes: one past every serial used in this
     # attempt, so a retry's turn and a later review never reuse a turn's decision ID.
     next_serial: int = Field(default=0, ge=0)

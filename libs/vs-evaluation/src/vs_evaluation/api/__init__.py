@@ -4,6 +4,7 @@ from vs_evaluation.agent_evidence import (
     MAX_EVIDENCE_SUMMARY_CHARS,
     ArtifactDigest,
     ContentDigest,
+    EvidenceFailureKind,
     EvidenceFingerprints,
     EvidenceKind,
     EvidenceMetric,
@@ -82,6 +83,7 @@ from vs_evaluation.filesystem_store import (
     FilesystemEvaluationStore,
 )
 from vs_evaluation.models import (
+    STAGE_OUTPUT_TAIL_CHARS,
     AvailabilitySnapshot,
     AvailabilityState,
     CostClass,
@@ -201,6 +203,7 @@ __all__ = [
     "MAX_PROFILER_REQUEST_CHARS",
     "MAX_STAGE_SUMMARY_TAIL_CHARS",
     "PROFILER_TERMINAL_RETENTION",
+    "STAGE_OUTPUT_TAIL_CHARS",
     "AccessErrorCode",
     "AgentAwaitResult",
     "AgentEvaluationCall",
@@ -264,6 +267,7 @@ __all__ = [
     "EvaluationTimeoutError",
     "EvaluationUnknown",
     "EvidenceCall",
+    "EvidenceFailureKind",
     "EvidenceFingerprints",
     "EvidenceKind",
     "EvidenceMetric",

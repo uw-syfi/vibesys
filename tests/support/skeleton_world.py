@@ -52,6 +52,7 @@ from vs_runtime.api.core import (
     DispatchProgress,
     ExecutorRefusal,
     JournalPublicationDelivery,
+    MeasurementServices,
     OperationCatalog,
     RunLoopConfig,
     RunStalledError,
@@ -87,7 +88,7 @@ if TYPE_CHECKING:
     )
     from vs_faults.api import FaultGate
     from vs_project.api import StateNamespace, StateStore
-    from vs_runtime.api.core import AccessGuardedWorkspace, TurnYields
+    from vs_runtime.api.core import AccessGuardedWorkspace, CommitObserver, TurnYields
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
 
 LEASE = 100.0
@@ -165,6 +166,8 @@ class World:
     limits: Limits = field(default_factory=Limits)
     yields: Callable[[RuntimeWorkspaces, StateNamespace], TurnYields] | None = None
     """Builds the turn-yield source from the host's workspaces and receipts, per process."""
+    commits: CommitObserver | None = None
+    """Told of every confirmed commit of each shell this world starts."""
     gate: FaultGate | None = None
 
     def initial(self) -> CoreState:
@@ -228,7 +231,7 @@ class World:
         bindings = core_bindings(
             receipts=receipts,
             workspaces=workspaces,
-            evaluation=evaluation,
+            measurement=MeasurementServices(evaluation),
             sessions=SessionServices(
                 self.agents.sessions(),
                 self.agents.resolver,
@@ -252,6 +255,8 @@ class World:
         A fresh run when the store is empty, a recovery of the durable envelope otherwise.
         """
         bindings = self.bindings()
+        if self.commits is not None:
+            bindings = dataclasses.replace(bindings, commits=self.commits)
         store: StateStore = self.env.project.state_store(RUN_ID)
         if self.gate is not None:
             store = FaultingStore(store, self.gate)

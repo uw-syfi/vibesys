@@ -22,8 +22,14 @@ import pytest
 _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
 _ORCHESTRATION = _SRC / "orchestration"
 
-# dynamic_core.py is the dynamic strategy's own host composition (see its docstring).
-_ALLOWED_EXTERNAL_POLICY_IMPORTS = {"api/evolve.py", "api/catalog.py", "dynamic_core.py"}
+# dynamic_core.py is the dynamic strategy's own host composition (see its docstring), and
+# dynamic_roles.py declares the roles that composition runs.
+_ALLOWED_EXTERNAL_POLICY_IMPORTS = {
+    "api/evolve.py",
+    "api/catalog.py",
+    "dynamic_core.py",
+    "dynamic_roles.py",
+}
 _INFRASTRUCTURE_LIBRARIES = (
     "vs_agent",
     "vs_evaluator_protocol",

@@ -7,7 +7,12 @@ from vibesys.orchestration.dynamic.strategy._evidence import (
     trusted_keys,
     turn_candidate,
 )
-from vibesys.orchestration.dynamic.strategy._ids import decision_id, invocation_id, session_id
+from vibesys.orchestration.dynamic.strategy._ids import (
+    decision_id,
+    invocation_id,
+    role_id,
+    session_id,
+)
 from vibesys.orchestration.dynamic.strategy._operations import (
     INTERPRET_KIND,
     RENDER_KIND,
@@ -61,6 +66,7 @@ from vibesys.orchestration.dynamic.strategy._state import (
     STATE_SCHEMA,
     DynamicStrategyState,
     HypothesisRecord,
+    Role,
     RoundRecord,
     Winner,
 )
@@ -106,6 +112,7 @@ __all__ = [
     "RetainVerifiedRevision",
     "RetentionReceipt",
     "ReviewPrompt",
+    "Role",
     "RoundRecord",
     "VerifyParentRevision",
     "Winner",
@@ -118,6 +125,7 @@ __all__ = [
     "ledger_refs",
     "options",
     "resolve",
+    "role_id",
     "session_id",
     "trusted_keys",
     "turn_candidate",

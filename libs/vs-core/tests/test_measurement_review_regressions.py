@@ -401,3 +401,60 @@ def test_profile_measurement_requires_the_profile_capture_capability(
     assert bool(result.requests) != refused
     feedback = [e for e in result.events if isinstance(e, core.Rejected)]
     assert [f.code for f in feedback] == ([core.RejectionCode.CAPABILITY] if refused else [])
+
+
+# An evaluator that died is reported on the job observation itself, with no facts.
+
+
+def _failed_job(
+    claim: core.MeasurementFailure | None, facts: core.EvaluationTerminalFacts | None
+) -> core.CoreState:
+    state, request = submitted()
+    fields = {"terminal": True, "released": True, "children_complete": True, "status": S.FAILED}
+    state = observe_job(state, observation(request, 2, **fields)).state
+    failed = observation(request, 3, **fields)
+    return transition(
+        committed(state, failed, facts),
+        core.JobObserved(
+            resource_id=JOB, observation=failed, evaluation_result=facts, failure=claim
+        ),
+    ).state
+
+
+@given(claim=st.sampled_from([None, *core.MeasurementFailure]))
+def test_a_job_observation_without_facts_charges_a_retry_only_for_an_infrastructure_claim(
+    claim: core.MeasurementFailure | None,
+) -> None:
+    state = _failed_job(claim, None)
+    retried = requested(
+        state, identity="again", measurement=plan(submitted_at=5.0, deadline_at=105.0)
+    )
+    assert bool(retried.requests) == (claim == core.MeasurementFailure.INFRASTRUCTURE)
+
+
+@given(claim=st.sampled_from([None, *core.MeasurementFailure]))
+def test_an_infrastructure_claim_never_overrides_scientific_facts(
+    claim: core.MeasurementFailure | None,
+) -> None:
+    facts = core.EvaluationTerminalFacts(
+        stages=(
+            core.EvaluationStageResult(
+                stage_id="accuracy", outcome=core.EvaluationStageOutcome.FAILED
+            ),
+        ),
+        accuracy_passed=False,
+    )
+    state = _failed_job(claim, facts)
+    retried = requested(
+        state, identity="again", measurement=plan(submitted_at=5.0, deadline_at=105.0)
+    )
+    assert retried.requests == ()
+
+
+@given(text=st.text(max_size=core.MEASUREMENT_DIAGNOSTIC_LIMIT * 2))
+def test_the_result_of_a_failed_job_carries_its_cut_diagnostic(text: str) -> None:
+    state, request = submitted()
+    fields = {"terminal": True, "released": True, "children_complete": True, "status": S.FAILED}
+    failed = observation(request, 2, diagnostic=text, **fields)
+    (event,) = results(observe_job(state, failed))
+    assert event.diagnostic == text[: core.MEASUREMENT_DIAGNOSTIC_LIMIT]
