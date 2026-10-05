@@ -30,7 +30,7 @@ import asyncio
 import hashlib
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from vs_core.api import (
     ArtifactId,
@@ -475,7 +475,7 @@ class _Loop:
 
     async def _race(self, seconds: float | None) -> None:
         """Wait for a request to finish, the operator to stop, or ``seconds`` to pass."""
-        waiting: list[asyncio.Future[object]] = [
+        waiting: list[asyncio.Future[Any]] = [
             asyncio.ensure_future(self._shell.wait_for_flight()),
             asyncio.ensure_future(self._woken.wait()),
         ]

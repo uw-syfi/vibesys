@@ -371,7 +371,7 @@ class _AdmittingDelivery(FakePublicationDelivery):
 
 
 @pytest.mark.parametrize("fails", [True, False])
-def test_a_tool_call_admitted_during_a_publish_commits_and_never_halts(fails: bool) -> None:
+def test_a_tool_call_admitted_during_a_publish_commits_and_never_halts(*, fails: bool) -> None:
     deliveries: list[_AdmittingDelivery] = []
 
     def make(store: FakeStateStore) -> FakePublicationDelivery:
