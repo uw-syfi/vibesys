@@ -101,7 +101,15 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     loop = CoreRunHost(shell, delivery, services.clock, controls)
     config = _loop_config(services.run_id)
     start_core(loop, config)
-    outcome = await drive_core(loop, config)
+    bridge = services.agent_evaluation
+    if bridge is not None:
+        bridge.attach(shell, services.clock)
+        await bridge.serve()
+    try:
+        outcome = await drive_core(loop, config)
+    finally:
+        if bridge is not None:
+            await bridge.close()
     if outcome.refusal is not None:
         raise CoreRunRefusedError(services.run_id, outcome.refusal)
     result = outcome.result

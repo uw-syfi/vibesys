@@ -33,6 +33,7 @@ from .types.attempts import (
 )
 from .types.common import Area
 from .types.evaluation import (
+    AgentMeasurementRequested,
     ContinuationJobsChanged,
     ContinuationReopenRequested,
     ContinuationRetireRequested,
@@ -202,6 +203,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | ContinuationScopeReopened()
             | RegisteredJobRequested()
             | MeasurementRequested()
+            | AgentMeasurementRequested()
             | JobObserved()
             | TurnSuspended()
             | DeadlineReached()

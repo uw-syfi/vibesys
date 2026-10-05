@@ -12,6 +12,13 @@ from vs_runtime._access_settlement import (
     AccessSettlementError,
     AccessViolation,
 )
+from vs_runtime._agent_evaluation import (
+    EVALUATION_TOOL_ID,
+    AgentEvaluationBridge,
+    AgentEvaluationPolicy,
+    AgentWorkspaces,
+    ScopeWorkspaces,
+)
 from vs_runtime._core_loop import (
     CoreContractGapError,
     CoreRuntime,
@@ -155,12 +162,14 @@ from vs_runtime._session_requests import (
     RuntimeSessionRequests,
     SessionBinding,
     SessionResolver,
+    TurnYields,
 )
 from vs_runtime._session_resolver import (
     ProductionSessionResolver,
     ResolverInputs,
     SessionExecutors,
     SessionSpecFactory,
+    ToolServerSource,
     open_session_requests,
     session_executors,
 )
@@ -180,6 +189,7 @@ from vs_runtime._workspace_requests import (
 )
 
 __all__ = [
+    "EVALUATION_TOOL_ID",
     "HAND_ROLLED_ROLES",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
@@ -190,6 +200,9 @@ __all__ = [
     "AccessSettlement",
     "AccessSettlementError",
     "AccessViolation",
+    "AgentEvaluationBridge",
+    "AgentEvaluationPolicy",
+    "AgentWorkspaces",
     "Applied",
     "AttemptBinding",
     "BegunUnsealed",
@@ -284,6 +297,7 @@ __all__ = [
     "RuntimeRecord",
     "RuntimeSessionRequests",
     "RuntimeWorkspaceRequests",
+    "ScopeWorkspaces",
     "SealedExecution",
     "SemanticEvents",
     "SessionBinding",
@@ -297,8 +311,10 @@ __all__ = [
     "Settled",
     "SteerArtifacts",
     "StoreWorkspaceReceipts",
+    "ToolServerSource",
     "Transient",
     "TurnDispatcher",
+    "TurnYields",
     "VerifyRevisionOwner",
     "WallRunClock",
     "WorkspaceReceipts",

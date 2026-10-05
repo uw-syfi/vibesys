@@ -152,7 +152,8 @@ def request_turn(draft: Draft, shape: TurnShape, turn: TurnRecord, scope: Scope)
             tool_policy=turn.tool_policy,
             deadline_at=draft.view.run.now_at + shape.seconds,
             charge_class=turn.charge,
-            predecessor=turn.invocation,
+            # A resume names its continuation, never a predecessor: core rejects both together.
+            predecessor=None if turn.charge == "resume" else turn.invocation,
         ),
     )
 
