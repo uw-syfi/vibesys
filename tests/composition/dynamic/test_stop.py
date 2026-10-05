@@ -6,7 +6,6 @@ import os
 import threading
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.composition.dynamic._harness import (
     PASS,
     AgentTransportError,
@@ -146,7 +145,6 @@ def test_a_stop_during_a_candidate_evaluation_cancels_its_job_and_starts_no_new_
     assert len(agents.prompts(JUDGE.id)) == 1
     assert len(agents.prompts(IMPLEMENTER.id)) == 1
     assert any(command.startswith("scancel ") for command in commands)
-
 
 
 def test_a_stop_mid_turn_ends_at_the_grace_bound_and_starts_no_evaluation(tmp_path: Path) -> None:

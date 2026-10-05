@@ -256,7 +256,12 @@ def _terminal_view(
         if terminal.state is EvaluationState.SUCCEEDED
         else ObservationStatus.FAILED
     )
-    observation = make(status, accepted=True, terminal=True, diagnostic=terminal.failure or "")
+    # A stage's own failure text says more than the job's summary (a benchmark's last
+    # output, say), and is all that explains a failure that left no evidence.
+    diagnostic = next(
+        (s.failure for s in terminal.stage_results if s.failure), terminal.failure or ""
+    )
+    observation = make(status, accepted=True, terminal=True, diagnostic=diagnostic)
     evidence, outcomes = _evidence(terminal, plan, subject, observation.sequence)
     failure = _failure_claim(outcomes) if status is ObservationStatus.FAILED else None
     if failure is MeasurementFailure.INFRASTRUCTURE:

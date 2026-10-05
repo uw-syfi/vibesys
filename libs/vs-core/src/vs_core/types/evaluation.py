@@ -640,6 +640,9 @@ class ResumeAuthorized(Value):
         return self
 
 
+MEASUREMENT_DIAGNOSTIC_LIMIT = 4000
+
+
 class MeasurementResult(Value):
     """Measurement result retains evidence and typed submission failure.
 
@@ -659,6 +662,12 @@ class MeasurementResult(Value):
     """
     evidence: tuple[EvidenceRef, ...]
     status: ObservationStatus
+    diagnostic: str = ""
+    """The executor's failure text, cut to `MEASUREMENT_DIAGNOSTIC_LIMIT` characters.
+
+    It is the only account of a failure that left no evidence, such as a benchmark that
+    died without a result record, so the strategy can tell the agent why it was given up.
+    """
 
 
 class SubmitMeasurement(RequestBase):

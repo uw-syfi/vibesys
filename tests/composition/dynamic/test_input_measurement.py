@@ -8,8 +8,8 @@ import pytest
 from tests.composition.dynamic._harness import (
     LEASE_GAP,
     PASS,
-    AgentTransportError,
     CoreRecords,
+    HostCrash,
     LoopInput,
     ScriptedAgents,
     edit_to,
@@ -86,7 +86,7 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
     loop_input = LoopInput.create(tmp_path)
     _failing_input(loop_input)
     request = loop_input.request(max_rounds=1)
-    first = ScriptedAgents().plan(AgentTransportError("planner died"))
+    first = ScriptedAgents().plan(HostCrash("planner died"))
     crashed = run_request(request, first)
     assert crashed.error is not None
     assert loop_input.sbatch_count() == _input_jobs()
@@ -124,11 +124,10 @@ def _interrupt_input_evaluator(loop_input: LoopInput, tmp_path: Path, failures: 
         "    attempts = int(counter.read_text()) if counter.exists() else 0\n"
         "    counter.write_text(str(attempts + 1))\n"
         f"    if attempts < {failures}:\n"
-        "        raise SystemExit(1)\n" + original,
+        '        raise SystemExit("benchmark server killed: out of memory")\n' + original,
         encoding="utf-8",
     )
     return counter
-
 
 
 @pytest.mark.parametrize("failures", [1, 5])
@@ -153,3 +152,5 @@ def test_transient_input_failure_is_retried_within_its_bound(tmp_path: Path, fai
     else:
         assert baseline["stage"] == "unmeasurable"
         assert baseline["benchmark_passed"] is None
+        # The agents are told why the input was given up, not only that it was.
+        assert "out of memory" in baseline["failure"]

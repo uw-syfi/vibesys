@@ -449,3 +449,12 @@ def test_an_infrastructure_claim_never_overrides_scientific_facts(
         state, identity="again", measurement=plan(submitted_at=5.0, deadline_at=105.0)
     )
     assert retried.requests == ()
+
+
+@given(text=st.text(max_size=core.MEASUREMENT_DIAGNOSTIC_LIMIT * 2))
+def test_the_result_of_a_failed_job_carries_its_cut_diagnostic(text: str) -> None:
+    state, request = submitted()
+    fields = {"terminal": True, "released": True, "children_complete": True, "status": S.FAILED}
+    failed = observation(request, 2, diagnostic=text, **fields)
+    (event,) = results(observe_job(state, failed))
+    assert event.diagnostic == text[: core.MEASUREMENT_DIAGNOSTIC_LIMIT]

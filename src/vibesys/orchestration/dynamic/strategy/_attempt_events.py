@@ -301,9 +301,8 @@ def on_measurement(
             return _put(
                 state, index, current.model_copy(update={"step": Step.NEEDED, "awaiting": None})
             )
-        return fail(
-            state, index, f"measurement produced no trusted evidence ({event.status.value})"
-        )
+        reason = f"measurement produced no trusted evidence ({event.status.value})"
+        return fail(state, index, f"{reason}: {event.diagnostic}" if event.diagnostic else reason)
     record = current.model_copy(
         update={
             "evidence": evidence,

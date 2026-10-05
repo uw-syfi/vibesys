@@ -48,6 +48,7 @@ from .types.common import (
     RunStatus,
 )
 from .types.evaluation import (
+    MEASUREMENT_DIAGNOSTIC_LIMIT,
     AgentCall,
     AgentMeasurementRequested,
     AgentRejection,
@@ -1169,6 +1170,7 @@ def _job_observed(
                     evidence=tuple(accepted),
                     status=observation.status,
                     failure=failure,
+                    diagnostic=observation.diagnostic[:MEASUREMENT_DIAGNOSTIC_LIMIT],
                 ),
             )
         elif newly or refused:
@@ -1180,6 +1182,7 @@ def _job_observed(
                     evidence=newly,
                     status=observation.status,
                     failure=failure,
+                    diagnostic=observation.diagnostic[:MEASUREMENT_DIAGNOSTIC_LIMIT],
                 ),
             )
         if observation.accepted and not updated.evidence:
