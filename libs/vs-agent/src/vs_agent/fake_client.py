@@ -196,6 +196,8 @@ class FakeAgentClient:
 
         self._closed = False
         self.cancel_count = 0
+        self.cancelled_sessions: list[AgentSessionKey] = []
+        self.released_sessions: list[AgentSessionKey] = []
         self._cancelled = threading.Event()
 
     # -- AgentClientProtocol: attribution ---------------------------------
@@ -248,6 +250,16 @@ class FakeAgentClient:
         """Record a cancellation request and release turns waiting for one."""
         self.cancel_count += 1
         self._cancelled.set()
+
+    def cancel_session(self, key: AgentSessionKey) -> None:
+        """Record a cancellation of one key and release turns waiting for a cancellation."""
+        self.cancelled_sessions.append(key)
+        self._cancelled.set()
+
+    def release_session(self, key: AgentSessionKey) -> None:
+        """Drop the live conversation of *key*; its stored checkpoint survives."""
+        self.released_sessions.append(key)
+        self._sessions.pop(key, None)
 
     def wait_cancelled(self, timeout: float) -> bool:
         """Block until :meth:`cancel` is called; return whether it was.
