@@ -100,7 +100,7 @@ def decide(draft: Draft) -> None:
                     subject=SUBJECT,
                     workspace=scope,
                     access=Access.READ_ONLY,
-                    reuse=turn.serial > 0,
+                    reuse=True,
                     output_schema=PLANNER_REPLY,
                     seconds=draft.config.planner_turn_seconds,
                 ),
