@@ -13,6 +13,7 @@ latency per remote command, so nothing sleeps.
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import tempfile
 import threading
 from dataclasses import dataclass
@@ -59,7 +60,7 @@ from vs_slurm.api import (
 from vs_slurm.api import SlurmBatchStageResult as _StageResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
 _POLL_INTERVAL_S = 10.0
 # The executor waits this long for a cancelled job to end before it leaves the
@@ -154,6 +155,28 @@ class _TimelineFake(FakeCluster):
         return super().submit(request, operation_id=operation_id)
 
 
+class _Faults:
+    """A connection to the scheduler that drops one chosen command, then recovers."""
+
+    def __init__(self, inner: TraceConnector) -> None:
+        self._inner = inner
+        self._countdown: int | None = None
+
+    def drop_command(self, index: int) -> None:
+        """Fail the ``index``-th command from now (0 is the next one) with a transport error."""
+        self._countdown = index
+
+    def __call__(
+        self, argv: Sequence[str], *, stdin: str | None, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        if self._countdown is not None:
+            if self._countdown == 0:
+                self._countdown = None
+                return subprocess.CompletedProcess(argv, 255, "", "connection lost")
+            self._countdown -= 1
+        return self._inner(argv, stdin=stdin, timeout=timeout)
+
+
 @dataclass
 class _World:
     """One scheduler behind the executor, with its clock and counters."""
@@ -163,6 +186,7 @@ class _World:
     transport_scancels: Callable[[], int]
     root: Path
     commands: Callable[[], tuple[str, ...]] = lambda: ()
+    faults: _Faults | None = None
 
 
 @dataclass(frozen=True)
@@ -196,18 +220,21 @@ def _replay_world(
         on_cancel_running=running,
         stage_weights=(3.0, 1.0),
     )
+    faults = _Faults(connector)
     runner = SlurmJobRunner(
         SlurmConfig(
             name="replay",
             remote_workspace_root=str(remote),
             transport=SlurmConnectorTransport(kind="connector", command=("trace-connector",)),
         ),
-        process=connector,
+        process=faults,
         clock=clock.now,
         pause=clock.advance,
     )
     cluster = SlurmCluster(runner, state_root=root / "identity")
-    return _World(_ObservedCluster(cluster), clock, connector.scancels, root, connector.commands)
+    return _World(
+        _ObservedCluster(cluster), clock, connector.scancels, root, connector.commands, faults
+    )
 
 
 def _replay(lifetime: str, running: str) -> _WorldSpec:
@@ -497,3 +524,127 @@ def test_the_reported_stage_follows_the_stage_that_is_running(spec: _WorldSpec) 
     assert indexes == sorted(indexes)
     assert seen[0] == order[0]
     assert seen[-1] == order[-1]
+
+
+_FAULT_WORLDS = tuple(
+    spec for spec in WORLDS if spec.label.startswith("replay:pending-then-running")
+)
+# A poll or a cancel sends fewer commands than this, so the later positions are
+# no-fault controls.
+_FAULT_POSITIONS = 12
+
+
+def _after_submitter_idles(
+    world: _World,
+) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator, threading.Event, threading.Event]:
+    """A stack whose submitter parks at its first wait, so a test alone sends commands.
+
+    The first pause is the submitter's own wait loop and parks; every later pause
+    (a cancel confirming) advances the world's clock.
+    """
+    idle = threading.Event()
+    release = threading.Event()
+    lock = threading.Lock()
+    parked = []
+
+    def pause(seconds: float) -> None:
+        with lock:
+            first = not parked
+            parked.append(True)
+        if first:
+            idle.set()
+            release.wait()
+        else:
+            world.clock.advance(seconds)
+
+    executor, coordinator = _stack(world, pause)
+    return executor, coordinator, idle, release
+
+
+async def _poll_with_dropped_command(spec: _WorldSpec, delay_s: float, position: int) -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        world = spec.build(Path(raw))
+        assert world.faults is not None
+        submitter, coordinator, idle, release = _after_submitter_idles(world)
+        handle = await coordinator.submit(_request())
+        await asyncio.to_thread(idle.wait)
+        reader = _executor(world)
+        try:
+            world.clock.advance(delay_s)
+            world.faults.drop_command(position)
+            polled = await reader.poll(handle.id)
+        finally:
+            release.set()
+            await submitter.close()
+        # Every fault is one transient transport error and the job is known: the
+        # other source (queue or accounting) answers. Ended jobs also collect files,
+        # which is a different boundary.
+        if polled.phase is not PollPhase.ENDED:
+            assert polled.phase is not PollPhase.UNKNOWN, polled.detail
+
+
+@pytest.mark.parametrize("spec", _FAULT_WORLDS, ids=lambda spec: spec.label)
+@_PROPERTY
+@example(delay_s=10.0, position=1)
+@example(delay_s=150.0, position=0)
+@example(delay_s=150.0, position=1)
+@example(delay_s=270.0, position=0)
+@example(delay_s=270.0, position=1)
+@example(delay_s=270.0, position=2)
+@given(
+    delay_s=st.floats(0, 330, allow_nan=False),
+    position=st.integers(0, _FAULT_POSITIONS),
+)
+def test_a_dropped_command_never_makes_a_poll_of_a_known_job_unknown(
+    spec: _WorldSpec, delay_s: float, position: int
+) -> None:
+    """A lost squeue, sacct or stage read while queued, running or tearing down is survivable."""
+    asyncio.run(_poll_with_dropped_command(spec, delay_s, position))
+
+
+async def _cancel_with_dropped_command(spec: _WorldSpec, delay_s: float, position: int) -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        world = spec.build(Path(raw))
+        assert world.faults is not None
+        executor, coordinator, idle, release = _after_submitter_idles(world)
+        handle = await coordinator.submit(_request())
+        await asyncio.to_thread(idle.wait)
+        try:
+            world.clock.advance(delay_s)
+            world.faults.drop_command(position)
+            # The job id is known, so the stop is never an error: it ends or it is CANCELING.
+            record = await coordinator.cancel(handle.id)
+            assert record.state in {
+                EvaluationState.CANCELED,
+                EvaluationState.CANCELING,
+                EvaluationState.SUCCEEDED,
+            }
+            assert world.transport_scancels() <= 1
+            world.clock.advance(_FOREVER)
+            record = await coordinator.snapshot(handle.id)
+            assert record.state in {EvaluationState.CANCELED, EvaluationState.SUCCEEDED}
+        finally:
+            release.set()
+            await executor.close()
+
+
+@pytest.mark.parametrize("spec", _FAULT_WORLDS, ids=lambda spec: spec.label)
+@_PROPERTY
+@example(delay_s=10.0, position=0)
+@example(delay_s=10.0, position=1)
+@example(delay_s=10.0, position=2)
+@example(delay_s=150.0, position=0)
+@example(delay_s=150.0, position=1)
+@example(delay_s=150.0, position=2)
+@example(delay_s=150.0, position=3)
+@example(delay_s=270.0, position=1)
+@example(delay_s=270.0, position=2)
+@given(
+    delay_s=st.floats(0, 330, allow_nan=False),
+    position=st.integers(0, _FAULT_POSITIONS),
+)
+def test_a_dropped_command_never_makes_the_stop_of_a_known_job_an_error(
+    spec: _WorldSpec, delay_s: float, position: int
+) -> None:
+    """A lost command at any step of a stop leaves it CANCELING at worst, then confirmed."""
+    asyncio.run(_cancel_with_dropped_command(spec, delay_s, position))

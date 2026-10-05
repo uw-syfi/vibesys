@@ -70,6 +70,7 @@ if TYPE_CHECKING:
         SlurmService,
     )
 
+_UNRESOLVED_JOB_ID = "0"  # the placeholder id of a submission whose acceptance is unresolved
 _LOG = logging.getLogger(__name__)
 
 
@@ -1034,20 +1035,28 @@ class SlurmEvaluationExecutor:
                 self._confirmations_left[handle_id] = self._cancel_confirmations
             cancelled = await _finish_in_thread(self._cluster.cancel, target)
             if isinstance(cancelled, ClusterUnknown):
-                raise ExecutorCancellationUnknownError(handle_id)
-            if (
-                handle is None
-                and durable is not None
-                and not durable.dispatch_started
-                and cancelled.job_id is None
-            ):
-                # The durable preparation proves this executor never dispatched.
-                # The cluster retained cancellation intent and has no accepted job
-                # identity, so there is no allocation termination to confirm.
-                return _CancelConfirmed()
-            job_id = job_id or cancelled.job_id
-            if job_id is not None:
-                self._cancel_sent.add(job_id)
+                job_id = job_id or cancelled.job_id
+                if job_id in {None, _UNRESOLVED_JOB_ID}:
+                    raise ExecutorCancellationUnknownError(handle_id)
+                # A transient scheduler error does not make a known job unknown. The
+                # cluster persisted the cancel intent before it failed, and every
+                # inspection of a cancelled record re-sends scancel, so the bounded
+                # confirmation below is also the retry. `_cancel_sent` stays unset,
+                # so a later call sends scancel again.
+            else:
+                if (
+                    handle is None
+                    and durable is not None
+                    and not durable.dispatch_started
+                    and cancelled.job_id is None
+                ):
+                    # The durable preparation proves this executor never dispatched.
+                    # The cluster retained cancellation intent and has no accepted job
+                    # identity, so there is no allocation termination to confirm.
+                    return _CancelConfirmed()
+                job_id = job_id or cancelled.job_id
+                if job_id is not None:
+                    self._cancel_sent.add(job_id)
         if job_id is not None:
             self._canceling.add(handle_id)
             self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELING))
