@@ -83,7 +83,7 @@ class CoreMeasurementEvents:
 
     def _publish_output(self, event: StageSettled, gate: GateKind) -> None:
         kind = _PROCESS_KINDS.get(gate, "validation")
-        for stream, content in (("stdout", event.summary), ("stderr", event.failure)):
+        for stream, content in (("stdout", event.stdout), ("stderr", event.stderr)):
             if content:
                 self._events.emit(
                     CoreEventType.SUBPROCESS_OUTPUT,

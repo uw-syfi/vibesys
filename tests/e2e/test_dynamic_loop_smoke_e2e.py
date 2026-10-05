@@ -21,6 +21,7 @@ one-line summary of wall time, tokens, and cost.
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import os
@@ -59,14 +60,26 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
-from entrypoints.run import run_headless
+from entrypoints.run import supervise
+from headless import HeadlessRenderer
+from headless import run as render_run
 from launch import LaunchSettings
 from vibesys.api import ComputeBackend, OrchestrationRegistry, ProfilerKind, RunStatus
 from vibesys.dynamic_core import dynamic_core_registration
+from vibesys.events import CoreEventType
 from vibesys.orchestration.dynamic import PLUGIN
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vs_agent.api import AgentCapabilities
-from vs_agent.api.testing import FakeAgentClient, FakeInvocation
+from vibesys.orchestration.dynamic.core_policy.api import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vs_agent.api import AgentClient
+from vs_agent.drivers.fake import (
+    FAKE_CAPABILITIES,
+    FakeDriver,
+    assistant_text,
+    thinking,
+    todo_write,
+    tool_call,
+    tool_result,
+    usage,
+)
 from vs_project.api import Project, StoredEnvelope
 from vs_slurm.fake_connector import active_jobs, executing_cluster, recorded_commands
 
@@ -74,6 +87,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
 
     from pydantic import BaseModel
+
+    from vibesys.api import CoreEvent, RunRequest, RunResult, Runs
+    from vs_agent.api import AgentEventSink, AgentSpec, SessionStore
+    from vs_agent.contracts import AgentSession, AgentSessionSpec, AgentTurnRequest
 
     type Events = list[dict[str, object]]
 
@@ -531,46 +548,236 @@ def _executed_legacy_files() -> Iterator[set[str]]:
         monitoring.free_tool_id(tool)
 
 
-def _core_agents(**_kwargs: object) -> FakeAgentClient:
-    """A Fake provider that answers each role with its typed reply, as a real agent would.
-
-    The implementer edits the candidate's workspace before replying, so the candidate
-    differs from the baseline and the trusted benchmark can tell them apart.
-    """
-    client = FakeAgentClient(
-        capabilities=AgentCapabilities(session_reuse=True, provider_session_resume=True),
-        session_reuse=True,
-    )
-
-    def implement(invocation: FakeInvocation) -> dict[str, object]:
-        (invocation.workspace / "queue.py").write_text("VALUE = 2\n", encoding="utf-8")
-        return {
-            "summary": "Raised VALUE.",
-            "outcome": "nominated",
-            "evidence": [{"location": "queue.py", "purpose": "the change"}],
-        }
-
-    client.set_response(
-        ORCHESTRATOR.id,
+_PLAN = {
+    "reasoning": "one mechanism limits throughput",
+    "workstreams": [
         {
-            "reasoning": "one mechanism limits throughput",
-            "workstreams": [
-                {
-                    "kind": "implement",
-                    "hypothesis_id": "raise-value",
-                    "title": "Raise the value",
-                    "hypothesis": "A larger VALUE raises throughput.",
-                    "task": "Set VALUE in queue.py.",
-                    "pass_criteria": "Accuracy passes and throughput improves.",
-                }
-            ],
-        },
+            "kind": "implement",
+            "hypothesis_id": "raise-value",
+            "title": "Raise the value",
+            "hypothesis": "A larger VALUE raises throughput.",
+            "task": "Set VALUE in queue.py.",
+            "pass_criteria": "Accuracy passes and throughput improves.",
+        }
+    ],
+}
+_IMPLEMENTED = {
+    "summary": "Raised VALUE.",
+    "outcome": "nominated",
+    "evidence": [{"location": "queue.py", "purpose": "the change"}],
+}
+_JUDGED = {"passed": True, "analysis": "The change is correct.", "feedback": ""}
+
+
+class _RoleDrivers:
+    """An agent driver that gives each role its own scripted provider behavior.
+
+    Every session is a real ``FakeDriver`` session, so scripted provider events leave
+    through the real ``AgentClient`` and its event sink, the route a production CLI
+    driver's events take. The implementer edits its workspace before it replies, so the
+    candidate differs from the baseline and the trusted benchmark can tell them apart.
+    """
+
+    capabilities = FAKE_CAPABILITIES
+
+    def __init__(self) -> None:
+        self._drivers: list[FakeDriver] = []
+
+    def create_session(self, spec: AgentSessionSpec) -> AgentSession:
+        def edit_workspace(turn: AgentTurnRequest) -> None:
+            del turn
+            (spec.workspace / "queue.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+        scripts = {
+            ORCHESTRATOR.id: FakeDriver(
+                turn=[
+                    thinking("Reading the baseline."),
+                    todo_write([("Find the bottleneck", "in_progress")]),
+                    assistant_text("One mechanism limits throughput."),
+                    usage(input_tokens=1200, output_tokens=80),
+                ],
+                answer=_PLAN,
+            ),
+            IMPLEMENTER.id: FakeDriver(
+                turn=[
+                    tool_call("Bash", {"command": "sed -i s/1/2/ queue.py"}),
+                    tool_result("edited queue.py"),
+                    assistant_text("Raised VALUE."),
+                    usage(input_tokens=3000, output_tokens=200),
+                ],
+                answer=_IMPLEMENTED,
+                on_turn=edit_workspace,
+            ),
+            JUDGE.id: FakeDriver(turn=[assistant_text("The change is correct.")], answer=_JUDGED),
+        }
+        driver = scripts[spec.role]
+        self._drivers.append(driver)
+        return driver.create_session(spec)
+
+    def close(self) -> None:
+        for driver in self._drivers:
+            driver.close()
+
+
+def _core_agents(
+    *,
+    spec: AgentSpec,
+    session_store: SessionStore,
+    events: AgentEventSink,
+    **_kwargs: object,
+) -> AgentClient:
+    """The production agent client over role-scripted fake providers."""
+    return AgentClient(
+        _RoleDrivers(),
+        provider=spec.provider,
+        model_name=spec.model,
+        session_store=session_store,
+        event_sink=events,
     )
-    client.set_response(IMPLEMENTER.id, implement)
-    client.set_response(
-        JUDGE.id, {"passed": True, "analysis": "The change is correct.", "feedback": ""}
+
+
+def _strings_of(value: object) -> frozenset[str]:
+    """Every string in a decoded JSON document, keys excluded."""
+    if isinstance(value, str):
+        return frozenset({value})
+    if isinstance(value, dict):
+        return frozenset().union(*map(_strings_of, value.values()))
+    if isinstance(value, list):
+        return frozenset().union(*map(_strings_of, value))
+    return frozenset()
+
+
+_AGENT_LIFECYCLE = (
+    CoreEventType.AGENT_EXECUTION_STARTED,
+    CoreEventType.PHASE_STARTED,
+    CoreEventType.INVOCATION_STARTED,
+    CoreEventType.AGENT_EXECUTION_FINISHED,
+    CoreEventType.INVOCATION_FINISHED,
+    CoreEventType.PHASE_FINISHED,
+)
+_AGENT_CONTENT = (
+    CoreEventType.AGENT_OUTPUT_CHUNK,
+    CoreEventType.TOOL_CALL,
+    CoreEventType.TOOL_RESULT,
+    CoreEventType.TODO_UPDATE,
+    CoreEventType.USAGE_UPDATE,
+)
+# What a frontend needs from a core run, each at least once.
+_REQUIRED_KINDS = frozenset(
+    {
+        *_AGENT_LIFECYCLE,
+        *_AGENT_CONTENT,
+        CoreEventType.GATE_STARTED,
+        CoreEventType.GATE_FINISHED,
+        CoreEventType.SUBPROCESS_OUTPUT,
+        CoreEventType.ROUND_FINISHED,
+        CoreEventType.EXPERIMENTS_CHANGED,
+    }
+)
+
+
+def _assert_headless_stream(
+    events: list[CoreEvent], *, run_id: str, committed: frozenset[str], rendered: str
+) -> None:
+    """What a headless frontend received from the core path is complete, legal and anchored.
+
+    Complete: every kind a frontend renders appears. Legal: each turn and each gate opens
+    once, carries its content between the open and the close, and closes once; a round
+    finishes after its measurement. Anchored: every run, turn and job identity an event
+    names exists in the committed core state.
+    """
+    kinds = [event.type for event in events]
+    assert set(kinds) >= _REQUIRED_KINDS, sorted(k.value for k in _REQUIRED_KINDS - set(kinds))
+    assert kinds[0] is CoreEventType.RUN_STARTED
+    assert kinds[-1] is CoreEventType.RUN_FINISHED
+    sequences = [event.sequence for event in events]
+    assert sequences == sorted(set(sequences)), "event sequence numbers must increase"
+    assert {event.run_id for event in events} == {run_id}
+
+    turns = {
+        event.execution_id for event in events if event.type is CoreEventType.INVOCATION_STARTED
+    }
+    assert len(turns) == 3, turns  # planner, implementer and judge each ran one turn
+    for turn in turns:
+        mine = [(i, e.type) for i, e in enumerate(events) if e.execution_id == turn]
+        lifecycle = [kind for _, kind in mine if kind in _AGENT_LIFECYCLE]
+        assert lifecycle == [
+            CoreEventType.AGENT_EXECUTION_STARTED,
+            CoreEventType.PHASE_STARTED,
+            CoreEventType.INVOCATION_STARTED,
+            CoreEventType.AGENT_EXECUTION_FINISHED,
+            CoreEventType.INVOCATION_FINISHED,
+            CoreEventType.PHASE_FINISHED,
+        ], (turn, lifecycle)
+        opened = next(i for i, kind in mine if kind is CoreEventType.INVOCATION_STARTED)
+        closed = next(i for i, kind in mine if kind is CoreEventType.AGENT_EXECUTION_FINISHED)
+        assert all(opened < i < closed for i, kind in mine if kind in _AGENT_CONTENT)
+
+    jobs = {event.execution_id for event in events if event.type is CoreEventType.GATE_STARTED}
+    assert len(jobs) == 2, jobs  # the baseline measurement and the candidate's
+    for job in jobs:
+        for gate in ("accuracy", "benchmark"):
+            at = [
+                (i, e.type)
+                for i, e in enumerate(events)
+                if e.execution_id == job
+                and (
+                    (
+                        e.type in (CoreEventType.GATE_STARTED, CoreEventType.GATE_FINISHED)
+                        and getattr(e.data, "gate", None) == gate
+                    )
+                    or (
+                        e.type is CoreEventType.SUBPROCESS_OUTPUT
+                        and getattr(e.data, "process_id", "").endswith(f"-{gate}")
+                    )
+                )
+            ]
+            kinds_at = [kind for _, kind in at]
+            assert kinds_at[0] is CoreEventType.GATE_STARTED, (job, gate, kinds_at)
+            assert kinds_at[-1] is CoreEventType.GATE_FINISHED, (job, gate, kinds_at)
+            assert kinds_at.count(CoreEventType.GATE_STARTED) == 1
+            assert kinds_at.count(CoreEventType.GATE_FINISHED) == 1
+
+    (round_at,) = [i for i, kind in enumerate(kinds) if kind is CoreEventType.ROUND_FINISHED]
+    last_judge = max(
+        i
+        for i, event in enumerate(events)
+        if event.type is CoreEventType.INVOCATION_FINISHED and event.agent_kind == JUDGE.id
     )
-    return client
+    last_gate = max(i for i, kind in enumerate(kinds) if kind is CoreEventType.GATE_FINISHED)
+    assert last_judge < round_at
+    assert last_gate < round_at
+
+    named = {event.execution_id for event in events if event.execution_id is not None}
+    assert named == turns | jobs
+    assert named <= committed, sorted(named - committed)
+
+    assert "One mechanism limits throughput." in rendered
+    assert "Raised VALUE." in rendered
+
+
+class _RecordingRenderer(HeadlessRenderer):
+    """The headless renderer, keeping every event it was handed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.events: list[CoreEvent] = []
+
+    def handle(self, event: CoreEvent) -> None:
+        self.events.append(event)
+        super().handle(event)
+
+
+def _run_headless_recording(
+    request: RunRequest, runs: Runs, renderer: HeadlessRenderer
+) -> RunResult:
+    """``run_headless`` with the renderer chosen by the caller."""
+
+    async def execute() -> RunResult:
+        handle = runs.start(request)
+        return await supervise(handle, render_run(handle, renderer=renderer))
+
+    return asyncio.run(execute())
 
 
 def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
@@ -617,8 +824,9 @@ def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
     registry.register(dynamic_core_registration())
     runs = launch.default_runs(LaunchSettings(registry=registry, agent_client_factory=_core_agents))
 
+    renderer = _RecordingRenderer()
     with _executed_legacy_files() as executed:
-        result = run_headless(request, runs)
+        result = _run_headless_recording(request, runs, renderer)
 
     assert result.succeeded is True
     assert result.status is RunStatus.COMPLETED
@@ -647,4 +855,9 @@ def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
     # The baseline and the one candidate were each submitted to the cluster exactly once.
     assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == 2
     assert active_jobs(loop_input.cluster) == ()
-    assert capsys.readouterr().out.strip()
+    _assert_headless_stream(
+        renderer.events,
+        run_id=result.run_id,
+        committed=_strings_of(envelope["core"]),
+        rendered=capsys.readouterr().out,
+    )

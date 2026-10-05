@@ -40,7 +40,8 @@ class StageSettled:
     """One stage of a measurement job ended, with what it measured or why it failed.
 
     ``passed`` is true when the stage ran to completion and its evidence did not fail.
-    ``cancelled`` is true when the executor cancelled the stage instead.
+    ``cancelled`` is true when the executor cancelled the stage instead. ``stdout`` and
+    ``stderr`` are the tails of what the stage's command printed, when the executor kept them.
     """
 
     handle_id: str
@@ -51,6 +52,8 @@ class StageSettled:
     metrics: tuple[StageMetric, ...]
     summary: str | None
     failure: str | None
+    stdout: str | None = None
+    stderr: str | None = None
 
 
 class MeasurementObserver(Protocol):
@@ -114,6 +117,8 @@ class MeasurementProgress:
                     else tuple(StageMetric(m.name, m.value, m.unit) for m in evidence.metrics),
                     summary=None if evidence is None else evidence.semantic_summary,
                     failure=step.failure,
+                    stdout=step.stdout_tail,
+                    stderr=step.stderr_tail,
                 )
             )
 

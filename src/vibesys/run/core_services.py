@@ -10,7 +10,7 @@ cannot serve, fails at composition with the name of what is missing, never mid-r
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel
@@ -27,6 +27,7 @@ from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import ArtifactStore, CorePlan, CoreRunContext
 from vs_runtime.api.core import (
     CoreStartup,
+    IgnoreCommits,
     IgnoreMeasurement,
     MeasurementServices,
     OperationPorts,
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
     from vs_project.api import Project, StateNamespace, StateStore
     from vs_runtime.api import AgentRole, CorePolicy, RunFacts
     from vs_runtime.api.core import (
+        CommitObserver,
         CoreRuntimeBindings,
         MeasurementObserver,
         OperationCatalog,
@@ -128,6 +130,8 @@ class CoreResources:
     """The run's clock: it places the deadline and later paces the loop on one timeline."""
     measurement_observer: MeasurementObserver = field(default_factory=IgnoreMeasurement)
     """Hears each measurement stage start and end, for the host's event stream."""
+    commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
+    """Hears each confirmed commit, for committed views and round events."""
     agent_lifecycle: AgentExecutionLifecycleSink = ignore_lifecycle
     """Receives the start and end of each provider turn, for the host's event stream."""
 
@@ -200,7 +204,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         run_id=run_id,
         strategy=plan.strategy,
         state=state,
-        bindings=bindings,
+        bindings=replace(bindings, commits=resources.commit_observer),
         catalog=catalog,
         store=resources.project.state_store(run_id),
         publications=publications,

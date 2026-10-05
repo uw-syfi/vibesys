@@ -13,11 +13,20 @@ from vibesys.orchestration.dynamic.core_policy._policy import (
     build_core_policy,
 )
 from vibesys.orchestration.dynamic.core_policy._projection import project_strategy_state
-from vibesys.orchestration.dynamic.core_policy._roles import CORE_ROLES, JUDGE
+from vibesys.orchestration.dynamic.core_policy._roles import (
+    CORE_ROLES,
+    IMPLEMENTER,
+    JUDGE,
+    ORCHESTRATOR,
+    PROFILER,
+)
 
 __all__ = [
     "CORE_ROLES",
+    "IMPLEMENTER",
     "JUDGE",
+    "ORCHESTRATOR",
+    "PROFILER",
     "UNBOUNDED_DEADLINE_AT",
     "DynamicCorePolicy",
     "PolicyInputs",

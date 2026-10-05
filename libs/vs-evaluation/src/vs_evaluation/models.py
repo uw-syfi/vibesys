@@ -183,8 +183,17 @@ class AvailabilitySnapshot(BaseModel):
         return 0 <= now - self.observed_at <= self.fresh_for_s
 
 
+STAGE_OUTPUT_TAIL_CHARS = 4000
+"""The most output kept per stream of one stage, from the end where the cause usually is."""
+
+
 class EvaluationStepResult(BaseModel):
-    """Terminal result and elapsed duration for one planned stage."""
+    """Terminal result and elapsed duration for one planned stage.
+
+    ``stdout_tail`` and ``stderr_tail`` are what the stage's command printed, for an
+    operator watching the run. They are no evidence: they never enter an evidence
+    identity and no agent reads them.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -195,6 +204,8 @@ class EvaluationStepResult(BaseModel):
     failure_kind: StageFailureKind | None = None
     """Absent legacy provenance retains execution stop-on-failure semantics."""
     duration_s: FiniteFloat | None = Field(default=None, ge=0)
+    stdout_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
+    stderr_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
 
     @model_validator(mode="after")
     def _result_matches_state(self) -> EvaluationStepResult:

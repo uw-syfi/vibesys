@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 
 from vs_evaluation.api import (
     MAX_EVIDENCE_SUMMARY_CHARS,
+    STAGE_OUTPUT_TAIL_CHARS,
     AvailabilitySnapshot,
     EvaluationRequest,
     EvaluationState,
@@ -354,6 +355,8 @@ class SemanticSlurmEvaluationExecutor:
                     state=StageState.SUCCEEDED if completed else StageState.FAILED,
                     result=evidence.model_dump(mode="json"),
                     duration_s=raw_step.duration_s,
+                    stdout_tail=raw.stdout[-STAGE_OUTPUT_TAIL_CHARS:] or None,
+                    stderr_tail=raw.stderr[-STAGE_OUTPUT_TAIL_CHARS:] or None,
                     failure_kind=None if completed else StageFailureKind.COLLECTION,
                     failure=(
                         None

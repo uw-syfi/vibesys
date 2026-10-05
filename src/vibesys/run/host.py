@@ -573,6 +573,9 @@ class _ProductHostFactory:
                 clock=WallRunClock(),
                 agent_lifecycle=self.integration.agent_execution_event,
                 measurement_observer=CoreMeasurementEvents(self.integration.events),
+                commit_observer=self.integration.core_commit_observer(
+                    project.state.run_id, self.projector, self.plugin.id
+                ),
                 session_spec=agent_session_spec(
                     client=client,
                     environment=environment,

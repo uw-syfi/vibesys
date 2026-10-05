@@ -180,6 +180,27 @@ class PublicationDelivery(Protocol):
     ) -> PublicationAcknowledgement: ...
 
 
+class CommitObserver(Protocol):
+    """Hears each runtime record the store confirmed, for display and projections only.
+
+    It runs after the commit is durable and on the loop's thread, and it must not raise.
+    ``previous`` is the record this process held before the commit: the last durable one,
+    the fresh record of a run that had none, or None when it held nothing.
+    """
+
+    def committed(self, previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]) -> object:
+        """One commit became durable."""
+        ...
+
+
+class IgnoreCommits:
+    """The observer of a host that shows nothing about commits."""
+
+    def committed(self, previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]) -> None:
+        """Drop the report."""
+        del previous, current
+
+
 class _Input[S: StrategyState](BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     event: CoreEvent
@@ -218,6 +239,7 @@ class CoreRuntimeBindings:
     registry: OperationRegistry = field(default_factory=OperationRegistry)
     executors: RequestExecutors = field(default_factory=RequestExecutors)
     transitions: CoreTransitions = field(default_factory=ProductionCoreTransitions)
+    commits: CommitObserver = field(default_factory=IgnoreCommits)
 
 
 class CoreRuntime[S: StrategyState]:
@@ -246,6 +268,7 @@ class CoreRuntime[S: StrategyState]:
         self._registry = selected.registry
         self._executors = selected.executors
         self._transitions = selected.transitions
+        self._commits = selected.commits
         self._record_model = cast(
             "type[RuntimeRecord[S]]", RuntimeRecord.__class_getitem__(type(strategy.state))
         )
@@ -544,8 +567,10 @@ class CoreRuntime[S: StrategyState]:
                 self._halted = True
                 message = "store acknowledged a different runtime record"
                 raise RuntimeCommitError(message)
+            previous = self._record
             self._record = validated
             self._storage_revision = stored.revision
+            self._commits.committed(previous, validated)
             return
         self._halted = True
         reloaded = self._load()
