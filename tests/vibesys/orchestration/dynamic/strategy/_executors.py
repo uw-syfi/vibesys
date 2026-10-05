@@ -52,7 +52,7 @@ from vs_core.api import (
     SubmitMeasurement,
     VerifyAdoption,
 )
-from vs_core.testing.drive import Answer, Running, Succeeded, Unknown
+from vs_core.testing.drive import Answer, Failed, Running, Succeeded, Unknown
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -81,7 +81,10 @@ class Executors:
     # Throughput per candidate commit; None makes the benchmark fail.
     benchmark: Callable[[str], float | None] = lambda _commit: 100.0
     accuracy: Callable[[str], bool] = lambda _commit: True
-    baseline_value: float = 50.0
+    # None makes the input's benchmark fail, as a workload the input cannot run does.
+    baseline_value: float | None = 50.0
+    # True for a measurement whose job ends without any evidence (its infrastructure failed).
+    infrastructure_failure: Callable[[MeasurementPlan], bool] = lambda _plan: False
     parent_verified: Callable[[str], bool] = lambda _commit: True
     submit: Callable[[SubmitMeasurement], Answer] | None = None
     jobs: int = 0
@@ -164,6 +167,8 @@ class Executors:
         )
         plan = job.plan
         assert isinstance(plan.candidate, RevisionRef)
+        if self.infrastructure_failure(plan):
+            return Failed(accepted=True)
         commit = plan.candidate.revision_id.root
         refs: list[EvidenceRef] = []
         stages: list[EvaluationStageResult] = []

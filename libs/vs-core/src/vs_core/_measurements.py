@@ -1176,7 +1176,12 @@ def _job_observed(
                 ),
             )
         if observation.accepted and not updated.evidence:
-            requests = (_job_request(CollectEvidence, updated, context, "evidence"),)
+            collect = _job_request(CollectEvidence, updated, context, "evidence")
+            # One collection per job. A collection that yields nothing (a job that failed
+            # before producing evidence) is itself observed as a job event, and asking
+            # again on that event would never end.
+            if not any(row.request_id == collect.request_id for row in context.intents.intents):
+                requests = (collect,)
     closing = _ended(context, job, event)
     return AreaChange(
         state=state,
@@ -1367,12 +1372,14 @@ def _job_request(
     source = job.submission_id if isinstance(job, OwnedJob) else job.request_id
     observation = job.observation
     sequence = observation.sequence if observation is not None else 0
+    # Evidence is collected once per job, so its id does not name an observation.
+    suffix = "" if model is CollectEvidence else f":{sequence}"
     canonical = next((r for r in context.intents.intents if r.request_id == source), None)
     # A poll raised by the clock has no triggering observation to inherit the
     # submission's decision from, so it names the decision itself.
     inherited = canonical.request if canonical is not None and model is ObserveOwnedJob else None
     return model(
-        request_id=RequestId(root=f"measurement:{source.root}:{action}:{sequence}"),
+        request_id=RequestId(root=f"measurement:{source.root}:{action}{suffix}"),
         scope=job.scope,
         admission_id=canonical.request.admission_id if canonical is not None else None,
         decision_id=inherited.decision_id if inherited is not None else None,
