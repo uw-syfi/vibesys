@@ -171,9 +171,16 @@ def test_registered_turn_inspection_requires_accepted_declared_normalized_origin
         }
     )
     if field == "exact":
-        # Exact ingress reaches the explicitly unimplemented ledger producer.
-        with pytest.raises(core.KernelNotImplementedError, match="_intent_ledger"):
-            core.step(state, event)
+        # Exact ingress is ledgered: the unknown query stays open, and the target
+        # fact repeats the accepted observation, so the original is unchanged.
+        result = core.step(state, event)
+        query_after, original_after = (
+            next(row for row in result.state.intents.intents if row.request_id == identity)
+            for identity in (query_id, record.request_id)
+        )
+        assert query_after.observation == event.observation
+        assert query_after.phase == core.IntentPhase.RECONCILING
+        assert original_after == record
     else:
         with pytest.raises(core.ContractError, match="invocation"):
             core.step(state, event)
