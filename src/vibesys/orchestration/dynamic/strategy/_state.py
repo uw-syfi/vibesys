@@ -62,7 +62,9 @@ class Step(StrEnum):
     NEEDED: decide must propose the phase's next decision. RENDERING / RENDERED:
     a prompt render is in flight or done. AWAITING: a decision or turn is in
     flight and an event moves the subject on. SUSPENDED: the turn yielded to wait
-    for its evaluations and only `ResumeAuthorized` moves it on.
+    for its evaluations and only `ResumeAuthorized` moves it on. RETAINING: a write
+    turn answered, but core has not yet retained (or declined) its checkpoint, so
+    the reply is held until `decide` can read the candidate from the view.
     """
 
     NEEDED = "needed"
@@ -70,6 +72,7 @@ class Step(StrEnum):
     RENDERED = "rendered"
     AWAITING = "awaiting"
     SUSPENDED = "suspended"
+    RETAINING = "retaining"
 
 
 class WorkKind(StrEnum):
@@ -257,6 +260,9 @@ class AttemptRecord(Value):
     # Implementer turns charged so far, bounded by `max_retries_per_round`.
     turns_spent: int = Field(default=0, ge=0)
     settle_sent: bool = False
+    # The implementer reply (JSON) and turn waiting for its checkpoint, while RETAINING.
+    held_reply: str | None = None
+    held_invocation: InvocationRef | None = None
 
 
 class Winner(Value):

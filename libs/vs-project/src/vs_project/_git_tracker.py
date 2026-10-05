@@ -636,7 +636,10 @@ class GitTracker:
         Role-isolated agents such as the orchestrator and judge are allowed to
         inspect the candidate but not mutate it.  Callers checkpoint framework
         state first, then use this method to detect any writes the agent made
-        during its turn before restoring the checkpoint.
+        during its turn before restoring the checkpoint.  Trusted VibeSys files
+        (``.vibesys``) are not part of the candidate: the framework writes its own
+        run state there while a turn is in flight, and tree restores preserve them,
+        so counting them would report changes that no restore can revert.
         """
         result = self.run(
             [
@@ -646,6 +649,7 @@ class GitTracker:
                 "--untracked-files=all",
                 "--",
                 ".",
+                *self._state_integration.metadata_restore_exclusions,
             ]
         )
         prefix_result = self.run(["git", "rev-parse", "--show-prefix"])

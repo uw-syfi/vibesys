@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from vs_core.api import (
     Capabilities,
     CoreState,
+    EvidenceRequirements,
     IntentsState,
     Limits,
     OperationRegistry,
@@ -80,6 +81,7 @@ class CoreStartup:
     deadline_at: float
     limits: Limits = dataclasses.field(default_factory=Limits)
     lifecycle: frozenset[LifecycleCapability] = frozenset()
+    requirements: EvidenceRequirements = dataclasses.field(default_factory=EvidenceRequirements)
 
 
 def new_core_state(
@@ -113,6 +115,7 @@ def new_core_state(
             capabilities=selected,
             limits=startup.limits,
             declaration=declaration,
+            requirements=startup.requirements,
         ),
     )
 

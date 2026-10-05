@@ -49,6 +49,7 @@ from .types.scheduling import (
     SlotChargeEnded,
     SlotReleased,
 )
+from .types.sessions import RunSessionsDrainRequested
 from .types.strategy import Accepted, Operation, Rejected, StartAttempt, Stop
 
 if TYPE_CHECKING:
@@ -572,7 +573,21 @@ def _control(
     if event.action == "pause":
         return AreaChange(state=closed)
     drained = _fill(closed, context)
-    return drained.model_copy(update={"signals": (*cancellations, *drained.signals)})
+    return drained.model_copy(
+        update={"signals": (*cancellations, *_run_sessions_drain(context), *drained.signals)}
+    )
+
+
+def _run_sessions_drain(context: SchedulingContext) -> tuple[Signal, ...]:
+    """Close the run-owned sessions under the first committed Stop's authority.
+
+    Attempt retirement closes only attempt-owned sessions, so without this a run-scoped
+    session (the planner's) is never released and the closing run cannot become terminal.
+    """
+    stop = _first_stop(context)
+    if stop is None:
+        return ()
+    return (RunSessionsDrainRequested(scope=stop.scope, authority=stop.decision_id),)
 
 
 def _retired_entry(request: AdmissionRequest, event: QueueEntryRetired) -> bool:

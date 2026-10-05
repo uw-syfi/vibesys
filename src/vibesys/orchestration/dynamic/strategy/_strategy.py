@@ -83,7 +83,8 @@ class DynamicStrategy:
         """Propose this revision's ordered decisions and the state that accounts for them."""
         if self.state.phase is RunPhase.FINISHED:
             return Proposal(state=self.state, decisions=())
-        draft = Draft(view=view, config=self.config, state=self.state)
+        state = attempt_events.settle_retained(self.state, view, self.config)
+        draft = Draft(view=view, config=self.config, state=state)
         baseline.decide(draft)
         attempts.decide(draft)
         planner.decide(draft)
