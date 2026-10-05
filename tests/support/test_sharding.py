@@ -2,15 +2,38 @@
 
 from __future__ import annotations
 
+import json
+import tomllib
 from collections import Counter
+from pathlib import Path
 
 import pytest
+import yaml
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.sharding import assign_shards, order_test_indices, parse_shard
+from tests.support.sharding import (
+    DEFAULT_DURATIONS,
+    HEAVY_SECONDS,
+    SHARD_BUDGET_SECONDS,
+    assign_heavy_items,
+    assign_shards,
+    discover_test_files,
+    drift_report,
+    is_heavy,
+    merge_durations,
+    order_test_indices,
+    parse_shard,
+    projected_shard_seconds,
+    shard_loads,
+)
+
+_REPO = Path(__file__).resolve().parents[2]
 
 _NAMES = st.text(alphabet="abcdefgh/_.", min_size=1, max_size=12)
 _DURATIONS = st.dictionaries(_NAMES, st.floats(min_value=0, max_value=500), max_size=30)
+_WHOLE_DURATIONS = st.dictionaries(
+    _NAMES, st.floats(min_value=0, max_value=HEAVY_SECONDS), max_size=30
+)
 _FILES = st.lists(_NAMES, min_size=1, max_size=40)
 _COUNTS = st.integers(min_value=1, max_value=6)
 
@@ -55,7 +78,7 @@ def test_duration_order_estimates_unknown_files_from_known_files() -> None:
     ]
 
 
-@given(files=_FILES, durations=_DURATIONS, count=_COUNTS)
+@given(files=_FILES, durations=_WHOLE_DURATIONS, count=_COUNTS)
 def test_every_file_lands_in_exactly_one_valid_shard(
     files: list[str], durations: dict[str, float], count: int
 ) -> None:
@@ -65,7 +88,7 @@ def test_every_file_lands_in_exactly_one_valid_shard(
     assert all(1 <= shard <= count for shard in assignment.values())
 
 
-@given(durations=_DURATIONS, count=_COUNTS, data=st.data())
+@given(durations=_WHOLE_DURATIONS, count=_COUNTS, data=st.data())
 def test_the_assignment_does_not_depend_on_collection_order(
     durations: dict[str, float], count: int, data: st.DataObject
 ) -> None:
@@ -75,7 +98,7 @@ def test_the_assignment_does_not_depend_on_collection_order(
     assert assign_shards(shuffled, durations, count) == assign_shards(files, durations, count)
 
 
-@given(files=_FILES, durations=_DURATIONS, count=_COUNTS)
+@given(files=_FILES, durations=_WHOLE_DURATIONS, count=_COUNTS)
 def test_the_heaviest_shard_exceeds_the_mean_by_less_than_one_file(
     files: list[str], durations: dict[str, float], count: int
 ) -> None:
@@ -102,3 +125,95 @@ def test_parse_shard_round_trips_every_valid_spec(count: int, data: st.DataObjec
 def test_parse_shard_rejects_malformed_specs(spec: str) -> None:
     with pytest.raises(ValueError, match="--shard"):
         parse_shard(spec)
+
+
+_ITEM_COUNTS = st.dictionaries(_NAMES, st.integers(min_value=1, max_value=30), max_size=10)
+
+
+@given(durations=_DURATIONS, counts=_ITEM_COUNTS, count=_COUNTS)
+def test_every_test_runs_in_exactly_one_shard_whether_or_not_its_file_is_heavy(
+    durations: dict[str, float], counts: dict[str, int], count: int
+) -> None:
+    whole, loads = shard_loads(counts, durations, count)
+    spread, _ = assign_heavy_items(counts, durations, loads)
+
+    for name, total in counts.items():
+        owners = (
+            [spread[name, index] for index in range(total)]
+            if is_heavy(name, durations)
+            else [whole[name]]
+        )
+        assert all(1 <= owner <= count for owner in owners)
+    assert set(whole) == {name for name in counts if not is_heavy(name, durations)}
+    assert {name for name, _ in spread} == {name for name in counts if is_heavy(name, durations)}
+    assert len(spread) == sum(total for name, total in counts.items() if is_heavy(name, durations))
+
+
+def test_a_heavy_file_is_spread_over_every_shard_instead_of_filling_one() -> None:
+    durations = {"sweep.py": 10 * HEAVY_SECONDS, "small.py": 1.0}
+    whole, loads = shard_loads(["sweep.py", "small.py"], durations, 4)
+    spread, final = assign_heavy_items({"sweep.py": 40}, durations, loads)
+
+    assert set(whole) == {"small.py"}
+    assert set(spread.values()) == {1, 2, 3, 4}
+    assert max(final) - min(final) <= durations["sweep.py"] / 40
+    assert max(final) < durations["sweep.py"] / 2
+
+
+@given(
+    records=st.lists(
+        st.dictionaries(_NAMES, st.floats(min_value=0, max_value=500), max_size=8), max_size=5
+    )
+)
+def test_merging_shard_records_keeps_every_file_and_adds_its_seconds(
+    records: list[dict[str, float]],
+) -> None:
+    merged = merge_durations(records)
+
+    assert set(merged) == {name for record in records for name in record}
+    for name, seconds in merged.items():
+        assert seconds == pytest.approx(
+            sum(r.get(name, 0.0) for r in records), abs=0.01 * len(records)
+        )
+
+
+def test_a_file_missing_from_the_record_or_far_over_it_is_reported_as_stale() -> None:
+    seconds, stale = drift_report(
+        {"new.py": 600.0, "old.py": 100.0, "close.py": 50.0, "tiny.py": 20.0},
+        {"old.py": 90.0, "close.py": 30.0, "tiny.py": 1.0},
+    )
+
+    assert seconds == pytest.approx(385.0)
+    assert [line.split(":")[0] for line in stale] == ["new.py"]
+
+
+def test_discovery_lists_test_files_and_skips_caches_and_hidden_directories(tmp_path: Path) -> None:
+    for relative in [
+        "a/test_x.py",
+        "a/y_test.py",
+        "a/helper.py",
+        "a/__pycache__/test_z.py",
+        "a/.hid/test_w.py",
+    ]:
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relative).write_text("")
+
+    assert discover_test_files(tmp_path, ["a", "missing"], ["test_*.py", "*_test.py"]) == [
+        "a/test_x.py",
+        "a/y_test.py",
+    ]
+
+
+def test_the_checked_in_record_keeps_every_ci_shard_within_its_budget() -> None:
+    durations = json.loads(DEFAULT_DURATIONS.read_text())
+    workflow = yaml.safe_load((_REPO / ".github/workflows/test.yml").read_text())
+    shards = len(workflow["jobs"]["test"]["strategy"]["matrix"]["shard"])
+    options = tomllib.loads((_REPO / "pyproject.toml").read_text())["tool"]["pytest"]["ini_options"]
+    files = discover_test_files(_REPO, options["testpaths"], ["test_*.py", "*_test.py"])
+
+    projected = projected_shard_seconds(files, durations, shards)
+
+    assert max(projected) <= SHARD_BUDGET_SECONDS, (
+        f"projected slowest shard {max(projected):.0f}s exceeds {SHARD_BUDGET_SECONDS:.0f}s: "
+        "add shards in .github/workflows/test.yml or refresh tests/support/shard_durations.json"
+    )
