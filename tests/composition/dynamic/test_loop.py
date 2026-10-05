@@ -201,13 +201,6 @@ def test_an_ambiguous_dispatched_turn_stalls_the_run_without_replanning(tmp_path
     assert records.selection is None
 
 
-# The planner's turn fails the way the provider reports giving up on its schema. Core's
-# turn result carries only a failed status, so the strategy corrects without the text.
-_ERROR_TEXT_GAP = (
-    "TurnResult has no failure detail: the correction cannot carry the provider's "
-    "validation errors, libs/vs-core/src/vs_core/types/sessions.py:378 (TurnResult) and "
-    "src/vibesys/orchestration/dynamic/strategy/_planner.py:127 (_parse); owner vs-core"
-)
 _PLANNER_FAULT_GAP = (
     "the planner is corrected max_corrections times and then the run fails; the legacy loop "
     "asked a fresh planning turn within max_retries_per_round, "
@@ -247,7 +240,6 @@ def test_a_provider_schema_failure_is_corrected_instead_of_ending_the_run(
     assert records.outcome == ("terminal", "success")
 
 
-@pytest.mark.xfail(strict=True, reason=_ERROR_TEXT_GAP)
 def test_a_correction_names_the_errors_the_provider_reported(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     agents = (
@@ -300,7 +292,6 @@ def test_a_plan_the_schema_rejects_is_corrected_and_the_run_completes(tmp_path: 
     assert [item["hypothesis_id"] for item in records.strategy["hypotheses"]] == ["0"]
 
 
-@pytest.mark.xfail(strict=True, reason=_ERROR_TEXT_GAP)
 def test_a_plan_that_fails_validation_is_corrected_with_the_field_named_errors(
     tmp_path: Path,
 ) -> None:

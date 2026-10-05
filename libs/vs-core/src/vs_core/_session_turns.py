@@ -65,6 +65,7 @@ from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import ExecuteRegisteredOperation, InspectRequest, IntentPhase
 from .types.kernel import AreaChange, DecisionCompleted
 from .types.sessions import (
+    TURN_FAILURE_DETAIL_LIMIT,
     Access,
     CancelTurn,
     CloseSession,
@@ -90,6 +91,7 @@ from .types.sessions import (
     SessionsAcquireRequested,
     SessionsState,
     SessionView,
+    TurnFailureKind,
     TurnInputsReserved,
     TurnObserved,
     TurnRequested,
@@ -98,7 +100,7 @@ from .types.sessions import (
 from .types.strategy import Accepted, Operation, Rejected, RequestTurn
 
 if TYPE_CHECKING:
-    from .types.common import Observation, SessionId
+    from .types.common import Observation, SchemaRef, SessionId
     from .types.evaluation_history import EvaluationHistoryCursor
     from .types.intents import Intent, Request
     from .types.kernel import SessionsContext, Signal
@@ -1087,7 +1089,7 @@ def _abandon_turn_acquisition(
     return AreaChange(
         state=state,
         signals=tuple(signals),
-        events=(TurnResult(invocation=ref, observation=observation),),
+        events=(_turn_result(ref, observation),),
     )
 
 
@@ -1373,6 +1375,35 @@ def _terminal_signals(
     return tuple(signals)
 
 
+def _turn_result(
+    ref: InvocationRef,
+    observation: Observation,
+    *,
+    output_schema: SchemaRef | None = None,
+    output_json: str | None = None,
+) -> TurnResult:
+    """The terminal result of a turn, with its failure kind and bounded executor text."""
+    if observation.status == ObservationStatus.SUCCEEDED:
+        return TurnResult(
+            invocation=ref,
+            observation=observation,
+            output_schema=output_schema,
+            output_json=output_json,
+        )
+    if observation.status == ObservationStatus.CANCELLED:
+        failure = TurnFailureKind.CANCELLED
+    else:
+        failure = TurnFailureKind.PROVIDER_FAILED
+    return TurnResult(
+        invocation=ref,
+        observation=observation,
+        output_schema=output_schema,
+        output_json=output_json,
+        failure=failure,
+        detail=observation.diagnostic[:TURN_FAILURE_DETAIL_LIMIT],
+    )
+
+
 def _observed_phase(invocation: Invocation, event: TurnObserved) -> SessionPhase:
     observation = event.observation
     if event.output_schema is not None and event.output_schema != invocation.turn.output_schema:
@@ -1647,9 +1678,9 @@ def _turn_observed(
         return AreaChange(state=state, signals=tuple(signals), requests=requests)
     signals.extend(_terminal_signals(state, context, invocation, event))
     events = (
-        TurnResult(
-            invocation=event.invocation,
-            observation=observation,
+        _turn_result(
+            event.invocation,
+            observation,
             output_schema=event.output_schema,
             output_json=event.output_json,
         ),

@@ -549,7 +549,7 @@ def on_turn(
     if event.observation.status is not ObservationStatus.SUCCEEDED or event.output_json is None:
         reason = f"{role.value} turn did not complete ({event.observation.status.value})"
         if role is Role.IMPLEMENTER:
-            return _retry(state, index, config, reason, reason)
+            return _retry(state, index, config, event.detail or reason, reason)
         return fail(state, index, reason)
     if role is Role.PROFILER:
         return _put(state, index, _profiled(record, config))

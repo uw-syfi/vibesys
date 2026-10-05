@@ -128,7 +128,9 @@ def _parse(
     state: DynamicStrategyState, view: RunView, config: DynamicConfig, event: TurnResult
 ) -> tuple[PortfolioPlan | None, str]:
     if event.observation.status is not ObservationStatus.SUCCEEDED or event.output_json is None:
-        return None, f"the planner turn did not complete ({event.observation.status.value})"
+        return None, event.detail or (
+            f"the planner turn did not complete ({event.observation.status.value})"
+        )
     revisions = tuple(
         item.snapshot.revision.revision_id.root for item in context.offered(state, view)
     )
