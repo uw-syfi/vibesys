@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
@@ -25,6 +25,9 @@ from tests.support.skeleton_world import LEASE, Process, drive
 from tests.support.waiting_loop_strategy import LoopState, LoopStrategy
 
 from vs_core.api import Limits, RunStatus
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 async def play(

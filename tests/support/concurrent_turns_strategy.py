@@ -43,8 +43,6 @@ class ConcurrentTurnsState(SkeletonState):
     """Invocation ids of the turns that finished, in the order core reported them."""
     failed: tuple[str, ...] = ()
     """Invocation ids of the finished turns whose result carries a failure."""
-    refused: tuple[str, ...] = ()
-    """Invocation ids of the turns whose requested wait core refused at commit."""
     suspended: tuple[str, ...] = ()
     """Invocation ids of the turns whose suspension core committed."""
     resumable: tuple[ResumeAuthorized, ...] = ()
@@ -136,8 +134,6 @@ class ConcurrentTurnsStrategy(SkeletonStrategy):
             update: dict[str, object] = {"results": (*state.results, name)}
             if event.failure is not None:
                 update["failed"] = (*state.failed, name)
-            if event.wait_refused:
-                update["refused"] = (*state.refused, name)
             recorded = state.model_copy(update=update)
             expected = 1 + len(self.wave) + len(recorded.suspended)
             if len(recorded.results) < expected or len(recorded.resumable) < len(

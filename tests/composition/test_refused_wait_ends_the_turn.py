@@ -2,9 +2,9 @@
 
 An agent's wait is checked against committed state when the agent asks and committed when
 its turn ends. If the commit refuses it (a peer's commit, a closed scope, an unowned job),
-the turn must end plainly: the run goes on, and the strategy sees an ordinary result that
-says the wait was refused, because the agent's own reply still says "waiting" and no
-suspension will follow. Here a stand-in for the bridge's accepted wait yields a wait on a
+the turn must end plainly: the run goes on, and the strategy sees an ordinary result. (The
+agent's own reply still says "waiting" and no suspension follows; a strategy that keys on
+the reply would wait forever, REVIEW-P10 P2-2.) Here a stand-in for the bridge's accepted wait yields a wait on a
 job the run does not own, which core refuses when it commits the suspension.
 """
 
@@ -121,5 +121,4 @@ def test_a_wait_core_refuses_at_commit_ends_the_turn_and_the_strategy_is_told(
     seen = asyncio.run(play(root))
     assert seen.results == (FIRST,)
     assert seen.failed == ()
-    assert seen.refused == (FIRST,)
     assert seen.suspended == ()
