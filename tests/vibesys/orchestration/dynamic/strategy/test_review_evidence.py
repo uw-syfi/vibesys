@@ -101,7 +101,11 @@ def test_the_judge_is_given_the_evidence_id_verdicts_and_metric_of_an_accepted_e
     run_shell(executors)
 
     (prompt,) = _review_prompts(executors)
-    by_kind = {item.kind: item for item in prompt.evaluations}
+    assert {item.kind for item in prompt.evaluations} == {EvidenceKind.LOCAL_VALIDATION}
+    by_kind = {
+        EvidenceKind(item.evidence_id.root.split(":")[0].replace("accuracy", "correctness")): item
+        for item in prompt.evaluations
+    }
     assert set(by_kind) == {EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK}
     assert all(item.revision == prompt.candidate for item in prompt.evaluations)
     assert by_kind[EvidenceKind.CORRECTNESS].passed is True
@@ -122,7 +126,9 @@ def test_a_failed_benchmark_reaches_the_judge_with_what_it_measured() -> None:
     run_shell(executors)
 
     (prompt,) = _review_prompts(executors)
-    benchmark = next(item for item in prompt.evaluations if item.kind is EvidenceKind.BENCHMARK)
+    benchmark = next(
+        item for item in prompt.evaluations if item.evidence_id.root.startswith("benchmark:")
+    )
     assert benchmark.passed is False
     assert benchmark.partial is not None
     assert benchmark.feedback == "benchmark failed"
@@ -191,7 +197,7 @@ def _record(candidate: RevisionRef | None = None) -> AttemptRecord:
 
 
 def _local(name: str, **changes: object) -> EvidenceRef:
-    base = evidence_ref(name, EvidenceKind.BENCHMARK, _candidate()).model_copy(
+    base = evidence_ref(name, EvidenceKind.LOCAL_VALIDATION, _candidate()).model_copy(
         update={
             "purpose": "local-validation",
             "scope": Scope(owner=ATTEMPT, generation=2),

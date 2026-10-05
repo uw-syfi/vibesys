@@ -149,7 +149,9 @@ class Executors:
         refs: list[EvidenceRef] = []
         stages: list[EvaluationStageResult] = []
         for stage in request.plan.stages:
-            reading = self._reading(request.plan, _KINDS[stage.stage_id], stage.stage_id, commit)
+            reading = self._reading(
+                request.plan, _KINDS[stage.stage_id], stage.stage_id, commit
+            ).model_copy(update={"kind": EvidenceKind.LOCAL_VALIDATION})
             self.readings[reading.evidence_id] = reading
             refs.append(self._ref(request.scope, request.request_id, request.plan, reading))
             outcome = (
