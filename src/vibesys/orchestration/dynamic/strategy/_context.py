@@ -104,8 +104,10 @@ def _tail(text: str, limit: int) -> str:
 
 
 def _fence(text: str) -> str:
-    """A Markdown code fence that no line of ``text`` can close: longer than its longest
-    run of backticks (at least three)."""
+    """A Markdown code fence that no line of ``text`` can close.
+
+    It is longer than the longest run of backticks in the text, and at least three.
+    """
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
     return "`" * max(3, longest + 1)
 
