@@ -2262,7 +2262,11 @@ def test_required_group_reattaches_run_owned_lease_without_transferring_or_closi
 
 
 def test_a_session_close_releases_its_closing_attempt_exactly_once() -> None:
-    """The ledger and Sessions both used to emit the release, and the step failed on the second."""
+    """One release per close: two emitters failed the step, and a dropped edge stalled closure.
+
+    Sessions marks the lease terminal before the release arrives, so graph discovery no
+    longer lists the edge; the closing attempt must still progress to its discard.
+    """
     state, request = closing_session_state()
     attempt_id = core.AttemptId(root="closing")
     owner_scope = core.Scope(owner=attempt_id, generation=0)
@@ -2292,10 +2296,36 @@ def test_a_session_close_releases_its_closing_attempt_exactly_once() -> None:
         ),
         release_dependencies=(dependency,),
     )
-    state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner,))})
+    fence = core.CloseAttemptScope(
+        request_id=core.RequestId(root="retire"),
+        scope=owner_scope,
+        admission_id=admission,
+        deadline_at=100.0,
+        attempt=core.AttemptRef(attempt_id=attempt_id, generation=0),
+    )
+    fenced = (
+        with_intent(state, fence)
+        .intents.intents[0]
+        .model_copy(
+            update={
+                "observation": turn_observation(
+                    fence, terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
+                ).model_copy(update={"children_complete": True, "admission_id": admission})
+            }
+        )
+    )
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(attempts=(owner,)),
+            "intents": state.intents.model_copy(
+                update={"intents": (*state.intents.intents, fenced)}
+            ),
+        }
+    )
     observation = turn_observation(
         request, terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
     ).model_copy(update={"released": True, "children_complete": True, "admission_id": admission})
     result = reload_step(state, core.RequestObserved(observation=observation))
     assert result.state.sessions.sessions[0].phase == core.SessionPhase.TERMINAL
+    assert any(isinstance(item, core.DiscardWorkspace) for item in result.requests)
     assert dependency not in result.state.attempts.attempts[0].release_dependencies

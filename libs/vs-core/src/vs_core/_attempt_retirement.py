@@ -1752,7 +1752,9 @@ def _closure_event(
         owner = _discover(owner, context)
         if event.observation.status == ObservationStatus.UNKNOWN:
             return owner, (), _inspect_unknown(owner, context, event)
-        if event.dependency in owner.release_dependencies and _proof_matches(owner, context, event):
+        # Discovery lists only unreleased edges, so a release that Sessions or Evaluation
+        # already recorded is absent here; the proof, not the list, authorizes progress.
+        if _proof_matches(owner, context, event):
             owner = owner.model_copy(
                 update={
                     "release_dependencies": tuple(
