@@ -296,7 +296,11 @@ class PollingEvaluationExecutor:
             semantic_summary=summary,
             metrics=metrics,
             partial_measurement=partial,
-            failure_kind=None if outcome is EvidenceOutcome.PASSED else kind,
+            failure_kind=(
+                None
+                if outcome is EvidenceOutcome.PASSED
+                else (kind or BenchmarkFailureKind.WORKLOAD)
+            ),
             accepted_round=0,
         )
         return _SemanticStageObservation(evidence=evidence, completed=completed)
