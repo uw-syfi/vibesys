@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 import vs_evaluation.api.testing as evaluation_testing
@@ -349,6 +349,10 @@ async def _stopped_after(spec: _WorldSpec, delay_s: float) -> None:
 
 @_worlds
 @_PROPERTY
+@example(delay_s=3.0)
+@example(delay_s=50.0)
+@example(delay_s=83.0)
+@example(delay_s=150.0)
 @given(delay_s=st.floats(0, 400, allow_nan=False))
 def test_a_stop_of_an_active_job_ends_canceled_with_one_scancel(
     spec: _WorldSpec, delay_s: float
@@ -407,6 +411,8 @@ async def test_a_stop_beyond_the_confirmation_bound_is_canceling_and_later_confi
     assert record.state is EvaluationState.CANCELING
     assert record.cancel_requested
     assert world.cluster.scancels == 1
+    # While the job tears down, confirming the stop must not send further scancels.
+    assert world.transport_scancels() <= 1
     world.clock.advance(_FOREVER)
     record = await coordinator.snapshot(handle.id)
     assert record.state is EvaluationState.CANCELED
