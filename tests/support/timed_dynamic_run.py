@@ -391,7 +391,7 @@ def _run(profile: TimingProfile, workspace: Path, stop_after: float | None) -> T
         timer = asyncio.ensure_future(stop_later(stop_after)) if stop_after is not None else None
         try:
             return await drive_core(host, loop_config), None
-        # lint-waiver: LW-601001 [BLE001]; the run's own failure is the observation: a test
+        # lint-waiver: LW-990101 [BLE001]; the run's own failure is the observation: a test
         # > asserts its type (a lapsed lease, a stop) and the virtual time it happened at.
         except BaseException as error:  # noqa: BLE001
             return None, error

@@ -27,15 +27,15 @@ class VirtualDeadlockError(RuntimeError):
     """Every task is waiting and no timer is scheduled: nothing can ever wake the run."""
 
 
-class _VirtualSelector(selectors.BaseSelector):
+class _VirtualSelector(selectors.DefaultSelector):
     """The loop's selector, with timer waits turned into clock jumps."""
 
     def __init__(self, clock: VirtualClock) -> None:
+        super().__init__()
         self._clock = clock
-        self._real = selectors.DefaultSelector()
 
     def select(self, timeout: float | None = None) -> list[tuple[selectors.SelectorKey, int]]:
-        ready = self._real.select(0)
+        ready = super().select(0)
         if ready or timeout == 0:
             return ready
         if timeout is None:
@@ -43,21 +43,6 @@ class _VirtualSelector(selectors.BaseSelector):
             raise VirtualDeadlockError(message)
         self._clock.at += timeout
         return []
-
-    def register(self, fileobj: Any, events: int, data: Any = None) -> selectors.SelectorKey:  # noqa: ANN401  # mirrors selectors.BaseSelector.register
-        return self._real.register(fileobj, events, data)
-
-    def unregister(self, fileobj: Any) -> selectors.SelectorKey:  # noqa: ANN401  # mirrors selectors.BaseSelector.unregister
-        return self._real.unregister(fileobj)
-
-    def modify(self, fileobj: Any, events: int, data: Any = None) -> selectors.SelectorKey:  # noqa: ANN401  # mirrors selectors.BaseSelector.modify
-        return self._real.modify(fileobj, events, data)
-
-    def get_map(self) -> Any:  # noqa: ANN401  # mirrors selectors.BaseSelector.get_map
-        return self._real.get_map()
-
-    def close(self) -> None:
-        self._real.close()
 
 
 class _VirtualLoop(asyncio.SelectorEventLoop):
@@ -82,6 +67,7 @@ class VirtualClock:
 
     async def sleep(self, seconds: float) -> None:
         """Wait until the virtual time is ``seconds`` later; other tasks run meanwhile."""
+        # test-isolation: this sleep runs on the virtual loop, whose time is this clock, so it never waits on the wall clock
         await asyncio.sleep(seconds)
 
 
