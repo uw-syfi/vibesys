@@ -38,6 +38,26 @@ class ExecutorCancellationUnknownError(RuntimeError):
         self.handle_id = handle_id
 
 
+class ExecutorCancellationUnconfirmedError(RuntimeError):
+    """Cancellation was requested for a known external job that is not yet seen ending.
+
+    The job identity is known, so this is not an unknown identity: the executor
+    sent its cancel request and its bounded confirmation wait ended while the
+    provider still reported the job active (for example while it tears down).
+    The caller treats the job as still owned and reconciles later, by cancelling
+    again or inspecting until a terminal state appears.
+    """
+
+    def __init__(self, handle_id: str, job_id: str) -> None:
+        """Retain the logical handle and the provider job that is still active."""
+        super().__init__(
+            f"cancellation of evaluation {handle_id!r} was requested for job {job_id!r}, "
+            "but the job was not observed to end within the confirmation wait"
+        )
+        self.handle_id = handle_id
+        self.job_id = job_id
+
+
 class ExecutorRejectedError(ValueError):
     """The executor refused the request before accepting it; a retry cannot succeed.
 

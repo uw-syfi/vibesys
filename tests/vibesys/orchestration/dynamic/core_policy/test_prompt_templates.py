@@ -119,10 +119,10 @@ _CONTEXTS: dict[PromptTemplate, st.SearchStrategy[PromptContext]] = {
 }
 
 
-def _variables(context: BaseModel) -> dict[str, object]:
+def _variables(context: BaseModel, *, agent_evaluation: bool = False) -> dict[str, object]:
     variables = {name: getattr(context, name) for name in type(context).model_fields}
     variables.pop("template")
-    return {"objective": _OBJECTIVE, **variables}
+    return {"objective": _OBJECTIVE, "agent_evaluation": agent_evaluation, **variables}
 
 
 def test_every_requestable_template_has_a_context_generator() -> None:
@@ -142,3 +142,18 @@ def test_a_template_renders_for_every_context_of_its_kind(
     assert text.strip()
     if template in (PromptTemplate.PORTFOLIO, PromptTemplate.IMPLEMENT, PromptTemplate.REVIEW):
         assert _OBJECTIVE in text
+
+
+@pytest.mark.parametrize("template", [PromptTemplate.IMPLEMENT, PromptTemplate.REVIEW])
+@given(data=st.data(), offered=st.booleans())
+def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
+    template: PromptTemplate, data: st.DataObject, *, offered: bool
+) -> None:
+    context = data.draw(_CONTEXTS[template])
+
+    text = TemplateRenderer(_ROOT).render_template(
+        f"{template.value}.j2", **_variables(context, agent_evaluation=offered)
+    )
+
+    assert ("submit_evaluation" in text) is offered
+    assert ("validate_evaluation_wait" in text) is offered

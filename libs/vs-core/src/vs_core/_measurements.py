@@ -7,6 +7,7 @@ receipt. Continuation wakes carry the exact facts before the atomic job update.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ._evaluation_history import produce_history
@@ -47,9 +48,13 @@ from .types.common import (
     RunStatus,
 )
 from .types.evaluation import (
+    AgentCall,
+    AgentMeasurementRequested,
+    AgentRejection,
     CancelOwnedJob,
     CollectEvidence,
     ContinuationJobsChanged,
+    ContinuationPhase,
     EvidenceAcceptanceReceipt,
     InspectOwnedJob,
     JobObserved,
@@ -356,12 +361,6 @@ def _requested(
                 ),
             ),
         )
-    matches = tuple(
-        b
-        for b in state.submission_budgets
-        if b.scope == event.scope and b.identity == identity.value
-    )
-    budget = matches[0] if matches else None
     # Replayed commands never allocate another ordinal, including changed timing.
     if any(
         isinstance(row.request, SubmitMeasurement)
@@ -369,6 +368,32 @@ def _requested(
         for row in context.intents.intents
     ):
         return AreaChange(state=state)
+    return _admit(
+        state, context, _Origin(event.scope, origin.value.decision_id), plan, identity.value
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _Origin:
+    """Who a submission is charged to: the scope and the Measure decision, if any."""
+
+    scope: Scope
+    decision_id: DecisionId | None
+
+
+def _admit(
+    state: EvaluationState,
+    context: EvaluationContext,
+    origin: _Origin,
+    plan: MeasurementPlan,
+    identity: MeasurementIdentity,
+) -> AreaChange[EvaluationState]:
+    """Charge the identity's budget and allocate one submission, or reject."""
+    scope = origin.scope
+    matches = tuple(
+        b for b in state.submission_budgets if b.scope == scope and b.identity == identity
+    )
+    budget = matches[0] if matches else None
     if len(matches) > 1 or not isinstance(_budget_ready(state, context, budget), Proven):
         failure = (
             next(
@@ -383,18 +408,52 @@ def _requested(
             if budget is not None
             else None
         )
-        return _rejected(state, event.scope, failure)
-    return _allocate(state, context, origin.value, plan, budget)
+        return _rejected(state, scope, failure)
+    return _allocate(state, context, origin, plan, budget)
+
+
+def _agent_requested(
+    state: EvaluationState, context: EvaluationContext, event: AgentMeasurementRequested
+) -> AreaChange[EvaluationState]:
+    """Admit an agent tool call: same authority, identity and budget as a Measure."""
+    if any(call.call_id == event.call_id for call in state.agent_calls):
+        return AreaChange(state=state)
+    identity = _identity(event.plan)
+    rejection: AgentRejection | None = None
+    if context.run.status != RunStatus.RUNNING:
+        rejection = AgentRejection.RUN_STOPPING
+    elif not isinstance(_current(context, event.scope), Proven):
+        rejection = AgentRejection.NOT_ADMITTED
+    elif not isinstance(identity, Proven):
+        rejection = AgentRejection.INVALID_PLAN
+    if rejection is not None or not isinstance(identity, Proven):
+        change = _rejected(state, event.scope)
+    else:
+        change = _admit(state, context, _Origin(event.scope, None), event.plan, identity.value)
+    request = next((r for r in change.requests if isinstance(r, SubmitMeasurement)), None)
+    if request is None and rejection is None:
+        rejection = AgentRejection.NOT_ALLOWED
+    call = AgentCall(
+        call_id=event.call_id,
+        scope=event.scope,
+        request_id=request.request_id if request is not None else None,
+        rejection=rejection,
+    )
+    return change.model_copy(
+        update={
+            "state": change.state.model_copy(update={"agent_calls": (*state.agent_calls, call)})
+        }
+    )
 
 
 def _allocate(
     state: EvaluationState,
     context: EvaluationContext,
-    origin: Measure,
+    origin: _Origin,
     plan: MeasurementPlan,
     budget: SubmissionBudget | None,
 ) -> AreaChange[EvaluationState]:
-    scope = origin.scope
+    scope, decision_id = origin.scope, origin.decision_id
     identity = _identity(plan)
     authority = _current(context, scope)
     if not isinstance(identity, Proven) or not isinstance(authority, Proven):
@@ -417,7 +476,7 @@ def _allocate(
         request_id=identity_id,
         scope=scope,
         admission_id=authority.value,
-        decision_id=origin.decision_id,
+        decision_id=decision_id,
         deadline_at=deadline,
         plan=plan,
     )
@@ -495,6 +554,57 @@ def _source(
 
 
 def _submission_observed(
+    state: EvaluationState, context: EvaluationContext, event: MeasurementSubmissionObserved
+) -> AreaChange[EvaluationState]:
+    """Apply a submission's own observation, then re-derive the attempt's history.
+
+    The ledger takes a job's end as its submission's own observation after the job event
+    that carried it, so the history that event produced could not yet read the closed
+    submission. This is the first moment it can.
+    """
+    change = _submission_receipted(state, context, event)
+    proof = _source(context, event.observation)
+    if (
+        not _conclusive(event.observation)
+        or not isinstance(proof, Proven)
+        or not isinstance(proof.value.request, SubmitMeasurement)
+    ):
+        return change
+    scope = proof.value.request.scope
+    wake = _deferred_wake(change.state, event, proof.value)
+    # A waiting continuation derives and publishes the history itself when it authorizes.
+    history = () if wake else _history_signals(change.state, context, scope)
+    return change.model_copy(update={"signals": (*change.signals, *history, *wake)})
+
+
+def _deferred_wake(
+    state: EvaluationState, event: MeasurementSubmissionObserved, source: Intent
+) -> tuple[ContinuationJobsChanged, ...]:
+    """The wake of a job's end that waited for the ledger to close its submission."""
+    job = next((j for j in state.jobs if j.submission_id == source.request_id), None)
+    if job is None or job.resource_id is None or job.observation != event.observation:
+        return ()
+    if not _conclusive(event.observation):
+        return ()
+    if not _awaited(state, job.resource_id):
+        return ()
+    return (
+        ContinuationJobsChanged(
+            resource_id=job.resource_id,
+            observation=event.observation,
+            previous=UnobservedJobFacts(resource_id=job.resource_id),
+        ),
+    )
+
+
+def _awaited(state: EvaluationState, resource_id: ResourceId) -> bool:
+    """Whether a waiting continuation names the job, so its authorization publishes the history."""
+    return any(
+        c.phase == ContinuationPhase.WAITING and resource_id in c.jobs for c in state.continuations
+    )
+
+
+def _submission_receipted(
     state: EvaluationState, context: EvaluationContext, event: MeasurementSubmissionObserved
 ) -> AreaChange[EvaluationState]:
     proof = _source(context, event.observation)
@@ -839,12 +949,20 @@ def _job_source(
     )
 
 
-def _builtin_source(
-    state: EvaluationState, context: EvaluationContext, job: OwnedJob, source: Intent
-) -> Verdict[OwnedJob]:
-    request = source.request
-    if not isinstance(request, SubmitMeasurement) or request.plan != job.plan:
-        return Mismatch(ProofField.PAYLOAD)
+def _measure_origin(
+    state: EvaluationState, context: EvaluationContext, source: Intent, request: SubmitMeasurement
+) -> Verdict[None]:
+    """Prove where a submission came from: an accepted Measure, or a recorded agent call.
+
+    An agent call has no decision. Core's own record of the call it admitted names the
+    request it allocated, so the same scope and request id prove the origin.
+    """
+    if request.decision_id is None:
+        admitted = any(
+            call.request_id == source.request_id and call.scope == request.scope
+            for call in state.agent_calls
+        )
+        return Proven(None) if admitted else Missing(ProofReason.ABSENT_RECEIPT)
     receipt = accepted_receipt_for(context.run.receipts, request.decision_id, None)
     if not isinstance(receipt, Proven):
         return receipt
@@ -860,6 +978,18 @@ def _builtin_source(
         return resolved
     if resolved.value != request.plan:
         return Mismatch(ProofField.PAYLOAD)
+    return Proven(None)
+
+
+def _builtin_source(
+    state: EvaluationState, context: EvaluationContext, job: OwnedJob, source: Intent
+) -> Verdict[OwnedJob]:
+    request = source.request
+    if not isinstance(request, SubmitMeasurement) or request.plan != job.plan:
+        return Mismatch(ProofField.PAYLOAD)
+    origin = _measure_origin(state, context, source, request)
+    if not isinstance(origin, Proven):
+        return origin
     budget = submission_budget_for(request, state.submission_budgets, context.run.receipts)
     return Proven(job) if isinstance(budget, Proven) else budget
 
@@ -1047,9 +1177,13 @@ def _job_observed(
             )
         if observation.accepted and not updated.evidence:
             requests = (_job_request(CollectEvidence, updated, context, "evidence"),)
+    closing = _ended(context, job, event)
     return AreaChange(
         state=state,
-        signals=(*_history_signals(state, context, job.scope), wake, *_ended(context, job, event)),
+        # While the ledger still has to take the job's end as its submission's own, the
+        # history and the wake wait for it (see `_submission_observed`): both would read a
+        # history in which this submission is not closed.
+        signals=closing or (*_history_unless_awaited(state, context, job, event), wake),
         requests=requests if context.run.status != RunStatus.TERMINAL else (),
         events=events,
     )
@@ -1063,7 +1197,8 @@ def _ended(
     """The job's first conclusive observation, handed to the ledger as its submission's own.
 
     A job's observations carry its submission's request id and sequence, so the end of
-    the job is a fact about the submit request. When the submit's own view was taken
+    the job is a fact about the submit request, with the terminal facts the history reads.
+    When the submit's own view was taken
     while the job still ran, nothing else completes that intent, and a closing run waits
     for every open one. A submission the ledger already closed needs nothing, and one it
     never dispatched cannot have been observed.
@@ -1079,7 +1214,9 @@ def _ended(
     )
     if intent is None or intent.phase in (IntentPhase.PREPARED, IntentPhase.COMPLETED):
         return ()
-    return (RequestObserved(observation=event.observation),)
+    return (
+        RequestObserved(observation=event.observation, evaluation_result=event.evaluation_result),
+    )
 
 
 def _next_poll(
@@ -1170,6 +1307,22 @@ def _job_budget(
         if isinstance(updated, Proven)
         else state
     )
+
+
+def _history_unless_awaited(
+    state: EvaluationState,
+    context: EvaluationContext,
+    job: OwnedJob | RegisteredOwnedJob,
+    event: JobObserved | RegisteredJobObserved,
+) -> tuple[AttemptEvaluationHistoryUpdated, ...]:
+    """The history signal, unless the continuation this job's end wakes publishes it itself."""
+    if (
+        job.resource_id is not None
+        and _conclusive(event.observation)
+        and _awaited(state, job.resource_id)
+    ):
+        return ()
+    return _history_signals(state, context, job.scope)
 
 
 def _history_signals(
@@ -1308,6 +1461,8 @@ def advance(
     match event:
         case MeasurementRequested():
             change = _requested(state, context, event)
+        case AgentMeasurementRequested():
+            change = _agent_requested(state, context, event)
         case MeasurementSubmissionObserved():
             change = _submission_observed(state, context, event)
         case RegisteredJobRequested():

@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 from ._proofs import Proven, released_owner
 from .types.attempts import AttemptPhase
 from .types.common import LifecycleClass
+from .types.evaluation import ContinuationPhase
 
 if TYPE_CHECKING:
     from .types.evaluation import OwnedJob, RegisteredOwnedJob
     from .types.intents import ChildLease, Intent
+    from .types.sessions import Invocation
 from .types.intents import IntentPhase
 from .types.sessions import SessionPhase
 
@@ -57,9 +59,7 @@ def cleanup_pending(state: CoreState) -> bool:
                 for child in state.intents.children
             ),
             any(
-                invocation.phase
-                not in (SessionPhase.TERMINAL, SessionPhase.CHECKPOINTED, SessionPhase.IDLE)
-                for invocation in state.sessions.invocations
+                _invocation_pending(state, invocation) for invocation in state.sessions.invocations
             ),
         )
     )
@@ -115,3 +115,21 @@ def _unreleased_children(state: CoreState) -> bool:
         for child in observation.descendants
     )
     return any(child not in released for child in children)
+
+
+def _invocation_pending(state: CoreState, invocation: Invocation) -> bool:
+    """Whether the invocation still holds work.
+
+    A yielded (SUSPENDED) invocation stays in that phase for the record. It holds
+    nothing once its continuation was resumed or cancelled.
+    """
+    if invocation.phase in (SessionPhase.TERMINAL, SessionPhase.CHECKPOINTED, SessionPhase.IDLE):
+        return False
+    return not (
+        invocation.phase == SessionPhase.SUSPENDED
+        and any(
+            row.invocation == invocation.invocation
+            and row.phase in (ContinuationPhase.RESUMED, ContinuationPhase.CANCELLED)
+            for row in state.evaluation.continuations
+        )
+    )

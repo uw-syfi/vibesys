@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.shared_build import shared_build
 
 from vibesys.inputs import load_input_bundle
 
@@ -76,9 +77,12 @@ def compiled_unordered_map_candidate(tmp_path_factory) -> Path:  # noqa: ANN001 
 
     project_root = Path(__file__).parents[2]
     starter = project_root / "examples" / "starters" / "unordered-map-rs"
-    build_dir = tmp_path_factory.mktemp("unordered-map-rs-build") / "starter"
-    _copy_input_bundle(starter, build_dir)
-    subprocess.run(["make"], cwd=build_dir, check=True)  # noqa: S607  # lint-waiver: LW-994656 [S607]; Executable name is a project tool resolved from PATH in tests.
+
+    def build(directory: Path) -> None:
+        _copy_input_bundle(starter, directory / "starter")
+        subprocess.run(["make"], cwd=directory / "starter", check=True)  # noqa: S607  # lint-waiver: LW-994656 [S607]; Executable name is a project tool resolved from PATH in tests.
+
+    build_dir = shared_build(tmp_path_factory, "unordered-map-rs-build", build) / "starter"
 
     candidate = build_dir / "unordered-map-candidate.so"
     assert candidate.is_file()
@@ -93,22 +97,25 @@ def unordered_map_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: AN
 
     project_root = Path(__file__).parents[2]
     source = project_root / "examples" / "evaluators" / "unordered-map" / "native_runner"
-    target_dir = tmp_path_factory.mktemp("unordered-map-native-runner") / "target"
-    subprocess.run(  # noqa: S603  # lint-waiver: LW-994658 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
-        [  # noqa: S607  # lint-waiver: LW-994659 [S607]; Executable name is a project tool resolved from PATH in tests.
-            "cargo",
-            "build",
-            "--quiet",
-            "--release",
-            "--locked",
-            "--manifest-path",
-            str(source / "Cargo.toml"),
-            "--target-dir",
-            str(target_dir),
-        ],
-        cwd=source,
-        check=True,
-    )
+
+    def build(directory: Path) -> None:
+        subprocess.run(  # noqa: S603  # lint-waiver: LW-994658 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
+            [  # noqa: S607  # lint-waiver: LW-994659 [S607]; Executable name is a project tool resolved from PATH in tests.
+                "cargo",
+                "build",
+                "--quiet",
+                "--release",
+                "--locked",
+                "--manifest-path",
+                str(source / "Cargo.toml"),
+                "--target-dir",
+                str(directory / "target"),
+            ],
+            cwd=source,
+            check=True,
+        )
+
+    target_dir = shared_build(tmp_path_factory, "unordered-map-native-runner", build) / "target"
     runner = target_dir / "release" / "vibesys-unordered-map-native-runner"
     assert runner.is_file()
 
@@ -370,17 +377,20 @@ def built_unordered_map_tbb(tmp_path_factory) -> Path:  # noqa: ANN001  # lint-w
     project_root = Path(__file__).parents[2]
     evaluator = project_root / "examples" / "evaluators" / "unordered-map"
     abi_header = evaluator / "include" / "vibesys_unordered_map_abi.h"
-    baseline = tmp_path_factory.mktemp("unordered-map-tbb") / "baseline"
-    shutil.copytree(
-        project_root / "examples" / "baselines" / "unordered-map-tbb",
-        baseline,
-        ignore=shutil.ignore_patterns("unordered-map-candidate.so"),
-    )
-    subprocess.run(  # noqa: S603  # lint-waiver: LW-994682 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
-        ["make", "clean", "all", f"ABI_HEADER={abi_header}"],  # noqa: S607  # lint-waiver: LW-994683 [S607]; Executable name is a project tool resolved from PATH in tests.
-        cwd=baseline,
-        check=True,
-    )
+
+    def build(directory: Path) -> None:
+        shutil.copytree(
+            project_root / "examples" / "baselines" / "unordered-map-tbb",
+            directory / "baseline",
+            ignore=shutil.ignore_patterns("unordered-map-candidate.so"),
+        )
+        subprocess.run(  # noqa: S603  # lint-waiver: LW-994682 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
+            ["make", "clean", "all", f"ABI_HEADER={abi_header}"],  # noqa: S607  # lint-waiver: LW-994683 [S607]; Executable name is a project tool resolved from PATH in tests.
+            cwd=directory / "baseline",
+            check=True,
+        )
+
+    baseline = shared_build(tmp_path_factory, "unordered-map-tbb", build) / "baseline"
     assert (baseline / "unordered-map-candidate.so").is_file()
     return baseline
 

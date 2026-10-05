@@ -33,6 +33,7 @@ from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
 from vs_core.api import (
     ClockAdvanced,
+    Limits,
     RoleId,
     RunFacts,
     RunStatus,
@@ -73,7 +74,7 @@ from vs_slurm.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from vs_agent.api import AgentSessionSpec, AgentTurnRequest
     from vs_core.api import CoreState
@@ -85,8 +86,9 @@ if TYPE_CHECKING:
         ResourceRequirements,
     )
     from vs_faults.api import FaultGate
-    from vs_project.api import StateStore
-    from vs_runtime.api.core import AccessGuardedWorkspace
+    from vs_project.api import StateNamespace, StateStore
+    from vs_runtime.api.core import AccessGuardedWorkspace, TurnYields
+    from vs_runtime.api.infrastructure import RuntimeWorkspaces
 
 LEASE = 100.0
 
@@ -155,6 +157,9 @@ class World:
     operations: OperationCatalog = field(default_factory=empty_catalog)
     timed: tuple[FakeRunClock, float] | None = None
     polls: list[str] = field(default_factory=list)
+    limits: Limits = field(default_factory=Limits)
+    yields: Callable[[RuntimeWorkspaces, StateNamespace], TurnYields] | None = None
+    """Builds the turn-yield source from the host's workspaces and receipts, per process."""
     gate: FaultGate | None = None
 
     def initial(self) -> CoreState:
@@ -176,7 +181,7 @@ class World:
             facts,
             DECLARATION,
             offered=self.operations,
-            startup=CoreStartup(deadline_at=1000.0),
+            startup=CoreStartup(deadline_at=1000.0, limits=self.limits),
         )
 
     def bindings(self) -> CoreRuntimeBindings:
@@ -215,7 +220,13 @@ class World:
             receipts=self.env.receipts_namespace(),
             workspaces=workspaces,
             evaluation=evaluation,
-            sessions=SessionServices(self.agents.sessions(), self.agents.resolver),
+            sessions=SessionServices(
+                self.agents.sessions(),
+                self.agents.resolver,
+                None
+                if self.yields is None
+                else self.yields(workspaces, self.env.receipts_namespace()),
+            ),
             operations=self.operations,
         )
         # The skeleton checks for orphan waits after every commit, so a stall fails where it starts.
@@ -324,6 +335,7 @@ class Implementation(BaseModel):
     """The implementer's structured reply: the commit it made in its workspace."""
 
     commit: str
+    waiting: bool = False
 
 
 IMPLEMENTATION = SchemaRef(name="implementation", version=1)
@@ -412,16 +424,17 @@ def open_skeleton_world(
     strategy: SkeletonStrategy | None = None,
     cluster: ScenarioCluster | None = None,
     timed: tuple[FakeRunClock, float] | None = None,
+    agents: Callable[[Path], SessionHost] | None = None,
     gate: FaultGate | None = None,
 ) -> Iterator[World]:
     """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
     with open_workspace_env(tmp_path) as env:
-        agents = _open_agents(tmp_path / "project")
+        hosted = (agents or _open_agents)(tmp_path / "project")
         yield World(
             env=env,
             root=tmp_path / "project",
             cluster=cluster or ScenarioCluster(),
-            agents=agents,
+            agents=hosted,
             strategy=strategy or SkeletonStrategy(),
             timed=timed,
             gate=gate,

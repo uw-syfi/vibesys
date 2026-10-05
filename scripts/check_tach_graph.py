@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""Keep the Mermaid module graph in docs/contributing/architecture.md current.
+"""Keep the Mermaid architecture overview in docs/contributing/architecture.md current.
 
 `tach show --mermaid` renders the module graph declared in `tach.toml`. This
-script embeds three views between marker comments in the architecture doc:
-
-    1. a high-level overview collapsed to top-level packages,
-    2. the `vibesys.*` core modules, filtered from the full graph so the
-       layering is legible, and
-    3. the full module graph.
+script embeds a high-level overview collapsed to top-level packages between
+marker comments in the architecture doc.
 
 Tach's edge order is not guaranteed stable, so edges are sorted. Only the local
 Mermaid output is used; never `tach show --web`, which uploads the graph.
@@ -73,14 +69,8 @@ def collapse(edges: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return sorted(e for e in folded if e[0] != e[1])
 
 
-def is_core(module: str) -> bool:
-    """Return whether `module` is the bare `vibesys` root or one of its children."""
-    return module == "vibesys" or module.startswith("vibesys.")
-
-
 def render_block(edges: list[tuple[str, str]], nodes: tuple[str, ...] = ()) -> str:
-    """Build the marked region: overview, core-cycle view, then full graph."""
-    core = [e for e in edges if is_core(e[0]) and is_core(e[1])]
+    """Build the marked region: architecture overview collapsed to top-level packages."""
     return "\n".join(
         [
             START,
@@ -91,20 +81,6 @@ def render_block(edges: list[tuple[str, str]], nodes: tuple[str, ...] = ()) -> s
             "",
             "```mermaid",
             mermaid(collapse(edges), tuple(node.split(".")[0] for node in nodes)),
-            "```",
-            "",
-            "## Core layers",
-            "",
-            "Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbids cycles.",
-            "",
-            "```mermaid",
-            mermaid(core, tuple(node for node in nodes if is_core(node))),
-            "```",
-            "",
-            "## Full module graph",
-            "",
-            "```mermaid",
-            mermaid(edges, nodes),
             "```",
             END,
         ]

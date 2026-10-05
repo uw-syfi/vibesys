@@ -14,13 +14,13 @@ legacy path takes ``resolve_configuration``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
-from vs_agent.api import AgentTurnRequest, ClientAgentSessions
-from vs_core.api import Access
+from vs_agent.api import AgentTurnRequest, ClientAgentSessions, MCPServerSpec
+from vs_core.api import Access, Scope
 from vs_prompts.api import TemplateRenderer
 from vs_runtime._artifact_store import ArtifactStoreError
 from vs_runtime._session_lifecycle_requests import SessionLifecycleRequests
@@ -34,12 +34,16 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_agent.api import AgentInvocationStore, AgentSessionSpec, AgentTurnExecutor
+    from vs_agent.api import (
+        AgentInvocationStore,
+        AgentSessionSpec,
+        AgentTurnExecutor,
+        ToolServerDescriptor,
+    )
     from vs_core.api import (
         ArtifactRef,
         RoleId,
         SchemaRef,
-        Scope,
         SessionInput,
         TurnSpec,
         WorkspaceRef,
@@ -47,7 +51,7 @@ if TYPE_CHECKING:
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._receipt_store import ReceiptStore
-    from vs_runtime._session_requests import SessionResolver
+    from vs_runtime._session_requests import SessionResolver, TurnYields
     from vs_runtime._workspace_access import AccessGuardedWorkspace
     from vs_runtime._workspace_receipts import WorkspaceReceipts
     from vs_runtime._workspaces import RuntimeWorkspaces
@@ -59,6 +63,14 @@ type SessionSpecFactory = Callable[[AgentRole, Path], AgentSessionSpec]
 
 _TEMPLATE = "session_turn.j2"
 _RANK = {WorkspaceAccess.READ_ONLY: 0, WorkspaceAccess.LIMITED: 1, WorkspaceAccess.READ_WRITE: 2}
+
+
+class ToolServerSource(Protocol):
+    """Extra tool servers one role's turns in one scope are offered."""
+
+    def servers(self, role: AgentRole, scope: Scope) -> tuple[ToolServerDescriptor, ...]:
+        """The servers for this role and scope; empty when the role is offered none."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -74,6 +86,8 @@ class ResolverInputs:
     session_spec: SessionSpecFactory
     artifact_directories: tuple[str, ...] = ()
     """Workspace-relative directories a ``write-artifacts`` turn may write."""
+    tool_servers: ToolServerSource | None = None
+    """Agent tool servers bound per role and scope; None offers the role no extra tool."""
     renderer: TemplateRenderer | None = None
     """Renders ``session_turn.j2``; defaults to the packaged template root."""
 
@@ -136,7 +150,18 @@ class ProductionSessionResolver:
     ) -> AgentSessionSpec | None:
         """The provider session for the turn's role in its workspace."""
         role = self._role(turn.session.role_id)
-        return None if role is None else self._inputs.session_spec(role, workspace.path)
+        if role is None:
+            return None
+        spec = self._inputs.session_spec(role, workspace.path)
+        source = self._inputs.tool_servers
+        if source is None:
+            return spec
+        scope = turn.workspace if isinstance(turn.workspace, Scope) else turn.workspace.scope
+        extra = tuple(
+            MCPServerSpec(item.name, item.command, item.args, item.env, item.runtime_env)
+            for item in source.servers(role, scope)
+        )
+        return replace(spec, mcp_servers=(*spec.mcp_servers, *extra))
 
     def turn_timeout(self, role: RoleId) -> timedelta | None:
         """The role's resolved in-turn timeout; one constant for every turn of the role."""
@@ -196,6 +221,7 @@ def open_session_requests(
     client: AgentTurnExecutor,
     invocation_slot: AgentInvocationStore,
     store: ReceiptStore,
+    yields: TurnYields | None = None,
 ) -> SessionExecutors:
     """The session executors over the run's agent client, journal slot and receipt store.
 
@@ -207,12 +233,18 @@ def open_session_requests(
     exist without it.
     """
     return session_executors(
-        ClientAgentSessions(client, invocation_slot), ProductionSessionResolver(inputs), store
+        ClientAgentSessions(client, invocation_slot),
+        ProductionSessionResolver(inputs),
+        store,
+        yields,
     )
 
 
 def session_executors(
-    sessions: ClientAgentSessions, resolver: SessionResolver, store: ReceiptStore
+    sessions: ClientAgentSessions,
+    resolver: SessionResolver,
+    store: ReceiptStore,
+    yields: TurnYields | None = None,
 ) -> SessionExecutors:
     """Both session executors over one access settlement, for any resolver.
 
@@ -220,7 +252,7 @@ def session_executors(
     that supply their own resolver call this, so the shared settlement and the snapshot
     fence it installs cannot be forgotten.
     """
-    turns = RuntimeSessionRequests(sessions, resolver, store)
+    turns = RuntimeSessionRequests(sessions, resolver, store, yields)
     return SessionExecutors(
         turns, SessionLifecycleRequests(sessions, turns, store, turns.settlement)
     )
@@ -231,6 +263,7 @@ __all__ = [
     "ResolverInputs",
     "SessionExecutors",
     "SessionSpecFactory",
+    "ToolServerSource",
     "open_session_requests",
     "session_executors",
 ]

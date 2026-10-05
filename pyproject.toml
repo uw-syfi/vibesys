@@ -153,18 +153,7 @@ floor = 40
 # comment naming why; do not add bare entries. Only list a module that
 # actually falls below the floor: allowlisting a covered module wrongly
 # implies it is untested.
-allowlist = [
-    # The dynamic strategy's attempt, planner, settlement and run-driver paths run
-    # only inside the whole-run scenarios in test_scenarios.py. Those are strict
-    # xfails until the core gaps named there close (EVAL-PATH #1333, SESSION-WIRING,
-    # CORE-P2), so these modules report low coverage. Remove each entry when the
-    # xfails are removed.
-    "src/vibesys/orchestration/dynamic/strategy/_attempt_events.py",
-    "src/vibesys/orchestration/dynamic/strategy/_attempts.py",
-    "src/vibesys/orchestration/dynamic/strategy/_planner.py",
-    "src/vibesys/orchestration/dynamic/strategy/_run.py",
-    "src/vibesys/orchestration/dynamic/strategy/_settlement.py",
-]
+allowlist = []
 
 [tool.vibesys.file_length]
 # God-file ceiling for first-party Python, in physical lines (`wc -l`).

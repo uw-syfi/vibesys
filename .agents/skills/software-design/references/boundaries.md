@@ -43,6 +43,18 @@ exhaustively:
 Do not turn an infrastructure failure into a verdict on the work (an
 evaluator crash is not a failed candidate).
 
+## Observations are monotone
+
+Each external system has exactly one total function from its raw states to
+the lifecycle the core sees, and every read path (inspect, poll, wait) calls
+it. Two mappings drift: one Slurm path read PENDING as running and another as
+queued, so a long queue wait moved the lifecycle from running back to queued
+and the coordinator killed the workstream. Make the lifecycle an ordered type
+and merge observations by max (a lattice join): a later, lower reading is a
+no-op, never an error and never a regression. Where the system legitimately
+goes backward (a requeue), order per attempt and record an anomaly instead of
+raising.
+
 ## Idempotence and retries
 
 - Make operations safe to repeat: cancel by owner tag, not only by handle;

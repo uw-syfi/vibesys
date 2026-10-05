@@ -203,8 +203,6 @@ def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
                 subject=subject,
                 workspace=workspace_for(scope, revision, mode),
                 access=access,
-                reuse=(record.plan.continue_hypothesis and role is Role.IMPLEMENTER)
-                or turn.serial > 0,
                 output_schema=schema,
                 seconds=seconds,
             ),

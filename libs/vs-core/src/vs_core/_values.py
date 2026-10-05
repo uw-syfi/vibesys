@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from enum import Enum
+from functools import cache
 from hashlib import sha256
 from types import UnionType
 from typing import Annotated, Literal, TypeAliasType, Union, get_args, get_origin
@@ -82,17 +83,44 @@ def _validate_model(model: type[BaseModel], path: tuple[str, ...], seen: set[typ
         _validate_annotation(field.annotation, (*path, name), seen)
 
 
+_IMMUTABLE_LEAF_TYPES = frozenset({str, int, float, bool, bytes, type(None)})
+
+
+@cache
+def _field_names(model: type[BaseModel]) -> tuple[str, ...]:
+    return tuple(model.model_fields)
+
+
+@cache
+def _wire_names(model: type[BaseModel]) -> dict[str, str]:
+    """Map each serialized field name to its attribute name; callers must not mutate it."""
+    by_alias = model.model_config.get("serialize_by_alias")
+    return {
+        (field.serialization_alias or field.alias or name) if by_alias else name: name
+        for name, field in model.model_fields.items()
+    }
+
+
 def deeply_immutable(value: object) -> bool:
     """Copied values and defaults cannot bypass registered schema guarantees."""
-    if isinstance(value, BaseModel):
-        return bool(value.model_config.get("frozen")) and all(
-            deeply_immutable(getattr(value, name)) for name in type(value).model_fields
-        )
-    if isinstance(value, tuple | frozenset):
-        return all(deeply_immutable(child) for child in value)
-    if isinstance(value, Enum):
-        return type(value.value) in (str, int, float, bool, type(None))
-    return type(value) in (str, int, float, bool, bytes, type(None))
+    # Iterative: every persisted envelope is checked on each step, so the walk
+    # avoids a Python call (and a generator) per leaf. An exact-type test cannot
+    # match a model, tuple, frozenset or Enum, so it only skips checks that
+    # would fail.
+    pending = [value]
+    while pending:
+        node = pending.pop()
+        if type(node) in _IMMUTABLE_LEAF_TYPES:
+            continue
+        if isinstance(node, BaseModel):
+            if not node.model_config.get("frozen"):
+                return False
+            pending.extend(getattr(node, name) for name in _field_names(type(node)))
+        elif isinstance(node, tuple | frozenset):
+            pending.extend(node)
+        elif not isinstance(node, Enum) or type(node.value) not in _IMMUTABLE_LEAF_TYPES:
+            return False
+    return True
 
 
 def canonical_json(value: BaseModel) -> str:
@@ -104,19 +132,26 @@ def canonical_json(value: BaseModel) -> str:
 
 
 def _canonical(value: object, serialized: object) -> object:
+    if type(value) in _IMMUTABLE_LEAF_TYPES:
+        return serialized
     if isinstance(value, BaseModel) and isinstance(serialized, dict):
-        names = {
-            (field.serialization_alias or field.alias or name)
-            if value.model_config.get("serialize_by_alias")
-            else name: name
-            for name, field in type(value).model_fields.items()
-        }
-        return {
-            name: _canonical(getattr(value, names[name]), child) if name in names else child
-            for name, child in serialized.items()
-        }
+        names = _wire_names(type(value))
+        result: dict[str, object] = {}
+        for name, child in serialized.items():
+            attribute = names.get(name)
+            if attribute is None:
+                result[name] = child
+                continue
+            member = getattr(value, attribute)
+            result[name] = (
+                child if type(member) in _IMMUTABLE_LEAF_TYPES else _canonical(member, child)
+            )
+        return result
     if isinstance(value, tuple | frozenset) and isinstance(serialized, list):
-        children = [_canonical(child, wire) for child, wire in zip(value, serialized, strict=True)]
+        children = [
+            wire if type(child) in _IMMUTABLE_LEAF_TYPES else _canonical(child, wire)
+            for child, wire in zip(value, serialized, strict=True)
+        ]
         if isinstance(value, frozenset):
             return sorted(children, key=lambda child: json.dumps(child, sort_keys=True))
         return children

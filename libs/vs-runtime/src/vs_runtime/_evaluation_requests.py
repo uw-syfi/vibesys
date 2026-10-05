@@ -46,6 +46,7 @@ from vs_core.api import (
 )
 from vs_evaluation.api import (
     EvaluationRequest,
+    ExecutorCancellationUnconfirmedError,
     ExecutorCancellationUnknownError,
     ExecutorPoll,
     ExecutorRejectedError,
@@ -533,6 +534,10 @@ class MeasurementRequests:
             return self._unknown(request, context, problem)
         try:
             await self._jobs.cancel(record.handle_id)
+        except ExecutorCancellationUnconfirmedError:
+            # The job is known and cancellation was requested; the view below
+            # reports it unreleased until its end is observed.
+            pass
         except ExecutorCancellationUnknownError as error:
             return self._unknown(request, context, f"cancellation outcome unknown: {error}")
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-940009 [BLE001]; a failed cancel leaves the job owned and running, so it is reported unproven and retried rather than halting the run.
@@ -569,7 +574,7 @@ class MeasurementRequests:
                 continue
             try:
                 await self._jobs.cancel(handle)
-            except ExecutorCancellationUnknownError:
+            except (ExecutorCancellationUnknownError, ExecutorCancellationUnconfirmedError):
                 pass
             except Exception:  # noqa: BLE001  # lint-waiver: LW-940010 [BLE001]; one job that cannot be cancelled must not hide the others from the manifest, and it stays unreleased.
                 ended.append(False)

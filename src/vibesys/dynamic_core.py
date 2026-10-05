@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.dynamic.agents import AGENTS
+from vibesys.orchestration.dynamic.agents import AGENTS, EVALUATION, IMPLEMENTER, JUDGE
 from vibesys.orchestration.dynamic.core_policy.api import (
     PolicyInputs,
     RunBounds,
@@ -43,6 +43,7 @@ from vs_runtime.api import (
     OrchestrationPlugin,
 )
 from vs_runtime.api.core import (
+    AgentEvaluationPolicy,
     OperationCatalog,
     OperationPorts,
     OperationRole,
@@ -138,6 +139,9 @@ def dynamic_projector() -> RuntimeRecordProjector[DynamicStrategyState]:
 # The label of the snapshot that retains a verified revision.
 RETENTION_LABEL = "verified"
 
+# Roles whose core turns may submit a measurement through the bridged evaluation tool.
+_MEASURING_ROLES = frozenset({IMPLEMENTER.id, JUDGE.id})
+
 
 def _core_plan(context: CoreRunContext) -> CorePlan:
     """The plan of one run: the policy resolved from what the host opened for it."""
@@ -169,8 +173,32 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         facts=policy.facts,
         limits=policy.limits,
         deadline_seconds=policy.deadline_at,
-        prompt_variables={"objective": policy.facts.objective},
+        prompt_variables={"objective": policy.facts.objective, "agent_evaluation": True},
         requirements=policy.requirements,
+        agent_evaluation=_agent_evaluation(policy),
+    )
+
+
+def _agent_evaluation(policy: DynamicCorePolicy) -> AgentEvaluationPolicy:
+    """The plan an implementer or judge measures with: the run's configured gates, once each.
+
+    It reads the same digests, recipe and stage budgets as the strategy's own trusted
+    measurement plans, so an agent measurement and a trusted one share one identity.
+    """
+    config = policy.strategy.config
+    facts = policy.facts
+    gates = (
+        ("accuracy", config.accuracy_seconds, config.accuracy_configured),
+        ("benchmark", config.benchmark_seconds, config.benchmark_configured),
+    )
+    return AgentEvaluationPolicy(
+        evaluator_digest=facts.evaluator_digest,
+        workload_digest=facts.workload_digest,
+        environment_digest=facts.environment_digest,
+        recipe=config.recipe,
+        stages=tuple((name, seconds) for name, seconds, configured in gates if configured),
+        queue_allowance=config.queue_allowance_seconds,
+        accuracy_stage="accuracy" if config.accuracy_configured else None,
     )
 
 
@@ -188,20 +216,24 @@ def dynamic_core_policy() -> CorePolicy:
 
 
 def core_agent_roles() -> tuple[AgentRole, ...]:
-    """The dynamic roles as a core session serves them: replies only, no agent tools.
+    """The dynamic roles as a core session serves them.
 
-    A core turn ends with a typed reply that the strategy folds, and trusted
-    measurement is the strategy's own decision, so no role carries the evaluation or
-    profiler tool and none needs an MCP server.
+    A core turn ends with a typed reply that the strategy folds. The implementer and
+    the judge may also submit a measurement of their own workspace through the bridged
+    evaluation tool (core decides admission and budget; there is no status or wait
+    tool). No other role carries a tool, so none needs an MCP server.
     """
-    return tuple(
-        role.model_copy(
-            update={
-                "extra_tools": (),
-                "required_capabilities": role.required_capabilities - {AgentCapability.MCP_SERVERS},
-            }
-        )
-        for role in AGENTS
+    return tuple(_core_role(role) for role in AGENTS)
+
+
+def _core_role(role: AgentRole) -> AgentRole:
+    if role.id in _MEASURING_ROLES:
+        return role.model_copy(update={"extra_tools": (EVALUATION,)})
+    return role.model_copy(
+        update={
+            "extra_tools": (),
+            "required_capabilities": role.required_capabilities - {AgentCapability.MCP_SERVERS},
+        }
     )
 
 

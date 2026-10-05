@@ -100,7 +100,6 @@ def decide(draft: Draft) -> None:
                     subject=SUBJECT,
                     workspace=scope,
                     access=Access.READ_ONLY,
-                    reuse=turn.serial > 0,
                     output_schema=PLANNER_REPLY,
                     seconds=draft.config.planner_turn_seconds,
                 ),
@@ -220,6 +219,7 @@ def on_turn(
                                 "serial": turn.serial + 1,
                                 "corrections": turn.corrections + 1,
                                 "charge": "correction",
+                                "invocation": event.invocation,
                             }
                         ),
                     }

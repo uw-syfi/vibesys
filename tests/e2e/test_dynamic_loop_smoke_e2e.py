@@ -67,6 +67,7 @@ from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
+from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools
 from vs_project.api import Project, StoredEnvelope
 from vs_slurm.fake_connector import active_jobs, executing_cluster, recorded_commands
 
@@ -531,6 +532,27 @@ def _executed_legacy_files() -> Iterator[set[str]]:
         monitoring.free_tool_id(tool)
 
 
+def _wait_for_own_measurement(invocation: FakeInvocation) -> dict[str, object]:
+    """Submit this workspace through the offered evaluation tool, then wait for the result.
+
+    The calls go over the tool server's own unix socket with the token the host issued,
+    exactly as the MCP process the provider would launch makes them.
+    """
+    (server,) = invocation.tool_servers or []
+    env = dict(server.runtime_env)
+    tools = {
+        tool.name: tool
+        for tool in build_core_evaluation_tools(
+            socket_path=Path(env["VS_EVALUATION_SOCKET"]), token=env["VS_EVALUATION_TOKEN"]
+        )
+    }
+    submit = tools[SUBMIT_TOOL]
+    handle = json.loads(submit.handler(submit.input_schema()))["handle_id"]
+    wait = tools[VALIDATE_WAIT_TOOL]
+    wait.handler(wait.input_schema(handles=(handle,)))
+    return {"kind": "waiting_for_evaluation", "handles": [handle]}
+
+
 def _core_agents(**_kwargs: object) -> FakeAgentClient:
     """A Fake provider that answers each role with its typed reply, as a real agent would.
 
@@ -542,13 +564,18 @@ def _core_agents(**_kwargs: object) -> FakeAgentClient:
         session_reuse=True,
     )
 
+    turns: list[str] = []
+
     def implement(invocation: FakeInvocation) -> dict[str, object]:
+        turns.append(invocation.invocation_id or "")
+        if len(turns) > 1:
+            return {
+                "summary": "Raised VALUE.",
+                "outcome": "nominated",
+                "evidence": [{"location": "queue.py", "purpose": "the change"}],
+            }
         (invocation.workspace / "queue.py").write_text("VALUE = 2\n", encoding="utf-8")
-        return {
-            "summary": "Raised VALUE.",
-            "outcome": "nominated",
-            "evidence": [{"location": "queue.py", "purpose": "the change"}],
-        }
+        return _wait_for_own_measurement(invocation)
 
     client.set_response(
         ORCHESTRATOR.id,
@@ -644,7 +671,12 @@ def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
     selection = envelope["core"]["run"]["result"]["selection"]
     assert selection["kind"] == "retained_candidate"
     assert selection["revision"] != envelope["core"]["run"]["facts"]["baseline"]
-    # The baseline and the one candidate were each submitted to the cluster exactly once.
-    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == 2
+    # The baseline, the implementer's own in-turn measurement through the tool, and the
+    # trusted measurement of the one candidate were each submitted exactly once.
+    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == 3
+    evaluation = envelope["core"]["evaluation"]
+    assert [call["rejection"] for call in evaluation["agent_calls"]] == [None]
+    # The turn waited once: core recorded exactly one continuation for the whole run.
+    assert len(evaluation["continuations"]) == 1
     assert active_jobs(loop_input.cluster) == ()
     assert capsys.readouterr().out.strip()

@@ -95,6 +95,7 @@ EXPECTED_TARGET = {
                 "registered_job_observed",
                 "registered_job_requested",
                 "measurement_requested",
+                "agent_measurement_requested",
                 "job_observed",
                 "observations_due",
                 "job_termination_requested",

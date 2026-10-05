@@ -1,0 +1,11 @@
+{% if agent_evaluation %}
+
+You may measure your own workspace before you reply: call `submit_evaluation` on the
+`evaluation` tool. The framework decides whether the submission is admitted and
+counts it against the run's budget; a refusal names the reason, so change the
+workspace or stop submitting. A successful call returns a handle. To wait for the
+result, call `validate_evaluation_wait` with every handle you need, then finish the
+turn with only `{"kind":"waiting_for_evaluation","handles":["<handle>"]}`. Do not
+poll: the host resumes this same session once every listed measurement is terminal.
+A waiting turn uses no new attempt.
+{% endif %}

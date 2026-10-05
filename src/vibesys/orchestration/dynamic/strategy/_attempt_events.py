@@ -61,6 +61,7 @@ from vs_core.api import (
     AttemptSettled,
     EvidenceKind,
     IntentBlocked,
+    InvocationRef,
     MeasurementResult,
     ObservationStatus,
     OperationResult,
@@ -323,8 +324,13 @@ def owns_turn(state: DynamicStrategyState, event: TurnResult) -> bool:
 
 
 def _correct(
-    state: DynamicStrategyState, index: int, config: DynamicConfig, error: str
+    state: DynamicStrategyState,
+    index: int,
+    config: DynamicConfig,
+    error: str,
+    invalid: InvocationRef,
 ) -> DynamicStrategyState | None:
+    """Ask the role to fix its reply; the correction names the invalid turn as its predecessor."""
     record = state.attempts[index]
     turn = record.turn
     role = role_of(record.phase)
@@ -335,6 +341,7 @@ def _correct(
         serial=turn.serial + 1,
         corrections=turn.corrections + 1,
         charge="correction",
+        invocation=invalid,
         context=ReplyCorrectionPrompt(role=_CORRECTION_ROLE[role], error=error),
     )
     return _put(
@@ -559,7 +566,7 @@ def _answered(
     role = Role.JUDGE if state.attempts[index].phase is WorkPhase.REVIEW else Role.IMPLEMENTER
     reply = _decode(role, event.output_json or "")
     if isinstance(reply, str):
-        return _correct(state, index, config, reply) or fail(
+        return _correct(state, index, config, reply, event.invocation) or fail(
             state, index, f"invalid {role.value} reply"
         )
     if isinstance(reply, WaitingForEvaluation):
