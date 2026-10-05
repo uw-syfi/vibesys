@@ -18,6 +18,7 @@ from .types.evaluation import (
     JobTerminationRequested,
     MeasurementRequested,
     MeasurementSubmissionObserved,
+    ObservationsDue,
     RegisteredJobObserved,
     RegisteredJobRequested,
     TurnSuspended,
@@ -48,6 +49,7 @@ EVENT_TO_SUBAREA: Mapping[type[EvaluationEvent], Reducer] = MappingProxyType(
         JobObserved: _measurements.advance,
         TurnSuspended: _continuations.advance,
         DeadlineReached: _continuations.advance,
+        ObservationsDue: _measurements.advance,
     }
 )
 

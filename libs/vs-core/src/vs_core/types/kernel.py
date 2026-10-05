@@ -150,6 +150,8 @@ class RunView(Value):
     controls: tuple[ControlInput, ...]
     inputs: tuple[InputRecord, ...]
     adoption: AdoptionView | None = None
+    # Earliest core time a paced job poll comes due, None when none is scheduled.
+    next_observe_at: Seconds | None = None
 
 
 class DecisionSubmitted(Value):
