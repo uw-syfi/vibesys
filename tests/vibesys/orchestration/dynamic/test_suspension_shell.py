@@ -13,6 +13,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     dynamic_options,
     implementation,
 )
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from tests.vibesys.orchestration.dynamic.test_plugin_suspension import ResumeScript, _open
 from tests.vibesys.orchestration.dynamic.test_suspension_deadline import (
     _drive,
@@ -21,7 +22,6 @@ from tests.vibesys.orchestration.dynamic.test_suspension_deadline import (
 )
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
     CompleteIntent,

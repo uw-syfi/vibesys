@@ -7,8 +7,8 @@ import string
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity
 from vs_evaluation.api import ContentDigest, EvidenceKind
 from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor, InMemoryEvaluationNamespace

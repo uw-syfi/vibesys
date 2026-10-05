@@ -15,9 +15,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.run.evaluation_backend import (
     EvidenceReusingEvaluation,
     SemanticEvaluationBackend,

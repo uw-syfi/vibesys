@@ -1,6 +1,6 @@
 """The legacy dynamic loop's plugin registration, kept only for tests until the loop is deleted.
 
-No catalog registers it: the built-in `dynamic` is the core registration in `plugin.py`.
+Lives under tests so entrypoints cannot reach it. No catalog registers it: the built-in `dynamic` is the core registration in `plugin.py`.
 """
 
 from functools import partial

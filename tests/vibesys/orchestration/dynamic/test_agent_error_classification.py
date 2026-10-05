@@ -15,6 +15,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     portfolio,
     throughput,
 )
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from tests.vibesys.orchestration.dynamic.test_suspension_shell import (
     _prepared_shell,
     _retry_state,
@@ -23,7 +24,6 @@ from tests.vibesys.orchestration.dynamic.test_suspension_shell import (
 )
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.lifecycle import awaiting_evaluation
 from vibesys.orchestration.dynamic.models import WaitingForEvaluation
 from vibesys.run.dynamic_suspension import EvaluationAttemptBoundError

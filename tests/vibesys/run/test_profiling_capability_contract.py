@@ -12,8 +12,8 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.run.evaluation_backend import (
     EvidenceReusingEvaluation,
     SemanticEvaluationBackend,

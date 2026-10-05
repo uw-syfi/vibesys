@@ -27,10 +27,10 @@ from tests.vibesys.orchestration.dynamic._support import (
     portfolio,
     throughput,
 )
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.orchestration.dynamic import ImplementPortfolioPlan
 from vibesys.orchestration.dynamic.agents import AGENTS, IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.lifecycle import TimedOut
 from vibesys.orchestration.dynamic.models import SteerNote
 from vibesys.orchestration.dynamic.prompts import (

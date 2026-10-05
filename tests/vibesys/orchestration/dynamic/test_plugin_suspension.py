@@ -15,9 +15,9 @@ from tests.vibesys.orchestration.dynamic._support import (
     implementation,
     portfolio,
 )
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.lifecycle import IntentKind, IntentStage
 from vibesys.orchestration.dynamic.models import (
     DurableStateCommitError,

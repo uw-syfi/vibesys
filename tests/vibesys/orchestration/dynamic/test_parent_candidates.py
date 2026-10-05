@@ -23,9 +23,9 @@ from tests.vibesys.orchestration.dynamic._support import (
     dynamic_options,
     portfolio,
 )
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.orchestration.dynamic.models import DurableStateCommitError
 from vibesys.orchestration.dynamic.parents.api import ParentCatalog
 from vs_evaluation.api import ContentDigest, EvidenceKind

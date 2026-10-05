@@ -39,6 +39,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_REGISTRATION
+
 from launch.testing import FakeStopTimer, create_session
 from vibesys.api import (
     ComputeBackend,
@@ -54,8 +57,6 @@ from vibesys.events import CoreEventType
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.dynamic import DynamicOptions
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_REGISTRATION
 from vibesys.orchestration.dynamic.models import DynamicState
 from vibesys.orchestration.profilers import ProfilerKind
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope

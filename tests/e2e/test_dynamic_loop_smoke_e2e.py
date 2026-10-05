@@ -44,6 +44,7 @@ from tests.support.loop_invariants import (
     summarize,
     terminal_event,
 )
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from tests.vibesys.orchestration.dynamic.loop._harness import (
     CAPTURE_RUNTIME_PYTHON,
     PASS,
@@ -63,7 +64,6 @@ from entrypoints.run import run_headless
 from launch import LaunchSettings
 from vibesys.api import ComputeBackend, ProfilerKind, RunStatus
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools

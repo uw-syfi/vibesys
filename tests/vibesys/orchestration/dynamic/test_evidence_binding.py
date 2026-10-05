@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING, Literal
 from hypothesis import example, given
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._support import dynamic_options, portfolio
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vs_runtime.api import AgentCapability
 from vs_runtime.api.testing import FakeRun
 

@@ -11,13 +11,13 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 import pytest
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 
 from launch import LaunchSettings, create_session
 from launch.testing import FakeStopTimer
 from vibesys.api import Config, CoreEvent, OrchestrationDescriptor, ResumeRef, RunRequest, RunResult
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.run.project_policy import build_project_path_policy
 from vs_agent.api import AgentInvocationState, AgentSessionKey, Completed
 from vs_project.api import Project

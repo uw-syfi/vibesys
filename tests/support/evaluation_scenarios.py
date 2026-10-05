@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 
 import anyio
 from hypothesis import strategies as st
+from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 
-from vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_evaluation.api import (
