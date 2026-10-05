@@ -31,6 +31,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from tests.support.fake_run_clock import FakeRunClock
 from tests.support.liveness import Budget, End, Journal, assert_live
 from tests.support.loop_invariants import RunRecords, check, terminal_event
 
@@ -54,6 +55,7 @@ from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_core.api import RunEnvelope
 from vs_project.api import Project, StoredEnvelope
+from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
 
@@ -67,13 +69,8 @@ if TYPE_CHECKING:
     from vs_agent.api.testing import FakeInvocation
     from vs_runtime.api.infrastructure import StopTimer
 
-LEASE_GAP = (
-    "gap (owner: host composition and vs-runtime): the host builds its run clock itself "
-    "(src/vibesys/run/host.py:583, WallRunClock) and a crashed process keeps its 60 s "
-    "lease (src/vibesys/run/core_run.py:39), so resuming in the same minute fails with "
-    "'runtime lease unavailable' and a scenario cannot advance time. Needs a clock seam "
-    "on LaunchSettings or a lease release when a run ends."
-)
+# Simulated seconds one run may wait; a healthy scenario needs a small fraction of it.
+SIMULATED_BUDGET_S = 120.0
 
 _PLANNER_SLOTS = re.compile(r"Schedule at most (\d+) ")
 _MEMBER = re.compile(
@@ -156,22 +153,6 @@ class _SharedCancelClient(FakeAgentClient):
     def cancel_session(self, key: AgentSessionKey) -> None:
         super().cancel_session(key)
         self._seen.set()
-
-
-class KnownGapError(AssertionError):
-    """A scenario step that fails today for a tracked gap in another owner's code.
-
-    Each gap has its own subclass so an expected failure names the gap it waits on: an xfail
-    with ``raises=<subclass>`` still fails on any other mistake in the scenario.
-    """
-
-
-class CrashGapError(KnownGapError):
-    """A run cannot be crashed and resumed: a scripted agent error is retried, not fatal."""
-
-    def __init__(self) -> None:
-        """Say why there is nothing to resume."""
-        super().__init__("the scripted planner death was retried: the run never crashed")
 
 
 class ScriptExhaustedError(AssertionError):
@@ -513,6 +494,7 @@ class LoopRun:
     result: RunResult | None
     error: BaseException | None
     events: list[CoreEvent]
+    clock: FakeRunClock | None
 
     @property
     def succeeded(self) -> bool | None:
@@ -524,6 +506,11 @@ class LoopRun:
         """Return the run's reported status; None when it raised."""
         return self.result.status if self.result is not None else None
 
+    def raise_error(self) -> None:
+        """Raise the error the run ended with, if any (for a gap's one expected symptom)."""
+        if self.error is not None:
+            raise self.error
+
     def notes(self) -> list[str]:
         """Return the framework warnings the run published."""
         return [
@@ -533,19 +520,34 @@ class LoopRun:
         ]
 
 
-def run_request(
+# lint-waiver: LW-136101 [PLR0913]; one entry point whose keywords are independent optional test seams.
+# > Bundling them in a settings object adds a wrapper type every scenario must build,
+# > and splitting the function duplicates the host composition below.
+def run_request(  # noqa: PLR0913
     request: RunRequest,
     agents: ScriptedAgents,
     *,
     on_handle: Callable[[RunHandle], None] | None = None,
     stop_timer: StopTimer | None = None,
     client_factory: Callable[..., AgentClientProtocol] | None = None,
+    clock: FakeRunClock | None = None,
 ) -> LoopRun:
-    """Execute a built request through the production host composition."""
+    """Execute a built request through the production host composition.
+
+    Without ``clock`` the run uses the production wall clock and lease. A scenario that
+    resumes a crashed run passes one ``simulated_clock()`` to both runs: the state store's
+    lease is compared on one shared timeline, and waiting advances it at once. Such a run
+    that waits more than ``SIMULATED_BUDGET_S`` simulated seconds fails instead of
+    spinning. Simulated time decouples the loop from the agent turns that run in threads,
+    so scenarios that depend on a turn finishing within one poll still use the wall clock.
+    """
+    if clock is not None:
+        clock.limit = clock.at + SIMULATED_BUDGET_S
     runs = launch.default_runs(
         LaunchSettings(
             agent_client_factory=client_factory or agents.client,
             stop_timer=stop_timer or FakeStopTimer(),
+            timing=None if clock is None else RunTiming(clock, PRODUCTION_LEASE_SECONDS),
         )
     )
     events: list[CoreEvent] = []
@@ -566,9 +568,9 @@ def run_request(
         # > couple the harness to how the host wraps a failure.
         except (Exception, RunStopped) as error:  # noqa: BLE001
             await asyncio.gather(collector, return_exceptions=True)
-            return LoopRun(handle.run_id, None, error, events)
+            return LoopRun(handle.run_id, None, error, events, clock)
         await asyncio.gather(collector, return_exceptions=True)
-        return LoopRun(result.run_id, result, None, events)
+        return LoopRun(result.run_id, result, None, events, clock)
 
     finished = asyncio.run(run())
     if finished.error is None:
@@ -614,6 +616,11 @@ def load_envelope(root: Path, run_id: str) -> dict[str, Any] | None:
         return None
     envelope: dict[str, Any] = json.loads(stored.payload)["envelope"]
     return envelope
+
+
+def simulated_clock() -> FakeRunClock:
+    """A run clock for a crash and its resume: waits advance it without waiting."""
+    return FakeRunClock(settle_background=False)
 
 
 def resume_request(request: RunRequest, run_id: str) -> RunRequest:
