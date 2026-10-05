@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
 from tests.support.run_execution import run_execution_record
@@ -16,10 +16,12 @@ from vs_runtime.api.core import (
     CoreRuntime,
     CoreRuntimeBindings,
     RuntimeRecord,
+    reject_legacy_resume,
     resolve_core_resume,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -228,3 +230,56 @@ def test_legacy_state_file_rejects_even_beside_a_valid_new_envelope(tmp_path: Pa
         resolve_core_resume(project, CounterStrategy(), run_id=run_id)
     assert failure.value.diagnostic.code == "dynamic_legacy_resume_unsupported"
     assert failure.value.diagnostic.source_schema == "unparseable"
+
+
+class _Run(NamedTuple):
+    project: Project
+    run_id: str
+    directory: Path
+
+
+def _legacy_state(run: _Run) -> None:
+    run.project.state.portable_namespace(run.run_id, "dynamic").write_bytes("state.json", b"{}")
+
+
+def _legacy_journal(run: _Run) -> None:
+    run.project.state.portable_namespace(run.run_id, "agent").write_bytes(
+        "invocations.jsonl", b"{}\n"
+    )
+
+
+def _legacy_top_level(run: _Run) -> None:
+    (run.directory / "events.jsonl").write_bytes(b"{}\n")
+
+
+def _legacy_unreadable(run: _Run) -> None:
+    (run.directory / "dynamic" / "state.json").mkdir(parents=True)
+
+
+@pytest.mark.parametrize(
+    "mark", [_legacy_state, _legacy_journal, _legacy_top_level, _legacy_unreadable]
+)
+def test_early_rejection_agrees_with_resume_resolution_on_every_legacy_marker(
+    tmp_path: Path, mark: Callable[[_Run], None]
+) -> None:
+    project, run_id = project_run(tmp_path)
+    directory = next(path for path in tmp_path.rglob(run_id) if path.is_dir())
+    mark(_Run(project, run_id, directory))
+    before = project.state.portable_run_export(run_id)
+
+    with pytest.raises(CoreResumeError) as early:
+        reject_legacy_resume(project, run_id)
+    with pytest.raises(CoreResumeError) as resolved:
+        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+
+    assert early.value.diagnostic == resolved.value.diagnostic
+    assert early.value.diagnostic.code == "dynamic_legacy_resume_unsupported"
+    assert project.state.portable_run_export(run_id) == before
+
+
+def test_early_rejection_leaves_core_runs_and_unknown_runs_to_the_resume(tmp_path: Path) -> None:
+    project, run_id = project_run(tmp_path)
+    reject_legacy_resume(project, run_id)  # never committed: not legacy
+    commit_record(project, run_id)
+    reject_legacy_resume(project, run_id)  # a committed core record: not legacy
+    reject_legacy_resume(project, "no-such-run")  # the resume reports a missing run

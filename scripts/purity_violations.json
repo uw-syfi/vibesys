@@ -1456,13 +1456,6 @@
     "occurrence": 1
   },
   {
-    "path": "src/vibesys/orchestration/dynamic/plugin.py",
-    "symbol": "<module>",
-    "rule": "io-import",
-    "subject": "vs_runtime.api",
-    "occurrence": 1
-  },
-  {
     "path": "src/vibesys/orchestration/dynamic/profiles.py",
     "symbol": "<module>",
     "rule": "banned-import",

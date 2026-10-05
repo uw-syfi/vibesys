@@ -41,6 +41,7 @@ from vs_runtime._core_preflight import (
     CoreResumeError,
     ResolvedCoreResume,
     ResumeDiagnostic,
+    reject_legacy_resume,
     resolve_core_resume,
 )
 from vs_runtime._core_publications import JournalPublicationDelivery
@@ -361,6 +362,7 @@ __all__ = [
     "owner_key",
     "production_owners",
     "receipt_executor_kinds",
+    "reject_legacy_resume",
     "report_turns",
     "resolve_core_resume",
     "result_type_name",
