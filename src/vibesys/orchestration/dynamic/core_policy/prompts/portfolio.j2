@@ -9,7 +9,7 @@ workstream counts once, whether it starts a hypothesis or continues one.
 Assign work only where it can succeed: never assign edits to read-only inputs, and
 never plan work that needs target hardware outside trusted evaluation.
 
-Current base revision (the root or the best trusted candidate): `{{ rev(base_revision) }}`
+Base revision (the run's input; a new workstream that names no parent starts from it): `{{ rev(base_revision) }}`
 Exact base accuracy PASS status: {{ base_accuracy_passed }} (null means unknown).
 Immutable parent offer {{ offer_snapshot }}.
 Your workspace holds the run's input, not candidate work: a workstream's files exist
@@ -20,7 +20,7 @@ Input baseline (the root before any change, trusted benchmark):
 {% for row in baseline %}
 - {{ metric(row) }}
 {% endfor %}
-A candidate must beat it on the objectives to be adopted or become the base revision.
+A candidate must beat it on the objectives to be adopted.
 {% endif %}
 {% if input_failure %}
 
@@ -70,7 +70,7 @@ needs `reason_kind` and a nonempty `reason`.
 
 The framework provides isolated candidate workspaces, runs independent reviews, and
 owns trusted evaluation and winner adoption. Only evaluated, accepted candidates can
-be adopted or become the base revision.
+be adopted or offered as a parent.
 
 ## Compact hypothesis history
 {% if history %}

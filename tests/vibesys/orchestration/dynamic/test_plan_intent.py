@@ -16,9 +16,9 @@ from tests.vibesys.orchestration.dynamic._support import (
     baseline_run,
     dynamic_options,
 )
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.orchestration.dynamic import (
-    PLUGIN,
     DynamicPlanningError,
     DynamicState,
     EvidenceReference,

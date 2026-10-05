@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from launch.composition import AGENT_TOOL_BINDINGS
 from vibesys.api.wiring import AgentToolContext
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, PROFILER
 from vibesys.orchestration.single.agents import IMPLEMENTER as SINGLE_IMPLEMENTER
 from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity

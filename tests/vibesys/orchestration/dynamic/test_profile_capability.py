@@ -15,8 +15,9 @@ from tests.vibesys.orchestration.dynamic._support import (
     portfolio,
     throughput,
 )
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
-from vibesys.orchestration.dynamic import PLUGIN, DynamicPlanningError, DynamicState
+from vibesys.orchestration.dynamic import DynamicPlanningError, DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_runtime.api import (
     AgentCapability,

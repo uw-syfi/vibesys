@@ -3,8 +3,8 @@
 A scenario runs the way the product does: a CLI-built request goes through
 ``launch.default_runs`` and the production host composition (real Git worktrees, the
 real ``.vibesys`` state store, the runtime's run loop, the trusted evaluation scripts).
-The core policy is selected by wiring (``dynamic_core_registration``) until the
-switch makes it the built-in. Two things are Fake because they are external:
+The core policy is the built-in ``dynamic`` registration, so the scenarios run the
+same catalog the entrypoints use. Two things are Fake because they are external:
 
 - the cluster: ``vs_slurm.fake_connector`` in executing mode runs every production job
   script on this host, so a job finishes at its first poll;
@@ -38,14 +38,12 @@ from entrypoints.cli import build_run_request, parse_cli_invocation
 from launch import LaunchSettings
 from vibesys.api import (
     CoreEventType,
-    OrchestrationRegistry,
     ResumeRef,
     RunRequest,
     RunResult,
     RunStatus,
     RunStopped,
 )
-from vibesys.dynamic_core import dynamic_core_registration
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
@@ -516,11 +514,8 @@ def run_request(
     client_factory: Callable[..., AgentClientProtocol] | None = None,
 ) -> LoopRun:
     """Execute a built request through the production host composition."""
-    registry = OrchestrationRegistry()
-    registry.register(dynamic_core_registration())
     runs = launch.default_runs(
         LaunchSettings(
-            registry=registry,
             agent_client_factory=client_factory or agents.client,
             stop_timer=stop_timer or FakeStopTimer(),
         )
