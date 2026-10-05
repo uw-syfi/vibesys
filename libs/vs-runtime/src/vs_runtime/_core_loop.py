@@ -199,6 +199,27 @@ class PublicationDelivery(Protocol):
     ) -> PublicationAcknowledgement: ...
 
 
+class CommitObserver(Protocol):
+    """Hears each runtime record the store confirmed, for display and projections only.
+
+    It runs after the commit is durable and on the loop's thread, and it must not raise.
+    ``previous`` is the record this process held before the commit: the last durable one,
+    the fresh record of a run that had none, or None when it held nothing.
+    """
+
+    def committed(self, previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]) -> object:
+        """One commit became durable."""
+        ...
+
+
+class IgnoreCommits:
+    """The observer of a host that shows nothing about commits."""
+
+    def committed(self, previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]) -> None:
+        """Drop the report."""
+        del previous, current
+
+
 class _Input[S: StrategyState](BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     event: CoreEvent
@@ -237,6 +258,7 @@ class CoreRuntimeBindings:
     registry: OperationRegistry = field(default_factory=OperationRegistry)
     executors: RequestExecutors = field(default_factory=RequestExecutors)
     transitions: CoreTransitions = field(default_factory=ProductionCoreTransitions)
+    commits: CommitObserver = field(default_factory=IgnoreCommits)
     check_liveness: bool = False
     """Check ``orphan_waits`` after every commit, not only at start. Linear in state size."""
 
@@ -267,6 +289,7 @@ class CoreRuntime[S: StrategyState]:
         self._registry = selected.registry
         self._executors = selected.executors
         self._transitions = selected.transitions
+        self._commits = selected.commits
         self._check_liveness = selected.check_liveness
         self._record_model = cast(
             "type[RuntimeRecord[S]]", RuntimeRecord.__class_getitem__(type(strategy.state))
@@ -644,9 +667,11 @@ class CoreRuntime[S: StrategyState]:
                 self._halted = True
                 message = "store acknowledged a different runtime record"
                 raise RuntimeCommitError(message)
+            previous = self._record
             self._record = candidate
             self._storage_revision = stored.revision
             self._time_floor = stamp
+            self._commits.committed(previous, candidate)
             if self._check_liveness:
                 self._halt_on_orphan_waits()
             return

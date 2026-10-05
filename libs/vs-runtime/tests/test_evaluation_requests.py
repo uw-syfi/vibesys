@@ -35,6 +35,7 @@ from vs_core.api import (
     HostId,
     InspectOwnedJob,
     JobObserved,
+    MeasurementFailure,
     ObservationStatus,
     ObserveOwnedJob,
     RequestId,
@@ -51,10 +52,13 @@ from vs_runtime.api.core import (
     ExecutionContext,
     ExecutionResult,
     ExecutorRole,
+    MeasurementObserver,
     MeasurementRequests,
     ReceiptStore,
     RequestExecutors,
     SealedExecution,
+    StageSettled,
+    StageStarted,
     revision_ref,
 )
 from vs_slurm.api import SlurmJobStatus
@@ -120,6 +124,8 @@ class World:
         self.cluster = cluster
         self.stack = stack
 
+    observer: MeasurementObserver | None = None
+
     def requests(
         self, crash_at: int | None = None
     ) -> tuple[MeasurementRequests, FaultingNamespace]:
@@ -134,7 +140,7 @@ class World:
             None if crash_at is None else 2 * crash_at,
         )
         store = ReceiptStore(cast("StateNamespace", faulting))
-        return MeasurementRequests(self.stack.executor, store), faulting
+        return MeasurementRequests(self.stack.executor, store, self.observer), faulting
 
 
 @asynccontextmanager
@@ -195,6 +201,67 @@ async def run(
 ) -> ExecutionResult:
     requests, _ = w.requests(crash_at)
     return await requests.execute(request, context_for(request))
+
+
+class Recorder:
+    """A measurement observer that keeps what it heard, in order."""
+
+    def __init__(self) -> None:
+        self.heard: list[StageStarted | StageSettled] = []
+
+    def stage_started(self, event: StageStarted) -> None:
+        self.heard.append(event)
+
+    def stage_settled(self, event: StageSettled) -> None:
+        self.heard.append(event)
+
+
+def shape(heard: list[StageStarted | StageSettled]) -> list[tuple[str, str]]:
+    return [("started" if isinstance(e, StageStarted) else "settled", e.stage_id) for e in heard]
+
+
+# progress
+
+
+async def test_each_stage_is_reported_once_however_often_the_job_is_observed() -> None:
+    async with world() as w:
+        w.observer = Recorder()
+        requests, _ = w.requests()
+        sub = submission("sub", candidate=w.stack.snapshot)
+        resource = resource_of(await requests.execute(sub, context_for(sub)))
+        await settled(w, resource)
+        for request in (
+            query(InspectOwnedJob, "inspect-1", resource),
+            query(InspectOwnedJob, "inspect-2", resource),
+            query(CollectEvidence, "collect", resource),
+        ):
+            await requests.execute(request, context_for(request))
+        heard = w.observer.heard
+        assert shape(heard) == [
+            ("started", "accuracy"),
+            ("settled", "accuracy"),
+            ("started", "benchmark"),
+            ("settled", "benchmark"),
+        ]
+        assert {e.handle_id for e in heard} == {resource.root}
+        benchmark = heard[-1]
+        assert isinstance(benchmark, StageSettled)
+        assert benchmark.passed
+        assert benchmark.metrics
+
+
+async def test_a_failed_benchmark_is_reported_failed_with_its_reason() -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = 1
+    async with world(cluster) as w:
+        w.observer = Recorder()
+        resource = resource_of(await submit(w))
+        await settled(w, resource)
+        await run(w, query(InspectOwnedJob, "inspect", resource))
+        settled_events = [e for e in w.observer.heard if isinstance(e, StageSettled)]
+        by_stage = {e.stage_id: e for e in settled_events}
+        assert by_stage["accuracy"].passed
+        assert not by_stage["benchmark"].passed
 
 
 # happy path
@@ -822,3 +889,63 @@ async def test_a_second_poll_that_reads_differently_returns_the_stored_evidence(
         ]
         assert evidence[0]
         assert evidence[0] == evidence[1] == evidence[2]
+
+
+# A benchmark that exits without its evaluator's result record, as after a node loss, an
+# out-of-memory kill or a GPU hang, frames nothing; one that reported a failure leaves a record.
+_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
+_END_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
+_NO_RECORD = (
+    f"{_MARKER}\n\n{_END_MARKER}",
+    "killed",
+    "",
+)
+_RECORD = (f'{_MARKER}\n{{"throughput": 12}}\n{_END_MARKER}',)
+
+
+@settings(
+    max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(output=st.sampled_from(_NO_RECORD), exit_code=st.sampled_from((0, 1, 137)))
+async def test_a_benchmark_without_a_result_record_is_infrastructure_whatever_its_exit(
+    output: str, exit_code: int
+) -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = exit_code
+    cluster.benchmark_output = output
+    async with world(cluster) as w:
+        resource = resource_of(await submit(w))
+        await settled(w, resource)
+        result = await run(w, query(ObserveOwnedJob, "observe", resource))
+        target = (await run(w, query(InspectOwnedJob, "inspect", resource))).observation.target
+        assert target is not None
+        assert target.observation.status is ObservationStatus.FAILED
+        # Nothing it measured is kept, so core has no workload fact to reject the candidate on.
+        assert target.evidence == ()
+        assert target.evaluation_result is None
+        assert target.measurement_failure is MeasurementFailure.INFRASTRUCTURE
+        jobs = [e for e in result.owner_events if isinstance(e, JobObserved)]
+        assert [e.failure for e in jobs] == [MeasurementFailure.INFRASTRUCTURE]
+
+
+@settings(
+    max_examples=6, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(exit_code=st.sampled_from((1, 2, 3)))
+async def test_a_benchmark_that_wrote_its_record_and_failed_is_the_workloads_permanent_fact(
+    exit_code: int,
+) -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = exit_code
+    cluster.benchmark_output = _RECORD[0]
+    async with world(cluster) as w:
+        resource = resource_of(await submit(w))
+        await settled(w, resource)
+        target = (await run(w, query(InspectOwnedJob, "inspect", resource))).observation.target
+        assert target is not None
+        assert target.measurement_failure is not MeasurementFailure.INFRASTRUCTURE
+        assert {ref.status for ref in target.evidence} == {
+            ObservationStatus.SUCCEEDED,
+            ObservationStatus.FAILED,
+        }
+        assert target.evaluation_result is not None

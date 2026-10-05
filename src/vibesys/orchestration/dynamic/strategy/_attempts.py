@@ -284,7 +284,7 @@ def _measure(draft: Draft, record: AttemptRecord) -> AttemptRecord:
             }
         )
     candidate = measured_revision(record)
-    identifier = ids.decision_id("measure", key_of(record))
+    identifier = ids.decision_id("measure", key_of(record), record.measurements)
     draft.emit(
         Measure(
             decision_id=identifier,
@@ -297,7 +297,13 @@ def _measure(draft: Draft, record: AttemptRecord) -> AttemptRecord:
             ),
         )
     )
-    return record.model_copy(update={"step": Step.AWAITING, "awaiting": identifier})
+    return record.model_copy(
+        update={
+            "step": Step.AWAITING,
+            "awaiting": identifier,
+            "measurements": record.measurements + 1,
+        }
+    )
 
 
 def _interpret(draft: Draft, record: AttemptRecord) -> AttemptRecord:

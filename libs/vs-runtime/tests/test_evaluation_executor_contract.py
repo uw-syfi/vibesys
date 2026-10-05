@@ -2,7 +2,7 @@
 
 The in-process ``PollingEvaluationExecutor`` (over a Fake ``Evaluation``) and
 the ``SemanticSlurmEvaluationExecutor`` (over the Fake Slurm cluster) are
-interchangeable behind ``core_bindings(evaluation=...)``, so each must submit,
+interchangeable behind ``core_bindings(measurement=MeasurementServices(...))``, so each must submit,
 reach a terminal state, render a failed stage's text, and cancel the same way.
 """
 
