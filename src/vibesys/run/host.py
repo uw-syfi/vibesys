@@ -478,7 +478,7 @@ class _ProductHostFactory:
             profiler=profiler_service,
         )
 
-    def _core_services(  # noqa: PLR0913  # lint-waiver: LW-948024 [PLR0913]; each argument is an independently owned resource the host already opened, and the composition reads them once.
+    def _core_services(  # noqa: PLR0913  # lint-waiver: LW-948090 [PLR0913]; each argument is an independently owned resource the host already opened, and the composition reads them once.
         self,
         resources: _PreparedRun,
         workspace_resources: WorkspaceResourceFactory,
@@ -684,7 +684,7 @@ class _ProductHostFactory:
         if self.core_services is not None:
             try:
                 await self.core_services.close()
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930076 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
+            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948091 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
                 errors.append(error)
         if errors:
             raise RunCleanupError(_EVALUATION_CLEANUP_FAILURE, tuple(errors))
@@ -797,7 +797,7 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
 
 
 @asynccontextmanager
-async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948025 [PLR0913]; independent product effects remain explicit at the sole wiring boundary.
+async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PLR0913]; independent product effects remain explicit at the sole wiring boundary.
     request: RunRequest,
     integration: LocalRunIntegration,
     *,

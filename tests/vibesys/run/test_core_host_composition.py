@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from vibesys.run.core_services import CoreServices
     from vs_agent.api import AgentClientProtocol
     from vs_core.api import Strategy
 
@@ -157,14 +158,14 @@ def _open(
     *,
     client_factory: Callable[..., AgentClientProtocol] | None,
     journal: bool,
-) -> Callable[[], object]:
+) -> Callable[[], CoreServices]:
     project_root = tmp_path / "project"
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
     integration = LocalRunIntegration()
 
-    async def exercise() -> object:
+    async def exercise() -> CoreServices:
         try:
             async with open_product_core_host(
                 _request(project_root),
@@ -185,9 +186,9 @@ def _open(
 
 def test_core_host_yields_services_whose_state_starts_the_strategy(tmp_path: Path) -> None:
     services = _open(tmp_path, client_factory=_resumable_client, journal=True)()
-    strategy = services.strategy  # type: ignore[attr-defined]
-    state = services.state  # type: ignore[attr-defined]
-    catalog = services.catalog  # type: ignore[attr-defined]
+    strategy = services.strategy
+    state = services.state
+    catalog = services.catalog
     offered = Capabilities(lifecycle=frozenset(), operations=catalog.offered_operations)
     assert validate_startup(strategy.declaration, offered).operations == ()
     assert [op.kind for op in catalog.offered_operations] == ["test.render"]
@@ -205,7 +206,7 @@ def test_core_host_yields_services_whose_state_starts_the_strategy(tmp_path: Pat
 def test_missing_resource_fails_at_composition_naming_it(
     tmp_path: Path,
     client_factory: Callable[..., AgentClientProtocol] | None,
-    journal: bool,  # noqa: FBT001
+    journal: bool,  # noqa: FBT001  # lint-waiver: LW-948093 [FBT001]; pytest passes the parametrized journal flag positionally by name, so a keyword-only bool is not possible.
     missing: str,
 ) -> None:
     with pytest.raises(CoreCompositionError, match=missing) as raised:
@@ -267,7 +268,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
         ),
     )
 
-    async def exercise() -> object:
+    async def exercise() -> RunStatus:
         return await run_plugin(
             request,
             integration,

@@ -7,6 +7,7 @@ strategy proposes nothing: the run stays open until a control or the deadline en
 from __future__ import annotations
 
 import itertools
+import math
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -181,10 +182,13 @@ async def test_an_idle_run_is_woken_a_bounded_number_of_times(
         horizon = process.shell.record.envelope.core.run.deadline_at - 1.0
     assert outcome.status == RunStatus.TERMINAL
     assert all(seconds >= min_sleep for seconds in clock.sleeps)
-    # Wakes come from the control poll and the lease renewal, each at most that often.
+    # Wakes come from the control poll and the lease renewal, each at most that often;
+    # a partial interval at the horizon still costs one wake, hence the ceilings.
     assert (
         len(clock.sleeps)
-        <= horizon / max(poll, min_sleep) + horizon / max(LEASE / 3, min_sleep) + 3
+        <= math.ceil(horizon / max(poll, min_sleep))
+        + math.ceil(horizon / max(LEASE / 3, min_sleep))
+        + 3
     )
 
 

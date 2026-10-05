@@ -289,7 +289,7 @@ def test_limits_carry_the_configured_observe_pacing(
     tmp_path_factory: pytest.TempPathFactory, interval: int, extra: int
 ) -> None:
     root = tmp_path_factory.mktemp("pacing")
-    config = {
+    config: dict[str, object] = {
         "evaluation": {
             "observe_interval_seconds": interval,
             "observe_backoff_cap_seconds": interval + extra,
