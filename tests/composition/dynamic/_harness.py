@@ -31,6 +31,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from tests.support.loop_invariants import RunRecords, check
+
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from launch import LaunchSettings
@@ -533,7 +535,35 @@ def run_request(
         await asyncio.gather(collector, return_exceptions=True)
         return LoopRun(result.run_id, result, None, events)
 
-    return asyncio.run(run())
+    finished = asyncio.run(run())
+    if finished.error is None:
+        _assert_invariants(request, finished)
+    return finished
+
+
+def _assert_invariants(request: RunRequest, run: LoopRun) -> None:
+    """Fail the scenario when the run's own records violate a loop invariant.
+
+    A run that raised (a crash or stall) has no terminal event by design, so only runs
+    that ended on their own terms are checked.
+    """
+    root = request.project_root
+    records = RunRecords.from_core(
+        [event.model_dump(mode="json") for event in run.events],
+        load_envelope(root, run.run_id),
+        root.parent / "cluster",
+    )
+    violations = check(records)
+    assert not violations, [f"{v.invariant}: {v.detail}" for v in violations]
+
+
+def load_envelope(root: Path, run_id: str) -> dict[str, Any] | None:
+    """Return the run's committed envelope, or None when none was committed."""
+    stored = Project.open(root).state_store(run_id).load()
+    if not isinstance(stored, StoredEnvelope):
+        return None
+    envelope: dict[str, Any] = json.loads(stored.payload)["envelope"]
+    return envelope
 
 
 def resume_request(request: RunRequest, run_id: str) -> RunRequest:
@@ -549,9 +579,9 @@ class CoreRecords:
         self.loop_input = loop_input
         self.run_id = run_id
         self.project = Project.open(loop_input.root)
-        stored = self.project.state_store(run_id).load()
-        assert isinstance(stored, StoredEnvelope)
-        self.envelope: dict[str, Any] = json.loads(stored.payload)["envelope"]
+        envelope = load_envelope(loop_input.root, run_id)
+        assert envelope is not None, f"no committed record for {run_id}"
+        self.envelope: dict[str, Any] = envelope
 
     @property
     def core(self) -> dict[str, Any]:

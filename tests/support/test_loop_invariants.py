@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from hypothesis import given
@@ -233,3 +234,76 @@ def test_records_load_from_a_run_layout(tmp_path: Path) -> None:
     assert _invariants(records) == [Invariant.EMPTY_COMPLETION, Invariant.CLUSTER_JOB_LEFT]
     assert records.usage == [{"kind": "dynamic-judge"}]
     assert records.cluster_jobs == {"5000": "PENDING"}
+
+
+def _envelope(
+    status: str = "terminal",
+    outcome: str | None = "success",
+    hypotheses: int = 1,
+    submitted_at: list[float] | None = None,
+) -> dict[str, object]:
+    intents = [
+        {"request": {"kind": "submit_measurement", "plan": {"submitted_at": at}}}
+        for at in submitted_at or []
+    ]
+    return {
+        "core": {
+            "run": {"status": status, "result": {"outcome": outcome} if outcome else None},
+            "intents": {"intents": intents},
+        },
+        "strategy": {"hypotheses": [{"hypothesis_id": f"h{i}"} for i in range(hypotheses)]},
+    }
+
+
+def _violations(events: list[Record], envelope: dict[str, object]) -> set[Invariant]:
+    return {v.invariant for v in check(RunRecords.from_core(events, envelope))}
+
+
+def test_a_core_run_that_completes_with_a_success_record_passes() -> None:
+    assert _violations([_started(), _finished()], _envelope()) == set()
+
+
+def test_a_core_run_that_completes_without_a_hypothesis_is_empty() -> None:
+    assert _violations([_started(), _finished()], _envelope(hypotheses=0)) == {
+        Invariant.EMPTY_COMPLETION
+    }
+
+
+@given(
+    status=st.sampled_from(["completed", "failed"]),
+    recorded=st.sampled_from(["running", "closing", "terminal"]),
+    outcome=st.sampled_from(["success", "failed", "cancelled"]),
+)
+def test_a_terminal_event_must_agree_with_the_core_record(
+    status: str, recorded: str, outcome: str
+) -> None:
+    agrees = recorded == "terminal" and (outcome == "success") == (status == "completed")
+
+    found = _violations([_started(), _finished(status)], _envelope(recorded, outcome))
+
+    assert (Invariant.RECORD_DISAGREES in found) is (not agrees)
+
+
+def test_a_stop_may_leave_the_core_record_open_or_cancelled() -> None:
+    stopped = _event("stopped", 20, status="interrupted")
+    stop = _event("stop_requested", 10)
+    for envelope in (_envelope("running", None), _envelope("terminal", "cancelled")):
+        assert _violations([_started(), stop, stopped], envelope) == set()
+    assert _violations([_started(), stop, stopped], _envelope("terminal", "success")) == {
+        Invariant.RECORD_DISAGREES
+    }
+
+
+def test_a_measurement_submitted_after_the_stop_request_is_flagged() -> None:
+    stop_at = datetime.fromisoformat("2026-10-03T18:00:10+00:00").timestamp()
+    events = [
+        _started(),
+        _event("stop_requested", 10),
+        _event("stopped", 20, status="interrupted"),
+    ]
+
+    before = _violations(events, _envelope("running", None, submitted_at=[stop_at - 1]))
+    after = _violations(events, _envelope("running", None, submitted_at=[stop_at + 1]))
+
+    assert before == set()
+    assert after == {Invariant.EVALUATION_AFTER_STOP}
