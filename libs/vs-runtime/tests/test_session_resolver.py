@@ -125,7 +125,7 @@ def open_production(env: WorkspaceEnv, declared: AgentRole) -> Production:
     client = AgentClient(FakeDriver(answer={"value": 7}, on_turn=turns.append))
     requests = open_session_requests(
         inputs, client=client, invocation_slot=FakeAgentInvocationStore(), store=store
-    )
+    ).turns
     return Production(env, artifacts, ProductionSessionResolver(inputs), store, requests, turns)
 
 

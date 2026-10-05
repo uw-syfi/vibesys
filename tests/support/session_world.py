@@ -186,6 +186,12 @@ class FakeSessionResolver:
             self.guarded = FakeWorkspace(path=self.workspace)
         return self.guarded
 
+    def guard_snapshots(self, fenced_by: Callable[[Path], tuple[str, ...]]) -> None:
+        """Install the fence on the one workspace of this world, as production does on its own."""
+        workspace = self.guarded or FakeWorkspace(path=self.workspace)
+        self.guarded = workspace
+        workspace.access_recovery.guard(lambda: fenced_by(workspace.path))
+
     def access_grant(self, turn: TurnSpec) -> AccessGrant | None:
         """Read-only unless a test says otherwise."""
         access = {
