@@ -150,7 +150,14 @@ class RuntimeWorkspace:
         self._resource = resource
         self._id = resource.id
         self.access_recovery = WorkspaceAccessRecovery()
+        if owner.access_fence is not None:
+            self.guard_access(owner.access_fence)
         self._closed = False
+
+    def guard_access(self, fenced_by: Callable[[Path], tuple[str, ...]]) -> None:
+        """Refuse snapshots of this workspace while *fenced_by* names its unjudged invocations."""
+        resource = self._resource
+        self.access_recovery.guard(lambda: fenced_by(resource.path))
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -291,7 +298,17 @@ class RuntimeWorkspaces:
         self._close_task: asyncio.Task[None] | None = None
         self._sessions: RuntimeWorkspaceAgentSessions | None = None
         self._evaluations: set[asyncio.Task[object]] = set()
+        self.access_fence: Callable[[Path], tuple[str, ...]] | None = None
         self.root = RuntimeWorkspace(self, resources.root)
+
+    def guard_access(self, fenced_by: Callable[[Path], tuple[str, ...]]) -> None:
+        """Refuse snapshots of any workspace of this collection while *fenced_by* names a fence.
+
+        Applies to the root, to live candidates, and to candidates opened later.
+        """
+        self.access_fence = fenced_by
+        for handle in (self.root, *self._candidates.values()):
+            handle.guard_access(fenced_by)
 
     def _attach_sessions(self, sessions: RuntimeWorkspaceAgentSessions) -> None:
         """Complete the private ownership cycle during runtime construction."""

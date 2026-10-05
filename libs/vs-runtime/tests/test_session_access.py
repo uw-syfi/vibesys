@@ -338,6 +338,8 @@ class Restart(StrEnum):
     NONE = "none"
     BEFORE_SETTLE = "before-settle"
     AFTER_SETTLE = "after-settle"
+    SNAPSHOT_FIRST = "snapshot-first"
+    """Die before settling, restart, and snapshot before any executor handles a request."""
 
 
 ALLOWED = "allowed.txt"
@@ -383,7 +385,7 @@ async def play(world: AccessWorld, outcome: Outcome, restart: Restart) -> None:
         await world.route(dispatch_request("req-1", "inv-1"))
         world.host.faults.down = False
         world.writes = {}
-    if restart is Restart.BEFORE_SETTLE:
+    if restart in {Restart.BEFORE_SETTLE, Restart.SNAPSHOT_FIRST}:
         dying = DiesBeforeRevert(world.root)
         world.host.resolver.guarded = cast("AccessGuardedWorkspace", dying)
         with contextlib.suppress(HostDied):
@@ -392,6 +394,12 @@ async def play(world: AccessWorld, outcome: Outcome, restart: Restart) -> None:
         await world.route(ends_here)
     if restart is not Restart.NONE:
         world.restart()
+        if restart is Restart.SNAPSHOT_FIRST:
+            lifecycle_executor(world.host, world.store())  # the restarted host is up, idle
+            frozen = tree(world.root.path)
+            with pytest.raises(RuntimeContractError):
+                await world.root.snapshot("before-any-executor")
+            assert tree(world.root.path) == frozen
         await world.route(ends_here)
         await world.route(inspect_request("req-i2", "inv-1"))
 

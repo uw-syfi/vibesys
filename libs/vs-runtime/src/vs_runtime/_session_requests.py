@@ -101,7 +101,9 @@ from vs_runtime._receipt_store import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import timedelta
+    from pathlib import Path
 
     from vs_agent.api import AgentSessions, AgentSessionSpec, ClientAgentSessions, InvocationOutcome
     from vs_core.api import InvocationId, Observation, RequestBase
@@ -153,6 +155,15 @@ class SessionResolver(Protocol):
 
     async def workspace_for(self, ref: WorkspaceRef | Scope) -> AccessGuardedWorkspace | None:
         """The live workspace a turn runs in, or None when it no longer exists."""
+        ...
+
+    def guard_snapshots(self, fenced_by: Callable[[Path], tuple[str, ...]]) -> None:
+        """Make every snapshot of every workspace of this run ask *fenced_by* first.
+
+        *fenced_by* takes a workspace's host path and names the invocations whose writes
+        are not judged; a snapshot is refused while it names any. Called once, when the
+        executors are built, so the fence is in place before anything can snapshot.
+        """
         ...
 
     def access_grant(self, turn: TurnSpec) -> AccessGrant | None:
@@ -308,6 +319,7 @@ class RuntimeSessionRequests:
         self._resolver = resolver
         self._store = store
         self.settlement = AccessSettlement(store, resolver.workspace_for)
+        resolver.guard_snapshots(self.settlement.fenced_by)
         """Judges each invocation's writes; the lifecycle executors share it."""
         self._observations = ObservationFactory(store)
         self._locks: dict[str, asyncio.Lock] = {}
@@ -571,8 +583,8 @@ class RuntimeSessionRequests:
         if self.settlement.receipt(access_key) is None:
             # Before the dispatch is recorded: a refusal here proves no provider call began.
             try:
-                await self._settle_ended_peers(turn.workspace, access_key)
-                self.settlement.require_clear(turn.workspace, access_key)
+                await self._settle_ended_peers(dispatch.workspace.path, access_key)
+                self.settlement.require_clear(dispatch.workspace.path, access_key)
             except AccessSettlementError as error:
                 return _unknown(str(error), binding.resource_id)
         ended = await self._admit(request, call, bkey, binding, dispatch)
@@ -580,7 +592,7 @@ class RuntimeSessionRequests:
             return ended
         return await self._run_turn(request, bkey, binding, dispatch)
 
-    async def _settle_ended_peers(self, workspace: WorkspaceRef | Scope, key: AccessKey) -> None:
+    async def _settle_ended_peers(self, workspace: Path, key: AccessKey) -> None:
         """Judge the unsettled turns of this workspace whose journal proves they ended.
 
         A host that died between a turn's journal write and its settlement left
@@ -620,13 +632,13 @@ class RuntimeSessionRequests:
         except AccessSettlementError as error:
             return _unknown(str(error), binding.resource_id)
         except InvocationConflictError as error:
-            await self.settlement.fence(access_key)
+            self.settlement.fence(access_key)
             return _rejected(f"invocation conflicts with its journal: {error}", binding.resource_id)
         except SessionConfigurationError as error:
-            await self.settlement.fence(access_key)
+            self.settlement.fence(access_key)
             return _rejected(f"session configuration refused: {error}", binding.resource_id)
         except (SessionPersistenceError, SessionResumeError) as error:
-            await self.settlement.fence(access_key)
+            self.settlement.fence(access_key)
             return _unknown(f"dispatch state is unreadable: {error}", binding.resource_id)
         return await self._finish(outcome, bkey, binding, dispatch, turn.output_schema)
 
@@ -687,7 +699,7 @@ class RuntimeSessionRequests:
         facts = self._translate(outcome, binding, dispatch.schema, ref)
         key = AccessKey(binding=bkey, invocation=dispatch.invocation)
         if not isinstance(outcome, (Completed, InvalidResponse)):
-            await self.settlement.fence(key)
+            self.settlement.fence(key)
             return facts
         try:
             violation = await self.settlement.settle(key)
@@ -854,9 +866,7 @@ class RuntimeSessionRequests:
             if violation is not None:
                 target = _violated(violation, binding.resource_id)
         else:
-            await self.settlement.fence(
-                AccessKey(binding=bkey, invocation=invocation.invocation_id.root)
-            )
+            self.settlement.fence(AccessKey(binding=bkey, invocation=invocation.invocation_id.root))
         return self._inspected(request, context, target, link.request_id)
 
     def _inspected(

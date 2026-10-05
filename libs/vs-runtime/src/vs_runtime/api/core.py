@@ -115,6 +115,7 @@ from vs_runtime._session_requests import (
 from vs_runtime._session_resolver import (
     ProductionSessionResolver,
     ResolverInputs,
+    SessionExecutors,
     SessionSpecFactory,
     open_session_requests,
 )
@@ -218,6 +219,7 @@ __all__ = [
     "RuntimeWorkspaceRequests",
     "SemanticEvents",
     "SessionBinding",
+    "SessionExecutors",
     "SessionLifecycleRequests",
     "SessionRequestRouter",
     "SessionRequests",
