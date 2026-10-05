@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ValidationError
 
+from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project.errors import ProjectStateError, StateModelNotFoundError
 
 if TYPE_CHECKING:
@@ -170,6 +171,7 @@ def atomic_write_bytes(
             stream.flush()
             filesystem.sync_file(stream)
         filesystem.replace(temporary_path, path)
+        FRAMEWORK_WRITES.wrote(path, contents)
         filesystem.sync_directory(path.parent)
     finally:
         if temporary_path is not None:
