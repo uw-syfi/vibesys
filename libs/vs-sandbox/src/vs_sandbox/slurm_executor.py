@@ -834,7 +834,7 @@ class SlurmEvaluationExecutor:
         target = handle if handle is not None else handle_id
         if handle is not None and handle.job.job_id in self._terminated_jobs:
             return
-        cancelled = await asyncio.to_thread(self._cluster.cancel, target)
+        cancelled = await _finish_in_thread(self._cluster.cancel, target)
         if isinstance(cancelled, ClusterUnknown):
             raise ExecutorCancellationUnknownError(handle_id)
         if (
@@ -847,7 +847,7 @@ class SlurmEvaluationExecutor:
             # The cluster retained cancellation intent and has no accepted job
             # identity, so there is no allocation termination to confirm.
             return
-        observed = await asyncio.to_thread(self._cluster.inspect, target)
+        observed = await _finish_in_thread(self._cluster.inspect, target)
         if not isinstance(observed, ClusterObservation) or observed.status not in {
             SlurmJobStatus.COMPLETED,
             SlurmJobStatus.FAILED,
@@ -918,6 +918,26 @@ class _SlurmStagePayloadError(ValueError):
     @classmethod
     def missing_command(cls, name: str) -> _SlurmStagePayloadError:
         return cls(f"Slurm stage {name!r} requires a nonempty configured command")
+
+
+async def _finish_in_thread[**P, R](
+    function: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
+) -> R:
+    """Run a blocking cluster call that must finish even if its awaiter is cancelled.
+
+    ``asyncio.to_thread`` abandons its worker when the awaiting task is cancelled,
+    so a cancel or inspect could still be mid-flight (an scancel not yet sent) after
+    the executor reported itself closed. This waits for the call to end, then
+    re-raises the cancellation.
+    """
+    work = asyncio.ensure_future(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(work)
+    except asyncio.CancelledError:
+        while not work.done():
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await asyncio.shield(work)
+        raise
 
 
 def _stage_command(name: str, command: str | None) -> tuple[str, ...]:
