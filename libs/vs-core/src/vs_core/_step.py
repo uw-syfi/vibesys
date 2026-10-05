@@ -270,6 +270,17 @@ def _reconcile_deadline(state: CoreState, request: Request) -> float:
     return max(state.run.now_at, deadline)
 
 
+def _same_request(previous: Intent, proposal: Request) -> bool:
+    """Whether a proposal names the request already prepared under its identity.
+
+    The deadline is a field of the attempt, not of the identity: a host that restarts and
+    proposes the same poll again stamps it with a later deadline, and the request already
+    prepared keeps the one it was prepared with. Every other field must match exactly.
+    """
+    reproposed = previous.request.model_copy(update={"deadline_at": proposal.deadline_at})
+    return digest(reproposed) == digest(proposal)
+
+
 def register_requests(
     state: CoreState, requests: tuple[Request, ...]
 ) -> tuple[CoreState, tuple[Request, ...]]:
@@ -284,7 +295,7 @@ def register_requests(
         payload_digest = digest(request)
         previous = next((record for record in records if record.request_id == request_id), None)
         if previous is not None:
-            if previous.payload_digest != payload_digest:
+            if not _same_request(previous, request):
                 raise ContractError(("request_id", request_id.root), "request identity conflict")
             continue
         lifecycle = request_lifecycle(request)

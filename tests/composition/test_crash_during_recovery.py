@@ -45,29 +45,14 @@ def _recovery_window(first: Crossing) -> tuple[Crossing, ...]:
     return tuple(window[:-1]) if window and window[-1].boundary == Boundary.DURABLE_WRITE else ()
 
 
-# Known gap: a restart that crashes again while recovering re-issues a measurement poll under
-# the identity of one already prepared, with a later deadline, and core rejects the conflict.
-_REISSUED_POLL = frozenset({"executor_request:submit_measurement#1+durable_write:commit#11"})
-
-
 def _sampled(window: tuple[Crossing, ...]) -> tuple[Crossing, ...]:
     """The harness budget is three minutes: every third crossing of a window, and its last."""
     return tuple(c for i, c in enumerate(window) if i % 3 == 0 or i == len(window) - 1)
 
 
 def _double_crashes() -> list[object]:
-    marks = [
-        pytest.mark.xfail(
-            strict=True, reason="a poll is re-issued under its prepared identity after a re-crash"
-        )
-    ]
     return [
-        pytest.param(
-            first,
-            second,
-            id=f"{name(first)}+{name(second)}",
-            marks=marks if f"{name(first)}+{name(second)}" in _REISSUED_POLL else [],
-        )
+        pytest.param(first, second, id=f"{name(first)}+{name(second)}")
         for first in _first_of_each_kind()
         for second in _sampled(_recovery_window(first))
     ]
