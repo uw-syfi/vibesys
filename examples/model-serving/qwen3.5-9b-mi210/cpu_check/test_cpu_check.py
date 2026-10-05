@@ -278,6 +278,11 @@ def test_tree_key_follows_content_not_location_and_changes_with_any_edit(
     _write(b, files)
     (b / "__pycache__").mkdir()
     (b / "__pycache__" / "x.pyc").write_bytes(b"cache")
+    # What the framework adds to each checkout differs between one tree's checkouts.
+    (b / ".git").write_text("gitdir: /elsewhere")
+    (b / ".mcp.json").write_text('{"token": "per-session"}')
+    (b / ".claude").mkdir()
+    (b / ".claude" / "settings.json").write_text("{}")
     options = {"expect_cache_hits": False, "concurrency": 0}
     assert tree_key(a, options) == tree_key(b, options)
 

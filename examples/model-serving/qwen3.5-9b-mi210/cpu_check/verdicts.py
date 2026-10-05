@@ -4,7 +4,9 @@ The check is deterministic for a given tree and options, so running it again can
 agent anything new: it only costs 10 to 120 s and the agent's tokens (live-1: 14 runs in one
 implementer turn, most re-running to see a different slice of the output; a judge re-ran
 it 12 times). A verdict is the exit code and the full report, stored under a key that is the
-hash of every file in the candidate root and the check's options. Any edit to the candidate or
+hash of every file in the candidate root and the check's options, except the root's dot
+entries (the framework puts its per-session `.git` link, `.mcp.json` token and agent
+settings there, which differ between an implementer's and a judge's checkout of one tree). Any edit to the candidate or
 to the check changes the key, so a stored verdict never describes a different tree. Only exits
 0 (pass) and 1 (a round failed) are stored; exit 2 (server did not start) may be an
 environment fault, so it is rerun.
@@ -26,8 +28,13 @@ def tree_key(root: Path, options: dict[str, object]) -> str:
     """Hash of the candidate root's files (paths and bytes) and the check's options."""
     digest = hashlib.sha256(json.dumps(options, sort_keys=True).encode())
     for directory, subdirs, files in os.walk(root):
-        subdirs[:] = sorted(d for d in subdirs if d not in _SKIPPED_DIRS)
+        at_root = Path(directory) == root
+        subdirs[:] = sorted(
+            d for d in subdirs if d not in _SKIPPED_DIRS and not (at_root and d.startswith("."))
+        )
         for name in sorted(files):
+            if at_root and name.startswith("."):
+                continue
             path = Path(directory, name)
             digest.update(b"\0" + path.relative_to(root).as_posix().encode() + b"\0")
             digest.update(hashlib.sha256(path.read_bytes()).digest())
