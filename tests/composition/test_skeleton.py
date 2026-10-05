@@ -21,6 +21,17 @@ from pathlib import Path
 
 import pytest
 from tests.support.executor_context import context_for
+from tests.support.session_world import (
+    ROLE,
+    SCHEMA,
+    SCOPE,
+    SESSION,
+    Reply,
+    dispatch_request,
+    ensure_request,
+    inspect_request,
+    turn_spec,
+)
 from tests.support.skeleton_strategy import DECLARATION, DIGEST, SkeletonStrategy, measurement
 from tests.support.skeleton_world import (
     CrashPoint,
@@ -36,23 +47,27 @@ import vs_core
 from vs_core.api import (
     CancelTurn,
     CloseSession,
+    ContinuationId,
     ContractError,
     ContractValidationError,
     DecisionId,
+    DispatchTurn,
+    EnsureSession,
     InspectRequest,
+    InspectTurn,
     InvocationId,
     InvocationRef,
     LifecycleClass,
     ObservationStatus,
     OperationSchemaRef,
     RequestId,
+    ResumeSessionTurn,
     RevisionId,
     RevisionRef,
     RunFacts,
     RunStatus,
     SchemaRef,
     Scope,
-    SessionId,
     SubmitMeasurement,
 )
 from vs_runtime.api.core import (
@@ -256,33 +271,59 @@ def test_retirement_requests_have_a_core_producer() -> None:
     assert not _unproduced() & RETIREMENT
 
 
+type SessionRequest = (
+    EnsureSession | DispatchTurn | InspectTurn | CancelTurn | CloseSession | ResumeSessionTurn
+)
+
+
+def _session_requests() -> tuple[SessionRequest, ...]:
+    """One request of each of the six kinds the session role serves."""
+    invocation = InvocationRef(
+        session_id=SESSION, invocation_id=InvocationId(root="inv-1"), generation=0
+    )
+    return (
+        ensure_request(),
+        dispatch_request(),
+        inspect_request(),
+        CancelTurn(
+            request_id=RequestId(root="probe-cancel"),
+            scope=SCOPE,
+            deadline_at=100.0,
+            invocation=invocation,
+        ),
+        CloseSession(
+            request_id=RequestId(root="probe-close"),
+            scope=SCOPE,
+            deadline_at=100.0,
+            session_id=SESSION,
+        ),
+        ResumeSessionTurn(
+            request_id=RequestId(root="probe-resume"),
+            scope=SCOPE,
+            deadline_at=100.0,
+            turn=turn_spec(),
+            continuation_id=ContinuationId(root="probe-continuation"),
+        ),
+    )
+
+
 @pytest.mark.asyncio
-async def test_session_lifecycle_requests_are_executed(tmp_path: Path) -> None:
+@pytest.mark.parametrize("request_", _session_requests(), ids=lambda request: request.kind)
+async def test_every_session_request_reaches_an_executor_that_serves_it(
+    tmp_path: Path, request_: SessionRequest
+) -> None:
+    """The session role built by ``core_bindings`` serves all six kinds: turns take
+    EnsureSession, DispatchTurn and InspectTurn, lifecycle takes the other three, and neither
+    answers a kind it does not own with 'not executed here'.
+    """
     with open_skeleton_world(tmp_path) as world:
+        world.agents.resolver.roles = frozenset({ROLE})
+        world.agents.resolver.schemas = {SCHEMA: Reply}
         executors = world.bindings().executors
-        scope = Scope(owner=world.initial().run.run_id, generation=0)
-        session = SessionId(root="implementer")
-        requests = (
-            CloseSession(
-                request_id=RequestId(root="probe-close"),
-                scope=scope,
-                deadline_at=100.0,
-                session_id=session,
-            ),
-            CancelTurn(
-                request_id=RequestId(root="probe-cancel"),
-                scope=scope,
-                deadline_at=100.0,
-                invocation=InvocationRef(
-                    session_id=session, invocation_id=InvocationId(root="inv"), generation=0
-                ),
-            ),
-        )
-        for request in requests:
-            result = await executors.sessions.execute(request, context_for(request))
-            assert isinstance(result, ExecutionResult), result
-            diagnostic = result.observation.observation.diagnostic
-            assert "not executed here" not in diagnostic, f"{request.kind}: {diagnostic}"
+        result = await executors.sessions.execute(request_, context_for(request_))
+        assert isinstance(result, ExecutionResult), result
+        diagnostic = result.observation.observation.diagnostic
+        assert "not executed here" not in diagnostic, f"{request_.kind}: {diagnostic}"
 
 
 @pytest.mark.asyncio
