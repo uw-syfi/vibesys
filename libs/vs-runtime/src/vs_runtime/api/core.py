@@ -27,6 +27,7 @@ from vs_runtime._core_loop import (
     DispatchCapExceededError,
     DispatchProgress,
     ObservationRejectedError,
+    OrphanWaitError,
     OwnerEventRejectedError,
     ProductionCoreTransitions,
     PublicationDelivery,
@@ -148,7 +149,12 @@ from vs_runtime._receipt_store import (
     result_type_name,
 )
 from vs_runtime._render_operation import RenderArtifactsOwner
-from vs_runtime._request_inspection import RecordedRequestInspector
+from vs_runtime._request_inspection import (
+    NOT_TARGET_FACTS,
+    Inspected,
+    RecordedRequestInspector,
+    as_target,
+)
 from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
 from vs_runtime._session_lifecycle_requests import (
     ContinuationBinding,
@@ -191,6 +197,7 @@ from vs_runtime._workspace_requests import (
 __all__ = [
     "EVALUATION_TOOL_ID",
     "HAND_ROLLED_ROLES",
+    "NOT_TARGET_FACTS",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
     "AccessGrant",
@@ -233,6 +240,7 @@ __all__ = [
     "ExecutorRefusal",
     "ExecutorRole",
     "Indeterminate",
+    "Inspected",
     "Inspection",
     "IntentReceipt",
     "InterpretEvidenceOwner",
@@ -257,6 +265,7 @@ __all__ = [
     "OperationPorts",
     "OperationReceipts",
     "OperationRole",
+    "OrphanWaitError",
     "OwnerEvent",
     "OwnerEventRejectedError",
     "Performed",
@@ -319,6 +328,7 @@ __all__ = [
     "WallRunClock",
     "WorkspaceReceipts",
     "WorkspaceRequests",
+    "as_target",
     "bind_operations",
     "build_operation_catalog",
     "commit_of",
