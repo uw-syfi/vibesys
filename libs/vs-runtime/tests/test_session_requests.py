@@ -235,6 +235,24 @@ async def test_a_crash_right_after_a_turn_cannot_skip_the_lost_checkpoint_guard(
 
 
 @pytest.mark.asyncio
+async def test_a_terminal_turn_is_released_so_a_closing_attempt_can_drain() -> None:
+    async with world() as w:
+        ensured = await w.execute(ensure_request())
+        done = await w.execute(dispatch_request())
+        seen = await w.execute(inspect_request())
+        assert not ensured.observation.observation.released
+        assert done.observation.observation.terminal
+        assert done.observation.observation.released
+        assert done.observation.observation.children_complete
+        assert seen.observation.target is not None
+        assert seen.observation.target.observation.released
+        w.host.faults.down = True
+        lost = await w.execute(dispatch_request("req-two", "inv-2"))
+        assert not lost.observation.observation.terminal
+        assert not lost.observation.observation.released
+
+
+@pytest.mark.asyncio
 async def test_the_in_turn_timeout_is_the_one_bound_with_the_session() -> None:
     async with world() as w:
         await w.execute(ensure_request())
