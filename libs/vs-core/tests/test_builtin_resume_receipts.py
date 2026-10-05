@@ -17,7 +17,7 @@ def builtin_state(
         intent = state.intents.intents[0]
         assert isinstance(intent.request, core.ResumeSessionTurn)
         request = core.DispatchTurn.model_validate(
-            intent.request.model_dump(exclude={"kind", "continuation_id"})
+            intent.request.model_dump(exclude={"kind", "continuation_id", "publication"})
         )
         state = replace_request(state, request)
     return state, identity

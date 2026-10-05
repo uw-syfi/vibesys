@@ -445,6 +445,14 @@ def with_intent(state: core.CoreState, request: core.Request) -> core.CoreState:
     )
 
 
+def request_index(prepared: core.Transition, session_id: core.SessionId) -> int:
+    return next(
+        index
+        for index, item in enumerate(prepared.requests)
+        if isinstance(item, core.EnsureSession) and item.spec.session_id == session_id
+    )
+
+
 def closing_session_state() -> tuple[core.CoreState, core.CloseSession]:
     spec = turn()
     request = core.CloseSession(
@@ -765,6 +773,13 @@ def test_failed_initial_group_late_acceptance_only_adds_cleanup(indices: list[in
         assert result.state.sessions.acquisition_groups[0].phase == "failed"
         assert result.events == ()
         assert all(isinstance(item, core.CloseSession) for item in result.requests)
+        # Each close names the physical lease and episode it releases.
+        for item in result.requests:
+            assert isinstance(item, core.CloseSession)
+            assert item.resource_id == core.ResourceId(
+                root=f"lease-{request_index(prepared, item.session_id)}"
+            )
+            assert item.episode == admission
         closes.extend(result.requests)
         state = result.state
     assert len(closes) == len(set(indices))
@@ -2244,3 +2259,73 @@ def test_required_group_reattaches_run_owned_lease_without_transferring_or_closi
         assert result.state.sessions.sessions[0].phase == core.SessionPhase.IDLE
         assert result.state.sessions.run_charges == ()
         assert result.state.attempts == state.attempts
+
+
+def test_a_session_close_releases_its_closing_attempt_exactly_once() -> None:
+    """One release per close: two emitters failed the step, and a dropped edge stalled closure.
+
+    Sessions marks the lease terminal before the release arrives, so graph discovery no
+    longer lists the edge; the closing attempt must still progress to its discard.
+    """
+    state, request = closing_session_state()
+    attempt_id = core.AttemptId(root="closing")
+    owner_scope = core.Scope(owner=attempt_id, generation=0)
+    admission = core.DecisionId(root="admission")
+    request = request.model_copy(update={"scope": owner_scope, "admission_id": admission})
+    session = state.sessions.sessions[0].model_copy(update={"scope": owner_scope})
+    state = state.model_copy(
+        update={"sessions": state.sessions.model_copy(update={"sessions": (session,)})}
+    )
+    state = with_intent(state, request)
+    dependency = core.ReleaseDependency(kind="session", identity=request.session_id)
+    owner = core.AttemptView(
+        attempt_id=attempt_id,
+        item_id=core.ItemId(root="item"),
+        generation=0,
+        phase=core.AttemptPhase.CLOSING,
+        workspace=core.WorkspacePlan(
+            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
+        ),
+        budget=core.AttemptBudget(),
+        admission_id=admission,
+        closure=core.AttemptClosure(
+            disposition="cancel",
+            requested_at=1.0,
+            authority=core.RequestId(root="retire"),
+            admission_id=admission,
+        ),
+        release_dependencies=(dependency,),
+    )
+    fence = core.CloseAttemptScope(
+        request_id=core.RequestId(root="retire"),
+        scope=owner_scope,
+        admission_id=admission,
+        deadline_at=100.0,
+        attempt=core.AttemptRef(attempt_id=attempt_id, generation=0),
+    )
+    fenced = (
+        with_intent(state, fence)
+        .intents.intents[0]
+        .model_copy(
+            update={
+                "observation": turn_observation(
+                    fence, terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
+                ).model_copy(update={"children_complete": True, "admission_id": admission})
+            }
+        )
+    )
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(attempts=(owner,)),
+            "intents": state.intents.model_copy(
+                update={"intents": (*state.intents.intents, fenced)}
+            ),
+        }
+    )
+    observation = turn_observation(
+        request, terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
+    ).model_copy(update={"released": True, "children_complete": True, "admission_id": admission})
+    result = reload_step(state, core.RequestObserved(observation=observation))
+    assert result.state.sessions.sessions[0].phase == core.SessionPhase.TERMINAL
+    assert any(isinstance(item, core.DiscardWorkspace) for item in result.requests)
+    assert dependency not in result.state.attempts.attempts[0].release_dependencies

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import partial
+from functools import cache, partial
 from typing import TYPE_CHECKING, assert_never
 
 from pydantic import TypeAdapter
@@ -194,6 +194,12 @@ class CoreReducers:
 _DEFAULT_REDUCERS = CoreReducers()
 
 
+@cache
+def _event_adapter[E](event_type: type[E]) -> TypeAdapter[E]:
+    """One validator per area event union: building a TypeAdapter costs about 5 ms."""
+    return TypeAdapter(event_type)
+
+
 def _context[C: AreaContext](state: CoreState, model: type[C]) -> C:
     return model(**{name: getattr(state, name) for name in model.model_fields})
 
@@ -207,20 +213,20 @@ def _dispatch(
             change = scheduling.schedule(
                 state.scheduling,
                 _context(state, SchedulingContext),
-                TypeAdapter(SchedulingEvent).validate_python(event),
+                _event_adapter(SchedulingEvent).validate_python(event),
             )
         case Area.ATTEMPTS:
             reducer = attempts.advance_attempt if reducers.attempts is None else reducers.attempts
             change = reducer(
                 state.attempts,
                 _context(state, AttemptsContext),
-                TypeAdapter(AttemptsEvent).validate_python(event),
+                _event_adapter(AttemptsEvent).validate_python(event),
             )
         case Area.SESSIONS:
             change = sessions.advance_session(
                 state.sessions,
                 _context(state, SessionsContext),
-                TypeAdapter(SessionsEvent).validate_python(event),
+                _event_adapter(SessionsEvent).validate_python(event),
                 input_reducer=reducers.session_inputs,
             )
         case Area.EVALUATION:
@@ -232,19 +238,19 @@ def _dispatch(
             change = reducer(
                 state.evaluation,
                 _context(state, EvaluationContext),
-                TypeAdapter(EvaluationEvent).validate_python(event),
+                _event_adapter(EvaluationEvent).validate_python(event),
             )
         case Area.SETTLEMENT:
             change = settlement.settle(
                 state.settlement,
                 _context(state, SettlementContext),
-                TypeAdapter(SettlementEvent).validate_python(event),
+                _event_adapter(SettlementEvent).validate_python(event),
             )
         case Area.INTENTS:
             change = intents.advance_intent(
                 state.intents,
                 _context(state, IntentsContext),
-                TypeAdapter(IntentsEvent).validate_python(event),
+                _event_adapter(IntentsEvent).validate_python(event),
             )
         case _:
             assert_never(area)

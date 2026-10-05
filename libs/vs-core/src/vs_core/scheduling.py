@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, assert_never
 
+from ._adoption import fences_root_mutation
 from ._proofs import (
     Proven,
     accepted_receipt_for,
@@ -33,6 +34,7 @@ from .types.kernel import AreaChange
 from .types.scheduling import (
     AdmissionControl,
     AdmitAttempt,
+    AdoptionFenceLifted,
     AttemptReady,
     AttemptReopenRequest,
     AttemptReopenRequested,
@@ -179,6 +181,12 @@ def _deadline_retirements(state: SchedulingState, context: SchedulingContext) ->
 
 
 def _fits(state: SchedulingState, context: SchedulingContext, request: AdmissionRequest) -> bool:
+    """The one admission gate: capacity, pools, and exclusive-root ownership.
+
+    Every precondition for starting or reopening an attempt lives here. Attempts
+    only re-checks defensively and declines, so an internally generated admission
+    never fails the step.
+    """
     if any(slot.attempt.attempt_id == _target(request).attempt_id for slot in state.slots):
         return False
     if len(state.slots) >= context.run.limits.max_parallel:
@@ -187,6 +195,8 @@ def _fits(state: SchedulingState, context: SchedulingContext, request: Admission
         return False
     if _mode(context, _target(request), request.decision_id) != WorkspaceMode.EXCLUSIVE_ROOT:
         return True
+    if fences_root_mutation(context.settlement, context.intents):
+        return False
     return not any(
         _mode(context, slot.attempt, slot.admission_id) == WorkspaceMode.EXCLUSIVE_ROOT
         for slot in state.slots
@@ -628,6 +638,9 @@ def schedule(
             )
         case AdmissionControl():
             return _control(state, context, event)
+        case AdoptionFenceLifted():
+            # The fence is part of `_fits`; this only retries admission.
+            change = _fill(state, context)
         case _:
             assert_never(event)
     return change

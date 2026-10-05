@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import Field
@@ -114,12 +115,37 @@ class RunResultProposal(Value):
     selection: Selection | None = None
 
 
+class AdoptionFailureReason(StrEnum):
+    """Why an adoption ended without a verified result."""
+
+    ADOPT_FAILED = "adopt-failed"
+    """The restore request was rejected, cancelled or failed for good."""
+    VERIFY_FAILED = "verify-failed"
+    """The verification request failed for good, so the root was not proven."""
+    CONTENT_MISMATCH = "content-mismatch"
+    """A verification succeeded but named another revision, or none."""
+    RETRIES_EXHAUSTED = "retries-exhausted"
+    """Every allowed round ended unproven (``Limits.max_retries`` + 1 rounds)."""
+
+
 class Adoption(Value):
     """Adoption lifecycle contract."""
 
     selection: Selection
     observation: Observation | None = None
     verified: bool = False
+    failure: AdoptionFailureReason | None = None
+    """Set once, when the adoption fails for good; the fence is released then."""
+
+
+class AdoptionView(Value):
+    """What a strategy may read about the current adoption."""
+
+    selection: Selection
+    phase: Literal["adopting", "verifying", "verified", "failed"]
+    rounds: int
+    """AdoptRevision rounds issued so far for this selection, across re-proposals."""
+    failure: AdoptionFailureReason | None = None
 
 
 class SettlementState(Value):
@@ -193,6 +219,20 @@ class AdoptionObserved(Value):
     kind: Literal["adoption_observed"] = "adoption_observed"
     observation: Observation
     revision: RevisionRef | None
+
+
+class AdoptionFailed(Value):
+    """An adoption ended for good without a verified result; emitted once.
+
+    The strategy may propose the winner again only while ``rounds`` is at most
+    ``Limits.max_retries``; core refuses a proposal past that bound.
+    """
+
+    kind: Literal["adoption_failed"] = "adoption_failed"
+    selection: Selection
+    reason: AdoptionFailureReason
+    observation: Observation
+    rounds: int
 
 
 class AttemptSettled(Value):

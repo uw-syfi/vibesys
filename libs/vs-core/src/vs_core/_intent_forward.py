@@ -191,11 +191,13 @@ def _reopened(
 def _releases(
     context: IntentsContext, intent: Intent, observation: Observation
 ) -> tuple[Signal, ...]:
-    """Terminal acknowledgement of a request that a closing attempt waits on."""
+    """Terminal acknowledgement of a request that a closing attempt waits on.
+
+    A session close is not released here: Sessions emits that edge itself, after it
+    has checked the lease proof, and a second emitter would deliver it twice.
+    """
     if not observation.terminal:
         return ()
-    request = intent.request
-    session = request.session_id if isinstance(request, CloseSession) else None
     return tuple(
         ReleaseDependencyObserved(
             attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
@@ -205,8 +207,7 @@ def _releases(
         for owner in context.attempts.attempts
         if owner.closure is not None
         for edge in owner.release_dependencies
-        if (edge.kind in ("request", "workspace") and edge.identity == intent.request_id)
-        or (edge.kind == "session" and session is not None and edge.identity == session)
+        if edge.kind in ("request", "workspace") and edge.identity == intent.request_id
     )
 
 

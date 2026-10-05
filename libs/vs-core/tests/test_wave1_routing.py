@@ -34,7 +34,6 @@ EXPECTED_TARGET = {
                 "attempt_evaluation_history_updated",
                 "attempt_registered",
                 "attempt_reacquire_requested",
-                "workspace_observed",
                 "invocation_checkpointed",
                 "revision_operation_requested",
                 "revision_operation_observed",
@@ -47,6 +46,7 @@ EXPECTED_TARGET = {
                 "attempt_charge_refund_requested",
             ),
         ),
+        ("vs_core.attempts._workspace_observed", ("workspace_observed",)),
         (
             "vs_core._attempt_retirement.advance",
             (
@@ -156,6 +156,7 @@ EXPECTED_TARGET = {
                 "queue_entry_retired",
                 "clock_advanced",
                 "admission_control",
+                "adoption_fence_lifted",
             ),
         ),
     )
