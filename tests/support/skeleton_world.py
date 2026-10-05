@@ -38,6 +38,7 @@ from vs_core.api import (
     SchemaRef,
     TurnSpec,
 )
+from vs_evaluation.api import ExecutorPoll, PollPhase
 from vs_project.api import run_git
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import render_stage_failure
@@ -65,14 +66,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
 from vs_slurm.api import (
-    ClusterInspectOutcome,
-    ClusterObservation,
-    ClusterSubmitOutcome,
-    ClusterTarget,
-    SlurmBatchRequest,
     SlurmConfig,
-    SlurmJobRequest,
-    SlurmJobStatus,
     SlurmSshTransport,
 )
 
@@ -81,45 +75,69 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentSessionSpec, AgentTurnRequest
     from vs_core.api import CoreState
+    from vs_evaluation.api import (
+        AvailabilitySnapshot,
+        EvaluationRequest,
+        ExecutorObservation,
+        PollingEvaluationExecutor,
+        ResourceRequirements,
+    )
     from vs_runtime.api.core import AccessGuardedWorkspace
 
 DIGEST = "ab" * 32
 LEASE = 100.0
 
 
-class TimedCluster(ScenarioCluster):
-    """A Fake cluster whose jobs run for ``runtime`` seconds of the shared run clock.
+@dataclass
+class TimedPolls:
+    """The world's evaluation executor, except that each job runs ``runtime`` clock seconds.
 
-    Each job reports RUNNING until the clock has moved ``runtime`` past its submission,
-    then reports its scripted ending. ``inspections`` counts every scheduler observation,
-    which is what a real cluster would charge as scheduler calls.
+    A job reports RUNNING until the shared run clock has moved ``runtime`` past the first
+    poll that saw it submitted; then it reports what the real executor reports. Everything
+    else is the real executor. ``polls`` is one entry per poll core asked for, which is what
+    pacing bounds.
     """
 
-    def __init__(self, clock: FakeRunClock, runtime: float) -> None:
-        """Run every job for *runtime* seconds from the moment the scheduler accepts it."""
-        super().__init__()
-        self._clock = clock
-        self._runtime = runtime
-        self._accepted_at: dict[str, float] = {}
-        self.inspections = 0
+    inner: PollingEvaluationExecutor
+    clock: FakeRunClock
+    runtime: float
+    polls: list[str]
+    _seen: dict[str, float] = field(default_factory=dict)
 
-    def submit(
-        self, request: SlurmJobRequest | SlurmBatchRequest, *, operation_id: str
-    ) -> ClusterSubmitOutcome:
-        """Record when the job was first accepted, then behave as the scenario cluster."""
-        self._accepted_at.setdefault(operation_id, self._clock.now())
-        return super().submit(request, operation_id=operation_id)
+    async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
+        """The real executor's availability."""
+        return await self.inner.availability(requirements)
 
-    def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
-        """Observe the job, reporting RUNNING while its runtime has not yet elapsed."""
-        outcome = super().inspect(target, by_job_id=by_job_id)
-        if not isinstance(outcome, ClusterObservation):
-            return outcome
-        self.inspections += 1
-        accepted = self._accepted_at.get(outcome.operation_id or "")
-        if accepted is None or self._clock.now() >= accepted + self._runtime:
-            return outcome
-        return outcome.model_copy(update={"status": SlurmJobStatus.RUNNING})
+    async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
+        """The real submission."""
+        await self.inner.submit(request, handle_id=handle_id)
+
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        """The real read."""
+        return await self.inner.inspect_only(handle_id)
+
+    async def inspect(self, handle_id: str) -> ExecutorObservation | None:
+        """The real read."""
+        return await self.inner.inspect(handle_id)
+
+    async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
+        """The real wait."""
+        await self.inner.wait_for_change(handle_id, timeout_s)
+
+    async def cancel(self, handle_id: str) -> None:
+        """The real cancellation."""
+        await self.inner.cancel(handle_id)
+
+    async def poll(self, handle_id: str) -> ExecutorPoll:
+        """Report RUNNING while the job's runtime has not elapsed on the run clock."""
+        self.polls.append(handle_id)
+        polled = await self.inner.poll(handle_id)
+        if polled.phase is PollPhase.UNSUBMITTED:
+            return polled
+        seen = self._seen.setdefault(handle_id, self.clock.now())
+        if self.clock.now() >= seen + self.runtime:
+            return polled
+        return ExecutorPoll(phase=PollPhase.RUNNING, current_stage=polled.current_stage)
 
 
 @dataclass
@@ -132,6 +150,8 @@ class World:
     agents: SessionHost
     strategy: SkeletonStrategy = field(default_factory=SkeletonStrategy)
     operations: OperationCatalog = field(default_factory=empty_catalog)
+    timed: tuple[FakeRunClock, float] | None = None
+    polls: list[str] = field(default_factory=list)
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -180,6 +200,9 @@ class World:
             stage_failure_text=render_stage_failure,
             cluster=self.cluster,
         )
+        if self.timed is not None:
+            clock, runtime = self.timed
+            evaluation = TimedPolls(evaluation, clock, runtime, self.polls)
         return core_bindings(
             receipts=self.env.receipts_namespace(),
             workspaces=workspaces,
@@ -370,6 +393,7 @@ def open_skeleton_world(
     tmp_path: Path,
     strategy: SkeletonStrategy | None = None,
     cluster: ScenarioCluster | None = None,
+    timed: tuple[FakeRunClock, float] | None = None,
 ) -> Iterator[World]:
     """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
     with open_workspace_env(tmp_path) as env:
@@ -380,4 +404,5 @@ def open_skeleton_world(
             cluster=cluster or ScenarioCluster(),
             agents=agents,
             strategy=strategy or SkeletonStrategy(),
+            timed=timed,
         )

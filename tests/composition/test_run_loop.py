@@ -17,9 +17,16 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.support.fake_run_clock import FakeRunClock
 from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
-from tests.support.skeleton_world import LEASE, Process, World, open_skeleton_world
+from tests.support.skeleton_world import (
+    LEASE,
+    Process,
+    StalledError,
+    World,
+    drive,
+    open_skeleton_world,
+)
 
-from vs_core.api import ArtifactRef, RunResultProposal, RunStatus
+from vs_core.api import ArtifactRef, Limits, RunResultProposal, RunStatus
 from vs_core.testing.builders import initial_state
 from vs_runtime.api.core import (
     CoreRunHost,
@@ -35,7 +42,18 @@ from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vs_core.api import RunView, StrategyEvent
+
 INERT = SkeletonStrategy(state=SkeletonState(schema_version=1, phase="done"), measured=False)
+
+
+class BaselineOnly(SkeletonStrategy):
+    """Measure the baseline, then cancel the run: no attempt is run."""
+
+    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
+        """Skip the attempt: the baseline measurement is followed by the cancellation."""
+        state = super().on_event(view, event)
+        return state.model_copy(update={"phase": "cancel"}) if state.phase == "start" else state
 
 
 @dataclass
@@ -168,6 +186,60 @@ async def test_an_idle_run_is_woken_a_bounded_number_of_times(
         len(clock.sleeps)
         <= horizon / max(poll, min_sleep) + horizon / max(LEASE / 3, min_sleep) + 3
     )
+
+
+async def _measure_a_job_running(tmp_path: Path, runtime: float) -> tuple[World, Process, bool]:
+    """Run the baseline measurement of a job that takes ``runtime`` clock seconds, then cancel.
+
+    Returns the world, the process and whether the run reached its terminal status.
+    """
+    clock = FakeRunClock(at=1.0)
+    with open_skeleton_world(tmp_path, BaselineOnly(), timed=(clock, runtime)) as world:
+        process = world.runtime()
+        process.shell.start("host-a", now_at=1.0, lease_duration=LEASE)
+        try:
+            assert await drive(process, start=1.0, clock=clock) is None
+        except StalledError:
+            return world, process, False
+        return world, process, True
+
+
+@pytest.mark.parametrize("runtime", [45.0, 300.0])
+@pytest.mark.asyncio
+async def test_a_running_job_is_polled_at_the_observe_interval(
+    tmp_path: Path, runtime: float
+) -> None:
+    """A job that runs ``runtime`` seconds is polled once per ``observe_interval`` while it runs.
+
+    Bound: one poll per interval over the runtime, plus the first poll (due as soon as the
+    job is submitted), the one that sees the end, and the two the submission itself makes
+    (whether to submit, then its own view). The answers never fail, so the backoff never
+    applies. A loop that polled on every wake would exceed it by orders of magnitude.
+    """
+    interval = Limits().observe_interval
+    world, process, _ = await _measure_a_job_running(tmp_path, runtime)
+    core = process.shell.record.envelope.core
+    assert [job.status for job in core.evaluation.jobs] == ["succeeded"]
+    assert len(world.cluster.submissions) == 1
+    assert runtime / interval - 1 <= len(world.polls) <= runtime / interval + 4
+
+
+@pytest.mark.xfail(
+    raises=AssertionError,
+    strict=True,
+    reason=(
+        "a measured run cannot close after its job ends: the submit_measurement intent stays "
+        "DISPATCHED because only its own (pending) observation could complete it, and a closing "
+        "run waits for every open intent (stalled at status 'closing', open intents "
+        "['submit_measurement:dispatched']). Hidden when the job has ended by the time of the "
+        "submit's own view. Owner CORE-PACE (#1337, the job-observation path in "
+        "vs_core/_measurements.py must complete the submit intent when the job is terminal)"
+    ),
+)
+@pytest.mark.asyncio
+async def test_a_run_with_a_long_measurement_closes_after_the_job_ends(tmp_path: Path) -> None:
+    _, _, terminal = await _measure_a_job_running(tmp_path, 45.0)
+    assert terminal
 
 
 @pytest.mark.asyncio
