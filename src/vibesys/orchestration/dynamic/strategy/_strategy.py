@@ -103,7 +103,7 @@ class DynamicStrategy:
         if isinstance(event, MeasurementResult):
             if event.scope.owner.kind == "run":
                 return baseline.on_measurement(state, view, event, self.config)
-            return attempt_events.on_measurement(state, event)
+            return attempt_events.on_measurement(state, event, self.config)
         return self._lifecycle(state, view, event)
 
     def _turn(

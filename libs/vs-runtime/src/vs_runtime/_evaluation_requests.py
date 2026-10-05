@@ -367,6 +367,7 @@ class MeasurementRequests:
                 progress=view.progress,
                 evidence=view.evidence,
                 evaluation_result=view.facts,
+                failure=view.failure,
             ),
         )
 
@@ -390,6 +391,7 @@ class MeasurementRequests:
                 progress=view.progress,
                 evidence=view.evidence,
                 evaluation_result=view.facts,
+                failure=view.failure,
             ),
         )
 
@@ -519,8 +521,12 @@ class MeasurementRequests:
             released=True,
             manifest=True,
         )
+        # Core asks for a collection whenever an ended job holds no evidence. A job that
+        # produced none has nothing to add to its end, which core already has; repeating
+        # that end would only make core ask again, forever.
         return ExecutionResult(
-            observation=RequestObserved(observation=own), owner_events=self._events(view)
+            observation=RequestObserved(observation=own),
+            owner_events=self._events(view) if view.evidence else (),
         )
 
     # cancel

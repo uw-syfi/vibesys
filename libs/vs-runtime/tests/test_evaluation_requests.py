@@ -35,6 +35,7 @@ from vs_core.api import (
     HostId,
     InspectOwnedJob,
     JobObserved,
+    MeasurementFailure,
     ObservationStatus,
     ObserveOwnedJob,
     RequestId,
@@ -822,3 +823,63 @@ async def test_a_second_poll_that_reads_differently_returns_the_stored_evidence(
         ]
         assert evidence[0]
         assert evidence[0] == evidence[1] == evidence[2]
+
+
+# A benchmark that exits without its evaluator's result record, as after a node loss, an
+# out-of-memory kill or a GPU hang, frames nothing; one that reported a failure leaves a record.
+_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
+_END_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
+_NO_RECORD = (
+    f"{_MARKER}\n\n{_END_MARKER}",
+    "killed",
+    "",
+)
+_RECORD = (f'{_MARKER}\n{{"throughput": 12}}\n{_END_MARKER}',)
+
+
+@settings(
+    max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(output=st.sampled_from(_NO_RECORD), exit_code=st.sampled_from((0, 1, 137)))
+async def test_a_benchmark_without_a_result_record_is_infrastructure_whatever_its_exit(
+    output: str, exit_code: int
+) -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = exit_code
+    cluster.benchmark_output = output
+    async with world(cluster) as w:
+        resource = resource_of(await submit(w))
+        await settled(w, resource)
+        result = await run(w, query(ObserveOwnedJob, "observe", resource))
+        target = (await run(w, query(InspectOwnedJob, "inspect", resource))).observation.target
+        assert target is not None
+        assert target.observation.status is ObservationStatus.FAILED
+        # Nothing it measured is kept, so core has no workload fact to reject the candidate on.
+        assert target.evidence == ()
+        assert target.evaluation_result is None
+        assert target.measurement_failure is MeasurementFailure.INFRASTRUCTURE
+        jobs = [e for e in result.owner_events if isinstance(e, JobObserved)]
+        assert [e.failure for e in jobs] == [MeasurementFailure.INFRASTRUCTURE]
+
+
+@settings(
+    max_examples=6, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(exit_code=st.sampled_from((1, 2, 3)))
+async def test_a_benchmark_that_wrote_its_record_and_failed_is_the_workloads_permanent_fact(
+    exit_code: int,
+) -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = exit_code
+    cluster.benchmark_output = _RECORD[0]
+    async with world(cluster) as w:
+        resource = resource_of(await submit(w))
+        await settled(w, resource)
+        target = (await run(w, query(InspectOwnedJob, "inspect", resource))).observation.target
+        assert target is not None
+        assert target.measurement_failure is not MeasurementFailure.INFRASTRUCTURE
+        assert {ref.status for ref in target.evidence} == {
+            ObservationStatus.SUCCEEDED,
+            ObservationStatus.FAILED,
+        }
+        assert target.evaluation_result is not None

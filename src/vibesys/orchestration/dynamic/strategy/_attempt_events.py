@@ -62,6 +62,7 @@ from vs_core.api import (
     EvidenceKind,
     IntentBlocked,
     InvocationRef,
+    MeasurementFailure,
     MeasurementResult,
     ObservationStatus,
     OperationResult,
@@ -260,8 +261,13 @@ def on_operation(
     return state
 
 
-def on_measurement(state: DynamicStrategyState, event: MeasurementResult) -> DynamicStrategyState:
+def on_measurement(
+    state: DynamicStrategyState, event: MeasurementResult, config: DynamicConfig
+) -> DynamicStrategyState:
     """Record a candidate's trusted evidence keys for interpretation.
+
+    A measurement that infrastructure interrupted says nothing about the candidate, so
+    it is submitted again, within `max_input_measurement_attempts`, instead of failing it.
 
     The result must come from the awaiting attempt's own scope and generation, and
     only evidence of the measured revision and purpose that core trusts is kept.
@@ -287,6 +293,13 @@ def on_measurement(state: DynamicStrategyState, event: MeasurementResult) -> Dyn
         purpose="profile" if current.plan.kind is WorkKind.PROFILE else "official",
     )
     if not evidence:
+        if (
+            event.failure is MeasurementFailure.INFRASTRUCTURE
+            and current.measurements < config.max_input_measurement_attempts
+        ):
+            return _put(
+                state, index, current.model_copy(update={"step": Step.NEEDED, "awaiting": None})
+            )
         return fail(
             state, index, f"measurement produced no trusted evidence ({event.status.value})"
         )

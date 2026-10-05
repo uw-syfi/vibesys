@@ -544,6 +544,10 @@ class JobObserved(Value):
     observation: Observation
     evidence: tuple[EvidenceRef, ...] = ()
     evaluation_result: EvaluationTerminalFacts | None = None
+    # The executor's classification of a failed job. It narrows what the observation
+    # proves (see `MeasurementFailure`) and lets the submission be retried only when
+    # it says infrastructure.
+    failure: MeasurementFailure | None = None
 
     @model_validator(mode="after")
     def correlated_progress(self) -> JobObserved:

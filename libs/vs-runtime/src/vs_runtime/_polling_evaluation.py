@@ -246,9 +246,12 @@ class PollingEvaluationExecutor:
             summary = result.feedback
             metrics: tuple[EvidenceMetric, ...] = ()
             partial = None
+            # A failed accuracy gate always describes the candidate.
+            kind: BenchmarkFailureKind | None = BenchmarkFailureKind.WORKLOAD
         elif stage.kind is EvidenceKind.BENCHMARK:
             result = await self._evaluation.benchmark(workspace)
             completed = result.failure_kind is not BenchmarkFailureKind.INFRASTRUCTURE
+            kind = result.failure_kind
             outcome = (
                 EvidenceOutcome.PASSED if completed and result.passed else EvidenceOutcome.FAILED
             )
@@ -293,6 +296,7 @@ class PollingEvaluationExecutor:
             semantic_summary=summary,
             metrics=metrics,
             partial_measurement=partial,
+            failure_kind=None if outcome is EvidenceOutcome.PASSED else kind,
             accepted_round=0,
         )
         return _SemanticStageObservation(evidence=evidence, completed=completed)

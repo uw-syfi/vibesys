@@ -259,6 +259,9 @@ class AttemptRecord(Value):
     ready: bool = False
     # Implementer turns charged so far, bounded by `max_retries_per_round`.
     turns_spent: int = Field(default=0, ge=0)
+    # Measurements submitted for this attempt, bounded by `max_input_measurement_attempts`
+    # when infrastructure interrupts them.
+    measurements: int = Field(default=0, ge=0)
     settle_sent: bool = False
     # The implementer reply (JSON) and turn waiting for its checkpoint, while RETAINING.
     held_reply: str | None = None

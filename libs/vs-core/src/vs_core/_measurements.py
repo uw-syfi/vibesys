@@ -649,7 +649,7 @@ def _resource_taken(state: EvaluationState, observation: Observation, owner: Req
 
 
 def _canonical_failure(
-    observation: Observation, source: Intent, claim: MeasurementFailure | None
+    observation: Observation, claim: MeasurementFailure | None, *, has_facts: bool
 ) -> MeasurementFailure | None:
     """Restrict the caller's failure claim to what the committed facts allow.
 
@@ -662,7 +662,7 @@ def _canonical_failure(
     if observation.accepted:
         if observation.status == ObservationStatus.SUCCEEDED:
             return None
-        if claim == MeasurementFailure.INFRASTRUCTURE and source.evaluation_result is not None:
+        if claim == MeasurementFailure.INFRASTRUCTURE and has_facts:
             return MeasurementFailure.UNKNOWN
     return claim
 
@@ -695,7 +695,9 @@ def _submission_receipt(
     updated = receipt.model_copy(
         update={
             "observation": event.observation,
-            "failure": _canonical_failure(event.observation, source, event.failure),
+            "failure": _canonical_failure(
+                event.observation, event.failure, has_facts=source.evaluation_result is not None
+            ),
         }
     )
     return Proven(
@@ -1143,7 +1145,12 @@ def _job_observed(
             "evidence": tuple(ledger),
         }
     )
-    state = _job_budget(state, context, updated)
+    claim = _canonical_failure(
+        observation,
+        event.failure if isinstance(event, JobObserved) else None,
+        has_facts=event.evaluation_result is not None,
+    )
+    state = _job_budget(state, context, updated, claim)
     wake = ContinuationJobsChanged(
         resource_id=observation.resource_id, observation=observation, previous=previous
     )
@@ -1153,7 +1160,7 @@ def _job_observed(
     if _conclusive(observation):
         newly = tuple(e for e in accepted if e not in job.evidence)
         # A refused evidence id is reported as an unclassified failure, never hidden.
-        failure = MeasurementFailure.UNKNOWN if refused else None
+        failure = MeasurementFailure.UNKNOWN if refused else claim
         if not _conclusive(job.observation):
             events = (
                 MeasurementResult(
@@ -1268,7 +1275,10 @@ def _poll_due(
 
 
 def _job_budget(
-    state: EvaluationState, context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob
+    state: EvaluationState,
+    context: EvaluationContext,
+    job: OwnedJob | RegisteredOwnedJob,
+    claim: MeasurementFailure | None = None,
 ) -> EvaluationState:
     if job.observation is None:
         return state
@@ -1292,7 +1302,8 @@ def _job_budget(
     updated = _submission_receipt(
         proof.value,
         MeasurementSubmissionObserved(
-            observation=job.observation, failure=receipt.failure if receipt is not None else None
+            observation=job.observation,
+            failure=(receipt.failure if receipt is not None else None) or claim,
         ),
         source,
     )
