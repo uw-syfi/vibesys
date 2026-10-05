@@ -89,6 +89,14 @@ class ObservationFactory:
     def __init__(self, store: ReceiptStore) -> None:
         self._store = store
 
+    def latest(self, request_id: RequestId) -> Observation | None:
+        """The last observation issued for *request_id*, or None when none was."""
+        try:
+            return self._store.load(_FAMILY, _PART, request_id.root, Observation)
+        except ReceiptCorruptError as error:
+            message = f"observation row for {request_id.root} is unreadable"
+            raise ObservationLedgerCorruptError(message) from error
+
     def observe(
         self,
         subject: ObservationSubject,

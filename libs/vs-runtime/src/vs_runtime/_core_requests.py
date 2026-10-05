@@ -229,6 +229,13 @@ RECEIPT_BACKED_ROLES = frozenset(
 )
 
 
+# Roles whose executors still keep receipts outside ``ReceiptStore.run_once``. Their
+# requests leave no execution record, so a missing record proves nothing about them
+# and ``InspectRequest`` cannot answer "never started" while this set is non-empty.
+# Each role leaves the set when it moves onto ``run_once``.
+HAND_ROLLED_ROLES: frozenset[ExecutorRole] = frozenset({ExecutorRole.EVALUATION})
+
+
 # Session kinds whose executors run on the shared ReceiptStore. Each session
 # executor module appends its kinds here when it lands; unlisted SESSIONS kinds
 # are still refused by the unbound default and need no harness scenario yet.
