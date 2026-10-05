@@ -17,7 +17,8 @@ from vibesys.api.store import open_run_store
 from vibesys.composition import resolve_agent_specs
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.plugin_catalog import project_run
-from vibesys.run.host import open_product_run_host
+from vibesys.run.core_run import drive_core_run
+from vibesys.run.host import open_product_core_host, open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
 from vibesys.run.profilers import validate_run_request
 from vs_project.api import Project
@@ -73,7 +74,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     plugin: OrchestrationPlugin,
     options: BaseModel,
     *,
-    open_agent_environment: Callable[..., AgentExecutionEnvironment],
+    open_agent_environment: Callable[..., AgentExecutionEnvironment] | None = None,
     projector: OrchestrationProjector | None = None,
     resume_policy: (
         Callable[
@@ -91,7 +92,28 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     stop_timer: StopTimer,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore],
 ) -> PluginRunStatus:
-    """Compose the private runtime host and invoke one validated plugin."""
+    """Compose the private runtime host and run one validated plugin.
+
+    A plugin with a ``core`` policy is driven by the runtime's core run loop over
+    services built from the run's resources; any other plugin awaits its own
+    ``orchestrate``. No plugin has both.
+    """
+    if plugin.core is not None:
+        async with open_product_core_host(
+            request,
+            integration,
+            open_agent_environment=open_agent_environment,
+            projector=projector,
+            resume_policy=resume_policy,
+            agent_client_factory=agent_client_factory,
+            backend_factory=backend_factory,
+            agent_tool_bindings=agent_tool_bindings,
+            plugin=plugin,
+            options=options,
+            stop_timer=stop_timer,
+            invocation_store_factory=invocation_store_factory,
+        ) as core_host:
+            return await drive_core_run(core_host, integration)
     async with open_product_run_host(
         request,
         integration,
