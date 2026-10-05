@@ -97,7 +97,7 @@ from vs_runtime.contracts import RuntimeContractError
 if TYPE_CHECKING:
     from datetime import timedelta
 
-    from vs_agent.api import AgentSessionSpec, ClientAgentSessions, InvocationOutcome
+    from vs_agent.api import AgentSessions, AgentSessionSpec, ClientAgentSessions, InvocationOutcome
     from vs_core.api import InvocationId, Observation, RequestBase
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
@@ -120,7 +120,7 @@ def load_session_binding(store: ReceiptStore, bkey: str) -> SessionBinding | Non
 
 
 def conversation_established(
-    sessions: ClientAgentSessions, binding: SessionBinding, *, excluding: str | None = None
+    sessions: AgentSessions, binding: SessionBinding, *, excluding: str | None = None
 ) -> bool:
     """Whether the journal shows a completed turn, so the provider conversation exists."""
     key = AgentSessionKey.parse(binding.session_key)
