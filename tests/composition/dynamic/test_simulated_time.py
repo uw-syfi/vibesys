@@ -179,6 +179,27 @@ def test_two_implementer_turns_overlap_with_two_in_flight(profile: TimingProfile
 
 @_SETTINGS
 @given(PROFILES)
+def test_a_finished_turn_is_followed_up_while_its_peer_turn_still_runs(
+    profile: TimingProfile,
+) -> None:
+    """Guards deciding while requests run (#1375): a finished turn's follow-up (the review,
+    then the evaluation submit) used to wait for every other running turn to end.
+    """
+    run = _finished(profile)
+    _ended_normally(run)
+    implementers = sorted((s for s in run.turns if s.role == "implementer"), key=lambda s: s.end)
+    judges = sorted((s for s in run.turns if s.role == "judge"), key=lambda s: s.end)
+    # Each review starts the moment its implementer's turn ends, not when the slowest ends.
+    for implementer in implementers:
+        assert any(abs(j.start - implementer.end) < 1e-6 for j in judges), implementer
+    # The first review's evaluation is submitted when that review ends, while the other
+    # review is still running (the submits are the jobs after the baseline's).
+    submits = sorted(at for _, at in run.jobs)[1:]
+    assert any(abs(at - judges[0].end) < 1e-6 for at in submits), (judges[0], submits)
+
+
+@_SETTINGS
+@given(PROFILES)
 def test_a_one_round_two_workstream_run_takes_the_critical_path(profile: TimingProfile) -> None:
     """Guards concurrent dispatch (#1374, #1375): with two turns in flight the run is the
     baseline evaluation, then planner, implementers, reviews (each stage as long as its

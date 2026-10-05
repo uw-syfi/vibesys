@@ -13,6 +13,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.fake_run_clock import FakeRunClock
@@ -37,7 +38,9 @@ from vibesys.orchestration.dynamic.strategy.api import (
     dynamic_operation_registry,
 )
 from vs_core.api import (
+    ClockAdvanced,
     DispatchTurn,
+    IntentPhase,
     RequestObserved,
     ResourceId,
     RunEnvelope,
@@ -53,6 +56,9 @@ from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
+    Publication,
+    PublicationAcknowledgement,
+    PublicationContext,
     RunLoopConfig,
     drive_core,
     start_core,
@@ -99,6 +105,11 @@ class _Ledger:
     executed: list[str] = field(default_factory=list)
     stepped: list[tuple[CoreState, CoreEvent, CoreState]] = field(default_factory=list)
     delays: deque[int] = field(default_factory=deque)
+    failing: frozenset[int] = frozenset()
+    """Ordinals (start order) of the implementer turns that raise after their delay."""
+    started: int = 0
+    returned: list[str] = field(default_factory=list)
+    """Implementer turns that finished and handed their observation back."""
 
 
 class _RecordingTransitions:
@@ -133,14 +144,25 @@ class _DelayedExecutors(ScriptedExecutors):
         if not _is_implementer_turn(request):
             return await super().execute(request, context)
         ledger = self._ledger
+        ordinal = ledger.started
+        ledger.started += 1
         ledger.turns_in_flight += 1
         ledger.max_turns_in_flight = max(ledger.max_turns_in_flight, ledger.turns_in_flight)
         try:
             for _ in range(ledger.delays.popleft() if ledger.delays else 0):
                 await asyncio.sleep(0)
-            return await super().execute(request, context)
+            if ordinal in ledger.failing:
+                message = f"implementer turn {ordinal} failed"
+                raise _TurnFailedError(message)
+            result = await super().execute(request, context)
+            ledger.returned.append(request.request_id.root)
+            return result
         finally:
             ledger.turns_in_flight -= 1
+
+
+class _TurnFailedError(RuntimeError):
+    """An executor error: the turn's process died."""
 
 
 def _is_implementer_turn(request: Request) -> bool:
@@ -156,8 +178,23 @@ class _Finished:
     start: CoreState
 
 
-def _run(cap: int | None, delays: list[int]) -> _Finished:
-    ledger = _Ledger(delays=deque(delays))
+@dataclass(frozen=True)
+class _Built:
+    shell: CoreRuntime[DynamicStrategyState]
+    host: CoreRunHost
+    config: RunLoopConfig
+    ledger: _Ledger
+    start: CoreState
+
+
+def _build(
+    cap: int | None,
+    delays: list[int],
+    *,
+    failing: frozenset[int] = frozenset(),
+    delivery: Callable[[FakeStateStore], FakePublicationDelivery] = FakePublicationDelivery,
+) -> _Built:
+    ledger = _Ledger(delays=deque(delays), failing=failing)
     executors = Executors(
         planner=deque([plan_reply(*(implement(f"h{n}") for n in range(IMPLEMENTERS)))]),
         implementer=deque(implemented() for _ in range(IMPLEMENTERS)),
@@ -195,15 +232,19 @@ def _run(cap: int | None, delays: list[int]) -> _Finished:
             ),
         ),
     )
-    host = CoreRunHost(shell, FakePublicationDelivery(store), _YieldingClock(1.0))
+    host = CoreRunHost(shell, delivery(store), _YieldingClock(1.0))
     loop_config = RunLoopConfig(
         host_id="concurrent", lease_duration=LEASE, max_dispatches=400, max_concurrent=cap
     )
     start_core(host, loop_config)
-    start = shell.record.envelope.core
-    outcome = asyncio.run(drive_core(host, loop_config))
+    return _Built(shell, host, loop_config, ledger, shell.record.envelope.core)
+
+
+def _run(cap: int | None, delays: list[int]) -> _Finished:
+    built = _build(cap, delays)
+    outcome = asyncio.run(drive_core(built.host, built.config))
     assert outcome.status == RunStatus.TERMINAL
-    return _Finished(core=shell.record.envelope.core, ledger=ledger, start=start)
+    return _Finished(core=built.shell.record.envelope.core, ledger=built.ledger, start=built.start)
 
 
 def _request_root(request: SubmitMeasurement) -> str:
@@ -281,3 +322,73 @@ def test_turns_overlap_up_to_the_cap() -> None:
 def test_without_an_explicit_cap_the_run_limit_sets_it() -> None:
     """One source of truth: the run's max_parallel (LIMITS has 2) is the loop's cap."""
     assert _run(None, [40] * IMPLEMENTERS).ledger.max_turns_in_flight == LIMITS.max_parallel
+
+
+@settings(max_examples=12, deadline=None)
+@given(
+    delays=st.lists(
+        st.integers(min_value=0, max_value=3), min_size=IMPLEMENTERS, max_size=IMPLEMENTERS
+    ),
+    failing=st.integers(min_value=0, max_value=IMPLEMENTERS - 1),
+)
+def test_a_failing_turn_keeps_what_the_turns_that_finished_with_it_returned(
+    delays: list[int], failing: int
+) -> None:
+    """A failure halts the run, but an observation another flight already returned is
+    committed first: that work ran once and is not redone.
+    """
+    built = _build(2, delays, failing=frozenset({failing}))
+    with pytest.raises(_TurnFailedError):
+        asyncio.run(drive_core(built.host, built.config))
+    intents = {i.request_id.root: i for i in built.shell.record.envelope.core.intents.intents}
+    for request_id in built.ledger.returned:
+        assert intents[request_id].phase == IntentPhase.COMPLETED, request_id
+
+
+class _AdmittingDelivery(FakePublicationDelivery):
+    """Publishing awaits, and an agent tool call arrives meanwhile; the delivery may fail."""
+
+    def __init__(self, store: FakeStateStore, *, fails: bool) -> None:
+        super().__init__(store)
+        self.shell: CoreRuntime[DynamicStrategyState] | None = None
+        self.admitted: list[CoreEvent] = []
+        self._fails = fails
+
+    async def publish(
+        self, publication: Publication, context: PublicationContext
+    ) -> PublicationAcknowledgement:
+        assert self.shell is not None
+        if not self.admitted:
+            now_at = context.now_at
+            for _ in range(2):
+                event = ClockAdvanced(now_at=now_at)
+                self.shell.admit(event, now_at=now_at)
+                self.admitted.append(event)
+            if self._fails:
+                message = "delivery is down"
+                raise OSError(message)
+        return await super().publish(publication, context)
+
+
+@pytest.mark.parametrize("fails", [True, False])
+def test_a_tool_call_admitted_during_a_publish_commits_and_never_halts(fails: bool) -> None:
+    deliveries: list[_AdmittingDelivery] = []
+
+    def make(store: FakeStateStore) -> FakePublicationDelivery:
+        deliveries.append(_AdmittingDelivery(store, fails=fails))
+        return deliveries[0]
+
+    built = _build(2, [1, 1], delivery=make)
+    deliveries[0].shell = built.shell
+    try:
+        outcome = asyncio.run(drive_core(built.host, built.config))
+    except OSError:
+        assert fails, "only a failing delivery may end the run"
+    else:
+        assert not fails
+        assert outcome.status == RunStatus.TERMINAL
+    (delivery,) = deliveries
+    assert len(delivery.admitted) == 2
+    for event in delivery.admitted:
+        # Once to answer the tool call, once in the commit that followed it.
+        assert sum(1 for _, stepped, _ in built.ledger.stepped if stepped is event) == 2

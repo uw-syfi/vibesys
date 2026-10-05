@@ -32,6 +32,7 @@ from vs_core.api import (
     Strategy,
     StrategyState,
     Transition,
+    TurnObserved,
     orphan_waits,
     project,
     step,
@@ -594,9 +595,29 @@ class CoreRuntime[S: StrategyState]:
                 self._halted = True
                 raise ObservationRejectedError(item.executed, error) from error
             if item.durable:
+                if self._end_turn_without_wait(item):
+                    return True
                 self._halted = True
                 raise OwnerEventRejectedError(item.event, error) from error
             raise
+        return True
+
+    def _end_turn_without_wait(self, item: _Input[S]) -> bool:
+        """Replace a rejected turn event that carries a wait with the same turn ending plainly.
+
+        The wait is an agent tool call, and a tool call must never halt the run. Turns in
+        one scope can run at once, so a wait the tool bridge accepted from committed state
+        can be refused at commit by a peer's. The agent's turn already ran; it ends without
+        suspending. Returns False when the event carries no wait, or when ending it plainly
+        is rejected too (a committed-state inconsistency, which does halt).
+        """
+        event = item.event
+        if not isinstance(event, TurnObserved) or event.suspension is None:
+            return False
+        ended = event.model_copy(update={"suspension": None})
+        pending = tuple(ended if p == event else p for p in self.record.pending_inputs)
+        self._commit(self.record.model_copy(update={"pending_inputs": pending}), item.now_at)
+        self._queue.appendleft(_Input[S](event=ended, now_at=item.now_at, durable=True))
         return True
 
     def _consume(self, item: _Input[S], transition: Transition | None = None) -> None:

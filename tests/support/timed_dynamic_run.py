@@ -271,14 +271,16 @@ class _TimedExecutors(ScriptedExecutors):
         observed = self._observed(request, Succeeded(resource_id=_lease(session)), context.now_at)
         view = observed.observation.model_copy(update={"status": ObservationStatus.CANCELLED})
         events = (
-            (TurnObserved(
-                invocation=InvocationRef(
-                    session_id=request.turn.session.session_id,
-                    invocation_id=request.turn.invocation_id,
-                    generation=request.scope.generation,
+            (
+                TurnObserved(
+                    invocation=InvocationRef(
+                        session_id=request.turn.session.session_id,
+                        invocation_id=request.turn.invocation_id,
+                        generation=request.scope.generation,
+                    ),
+                    observation=view,
                 ),
-                observation=view,
-            ),)
+            )
             if isinstance(request, DispatchTurn | ResumeSessionTurn)
             else ()
         )
