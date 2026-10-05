@@ -37,10 +37,12 @@ from .config import (
     load_slurm_config,
     shell_join_with_port,
 )
-from .fake_cluster import FakeCluster
-from .fake_connector import FakeConnector
+from .fake_cluster import FakeCluster, ManualClock, SecondsRange, SlurmTimingProfile
+from .fake_connector import REQUESTS_FILE, FakeConnector
 from .identity import runtime_content_identity
+from .phase_register import MergedPhase, PhaseAnomaly, PhaseRegister
 from .runner import (
+    SchedulerReading,
     SlurmArtifactTarget,
     SlurmBatchHandle,
     SlurmBatchRequest,
@@ -56,14 +58,17 @@ from .runner import (
     SlurmJobRunner,
     SlurmJobStatus,
     SlurmJobWaitResult,
+    SlurmPhase,
     SlurmProcess,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
+    phase_of,
 )
 from .staging import tree_content_identity
 
 __all__ = [
     "PORT_PLACEHOLDER",
+    "REQUESTS_FILE",
     "Cluster",
     "ClusterCancelOutcome",
     "ClusterCancelRequested",
@@ -81,6 +86,12 @@ __all__ = [
     "ClusterUnknown",
     "FakeCluster",
     "FakeConnector",
+    "ManualClock",
+    "MergedPhase",
+    "PhaseAnomaly",
+    "PhaseRegister",
+    "SchedulerReading",
+    "SecondsRange",
     "SlurmArtifactTarget",
     "SlurmBatchHandle",
     "SlurmBatchRequest",
@@ -100,13 +111,16 @@ __all__ = [
     "SlurmJobRunner",
     "SlurmJobStatus",
     "SlurmJobWaitResult",
+    "SlurmPhase",
     "SlurmProcess",
     "SlurmService",
     "SlurmSshTransport",
     "SlurmSubmissionRejectedError",
+    "SlurmTimingProfile",
     "SlurmTransport",
     "SlurmTreeArtifact",
     "load_slurm_config",
+    "phase_of",
     "runtime_content_identity",
     "shell_join_with_port",
     "tree_content_identity",
@@ -136,6 +150,12 @@ class Cluster(Protocol):
         """Record cancellation intent, leaving confirmation to inspect."""
         ...
 
-    def collect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCollectOutcome:
+    def collect(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCollectOutcome:
         """Collect terminal evidence, preserving partial results as Unknown."""
         ...

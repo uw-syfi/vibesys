@@ -33,6 +33,7 @@ from .cluster_types import (
 )
 from .remote_operations import RemoteOperationError, RemoteOperationEvidence
 from .runner import (
+    SchedulerReading,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
@@ -340,7 +341,7 @@ class SlurmCluster:
                 return self._reconcile(record, evidence)
             if by_job_id and isinstance(target, str):
                 try:
-                    status, reason, start = self._runner.inspect_job(target)
+                    reading = self._runner.inspect_job(target)
                 except (
                     SlurmError,
                     OSError,
@@ -350,7 +351,7 @@ class SlurmCluster:
                     ValidationError,
                 ) as exc:
                     return ClusterUnknown(operation_id=None, job_id=target, reason=str(exc))
-                return self._observation(None, target, (status, reason, start), None)
+                return self._observation(None, target, reading, None)
             return ClusterUnknown(
                 operation_id=target if isinstance(target, str) else None,
                 reason="operation not found",
@@ -396,7 +397,7 @@ class SlurmCluster:
             )
 
     def _cancel_job(self, job_id: str) -> ClusterCancelOutcome:
-        status, _, _ = self._runner.inspect_job(job_id)
+        status = self._runner.inspect_job(job_id).status
         if status == SlurmJobStatus.UNKNOWN:
             return ClusterUnknown(
                 operation_id=None, job_id=job_id, reason="scheduler state unknown"
@@ -405,9 +406,20 @@ class SlurmCluster:
             self._runner.cancel_job(job_id)
         return ClusterCancelRequested(operation_id=None, job_id=job_id)
 
-    def collect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCollectOutcome:
-        """Collect terminal evidence, preserving partial results as Unknown."""
-        observed = self.inspect(target, by_job_id=by_job_id)
+    def collect(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterInspectOutcome | None = None,
+    ) -> ClusterCollectOutcome:
+        """Collect terminal evidence, preserving partial results as Unknown.
+
+        ``observed`` is a reading the caller just took of this target; passing it saves
+        the scheduler and manifest queries a fresh inspection would make.
+        """
+        if observed is None:
+            observed = self.inspect(target, by_job_id=by_job_id)
         if isinstance(observed, ClusterUnknown):
             return observed
         if observed.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
@@ -429,9 +441,9 @@ class SlurmCluster:
     ) -> ClusterCollectOutcome:
         try:
             result = (
-                self._runner.collect_batch(handle)
+                self._runner.collect_batch(handle, observed=observed.status)
                 if isinstance(handle, SlurmBatchHandle)
-                else self._runner.collect_evidence(handle)
+                else self._runner.collect_evidence(handle, observed=observed.status)
             )
         except (
             SlurmError,
@@ -625,8 +637,11 @@ class SlurmCluster:
                 self._runner.record_operation_acceptance(
                     record.operation_id, record.model_dump_json()
                 )
-            status, reason, start = self._runner.inspect_job(job.job_id)
-            if record.cancelled and status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
+            reading = self._runner.inspect_job(job.job_id)
+            if record.cancelled and reading.status in {
+                SlurmJobStatus.PENDING,
+                SlurmJobStatus.RUNNING,
+            }:
                 self._runner.cancel(job)
         except (
             SlurmError,
@@ -639,16 +654,16 @@ class SlurmCluster:
             return ClusterUnknown(
                 operation_id=record.operation_id, job_id=job.job_id, reason=str(exc)
             )
-        return self._observation(record.operation_id, job.job_id, (status, reason, start), handle)
+        return self._observation(record.operation_id, job.job_id, reading, handle)
 
     @staticmethod
     def _observation(
         operation_id: str | None,
         job_id: str,
-        details: tuple[SlurmJobStatus, str | None, str | None],
+        reading: SchedulerReading,
         handle: ClusterHandle | None,
     ) -> ClusterInspectOutcome:
-        status, reason, start = details
+        status = reading.status
         if status == SlurmJobStatus.UNKNOWN:
             return ClusterUnknown(
                 operation_id=operation_id, job_id=job_id, reason="scheduler state unknown"
@@ -657,7 +672,9 @@ class SlurmCluster:
             operation_id=operation_id,
             job_id=job_id,
             status=status,
-            pending_reason=reason if status == SlurmJobStatus.PENDING else None,
-            estimated_start=start if status == SlurmJobStatus.PENDING else None,
+            phase=reading.phase,
+            attempt=reading.attempt,
+            pending_reason=reading.reason if status == SlurmJobStatus.PENDING else None,
+            estimated_start=(reading.estimated_start if status == SlurmJobStatus.PENDING else None),
             handle=handle,
         )
