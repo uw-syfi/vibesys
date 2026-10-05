@@ -554,7 +554,16 @@ class SlurmEvaluationExecutor:
     async def close(self) -> None:
         """Cancel and drain every background execution owned by this executor."""
         active = tuple(handle_id for handle_id, task in self._tasks.items() if not task.done())
-        await asyncio.gather(*(self.cancel(handle_id) for handle_id in active))
+        results = await asyncio.gather(
+            *(self.cancel(handle_id) for handle_id in active), return_exceptions=True
+        )
+        for result in results:
+            if isinstance(result, ExecutorCancellationUnconfirmedError):
+                # The durable record keeps the known job, so a later reconcile
+                # confirms it. A stopped run must not fail because teardown is slow.
+                _LOG.warning("%s", result)
+            elif isinstance(result, BaseException):
+                raise result
 
     async def _admit_and_execute(
         self,
