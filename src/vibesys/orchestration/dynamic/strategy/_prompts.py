@@ -67,6 +67,8 @@ class HistoryRow(Value):
     metrics: tuple[MetricRow, ...] = ()
     partial: PartialRow | None = None
     failure_tail: str = ""
+    # Why the workstream ended when no trusted check explains it.
+    failure: str = ""
 
 
 class PlannerPrompt(Value):
@@ -110,6 +112,11 @@ class ImplementPrompt(Value):
     prior_revision: RevisionRef | None = None
     feedback: str | None = None
     prior_failure_tail: str = ""
+    # The implementer's own account of its latest turn that ended without a candidate, and
+    # the narrower step it named for this one; `turns_without_candidate` counts those turns.
+    blocker: str | None = None
+    narrowed_step: str | None = None
+    turns_without_candidate: int = Field(default=0, ge=0)
 
 
 class ReviewPrompt(Value):

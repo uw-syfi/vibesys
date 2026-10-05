@@ -93,6 +93,9 @@ _CONTEXTS: dict[PromptTemplate, st.SearchStrategy[PromptContext]] = {
         worktree_revision=st.none() | _REVISIONS,
         prior_revision=st.none() | _REVISIONS,
         feedback=st.none() | _TEXT,
+        blocker=st.none() | _TEXT,
+        narrowed_step=st.none() | _TEXT,
+        turns_without_candidate=st.integers(0, 3),
     ),
     PromptTemplate.REVIEW: st.builds(
         ReviewPrompt,

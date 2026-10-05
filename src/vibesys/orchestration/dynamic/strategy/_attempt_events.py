@@ -39,11 +39,14 @@ from vibesys.orchestration.dynamic.strategy._parents import (
     ParentSnapshot,
     ingest,
 )
+from vibesys.orchestration.dynamic.strategy._progress import refusal
 from vibesys.orchestration.dynamic.strategy._prompts import ReplyCorrectionPrompt, ResumePrompt
 from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading, reading_of
 from vibesys.orchestration.dynamic.strategy._settlement import STOPPED
 from vibesys.orchestration.dynamic.strategy._state import (
     AttemptRecord,
+    Blocker,
+    BlockerKind,
     DynamicStrategyState,
     HypothesisRecord,
     Role,
@@ -410,7 +413,11 @@ def _ask_again(
 
 
 def _retry(
-    state: DynamicStrategyState, index: int, config: DynamicConfig, feedback: str, reason: str
+    state: DynamicStrategyState,
+    index: int,
+    config: DynamicConfig,
+    feedback: str | None,
+    reason: str,
 ) -> DynamicStrategyState:
     record = state.attempts[index]
     turn = record.turn
@@ -434,6 +441,26 @@ def _retry(
         }
     )
     return _put(state, index, retried)
+
+
+def _retry_unmeasured(
+    state: DynamicStrategyState, index: int, config: DynamicConfig, blocker: Blocker, reason: str
+) -> DynamicStrategyState:
+    """Ask a workstream again after a turn that ended without a measurable candidate.
+
+    The turn is recorded, then `refusal` decides: a turn with nothing new for the agent, or
+    one past `max_unmeasured_turns`, settles the workstream as failed instead.
+    """
+    record = state.attempts[index]
+    blockers = (*record.blockers, blocker)
+    state = _put(state, index, record.model_copy(update={"blockers": blockers}))
+    refused = refusal(blockers, config)
+    if refused is not None:
+        return fail(state, index, refused)
+    # A rejection's feedback reaches the next turn as such; an implementer's own blocker is
+    # rendered from `blockers` by the prompt context.
+    feedback = blocker.summary if blocker.kind is BlockerKind.REJECTED else None
+    return _retry(state, index, config, feedback, reason)
 
 
 def _yielded(state: DynamicStrategyState, index: int, view: RunView) -> DynamicStrategyState:
@@ -550,7 +577,13 @@ def _implemented(
     )
     state = _put(state, index, record)
     if result.outcome is HypothesisOutcome.IMPLEMENTATION_FAILED:
-        return _retry(state, index, config, result.summary, "implementation failed")
+        blocker = Blocker(
+            kind=BlockerKind.FAILED,
+            summary=result.summary,
+            next_step=result.next_step,
+            cited=tuple(item.location for item in result.evidence),
+        )
+        return _retry_unmeasured(state, index, config, blocker, "implementation failed")
     if result.outcome is HypothesisOutcome.BLOCKED:
         return _put(
             state, index, record.model_copy(update={"phase": WorkPhase.SETTLE, "step": Step.NEEDED})
@@ -578,9 +611,9 @@ def _reviewed(
     state = _put(state, index, record)
     if result.passed:
         return _put(state, index, _measure_or_settle(record, config))
-    return _retry(
-        state, index, config, result.feedback or result.analysis, "review rejected the candidate"
-    )
+    feedback = result.feedback or result.analysis
+    blocker = Blocker(kind=BlockerKind.REJECTED, summary=feedback)
+    return _retry_unmeasured(state, index, config, blocker, "review rejected the candidate")
 
 
 def _decode(

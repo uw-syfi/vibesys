@@ -238,6 +238,27 @@ class HypothesisRecord(Value):
     rounds: tuple[RoundRecord, ...] = ()
 
 
+class BlockerKind(StrEnum):
+    """Why an implementer turn ended without a candidate that reached measurement."""
+
+    FAILED = "failed"
+    REJECTED = "rejected"
+
+
+class Blocker(Value):
+    """One turn of a workstream that ended without a measurable candidate.
+
+    ``FAILED`` is the implementer's own account (its summary, the next step it names and
+    the evidence it cites). ``REJECTED`` is the reviewer's feedback on a candidate that was
+    not measured.
+    """
+
+    kind: BlockerKind
+    summary: str
+    next_step: str = ""
+    cited: tuple[str, ...] = ()
+
+
 class AttemptRecord(Value):
     """Scientific progress of one scheduled workstream."""
 
@@ -268,6 +289,9 @@ class AttemptRecord(Value):
     ready: bool = False
     # Implementer turns charged so far, bounded by `max_retries_per_round`.
     turns_spent: int = Field(default=0, ge=0)
+    # Every turn that ended without a measurable candidate, in order; its length is bounded
+    # by `max_unmeasured_turns`.
+    blockers: tuple[Blocker, ...] = ()
     # Measurements submitted for this attempt, bounded by `max_input_measurement_attempts`
     # when infrastructure interrupts them.
     measurements: int = Field(default=0, ge=0)
