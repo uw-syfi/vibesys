@@ -138,12 +138,21 @@ from vs_runtime._session_lifecycle_requests import (
     TurnDispatcher,
 )
 from vs_runtime._session_requests import (
+    AccessReceipt,
+    AccessViolation,
     JournalRunInvocations,
     RuntimeSessionRequests,
     SessionBinding,
     SessionResolver,
 )
+from vs_runtime._session_resolver import (
+    ProductionSessionResolver,
+    ResolverInputs,
+    SessionSpecFactory,
+    open_session_requests,
+)
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
+from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
     RootGrant,
@@ -161,6 +170,10 @@ __all__ = [
     "HAND_ROLLED_ROLES",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
+    "AccessGrant",
+    "AccessGuardedWorkspace",
+    "AccessReceipt",
+    "AccessViolation",
     "Applied",
     "AttemptBinding",
     "BegunUnsealed",
@@ -219,6 +232,7 @@ __all__ = [
     "Performed",
     "Performer",
     "ProductionCoreTransitions",
+    "ProductionSessionResolver",
     "Publication",
     "PublicationAcknowledgement",
     "PublicationContext",
@@ -236,6 +250,7 @@ __all__ = [
     "Replayed",
     "RequestExecutors",
     "ResolvedCoreResume",
+    "ResolverInputs",
     "ResultReceipt",
     "ResumeDiagnostic",
     "RetainRevisionOwner",
@@ -260,6 +275,7 @@ __all__ = [
     "SessionRequests",
     "SessionResolver",
     "SessionServices",
+    "SessionSpecFactory",
     "Settled",
     "SteerArtifacts",
     "StoreWorkspaceReceipts",
@@ -276,6 +292,7 @@ __all__ = [
     "bind_operations",
     "build_operation_catalog",
     "commit_of",
+    "open_session_requests",
     "owner_key",
     "production_owners",
     "receipt_executor_kinds",

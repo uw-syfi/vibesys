@@ -387,6 +387,8 @@ def render_packaged_prompts(installed: Path) -> int:
         source_objective, list(resource_roots.values())
     )
     context["facts"] = RunFacts(domain_id="generic", objective=str(context["objective"]))
+    context["prompts"] = ("Review the candidate.",)
+    context["inputs"] = ({"mode": "steer", "text": "Focus on the cache."},)
     hidden = (
         build_project_path_policy(workspace, evaluator_source=None).resolve(workspace).hidden_paths
     )
