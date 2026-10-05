@@ -128,7 +128,12 @@ async def test_inspect_never_claims_never_started_once_an_effect_happened(
 
 @pytest.mark.parametrize(
     ("case", "scenario"),
-    [param for param in PARAMS if param.values[1].effectful],
+    [
+        pytest.param(case, scenario, id=f"{case.name}-{scenario.name}")
+        for case in CASES
+        for scenario in case.scenarios
+        if scenario.effectful
+    ],
 )
 async def test_inspect_after_completion_reports_the_executed_result(
     case: ExecutorCase, scenario: Scenario

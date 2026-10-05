@@ -49,7 +49,10 @@ class TargetProbe(Protocol):
     returns the target's facts, re-observing the external effect when necessary.
     """
 
-    result_type: type[BaseModel]
+    @property
+    def result_type(self) -> type[BaseModel]:
+        """The sealed result type this probe answers for."""
+        ...
 
     async def answer(
         self,

@@ -17,13 +17,13 @@ import pytest
 from tests.support.executor_cases import CASES
 from tests.support.executor_context import RevocableLease
 
-import vs_runtime
+from vs_runtime.api import core
 from vs_runtime.api.core import HAND_ROLLED_ROLES, REQUEST_DISPATCH, NeverBegun, ReceiptStore
 
 if TYPE_CHECKING:
     from tests.support.executor_harness import ExecutorCase, Scenario
 
-SOURCE = Path(vs_runtime.__file__).parent
+SOURCE = Path(core.__file__).parents[1]  # the package's own source, scanned below
 
 # The only modules that may write execution records or observation rows: the store and
 # the factory, plus the operation receipt wrapper that seals a result an inspection proved.
