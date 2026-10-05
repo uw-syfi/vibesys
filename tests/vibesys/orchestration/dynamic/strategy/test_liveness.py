@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.liveness import Journal, LivenessViolationError, spin_violations
+from tests.support.liveness import Journal, spin_violations
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
@@ -124,18 +124,9 @@ def test_every_sequence_of_answered_outcomes_ends_the_run_live(
     run_shell(Scenario(measurements, turns))
 
 
-# An executor that goes silent leaves its request open: core waits for a later observation,
-# and nothing in the run loop times the wait out, so the loop stalls instead of ending the
-# run. Core's `ReconciliationDeadline` event exists but no shell emits it.
-SILENT_EXECUTOR_GAP = (
-    "gap (owner: vs-runtime run loop): an executor that reports Unknown or a retryable "
-    "failure and then never observes the request again leaves its intent open. Core waits "
-    "for a later observation, the loop wakes only for job polls, and no shell emits "
-    "ReconciliationDeadline, so the run stalls (RunStalledError) instead of ending."
-)
-
-
-@pytest.mark.xfail(raises=LivenessViolationError, strict=True, reason=SILENT_EXECUTOR_GAP)
+# An executor that answers Unknown or a retryable failure and then goes silent leaves its
+# request open. Core blocks it once its reconciliation bound passes on the run clock, and
+# the strategy ends the work that awaited it.
 @pytest.mark.parametrize("position", range(2))
 def test_a_lost_measurement_ends_the_run_live(position: int) -> None:
     """The ``position``-th measurement of the run (input, then candidates) is never answered."""
@@ -143,7 +134,6 @@ def test_a_lost_measurement_ends_the_run_live(position: int) -> None:
     run_shell(Scenario(outcomes, []))
 
 
-@pytest.mark.xfail(raises=LivenessViolationError, strict=True, reason=SILENT_EXECUTOR_GAP)
 @pytest.mark.parametrize("outcome", [Turn.LOST, Turn.RETRYABLE_FAILURE])
 def test_a_turn_the_executor_never_finishes_ends_the_run_live(outcome: Turn) -> None:
     run_shell(Scenario([], [outcome]))
