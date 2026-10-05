@@ -9,13 +9,17 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys.run.core_services import agent_session_spec
-from vs_agent.api import AgentSpec
+from vs_agent.api import AgentSpec, SkillSelection
 from vs_agent.api.testing import FakeAgentClient
 from vs_runtime.api import AgentRole
 from vs_runtime.api.infrastructure import AgentExecutionConfiguration
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 
 _SHARED = HostResource(Path("/shared"), HostResourceAccess.READ_ONLY, "run-wide mount")
+
+
+def _skip_nothing(_directory: str, _names: list[str]) -> set[str]:
+    return set()
 
 
 @dataclass(frozen=True)
@@ -25,7 +29,14 @@ class _Environment:
     host_resources: tuple[HostResource, ...] = (_SHARED,)
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
     skill_source_dirs: tuple[Path, ...] = ()
+    skill_selection: SkillSelection = field(
+        default_factory=lambda: SkillSelection(skip_dir=_skip_nothing)
+    )
+    backends: None = None
     use_docker: bool = False
+
+    def close(self) -> None:
+        """Nothing is held."""
 
 
 _role_ids = st.lists(

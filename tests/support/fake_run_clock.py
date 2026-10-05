@@ -30,13 +30,14 @@ class FakeRunClock:
 
         The lease heartbeat waits for logical time that others advance: it only yields.
         """
-        if asyncio.current_task().get_name() == HEARTBEAT_TASK:  # type: ignore[union-attr]
+        current = asyncio.current_task()
+        if current is not None and current.get_name() == HEARTBEAT_TASK:
             await asyncio.sleep(0)
             return
         background = [
             task
             for task in asyncio.all_tasks()
-            if task is not asyncio.current_task() and task.get_name() != HEARTBEAT_TASK
+            if task is not current and task.get_name() != HEARTBEAT_TASK
         ]
         if background:
             await asyncio.gather(*background, return_exceptions=True)
