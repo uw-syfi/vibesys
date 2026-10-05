@@ -28,6 +28,9 @@ from vibesys.orchestration.dynamic.strategy._state import (
 from vs_core.api import RunView
 
 _HISTORY_ROWS = 20
+_HISTORY_TITLE_CHARS = 200
+_HISTORY_SUMMARY_CHARS = 600
+_CUT = " [cut]"
 
 
 def remaining(state: DynamicStrategyState, config: DynamicConfig) -> int:
@@ -76,16 +79,25 @@ def _status(record: HypothesisRecord, running: frozenset[str]) -> str:
     return record.strategy.value
 
 
+def _bounded(text: str, limit: int) -> str:
+    """Cut free agent text to ``limit`` characters for the planner's compact history.
+
+    The record keeps the whole text; only this rendered view is bounded, and a cut is
+    marked so the planner does not read a prefix as the whole.
+    """
+    return text if len(text) <= limit else f"{text[:limit]}{_CUT}"
+
+
 def _history_row(record: HypothesisRecord, running: frozenset[str]) -> HistoryRow:
     last = record.rounds[-1] if record.rounds else None
     return HistoryRow(
         hypothesis_id=record.hypothesis_id,
         sequence=record.first_sequence,
-        title=record.title,
+        title=_bounded(record.title, _HISTORY_TITLE_CHARS),
         status=_status(record, running),
         strategy=record.strategy.value,
         outcome=None if last is None or last.outcome is None else last.outcome.value,
-        summary="" if last is None else last.summary,
+        summary="" if last is None else _bounded(last.summary, _HISTORY_SUMMARY_CHARS),
         review_passed=None if last is None else last.review_passed,
         accuracy_passed=None if last is None else last.accuracy_passed,
         benchmark_passed=None if last is None else last.benchmark_passed,

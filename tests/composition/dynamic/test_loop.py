@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import re
+import tempfile
+import unicodedata
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 from tests.composition.dynamic._harness import (
     PASS,
     AgentTransportError,
@@ -24,7 +31,7 @@ from vs_agent.api import AgentOutputSchemaError
 from vs_runtime.api.core import RunStalledError
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Callable
 
 _SCHEMA_ERRORS = (
     "Output does not match required schema: root: must have required property 'workstreams', "
@@ -306,3 +313,151 @@ def test_a_plan_that_fails_validation_is_corrected_with_the_field_named_errors(
     assert "Correction required" in planner[1]
     assert "workstreams.0.implement.hypothesis_id" in planner[1]
     assert "'0 ' is not a valid identifier" in planner[1]
+
+
+def test_long_agent_text_is_kept_whole_and_the_planner_history_stays_bounded(
+    tmp_path: Path,
+) -> None:
+    """No agent text field is capped, so nothing is cut at the agent boundary."""
+    loop_input = LoopInput.create(tmp_path)
+    long = "word " * 4000
+    long_workstream = {
+        **workstream("H1", title=long, task=long),
+        "hypothesis": long,
+        "pass_criteria": long,
+    }
+    plan = {**portfolio(long_workstream), "reasoning": long}
+
+    def long_result(agent: Turn) -> dict[str, object]:
+        agent.set_value(2)
+        return {**implemented("H1"), "summary": long, "next_step": long}
+
+    agents = (
+        ScriptedAgents()
+        .plan(plan, portfolio(workstream("H2")))
+        .implement("H1", long_result)
+        .judge("H1", {"passed": True, "analysis": long, "feedback": long})
+        .implement("H2", edit_to(3, "H2"))
+        .judge("H2", PASS)
+    )
+
+    run = run_request(loop_input.request(max_rounds=2), agents)
+
+    assert run.error is None
+    assert agents.unscripted == []
+    records = CoreRecords(loop_input, run.run_id)
+    first = records.attempt("H1")
+    assert first["plan"]["hypothesis"] == long
+    assert first["plan"]["task"] == long
+    assert first["plan"]["pass_criteria"] == long
+    assert first["summary"] == long
+    assert first["next_step"] == long
+    second_planning = agents.prompts(ORCHESTRATOR.id)[1]
+    assert len(second_planning) < 20_000
+    assert long not in second_planning
+
+
+def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
+    tmp_path: Path,
+) -> None:
+    """Regression for r14: candidates that miss the warmup bar differ by how far they got.
+
+    Two candidates fail the benchmark with 14 and 38 of 72 rounds. The record keeps the
+    structured measurement of each, and the next plan lists the closer candidate first.
+    """
+    loop_input = LoopInput.create(tmp_path)
+    # The input itself misses the bar too, by more than either candidate.
+    (loop_input.root / "queue.py").write_text("VALUE = 1\nREQUIRED = 72\n", encoding="utf-8")
+
+    def reach(value: int, identifier: str) -> Callable[[Turn], dict[str, object]]:
+        def turn(agent: Turn) -> dict[str, object]:
+            agent.write_queue(f"VALUE = {value}\nREQUIRED = 72\n")
+            return implemented(identifier)
+
+        return turn
+
+    agents = (
+        ScriptedAgents()
+        .plan(
+            portfolio(workstream("A"), workstream("B")),
+            portfolio(workstream("C")),
+            portfolio(workstream("D")),
+        )
+        .implement("A", reach(14, "A"))
+        .judge("A", PASS)
+        .implement("B", reach(38, "B"))
+        .judge("B", PASS)
+        .implement("C", implemented("C", outcome="blocked"))
+        .implement("D", implemented("D", outcome="blocked"))
+    )
+
+    run = run_request(loop_input.request(max_rounds=2, max_in_flight=2), agents)
+
+    assert agents.unscripted == []
+    assert run.error is None
+    records = CoreRecords(loop_input, run.run_id)
+
+    def measured(value: int) -> dict[str, object]:
+        return {
+            "name": "warmup_rounds_per_s",
+            "value": float(value),
+            "direction": "max",
+            "unit": "rounds/s",
+            "target": 72.0,
+            "completed": float(value),
+            "required": 72.0,
+            "progress_unit": "rounds",
+        }
+
+    rounds = {item["hypothesis_id"]: item["rounds"][0] for item in records.strategy["hypotheses"]}
+    for identifier, value in (("A", 14), ("B", 38)):
+        assert rounds[identifier]["benchmark_passed"] is False
+        assert rounds[identifier]["metrics"] == []
+        assert rounds[identifier]["partial"] == measured(value)
+    planner = agents.prompts(ORCHESTRATOR.id)
+    assert len(planner) == 3
+    # The third plan is the first that sees both finished candidates.
+    buildable = planner[2].split("Buildable candidates")[1]
+    order = re.findall(r"hypothesis `([A-Z])`", buildable)
+    assert order[:2] == ["B", "A"]
+    assert "partial warmup_rounds_per_s = 38.0 rounds/s" in buildable
+    assert re.search(r"progress 38(\.0)? of 72(\.0)? rounds", buildable)
+
+
+# Hypothesis ids and titles are agent output that becomes workspace names, Git refs,
+# state namespaces, core identities, and prompt text. The plan accepts an id only in
+# its one canonical spelling, so this generates canonical ids. Each example is a whole
+# run, so a pull request draws one generated example beside the pinned past failure;
+# the scheduled workflow sets ``VIBESYS_FULL_PROPERTIES=1`` and draws many more.
+_IDS = st.text(
+    st.characters(categories=("L", "M", "N", "P", "S"), include_characters=" "),
+    min_size=1,
+    max_size=128,
+).filter(lambda value: value == value.strip() and unicodedata.is_normalized("NFC", value))
+_TITLES = st.text(st.characters(exclude_categories=("Cs",)), min_size=1, max_size=80)
+_LOOP_EXAMPLES = 20 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 1
+
+
+@settings(max_examples=_LOOP_EXAMPLES)
+@given(identifier=_IDS, title=_TITLES)
+@example(identifier="0", title="T" * 80)
+def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
+    identifier: str, title: str
+) -> None:
+    with tempfile.TemporaryDirectory() as base:
+        loop_input = LoopInput.create(Path(base))
+        agents = (
+            ScriptedAgents()
+            .plan(portfolio(workstream(identifier, title=title)))
+            .implement(identifier, edit_to(2, identifier))
+            .judge(identifier, PASS)
+        )
+
+        run = run_request(loop_input.request(), agents)
+
+        assert run.error is None
+        assert run.succeeded is True
+        assert agents.unscripted == []
+        (item,) = CoreRecords(loop_input, run.run_id).strategy["hypotheses"]
+        assert item["hypothesis_id"] == identifier
+        assert item["rounds"][0]["eligible"]
