@@ -52,6 +52,7 @@ from vs_runtime._core_requests import (
     WorkspaceRequests,
     receipt_executor_kinds,
 )
+from vs_runtime._core_wiring import SessionServices, core_bindings, new_core_state
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
 from vs_runtime._evidence_ledger import (
     EvidenceEntry,
@@ -237,6 +238,7 @@ __all__ = [
     "SessionRequests",
     "SessionResolver",
     "SessionSpecFactory",
+    "SessionServices",
     "Settled",
     "StoreWorkspaceReceipts",
     "Transient",
@@ -248,6 +250,8 @@ __all__ = [
     "build_operation_catalog",
     "commit_of",
     "open_session_requests",
+    "core_bindings",
+    "new_core_state",
     "owner_key",
     "production_owners",
     "receipt_executor_kinds",
