@@ -6,6 +6,7 @@ strategy proposes nothing: the run stays open until a control or the deadline en
 
 from __future__ import annotations
 
+import asyncio
 import itertools
 import math
 import tempfile
@@ -229,6 +230,33 @@ async def test_a_running_job_is_polled_at_the_observe_interval(
     assert [job.status for job in core.evaluation.jobs] == ["succeeded"]
     assert len(world.cluster.submissions) == 1
     assert runtime / interval - 1 <= len(world.polls) <= runtime / interval + 4
+
+
+@pytest.mark.parametrize("leases", [1, 3, 10])
+@pytest.mark.asyncio
+async def test_a_dispatch_longer_than_the_lease_does_not_lose_the_lease(
+    tmp_path: Path, leases: int
+) -> None:
+    """One dispatch (an agent turn) can run for many lease durations; the loop renews beside it.
+
+    The submission stands for such a dispatch: run-clock time passes while it is in flight and
+    the loop body does not run. Without renewal the next commit is stamped after the lease
+    expired and the run dies with a fence conflict.
+    """
+    clock = FakeRunClock(at=1.0)
+
+    async def lease_durations_pass() -> None:
+        for _ in range(leases * 4):
+            clock.at += LEASE / 4
+            await asyncio.sleep(0)
+
+    with open_skeleton_world(tmp_path, BaselineOnly(), timed=(clock, 0.0)) as world:
+        world.during_submit = lease_durations_pass
+        process, host = _host(world, clock)
+        start_core(host, _config())
+        outcome = await drive_core(host, _config())
+        assert process.shell.holds_lease(now_at=clock.now())
+    assert outcome.status == RunStatus.TERMINAL
 
 
 @pytest.mark.asyncio

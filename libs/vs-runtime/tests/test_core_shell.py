@@ -201,7 +201,9 @@ def test_shell_schema_version_rejects_coercion_and_unknown_versions(version: obj
 @given(
     stamps=st.lists(st.integers(min_value=0, max_value=20), min_size=1, max_size=12),
 )
-def test_an_input_stamped_before_an_earlier_commit_still_commits(stamps: list[int]) -> None:
+def test_an_input_stamped_before_an_earlier_commit_still_commits_and_renews(
+    stamps: list[int],
+) -> None:
     """A tool call that arrives during a turn is stamped before the turn's own commit.
 
     The store's time watermark never moves back, so the shell must stamp every commit
@@ -214,6 +216,7 @@ def test_an_input_stamped_before_an_earlier_commit_still_commits(stamps: list[in
         shell.submit(ClockAdvanced(now_at=event_time), now_at=stamp)
         assert shell.advance()
         assert shell.holds_lease(now_at=stamp)
+        shell.renew(now_at=stamp, lease_duration=1000)
     assert shell.record.envelope.core.run.now_at == len(stamps)
 
 

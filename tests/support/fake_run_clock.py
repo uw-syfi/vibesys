@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
+from vs_runtime.api.core import HEARTBEAT_TASK
+
 
 @dataclass
 class FakeRunClock:
@@ -24,8 +26,18 @@ class FakeRunClock:
         return self.at
 
     async def sleep(self, seconds: float) -> None:
-        """Let background work finish, then advance logical time instead of waiting."""
-        background = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+        """Let background work finish, then advance logical time instead of waiting.
+
+        The lease heartbeat waits for logical time that others advance: it only yields.
+        """
+        if asyncio.current_task().get_name() == HEARTBEAT_TASK:  # type: ignore[union-attr]
+            await asyncio.sleep(0)
+            return
+        background = [
+            task
+            for task in asyncio.all_tasks()
+            if task is not asyncio.current_task() and task.get_name() != HEARTBEAT_TASK
+        ]
         if background:
             await asyncio.gather(*background, return_exceptions=True)
         self.sleeps.append(seconds)

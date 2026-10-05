@@ -67,6 +67,10 @@ class RunClock(Protocol):
         ...
 
 
+#: Name of the task that renews the lease while a drain is in flight; fakes recognize it.
+HEARTBEAT_TASK = "lease-heartbeat"
+
+
 class WallRunClock:
     """Production clock: seconds since the epoch, real sleeping."""
 
@@ -295,9 +299,24 @@ class _Loop:
     async def _drain(self, now: float) -> ExecutorRefusal | None:
         total = self._shell.dispatched - self._first_dispatch
         remaining = max(self._config.max_dispatches - total, 0)
-        return await self._shell.run_until_idle(
-            self._delivery, now_at=now, max_dispatches=remaining
-        )
+        # One dispatch (an agent turn) can outlast the lease, and the loop does not
+        # iterate while it runs, so the lease is renewed from beside the drain.
+        heartbeat = asyncio.create_task(self._heartbeat(), name=HEARTBEAT_TASK)
+        try:
+            return await self._shell.run_until_idle(
+                self._delivery, now_at=now, max_dispatches=remaining
+            )
+        finally:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
+            if not heartbeat.cancelled() and (failure := heartbeat.exception()) is not None:
+                raise failure
+
+    async def _heartbeat(self) -> None:
+        """Renew the lease every third of its duration until cancelled."""
+        while True:
+            await self._clock.sleep(self._config.lease_duration / 3)
+            self._renew(self._read())
 
     def _renew(self, now: float) -> None:
         if now - self._renewed_at >= self._config.lease_duration / 3:
