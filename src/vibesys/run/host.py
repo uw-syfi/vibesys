@@ -37,6 +37,7 @@ from vibesys.run.evaluation_backend import (
     SemanticEvaluationBackend,
     semantic_evaluation_identity,
 )
+from vibesys.run.measurement_events import CoreMeasurementEvents
 from vibesys.run.profiler_agent import ProfilerEvaluationAccess, RuntimeProfilerTurnProvision
 from vibesys.run.resources import _StateBinding, open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
@@ -70,7 +71,7 @@ from vs_sandbox.api.slurm import load_slurm_policy, read_slurm_evaluation_plan
 from vs_slurm.api import load_slurm_config
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Mapping
+    from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
     from contextlib import ExitStack
 
     from pydantic import BaseModel
@@ -582,6 +583,11 @@ class _ProductHostFactory:
                 invocation_slot=invocations,
                 configuration=configuration,
                 clock=WallRunClock(),
+                agent_lifecycle=self.integration.agent_execution_event,
+                measurement_observer=CoreMeasurementEvents(self.integration.events),
+                commit_observer=self.integration.core_commit_observer(
+                    project.state.run_id, self.projector, self.plugin.id
+                ),
                 session_spec=agent_session_spec(
                     client=client,
                     environment=environment,
@@ -685,22 +691,23 @@ class _ProductHostFactory:
             await close_evaluation_services(self.evaluation_service, self.profiler_service)
         )
         if self.profiler_provision is not None:
-            try:
-                await self.profiler_provision.close()
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930074 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-                errors.append(error)
+            await _collect_close_error(errors, self.profiler_provision.close)
         if self.evaluation_backend is not None:
-            try:
-                await self.evaluation_backend.close()
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930075 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-                errors.append(error)
+            await _collect_close_error(errors, self.evaluation_backend.close)
         if self.core_services is not None:
-            try:
-                await self.core_services.close()
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948091 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-                errors.append(error)
+            await _collect_close_error(errors, self.core_services.close)
         if errors:
             raise RunCleanupError(_EVALUATION_CLEANUP_FAILURE, tuple(errors))
+
+
+async def _collect_close_error(
+    errors: list[BaseException], close: Callable[[], Awaitable[None]]
+) -> None:
+    """Run one resource's ``close``; record its failure so the next resource still closes."""
+    try:
+        await close()
+    except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930074 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
+        errors.append(error)
 
 
 async def close_evaluation_services(

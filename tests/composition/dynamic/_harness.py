@@ -132,12 +132,14 @@ class _SharedCancelClient(FakeAgentClient):
         capabilities: AgentCapabilities,
         session_store: SessionStore | None,
         skill_selection: SkillSelection,
+        log_dir: Path | None,
     ) -> None:
         super().__init__(
             capabilities=capabilities,
             session_reuse=True,
             session_store=session_store,
             skill_selection=skill_selection,
+            log_dir=log_dir,
         )
         self._seen = seen
 
@@ -273,6 +275,7 @@ class ScriptedAgents:
         *,
         session_store: SessionStore | None = None,
         skill_selection: SkillSelection = NULL_SKILL_SELECTION,
+        log_dir: Path | None = None,
         **_kwargs: object,
     ) -> FakeAgentClient:
         """Build a Fake client with the capabilities the agent CLI drivers report."""
@@ -281,6 +284,7 @@ class ScriptedAgents:
             capabilities=AgentCapabilities(session_reuse=True, provider_session_resume=True),
             session_store=session_store,
             skill_selection=skill_selection,
+            log_dir=log_dir,
         )
         for role in (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id):
             client.set_response(role, self._answer)
@@ -576,6 +580,7 @@ def _assert_invariants(request: RunRequest, run: LoopRun) -> None:
         [event.model_dump(mode="json") for event in run.events],
         load_envelope(root, run.run_id),
         root.parent / "cluster",
+        Project.log_directory_for(root, run.run_id),
     )
     violations = check(records)
     assert not violations, [f"{v.invariant}: {v.detail}" for v in violations]

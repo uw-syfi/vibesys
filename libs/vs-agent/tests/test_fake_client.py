@@ -9,14 +9,18 @@ recording, streamed output, ``on_invoke`` side effects, session reuse, and
 
 from __future__ import annotations
 
+import json
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack, override
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import BaseModel
 
 from vs_agent.api import AgentOutputSchemaError, StdioServerDescriptor
-from vs_agent.contracts import AgentCapabilities
+from vs_agent.contracts import AgentCapabilities, AgentUsage
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.sink import AgentEventSink
@@ -488,3 +492,51 @@ def test_evict_session_clears_a_seeded_conversation() -> None:
 
     assert client.provider_session_id(key) is None
     assert client.last_turn_provider_session_id(key) is None
+
+
+def _usage_rows(log_dir: Path) -> list[dict[str, Any]]:
+    path = log_dir / "usage.jsonl"
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+@given(failures=st.lists(st.booleans(), max_size=8))
+def test_every_dispatched_turn_records_one_usage_row_even_when_it_fails(
+    failures: list[bool],
+) -> None:
+    usage = AgentUsage(input_tokens=7, output_tokens=3, total_cost_usd=0.25)
+    with tempfile.TemporaryDirectory() as tmp:
+        log_dir = Path(tmp)
+        client = FakeAgentClient(log_dir=log_dir).set_usage(usage)
+        client.set_text("implementer", "done")
+        for index, fails in enumerate(failures):
+            if fails:
+                client.fail("implementer", RuntimeError("provider died"), times=1)
+            try:
+                client.invoke_text(
+                    kind="implementer",
+                    workspace=log_dir,
+                    system_prompt="system",
+                    user_prompt="user",
+                    round_label=f"turn {index}",
+                )
+            except RuntimeError:
+                assert fails
+
+        rows = _usage_rows(log_dir) if failures else []
+
+    assert [row["round_label"] for row in rows] == [f"turn {i}" for i in range(len(failures))]
+    assert {row["kind"] for row in rows} <= {"implementer"}
+    assert all(row["input_tokens"] == 7 and row["output_tokens"] == 3 for row in rows)
+    assert all(row["total_cost_usd"] == 0.25 for row in rows)
+
+
+def test_a_client_without_a_log_dir_writes_no_usage_row(tmp_path: Path) -> None:
+    FakeAgentClient().invoke_text(
+        kind="judge",
+        workspace=tmp_path,
+        system_prompt="system",
+        user_prompt="user",
+        round_label="judge #1",
+    )
+
+    assert list(tmp_path.iterdir()) == []

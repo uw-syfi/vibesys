@@ -27,7 +27,9 @@ from vs_agent.contracts import (
     AgentEvent,
     AgentEventKind,
     AgentOutputSchemaError,
+    AgentSkillUse,
     AgentTurnResult,
+    AgentUsage,
     session_spec_fingerprint,
 )
 from vs_agent.runner import validate_typed_response
@@ -36,6 +38,7 @@ from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.tools import StdioServerDescriptor
+from vs_agent.usage_records import append_usage_record
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -152,8 +155,13 @@ class FakeAgentClient:
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
         session_store: SessionStore | None = None,
         skill_selection: SkillSelection = NULL_SKILL_SELECTION,
+        log_dir: Path | None = None,
     ) -> None:
         """Create a fake client; see the class docstring for defaults.
+
+        With ``log_dir`` every dispatched turn, failed or not, appends one row to its
+        ``usage.jsonl``, as the production client does; ``set_usage`` fills the row's
+        token counts.
 
         ``capabilities`` overrides the reported feature set (e.g. to report
         ``tool_servers=True`` for a backend that hosts issue-tracker tools); when
@@ -174,6 +182,8 @@ class FakeAgentClient:
         self._sink = event_sink
         self._session_store = session_store or NullSessionStore()
         self._skill_selection = skill_selection
+        self._log_dir = log_dir
+        self._usage = AgentUsage()
         self._default_text: TextSource = DEFAULT_TEXT
 
         self.calls: list[FakeInvocation] = []
@@ -336,6 +346,11 @@ class FakeAgentClient:
             self._model = model
         return self
 
+    def set_usage(self, usage: AgentUsage) -> Self:
+        """Report ``usage`` for every turn from now on (the default reports none)."""
+        self._usage = usage
+        return self
+
     def set_model_for_kind(self, mapping: dict[str, str]) -> Self:
         """Set per-kind model overrides, merged into any already configured."""
         self._model_for_kind.update(mapping)
@@ -427,6 +442,9 @@ class FakeAgentClient:
             tool_servers=tools,
             reuse_session=True,
             session_key=session_key,
+        )
+        self._write_usage(
+            session_spec.role, turn.label, session_spec.model, session_spec.reasoning_effort
         )
         self._maybe_raise(session_spec.role)
         self._update_session(reuse_session=True, session_key=session_key)
@@ -548,6 +566,7 @@ class FakeAgentClient:
             reuse_session=reuse_session,
             session_key=session_key,
         )
+        self._write_usage(kind, round_label, self.model_for_kind(kind), None)
         self._maybe_raise(kind)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
@@ -584,6 +603,7 @@ class FakeAgentClient:
             reuse_session=reuse_session,
             session_key=session_key,
         )
+        self._write_usage(kind, round_label, self.model_for_kind(kind), None)
         self._maybe_raise(kind)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
@@ -627,6 +647,23 @@ class FakeAgentClient:
         for callback in self._on_invoke_callbacks:
             callback(invocation)
         return invocation
+
+    def _write_usage(
+        self, kind: str, round_label: str | None, model: str | None, reasoning_effort: str | None
+    ) -> None:
+        """Append the turn's usage row, before its outcome is known, like the real client."""
+        if self._log_dir is None:
+            return
+        append_usage_record(
+            self._log_dir,
+            kind=kind,
+            round_label=round_label,
+            provider=self._provider,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            usage=self._usage,
+            skills=AgentSkillUse(),
+        )
 
     def _maybe_raise(self, kind: str) -> None:
         state = self._failures.get(kind)
