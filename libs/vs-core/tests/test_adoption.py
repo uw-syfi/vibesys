@@ -246,6 +246,23 @@ def test_a_winner_completes_only_after_a_positive_verification() -> None:
     assert len(run.results()) == 1
 
 
+def test_a_candidate_with_an_agent_record_and_the_official_accuracy_record_is_adopted() -> None:
+    """The live path holds both: the agent's own evaluation (kind local-validation) and the official one."""
+    agent = accuracy_proof("rev-a").model_copy(
+        update={
+            "kind": core.EvidenceKind.LOCAL_VALIDATION,
+            "purpose": "local-validation",
+            "evidence_id": core.EvidenceId(root="agent-rev-a"),
+        }
+    )
+    state = world()
+    both = core.EvaluationState(evidence=(agent, *state.evaluation.evidence))
+    run = Run(state.model_copy(update={"evaluation": both}))
+    (adopt,) = new_requests(run.propose(GOOD[0]))
+    assert run.rejections() == []
+    assert adopt.selection == GOOD[0]
+
+
 def test_a_successful_result_must_name_the_verified_adopted_winner() -> None:
     run = start()
     selection = GOOD[0]
