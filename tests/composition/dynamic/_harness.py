@@ -3,8 +3,8 @@
 A scenario runs the way the product does: a CLI-built request goes through
 ``launch.default_runs`` and the production host composition (real Git worktrees, the
 real ``.vibesys`` state store, the runtime's run loop, the trusted evaluation scripts).
-The core policy is selected by wiring (``dynamic_core_registration``) until the
-switch makes it the built-in. Two things are Fake because they are external:
+The core policy is the built-in ``dynamic`` registration, so the scenarios run the
+same catalog the entrypoints use. Two things are Fake because they are external:
 
 - the cluster: ``vs_slurm.fake_connector`` in executing mode runs every production job
   script on this host, so a job finishes at its first poll;
@@ -39,14 +39,12 @@ from entrypoints.cli import build_run_request, parse_cli_invocation
 from launch import LaunchSettings
 from vibesys.api import (
     CoreEventType,
-    OrchestrationRegistry,
     ResumeRef,
     RunRequest,
     RunResult,
     RunStatus,
     RunStopped,
 )
-from vibesys.dynamic_core import dynamic_core_registration
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
@@ -61,7 +59,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from vibesys.api import CoreEvent, RunHandle
-    from vs_agent.api import AgentSessionKey, SessionStore, SkillSelection
+    from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
     from vs_runtime.api.infrastructure import StopTimer
 
@@ -513,12 +511,13 @@ class LoopRun:
         ]
 
 
-def run_request(
+def run_request(  # noqa: PLR0913  # one entry point; each keyword is an independent optional test seam, and bundling them would only add a wrapper type
     request: RunRequest,
     agents: ScriptedAgents,
     *,
     on_handle: Callable[[RunHandle], None] | None = None,
     stop_timer: StopTimer | None = None,
+    client_factory: Callable[..., AgentClientProtocol] | None = None,
     clock: FakeRunClock | None = None,
 ) -> LoopRun:
     """Execute a built request through the production host composition.
@@ -532,12 +531,9 @@ def run_request(
     """
     if clock is not None:
         clock.limit = clock.at + SIMULATED_BUDGET_S
-    registry = OrchestrationRegistry()
-    registry.register(dynamic_core_registration())
     runs = launch.default_runs(
         LaunchSettings(
-            registry=registry,
-            agent_client_factory=agents.client,
+            agent_client_factory=client_factory or agents.client,
             stop_timer=stop_timer or FakeStopTimer(),
             timing=None if clock is None else RunTiming(clock, PRODUCTION_LEASE_SECONDS),
         )

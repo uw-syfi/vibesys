@@ -18,11 +18,9 @@ from tests.vibesys.orchestration.dynamic._support import (
     throughput,
     two_epoch_script,
 )
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
-from vibesys.orchestration.dynamic import (
-    PLUGIN,
-    DynamicState,
-)
+from vibesys.orchestration.dynamic import DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.models import (
     DurableStateCommitError,

@@ -36,31 +36,37 @@ import threading
 from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from launch import built_in_orchestrations
 from launch.testing import FakeStopTimer, create_session
 from vibesys.api import (
     ComputeBackend,
     Config,
     OrchestrationDescriptor,
+    OrchestrationRegistry,
     ResumeRef,
     RunRequest,
     RunStatus,
     RunStopped,
 )
 from vibesys.events import CoreEventType
+from vibesys.hypothesis.readmodel import project_hypothesis_state
 from vibesys.inputs import load_input_bundle
-from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
+from vibesys.orchestration.dynamic import DynamicOptions
+from vibesys.orchestration.dynamic.agents import AGENTS, IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vibesys.orchestration.dynamic.models import DynamicState
+from vibesys.orchestration.dynamic.orchestration import orchestrate
 from vibesys.orchestration.profilers import ProfilerKind
+from vibesys.orchestration.resume import compare_round_budget
+from vibesys.plugin_registration import OrchestrationRegistration
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_evaluation.api import EvaluationAgentRole
 from vs_evaluation.api.tools import build_evaluation_tools
 from vs_project.api import Project
+from vs_runtime.api import OrchestrationPlugin
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_sandbox.api import create_compute_backend
 from vs_slurm.fake_connector import (
@@ -74,7 +80,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
     from typing import Any
 
+    from pydantic import BaseModel
+
     from vibesys.events import CoreEvent
+    from vibesys.run.contracts import PluginProjection
     from vs_agent.api import (
         AgentClientProtocol,
         AgentSessionKey,
@@ -83,6 +92,39 @@ if TYPE_CHECKING:
         ToolSpec,
     )
     from vs_agent.api.testing import FakeInvocation
+
+
+def _project(raw_state: BaseModel) -> PluginProjection:
+    """Project the authoritative shared hypothesis state."""
+    return project_hypothesis_state(DynamicState.model_validate(raw_state).search)
+
+
+def _project_max_rounds(raw_options: BaseModel) -> int:
+    """Project the round budget: every workstream records one round."""
+    options = DynamicOptions.model_validate(raw_options)
+    return options.max_rounds * options.max_in_flight
+
+
+# The legacy dynamic loop's registration, kept for tests until SW-8 deletes the loop.
+# No catalog registers it; the built-in `dynamic` is the core registration.
+LEGACY_PLUGIN = OrchestrationPlugin(
+    id="dynamic",
+    agents=AGENTS,
+    options=DynamicOptions,
+    state=DynamicState,
+    orchestrate=orchestrate,
+)
+PLUGIN = LEGACY_PLUGIN
+LEGACY_REGISTRATION = OrchestrationRegistration(
+    plugin=LEGACY_PLUGIN,
+    project=_project,
+    resume_policy=partial(
+        compare_round_budget,
+        plugin_id="dynamic",
+        options_type=DynamicOptions,
+    ),
+    project_max_rounds=_project_max_rounds,
+)
 
 # A deadlock guard for the evaluation tools: each evaluation finishes within a
 # few seconds, and raising the bound never turns a failure into a pass.
@@ -189,6 +231,7 @@ _ACCURACY = """\
 import pathlib
 namespace = {}
 exec(pathlib.Path("queue.py").read_text(), namespace)
+
 
 
 def check(value):
@@ -813,7 +856,7 @@ def run_request(
         session = create_session(
             request,
             sink=sink,
-            registry=built_in_orchestrations(),
+            registry=_legacy_registry(),
             agent_client_factory=client_factory or scripted_client,
             backend_factory=create_compute_backend,
             stop_timer=stop_timer or FakeStopTimer(),
@@ -834,6 +877,13 @@ def run_request(
         return LoopRun(result.run_id, result.succeeded, None, events, result.status)
 
     return asyncio.run(run())
+
+
+def _legacy_registry() -> OrchestrationRegistry:
+    """A catalog of only the legacy dynamic loop: no built-in catalog registers it."""
+    registry = OrchestrationRegistry()
+    registry.register(LEGACY_REGISTRATION)
+    return registry
 
 
 def _run_id(events: list[CoreEvent]) -> str:

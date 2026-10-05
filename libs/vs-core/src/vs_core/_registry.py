@@ -289,13 +289,22 @@ class OperationRegistry:
             decision.model_dump_json(), context={"operation_registry": self}
         )
 
-    def encode_envelope(self, envelope: RunEnvelope) -> str:
-        """Write the whole atomic envelope with registered operation subtypes."""
+    def validate_envelope(self, envelope: RunEnvelope) -> None:
+        """Check what writing the envelope requires, without serializing it.
+
+        A durable write that serializes the envelope itself (such as the runtime
+        record, which embeds it) calls this once instead of paying for a throwaway
+        canonical encoding.
+        """
         _validate_envelope_version(envelope.schema_version)
         self.validate_core(envelope.core)
         validate_immutable_schema(type(envelope.strategy))
         if not deeply_immutable(envelope):
             raise ContractError(("envelope",), "immutable durable value required")
+
+    def encode_envelope(self, envelope: RunEnvelope) -> str:
+        """Write the whole atomic envelope with registered operation subtypes."""
+        self.validate_envelope(envelope)
         return canonical_json(envelope)
 
     def decode_envelope[S: StrategyState](

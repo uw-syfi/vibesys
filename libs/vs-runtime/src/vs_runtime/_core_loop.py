@@ -286,6 +286,9 @@ class CoreRuntime[S: StrategyState]:
         self._queue: deque[_Input[S] | _Decide] = deque()
         # State after the admitted inputs still queued, valid at one storage revision.
         self._tail: tuple[int | None, CoreState] | None = None
+        # The (run, registry) values `_check_identity` last accepted. Both are frozen, so
+        # the same objects always give the same verdict.
+        self._identity_verified: tuple[object, object] | None = None
 
     @classmethod
     def resume(
@@ -326,7 +329,18 @@ class CoreRuntime[S: StrategyState]:
 
     def _decode(self, stored: StoredEnvelope) -> RuntimeRecord[S]:
         record = self._record_model.decode(stored, self._registry)
-        envelope = record.envelope
+        self._check_identity(record.envelope)
+        return record.model_copy(update={"envelope": record.envelope})
+
+    def _check_identity(self, envelope: RunEnvelope[S]) -> None:
+        """The envelope belongs to this run, strategy and registry (no decoding)."""
+        verified = self._identity_verified
+        if (
+            verified is not None
+            and verified[0] is envelope.core.run
+            and verified[1] is envelope.core.registry
+        ):
+            return
         if envelope.core.run.declaration != self._strategy.declaration:
             raise ContractError(
                 ("declaration",), "offered strategy differs from durable declaration"
@@ -336,7 +350,7 @@ class CoreRuntime[S: StrategyState]:
         selected = validate_startup(self._strategy.declaration, envelope.core.run.capabilities)
         if selected.operations != envelope.core.registry:
             raise ContractError(("registry",), "durable registry differs from selected declaration")
-        return record.model_copy(update={"envelope": envelope})
+        self._identity_verified = (envelope.core.run, envelope.core.registry)
 
     def _load(self) -> StoredEnvelope | None:
         stored = self._store.load()
@@ -584,14 +598,19 @@ class CoreRuntime[S: StrategyState]:
         )
 
     def _commit(self, candidate: RuntimeRecord[S], now_at: float) -> None:
-        self._registry.encode_envelope(candidate.envelope)
+        # One serialization per commit. What the candidate must satisfy is checked on the
+        # value (no encode-then-decode round trip); that its bytes decode back to the same
+        # record is a property of the codec, tested over generated records and enforced
+        # on every load by `_decode`. `model_copy` skips validators, so the record's own
+        # invariants are rechecked here.
+        self._registry.validate_envelope(candidate.envelope)
+        candidate.check_publications()
+        self._check_identity(candidate.envelope)
         stored = StoredEnvelope(
             revision=0 if self._storage_revision is None else self._storage_revision + 1,
             schema_version=1,
             payload=candidate.model_dump_json().encode(),
         )
-        # Decode our wire at the boundary too; model_copy deliberately skips validation.
-        validated = self._decode(stored)
         if self._fence is None:
             message = "runtime has no lease"
             raise RuntimeCommitError(message)
@@ -609,7 +628,7 @@ class CoreRuntime[S: StrategyState]:
                 self._halted = True
                 message = "store acknowledged a different runtime record"
                 raise RuntimeCommitError(message)
-            self._record = validated
+            self._record = candidate
             self._storage_revision = stored.revision
             self._time_floor = stamp
             if self._check_liveness:
