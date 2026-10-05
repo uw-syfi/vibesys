@@ -10,6 +10,7 @@ executor over the same disk, so a restart forgets exactly what a real one forget
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
@@ -157,6 +158,7 @@ class FakeSessionResolver:
     renderer: TemplateRenderer
     guarded: AccessGuardedWorkspace | None = None
     access: Access = Access.READ_ONLY
+    timeout: timedelta | None = timedelta(seconds=30)
     grant_paths: tuple[str, ...] = ()
     grant_directories: tuple[str, ...] = ()
     roles: frozenset[RoleId] = frozenset({ROLE})
@@ -198,6 +200,11 @@ class FakeSessionResolver:
             workspace=workspace.path,
             policy=AgentExecutionPolicy(require_enforcement=False),
         )
+
+    def turn_timeout(self, role: RoleId) -> timedelta | None:
+        """The one declared in-turn timeout of every role."""
+        del role
+        return self.timeout
 
     def template(self, turn: TurnSpec) -> AgentTurnRequest | None:
         """The fixed per-role turn configuration."""

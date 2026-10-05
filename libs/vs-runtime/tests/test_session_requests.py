@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -38,13 +39,16 @@ if TYPE_CHECKING:
     from vs_core.api import RequestBase
 
 
-class CrashBeforeSeal(ReceiptStore):
-    """A receipt store whose host dies when a request's sealed result is about to be written."""
+class CrashOnReplace(ReceiptStore):
+    """A receipt store whose host dies at the first record it overwrites.
+
+    After a provider turn, every overwrite (settling its workspace access, sealing the
+    request's result) comes after the journal wrote the outcome.
+    """
 
     def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
-        if family == "executions":
-            raise SystemExit
-        super().replace(family, part, key, receipt)
+        del family, part, key, receipt
+        raise SystemExit
 
 
 class World:
@@ -58,7 +62,7 @@ class World:
 
     def store(self, *, dies_before_seal: bool = False) -> ReceiptStore:
         namespace = self._project.state.state_store_namespace("run")
-        return CrashBeforeSeal(namespace) if dies_before_seal else ReceiptStore(namespace)
+        return CrashOnReplace(namespace) if dies_before_seal else ReceiptStore(namespace)
 
     async def execute(
         self,
@@ -230,6 +234,51 @@ async def test_a_late_retry_of_a_turn_that_may_have_started_is_unknown_never_rej
         assert status(retried) is ObservationStatus.UNKNOWN
         assert not retried.observation.observation.terminal
         assert len(w.host.turns) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_crash_right_after_a_turn_cannot_skip_the_lost_checkpoint_guard() -> None:
+    async with world() as w:
+        first = await w.execute(ensure_request())
+        with pytest.raises(SystemExit):
+            await w.execute(dispatch_request(), dies_before_seal=True)
+        assert len(w.host.turns) == 1
+        lost = open_host(w.host.resolver.workspace)
+        lost.journal = w.host.journal
+        w.host = lost
+        follow_up = await w.execute(dispatch_request("req-two", "inv-2"))
+        assert status(follow_up) is ObservationStatus.REJECTED
+        assert lost.turns == []  # no fresh conversation took the lost one's place
+        again = await w.execute(
+            reuse_ensure("req-reattach", first.observation.observation.resource_id)
+        )
+        assert status(again) is ObservationStatus.REJECTED
+
+
+@pytest.mark.asyncio
+async def test_the_in_turn_timeout_is_the_one_bound_with_the_session() -> None:
+    async with world() as w:
+        await w.execute(ensure_request())
+        await w.execute(dispatch_request())
+        await w.execute(dispatch_request("req-two", "inv-2"))
+        assert [turn.timeout for turn in w.host.turns] == [timedelta(seconds=30)] * 2
+        w.host.resolver.timeout = timedelta(seconds=60)
+        changed = await w.execute(dispatch_request("req-three", "inv-3"))
+        assert status(changed) is ObservationStatus.REJECTED
+        assert "timeout" in changed.observation.observation.diagnostic
+        assert len(w.host.turns) == 2
+
+
+@pytest.mark.parametrize("seconds", [0.0, -1.0])
+@pytest.mark.asyncio
+async def test_an_invalid_turn_timeout_is_rejected_when_the_session_is_bound(
+    seconds: float,
+) -> None:
+    async with world() as w:
+        w.host.resolver.timeout = timedelta(seconds=seconds)
+        result = await w.execute(ensure_request())
+        assert status(result) is ObservationStatus.REJECTED
+        assert "timeout" in result.observation.observation.diagnostic
 
 
 @pytest.mark.asyncio

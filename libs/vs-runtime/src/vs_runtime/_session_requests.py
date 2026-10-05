@@ -95,6 +95,8 @@ from vs_runtime._workspace_access import AccessGrant, enforce_workspace_access
 from vs_runtime.contracts import RuntimeContractError
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from vs_agent.api import AgentSessionSpec, ClientAgentSessions, InvocationOutcome
     from vs_core.api import Observation, RequestBase
     from vs_prompts.api import RenderedPrompt
@@ -136,11 +138,20 @@ class SessionResolver(Protocol):
         """The pydantic type that validates replies for *ref*."""
         ...
 
+    def turn_timeout(self, role: RoleId) -> timedelta | None:
+        """The role's in-turn timeout: one constant per role, None for the driver default.
+
+        The executor records it when the session is bound and rejects a turn when the
+        resolver later answers differently, because the durable session fences it.
+        """
+        ...
+
     def template(self, turn: TurnSpec) -> AgentTurnRequest | None:
-        """The fixed per-role turn configuration: instructions, timeout, constant label.
+        """The fixed per-role turn configuration: instructions and a constant label.
 
         These fields must not vary between turns of one conversation, because the
-        durable session fences them. The executor adds message, schema and identity.
+        durable session fences them. The executor adds message, schema, timeout and
+        identity; a timeout set here is replaced by the bound one.
         """
         ...
 
@@ -161,8 +172,13 @@ class SessionBinding(BaseModel):
     ensure_request: RequestId
     resource_id: ResourceId
     session_key: str
-    established: bool = False
-    """True once a turn completed, so the provider conversation must exist."""
+    turn_timeout_seconds: float | None = None
+    """The role's in-turn timeout, fixed when the session was bound."""
+    dispatched: tuple[str, ...] = ()
+    """Invocations dispatched in this session, recorded before each provider call.
+
+    The conversation is established once the journal shows one of them Completed,
+    so no flag has to be written after a turn and no crash can skip the guard."""
 
 
 class DispatchRecord(BaseModel):
@@ -426,11 +442,15 @@ class RuntimeSessionRequests:
             return _rejected(f"role {spec.role_id.root} is not declared")
         key = self._binding_key(request, spec.session_id)
         required = request.required_resource
+        timeout = self._resolver.turn_timeout(spec.role_id)
+        if timeout is not None and timeout.total_seconds() <= 0:
+            return _rejected(f"role {spec.role_id.root} declares an invalid turn timeout")
         wanted = SessionBinding(
             spec=spec,
             ensure_request=request_id,
             resource_id=ResourceId(root=f"session:{key}"),
             session_key=self._conversation_key(request, spec),
+            turn_timeout_seconds=None if timeout is None else timeout.total_seconds(),
         )
         binding = self._bind(key, wanted, required)
         if not _same_session(binding.spec, spec):
@@ -445,7 +465,7 @@ class RuntimeSessionRequests:
             raise _RefusalError(
                 _rejected("session identity is already in use", binding.resource_id)
             )
-        if binding.established:
+        if await self._established(key, excluding=None):
             await self._require_checkpoint(binding)
         return _Facts(ObservationStatus.SUCCEEDED, accepted=True, resource_id=binding.resource_id)
 
@@ -511,10 +531,23 @@ class RuntimeSessionRequests:
             raise _RefusalError(
                 _rejected("the turn's session, prompts or inputs cannot be resolved")
             )
+        timeout = self._resolver.turn_timeout(turn.session.role_id)
+        if (None if timeout is None else timeout.total_seconds()) != binding.turn_timeout_seconds:
+            raise _RefusalError(
+                _rejected(
+                    f"role {turn.session.role_id.root} changed its turn timeout since the "
+                    "session was bound",
+                    binding.resource_id,
+                )
+            )
         dispatch = _Dispatch(
             AgentSessionKey.parse(binding.session_key),
             spec,
-            replace(template, output_schema=schema),
+            replace(
+                template,
+                output_schema=schema,
+                timeout=None if timeout is None else timeout,
+            ),
             message,
             turn.invocation_id.root,
             schema,
@@ -531,16 +564,8 @@ class RuntimeSessionRequests:
         if ended is not None:
             return ended
         await self._begin_access(request, bkey, dispatch)
-        if binding.established:
-            await self._require_checkpoint(binding)
         try:
-            outcome = await await_session_operation(
-                asyncio.create_task(
-                    asyncio.to_thread(
-                        self._start_or_resume, dispatch, established=binding.established
-                    )
-                )
-            )
+            outcome = await self._outcome(bkey, binding, dispatch)
         except InvocationConflictError as error:
             return _rejected(f"invocation conflicts with its journal: {error}", binding.resource_id)
         except SessionConfigurationError as error:
@@ -548,6 +573,50 @@ class RuntimeSessionRequests:
         except (SessionPersistenceError, SessionResumeError) as error:
             return _unknown(f"dispatch state is unreadable: {error}", binding.resource_id)
         return await self._finish(outcome, bkey, binding, dispatch, turn.output_schema)
+
+    async def _outcome(
+        self, bkey: str, binding: SessionBinding, dispatch: _Dispatch
+    ) -> InvocationOutcome:
+        """The journal's outcome for the invocation, dispatching it only if it never ended.
+
+        A turn that already ended is read back: dispatching it through the other of
+        start and resume would look like a changed payload to the journal.
+        """
+        recorded = await asyncio.to_thread(
+            self._sessions.inspect, dispatch.key, dispatch.invocation
+        )
+        if isinstance(recorded, (Completed, InvalidResponse)):
+            return recorded
+        established = await self._established(bkey, excluding=dispatch.invocation)
+        if established:
+            await self._require_checkpoint(binding)
+        return await await_session_operation(
+            asyncio.create_task(
+                asyncio.to_thread(self._start_or_resume, dispatch, established=established)
+            )
+        )
+
+    async def _established(self, bkey: str, *, excluding: str | None) -> bool:
+        """Whether the journal shows a completed turn, so the provider conversation exists."""
+        binding = self._store.load(_BINDINGS, "binding", bkey, SessionBinding)
+        if binding is None:
+            return False
+        key = AgentSessionKey.parse(binding.session_key)
+        others = tuple(i for i in reversed(binding.dispatched) if i != excluding)
+        outcomes = await asyncio.gather(
+            *(asyncio.to_thread(self._sessions.inspect, key, i) for i in others)
+        )
+        return any(isinstance(outcome, Completed) for outcome in outcomes)
+
+    def _note_dispatch(self, bkey: str, invocation: str) -> None:
+        """Record, in the binding and before the provider call, that this invocation may run."""
+
+        def append(stored: SessionBinding | None) -> tuple[SessionBinding | None, None]:
+            if stored is None or invocation in stored.dispatched:
+                return None, None
+            return stored.model_copy(update={"dispatched": (*stored.dispatched, invocation)}), None
+
+        self._store.modify(_BINDINGS, "binding", bkey, SessionBinding, append)
 
     async def _finish(
         self,
@@ -557,16 +626,12 @@ class RuntimeSessionRequests:
         dispatch: _Dispatch,
         ref: SchemaRef,
     ) -> _Facts:
-        """What a journal outcome means: establish the conversation, then enforce access.
+        """What a journal outcome means: judge the turn against its workspace access.
 
         A turn that ended is judged against its workspace access before anyone sees
         its output; one that may still be running is not, because it may still write.
         """
         facts = self._translate(outcome, binding, dispatch.schema, ref)
-        if isinstance(outcome, Completed) and not binding.established:
-            self._store.replace(
-                _BINDINGS, "binding", bkey, binding.model_copy(update={"established": True})
-            )
         if not isinstance(outcome, (Completed, InvalidResponse)):
             return facts
         violation = await self._settle_access(f"{bkey}/{dispatch.invocation}")
@@ -645,6 +710,7 @@ class RuntimeSessionRequests:
             return await self._after_deadline(bkey, binding, dispatch, turn.output_schema)
         # Written before any provider call: its absence later proves no dispatch began.
         self._store.record_once(_DISPATCHES, "dispatch", record_key, link)
+        self._note_dispatch(bkey, dispatch.invocation)
         return None
 
     async def _after_deadline(
@@ -671,16 +737,11 @@ class RuntimeSessionRequests:
         """Continue an established conversation; start only one that never completed a turn."""
         sessions = self._sessions
         key, invocation = dispatch.key, dispatch.invocation
-        recorded = sessions.inspect(key, invocation)
-        if isinstance(recorded, (Completed, InvalidResponse)):
-            # Establishing the conversation changes how a turn is dispatched (start versus
-            # resume), and the journal fences a payload that changed. A turn that already
-            # ended is read back, never dispatched through the other path.
-            return recorded
         if not established:
             turn = replace(dispatch.template, message=dispatch.message, invocation_id=invocation)
             return sessions.start(key, dispatch.spec, turn)
-        checkpoint = recorded.checkpoint or sessions.checkpoint(key)
+        previous = sessions.inspect(key, invocation)
+        checkpoint = previous.checkpoint or sessions.checkpoint(key)
         sessions.bind(
             key,
             dispatch.spec,
