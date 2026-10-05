@@ -296,6 +296,7 @@ def test_a_blocked_intent_releases_closure_only_when_it_was_never_accepted_and_u
 ) -> None:
     state = _silent(core.IntentPhase.BLOCKED, core.ObservationStatus.UNKNOWN, terminal=False)
     intent = state.intents.intents[0]
+    assert intent.observation is not None
     observation = intent.observation.model_copy(
         update={
             "accepted": accepted,
