@@ -50,6 +50,7 @@ from vs_runtime.api.core import (
     DispatchProgress,
     ExecutorRefusal,
     JournalPublicationDelivery,
+    MeasurementServices,
     OperationCatalog,
     RunLoopConfig,
     RunStalledError,
@@ -210,7 +211,7 @@ class World:
         return core_bindings(
             receipts=self.env.receipts_namespace(),
             workspaces=workspaces,
-            evaluation=evaluation,
+            measurement=MeasurementServices(evaluation),
             sessions=SessionServices(self.agents.sessions(), self.agents.resolver),
             operations=self.operations,
         )

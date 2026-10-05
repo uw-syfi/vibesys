@@ -61,6 +61,11 @@ from vs_runtime._evaluation_jobs import (
     measurement_request,
 )
 from vs_runtime._evidence_ledger import ReceiptEvidenceLedger
+from vs_runtime._measurement_progress import (
+    IgnoreMeasurement,
+    MeasurementObserver,
+    MeasurementProgress,
+)
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
@@ -113,10 +118,19 @@ def _scope_key(scope: Scope, admission_id: DecisionId | None) -> str:
 class MeasurementRequests:
     """Translate the six evaluation requests into polls and submissions of one executor."""
 
-    def __init__(self, jobs: PollingEvaluationExecutor, store: ReceiptStore) -> None:
-        """Bind the executor that runs jobs and the receipts that make requests idempotent."""
+    def __init__(
+        self,
+        jobs: PollingEvaluationExecutor,
+        store: ReceiptStore,
+        observer: MeasurementObserver | None = None,
+    ) -> None:
+        """Bind the executor that runs jobs and the receipts that make requests idempotent.
+
+        *observer* is told when each stage of a job starts and ends; it never changes a result.
+        """
         self._jobs = jobs
         self._store = store
+        self._progress = MeasurementProgress(observer or IgnoreMeasurement())
         self._observations = ObservationFactory(store)
 
     async def execute(
@@ -255,6 +269,7 @@ class MeasurementRequests:
             RequestId(root=record.request_id), record.scope, record.admission_id
         )
         polled = self._with_ledgered_evidence(await self._poll(record.handle_id), record, subject)
+        self._progress.report(record.handle_id, record.plan.purpose, polled)
         # The job's observations carry the submission's request id, so they share one
         # sequence with the submission's own (possibly Unknown) observations.
         view = job_view(

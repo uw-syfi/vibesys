@@ -78,6 +78,7 @@ from vs_runtime._core_run import (
 )
 from vs_runtime._core_wiring import (
     CoreStartup,
+    MeasurementServices,
     SessionServices,
     core_bindings,
     empty_catalog,
@@ -91,6 +92,13 @@ from vs_runtime._evidence_ledger import (
     ReceiptEvidenceLedger,
 )
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
+from vs_runtime._measurement_progress import (
+    IgnoreMeasurement,
+    MeasurementObserver,
+    StageMetric,
+    StageSettled,
+    StageStarted,
+)
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
@@ -220,6 +228,7 @@ __all__ = [
     "ExecutionResult",
     "ExecutorRefusal",
     "ExecutorRole",
+    "IgnoreMeasurement",
     "Indeterminate",
     "Inspection",
     "IntentReceipt",
@@ -229,7 +238,9 @@ __all__ = [
     "JournalRunInvocations",
     "JournalSemanticEvents",
     "LifecycleReportingExecutor",
+    "MeasurementObserver",
     "MeasurementRequests",
+    "MeasurementServices",
     "NamespaceOperationReceipts",
     "NeverBegun",
     "NextWake",
@@ -297,6 +308,9 @@ __all__ = [
     "SessionServices",
     "SessionSpecFactory",
     "Settled",
+    "StageMetric",
+    "StageSettled",
+    "StageStarted",
     "SteerArtifacts",
     "StoreWorkspaceReceipts",
     "Transient",

@@ -51,10 +51,13 @@ from vs_runtime.api.core import (
     ExecutionContext,
     ExecutionResult,
     ExecutorRole,
+    MeasurementObserver,
     MeasurementRequests,
     ReceiptStore,
     RequestExecutors,
     SealedExecution,
+    StageSettled,
+    StageStarted,
     revision_ref,
 )
 from vs_slurm.api import SlurmJobStatus
@@ -120,6 +123,8 @@ class World:
         self.cluster = cluster
         self.stack = stack
 
+    observer: MeasurementObserver | None = None
+
     def requests(
         self, crash_at: int | None = None
     ) -> tuple[MeasurementRequests, FaultingNamespace]:
@@ -134,7 +139,7 @@ class World:
             None if crash_at is None else 2 * crash_at,
         )
         store = ReceiptStore(cast("StateNamespace", faulting))
-        return MeasurementRequests(self.stack.executor, store), faulting
+        return MeasurementRequests(self.stack.executor, store, self.observer), faulting
 
 
 @asynccontextmanager
@@ -195,6 +200,67 @@ async def run(
 ) -> ExecutionResult:
     requests, _ = w.requests(crash_at)
     return await requests.execute(request, context_for(request))
+
+
+class Recorder:
+    """A measurement observer that keeps what it heard, in order."""
+
+    def __init__(self) -> None:
+        self.heard: list[StageStarted | StageSettled] = []
+
+    def stage_started(self, event: StageStarted) -> None:
+        self.heard.append(event)
+
+    def stage_settled(self, event: StageSettled) -> None:
+        self.heard.append(event)
+
+
+def shape(heard: list[StageStarted | StageSettled]) -> list[tuple[str, str]]:
+    return [("started" if isinstance(e, StageStarted) else "settled", e.stage_id) for e in heard]
+
+
+# progress
+
+
+async def test_each_stage_is_reported_once_however_often_the_job_is_observed() -> None:
+    async with world() as w:
+        w.observer = Recorder()
+        requests, _ = w.requests()
+        sub = submission("sub", candidate=w.stack.snapshot)
+        resource = resource_of(await requests.execute(sub, context_for(sub)))
+        await settled(w, resource)
+        for request in (
+            query(InspectOwnedJob, "inspect-1", resource),
+            query(InspectOwnedJob, "inspect-2", resource),
+            query(CollectEvidence, "collect", resource),
+        ):
+            await requests.execute(request, context_for(request))
+        heard = w.observer.heard
+        assert shape(heard) == [
+            ("started", "accuracy"),
+            ("settled", "accuracy"),
+            ("started", "benchmark"),
+            ("settled", "benchmark"),
+        ]
+        assert {e.handle_id for e in heard} == {resource.root}
+        benchmark = heard[-1]
+        assert isinstance(benchmark, StageSettled)
+        assert benchmark.passed
+        assert benchmark.metrics
+
+
+async def test_a_failed_benchmark_is_reported_failed_with_its_reason() -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = 1
+    async with world(cluster) as w:
+        w.observer = Recorder()
+        resource = resource_of(await submit(w))
+        await settled(w, resource)
+        await run(w, query(InspectOwnedJob, "inspect", resource))
+        settled_events = [e for e in w.observer.heard if isinstance(e, StageSettled)]
+        by_stage = {e.stage_id: e for e in settled_events}
+        assert by_stage["accuracy"].passed
+        assert not by_stage["benchmark"].passed
 
 
 # happy path

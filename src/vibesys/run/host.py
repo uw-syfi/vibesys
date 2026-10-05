@@ -36,6 +36,7 @@ from vibesys.run.evaluation_backend import (
     SemanticEvaluationBackend,
     semantic_evaluation_identity,
 )
+from vibesys.run.measurement_events import CoreMeasurementEvents
 from vibesys.run.profiler_agent import ProfilerEvaluationAccess, RuntimeProfilerTurnProvision
 from vibesys.run.resources import _StateBinding, open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
@@ -571,6 +572,7 @@ class _ProductHostFactory:
                 configuration=partial(self._agent_configuration, resources),
                 clock=WallRunClock(),
                 agent_lifecycle=self.integration.agent_execution_event,
+                measurement_observer=CoreMeasurementEvents(self.integration.events),
                 session_spec=agent_session_spec(
                     client=client,
                     environment=environment,

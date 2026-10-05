@@ -10,7 +10,7 @@ cannot serve, fails at composition with the name of what is missing, never mid-r
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel
@@ -27,6 +27,8 @@ from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import ArtifactStore, CorePlan, CoreRunContext
 from vs_runtime.api.core import (
     CoreStartup,
+    IgnoreMeasurement,
+    MeasurementServices,
     OperationPorts,
     ProductionSessionResolver,
     ReceiptEvidenceLedger,
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
     from vs_runtime.api import AgentRole, CorePolicy, RunFacts
     from vs_runtime.api.core import (
         CoreRuntimeBindings,
+        MeasurementObserver,
         OperationCatalog,
         RunClock,
         SessionSpecFactory,
@@ -123,6 +126,8 @@ class CoreResources:
     session_spec: SessionSpecFactory
     clock: RunClock
     """The run's clock: it places the deadline and later paces the loop on one timeline."""
+    measurement_observer: MeasurementObserver = field(default_factory=IgnoreMeasurement)
+    """Hears each measurement stage start and end, for the host's event stream."""
     agent_lifecycle: AgentExecutionLifecycleSink = ignore_lifecycle
     """Receives the start and end of each provider turn, for the host's event stream."""
 
@@ -187,7 +192,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     bindings = core_bindings(
         receipts=receipts,
         workspaces=resources.workspaces,
-        evaluation=resources.evaluation,
+        measurement=MeasurementServices(resources.evaluation, resources.measurement_observer),
         sessions=SessionServices(_agent_sessions(resources), resolver),
         operations=catalog,
     )

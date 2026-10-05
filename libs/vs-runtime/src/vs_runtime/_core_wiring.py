@@ -30,6 +30,7 @@ from vs_core.api import (
 from vs_runtime._core_loop import CoreRuntimeBindings
 from vs_runtime._core_requests import RequestExecutors
 from vs_runtime._evaluation_requests import MeasurementRequests
+from vs_runtime._measurement_progress import IgnoreMeasurement, MeasurementObserver
 from vs_runtime._observation_factory import ObservationFactory
 from vs_runtime._operation_catalog import OperationCatalog
 from vs_runtime._operation_receipts import NamespaceOperationReceipts
@@ -48,6 +49,15 @@ if TYPE_CHECKING:
     from vs_project.api import StateNamespace
     from vs_runtime._session_requests import SessionResolver
     from vs_runtime._workspaces import RuntimeWorkspaces
+
+
+@dataclasses.dataclass(frozen=True)
+class MeasurementServices:
+    """What the EVALUATION role runs on: the executor and a display-only progress listener."""
+
+    executor: PollingEvaluationExecutor
+    observer: MeasurementObserver = dataclasses.field(default_factory=IgnoreMeasurement)
+    """Hears each measurement stage start and end; it never changes a result."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -122,7 +132,7 @@ def core_bindings(
     *,
     receipts: StateNamespace,
     workspaces: RuntimeWorkspaces,
-    evaluation: PollingEvaluationExecutor,
+    measurement: MeasurementServices,
     sessions: SessionServices,
     operations: OperationCatalog | None = None,
 ) -> CoreRuntimeBindings:
@@ -145,7 +155,7 @@ def core_bindings(
     executors = RequestExecutors(
         workspaces=RuntimeWorkspaceRequests(workspaces, store, proof),
         sessions=SessionRequestRouter(session.turns, session.lifecycle),
-        evaluation=MeasurementRequests(evaluation, store),
+        evaluation=MeasurementRequests(measurement.executor, store, measurement.observer),
         operations=RegisteredOperationRequests(
             catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
         ),
