@@ -14,6 +14,7 @@ from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     Accepted,
     Access,
+    Adoption,
     AttemptAdmitted,
     AttemptBudget,
     AttemptChargeRefundRequested,
@@ -32,6 +33,7 @@ from vs_core.api import (
     ChargeId,
     ChargeKind,
     ChargeReceipt,
+    CheckpointDecline,
     CloseAttemptScope,
     Continuation,
     ContinuationId,
@@ -99,6 +101,7 @@ from vs_core.api import (
     StartAttempt,
     StrategyState,
     Transition,
+    TrustedBaseline,
     TurnRequested,
     TurnSpec,
     Value,
@@ -741,6 +744,16 @@ def test_reused_conversations_require_resource_correspondence(
         assert_charge_authorized(state, event)
 
 
+def assert_root_conflict_declined(state: CoreState, event: AttemptAdmitted) -> None:
+    """A root conflict that slips past Scheduling declines; it never fails the step."""
+    result = step(state, event)
+    assert not any(isinstance(request, EnsureWorkspace) for request in result.requests)
+    admitted = next(
+        row for row in result.state.attempts.attempts if row.attempt_id == event.request.attempt_id
+    )
+    assert admitted.phase != AttemptPhase.ACQUIRING
+
+
 @pytest.mark.parametrize("mode", list(WorkspaceMode))
 @pytest.mark.parametrize("predecessor_present", [False, True])
 @pytest.mark.parametrize(
@@ -771,9 +784,11 @@ def test_root_admission_guard_is_independent_of_optional_parked_predecessor(
         budget=event.budget,
     )
     state = occupy_slot(canonical_start(state, event), event)
-    if predecessor_present or mode == WorkspaceMode.EXCLUSIVE_ROOT:
-        with pytest.raises(ContractValidationError, match=r"workspace|parked_predecessor"):
+    if predecessor_present:
+        with pytest.raises(ContractValidationError, match=r"parked_predecessor"):
             step(state, event)
+    elif mode == WorkspaceMode.EXCLUSIVE_ROOT:
+        assert_root_conflict_declined(state, event)
     else:
         result = step(state, event)
         assert len(result.requests) == 1
@@ -801,6 +816,32 @@ def test_exclusive_root_is_released_when_its_holder_leaves_the_root(phase: Attem
     )
     result = step(occupy_slot(canonical_start(state, event), event), event)
     assert [type(request) for request in result.requests] == [EnsureWorkspace]
+
+
+@pytest.mark.parametrize("verified", [False, True])
+def test_attempts_decline_an_exclusive_root_admission_under_an_inflight_adoption(
+    *, verified: bool
+) -> None:
+    """Scheduling's gate normally prevents this; Attempts declines rather than raising."""
+    state = initial_state()
+    event = registration("next")
+    event = AttemptAdmitted(
+        admission_id=event.request.decision_id,
+        request=event.request,
+        workspace=WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline),
+        budget=event.budget,
+    )
+    adoption = Adoption(
+        selection=TrustedBaseline(revision=state.run.facts.baseline), verified=verified
+    )
+    state = state.model_copy(
+        update={"settlement": state.settlement.model_copy(update={"adoption": adoption})}
+    )
+    state = occupy_slot(canonical_start(state, event), event)
+    if verified:
+        assert [type(request) for request in step(state, event).requests] == [EnsureWorkspace]
+    else:
+        assert_root_conflict_declined(state, event)
 
 
 def checkpoint_state() -> CoreState:
@@ -837,9 +878,8 @@ def checkpoint_state() -> CoreState:
 
 @pytest.mark.parametrize("proof", ["absent", "unknown", "pending", "nonterminal", "terminal"])
 @pytest.mark.parametrize("access", list(Access))
-@given(retention=st.sampled_from(("wip", "candidate")))
 def test_checkpoint_waits_for_every_competing_writer_to_terminate(
-    proof: str, retention: Literal["wip", "candidate"], access: Access
+    proof: str, access: Access
 ) -> None:
     state = checkpoint_state()
     target = state.sessions.invocations[0]
@@ -883,23 +923,20 @@ def test_checkpoint_waits_for_every_competing_writer_to_terminate(
     event = InvocationCheckpointRequested(
         attempt=owner_ref(),
         invocation=target.invocation,
-        retention=retention,
+        retention="wip",
         authority=RequestId(root="checkpoint"),
     )
-    if retention == "candidate" and (proof == "terminal" or access != Access.WRITE_CANDIDATE):
-        with pytest.raises(KernelNotImplementedError) as raised:
-            step(state, event)
-        assert raised.value.subarea == "_attempt_acquisition"
-        assert raised.value.event_kind == "invocation_checkpoint_requested"
-        return
     result = step(state, event)
     assert result == step(reload_state(state), event)
     assert result.state.attempts.attempts[0].checkpoints == ()
-    if (proof == "terminal" or access != Access.WRITE_CANDIDATE) and retention == "wip":
+    if proof == "terminal" or access != Access.WRITE_CANDIDATE:
         assert len(result.requests) == 1
         assert isinstance(result.requests[0], SnapshotAndRetain)
     else:
         assert result.requests == ()
+        assert [row.reason for row in result.state.attempts.attempts[0].checkpoint_declines] == [
+            CheckpointDecline.WRITER_ACTIVE
+        ]
 
 
 def test_checkpoint_signal_requires_committed_retention_not_its_request() -> None:
@@ -1403,10 +1440,7 @@ def test_absent_invocation_cannot_mint_accounting_authority(phase: AttemptPhase)
     assert result.requests == ()
 
 
-@given(st.sampled_from(("wip", "candidate")))
-def test_checkpoint_requires_writer_termination_proof(
-    retention: Literal["wip", "candidate"],
-) -> None:
+def test_checkpoint_requires_writer_termination_proof() -> None:
     state = owned_state(AttemptPhase.ACTIVE)
     event = InvocationCheckpointRequested(
         attempt=owner_ref(),
@@ -1415,12 +1449,30 @@ def test_checkpoint_requires_writer_termination_proof(
             invocation_id=InvocationId(root="missing"),
             generation=0,
         ),
-        retention=retention,
+        retention="wip",
         authority=RequestId(root="checkpoint"),
     )
     result = step(state, event)
     assert result.requests == ()
     assert result.state.attempts.attempts[0].checkpoints == ()
+    assert result.state.attempts.attempts[0].checkpoint_declines == ()
+
+
+def test_a_candidate_cannot_be_requested_as_an_invocation_checkpoint() -> None:
+    """Candidate retention names an explicit revision at closure; the type excludes it."""
+    with pytest.raises(ValueError, match="retention"):
+        InvocationCheckpointRequested.model_validate(
+            {
+                "attempt": owner_ref(),
+                "invocation": InvocationRef(
+                    session_id=SessionId(root="s"),
+                    invocation_id=InvocationId(root="i"),
+                    generation=0,
+                ),
+                "retention": "candidate",
+                "authority": RequestId(root="checkpoint"),
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -1985,8 +2037,11 @@ def test_unresolved_old_root_ownership_fences_acquisition_even_if_logically_reti
         ),
     )
     state = occupy_slot(canonical_start(state, admitted), admitted)
-    with pytest.raises(ContractValidationError, match=r"workspace|parked_predecessor"):
-        step(state, admitted)
+    if predecessor_present:
+        with pytest.raises(ContractValidationError, match=r"parked_predecessor"):
+            step(state, admitted)
+    else:
+        assert_root_conflict_declined(state, admitted)
 
 
 @pytest.mark.parametrize(
@@ -2240,8 +2295,9 @@ def test_reacquisition_obeys_the_same_exclusive_root_guard_as_initial_admission(
         base=state.run.facts.baseline,
     )
     if mode == WorkspaceMode.EXCLUSIVE_ROOT:
-        with pytest.raises(ContractValidationError, match="workspace"):
-            step(state, event)
+        result = step(state, event)
+        assert not any(isinstance(request, RestoreRevision) for request in result.requests)
+        assert result.state.attempts.attempts[0].closure is not None
     else:
         result = step(state, event)
         assert len(result.requests) == 2
@@ -2734,7 +2790,8 @@ def test_checkpoint_authority_must_identify_exactly_one_interruption() -> None:
     event = InvocationCheckpointRequested(
         attempt=owner_ref(), invocation=claim.invocation, retention="wip", authority=claim.authority
     )
-    with pytest.raises(KernelNotImplementedError) as raised:
-        step(reload_state(state), event)
-    assert raised.value.subarea == "_attempt_acquisition"
-    assert raised.value.event_kind == "invocation_checkpoint_requested"
+    declined = step(reload_state(state), event)
+    assert declined.requests == ()
+    assert [row.reason for row in declined.state.attempts.attempts[0].checkpoint_declines] == [
+        CheckpointDecline.UNAUTHORIZED
+    ]

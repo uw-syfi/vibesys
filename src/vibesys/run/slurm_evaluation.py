@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.run.evaluation_backend import render_stage_failure
+from vs_runtime.api import render_stage_failure
 from vs_runtime.api.infrastructure import SemanticSlurmEvaluationExecutor
 
 if TYPE_CHECKING:

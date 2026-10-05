@@ -39,7 +39,6 @@ from vs_core.api import (
     ResourceId,
     RestoreRevision,
     RetainRevision,
-    RevisionId,
     RevisionRef,
     RunInvocationCheckpointObserved,
     SetupFailureKind,
@@ -86,20 +85,21 @@ if TYPE_CHECKING:
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
-_DIGEST_PREFIX = "git-commit:"
 
 
 def revision_ref(commit: str) -> RevisionRef:
     """Return the canonical core reference of one Git commit."""
-    return RevisionRef(revision_id=RevisionId(root=commit), digest=f"{_DIGEST_PREFIX}{commit}")
+    return RevisionRef.of_git_commit(commit)
 
 
-def _commit_of(ref: RevisionRef) -> str | None:
-    """Return the commit named by a reference, or ``None`` if it is not canonical."""
-    commit = ref.revision_id.root
-    if _COMMIT.match(commit) is None or ref.digest != f"{_DIGEST_PREFIX}{commit}":
-        return None
-    return commit
+def commit_of(ref: RevisionRef) -> str | None:
+    """Return the commit named by a reference, or ``None`` if it is not canonical.
+
+    Core's ``RevisionRef.git_commit`` is the one reader of the digest scheme; this
+    only adds the workspace's own rule that a commit is a full 40-digit object name.
+    """
+    commit = ref.git_commit
+    return commit if commit is not None and _COMMIT.match(commit) is not None else None
 
 
 @dataclass(frozen=True)
@@ -236,6 +236,7 @@ class RuntimeWorkspaceRequests:
                 children_complete=facts.children_complete,
                 resource_id=facts.resource_id,
                 diagnostic=facts.diagnostic,
+                revision=facts.revision,
             ),
             observed_at=context.now_at,
         )
@@ -347,7 +348,7 @@ class RuntimeWorkspaceRequests:
         retained_by_any: bool = False,
     ) -> str | None:
         """Return the commit if canonical, present and known to this run (see module doc)."""
-        commit = _commit_of(ref)
+        commit = commit_of(ref)
         root = self._workspaces.root
         if commit is None or not await root.has_revision(commit):
             return None
@@ -373,7 +374,14 @@ class RuntimeWorkspaceRequests:
         applied = await root.matches_revision(commit)
         if isinstance(request, VerifyAdoption):
             if not applied:
-                return _unknown("root workspace does not yet prove the selected content")
+                # The root was read and its tracked content differs from the selection:
+                # a conclusive mismatch, which core treats as terminal FAILED. UNKNOWN
+                # stays for what could not be compared at all (a missing revision above).
+                return _Facts(
+                    ObservationStatus.FAILED,
+                    accepted=True,
+                    diagnostic="root workspace content differs from the selected revision",
+                )
         elif not (resumed and applied):
             failure = await self._materialize(root, commit)
             if failure is not None:
@@ -405,7 +413,7 @@ class RuntimeWorkspaceRequests:
         base = await self._known_revision(
             plan.base,
             owner=attempt_key(attempt),
-            extra=_commit_of(existing.base) if existing else None,
+            extra=commit_of(existing.base) if existing else None,
         )
         if base is None:
             return _rejected("base revision is not a revision of this run")
@@ -427,6 +435,7 @@ class RuntimeWorkspaceRequests:
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
+            children_complete=True,
             resource_id=resource_id,
             revision=request.plan.base,
         )
@@ -464,6 +473,7 @@ class RuntimeWorkspaceRequests:
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
+            children_complete=True,
             resource_id=binding.resource_id,
             revision=request.plan.base,
         )
@@ -493,7 +503,7 @@ class RuntimeWorkspaceRequests:
         commit = await self._known_revision(
             request.revision,
             owner=attempt_key(request.attempt),
-            extra=_commit_of(binding.base),
+            extra=commit_of(binding.base),
         )
         if commit is None:
             return _rejected(
@@ -508,6 +518,7 @@ class RuntimeWorkspaceRequests:
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
+            children_complete=True,
             resource_id=binding.resource_id,
             revision=request.revision,
         )
@@ -518,7 +529,7 @@ class RuntimeWorkspaceRequests:
         commit = await self._known_revision(
             request.revision,
             owner=attempt_key(request.attempt),
-            extra=_commit_of(binding.base),
+            extra=commit_of(binding.base),
         )
         if commit is None:
             return _rejected(
@@ -532,6 +543,7 @@ class RuntimeWorkspaceRequests:
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
+            children_complete=True,
             resource_id=binding.resource_id,
             revision=request.revision,
         )
@@ -560,6 +572,7 @@ class RuntimeWorkspaceRequests:
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
+            children_complete=True,
             resource_id=resource_id,
             revision=revision_ref(commit),
         )
@@ -619,4 +632,4 @@ class RuntimeWorkspaceRequests:
         )
 
 
-__all__ = ["RunInvocationProof", "RuntimeWorkspaceRequests", "revision_ref"]
+__all__ = ["RunInvocationProof", "RuntimeWorkspaceRequests", "commit_of", "revision_ref"]

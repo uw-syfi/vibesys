@@ -103,6 +103,10 @@ def _state(
     return state
 
 
+# Building a TypeAdapter for the event union costs about 50 ms, so build it once.
+_EVENT_CODEC: TypeAdapter[core.CoreEvent] = TypeAdapter(core.CoreEvent)
+
+
 def _step(
     state: core.CoreState, event: core.CoreEvent, codec: core.OperationRegistry | None = None
 ) -> core.Transition:
@@ -110,9 +114,7 @@ def _step(
     before = state.model_dump_json()
     context = {"operation_registry": codec} if codec is not None else None
     loaded = core.CoreState.model_validate_json(before, context=context)
-    wire_event = TypeAdapter(core.CoreEvent).validate_json(
-        TypeAdapter(core.CoreEvent).dump_json(event), context=context
-    )
+    wire_event = _EVENT_CODEC.validate_json(_EVENT_CODEC.dump_json(event), context=context)
     result = core.step(state, event)
     replay = core.step(loaded, wire_event)
     assert result == replay
@@ -1512,3 +1514,55 @@ def test_cancel_control_requires_its_exact_canonical_stop_result() -> None:
     result = _step(state, core.AdmissionControl(action="cancel"), codec)
     assert result.requests == result.events == ()
     assert result.state == state.model_copy(update={"revision": state.revision + 1})
+
+
+def _adopting(state: core.CoreState, *, verified: bool = False) -> core.CoreState:
+    adoption = core.Adoption(
+        selection=core.TrustedBaseline(revision=state.run.facts.baseline), verified=verified
+    )
+    return state.model_copy(
+        update={"settlement": state.settlement.model_copy(update={"adoption": adoption})}
+    )
+
+
+def queued_root_behind_full_slot(
+    mode: core.WorkspaceMode,
+) -> tuple[core.CoreState, core.SlotReleased]:
+    running, head = _request(0), _request(1)
+    state = _state(
+        owners=(
+            _owner(running, phase=core.AttemptPhase.CLOSING),
+            _owner(head, mode=mode),
+        ),
+        slots=(_slot(running),),
+        queue=(head,),
+        limits=core.Limits(max_attempts=2, max_parallel=1),
+    )
+    return state, core.SlotReleased(attempt=_ref(running), admission_id=running.decision_id)
+
+
+@pytest.mark.parametrize("mode", list(core.WorkspaceMode))
+def test_an_exclusive_root_head_waits_out_an_adoption_and_never_fails_the_step(
+    mode: core.WorkspaceMode,
+) -> None:
+    """D3: the adoption fence is one term of Scheduling's gate, not an Attempts exception."""
+    state, released = queued_root_behind_full_slot(mode)
+    fenced = _adopting(state)
+    result = _step(fenced, released)
+    queued = _ref(_request(1))
+    admitted = [slot.attempt for slot in result.state.scheduling.slots]
+    if mode == core.WorkspaceMode.EXCLUSIVE_ROOT:
+        assert queued not in admitted
+        assert [item.decision_id for item in result.state.scheduling.queue] == [
+            _request(1).decision_id
+        ]
+        assert result.requests == ()
+    else:
+        assert queued in admitted
+
+
+def test_a_lifted_adoption_fence_admits_the_waiting_exclusive_root_head() -> None:
+    state, released = queued_root_behind_full_slot(core.WorkspaceMode.EXCLUSIVE_ROOT)
+    waiting = _step(_adopting(state), released).state
+    done = _adopting(waiting, verified=True)
+    _assert_attempts_boundary(done, core.AdoptionFenceLifted(), "attempt_admitted")

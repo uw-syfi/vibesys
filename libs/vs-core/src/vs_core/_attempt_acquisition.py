@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._adoption import fences_root_mutation
 from ._evaluation_history import produce_history
 from ._proofs import (
     Mismatch,
@@ -27,6 +28,7 @@ from ._proofs import (
     operation_for,
 )
 from ._registry import ContractError
+from ._session_scope import retains_write_turn, write_turn_authority
 from .types.attempts import (
     AttemptAdmitted,
     AttemptChargeRefundRequested,
@@ -39,6 +41,8 @@ from .types.attempts import (
     AttemptSetupFailed,
     AttemptsState,
     AttemptView,
+    CheckpointDecline,
+    CheckpointDeclined,
     EnsureWorkspace,
     InitialSessionsFailed,
     InitialSessionsReady,
@@ -55,7 +59,6 @@ from .types.attempts import (
     WorkspaceObserved,
 )
 from .types.common import (
-    Area,
     AttemptRef,
     ChargeId,
     ChargeKind,
@@ -64,7 +67,6 @@ from .types.common import (
     DecisionId,
     ExecuteRegisteredOperation,
     InvocationRef,
-    KernelNotImplementedError,
     Observation,
     ObservationStatus,
     RequestBase,
@@ -458,8 +460,11 @@ def _register(state: AttemptsState, event: AttemptRegistered | AttemptAdmitted) 
     )
 
 
-def _root_conflict(state: AttemptsState, attempt: AttemptView) -> bool:
-    return attempt.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT and any(
+def _root_conflict(state: AttemptsState, context: AttemptsContext, attempt: AttemptView) -> bool:
+    """Defensive recheck of the gate in Scheduling: the root has another owner or an adoption."""
+    if attempt.workspace.mode != WorkspaceMode.EXCLUSIVE_ROOT:
+        return False
+    return fences_root_mutation(context.settlement, context.intents) or any(
         _ref(other) != _ref(attempt)
         and other.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT
         and (
@@ -468,6 +473,24 @@ def _root_conflict(state: AttemptsState, attempt: AttemptView) -> bool:
             or other.pending_intents
         )
         for other in state.attempts
+    )
+
+
+def _registered(state: AttemptsState, attempt: AttemptView) -> AttemptsState:
+    if _find(state, _ref(attempt)) is not None:
+        return state
+    return state.model_copy(update={"attempts": (*state.attempts, attempt)})
+
+
+def _decline_root(
+    attempt: AttemptView, context: AttemptsContext, admission_id: DecisionId
+) -> RetireRequested:
+    return RetireRequested(
+        attempt=_ref(attempt),
+        disposition="cancel",
+        authority=RequestId(root=f"root-conflict:{admission_id.root}"),
+        admission_id=admission_id,
+        requested_at=context.run.now_at,
     )
 
 
@@ -502,8 +525,13 @@ def _admit(
                 ),
             ),
         )
-    if _root_conflict(state, attempt):
-        raise ContractValidationError("workspace", "exclusive root is already owned")
+    if _root_conflict(state, context, attempt):
+        # Scheduling's gate should have prevented this. Decline by cancelling the
+        # admission, which frees its slot; never fail the step on an internal signal.
+        return AreaChange(
+            state=_registered(state, attempt),
+            signals=(_decline_root(attempt, context, event.admission_id),),
+        )
     attempt = attempt.model_copy(
         update={"phase": AttemptPhase.ACQUIRING, "admission_id": event.admission_id}
     )
@@ -1158,6 +1186,59 @@ def _interrupt_checkpoint(
     )
 
 
+def _checkpoint_authorized(
+    context: AttemptsContext, invocation: Invocation, identity: RequestId
+) -> bool:
+    """An interruption claim, or the conclusive write turn's own derived authority."""
+    return _interrupt_checkpoint(context, invocation.invocation, identity) or (
+        retains_write_turn(invocation) and identity == write_turn_authority(invocation.invocation)
+    )
+
+
+def _checkpoint_decline(
+    context: AttemptsContext, attempt: AttemptView, invocation: Invocation, identity: RequestId
+) -> CheckpointDecline | None:
+    """The reason this terminal invocation takes no checkpoint now, or None to take it."""
+    if not _checkpoint_authorized(context, invocation, identity):
+        return CheckpointDecline.UNAUTHORIZED
+    if not any(
+        charge.invocation_id == invocation.invocation.invocation_id
+        and charge.historical_proof is None
+        for charge in attempt.charges
+    ):
+        return CheckpointDecline.UNCHARGED
+    if identity == write_turn_authority(invocation.invocation) and (
+        attempt.phase != AttemptPhase.ACTIVE or attempt.closure is not None
+    ):
+        # Dispatch of an ordinary mutation needs a live episode; closure retains instead.
+        return CheckpointDecline.NOT_ACTIVE
+    if any(
+        row.scope == _scope(attempt)
+        and row.invocation != invocation.invocation
+        and row.turn.session.access == Access.WRITE_CANDIDATE
+        and not _terminal(context, row, attempt)
+        for row in context.sessions.invocations
+    ):
+        return CheckpointDecline.WRITER_ACTIVE
+    return None
+
+
+def _decline_checkpoint(
+    state: AttemptsState,
+    attempt: AttemptView,
+    event: InvocationCheckpointRequested,
+    reason: CheckpointDecline,
+) -> AreaChange[AttemptsState]:
+    """Record why no checkpoint is requested; never silent, never repeated."""
+    row = CheckpointDeclined(invocation=event.invocation, authority=event.authority, reason=reason)
+    if row in attempt.checkpoint_declines:
+        return AreaChange(state=state)
+    updated = attempt.model_copy(
+        update={"checkpoint_declines": (*attempt.checkpoint_declines, row)}
+    )
+    return AreaChange(state=_replace(state, updated))
+
+
 def _checkpoint_request(
     state: AttemptsState,
     context: AttemptsContext,
@@ -1172,28 +1253,15 @@ def _checkpoint_request(
         or attempt.admission_id is None
     ):
         return AreaChange(state=state)
-    if not any(
-        charge.invocation_id == event.invocation.invocation_id and charge.historical_proof is None
-        for charge in attempt.charges
-    ):
-        return AreaChange(state=state)
     identity = event.authority
     if (
         any(checkpoint.request_id == identity for checkpoint in attempt.checkpoints)
         or identity in attempt.pending_intents
     ):
         return AreaChange(state=state)
-    if any(
-        row.scope == _scope(attempt)
-        and row.invocation != event.invocation
-        and row.turn.session.access == Access.WRITE_CANDIDATE
-        and not _terminal(context, row, attempt)
-        for row in context.sessions.invocations
-    ):
-        return AreaChange(state=state)
-    # Only interruption claims authorize an attempt-owned invocation checkpoint.
-    if event.retention != "wip" or not _interrupt_checkpoint(context, event.invocation, identity):
-        raise KernelNotImplementedError(Area.ATTEMPTS, event.kind, subarea="_attempt_acquisition")
+    declined = _checkpoint_decline(context, attempt, invocation, identity)
+    if declined is not None:
+        return _decline_checkpoint(state, attempt, event, declined)
     request = SnapshotAndRetain(
         request_id=identity,
         scope=_scope(attempt),
@@ -1205,6 +1273,75 @@ def _checkpoint_request(
     )
     updated = attempt.model_copy(update={"pending_intents": (*attempt.pending_intents, identity)})
     return AreaChange(state=_replace(state, updated), requests=(request,))
+
+
+def _checkpoint_acknowledged(
+    state: AttemptsState,
+    context: AttemptsContext,
+    attempt: AttemptView,
+    event: WorkspaceObserved,
+) -> AreaChange[AttemptsState]:
+    """Turn the workspace's answer to an invocation snapshot into the attempt's checkpoint.
+
+    The ledger forwards every answer as a WorkspaceObserved, and the executor cannot
+    know the attempt's charges, so core completes the proof from its own records and
+    runs it through the same validation as an explicit InvocationCheckpointed.
+    """
+    observation = event.observation
+    intent = _intent(context, observation.request_id)
+    request = intent.request if intent is not None else None
+    if (
+        not isinstance(request, SnapshotAndRetain)
+        or request.invocation is None
+        or request.attempt != _ref(attempt)
+        or observation.request_id not in attempt.pending_intents
+        or not _current(attempt, observation)
+        or not observation.terminal
+    ):
+        return AreaChange(state=state)
+    charge = next(
+        (
+            row
+            for row in attempt.charges
+            if row.invocation_id == request.invocation.invocation_id
+            and row.historical_proof is None
+        ),
+        None,
+    )
+    if observation.status == ObservationStatus.SUCCEEDED and event.revision is not None:
+        if charge is None:
+            return AreaChange(state=state)
+        return _checkpointed(
+            state,
+            context,
+            attempt,
+            InvocationCheckpointed(
+                attempt=_ref(attempt),
+                revision=event.revision,
+                charge=charge,
+                invocation=request.invocation,
+                checkpoint_request=observation.request_id,
+            ),
+        )
+    # A conclusive failure retains nothing here; release must not wait on it forever.
+    updated = attempt.model_copy(
+        update={
+            "pending_intents": tuple(
+                identity
+                for identity in attempt.pending_intents
+                if identity != observation.request_id
+            ),
+            "checkpoint_declines": (
+                *attempt.checkpoint_declines,
+                CheckpointDeclined(
+                    invocation=request.invocation,
+                    authority=observation.request_id,
+                    reason=CheckpointDecline.SNAPSHOT_FAILED,
+                ),
+            ),
+        }
+    )
+    return AreaChange(state=_replace(state, updated))
 
 
 def _checkpointed(
@@ -1223,7 +1360,7 @@ def _checkpointed(
         or event.charge not in attempt.charges
         or event.charge.invocation_id != event.invocation.invocation_id
         or event.charge.historical_proof is not None
-        or not _interrupt_checkpoint(context, event.invocation, event.checkpoint_request)
+        or not _checkpoint_authorized(context, invocation, event.checkpoint_request)
     ):
         return AreaChange(state=state)
     if (
@@ -1447,13 +1584,14 @@ def _reacquire(
     if not isinstance(proof, Proven):
         return AreaChange(state=state)
     sessions = proof.value
-    if _root_conflict(state, attempt):
-        raise ContractValidationError("workspace", "exclusive root is already owned")
-    if (
+    conflict = _root_conflict(state, context, attempt)
+    if conflict or (
         attempt.workspace.mode == WorkspaceMode.READ_ONLY_REVISION
         and event.base != attempt.workspace.base
     ):
-        return AreaChange(state=state)
+        # A root conflict declines by cancelling the admission; never fail the step.
+        decline = (_decline_root(attempt, context, event.admission_id),) if conflict else ()
+        return AreaChange(state=state, signals=decline)
     identity = RequestId(root=_identity(attempt, f"restore:{event.request_id.root}"))
     if identity in attempt.pending_intents or _intent(context, identity) is not None:
         return AreaChange(state=state)
@@ -1532,8 +1670,11 @@ def _revision_request(
         or _intent(context, event.request.request_id) is not None
     ):
         return AreaChange(state=state)
+    # DISCARD releases the workspace hold, which only closure may do: Retirement dispatches a
+    # declared discard operation as cleanup once the attempt is closing. An active attempt
+    # declines it (the strategy must retire the attempt first).
     if event.authority == RevisionAuthority.DISCARD:
-        raise KernelNotImplementedError(Area.ATTEMPTS, event.kind, subarea="_attempt_acquisition")
+        return AreaChange(state=state)
     updated = attempt.model_copy(
         update={"pending_intents": (*attempt.pending_intents, event.request.request_id)}
     )
@@ -1720,11 +1861,29 @@ def _revision_observed(
     return AreaChange(state=_replace(state, updated))
 
 
+def is_invocation_snapshot(context: AttemptsContext, event: WorkspaceObserved) -> bool:
+    """Whether a workspace observation answers an invocation's checkpoint request."""
+    intent = _intent(context, event.observation.request_id)
+    return (
+        intent is not None
+        and isinstance(intent.request, SnapshotAndRetain)
+        and intent.request.invocation is not None
+    )
+
+
+def _workspace_answer(
+    state: AttemptsState, context: AttemptsContext, attempt: AttemptView, event: WorkspaceObserved
+) -> AreaChange[AttemptsState]:
+    if is_invocation_snapshot(context, event):
+        return _checkpoint_acknowledged(state, context, attempt, event)
+    return _workspace(state, context, attempt, event)
+
+
 def _advance_acquisition(
     state: AttemptsState, context: AttemptsContext, attempt: AttemptView, event: AcquisitionEvent
 ) -> AreaChange[AttemptsState]:
     if isinstance(event, WorkspaceObserved):
-        return _workspace(state, context, attempt, event)
+        return _workspace_answer(state, context, attempt, event)
     if isinstance(event, AttemptReacquireRequested):
         return _reacquire(state, context, attempt, event)
     if isinstance(event, InitialSessionsReady):

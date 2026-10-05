@@ -8,6 +8,7 @@ ends with, and counts real submissions so tests can prove "exactly once".
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -18,13 +19,13 @@ from vs_core.api import (
     MeasurementPlan,
     MeasurementStage,
     RequestId,
-    RevisionId,
     RevisionRef,
     RunId,
     Scope,
     SubmitMeasurement,
 )
 from vs_project.api import StateNamespace
+from vs_runtime.api import render_stage_failure
 from vs_runtime.api.infrastructure import (
     ScalarBenchmarkContract,
     SemanticSlurmEvaluationExecutor,
@@ -45,10 +46,8 @@ from vs_slurm.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from pathlib import Path
 
-    from vs_evaluation.api import EvidenceKind
     from vs_runtime.contracts import CandidateWorkspace
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
@@ -72,6 +71,7 @@ class ScenarioCluster(FakeCluster):
         self.benchmark_exit = 0
         self.benchmark_output = BENCHMARK_OUTPUT
         self.submissions: list[str] = []
+        self.accepted = threading.Event()
 
     @property
     def cancelled(self) -> list[str]:
@@ -85,7 +85,9 @@ class ScenarioCluster(FakeCluster):
         if isinstance(request, SlurmBatchRequest) and operation_id not in self.submissions:
             self.submissions.append(operation_id)
             self.script(operation_id, states=self.states, result=self._result(request))
-        return super().submit(request, operation_id=operation_id)
+        outcome = super().submit(request, operation_id=operation_id)
+        self.accepted.set()
+        return outcome
 
     def _result(self, request: SlurmBatchRequest) -> SlurmBatchResult:
         stages = []
@@ -141,15 +143,6 @@ def _config() -> SlurmConfig:
     )
 
 
-def stage_failure_text(
-    rejected: Sequence[tuple[str | None, EvidenceKind]], observed_failure: str | None
-) -> str:
-    """Stand-in for the product's rendered failure text."""
-    return "\n".join(summary or f"{kind.value} check failed" for summary, kind in rejected) or (
-        observed_failure or "a stage failed"
-    )
-
-
 async def build_stack(root: Path, cluster: ScenarioCluster | None = None) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root."""
     cluster = cluster or ScenarioCluster()
@@ -176,7 +169,7 @@ async def build_stack(root: Path, cluster: ScenarioCluster | None = None) -> Sta
         workspaces,
         namespace,  # type: ignore[arg-type]  # the evaluation namespace is a StateNamespace
         root / "handles",
-        stage_failure_text=stage_failure_text,
+        stage_failure_text=render_stage_failure,
         cluster=cluster,
     )
     return Stack(executor, cluster, snapshot)
@@ -188,7 +181,7 @@ def plan(
     """A resolved official measurement of one revision."""
     return MeasurementPlan(
         purpose="official",
-        candidate=RevisionRef(revision_id=RevisionId(root=candidate), digest=DIGEST),
+        candidate=RevisionRef.of_git_commit(candidate),
         evaluator_digest=DIGEST,
         workload_digest=DIGEST,
         environment_digest=DIGEST,

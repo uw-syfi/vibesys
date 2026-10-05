@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
+from tests.support.executor_harness import FaultingNamespace, ProcessKilledError
 from tests.support.observation_contract import assert_core_accepts
 from tests.support.runtime_evaluation import (
     ADMISSION,
@@ -30,13 +34,17 @@ from vs_core.api import (
     HostFence,
     HostId,
     InspectOwnedJob,
+    JobObserved,
     ObservationStatus,
     ObserveOwnedJob,
     RequestId,
     ResourceId,
+    RevisionId,
+    RevisionRef,
     SubmitMeasurement,
 )
 from vs_core.api.proofs import Proven, fresh_observation
+from vs_evaluation.api import ExecutorPoll, PollPhase
 from vs_project.api import Project
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
@@ -46,15 +54,22 @@ from vs_runtime.api.core import (
     MeasurementRequests,
     ReceiptStore,
     RequestExecutors,
+    SealedExecution,
+    revision_ref,
 )
 from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
-    from pydantic import BaseModel
-
-    from vs_core.api import Observation
+    from vs_core.api import Observation, RequestBase
+    from vs_evaluation.api import (
+        AvailabilitySnapshot,
+        EvaluationRequest,
+        ExecutorObservation,
+        PollingEvaluationExecutor,
+        ResourceRequirements,
+    )
     from vs_project.api import StateNamespace
 
 pytestmark = pytest.mark.asyncio
@@ -67,32 +82,6 @@ type EvaluationRoleRequest = (
     | CancelOwnedJob
     | CloseAttemptScope
 )
-
-
-class CrashError(Exception):
-    """Raised by CrashingStore to stand for the process dying at that write."""
-
-
-class CrashingStore(ReceiptStore):
-    """A receipt store that dies just before its ``crash_at``-th write."""
-
-    def __init__(self, namespace: StateNamespace, crash_at: int | None = None) -> None:
-        super().__init__(namespace)
-        self.writes = 0
-        self._crash_at = crash_at
-
-    def _tick(self) -> None:
-        if self._crash_at == self.writes:
-            raise CrashError
-        self.writes += 1
-
-    def record_once(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
-        self._tick()
-        super().record_once(family, part, key, receipt)
-
-    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
-        self._tick()
-        super().replace(family, part, key, receipt)
 
 
 class FakeLease:
@@ -131,10 +120,21 @@ class World:
         self.cluster = cluster
         self.stack = stack
 
-    def requests(self, crash_at: int | None = None) -> tuple[MeasurementRequests, CrashingStore]:
+    def requests(
+        self, crash_at: int | None = None
+    ) -> tuple[MeasurementRequests, FaultingNamespace]:
+        """Executors over the run's real disk; the process dies just before write ``crash_at``.
+
+        Every durable write goes through the faulting namespace, including the
+        read-modify-write ones (``ReceiptStore.modify``), the begun marker and the fence.
+        """
         project = Project.open(self.base / "project")
-        store = CrashingStore(project.state.state_store_namespace("run"), crash_at)
-        return MeasurementRequests(self.stack.executor, store), store
+        faulting = FaultingNamespace(
+            project.state.state_store_namespace("run"),
+            None if crash_at is None else 2 * crash_at,
+        )
+        store = ReceiptStore(cast("StateNamespace", faulting))
+        return MeasurementRequests(self.stack.executor, store), faulting
 
 
 @asynccontextmanager
@@ -431,6 +431,85 @@ async def test_close_fences_the_episode_and_lists_children() -> None:
         assert w.cluster.submissions == [resource.root]
 
 
+async def test_close_releases_every_job_however_far_its_submission_got() -> None:
+    """D2: a submission that dies at any write must not wedge the scope's close."""
+    async with world() as probe:
+        requests, faulting = probe.requests()
+        sub = submission(candidate=probe.stack.snapshot)
+        handle = resource_of(await requests.execute(sub, context_for(sub)))
+        writes = faulting.writes
+    for crash_at in range(writes):
+        async with world() as w:
+            sub = submission(candidate=w.stack.snapshot)
+            requests, _ = w.requests(crash_at)
+            with contextlib.suppress(ProcessKilledError):
+                await requests.execute(sub, context_for(sub))
+            if (await w.stack.executor.poll(handle.root)).phase is not PollPhase.UNSUBMITTED:
+                await settled(w, handle)  # the executor's own admission reaches the cluster
+            # Core retries a close that could not yet prove release, under a new request.
+            for attempt in range(5):
+                closed = await run(w, close_request(f"close-{attempt}"))
+                own = closed.observation.observation
+                if own.released:
+                    break
+            assert own.released, f"write {crash_at}: {own.diagnostic}"
+            assert len(own.children) <= 1
+            # The released close is sealed, and the retried submission can launch nothing.
+            assert await run(w, close_request(f"close-{attempt}")) == closed
+            before = list(w.cluster.submissions)
+            retried = await run(w, sub)
+            assert w.cluster.submissions == before
+            if not before:
+                assert retried.observation.observation.status is ObservationStatus.REJECTED
+
+
+async def test_a_revision_the_workspace_named_is_measurable() -> None:
+    """The workspace executor's reference for a real commit must be accepted as a candidate."""
+    async with world() as w:
+        sub = submission(
+            override=plan(candidate=w.stack.snapshot).model_copy(
+                update={"candidate": revision_ref(w.stack.snapshot)}
+            )
+        )
+        got = await run(w, sub)
+        assert got.observation.observation.accepted
+        assert got.observation.observation.resource_id is not None
+
+
+@settings(
+    max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(
+    digest=st.one_of(
+        st.just("sha256:" + "a" * 64),
+        st.just("a" * 64),
+        st.text(min_size=1, max_size=20),
+        st.just("git-commit:other"),
+    )
+)
+async def test_a_revision_whose_digest_is_not_its_own_git_commit_is_rejected(digest: str) -> None:
+    async with world() as w:
+        stale = RevisionRef(revision_id=RevisionId(root=w.stack.snapshot), digest=digest)
+        sub = submission(
+            override=plan(candidate=w.stack.snapshot).model_copy(update={"candidate": stale})
+        )
+        got = await run(w, sub)
+        assert got.observation.observation.status is ObservationStatus.REJECTED
+        assert "git commit" in got.observation.observation.diagnostic
+        assert w.cluster.submissions == []
+
+
+async def test_an_accepted_submission_delivers_the_jobs_first_observation() -> None:
+    """Core polls a live job after each job observation, so the first one starts the cycle."""
+    async with world() as w:
+        got = await submit(w)
+        events = [type(event).__name__ for event in got.owner_events]
+        assert events == ["MeasurementSubmissionObserved", "JobObserved"]
+        job = got.owner_events[1]
+        assert isinstance(job, JobObserved)
+        assert job.observation == got.observation.observation
+
+
 async def test_closing_an_older_episode_does_not_fence_a_newer_one() -> None:
     async with world() as w:
         await run(w, close_request("close-old", DecisionId(root="admission-0")))
@@ -473,7 +552,7 @@ async def test_crash_at_every_write_boundary_recovers_exactly_once(name: str) ->
             requests, store = w.requests(crash_at)
             try:
                 await requests.execute(request, context_for(request))
-            except CrashError:
+            except ProcessKilledError:
                 assert crash_at < writes
             else:
                 assert crash_at == writes
@@ -506,7 +585,7 @@ async def test_crash_between_submission_and_seal_does_not_resubmit() -> None:
             await requests.execute(submission(candidate=other.stack.snapshot), context_for(sub))
             last = store.writes - 1
         requests, _ = w.requests(last)
-        with pytest.raises(CrashError):
+        with pytest.raises(ProcessKilledError):
             await requests.execute(sub, context_for(sub))
         resumed = await run(w, sub)
         await settled(w, resource_of(resumed))
@@ -598,3 +677,148 @@ async def test_core_accepts_every_observation_across_retries_and_restarts(kind: 
     assert_core_accepts(
         await OBSERVATION_SCENARIOS[kind](), expect_retry=kind is not CloseAttemptScope
     )
+
+
+# sealing only definitive results (D-C, D5, D7)
+
+
+class _ScriptedPolls:
+    """The world's executor, except that a script may change what each poll reports.
+
+    Everything else is the real executor, so only the poll the script touches differs.
+    """
+
+    def __init__(self, inner: PollingEvaluationExecutor, script: PollScript) -> None:
+        self._inner = inner
+        self._script = script
+        self.polls = 0
+
+    async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
+        return await self._inner.availability(requirements)
+
+    async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
+        await self._inner.submit(request, handle_id=handle_id)
+
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        return await self._inner.inspect_only(handle_id)
+
+    async def inspect(self, handle_id: str) -> ExecutorObservation | None:
+        return await self._inner.inspect(handle_id)
+
+    async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
+        await self._inner.wait_for_change(handle_id, timeout_s)
+
+    async def cancel(self, handle_id: str) -> None:
+        await self._inner.cancel(handle_id)
+
+    async def poll(self, handle_id: str) -> ExecutorPoll:
+        self.polls += 1
+        return self._script(self.polls, await self._inner.poll(handle_id))
+
+
+type PollScript = Callable[[int, ExecutorPoll], ExecutorPoll]
+
+
+def _requests_over(w: World, polls: _ScriptedPolls) -> MeasurementRequests:
+    project = Project.open(w.base / "project")
+    store = ReceiptStore(project.state.state_store_namespace("run"))
+    return MeasurementRequests(polls, store)
+
+
+def _sealed(w: World, request: RequestBase) -> bool:
+    project = Project.open(w.base / "project")
+    store = ReceiptStore(project.state.state_store_namespace("run"))
+    assert request.request_id is not None
+    return isinstance(store.history(request.request_id.root), SealedExecution)
+
+
+EXECUTOR_DOWN = "executor unreachable"
+
+
+def _raise_on_first(poll_number: int, polled: ExecutorPoll) -> ExecutorPoll:
+    if poll_number == 2:  # poll 1 decides whether to submit; poll 2 is the submission's view
+        raise ConnectionError(EXECUTOR_DOWN)
+    return polled
+
+
+async def test_a_submission_whose_view_poll_failed_is_not_sealed_and_a_retry_reports_the_job() -> (
+    None
+):
+    """D-C: Unknown is never sealed, so the retry re-polls and core learns the job exists."""
+    async with world() as w:
+        polls = _ScriptedPolls(w.stack.executor, _raise_on_first)
+        requests = _requests_over(w, polls)
+        sub = submission(candidate=w.stack.snapshot)
+        first = await requests.execute(sub, context_for(sub))
+        assert first.observation.observation.status is ObservationStatus.UNKNOWN
+        assert not _sealed(w, sub)
+
+        retried = await requests.execute(sub, context_for(sub))
+        seen = retried.observation.observation
+        assert seen.accepted
+        assert seen.resource_id is not None
+        assert any(isinstance(event, JobObserved) for event in retried.owner_events)
+        assert w.cluster.submissions in ([], [seen.resource_id.root])
+        assert_core_accepts([first, retried], expect_retry=True)
+
+
+async def test_a_cancel_that_has_not_ended_the_job_is_not_sealed_and_a_retry_releases() -> None:
+    """D5: CANCELLED with released=False must not replay forever."""
+    cluster = ScenarioCluster()
+    cluster.states = (SlurmJobStatus.PENDING,)
+    async with world(cluster) as w:
+        resource = resource_of(await submit(w))
+        await settled(w, resource)
+        holding = {"open": True}
+
+        def hold_open(_poll_number: int, polled: ExecutorPoll) -> ExecutorPoll:
+            if holding["open"]:
+                return ExecutorPoll(phase=PollPhase.RUNNING)
+            return polled
+
+        polls = _ScriptedPolls(w.stack.executor, hold_open)
+        requests = _requests_over(w, polls)
+        cancel = query(CancelOwnedJob, "cancel", resource)
+        first = await requests.execute(cancel, context_for(cancel))
+        assert first.observation.observation.status is ObservationStatus.CANCELLED
+        assert not first.observation.observation.released
+        assert not _sealed(w, cancel)
+        holding["open"] = False
+
+        retried = await requests.execute(cancel, context_for(cancel))
+        assert retried.observation.observation.released
+        assert _sealed(w, cancel)
+        assert_core_accepts([first, retried], expect_retry=True)
+
+
+async def test_a_second_poll_that_reads_differently_returns_the_stored_evidence() -> None:
+    """D7: evidence never changes under a reader, and no ContractError escapes a poll."""
+    async with world() as w:
+        resource = resource_of(await submit(w))
+        await settled(w, resource)
+
+        def reword(poll_number: int, polled: ExecutorPoll) -> ExecutorPoll:
+            terminal = polled.terminal
+            if poll_number < 2 or terminal is None:
+                return polled
+            steps = []
+            for step in terminal.stage_results:
+                kept = step.result if isinstance(step.result, dict) else {}
+                reworded = {**kept, "semantic_summary": f"reworded on poll {poll_number}"}
+                steps.append(step.model_copy(update={"result": reworded}))
+            return polled.model_copy(
+                update={"terminal": terminal.model_copy(update={"stage_results": tuple(steps)})}
+            )
+
+        requests = _requests_over(w, _ScriptedPolls(w.stack.executor, reword))
+        views = []
+        for name in ("obs-1", "obs-2", "obs-3"):
+            request = query(InspectOwnedJob, name, resource)
+            result = await requests.execute(request, context_for(request))
+            views.append(result.observation.target)
+        assert all(view is not None for view in views)
+        evidence = [
+            [ref.evidence_id for ref in view.evidence] for view in views if view is not None
+        ]
+        assert evidence[0]
+        assert evidence[0] == evidence[1] == evidence[2]

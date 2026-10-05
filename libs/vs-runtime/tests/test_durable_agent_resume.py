@@ -149,6 +149,10 @@ class WorkspaceResource:
         del revision
         return ""
 
+    def is_retained(self, revision: str) -> bool:
+        del revision
+        return True
+
     def trusted_input_changes(self) -> list[str]:
         return []
 

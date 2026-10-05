@@ -326,7 +326,7 @@ depends_on = ["vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.slurm_evaluation"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys.run.evaluation_backend", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm"]
+depends_on = ["vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm"]
 
 [[modules]]
 path = "vibesys.run.contracts"
@@ -694,7 +694,7 @@ expose = ["ProfilerEvaluationAccess", "RuntimeProfilerTurnProvision"]
 from = ["vibesys.run.profiler_agent"]
 
 [[interfaces]]
-expose = ["EvidenceResultIdentity", "EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "agent_evaluation", "evidence_identity", "render_evaluation_failure", "render_rejected_evidence", "render_stage_failure"]
+expose = ["EvidenceResultIdentity", "EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "agent_evaluation", "evidence_identity"]
 from = ["vibesys.run.evaluation_backend"]
 
 [[interfaces]]
@@ -1027,7 +1027,7 @@ depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common"]
 
 [[interfaces]]
 from = ["vs_core._session_scope"]
-expose = ["attempt_for", "proven_invocation", "scope_active"]
+expose = ["attempt_for", "encode_identity", "proven_invocation", "retains_write_turn", "scope_active", "turn_request_id", "write_turn_authority"]
 
 [[modules]]
 path = "vs_core._session_checkpoints"

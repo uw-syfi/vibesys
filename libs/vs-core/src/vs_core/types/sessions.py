@@ -38,7 +38,7 @@ from .common import (
     WorkspaceRef,
     validate_setup_failure,
 )
-from .evaluation import Continuation
+from .evaluation import Continuation, ResumeAuthorizationReceipt
 from .evaluation_history import EvaluationHistoryCursor
 from .session_inputs import InputRecord, InvocationInputTarget, SessionInput
 
@@ -436,6 +436,15 @@ class CloseSession(RequestBase):
 
     kind: Literal["close_session"] = "close_session"
     session_id: SessionId
+    resource_id: ResourceId | None = None
+    """The physical lease this request releases, as the session recorded it.
+
+    None means no lease was ever recorded (an acquisition that never completed).
+    An executor releases only this lease, never a newer one under the same
+    ``session_id``.
+    """
+    episode: DecisionId | None = None
+    """The admission episode the released lease was held under (None for run scope)."""
 
 
 class ResumeSessionTurn(RequestBase):
@@ -451,6 +460,13 @@ class ResumeSessionTurn(RequestBase):
     turn: TurnSpec
     inputs: tuple[SessionInput, ...] = ()
     continuation_id: ContinuationId
+    publication: ResumeAuthorizationReceipt | None = None
+    """The publication proof core held for this continuation when it issued the resume.
+
+    An executor compares it with its own continuation record (successor, evidence
+    and history cursor) before it dispatches. None only for requests issued before
+    this field existed.
+    """
 
 
 class SessionInputReceived(Value):

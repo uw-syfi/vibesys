@@ -500,6 +500,17 @@ class Limits(Value):
     queue_allowance: Seconds = 900.0
     cancellation_bound: Seconds = 60.0
     reconciliation_bound: Seconds = 60.0
+    # Poll cadence for a submitted measurement job, and the cap of the doubling
+    # delay before re-polling a job whose last poll was unknown.
+    observe_interval: Seconds = Field(default=10.0, gt=0)
+    observe_backoff_cap: Seconds = Field(default=120.0, gt=0)
+
+    @model_validator(mode="after")
+    def observe_cap_covers_interval(self) -> Limits:
+        """A backoff cap below the base interval would shorten retries below the cadence."""
+        if self.observe_backoff_cap < self.observe_interval:
+            raise ContractValidationError("observe_backoff_cap", "below observe_interval")
+        return self
 
     @model_validator(mode="after")
     def distinct_pool_capacities(self) -> Limits:

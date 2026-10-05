@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._adoption import view as adoption_view
 from .types.common import ChargeKind
 from .types.intents import (
     ExecuteRegisteredOperation,
@@ -90,6 +91,16 @@ def evidence_view(state: EvaluationState) -> tuple[EvidenceRef, ...]:
     return state.evidence
 
 
+def next_observe_at(state: EvaluationState) -> float | None:
+    """The earliest scheduled poll time, so the run loop can sleep until it."""
+    due = tuple(
+        job.pacing.next_at
+        for job in (*state.jobs, *state.registered_jobs)
+        if job.pacing.next_at is not None
+    )
+    return min(due) if due else None
+
+
 def settlement_view(state: SettlementState) -> tuple[Settlement, ...]:
     """Project final settlements, excluding pending closure."""
     return state.settlements
@@ -140,4 +151,6 @@ def project(state: CoreState) -> RunView:
         settlements=settlement_view(state.settlement),
         artifacts=run.artifacts,
         controls=run.controls,
+        next_observe_at=next_observe_at(state.evaluation),
+        adoption=adoption_view(state.settlement, state.intents),
     )

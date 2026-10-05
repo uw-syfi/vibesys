@@ -23,9 +23,11 @@ from tests.support.runtime_operations import (
     SimulatedCrashError,
     VerifyParentRevision,
     catalog_of,
+    commit_of,
     execute_request,
     scenarios,
 )
+from tests.support.runtime_operations import revision as revision_ref
 
 from vs_core.api import (
     CancelOwnedResource,
@@ -56,7 +58,13 @@ from vs_runtime.api.core import (
     ReceiptStore,
     RegisteredOperationRequests,
     RequestExecutors,
+    ResultReceipt,
+    Settled,
+    Transient,
+    VerifyRevisionOwner,
+    owner_key,
 )
+from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
 
 pytestmark = pytest.mark.asyncio
 
@@ -411,7 +419,7 @@ async def test_inspection_routes_unknown_targets_and_child_resources() -> None:
         runner = executor(items, namespace)
         missing = await inspect_of(runner, "nobody")
         assert missing.target is not None
-        assert missing.target.observation.status is ObservationStatus.UNKNOWN
+        assert missing.target.observation.status is ObservationStatus.REJECTED
         child = await inspect_of(runner, "nobody", resource="child")
         assert child.observation.status is ObservationStatus.REJECTED
         assert child.target is None
@@ -422,13 +430,36 @@ async def test_inspection_seals_an_effect_the_owner_proves_never_happened() -> N
         items = scenarios(root, namespace)
         echo = pick(items, "echo")
         request = execute_request(catalog_of(items), echo.request, "req-never")
-        receipts = NamespaceOperationReceipts(ReceiptStore(namespace))
-        receipts.record_intent(
-            IntentReceipt(
-                request_id="req-never",
-                payload_digest=context_for(request).payload_digest,
-                operation=request.operation,
+        store = ReceiptStore(namespace)
+        receipts = NamespaceOperationReceipts(store)
+        context = context_for(request)
+
+        async def crash_after_intent(
+            *, resumed: bool
+        ) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
+            del resumed
+            receipts.record_intent(
+                IntentReceipt(
+                    request_id="req-never",
+                    payload_digest=context.payload_digest,
+                    operation=request.operation,
+                )
             )
+            return Transient(
+                ResultReceipt(
+                    request_id="req-never",
+                    payload_digest=context.payload_digest,
+                    schema_ref=request.operation.schema_ref,
+                    status=ObservationStatus.UNKNOWN,
+                )
+            )
+
+        await store.run_once(
+            "req-never",
+            owner=owner_key(request),
+            context=context,
+            result_type=ResultReceipt,
+            perform=crash_after_intent,
         )
         runner = RegisteredOperationRequests(
             catalog_of(items), receipts, ObservationFactory(ReceiptStore(namespace))
@@ -514,6 +545,31 @@ async def test_parent_verification_requires_a_retained_canonical_revision(
         assert getattr(result.outcome, "verified", None) is verified
 
 
+@settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    retained=st.sets(st.sampled_from(["r1", "r2", "r3"])),
+    dangling=st.sets(st.sampled_from(["d1", "d2", "d3"])),
+    asked=st.sampled_from(["r1", "r2", "r3", "d1", "d2", "d3", "unknown"]),
+)
+async def test_parent_verification_checks_retention_not_that_the_revision_exports(
+    retained: set[str], dangling: set[str], asked: str
+) -> None:
+    """A commit that exists but is not retained (dangling) must not verify."""
+    workspaces = FakeWorkspaces(FakeWorkspace(known_revisions=retained))
+    for revision in dangling:
+        workspaces.add_dangling_revision(revision)
+    owner = VerifyRevisionOwner(workspaces, workspaces, commit_of)
+    request = VerifyParentRevision(parent=revision_ref(asked))
+    with workspace() as (root, namespace):
+        items = scenarios(root, namespace)
+        wire = execute_request(catalog_of(items), request, "req-r")
+        outcome = await owner.execute(request, context_for(wire))
+    expected = asked in retained and asked not in dangling
+    assert outcome["verified"] is expected
+    if asked in dangling and asked not in retained:
+        assert await workspaces.export_patch(asked)  # present, yet not verified
+
+
 async def test_render_with_a_missing_template_variable_is_a_typed_failure_with_no_artifact() -> (
     None
 ):
@@ -576,7 +632,7 @@ async def _inspect_before_and_after_the_target_ran() -> list[ExecutionResult]:
         )
         before = await executor(items, namespace).execute(inspect, context_for(inspect))
         assert before.observation.target is not None
-        assert before.observation.target.observation.status is ObservationStatus.UNKNOWN
+        assert before.observation.target.observation.status is ObservationStatus.REJECTED
         ran = await executor(items, namespace).execute(request, context_for(request))
         after = await executor(items, namespace).execute(inspect, context_for(inspect))
         assert after.observation.target is not None

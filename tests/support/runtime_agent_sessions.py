@@ -175,6 +175,10 @@ class _WorkspaceResource:
     def candidate_patch(self, revision: str) -> str:
         return revision
 
+    def is_retained(self, revision: str) -> bool:
+        del revision
+        return True
+
     def trusted_input_changes(self) -> list[str]:
         return []
 

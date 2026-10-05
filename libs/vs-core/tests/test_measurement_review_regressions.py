@@ -63,7 +63,16 @@ def test_inert_job_observations_emit_no_events(sequence: int, fault: str) -> Non
         observed = observed.model_copy(update={"request_id": core.RequestId(root="unknown")})
     elif fault == "foreign-resource":
         observed = observed.model_copy(update={"resource_id": core.ResourceId(root="foreign")})
-    if fault != "uncommitted":
+    if fault == "uncommitted":
+        # The ledger holds no observation of the submission, so nothing vouches for the job.
+        rows = tuple(
+            row.model_copy(update={"observation": None, "sequence": 0})
+            for row in state.intents.intents
+        )
+        state = state.model_copy(
+            update={"intents": state.intents.model_copy(update={"intents": rows})}
+        )
+    else:
         state = committed(state, observed)
     result = transition(state, core.JobObserved(resource_id=JOB, observation=observed))
     assert result.events == ()
@@ -124,6 +133,7 @@ def test_workload_claim_on_running_job_does_not_freeze_the_receipt() -> None:
             observation=running, failure=core.MeasurementFailure.WORKLOAD
         ),
     ).state
+    state = observe_job(state, running).state
     fields = {"terminal": True, "released": True, "children_complete": True, "status": S.FAILED}
     state = observe_job(state, observation(request, 3, **fields)).state
     failed = observation(request, 4, **fields)
@@ -304,8 +314,10 @@ def test_colliding_resource_ids_cannot_orphan_owned_jobs(sequence: int) -> None:
     receipt = state.evaluation.submission_budgets[1].receipts[0]
     assert isinstance(receipt, core.PreparedSubmissionReceipt)
     assert receipt.observation is None
-    later = observation(first, sequence)
-    state = observe_job(state, later).state
+    # The executor issues each poll's sequence in turn, so the job walks up to `later`.
+    for step_sequence in range(2, sequence + 1):
+        later = observation(first, step_sequence)
+        state = observe_job(state, later).state
     assert state.evaluation.jobs[0].observation == later
     cancel = transition(state, core.JobTerminationRequested(resource_id=JOB, cause="retirement"))
     assert [type(r) for r in cancel.requests] == [core.CancelOwnedJob]

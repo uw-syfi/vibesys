@@ -30,6 +30,7 @@ from vs_core.api import (
     ObservationStatus,
     RequestId,
     ResourceId,
+    RevisionRef,
     Scope,
 )
 from vs_runtime._receipt_store import ReceiptCorruptError
@@ -59,6 +60,8 @@ class ObservationFacts:
     children_complete: bool = False
     resource_id: ResourceId | None = None
     diagnostic: str = ""
+    revision: RevisionRef | None = None
+    """The revision a snapshot or retain produced; a derived event may carry only this one."""
 
 
 @dataclass(frozen=True)
@@ -88,6 +91,14 @@ class ObservationFactory:
 
     def __init__(self, store: ReceiptStore) -> None:
         self._store = store
+
+    def latest(self, request_id: RequestId) -> Observation | None:
+        """The last observation issued for *request_id*, or None when none was."""
+        try:
+            return self._store.load(_FAMILY, _PART, request_id.root, Observation)
+        except ReceiptCorruptError as error:
+            message = f"observation row for {request_id.root} is unreadable"
+            raise ObservationLedgerCorruptError(message) from error
 
     def observe(
         self,
@@ -124,6 +135,7 @@ class ObservationFactory:
                 children=facts.children,
                 children_complete=facts.children_complete,
                 diagnostic=facts.diagnostic,
+                revision=facts.revision,
             )
 
         def decide(latest: Observation | None) -> tuple[Observation | None, Observation]:
