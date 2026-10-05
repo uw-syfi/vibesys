@@ -41,6 +41,7 @@ from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
+    EvidenceFailureKind,
     EvidenceFingerprints,
     EvidenceOutcome,
     ExecutorObservation,
@@ -255,13 +256,36 @@ def _terminal_view(
         if terminal.state is EvaluationState.SUCCEEDED
         else ObservationStatus.FAILED
     )
-    observation = make(status, accepted=True, terminal=True, diagnostic=terminal.failure or "")
+    # A stage's own failure text says more than the job's summary (a benchmark's last
+    # output, say), and is all that explains a failure that left no evidence.
+    diagnostic = next(
+        (s.failure for s in terminal.stage_results if s.failure), terminal.failure or ""
+    )
+    observation = make(status, accepted=True, terminal=True, diagnostic=diagnostic)
     evidence, outcomes = _evidence(terminal, plan, subject, observation.sequence)
-    facts = _facts(terminal, plan, outcomes)
-    failure = None
-    if status is ObservationStatus.FAILED:
-        failure = MeasurementFailure.UNKNOWN if evidence else MeasurementFailure.INFRASTRUCTURE
-    return JobView(observation, None, evidence, facts, failure)
+    failure = _failure_claim(outcomes) if status is ObservationStatus.FAILED else None
+    if failure is MeasurementFailure.INFRASTRUCTURE:
+        # A measurement the machinery interrupted proves nothing about the candidate: no
+        # evidence and no scientific facts reach the core, so it may retry the measurement.
+        return JobView(observation, None, (), None, failure)
+    return JobView(observation, None, evidence, _facts(terminal, plan, outcomes), failure)
+
+
+def _failure_claim(outcomes: dict[str, TrustedEvidence]) -> MeasurementFailure:
+    """Classify a failed job from its stage evidence.
+
+    No evidence means the executor died before measuring anything. Otherwise any stage the
+    machinery failed makes the job retryable; the workload is blamed only when every failed
+    stage says so, and evidence that does not say proves neither.
+    """
+    kinds = {
+        item.failure_kind for item in outcomes.values() if item.outcome is EvidenceOutcome.FAILED
+    }
+    if not outcomes or EvidenceFailureKind.INFRASTRUCTURE in kinds:
+        return MeasurementFailure.INFRASTRUCTURE
+    if kinds == {EvidenceFailureKind.WORKLOAD}:
+        return MeasurementFailure.WORKLOAD
+    return MeasurementFailure.UNKNOWN
 
 
 def _core_kind(kind: StageKind, purpose: str) -> EvidenceKind:

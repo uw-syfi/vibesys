@@ -166,22 +166,6 @@ class CrashGapError(KnownGapError):
         super().__init__("the scripted planner death was retried: the run never crashed")
 
 
-class InfraRetryGapError(KnownGapError):
-    """A benchmark process that dies without a result is not measured again."""
-
-    def __init__(self, measured: int, expected: int) -> None:
-        """Say how often the input was measured."""
-        super().__init__(f"input measured {measured} times, expected {expected}")
-
-
-class CancelGapError(KnownGapError):
-    """A stuck provider turn is not cancelled when the stop grace bound ends the run."""
-
-    def __init__(self) -> None:
-        """Say what was not cancelled."""
-        super().__init__("the stuck provider turn was never cancelled")
-
-
 class ScriptExhaustedError(AssertionError):
     """An agent turn arrived that the scenario did not script."""
 

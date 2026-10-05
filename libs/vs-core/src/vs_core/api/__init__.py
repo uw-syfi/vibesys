@@ -175,6 +175,7 @@ from vs_core.types.common import (
     WorkspaceRef,
 )
 from vs_core.types.evaluation import (
+    MEASUREMENT_DIAGNOSTIC_LIMIT,
     AgentCall,
     AgentMeasurementRequested,
     AgentRejection,
@@ -437,6 +438,7 @@ from vs_core.types.strategy import (
 __all__ = [
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
+    "MEASUREMENT_DIAGNOSTIC_LIMIT",
     "TURN_FAILURE_DETAIL_LIMIT",
     "Accepted",
     "Access",

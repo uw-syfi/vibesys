@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar, overload
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from vs_core.api import EvidenceRequirements
-from vs_evaluation.api import ProfileField, TrustedEvidence
+from vs_evaluation.api import EvidenceFailureKind, ProfileField, TrustedEvidence
 from vs_evaluator_protocol.api import PartialMeasurement
 
 if TYPE_CHECKING:
@@ -795,11 +795,9 @@ class AccuracyEvaluation(BaseModel):
         return self.feedback is None
 
 
-class BenchmarkFailureKind(StrEnum):
-    """Whether a benchmark failure describes its workload or execution infrastructure."""
-
-    WORKLOAD = "workload"
-    INFRASTRUCTURE = "infrastructure"
+# Whether a benchmark failure describes its workload or execution infrastructure. It is
+# the evidence's own failure kind, so the executor's claim reaches the evidence unconverted.
+BenchmarkFailureKind = EvidenceFailureKind
 
 
 class BenchmarkEvaluation(BaseModel):

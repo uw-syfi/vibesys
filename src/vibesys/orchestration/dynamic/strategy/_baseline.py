@@ -104,7 +104,10 @@ def on_measurement(
     elif baseline.attempts >= config.max_input_measurement_attempts:
         update = {
             "stage": BaselineStage.UNMEASURABLE,
-            "failure": f"the input measurement produced no evidence ({event.status.value})",
+            "failure": (
+                f"the input measurement produced no evidence ({event.status.value})"
+                + (f": {event.diagnostic}" if event.diagnostic else "")
+            ),
         }
     else:
         update = {"stage": BaselineStage.NEEDED}
