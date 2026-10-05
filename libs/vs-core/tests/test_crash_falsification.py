@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-import pytest
-
 import vs_core.api as core
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
@@ -61,6 +59,8 @@ from vs_core.api import (
     step,
 )
 
+from .test_recovery_proof_regressions import _digest
+
 
 def lane_step(state: CoreState, event: CoreEvent, area: Area) -> Transition:
     """The strict xfail must identify the expected first owning reducer."""
@@ -101,6 +101,15 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         session_id=spec.session_id, invocation_id=InvocationId(root="original"), generation=0
     )
     next_ref = invocation.model_copy(update={"invocation_id": InvocationId(root="canonical-next")})
+    original_turn = TurnSpec(
+        session=spec,
+        invocation_id=invocation.invocation_id,
+        workspace=scope,
+        prompts=(),
+        output_schema=SchemaRef(name="result", version=1),
+        deadline_at=100.0,
+        charge_class="free",
+    )
     turn = TurnSpec(
         session=spec,
         invocation_id=next_ref.invocation_id,
@@ -125,11 +134,31 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         queue_allowance=0.0,
         deadline_at=10.0,
     )
+    # The paid measurement was authorized by a real accepted Measure decision.
+    measured = step(
+        state.model_copy(
+            update={
+                "intents": core.IntentsState(
+                    recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY)
+                )
+            }
+        ),
+        DecisionSubmitted(
+            decision=core.Measure(
+                decision_id=DecisionId(root="measure-decision"), scope=scope, plan=plan
+            ),
+            expected_revision=0,
+        ),
+    )
+    (submission,) = measured.requests
+    assert isinstance(submission, core.SubmitMeasurement)
+    job_request = submission.request_id
+    assert job_request is not None
     evidence = EvidenceRef(
         kind=EvidenceKind.CORRECTNESS,
         purpose="official",
         scope=scope,
-        source_request=RequestId(root="measurement"),
+        source_request=job_request,
         evidence_id=EvidenceId(root="original-evidence"),
         candidate=state.run.facts.baseline,
         observation_sequence=1,
@@ -139,12 +168,27 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         provenance="trusted",
         status=ObservationStatus.SUCCEEDED,
     )
+    yielded = Observation(
+        event_id=EventId(root="original-yielded"),
+        request_id=RequestId(root="original-dispatch"),
+        scope=scope,
+        sequence=1,
+        observed_at=1.0,
+        status=ObservationStatus.SUCCEEDED,
+        accepted=True,
+        terminal=True,
+        released=True,
+        resource_id=ResourceId(root="conversation"),
+    )
+    dispatch = DispatchTurn(
+        request_id=yielded.request_id, scope=scope, deadline_at=100.0, turn=original_turn
+    )
     job = OwnedJob(
         resource_id=resource,
         scope=scope,
         plan=plan,
         status=ObservationStatus.PENDING,
-        submission_id=RequestId(root="job-request"),
+        submission_id=job_request,
     )
     assert turn.continuation_id is not None
     continuation = Continuation(
@@ -157,7 +201,17 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
     )
     state = state.model_copy(
         update={
+            "run": state.run.model_copy(update={"receipts": measured.state.run.receipts}),
             "sessions": SessionsState(
+                invocations=(
+                    core.Invocation(
+                        invocation=invocation,
+                        scope=scope,
+                        turn=original_turn,
+                        phase=SessionPhase.SUSPENDED,
+                        observation=yielded,
+                    ),
+                ),
                 inputs=(
                     core.InputRecord(
                         input=core.SessionInput(
@@ -180,11 +234,39 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                         phase=SessionPhase.SUSPENDED,
                         invocation=invocation.invocation_id,
                         accepted=True,
+                        resource_id=yielded.resource_id,
                         continuation_id=continuation.continuation_id,
                     ),
                 ),
             ),
-            "evaluation": EvaluationState(jobs=(job,), continuations=(continuation,)),
+            "intents": core.IntentsState(
+                recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY),
+                intents=(
+                    core.Intent(
+                        request_id=yielded.request_id,
+                        request=dispatch,
+                        payload_digest=_digest(dispatch),
+                        lifecycle=core.LifecycleClass.SESSION_TURN,
+                        phase=core.IntentPhase.COMPLETED,
+                        sequence=yielded.sequence,
+                        observation=yielded,
+                        reconcile_deadline_at=100.0,
+                    ),
+                    core.Intent(
+                        request_id=job_request,
+                        request=submission,
+                        payload_digest=_digest(submission),
+                        lifecycle=core.LifecycleClass.OWNED_JOB,
+                        phase=core.IntentPhase.DISPATCHED,
+                        reconcile_deadline_at=10.0,
+                    ),
+                ),
+            ),
+            "evaluation": EvaluationState(
+                jobs=(job,),
+                continuations=(continuation,),
+                submission_budgets=measured.state.evaluation.submission_budgets,
+            ),
             "attempts": core.AttemptsState(
                 attempts=(
                     core.AttemptView(
@@ -212,7 +294,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         resource_id=resource,
         observation=Observation(
             event_id=EventId(root="job-completed"),
-            request_id=RequestId(root="job-request"),
+            request_id=job_request,
             scope=scope,
             sequence=1,
             observed_at=9.0,
@@ -223,6 +305,14 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
             released=True,
         ),
         evidence=(evidence,),
+        evaluation_result=core.EvaluationTerminalFacts(
+            stages=(
+                core.EvaluationStageResult(
+                    stage_id="measure", outcome=core.EvaluationStageOutcome.PASSED
+                ),
+            ),
+            accuracy_passed=True,
+        ),
     )
     return state, turn, observed
 
@@ -293,7 +383,10 @@ def execute(
     # Replay the durable outbox; stable invocation identity makes acceptance idempotent.
     for intent in current.core.intents.intents:
         request = intent.request
-        if isinstance(request, DispatchTurn | ResumeSessionTurn):
+        # Completed work was acknowledged before the crash window and is never replayed.
+        if intent.phase != core.IntentPhase.COMPLETED and isinstance(
+            request, DispatchTurn | ResumeSessionTurn
+        ):
             payload = request.turn.model_dump_json()
             prior = accepted.setdefault(request.turn.invocation_id, payload)
             assert prior == payload
@@ -329,28 +422,29 @@ def execute(
     return current, tuple(accepted)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KernelNotImplementedError,
-    reason="Intents A canonical ingress and Sessions callback composition remain unavailable",
-)
 def test_crash_boundaries_do_not_duplicate_resume_or_paid_work() -> None:
     original, turn, job = suspended_run()
-    # Canonical source facts must commit before the measurement leaf consumes
-    # them. This historical fixture has no request ledger; Intents A is now the
-    # first missing producer, followed by the remaining composed session facts.
-    lane_step(
+    # Canonical source facts commit in the request ledger before the measurement
+    # leaf consumes the job observation.
+    ingress = core.step(
         original,
-        core.RequestObserved(observation=job.observation, evidence=job.evidence),
-        Area.INTENTS,
+        core.RequestObserved(
+            observation=job.observation,
+            evidence=job.evidence,
+            evaluation_result=job.evaluation_result,
+        ),
     )
-    lane_step(original, job, Area.EVALUATION)
+    (submitted,) = (
+        row for row in ingress.state.intents.intents if row.request_id == job.observation.request_id
+    )
+    assert submitted.observation == job.observation
+    assert submitted.phase == core.IntentPhase.COMPLETED
     initial = RunEnvelope[CallbackState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=original.run.declaration.strategy_id,
         state_schema=SchemaRef(name="callbacks", version=1),
-        core=original,
+        core=ingress.state,
         strategy=CallbackState(schema_version=1),
         event_cursor=EventCursor(sequence=0),
     )
