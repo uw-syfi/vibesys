@@ -231,7 +231,27 @@ def _observed(
     original = _unique(change.state, target.observation.request_id)
     if original is None:
         raise ContractError(("target", "request_id"), "target names no canonical request")
+    if target.never_began:
+        return _finish(change, _reissue(change.state, original))
     return _finish(change, _apply(change.state, context, original, target))
+
+
+def _reissue(state: IntentsState, intent: Intent) -> AreaChange[IntentsState]:
+    """A request proven never begun goes out again, unchanged, from PREPARED.
+
+    The proof is the executor's record that no effect started, so the request is
+    neither observed nor reported to its owner: the owner never learns it was
+    interrupted, and the replay equals the straight run. Only an open intent is
+    reissued; a request that already concluded keeps its disposition.
+    """
+    if intent.phase not in (IntentPhase.DISPATCHED, IntentPhase.RECONCILING):
+        return AreaChange(state=state)
+    # An earlier inconclusive observation (a declined or unknown attempt) described a
+    # dispatch that did nothing, so the reissued request starts without one.
+    reissued = intent.model_copy(
+        update={"phase": IntentPhase.PREPARED, "observation": None, "sequence": None}
+    )
+    return AreaChange(state=_replace(state, reissued))
 
 
 def _apply(

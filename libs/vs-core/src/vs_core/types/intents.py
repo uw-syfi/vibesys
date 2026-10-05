@@ -26,6 +26,7 @@ from .common import (
     ExecuteRegisteredOperation,
     LifecycleClass,
     Observation,
+    ObservationStatus,
     OperationId,
     OperationRef,
     OperationSchemaRef,
@@ -383,11 +384,24 @@ class TargetObservation(OutcomeValue):
     outcome_json: str | None = None
     outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
     operation_schema: OperationSchemaRef | None = None
+    never_began: bool = False
+    """Proof that the effect never started (no begun record), so the request may go out again."""
 
     @model_validator(mode="after")
     def registered_outcome(self, info: ValidationInfo) -> TargetObservation:
         """Restore registered target subtypes at the owning codec boundary."""
         validate_setup_failure(self.observation, self.setup_failure)
+        if self.never_began and not (
+            self.observation.status == ObservationStatus.REJECTED
+            and self.observation.terminal
+            and not self.observation.accepted
+            and self.observation.resource_id is None
+            and not self.observation.children
+            and self.target_resource is None
+        ):
+            raise ContractValidationError(
+                "never_began", "requires a terminal refusal that accepted nothing and owns nothing"
+            )
         if self.evaluation_result is not None:
             self.evaluation_result.validate_observation(self.observation)
         if self.target_resource is not None and (

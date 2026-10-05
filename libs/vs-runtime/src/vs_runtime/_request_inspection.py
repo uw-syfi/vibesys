@@ -152,6 +152,7 @@ class RecordedRequestInspector:
                 status=ObservationStatus.REJECTED,
                 diagnostic="no begun marker: the effect never started",
             ),
+            never_began=True,
         )
 
     def _sealed(
@@ -181,14 +182,19 @@ class RecordedRequestInspector:
         )
 
     def _target(
-        self, request: InspectRequest, context: ExecutionContext, facts: ObservationFacts
+        self,
+        request: InspectRequest,
+        context: ExecutionContext,
+        facts: ObservationFacts,
+        *,
+        never_began: bool = False,
     ) -> TargetObservation:
         observation = self._observations.observe(
             ObservationSubject.of(request, request_id=request.target),
             facts,
             observed_at=context.now_at,
         )
-        return TargetObservation(observation=observation)
+        return TargetObservation(observation=observation, never_began=never_began)
 
 
 __all__ = ["Inspected", "RecordedRequestInspector", "TargetProbe", "as_target"]
