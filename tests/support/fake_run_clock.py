@@ -7,6 +7,9 @@ from dataclasses import dataclass, field
 
 from vs_runtime.api.core import HEARTBEAT_TASK
 
+#: Event-loop turns ``sleep`` lets background tasks run before logical time moves.
+SETTLE_TURNS = 200
+
 
 @dataclass
 class FakeRunClock:
@@ -29,6 +32,12 @@ class FakeRunClock:
         """Let background work finish, then advance logical time instead of waiting.
 
         The lease heartbeat waits for logical time that others advance: it only yields.
+
+        Waiting is bounded to ``SETTLE_TURNS`` event-loop turns. A task that is waiting on
+        time itself (another sleeper, or a controller that awaits one) cannot finish until
+        this sleep returns, so waiting for every task unconditionally deadlocks as soon
+        as two tasks wait on the clock. Work that needs real time to finish belongs on a
+        ``tests.support.virtual_time.VirtualClock``, which has no such bound.
         """
         current = asyncio.current_task()
         if current is not None and current.get_name() == HEARTBEAT_TASK:
@@ -39,7 +48,9 @@ class FakeRunClock:
             for task in asyncio.all_tasks()
             if task is not current and task.get_name() != HEARTBEAT_TASK
         ]
-        if background:
-            await asyncio.gather(*background, return_exceptions=True)
+        for _ in range(SETTLE_TURNS):
+            if all(task.done() for task in background):
+                break
+            await asyncio.sleep(0)
         self.sleeps.append(seconds)
         self.at += seconds
