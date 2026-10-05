@@ -34,6 +34,7 @@ from vs_runtime._agent_declarations import (
 )
 from vs_runtime._agent_execution import AgentResumeConfiguration, RuntimeAgentExecution
 from vs_runtime._prepared_conversations import prepare_agent_conversation
+from vs_runtime._workspace_access import AccessGrant, enforce_workspace_access
 from vs_runtime.contracts import (
     AgentBinding,
     AgentCapability,
@@ -322,15 +323,17 @@ class RuntimeAgentSession:
         return result
 
     async def _enforce_workspace_access(self, revision: str) -> None:
-        if self._role.workspace_access is not WorkspaceAccess.READ_WRITE:
-            limited = self._role.workspace_access is WorkspaceAccess.LIMITED
-            self._workspace.access_recovery.begin(
-                revision,
-                self._role.id,
-                self._writable_paths if limited else (),
-                self._writable_directory_paths if limited else (),
-            )
-        restored = await self._workspace.access_recovery.reconcile(self._workspace)
+        limited = self._role.workspace_access is WorkspaceAccess.LIMITED
+        restored = await enforce_workspace_access(
+            self._workspace,
+            AccessGrant(
+                role_id=self._role.id,
+                access=self._role.workspace_access,
+                paths=self._writable_paths if limited else (),
+                directories=self._writable_directory_paths if limited else (),
+            ),
+            revision,
+        )
         unauthorized = restored.restored_paths
         if unauthorized:
             self._log(

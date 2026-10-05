@@ -5,32 +5,30 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.executor_context import RevocableLease, context_for
+from tests.support.executor_context import RevocableLease
 from tests.support.observation_contract import assert_core_accepts
 from tests.support.session_world import (
-    SCOPE,
-    SESSION,
+    CrashOnReplace,
     SessionHost,
     dispatch_request,
     ensure_request,
     inspect_request,
     open_host,
     reuse_ensure,
+    run_snapshot,
+    turn_output,
 )
 
 from vs_core.api import (
-    InvocationId,
-    InvocationRef,
     ObservationStatus,
-    RequestId,
     ResourceId,
-    SnapshotAndRetainRun,
 )
 from vs_project.api import Project
 from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, ReceiptStore
@@ -50,8 +48,9 @@ class World:
         self._project = Project.open(base / "project")
         self.host: SessionHost = open_host(base / "workspace")
 
-    def store(self) -> ReceiptStore:
-        return ReceiptStore(self._project.state.state_store_namespace("run"))
+    def store(self, *, dies_before_seal: bool = False) -> ReceiptStore:
+        namespace = self._project.state.state_store_namespace("run")
+        return CrashOnReplace(namespace) if dies_before_seal else ReceiptStore(namespace)
 
     async def execute(
         self,
@@ -59,13 +58,11 @@ class World:
         *,
         lease: RevocableLease | None = None,
         now_at: float | None = None,
+        dies_before_seal: bool = False,
     ) -> ExecutionResult:
-        context = context_for(request, lease=lease)
-        if now_at is not None:
-            context = context.model_copy(update={"now_at": now_at})
-        outcome = await self.host.executor(self.store()).execute(cast("Any", request), context)
-        assert isinstance(outcome, ExecutionResult), outcome
-        return outcome
+        return await self.host.run(
+            request, self.store(dies_before_seal=dies_before_seal), lease=lease, now_at=now_at
+        )
 
 
 @asynccontextmanager
@@ -119,16 +116,14 @@ async def test_a_lost_provider_conversation_is_not_replaced_by_a_fresh_one() -> 
     async with world() as w:
         first = await w.execute(ensure_request())
         await w.execute(dispatch_request())
-        lost = open_host(w.host.resolver.workspace)
-        lost.journal = w.host.journal
-        w.host = lost
+        w.host = w.host.restart_lost_conversation(w.host.resolver.workspace)
         result = await w.execute(
             reuse_ensure("req-reattach", first.observation.observation.resource_id)
         )
         assert status(result) is ObservationStatus.REJECTED
         follow_up = await w.execute(dispatch_request("req-two", "inv-2"))
         assert status(follow_up) is ObservationStatus.REJECTED
-        assert lost.turns == []
+        assert w.host.turns == []
 
 
 @pytest.mark.asyncio
@@ -153,10 +148,10 @@ async def test_dispatch_completes_with_validated_output_and_continues_the_conver
         first = await w.execute(dispatch_request())
         second = await w.execute(dispatch_request("req-two", "inv-2"))
         assert status(first) is status(second) is ObservationStatus.SUCCEEDED
-        assert first.observation.outcome_json == '{"value":7}'
         event = first.owner_events[0]
         assert event.kind == "turn_observed"
-        assert event.output_json == first.observation.outcome_json
+        assert event.output_json == '{"value":7}'
+        assert_core_accepts([first, second], expect_retry=False)
         assert len(w.host.turns) == 2
         assert w.host.turns[0].expected_provider_session_id is None
         assert w.host.turns[1].expected_provider_session_id is not None
@@ -194,6 +189,96 @@ async def test_a_turn_past_its_deadline_is_rejected_without_dispatch() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_late_retry_after_a_crash_replays_the_turn_that_already_ran() -> None:
+    async with world() as w:
+        await w.execute(ensure_request())
+        with pytest.raises(SystemExit):
+            await w.execute(dispatch_request(), dies_before_seal=True)
+        assert len(w.host.turns) == 1
+        retried = await w.execute(dispatch_request(), now_at=500.0)
+        inspected = await w.execute(inspect_request(), now_at=500.0)
+        assert status(retried) is ObservationStatus.SUCCEEDED
+        assert turn_output(retried) == '{"value":7}'
+        assert inspected.observation.target is not None
+        assert inspected.observation.target.observation.status is ObservationStatus.SUCCEEDED
+        assert len(w.host.turns) == 1
+        assert_core_accepts([retried, inspected], expect_retry=False)
+
+
+@pytest.mark.asyncio
+async def test_a_late_retry_of_a_turn_that_may_have_started_is_unknown_never_rejected() -> None:
+    async with world() as w:
+        await w.execute(ensure_request())
+        w.host.faults.down = True
+        await w.execute(dispatch_request())
+        retried = await w.execute(dispatch_request(), now_at=500.0)
+        assert status(retried) is ObservationStatus.UNKNOWN
+        assert not retried.observation.observation.terminal
+        assert len(w.host.turns) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_crash_right_after_a_turn_cannot_skip_the_lost_checkpoint_guard() -> None:
+    async with world() as w:
+        first = await w.execute(ensure_request())
+        with pytest.raises(SystemExit):
+            await w.execute(dispatch_request(), dies_before_seal=True)
+        assert len(w.host.turns) == 1
+        w.host = w.host.restart_lost_conversation(w.host.resolver.workspace)
+        follow_up = await w.execute(dispatch_request("req-two", "inv-2"))
+        assert status(follow_up) is ObservationStatus.REJECTED
+        assert w.host.turns == []  # no fresh conversation took the lost one's place
+        again = await w.execute(
+            reuse_ensure("req-reattach", first.observation.observation.resource_id)
+        )
+        assert status(again) is ObservationStatus.REJECTED
+
+
+@pytest.mark.asyncio
+async def test_a_terminal_turn_is_released_so_a_closing_attempt_can_drain() -> None:
+    async with world() as w:
+        ensured = await w.execute(ensure_request())
+        done = await w.execute(dispatch_request())
+        seen = await w.execute(inspect_request())
+        assert not ensured.observation.observation.released
+        assert done.observation.observation.terminal
+        assert done.observation.observation.released
+        assert done.observation.observation.children_complete
+        assert seen.observation.target is not None
+        assert seen.observation.target.observation.released
+        w.host.faults.down = True
+        lost = await w.execute(dispatch_request("req-two", "inv-2"))
+        assert not lost.observation.observation.terminal
+        assert not lost.observation.observation.released
+
+
+@pytest.mark.asyncio
+async def test_the_in_turn_timeout_is_the_one_bound_with_the_session() -> None:
+    async with world() as w:
+        await w.execute(ensure_request())
+        await w.execute(dispatch_request())
+        await w.execute(dispatch_request("req-two", "inv-2"))
+        assert [turn.timeout for turn in w.host.turns] == [timedelta(seconds=30)] * 2
+        w.host.resolver.timeout = timedelta(seconds=60)
+        changed = await w.execute(dispatch_request("req-three", "inv-3"))
+        assert status(changed) is ObservationStatus.REJECTED
+        assert "timeout" in changed.observation.observation.diagnostic
+        assert len(w.host.turns) == 2
+
+
+@pytest.mark.parametrize("seconds", [0.0, -1.0])
+@pytest.mark.asyncio
+async def test_an_invalid_turn_timeout_is_rejected_when_the_session_is_bound(
+    seconds: float,
+) -> None:
+    async with world() as w:
+        w.host.resolver.timeout = timedelta(seconds=seconds)
+        result = await w.execute(ensure_request())
+        assert status(result) is ObservationStatus.REJECTED
+        assert "timeout" in result.observation.observation.diagnostic
+
+
+@pytest.mark.asyncio
 async def test_unknown_acceptance_is_inspected_and_never_dispatched_again() -> None:
     async with world() as w:
         await w.execute(ensure_request())
@@ -225,7 +310,7 @@ async def test_inspect_translates_a_completed_turn_and_a_never_dispatched_one() 
         seen = await w.execute(inspect_request("req-i2", "inv-1"))
         assert seen.observation.target is not None
         assert seen.observation.target.observation.status is ObservationStatus.SUCCEEDED
-        assert seen.observation.target.outcome_json == dispatched.observation.outcome_json
+        assert turn_output(seen) == turn_output(dispatched) is not None
         assert_core_accepts([dispatched, seen], expect_retry=False)
 
 
@@ -237,18 +322,6 @@ async def test_one_invocation_cannot_be_dispatched_by_two_requests() -> None:
         other = await w.execute(dispatch_request("req-b"))
         assert status(other) is ObservationStatus.REJECTED
         assert len(w.host.turns) == 1
-
-
-def run_snapshot(invocation: str = "inv-1") -> SnapshotAndRetainRun:
-    return SnapshotAndRetainRun(
-        request_id=RequestId(root="req-snap"),
-        scope=SCOPE,
-        deadline_at=100.0,
-        invocation=InvocationRef(
-            session_id=SESSION, invocation_id=InvocationId(root=invocation), generation=0
-        ),
-        retention="candidate",
-    )
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,13 @@ observations enter one queue; only confirmed commits authorize dispatch or
 publication. Unbound executor roles return named typed refusals.
 """
 
+from vs_runtime._access_settlement import (
+    AccessKey,
+    AccessReceipt,
+    AccessSettlement,
+    AccessSettlementError,
+    AccessViolation,
+)
 from vs_runtime._core_loop import (
     CoreContractGapError,
     CoreRuntime,
@@ -128,7 +135,16 @@ from vs_runtime._session_requests import (
     SessionBinding,
     SessionResolver,
 )
+from vs_runtime._session_resolver import (
+    ProductionSessionResolver,
+    ResolverInputs,
+    SessionExecutors,
+    SessionSpecFactory,
+    open_session_requests,
+    session_executors,
+)
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
+from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
     RootGrant,
@@ -146,6 +162,13 @@ __all__ = [
     "HAND_ROLLED_ROLES",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
+    "AccessGrant",
+    "AccessGuardedWorkspace",
+    "AccessKey",
+    "AccessReceipt",
+    "AccessSettlement",
+    "AccessSettlementError",
+    "AccessViolation",
     "Applied",
     "AttemptBinding",
     "BegunUnsealed",
@@ -201,6 +224,7 @@ __all__ = [
     "Performed",
     "Performer",
     "ProductionCoreTransitions",
+    "ProductionSessionResolver",
     "Publication",
     "PublicationAcknowledgement",
     "PublicationContext",
@@ -218,6 +242,7 @@ __all__ = [
     "Replayed",
     "RequestExecutors",
     "ResolvedCoreResume",
+    "ResolverInputs",
     "ResultReceipt",
     "ResumeDiagnostic",
     "RetainRevisionOwner",
@@ -232,11 +257,13 @@ __all__ = [
     "SealedExecution",
     "SemanticEvents",
     "SessionBinding",
+    "SessionExecutors",
     "SessionLifecycleRequests",
     "SessionRequestRouter",
     "SessionRequests",
     "SessionResolver",
     "SessionServices",
+    "SessionSpecFactory",
     "Settled",
     "StoreWorkspaceReceipts",
     "Transient",
@@ -249,11 +276,13 @@ __all__ = [
     "commit_of",
     "core_bindings",
     "new_core_state",
+    "open_session_requests",
     "owner_key",
     "production_owners",
     "receipt_executor_kinds",
     "resolve_core_resume",
     "result_type_name",
     "revision_ref",
+    "session_executors",
     "settle",
 ]

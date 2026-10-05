@@ -45,6 +45,7 @@ from vs_core.api import (
     Capabilities,
     CloseSession,
     ContractError,
+    ContractValidationError,
     DecisionId,
     InspectRequest,
     InvocationId,
@@ -143,7 +144,7 @@ async def test_skeleton(tmp_path: Path, crash: CrashPoint | None) -> None:
     await _play(tmp_path, crash, SkeletonStrategy())
 
 
-# Gaps found behind SESSION_OUTCOME. Each was reproduced by a local, unpushed edit that
+# Gaps found behind TURN_OUTPUT_DROPPED. Each was reproduced by a local, unpushed edit that
 # fixed the gap in front of it (the patch is in the skeleton-2 handoff); with all of them
 # applied the discarded-attempt scenario passes straight through. In the order met:
 #   G2 owner SESSION-WIRING: a terminal DispatchTurn observation is never released
@@ -162,16 +163,18 @@ async def test_skeleton(tmp_path: Path, crash: CrashPoint | None) -> None:
 #      (_workspace_requests.py:376 _known_revision, :542), so a kept candidate cannot be
 #      settled. The discarded-attempt scenario sidesteps it by adopting the trusted baseline.
 
-SESSION_OUTCOME = pytest.mark.xfail(
-    raises=ObservationRejectedError,
+TURN_OUTPUT_DROPPED = pytest.mark.xfail(
+    raises=(AssertionError, ContractValidationError, ObservationRejectedError),
     strict=True,
     reason=(
-        "core rejects the DispatchTurn observation: the executor puts the turn's output on "
-        "RequestObserved (outcome_schema, outcome_json; _session_requests.py:329) and core's "
-        "ingress requires a registered outcome proof for those fields "
-        "(vs_core/_step.py:1202); the output belongs on the TurnObserved owner event only; "
-        "owner SESSION-WIRING (_session_requests.py), probe "
-        "test_a_turn_observation_passes_core_ingress"
+        "a write turn's structured reply never reaches the strategy: the turn output cannot ride "
+        "RequestObserved (core's ingress needs a registered outcome proof, vs_core/_step.py), so "
+        "it travels on the executor's TurnObserved owner event; but core derives its own "
+        "TurnObserved from the intent ledger (vs_core/_intent_forward.py, DispatchTurn case) with "
+        "output_json=None, applies it first, and drops the executor's event as a replay of the "
+        "same sequence (vs_core/_session_turns.py _turn_observed). TurnResult.output_json is "
+        "None, so the candidate commit is unknown and the retained settlement is refused. "
+        "Owner CORE-INTENT (fix/core-owner-event-precedence)"
     ),
 )
 
@@ -180,12 +183,12 @@ SESSION_OUTCOME = pytest.mark.xfail(
 @pytest.mark.parametrize(
     "crash",
     [
-        pytest.param(None, id="straight-through", marks=SESSION_OUTCOME),
+        pytest.param(None, id="straight-through", marks=TURN_OUTPUT_DROPPED),
         pytest.param(
-            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=RECOVERY_UNRESOLVED
+            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=TURN_OUTPUT_DROPPED
         ),
         pytest.param(
-            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=RECOVERY_UNRESOLVED
+            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=TURN_OUTPUT_DROPPED
         ),
     ],
 )
@@ -198,13 +201,9 @@ async def test_skeleton_without_measurements(tmp_path: Path, crash: CrashPoint |
 @pytest.mark.parametrize(
     "crash",
     [
-        pytest.param(None, id="straight-through", marks=SESSION_OUTCOME),
-        pytest.param(
-            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=RECOVERY_UNRESOLVED
-        ),
-        pytest.param(
-            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=RECOVERY_UNRESOLVED
-        ),
+        None,
+        pytest.param(CrashPoint.AFTER_DISPATCH),
+        pytest.param(CrashPoint.AFTER_OBSERVATION),
     ],
 )
 async def test_skeleton_discarded_attempt(tmp_path: Path, crash: CrashPoint | None) -> None:

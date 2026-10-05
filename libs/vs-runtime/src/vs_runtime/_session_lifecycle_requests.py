@@ -62,6 +62,12 @@ from vs_core.api import (
     SessionObserved,
     TurnObserved,
 )
+from vs_runtime._access_settlement import (
+    AccessKey,
+    AccessSettlement,
+    AccessSettlementError,
+    access_unproven,
+)
 from vs_runtime._core_requests import ExecutionContext, ExecutionOutcome, ExecutionResult
 from vs_runtime._observation_factory import (
     ObservationFactory,
@@ -78,11 +84,17 @@ from vs_runtime._receipt_store import (
     Transient,
     owner_key,
 )
-from vs_runtime._session_requests import _BINDINGS, _DISPATCHES, DispatchRecord, SessionBinding
+from vs_runtime._session_requests import (
+    SessionBinding,
+    conversation_established,
+    load_dispatch_record,
+    load_session_binding,
+    session_binding_key,
+)
 
 if TYPE_CHECKING:
     from vs_agent.api import AgentInvocationRecord, AgentSessionCheckpoint, AgentSessions
-    from vs_core.api import RequestBase, SnapshotAndRetainRun
+    from vs_core.api import RequestBase, SessionId, SnapshotAndRetainRun
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspace_requests import RunInvocationProof
@@ -153,12 +165,32 @@ def _journal_row(
     return record
 
 
+def _writer_ended(row: AgentInvocationRecord | None) -> bool:
+    """Whether the journal row proves the invocation's writer ended: judged or released."""
+    if row is None:
+        return False
+    if isinstance(row.outcome, (Completed, InvalidResponse)):
+        return True
+    return row.interrupted and isinstance(row.outcome, Unknown)
+
+
+def _call_returned(row: AgentInvocationRecord | None) -> bool:
+    """Whether the dispatch call of the row returned, so releasing the key ended its turn.
+
+    An Unknown row was written by a call that returned; a Pending row (a call in
+    flight, or one a restart cannot account for) never qualifies.
+    """
+    return _writer_ended(row) or (row is not None and isinstance(row.outcome, Unknown))
+
+
 class ReleasedRunInvocations:
     """Run-invocation proof that also accepts a turn CancelTurn interrupted and released.
 
     ``JournalRunInvocations`` proves settled turns. A returned dispatch that left an
     Unknown row and was then released by ``release_interrupted`` has no live writer
     either; a recovered Pending row never qualifies, because it is never released.
+    Either way the turn's access receipt must be settled: ended but unjudged is not
+    proof.
     """
 
     def __init__(
@@ -176,14 +208,15 @@ class ReleasedRunInvocations:
             return None
         invocation = request.invocation
         try:
-            binding = self._store.load(
-                _BINDINGS,
-                "binding",
-                f"{owner_key(request)}/{invocation.session_id.root}",
-                SessionBinding,
-            )
+            bkey = session_binding_key(request, invocation.session_id)
+            binding = load_session_binding(self._store, bkey)
             if binding is None:
                 return reason
+            unsettled = access_unproven(
+                self._store, AccessKey(binding=bkey, invocation=invocation.invocation_id.root)
+            )
+            if unsettled is not None:
+                return unsettled
             row = _journal_row(
                 self._sessions,
                 AgentSessionKey.parse(binding.session_key),
@@ -191,7 +224,7 @@ class ReleasedRunInvocations:
             )
         except (ReceiptCorruptError, *_SESSION_ERRORS) as error:
             return f"invocation evidence is unreadable: {error}"
-        if row is not None and row.interrupted and isinstance(row.outcome, Unknown):
+        if _writer_ended(row):
             return None
         return reason
 
@@ -200,12 +233,20 @@ class SessionLifecycleRequests:
     """Execute CancelTurn, CloseSession and ResumeSessionTurn once each."""
 
     def __init__(
-        self, sessions: AgentSessions, dispatcher: TurnDispatcher, store: ReceiptStore
+        self,
+        sessions: AgentSessions,
+        dispatcher: TurnDispatcher,
+        store: ReceiptStore,
+        settlement: AccessSettlement,
     ) -> None:
-        """Bind the durable agent sessions, the turn dispatcher and the shared store."""
+        """Bind the durable agent sessions, the turn dispatcher, the store and its settlement.
+
+        *settlement* is the instance the turn dispatcher records receipts with.
+        """
         self._sessions = sessions
         self._dispatcher = dispatcher
         self._store = store
+        self._settlement = settlement
         self._observations = ObservationFactory(store)
 
     async def execute(
@@ -279,8 +320,6 @@ class SessionLifecycleRequests:
         return ExecutionResult(
             observation=RequestObserved(
                 observation=observation,
-                outcome_schema=None if turn is None else turn.output_schema,
-                outcome_json=None if turn is None else turn.output_json,
             ),
             owner_events=events,
         )
@@ -291,33 +330,83 @@ class SessionLifecycleRequests:
         match request:
             case CancelTurn():
                 facts = await asyncio.to_thread(self._cancel, request)
+                facts = await self._settled(
+                    facts,
+                    request,
+                    request.invocation.session_id,
+                    request.invocation.invocation_id.root,
+                )
             case CloseSession():
                 facts = await asyncio.to_thread(self._close, request)
+                facts = await self._settled(facts, request, request.session_id, None)
             case ResumeSessionTurn():
                 return await self._resume(request, request_id, context)
             case _:
                 facts = _rejected(f"{request.kind} is not executed here")
         return self._result(request, context, facts)
 
-    def _binding(self, request: RequestBase, session: str) -> SessionBinding | None:
-        # The key RuntimeSessionRequests writes: scope owner and generation, then session.
-        return self._store.load(
-            _BINDINGS, "binding", f"{owner_key(request)}/{session}", SessionBinding
-        )
+    def _binding(self, request: RequestBase, session: SessionId) -> SessionBinding | None:
+        return load_session_binding(self._store, session_binding_key(request, session))
+
+    async def _settled(
+        self,
+        facts: ObservationFacts,
+        request: RequestBase,
+        session: SessionId,
+        invocation_id: str | None,
+    ) -> ObservationFacts:
+        """Judge the writes of every invocation this released outcome proves ended.
+
+        *invocation_id* narrows it to one invocation, otherwise every dispatched
+        invocation of the session whose journal row proves its writer ended. An
+        outcome that is not released proves nothing and is returned unchanged; one
+        whose revert cannot finish is Unknown, so a retry resumes it.
+        """
+        if not facts.released:
+            return facts
+        bkey = session_binding_key(request, session)
+        binding = load_session_binding(self._store, bkey)
+        if binding is None:
+            return facts
+        try:
+            await self._settle_ended(
+                bkey, binding, invocation_id, closed=isinstance(request, CloseSession)
+            )
+        except AccessSettlementError as error:
+            return _unknown(str(error), binding)
+        except (ReceiptCorruptError, *_SESSION_ERRORS) as error:
+            return _unknown(f"access cannot be settled: {error}", binding)
+        return facts
+
+    async def _settle_ended(
+        self, bkey: str, binding: SessionBinding, only: str | None, *, closed: bool = False
+    ) -> None:
+        """Settle the receipts of the session's invocations whose writers provably ended.
+
+        A closed session also ends every turn whose dispatch call returned: no
+        provider resource of the key remains.
+        """
+        key = AgentSessionKey.parse(binding.session_key)
+        for invocation_id in binding.dispatched if only is None else (only,):
+            access_key = AccessKey(binding=bkey, invocation=invocation_id)
+            receipt = self._settlement.receipt(access_key)
+            if receipt is None or receipt.settled:
+                continue
+            row = await asyncio.to_thread(_journal_row, self._sessions, key, invocation_id)
+            if (_call_returned if closed else _writer_ended)(row):
+                await self._settlement.settle(access_key)
 
     # cancel
 
     def _cancel(self, request: CancelTurn) -> ObservationFacts:
         invocation = request.invocation
-        session = invocation.session_id.root
-        binding = self._binding(request, session)
+        binding = self._binding(request, invocation.session_id)
         if binding is None:
             return _rejected("no ensured session for this invocation")
-        link = self._store.load(
-            _DISPATCHES,
-            "dispatch",
-            f"{owner_key(request)}/{session}/{invocation.invocation_id.root}",
-            DispatchRecord,
+        link = load_dispatch_record(
+            self._store,
+            session_binding_key(request, invocation.session_id),
+            invocation.invocation_id,
         )
         if link is None:
             return _rejected("the invocation was never dispatched", binding)
@@ -349,7 +438,7 @@ class SessionLifecycleRequests:
     # close
 
     def _close(self, request: CloseSession) -> ObservationFacts:
-        binding = self._binding(request, request.session_id.root)
+        binding = self._binding(request, request.session_id)
         if binding is None:
             return _rejected("no ensured session to close")
         try:
@@ -379,6 +468,9 @@ class SessionLifecycleRequests:
         problem = await asyncio.to_thread(self._bind_continuation, request)
         if problem is not None:
             return self._result(request, context, problem)
+        superseded = await self._settle_superseded(request)
+        if superseded is not None:
+            return self._result(request, context, superseded)
         dispatch = DispatchTurn(
             request_id=RequestId(root=f"{request_id.root}.dispatch"),
             scope=request.scope,
@@ -404,17 +496,36 @@ class SessionLifecycleRequests:
         )
         return self._result(request, context, facts, turn=event)
 
+    async def _settle_superseded(self, request: ResumeSessionTurn) -> ObservationFacts | None:
+        """Judge the writes of earlier turns the successor supersedes, before it can snapshot.
+
+        Only turns whose writers provably ended qualify; the resumed dispatch then
+        refuses to baseline a workspace that still holds an unjudged one.
+        """
+        session = request.turn.session.session_id
+        bkey = session_binding_key(request, session)
+        binding = load_session_binding(self._store, bkey)
+        if binding is None:
+            return None
+        try:
+            await self._settle_ended(bkey, binding, None)
+        except AccessSettlementError as error:
+            return _unknown(str(error), binding)
+        except (ReceiptCorruptError, *_SESSION_ERRORS) as error:
+            return _unknown(f"access cannot be settled: {error}", binding)
+        return None
+
     def _retained(
         self, request: ResumeSessionTurn
     ) -> tuple[SessionBinding, AgentSessionCheckpoint] | ObservationFacts:
         """The session's binding and retained provider conversation, or why there is none."""
         session = request.turn.session
-        binding = self._binding(request, session.session_id.root)
+        binding = self._binding(request, session.session_id)
         if binding is None or binding.spec != session.model_copy(
             update={"policy": binding.spec.policy}
         ):
             return _rejected("no ensured session matches this turn's session")
-        if not binding.established:
+        if not conversation_established(self._sessions, binding):
             return _rejected("the session completed no turn: there is nothing to resume", binding)
         try:
             checkpoint = self._sessions.checkpoint(AgentSessionKey.parse(binding.session_key))

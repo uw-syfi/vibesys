@@ -24,7 +24,6 @@ observations are stored; Unknown and retryable failures are not.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol, assert_never
@@ -70,6 +69,7 @@ from vs_runtime._receipt_store import (
     Transient,
     owner_key,
 )
+from vs_runtime._workspace_lookup import candidate_member_id, find_attempt_workspace
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
     RootGrant,
@@ -100,11 +100,6 @@ def commit_of(ref: RevisionRef) -> str | None:
     """
     commit = ref.git_commit
     return commit if commit is not None and _COMMIT.match(commit) is not None else None
-
-
-def _member_id(attempt: AttemptRef) -> str:
-    """Stable member identity: one candidate path per attempt generation."""
-    return "attempt-" + hashlib.sha256(attempt_key(attempt).encode()).hexdigest()[:24]
 
 
 @dataclass(frozen=True)
@@ -339,22 +334,10 @@ class RuntimeWorkspaceRequests:
         self, attempt: AttemptRef, binding: AttemptBinding
     ) -> RuntimeWorkspace | _Facts:
         """Return the attempt's live workspace, reopening it from disk after a restart."""
-        if binding.workspace_id is None:
-            if self._receipts.root_holder() != attempt:
-                return _rejected(
-                    "the exclusive root is held by another attempt generation",
-                    resource_id=binding.resource_id,
-                )
-            return self._workspaces.root
-        member = _member_id(attempt)
-        live = self._workspaces.live_candidate(member) or await self._workspaces.reattach_candidate(
-            member
-        )
-        if live is None:
-            return _rejected(
-                "the attempt's workspace no longer exists", resource_id=binding.resource_id
-            )
-        return live
+        found = await find_attempt_workspace(self._workspaces, self._receipts, attempt, binding)
+        if isinstance(found, str):
+            return _rejected(found, resource_id=binding.resource_id)
+        return found
 
     async def _known_revision(
         self,
@@ -467,7 +450,7 @@ class RuntimeWorkspaceRequests:
     ) -> _Facts:
         del resumed
         attempt = request.attempt
-        member = _member_id(attempt)
+        member = candidate_member_id(attempt)
         live = self._workspaces.live_candidate(member)
         if live is None:
             # A host that stopped after creating the worktree leaves it on disk:
@@ -602,7 +585,7 @@ class RuntimeWorkspaceRequests:
                 "the exclusive root workspace is run-owned and cannot be discarded",
                 resource_id=binding.resource_id,
             )
-        member = _member_id(request.attempt)
+        member = candidate_member_id(request.attempt)
         candidate = self._workspaces.live_candidate(member)
         if candidate is None:
             candidate = await self._workspaces.reattach_candidate(member)

@@ -67,6 +67,7 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentSessionSpec, AgentTurnRequest
     from vs_core.api import CoreState
+    from vs_runtime.api.core import AccessGuardedWorkspace
 
 DIGEST = "ab" * 32
 LEASE = 100.0
@@ -314,10 +315,12 @@ class CandidateResolver(FakeSessionResolver):
 
     writer: CandidateWriter | None = None
 
-    def agent_spec(self, turn: TurnSpec) -> AgentSessionSpec | None:
+    def agent_spec(
+        self, turn: TurnSpec, workspace: AccessGuardedWorkspace
+    ) -> AgentSessionSpec | None:
         """The Fake provider's session configuration over the live candidate worktree."""
         assert self.writer is not None
-        spec = super().agent_spec(turn)
+        spec = super().agent_spec(turn, workspace)
         assert spec is not None
         return dataclasses.replace(spec, workspace=self.writer.worktree())
 

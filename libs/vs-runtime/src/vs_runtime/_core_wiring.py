@@ -37,10 +37,10 @@ from vs_runtime._receipt_store import ReceiptStore
 from vs_runtime._semantic_events import JournalSemanticEvents
 from vs_runtime._session_lifecycle_requests import (
     ReleasedRunInvocations,
-    SessionLifecycleRequests,
     SessionRequestRouter,
 )
-from vs_runtime._session_requests import JournalRunInvocations, RuntimeSessionRequests
+from vs_runtime._session_requests import JournalRunInvocations
+from vs_runtime._session_resolver import session_executors
 from vs_runtime._workspace_requests import RuntimeWorkspaceRequests
 
 if TYPE_CHECKING:
@@ -109,15 +109,13 @@ def core_bindings(
     """
     store = ReceiptStore(receipts)
     catalog = operations or OperationCatalog(OperationRegistry(), ())
-    turns = RuntimeSessionRequests(sessions.agent_sessions, sessions.resolver, store)
+    session_pair = session_executors(sessions.agent_sessions, sessions.resolver, store)
     proof = ReleasedRunInvocations(
         JournalRunInvocations(sessions.agent_sessions, store), sessions.agent_sessions, store
     )
     executors = RequestExecutors(
         workspaces=RuntimeWorkspaceRequests(workspaces, store, proof),
-        sessions=SessionRequestRouter(
-            turns, SessionLifecycleRequests(sessions.agent_sessions, turns, store)
-        ),
+        sessions=SessionRequestRouter(session_pair.turns, session_pair.lifecycle),
         evaluation=MeasurementRequests(evaluation, store),
         operations=RegisteredOperationRequests(
             catalog, NamespaceOperationReceipts(store), ObservationFactory(store)

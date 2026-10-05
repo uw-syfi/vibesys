@@ -552,16 +552,10 @@ class _SessionsWorld(_World):
         digest: str | None = None,
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
-        executor = self.host.executor(self.store(faulting))
-        context = context_for(request, lease=lease)
-        if digest is not None:
-            context = context.model_copy(update={"payload_digest": digest})
         try:
-            outcome = await executor.execute(cast("Any", request), context)
+            return await self.host.run(request, self.store(faulting), lease=lease, digest=digest)
         finally:
             self._writes = faulting.writes
-        assert isinstance(outcome, ExecutionResult), outcome
-        return outcome
 
     def effects(self) -> int:
         """Provider turns, journaled invocations and the session binding."""
