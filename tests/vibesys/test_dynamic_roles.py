@@ -6,9 +6,10 @@ import subprocess
 import sys
 
 from vibesys.dynamic_core import dynamic_core_registration
-from vibesys.orchestration.dynamic.core_policy.api import CORE_ROLES
+from vibesys.dynamic_roles import CORE_ROLES
 from vibesys.orchestration.dynamic.strategy.api import Role, role_id
-from vs_runtime.api import AgentCapability
+from vs_runtime.api import AgentCapability, AgentTool
+from vs_runtime.api.core import EVALUATION_TOOL_ID
 
 _LEGACY_ROLES = "vibesys.orchestration.dynamic.agents"
 
@@ -20,11 +21,14 @@ def test_every_strategy_role_is_declared_once_and_the_plugin_serves_them() -> No
     assert tuple(dynamic_core_registration().plugin.agents) == CORE_ROLES
 
 
-def test_a_core_role_answers_with_a_reply_and_needs_no_tool_or_mcp_server() -> None:
+def test_only_the_roles_that_measure_carry_the_evaluation_tool_and_its_mcp_server() -> None:
+    measuring = {role_id(Role.IMPLEMENTER.value).root, role_id(Role.JUDGE.value).root}
     for role in CORE_ROLES:
-        assert role.extra_tools == ()
-        assert AgentCapability.MCP_SERVERS not in role.required_capabilities
         assert str(role.system_prompt).strip()
+        carries_tool = role.extra_tools == (AgentTool(id=EVALUATION_TOOL_ID),)
+        assert carries_tool == (role.id in measuring)
+        assert (AgentCapability.MCP_SERVERS in role.required_capabilities) == carries_tool
+        assert carries_tool or role.extra_tools == ()
 
 
 def test_the_core_policy_does_not_load_the_legacy_role_package() -> None:

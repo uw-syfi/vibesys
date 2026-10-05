@@ -66,9 +66,9 @@ from headless import run as render_run
 from launch import LaunchSettings
 from vibesys.api import ComputeBackend, OrchestrationRegistry, ProfilerKind, RunStatus
 from vibesys.dynamic_core import dynamic_core_registration
+from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.events import CoreEventType
 from vibesys.orchestration.dynamic import PLUGIN
-from vibesys.orchestration.dynamic.core_policy.api import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_agent.api import AgentClient
 from vs_agent.drivers.fake import (
     FAKE_CAPABILITIES,

@@ -1074,7 +1074,18 @@ expose = ["ResolvedRun", "dynamic_operation_catalog", "dynamic_projector", "reso
 # place that stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.dynamic_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.run.evaluation_backend"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.dynamic_roles", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.run.evaluation_backend"]
+
+[[interfaces]]
+from = ["vibesys.dynamic_roles"]
+expose = ["CORE_ROLES", "IMPLEMENTER", "JUDGE", "ORCHESTRATOR", "PROFILER"]
+
+[[modules]]
+# The agent roles of a core dynamic run: host wiring (vs_runtime values, template file
+# paths) that the pure core_policy may not hold.
+path = "vibesys.dynamic_roles"
+layer = "loops"
+depends_on = ["vs_prompts", "vs_runtime", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.strategy"]
 
 [[modules]]
 path = "vs_core._session_scope"

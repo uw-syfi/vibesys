@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vibesys.dynamic_roles import CORE_ROLES
 from vibesys.orchestration.dynamic.core_policy.api import (
-    CORE_ROLES,
     PolicyInputs,
     RunBounds,
     build_core_policy,

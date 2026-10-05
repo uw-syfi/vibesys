@@ -9,15 +9,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.orchestration.dynamic.core_policy._limits import limits_for, run_deadline_at
 from vibesys.orchestration.dynamic.core_policy._replies import reply_schemas
-from vibesys.orchestration.dynamic.core_policy._roles import JUDGE
-from vibesys.orchestration.dynamic.strategy.api import JUDGE_REPLY, DynamicConfig, DynamicStrategy
+from vibesys.orchestration.dynamic.strategy.api import (
+    JUDGE_REPLY,
+    DynamicConfig,
+    DynamicStrategy,
+    Role,
+    role_id,
+)
 from vs_core.api import (
     ArtifactRef,
     AssessmentAuthority,
     AssessmentKind,
     EvidenceRequirements,
     RevisionRef,
-    RoleId,
 )
 from vs_core.api import RunFacts as CoreRunFacts
 
@@ -96,7 +100,7 @@ def requirements_for(config: DynamicConfig) -> EvidenceRequirements:
         assessment_authorities=(
             AssessmentAuthority(
                 kind=AssessmentKind.LOCAL_VALIDATION,
-                role_id=RoleId(root=JUDGE.id),
+                role_id=role_id(Role.JUDGE.value),
                 output_schema=JUDGE_REPLY,
             ),
         ),
