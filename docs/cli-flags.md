@@ -48,7 +48,13 @@ Set the queue allowance in `agent.toml`:
 ```toml
 [evaluation]
 queue_allowance_seconds = 900
+observe_interval_seconds = 10
+observe_backoff_cap_seconds = 120
 ```
+
+`observe_interval_seconds` (default 10) is how often the core polls a running
+evaluation job. `observe_backoff_cap_seconds` (default 120, at least the
+interval) caps the poll delay after the job's state could not be read.
 
 The value must be a positive integer and defaults to 900 seconds. A suspended
 continuation's absolute deadline is its evaluation submit time plus this
@@ -56,6 +62,19 @@ allowance and the sum of declared timeouts for the stages that run, including
 framework setup when requested. Requested stages without a declared timeout
 cannot produce a suspension deadline. Queue estimates inform planning; they do
 not extend the deadline.
+
+### Run time budget
+
+Optionally bound the wall-clock time of one run in `agent.toml`:
+
+```toml
+[run]
+max_run_seconds = 86400
+```
+
+The value must be a positive integer. It is omitted by default, and the run is
+then unbounded in time (the round budget still applies). The core-driven
+`dynamic` strategy reads it as the run deadline.
 
 ## Mental Model
 

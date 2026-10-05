@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack
+from typing import Any, TypedDict, Unpack
 
-from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict
 
 from vs_agent.api import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, serve_stdio
 from vs_evaluation.agent_models import (
     MAX_AGENT_AWAIT_S,
-    AgentEvaluationReply,
     AvailabilityCall,
     AwaitArgs,
     AwaitCall,
@@ -29,29 +27,19 @@ from vs_evaluation.agent_models import (
     ProfilerOperationsCall,
     ProfilerStatusCall,
     RunOperationsCall,
-    SocketFailure,
-    SocketReply,
     StatusCall,
     SubmitCall,
     WaitArgs,
     WaitCall,
 )
+from vs_evaluation.agent_wire import Offer, SocketClient
 from vs_evaluation.profiler_models import (
     AWAIT_CAP_TEXT,
-    AgentToolArgs,
     AwaitProfilerArgs,
     DispatchProfilerArgs,
     NoArgs,
     ProfilerHandleArgs,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-_REPLY = TypeAdapter(SocketReply)
-_TOOL_REPLY = TypeAdapter(AgentEvaluationReply)
-_DEFAULT_TIMEOUT_S = 30.0
-_MAX_REPLY_BYTES = 1_048_576
 
 
 def evaluation_mcp_descriptor(grant: EvaluationGrant, socket_path: str) -> ToolServerDescriptor:
@@ -79,124 +67,9 @@ def evaluation_mcp_descriptor(grant: EvaluationGrant, socket_path: str) -> ToolS
     )
 
 
-class EvaluationServiceClientError(RuntimeError):
-    """The private evaluation service rejected or truncated a tool call."""
-
-    @classmethod
-    def rejected(cls, message: str) -> EvaluationServiceClientError:
-        """Build an error carrying the host's typed boundary diagnostic."""
-        return cls(message)
-
-    @classmethod
-    def unavailable(cls, error: OSError) -> EvaluationServiceClientError:
-        """Build the error for a service the client could not reach or that dropped the call."""
-        return cls(f"evaluation service unavailable: {type(error).__name__}: {error}")
-
-    @classmethod
-    def oversized(cls) -> EvaluationServiceClientError:
-        """Build the fixed reply size violation."""
-        return cls("evaluation service reply exceeded size limit")
-
-    @classmethod
-    def incomplete(cls) -> EvaluationServiceClientError:
-        """Build the fixed incomplete-frame violation."""
-        return cls("evaluation service closed without a complete reply")
-
-    @classmethod
-    def invalid(cls, error: ValidationError) -> EvaluationServiceClientError:
-        """Build the error for arguments the wire call model rejects."""
-        problems = "; ".join(
-            f"{'.'.join(str(part) for part in item['loc']) or 'arguments'}: {item['msg']}"
-            for item in error.errors(include_url=False, include_input=False)
-        )
-        return cls(f"invalid arguments: {problems}")
-
-
-class _SocketClient:
-    def __init__(self, path: Path) -> None:
-        self._path = path
-
-    def call(self, request: BaseModel, *, timeout_s: float = _DEFAULT_TIMEOUT_S) -> str:
-        document = request.model_dump_json().encode() + b"\n"
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(timeout_s)
-                client.connect(str(self._path))
-                client.sendall(document)
-                response = _read_line(client)
-        except OSError as error:
-            # A stopped service, a dropped oversized frame, or a timeout: the
-            # agent gets the typed tool error, never a raw socket exception.
-            raise EvaluationServiceClientError.unavailable(error) from error
-        decoded = _REPLY.validate_json(response)
-        if isinstance(decoded, SocketFailure):
-            raise EvaluationServiceClientError.rejected(decoded.error)
-        reply = _TOOL_REPLY.validate_json(json.dumps(decoded.result))
-        return reply.model_dump_json()
-
-
-def _read_line(client: socket.socket) -> bytes:
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = client.recv(65536)
-        if not chunk:
-            break
-        chunks.append(chunk)
-        total += len(chunk)
-        if total > _MAX_REPLY_BYTES:
-            raise EvaluationServiceClientError.oversized()
-        if b"\n" in chunk:
-            break
-    data = b"".join(chunks)
-    line, separator, _rest = data.partition(b"\n")
-    if not separator:
-        raise EvaluationServiceClientError.incomplete()
-    return line
-
-
 def _socket_wait_s(args: AwaitArgs | AwaitProfilerArgs) -> float:
     """Socket deadline for an await: the service's cap on the wait, plus slack."""
     return min(args.timeout_s, MAX_AGENT_AWAIT_S) + 5.0
-
-
-class _Offer:
-    """Build tools whose input schema is the agent-supplied part of a wire call."""
-
-    def __init__(self, client: _SocketClient, token: str) -> None:
-        self._client = client
-        self._token = token
-
-    def tool[A: AgentToolArgs](
-        self,
-        name: str,
-        description: str,
-        args: type[A],
-        call: type[A],
-        socket_wait_s: Callable[[A], float] | None = None,
-    ) -> ToolSpec[A]:
-        """Offer *call*'s agent-supplied fields, *args*, as the tool *name*.
-
-        *call* subclasses *args* and adds only the host-held ``action`` and
-        ``token``, so the schema the agent is offered and the model the
-        service validates are one definition. A value the wire model still
-        rejects is a typed tool error.
-        """
-        if not issubclass(call, args):
-            message = f"{call.__name__} does not extend the tool arguments {args.__name__}"
-            raise TypeError(message)
-        client, token = self._client, self._token
-
-        def handler(values: A) -> str:
-            try:
-                request = call.model_validate({**values.model_dump(), "token": token})
-            except ValidationError as error:
-                raise EvaluationServiceClientError.invalid(error) from error
-            if socket_wait_s is None:
-                return client.call(request)
-            return client.call(request, timeout_s=socket_wait_s(values))
-
-        return ToolSpec(name=name, description=description, input_schema=args, handler=handler)
 
 
 class _CapabilityArgs(TypedDict, total=False):
@@ -226,7 +99,7 @@ def build_evaluation_tools(
     profiler_available = policy.profiler_available
     run_observer = policy.run_observer
     evaluation_suspension = policy.evaluation_suspension
-    offer = _Offer(_SocketClient(socket_path), token)
+    offer = Offer(SocketClient(socket_path), token)
     tools: list[ToolSpec[Any]] = []
     if evaluation_suspension:
         tools.append(

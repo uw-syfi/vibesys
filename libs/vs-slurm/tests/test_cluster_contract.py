@@ -92,6 +92,9 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
 
             cluster.script(
                 operation_id,
+                # The connector-backed implementation has no COMPLETING lag, and this
+                # suite compares both: the lag has its own tests on the Fake.
+                teardown_lag=0,
                 states=values.get("states", (SlurmJobStatus.PENDING,)),
                 pending_reason=values.get("pending_reason"),
                 estimated_start=values.get("estimated_start"),

@@ -11,6 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._git_process import git_environment, run_git
 from vs_project.project import Project
 
@@ -638,6 +639,12 @@ class GitTracker:
         inspect the candidate but not mutate it.  Callers checkpoint framework
         state first, then use this method to detect any writes the agent made
         during its turn before restoring the checkpoint.
+
+        The framework writes its own run state below ``.vibesys`` while a turn is in
+        flight, so a path is not reported when it is exactly what the framework last
+        published there (see ``_framework_writes``). Any other change below
+        ``.vibesys`` is reported like a change anywhere else: an isolated role must
+        not rewrite framework state either.
         """
         result = self.run(
             [
@@ -651,11 +658,14 @@ class GitTracker:
         )
         prefix_result = self.run(["git", "rev-parse", "--show-prefix"])
         prefix = prefix_result.stdout.decode(errors="replace").strip()
-        return sorted(
+        changed = sorted(
             line[3:].removeprefix(prefix) if prefix else line[3:]
             for line in result.stdout.decode(errors="replace").splitlines()
             if line[3:]
         )
+        return [
+            path for path in changed if not FRAMEWORK_WRITES.is_framework_state(self.root / path)
+        ]
 
     def checkout_tree(
         self,

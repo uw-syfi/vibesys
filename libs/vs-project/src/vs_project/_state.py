@@ -34,6 +34,7 @@ from pydantic import (
 )
 
 import vs_project._paths as project_paths
+from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._manifests import (
     _IDENTIFIER_PATTERN,
     GitObjectId,
@@ -525,6 +526,7 @@ class StateNamespace:
                 if path.exists() and not path.is_file():
                     raise ProjectStateError.state_path_not_file(path)
                 path.unlink(missing_ok=True)
+                FRAMEWORK_WRITES.removed(path)
             else:
                 _atomic_write_bytes(
                     path,
@@ -543,6 +545,7 @@ class StateNamespace:
             raise ProjectStateError.state_path_not_file(path)
         try:
             path.unlink()
+            FRAMEWORK_WRITES.removed(path)
         except OSError as exc:
             message = f"Could not delete VibeSys state model at {path}: {exc}"
             raise ProjectStateError(message) from exc
@@ -636,6 +639,7 @@ class StateNamespace:
             if directory.exists() and not directory.is_dir():
                 raise ProjectStateError.external_state_path_not_directory(self._kind, directory)
             directory.mkdir(parents=True, exist_ok=True)
+            FRAMEWORK_WRITES.claim_directory(directory)
         except OSError as exc:
             raise ProjectStateError.external_state_directory_create_failed(
                 self._kind, directory, exc

@@ -8,6 +8,8 @@ import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from tests.support import run_test_command
 from tests.support.run_execution import run_execution_record
 
@@ -375,6 +377,113 @@ def test_reading_pending_changes_never_writes_the_repository_index(tmp_path: Pat
     assert tracker.pending_changes() == []
 
     assert (index.read_bytes(), index.stat().st_mtime_ns) == before
+
+
+_NAMESPACE = "turn-state"
+_FRAMEWORK_FILES = ("a.json", "b.json")
+_AGENT_PATHS = (
+    "main.py",
+    "pkg/new.py",
+    ".vibesys/other.txt",
+    ".vibesys/state/runs/guard-run/turn-state/a.json",
+    ".vibesys/state/runs/guard-run/turn-state/b.json",
+    ".vibesys/state/runs/guard-run/turn-state/stray.txt",
+)
+_BASELINE = {
+    "main.py": b"VALUE = 1\n",
+    ".vibesys/state/runs/guard-run/turn-state/a.json": b"fw-initial",
+}
+
+
+@st.composite
+def _turn(draw: st.DrawFn) -> list[tuple[str, str, bytes | None]]:
+    """Interleaved framework and agent writes; agent bytes never equal framework bytes."""
+    framework = st.tuples(
+        st.just("framework"),
+        st.sampled_from(_FRAMEWORK_FILES),
+        st.sampled_from([b"fw-0", b"fw-1", b"fw-initial"]),
+    )
+    agent = st.tuples(
+        st.just("agent"),
+        st.sampled_from(_AGENT_PATHS),
+        st.sampled_from([None, b"agent-0", b"agent-1", b"VALUE = 1\n"]),
+    )
+    return draw(st.lists(st.one_of(framework, agent), max_size=8))
+
+
+@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(turn=_turn())
+def test_isolation_reports_exactly_what_the_agent_wrote_including_below_vibesys(
+    tmp_path_factory: pytest.TempPathFactory, turn: list[tuple[str, str, bytes | None]]
+) -> None:
+    """Framework state written during a turn is not the agent's; any other write is.
+
+    The framework publishes run state below ``.vibesys`` while a turn is in flight, so
+    the isolation check cannot ignore that directory without letting a read-only role
+    write there unnoticed. Whatever the interleaving, the paths reported are exactly
+    those whose last writer was the agent and whose content then differs from the
+    baseline the turn started from.
+    """
+    root = tmp_path_factory.mktemp("project")
+    tracker = _initialized_tracker(root)
+    project = _project(root, tracker)
+    namespace = project.state.portable_namespace(tracker.run_id, _NAMESPACE)
+    namespace.write_bytes("a.json", _BASELINE[".vibesys/state/runs/guard-run/turn-state/a.json"])
+    tracker.snapshot_framework_state("baseline framework state", namespace.snapshot())
+    assert tracker.pending_changes() == []
+
+    final: dict[str, bytes | None] = {}
+    last_writer: dict[str, str] = {}
+    for writer, name, content in turn:
+        if writer == "framework":
+            assert content is not None
+            namespace.write_bytes(name, content)
+            path = namespace.agent_visible_path(name)
+        else:
+            path = name
+            target = root / path
+            if content is None:
+                target.unlink(missing_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+        final[path] = content
+        last_writer[path] = writer
+
+    expected = sorted(
+        path
+        for path, writer in last_writer.items()
+        if writer == "agent" and final[path] != _BASELINE.get(path)
+    )
+    assert tracker.pending_changes() == expected
+
+
+def test_an_agent_overwrite_of_a_framework_file_is_reported(tmp_path: Path) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    project = _project(tmp_path, tracker)
+    namespace = project.state.portable_namespace(tracker.run_id, _NAMESPACE)
+    namespace.write_bytes("a.json", b"fw-0")
+    assert tracker.pending_changes() == []
+
+    (tmp_path / namespace.agent_visible_path("a.json")).write_bytes(b"agent-0")
+
+    assert tracker.pending_changes() == [namespace.agent_visible_path("a.json")]
+
+
+def test_files_a_library_writes_in_a_framework_directory_are_not_the_agents(
+    tmp_path: Path,
+) -> None:
+    """A path-based library (the artifact store) writes inside the directory it is handed."""
+    tracker = _initialized_tracker(tmp_path)
+    project = _project(tmp_path, tracker)
+    namespace = project.state.portable_namespace(tracker.run_id, _NAMESPACE)
+    (namespace.external_directory("objects") / "0123abcd").write_bytes(b"object")
+    assert tracker.pending_changes() == []
+
+    stray = tmp_path / ".vibesys" / "stray.txt"
+    stray.write_bytes(b"agent")
+
+    assert tracker.pending_changes() == [".vibesys/stray.txt"]
 
 
 def test_is_retained_separates_reachable_commits_from_dangling_and_unknown_ones(

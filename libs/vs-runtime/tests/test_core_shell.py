@@ -186,3 +186,22 @@ def test_shell_schema_version_rejects_coercion_and_unknown_versions(version: obj
     value["schema_version"] = version
     with pytest.raises(ValidationError, match="schema_version"):
         RuntimeRecord[CounterState].model_validate_json(json.dumps(value))
+
+
+@given(
+    stamps=st.lists(st.integers(min_value=0, max_value=20), min_size=1, max_size=12),
+)
+def test_an_input_stamped_before_an_earlier_commit_still_commits(stamps: list[int]) -> None:
+    """A tool call that arrives during a turn is stamped before the turn's own commit.
+
+    The store's time watermark never moves back, so the shell must stamp every commit
+    and every lease check no earlier than the last commit, whatever order stamps arrive in.
+    """
+    store = FakeStateStore()
+    shell = runtime(store)
+    shell.start("host", now_at=0, lease_duration=1000)
+    for event_time, stamp in enumerate(stamps, start=1):
+        shell.submit(ClockAdvanced(now_at=event_time), now_at=stamp)
+        assert shell.advance()
+        assert shell.holds_lease(now_at=stamp)
+    assert shell.record.envelope.core.run.now_at == len(stamps)

@@ -452,6 +452,7 @@ class EvaluationState(Value):
     continuations: tuple[Continuation, ...] = ()
     evidence: tuple[EvidenceRef, ...] = ()
     submission_budgets: tuple[SubmissionBudget, ...] = ()
+    agent_calls: tuple[AgentCall, ...] = ()
 
     def evidence_for(self, key: EvidenceKey) -> EvidenceRef | None:
         """The ledger record with this full identity, or None."""
@@ -484,6 +485,45 @@ class MeasurementRequested(Value):
     kind: Literal["measurement_requested"] = "measurement_requested"
     scope: Scope
     plan: MeasurementPlan
+
+
+class AgentMeasurementRequested(Value):
+    """An agent's in-turn evaluation tool call, admitted by core like a Measure decision.
+
+    The scope is the calling principal: its owner is the attempt that holds the turn
+    and its generation fences stale callers. call_id is the tool server's idempotency
+    key; a replayed call never allocates a second submission. The candidate must
+    already be a revision (the host snapshots the caller's workspace); budget,
+    admission and identity are decided by core exactly as for Measure.
+    """
+
+    kind: Literal["agent_measurement_requested"] = "agent_measurement_requested"
+    scope: Scope
+    plan: MeasurementPlan
+    call_id: str = Field(min_length=1)
+
+
+class AgentRejection(StrEnum):
+    """Why core refused an agent's evaluation call; nothing was charged."""
+
+    RUN_STOPPING = "run_stopping"
+    """The run is no longer running, so it starts no new work."""
+    NOT_ADMITTED = "not_admitted"
+    """The scope is not a current admitted owner: a stale generation, or a closed attempt."""
+    INVALID_PLAN = "invalid_plan"
+    """The plan names no candidate revision, so no measurement identity exists."""
+    NOT_ALLOWED = "not_allowed"
+    """The identity's submission budget is spent, or the plan exceeds a run limit or deadline."""
+
+
+class AgentCall(Value):
+    """Record of one admitted or rejected agent tool call, keyed by its call_id."""
+
+    call_id: str
+    scope: Scope
+    request_id: RequestId | None = None
+    """The submission it allocated, or None when core rejected the call."""
+    rejection: AgentRejection | None = None
 
 
 class RegisteredJobRequested(Value):
@@ -796,6 +836,7 @@ type EvaluationEvent = Annotated[
     RegisteredJobObserved
     | RegisteredJobRequested
     | MeasurementRequested
+    | AgentMeasurementRequested
     | JobObserved
     | TurnSuspended
     | DeadlineReached
