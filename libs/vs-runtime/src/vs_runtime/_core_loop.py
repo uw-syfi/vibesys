@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -95,6 +96,10 @@ class AdmissionBusyError(RuntimeCommitError):
 
     def __init__(self) -> None:
         super().__init__("admission needs an idle input queue")
+
+
+class LeaseUnavailableError(RuntimeCommitError):
+    """Another host holds the run's lease, or the clock is behind the store's last mutation."""
 
 
 class CoreContractGapError(RuntimeCommitError):
@@ -464,7 +469,7 @@ class CoreRuntime[S: StrategyState]:
         fence = self._store.acquire(host_id, now=now_at, duration=lease_duration)
         if fence is None:
             message = "runtime lease unavailable"
-            raise RuntimeCommitError(message)
+            raise LeaseUnavailableError(message)
         self._fence = fence
         provisional = provisional.model_copy(
             update={"fence": HostFence(host_id=HostId(root=fence.host_id), epoch=fence.epoch)}
@@ -517,6 +522,22 @@ class CoreRuntime[S: StrategyState]:
             raise RuntimeCommitError(message)
         self._fence = renewed
         return renewed
+
+    def release_lease(self, *, now_at: float) -> None:
+        """Give the lease back so a restart need not wait for it to expire.
+
+        Call when the loop ends, cleanly or not. A shell that never started or already
+        lost its lease does nothing; the store releases only a lease this fence holds.
+        """
+        if self._fence is None:
+            return
+        self._time_floor = max(self._time_floor, now_at)
+        self._halted = True
+        # Any failure to release, not only an OSError (a corrupt lease document fails
+        # validation), only makes the next host wait for the lease to expire. This runs
+        # in a ``finally``, so letting it raise would replace the run's own exception.
+        with contextlib.suppress(Exception):
+            self._store.release(self._fence, now=self._time_floor)
 
     def holds_lease(self, *, now_at: float) -> bool:
         """True while this shell is active and the store still honors its fence."""
