@@ -104,6 +104,7 @@ graph TD
     server --> vibesys
     server --> vs_prompts
     vibesys --> vs_agent
+    vibesys --> vs_core
     vibesys --> vs_evaluation
     vibesys --> vs_evaluator_protocol
     vibesys --> vs_github
@@ -249,6 +250,9 @@ graph TD
     vibesys.orchestration.dynamic.prompts --> vibesys.orchestration.dynamic.models
     vibesys.orchestration.dynamic.steers --> vibesys.orchestration.dynamic.models
     vibesys.orchestration.dynamic.steers --> vibesys.orchestration.dynamic.prompts
+    vibesys.orchestration.dynamic.strategy --> vibesys.hypothesis
+    vibesys.orchestration.dynamic.strategy --> vibesys.metrics
+    vibesys.orchestration.dynamic.strategy --> vibesys.orchestration.dynamic.models
     vibesys.orchestration.dynamic.transitions --> vibesys.hypothesis
     vibesys.orchestration.dynamic.transitions --> vibesys.orchestration.dynamic.lifecycle
     vibesys.orchestration.dynamic.transitions --> vibesys.orchestration.dynamic.models
@@ -604,6 +608,10 @@ graph TD
     vibesys.orchestration.dynamic.prompts --> vs_prompts
     vibesys.orchestration.dynamic.steers --> vibesys.orchestration.dynamic.models
     vibesys.orchestration.dynamic.steers --> vibesys.orchestration.dynamic.prompts
+    vibesys.orchestration.dynamic.strategy --> vibesys.hypothesis
+    vibesys.orchestration.dynamic.strategy --> vibesys.metrics
+    vibesys.orchestration.dynamic.strategy --> vibesys.orchestration.dynamic.models
+    vibesys.orchestration.dynamic.strategy --> vs_core
     vibesys.orchestration.dynamic.transitions --> vibesys.hypothesis
     vibesys.orchestration.dynamic.transitions --> vibesys.orchestration.dynamic.lifecycle
     vibesys.orchestration.dynamic.transitions --> vibesys.orchestration.dynamic.models
