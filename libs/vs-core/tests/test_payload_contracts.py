@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from enum import Enum
 from typing import ClassVar, Literal
 
@@ -78,20 +79,49 @@ codec = OperationRegistry((OperationRegistration(
         request_schema=SchemaRef(name="request", version=1),
         outcome_schema=SchemaRef(name="outcome", version=1)),
     request_model=Request, outcome_model=Outcome),))
-wire = codec.encode(Request(payload=tuple(frozenset(x) for x in json.loads(sys.argv[1]))))
-state = initial_state()
-state = state.model_copy(update={
-    "registry": codec.descriptors,
-    "run": state.run.model_copy(update={"capabilities": Capabilities(operations=codec.descriptors)}),
-})
-scope = Scope(owner=state.run.run_id, generation=0)
-request = ExecuteRegisteredOperation(scope=scope, deadline_at=100.0,
-    operation_id=OperationId(root="query"), operation=wire, retry_limit=0)
-event = RequestPrepared(request=request, lifecycle=LifecycleClass.QUERY)
-result = trace_step(state, event, ReducerTrace(frames=(TraceFrame(signal=event,
-    change=IntentsChange(state=state.intents, requests=(request,))),)))
-print(json.dumps([wire.payload_json, result.requests[0].request_id.root]))
+for argument in sys.stdin:
+    wire = codec.encode(Request(payload=tuple(frozenset(x) for x in json.loads(argument))))
+    state = initial_state()
+    state = state.model_copy(update={
+        "registry": codec.descriptors,
+        "run": state.run.model_copy(update={"capabilities": Capabilities(operations=codec.descriptors)}),
+    })
+    scope = Scope(owner=state.run.run_id, generation=0)
+    request = ExecuteRegisteredOperation(scope=scope, deadline_at=100.0,
+        operation_id=OperationId(root="query"), operation=wire, retry_limit=0)
+    event = RequestPrepared(request=request, lifecycle=LifecycleClass.QUERY)
+    result = trace_step(state, event, ReducerTrace(frames=(TraceFrame(signal=event,
+        change=IntentsChange(state=state.intents, requests=(request,))),)))
+    print(json.dumps([wire.payload_json, result.requests[0].request_id.root]))
+    sys.stdout.flush()
 """
+
+
+@pytest.fixture(scope="module")
+def hash_seed_workers() -> Iterator[list[subprocess.Popen[str]]]:
+    """One interpreter per hash seed, reused across examples: importing vs_core costs seconds."""
+    workers = [
+        # LW-126001 [S603]; Fixed interpreter/program; generated payloads arrive on stdin.
+        # > A shell wrapper adds quoting risks; multiprocessing inherits an initialized
+        # > hash seed instead of starting an interpreter with the required seed.
+        subprocess.Popen(  # noqa: S603
+            [sys.executable, "-c", HASH_SCRIPT],
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        for seed in ("1", "23")
+    ]
+    try:
+        yield workers
+    finally:
+        for worker in workers:
+            assert worker.stdin is not None
+            worker.stdin.close()
+            assert worker.wait() == 0
+            assert worker.stdout is not None
+            worker.stdout.close()
 
 
 @settings(max_examples=12)
@@ -102,21 +132,18 @@ print(json.dumps([wire.payload_json, result.requests[0].request_id.root]))
         max_size=4,
     )
 )
-def test_wire_and_request_digest_are_independent_of_hash_seed(payload: list[set[str]]) -> None:
+def test_wire_and_request_digest_are_independent_of_hash_seed(
+    hash_seed_workers: list[subprocess.Popen[str]], payload: list[set[str]]
+) -> None:
     argument = json.dumps([sorted(values) for values in payload])
-    outputs = [
-        # LW-126001 [S603]; Fixed interpreter/program; generated payload is a separate argv.
-        # > A shell wrapper adds quoting risks; multiprocessing inherits an initialized
-        # > hash seed instead of starting an interpreter with the required seed.
-        subprocess.run(  # noqa: S603
-            [sys.executable, "-c", HASH_SCRIPT, argument],
-            env={**os.environ, "PYTHONHASHSEED": seed},
-            check=True,
-            text=True,
-            capture_output=True,
-        ).stdout
-        for seed in ("1", "23")
-    ]
+    outputs = []
+    for worker in hash_seed_workers:
+        assert worker.stdin is not None
+        assert worker.stdout is not None
+        worker.stdin.write(argument + "\n")
+        worker.stdin.flush()
+        outputs.append(worker.stdout.readline())
+    assert outputs[0]
     assert outputs[0] == outputs[1]
 
 
