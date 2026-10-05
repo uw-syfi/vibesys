@@ -24,6 +24,7 @@ from tests.support.session_world import (
     ProviderFaults,
     SessionHost,
 )
+from tests.support.skeleton_faults import FaultingExecutors, FaultSchedule
 from tests.support.skeleton_strategy import DECLARATION, SkeletonState, SkeletonStrategy
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
 
@@ -80,6 +81,7 @@ class World:
     cluster: ScenarioCluster
     agents: SessionHost
     strategy: SkeletonStrategy = field(default_factory=SkeletonStrategy)
+    faults: FaultSchedule | None = None
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -128,12 +130,16 @@ class World:
             stage_failure_text=stage_failure_text,
             cluster=self.cluster,
         )
-        return core_bindings(
+        bindings = core_bindings(
             receipts=self.env.receipts_namespace(),
             workspaces=workspaces,
             evaluation=evaluation,
             sessions=SessionServices(self.agents.sessions(), self.agents.resolver),
         )
+        if self.faults is None:
+            return bindings
+        executors = FaultingExecutors.around(bindings.executors, self.faults)
+        return dataclasses.replace(bindings, executors=executors)
 
     def runtime(self) -> Process:
         """A shell over this run's durable store, as one new process would start it.
@@ -336,7 +342,9 @@ def _open_agents(root: Path) -> SessionHost:
 
 @contextmanager
 def open_skeleton_world(
-    tmp_path: Path, strategy: SkeletonStrategy | None = None
+    tmp_path: Path,
+    strategy: SkeletonStrategy | None = None,
+    faults: FaultSchedule | None = None,
 ) -> Iterator[World]:
     """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
     with open_workspace_env(tmp_path) as env:
@@ -347,4 +355,5 @@ def open_skeleton_world(
             cluster=ScenarioCluster(),
             agents=agents,
             strategy=strategy or SkeletonStrategy(),
+            faults=faults,
         )
