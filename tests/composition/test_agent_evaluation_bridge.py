@@ -268,6 +268,7 @@ async def test_an_agent_submits_through_the_tool_and_is_resumed_once(tmp_path: P
         process, _ = await run(played)
         state = process.shell.record.envelope.core
         strategy = process.shell.record.envelope.strategy
+        assert isinstance(strategy, WaitingState)
         assert state.run.status == RunStatus.TERMINAL
         assert len(played.writer.handles) == 1
         assert played.writer.refusals == []

@@ -584,10 +584,7 @@ def _deferred_wake(
         return ()
     if not _conclusive(event.observation):
         return ()
-    if not any(
-        c.phase == ContinuationPhase.WAITING and job.resource_id in c.jobs
-        for c in state.continuations
-    ):
+    if not _awaited(state, job.resource_id):
         return ()
     return (
         ContinuationJobsChanged(
@@ -595,6 +592,13 @@ def _deferred_wake(
             observation=event.observation,
             previous=UnobservedJobFacts(resource_id=job.resource_id),
         ),
+    )
+
+
+def _awaited(state: EvaluationState, resource_id: ResourceId) -> bool:
+    """Whether a waiting continuation names the job, so its authorization publishes the history."""
+    return any(
+        c.phase == ContinuationPhase.WAITING and resource_id in c.jobs for c in state.continuations
     )
 
 
@@ -1177,7 +1181,7 @@ def _job_observed(
         # While the ledger still has to take the job's end as its submission's own, the
         # history and the wake wait for it (see `_submission_observed`): both would read a
         # history in which this submission is not closed.
-        signals=closing or (*_history_signals(state, context, job.scope), wake),
+        signals=closing or (*_history_unless_awaited(state, context, job, event), wake),
         requests=requests if context.run.status != RunStatus.TERMINAL else (),
         events=events,
     )
@@ -1301,6 +1305,22 @@ def _job_budget(
         if isinstance(updated, Proven)
         else state
     )
+
+
+def _history_unless_awaited(
+    state: EvaluationState,
+    context: EvaluationContext,
+    job: OwnedJob | RegisteredOwnedJob,
+    event: JobObserved | RegisteredJobObserved,
+) -> tuple[AttemptEvaluationHistoryUpdated, ...]:
+    """The history signal, unless the continuation this job's end wakes publishes it itself."""
+    if (
+        job.resource_id is not None
+        and _conclusive(event.observation)
+        and _awaited(state, job.resource_id)
+    ):
+        return ()
+    return _history_signals(state, context, job.scope)
 
 
 def _history_signals(

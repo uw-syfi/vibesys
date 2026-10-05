@@ -421,7 +421,7 @@ class CoreRuntime[S: StrategyState]:
         if self._halted or self._fence is None:
             return False
         self._time_floor = max(self._time_floor, now_at)
-        return self._store.verify(self._fence, now=now_at)
+        return self._store.verify(self._fence, now=max(now_at, self._time_floor))
 
     def submit(self, event: CoreEvent, *, now_at: float) -> None:
         """Queue validated input. Redeliver durable occurrences after precommit crashes."""
@@ -558,10 +558,12 @@ class CoreRuntime[S: StrategyState]:
         if self._fence is None:
             message = "runtime has no lease"
             raise RuntimeCommitError(message)
+        # The store's time watermark never moves back, so a commit made after a later one
+        # (an input stamped before an earlier commit, such as a tool call that arrived
+        # during a turn) is stamped no earlier than the last commit.
+        stamp = max(now_at, self._time_floor)
         try:
-            result = self._store.commit(
-                self._storage_revision, stored, self._fence, now=max(now_at, self._time_floor)
-            )
+            result = self._store.commit(self._storage_revision, stored, self._fence, now=stamp)
         except OSError:
             self._halted = True
             raise
@@ -572,6 +574,7 @@ class CoreRuntime[S: StrategyState]:
                 raise RuntimeCommitError(message)
             self._record = validated
             self._storage_revision = stored.revision
+            self._time_floor = stamp
             return
         self._halted = True
         reloaded = self._load()
@@ -626,7 +629,9 @@ class CoreRuntime[S: StrategyState]:
             _Input[S](event=DispatchAuthorized(request_id=intent.request_id), now_at=now_at),
             transition,
         )
-        if self._fence is None or not self._store.verify(self._fence, now=now_at):
+        if self._fence is None or not self._store.verify(
+            self._fence, now=max(now_at, self._time_floor)
+        ):
             self._halted = True
             message = "runtime fence lost before execution"
             raise RuntimeCommitError(message)
@@ -724,7 +729,9 @@ class CoreRuntime[S: StrategyState]:
         self._require_active()
         if not self.record.pending_publications:
             return False
-        if self._fence is None or not self._store.verify(self._fence, now=now_at):
+        if self._fence is None or not self._store.verify(
+            self._fence, now=max(now_at, self._time_floor)
+        ):
             self._halted = True
             message = "runtime fence lost before publication"
             raise RuntimeCommitError(message)
@@ -733,7 +740,9 @@ class CoreRuntime[S: StrategyState]:
         try:
             await delivery.publish(
                 publication,
-                PublicationContext(fence=self._fence, now_at=now_at, lease=_ShellLease(self)),
+                PublicationContext(
+                    fence=self._fence, now_at=max(now_at, self._time_floor), lease=_ShellLease(self)
+                ),
             )
             self._commit(
                 self.record.model_copy(
