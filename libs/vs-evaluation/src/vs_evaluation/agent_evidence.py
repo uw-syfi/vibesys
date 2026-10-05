@@ -11,7 +11,7 @@ import hashlib
 from enum import StrEnum
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from vs_evaluator_protocol.api import PartialMeasurement
 
@@ -32,6 +32,19 @@ class EvidenceOutcome(StrEnum):
     PASSED = "passed"
     FAILED = "failed"
     OBSERVED = "observed"
+
+
+class EvidenceFailureKind(StrEnum):
+    """Whose fault a failed stage is: the candidate's workload, or the machinery running it.
+
+    A workload failure is a permanent fact about the candidate, so it is never retried.
+    An infrastructure failure (a node loss, an out-of-memory kill, an evaluator that
+    died before writing its result record) says nothing about the candidate, so the
+    measurement may be repeated.
+    """
+
+    WORKLOAD = "workload"
+    INFRASTRUCTURE = "infrastructure"
 
 
 class ContentDigest(BaseModel):
@@ -97,14 +110,25 @@ class TrustedEvidence(BaseModel):
     # What a failed stage measured before it stopped, as its evaluator
     # reported it through the evaluator result protocol; never inferred.
     partial_measurement: PartialMeasurement | None = None
+    # Set by the executor that ran the stage, only on failed evidence. Absent on
+    # evidence recorded before failures were classified, which proves neither kind.
+    failure_kind: EvidenceFailureKind | None = None
     artifacts: tuple[ArtifactDigest, ...] = ()
     accepted_round: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _kind_only_when_failed(self) -> Self:
+        if self.failure_kind is not None and self.outcome is not EvidenceOutcome.FAILED:
+            message = "only failed evidence carries a failure kind"
+            raise ValueError(message)
+        return self
 
 
 __all__ = [
     "MAX_EVIDENCE_SUMMARY_CHARS",
     "ArtifactDigest",
     "ContentDigest",
+    "EvidenceFailureKind",
     "EvidenceFingerprints",
     "EvidenceKind",
     "EvidenceMetric",

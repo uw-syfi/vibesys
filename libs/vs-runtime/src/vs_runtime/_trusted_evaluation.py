@@ -510,6 +510,20 @@ class TrustedBenchmarkDecoding:
     partial: PartialMeasurement | None = None
     reason: str | None = None
     violation: str | None = None
+    # Set on every failed run: a run whose evaluator wrote no result record, whatever
+    # the exit status, is infrastructure; any record, even a malformed one, is the workload's.
+    failure_kind: BenchmarkFailureKind | None = None
+
+
+def _has_result_record(framed: str) -> bool:
+    """Whether the evaluator wrote any result record between the trusted wrapper's markers.
+
+    The wrapper prints both markers even when the evaluator dies first, so a run whose
+    evaluator never wrote its record frames nothing.
+    """
+    _, marker, framed_result = framed.rpartition(_BENCHMARK_MARKER)
+    encoded, end_marker, _ = framed_result.partition(_BENCHMARK_END_MARKER)
+    return bool(marker and end_marker and encoded.strip())
 
 
 def _benchmark_failure_kind(
@@ -521,16 +535,12 @@ def _benchmark_failure_kind(
     even when the evaluator writes nothing, so empty or absent results remain retryable.
     Negative or absent exit codes describe cancellation, timeout, or transport loss.
     """
-    _, marker, framed_result = framed.rpartition(_BENCHMARK_MARKER)
-    encoded, end_marker, _ = framed_result.partition(_BENCHMARK_END_MARKER)
     if (
         execution_failure is None
         and result.exit_code is not None
         and result.exit_code >= 0
         and not result.cancelled
-        and marker
-        and end_marker
-        and encoded.strip()
+        and _has_result_record(framed)
     ):
         return BenchmarkFailureKind.WORKLOAD
     return BenchmarkFailureKind.INFRASTRUCTURE
@@ -548,20 +558,25 @@ def decode_trusted_benchmark_run(
     The evaluator's own `error` record decides first, so a run that reported a
     failure keeps its partial measurement even if its exit status was lost.
     """
+    kind = (
+        BenchmarkFailureKind.WORKLOAD
+        if _has_result_record(framed)
+        else BenchmarkFailureKind.INFRASTRUCTURE
+    )
     try:
         failure = _decode_benchmark_failure(framed, contract)
     except ValueError as error:
-        return TrustedBenchmarkDecoding(passed=False, violation=str(error))
+        return TrustedBenchmarkDecoding(passed=False, violation=str(error), failure_kind=kind)
     if failure is not None:
         return TrustedBenchmarkDecoding(
-            passed=False, partial=failure.partial, reason=failure.failure
+            passed=False, partial=failure.partial, reason=failure.failure, failure_kind=kind
         )
     if not exited_cleanly:
-        return TrustedBenchmarkDecoding(passed=False)
+        return TrustedBenchmarkDecoding(passed=False, failure_kind=kind)
     try:
         row, metrics = decode_trusted_benchmark_output(framed, contract, required_metrics)
     except (ProtocolError, ValueError, TypeError, json.JSONDecodeError) as error:
-        return TrustedBenchmarkDecoding(passed=False, violation=str(error))
+        return TrustedBenchmarkDecoding(passed=False, violation=str(error), failure_kind=kind)
     return TrustedBenchmarkDecoding(passed=True, row=row, metrics=metrics)
 
 

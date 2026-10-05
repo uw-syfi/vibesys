@@ -194,6 +194,27 @@ class PublicationDelivery(Protocol):
     ) -> PublicationAcknowledgement: ...
 
 
+class CommitObserver(Protocol):
+    """Hears each runtime record the store confirmed, for display and projections only.
+
+    It runs after the commit is durable and on the loop's thread, and it must not raise.
+    ``previous`` is the record this process held before the commit: the last durable one,
+    the fresh record of a run that had none, or None when it held nothing.
+    """
+
+    def committed(self, previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]) -> object:
+        """One commit became durable."""
+        ...
+
+
+class IgnoreCommits:
+    """The observer of a host that shows nothing about commits."""
+
+    def committed(self, previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]) -> None:
+        """Drop the report."""
+        del previous, current
+
+
 class _Input[S: StrategyState](BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     event: CoreEvent
@@ -232,6 +253,7 @@ class CoreRuntimeBindings:
     registry: OperationRegistry = field(default_factory=OperationRegistry)
     executors: RequestExecutors = field(default_factory=RequestExecutors)
     transitions: CoreTransitions = field(default_factory=ProductionCoreTransitions)
+    commits: CommitObserver = field(default_factory=IgnoreCommits)
     check_liveness: bool = False
     """Check ``orphan_waits`` after every commit, not only at start. Linear in state size."""
 
@@ -262,6 +284,7 @@ class CoreRuntime[S: StrategyState]:
         self._registry = selected.registry
         self._executors = selected.executors
         self._transitions = selected.transitions
+        self._commits = selected.commits
         self._check_liveness = selected.check_liveness
         self._record_model = cast(
             "type[RuntimeRecord[S]]", RuntimeRecord.__class_getitem__(type(strategy.state))
@@ -273,6 +296,7 @@ class CoreRuntime[S: StrategyState]:
         self._storage_revision: int | None = None
         self._fence: StoreFence | None = None
         self._halted = False
+        self._strategy_wake_at: float | None = None
         self._busy = False
         self._dispatched = 0
         self._last_kind: str | None = None
@@ -435,9 +459,11 @@ class CoreRuntime[S: StrategyState]:
         if self._halted or self._fence is None:
             message = "runtime inactive, busy or commit unconfirmed"
             raise RuntimeCommitError(message)
+        # Like every commit and check, renewal never stamps earlier than the last commit:
+        # the store rejects a stamp below its watermark, which the commit raised.
         self._time_floor = max(self._time_floor, now_at)
         try:
-            renewed = self._store.renew(self._fence, now=now_at, duration=lease_duration)
+            renewed = self._store.renew(self._fence, now=self._time_floor, duration=lease_duration)
         except OSError:
             self._halted = True
             raise
@@ -484,6 +510,11 @@ class CoreRuntime[S: StrategyState]:
         self._tail = (self._storage_revision, transition.state)
         return transition
 
+    @property
+    def strategy_wake_at(self) -> float | None:
+        """The time the strategy's latest proposal waits for, or None when it waits for none."""
+        return self._strategy_wake_at
+
     def decide(self, *, now_at: float) -> None:
         """Queue a strategy call against the revision observed when it is consumed."""
         self._require_active(queue_only=True)
@@ -512,6 +543,7 @@ class CoreRuntime[S: StrategyState]:
             proposal = self._strategy.bind(self.record.envelope.strategy).decide(
                 project(self.record.envelope.core)
             )
+            self._strategy_wake_at = proposal.wake_at
             item = _Input[S](
                 event=ProposalSubmitted(
                     decisions=tuple(
@@ -585,6 +617,11 @@ class CoreRuntime[S: StrategyState]:
         # on every load by `_decode`. `model_copy` skips validators, so the record's own
         # invariants are rechecked here.
         self._registry.validate_envelope(candidate.envelope)
+        # A strategy state built with `model_copy(update=...)` never ran its field validators;
+        # validating it on the value keeps an invalid state from becoming a durable record
+        # that no later process can load.
+        strategy = candidate.envelope.strategy
+        type(strategy).model_validate(strategy.model_dump(warnings=False))
         candidate.check_publications()
         self._check_identity(candidate.envelope)
         stored = StoredEnvelope(
@@ -609,9 +646,11 @@ class CoreRuntime[S: StrategyState]:
                 self._halted = True
                 message = "store acknowledged a different runtime record"
                 raise RuntimeCommitError(message)
+            previous = self._record
             self._record = candidate
             self._storage_revision = stored.revision
             self._time_floor = stamp
+            self._commits.committed(previous, candidate)
             if self._check_liveness:
                 self._halt_on_orphan_waits()
             return

@@ -62,6 +62,7 @@ from vs_core.api import (
     EvidenceKind,
     IntentBlocked,
     InvocationRef,
+    MeasurementFailure,
     MeasurementResult,
     ObservationStatus,
     OperationResult,
@@ -261,8 +262,13 @@ def on_operation(
     return state
 
 
-def on_measurement(state: DynamicStrategyState, event: MeasurementResult) -> DynamicStrategyState:
+def on_measurement(
+    state: DynamicStrategyState, event: MeasurementResult, config: DynamicConfig
+) -> DynamicStrategyState:
     """Record a candidate's trusted evidence keys for interpretation.
+
+    A measurement that infrastructure interrupted says nothing about the candidate, so
+    it is submitted again, within `max_input_measurement_attempts`, instead of failing it.
 
     The result must come from the awaiting attempt's own scope and generation, and
     only evidence of the measured revision and purpose that core trusts is kept.
@@ -288,9 +294,15 @@ def on_measurement(state: DynamicStrategyState, event: MeasurementResult) -> Dyn
         purpose="profile" if current.plan.kind is WorkKind.PROFILE else "official",
     )
     if not evidence:
-        return fail(
-            state, index, f"measurement produced no trusted evidence ({event.status.value})"
-        )
+        if (
+            event.failure is MeasurementFailure.INFRASTRUCTURE
+            and current.measurements < config.max_input_measurement_attempts
+        ):
+            return _put(
+                state, index, current.model_copy(update={"step": Step.NEEDED, "awaiting": None})
+            )
+        reason = f"measurement produced no trusted evidence ({event.status.value})"
+        return fail(state, index, f"{reason}: {event.diagnostic}" if event.diagnostic else reason)
     record = current.model_copy(
         update={
             "evidence": evidence,
@@ -353,12 +365,17 @@ def _correct(
 
 
 def _ask_again(
-    state: DynamicStrategyState, index: int, config: DynamicConfig, event: TurnResult
+    state: DynamicStrategyState,
+    index: int,
+    config: DynamicConfig,
+    event: TurnResult,
+    now: float,
 ) -> DynamicStrategyState:
     """The transport lost the turn: ask the role again, or fail the workstream.
 
     The new turn is a correction of the lost one (it consumes no paid retry), asks the
-    same question, and counts against ``max_turn_drops`` for this logical turn. A resume
+    same question after the drop backoff on the run clock, and counts against
+    ``max_turn_drops`` for this logical turn. A resume
     cannot be asked again: core authorizes each continuation's resume once.
     """
     record = state.attempts[index]
@@ -379,6 +396,7 @@ def _ask_again(
             "charge": "correction",
             "invocation": event.invocation,
             "prompts": (),
+            "ask_not_before": now + config.drop_backoff(turn.drops),
         }
     )
     return _put(
@@ -574,14 +592,17 @@ def _decode(
 
 def _unfinished(
     state: DynamicStrategyState,
+    view: RunView,
     index: int,
     config: DynamicConfig,
-    role: Role,
     event: TurnResult,
 ) -> DynamicStrategyState:
     """A turn ended without a usable reply: ask again if lost, retry the implementer or fail."""
+    role = role_of(state.attempts[index].phase)
+    if role is None:
+        return state
     if event.failure is TurnFailureKind.TRANSPORT_LOST:
-        return _ask_again(state, index, config, event)
+        return _ask_again(state, index, config, event, view.run.now_at)
     reason = f"{role.value} turn did not complete ({event.observation.status.value})"
     if role is Role.IMPLEMENTER:
         return _retry(state, index, config, event.detail or reason, reason)
@@ -600,7 +621,7 @@ def on_turn(
     if role is None:
         return state
     if event.observation.status is not ObservationStatus.SUCCEEDED or event.output_json is None:
-        return _unfinished(state, index, config, role, event)
+        return _unfinished(state, view, index, config, event)
     if role is Role.PROFILER:
         return _put(state, index, _profiled(record, config))
     return _answered(state, index, view, config, event)

@@ -132,12 +132,14 @@ class _SharedCancelClient(FakeAgentClient):
         capabilities: AgentCapabilities,
         session_store: SessionStore | None,
         skill_selection: SkillSelection,
+        log_dir: Path | None,
     ) -> None:
         super().__init__(
             capabilities=capabilities,
             session_reuse=True,
             session_store=session_store,
             skill_selection=skill_selection,
+            log_dir=log_dir,
         )
         self._seen = seen
 
@@ -148,6 +150,22 @@ class _SharedCancelClient(FakeAgentClient):
     def cancel_session(self, key: AgentSessionKey) -> None:
         super().cancel_session(key)
         self._seen.set()
+
+
+class KnownGapError(AssertionError):
+    """A scenario step that fails today for a tracked gap in another owner's code.
+
+    Each gap has its own subclass so an expected failure names the gap it waits on: an xfail
+    with ``raises=<subclass>`` still fails on any other mistake in the scenario.
+    """
+
+
+class CrashGapError(KnownGapError):
+    """A run cannot be crashed and resumed: a scripted agent error is retried, not fatal."""
+
+    def __init__(self) -> None:
+        """Say why there is nothing to resume."""
+        super().__init__("the scripted planner death was retried: the run never crashed")
 
 
 class ScriptExhaustedError(AssertionError):
@@ -257,6 +275,7 @@ class ScriptedAgents:
         *,
         session_store: SessionStore | None = None,
         skill_selection: SkillSelection = NULL_SKILL_SELECTION,
+        log_dir: Path | None = None,
         **_kwargs: object,
     ) -> FakeAgentClient:
         """Build a Fake client with the capabilities the agent CLI drivers report."""
@@ -265,6 +284,7 @@ class ScriptedAgents:
             capabilities=AgentCapabilities(session_reuse=True, provider_session_resume=True),
             session_store=session_store,
             skill_selection=skill_selection,
+            log_dir=log_dir,
         )
         for role in (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id):
             client.set_response(role, self._answer)
@@ -452,14 +472,19 @@ class LoopInput:
         """Return the cluster's pending-job announcement path (create a FIFO there)."""
         return self.cluster / SUBMITTED_FILE
 
-    def request(self, **flags: int | str) -> RunRequest:
+    def request(self, **flags: float | str) -> RunRequest:
         """Build the run request from the command line, as the operator's CLI does.
 
         ``flags`` are long options without the dashes, underscores for hyphens:
         ``max_rounds=2`` is ``--max-rounds 2``. The run environment is the Fake Slurm
         cluster unless ``run_environment`` says otherwise.
         """
-        chosen: dict[str, int | str] = {"max_rounds": 1, "max_in_flight": 1, **flags}
+        chosen: dict[str, float | str] = {
+            "max_rounds": 1,
+            "max_in_flight": 1,
+            "turn_drop_backoff_seconds": 0.01,
+            **flags,
+        }
         argv = [
             "--outer-loop", "dynamic",
             "--input", str(self.root),
@@ -556,6 +581,7 @@ def _assert_invariants(request: RunRequest, run: LoopRun) -> None:
         [event.model_dump(mode="json") for event in run.events],
         load_envelope(root, run.run_id),
         root.parent / "cluster",
+        Project.log_directory_for(root, run.run_id),
     )
     violations = check(records)
     assert not violations, [f"{v.invariant}: {v.detail}" for v in violations]

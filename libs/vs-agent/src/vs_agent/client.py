@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import threading
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
@@ -38,6 +37,7 @@ from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
+from vs_agent.usage_records import USAGE_FILE, append_usage_record, usage_dict
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -149,34 +149,13 @@ class _LoggerObserver:
                 ),
             )
         elif event.kind is AgentEventKind.USAGE and event.usage is not None:
-            self._logger.update_usage(_usage_dict(event.usage))
+            self._logger.update_usage(usage_dict(event.usage))
         elif event.kind is AgentEventKind.SKILL:
             self._logger.on_diagnostic(f"[skill] {event.text or 'unknown'}")
 
     def close(self) -> None:
         """Close any assistant-text segment left open at turn completion."""
         self._logger.end_text()
-
-
-def _usage_dict(usage: AgentUsage) -> dict[str, int | float | None]:
-    return {
-        "input_tokens": usage.input_tokens,
-        "cache_creation_input_tokens": usage.cache_creation_input_tokens,
-        "cache_read_input_tokens": usage.cache_read_input_tokens,
-        "output_tokens": usage.output_tokens,
-        "total_cost_usd": usage.total_cost_usd,
-        "duration_ms": usage.duration_ms,
-    }
-
-
-def _skill_dict(skills: AgentSkillUse) -> dict[str, int | list[str] | None]:
-    """Usage-record fields for skill use; ``None`` where the provider cannot say."""
-    invoked = skills.invoked
-    return {
-        "skill_uses": None if invoked is None else len(invoked),
-        "skills_invoked": None if invoked is None else list(invoked),
-        "skills_offered": None if skills.offered is None else len(skills.offered),
-    }
 
 
 def _translate_tool_servers(
@@ -536,24 +515,22 @@ class AgentClient:
             return
         usage = result.usage if result is not None else AgentUsage()
         skills = result.skills if result is not None else AgentSkillUse()
-        record = {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "kind": kind,
-            "round_label": round_label,
-            "provider": self._provider,
-            "model": model,
-            "reasoning_effort": reasoning_effort,
-            **_usage_dict(usage),
-            **_skill_dict(skills),
-        }
-        target = self._log_dir / "usage.jsonl"
         try:
-            with target.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps(record) + "\n")
+            append_usage_record(
+                self._log_dir,
+                kind=kind,
+                round_label=round_label,
+                provider=self._provider,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                usage=usage,
+                skills=skills,
+            )
         except OSError as exc:
             _emit_and_log(
                 self._sink,
-                f"[usage] failed to append {target}: {type(exc).__name__}: {exc}",
+                f"[usage] failed to append {self._log_dir / USAGE_FILE}: "
+                f"{type(exc).__name__}: {exc}",
                 self._run_log_file,
             )
 

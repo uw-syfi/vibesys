@@ -89,7 +89,7 @@ class DynamicStrategy:
         attempts.decide(draft)
         planner.decide(draft)
         run.decide(draft)
-        return Proposal(state=draft.state, decisions=tuple(draft.decisions))
+        return Proposal(state=draft.state, decisions=tuple(draft.decisions), wake_at=draft.wake_at)
 
     def on_event(self, view: RunView, event: StrategyEvent) -> DynamicStrategyState:
         """Fold one core feedback into the scientific state."""
@@ -103,7 +103,7 @@ class DynamicStrategy:
         if isinstance(event, MeasurementResult):
             if event.scope.owner.kind == "run":
                 return baseline.on_measurement(state, view, event, self.config)
-            return attempt_events.on_measurement(state, event)
+            return attempt_events.on_measurement(state, event, self.config)
         return self._lifecycle(state, view, event)
 
     def _turn(

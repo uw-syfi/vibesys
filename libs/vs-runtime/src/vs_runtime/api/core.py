@@ -20,12 +20,14 @@ from vs_runtime._agent_evaluation import (
     ScopeWorkspaces,
 )
 from vs_runtime._core_loop import (
+    CommitObserver,
     CoreContractGapError,
     CoreRuntime,
     CoreRuntimeBindings,
     CoreTransitions,
     DispatchCapExceededError,
     DispatchProgress,
+    IgnoreCommits,
     ObservationRejectedError,
     OrphanWaitError,
     OwnerEventRejectedError,
@@ -72,6 +74,7 @@ from vs_runtime._core_requests import (
     settle,
 )
 from vs_runtime._core_run import (
+    HEARTBEAT_TASK,
     CoreRunHost,
     NextWake,
     RunClock,
@@ -87,6 +90,7 @@ from vs_runtime._core_run import (
 )
 from vs_runtime._core_wiring import (
     CoreStartup,
+    MeasurementServices,
     SessionServices,
     core_bindings,
     empty_catalog,
@@ -100,6 +104,13 @@ from vs_runtime._evidence_ledger import (
     ReceiptEvidenceLedger,
 )
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
+from vs_runtime._measurement_progress import (
+    IgnoreMeasurement,
+    MeasurementObserver,
+    StageMetric,
+    StageSettled,
+    StageStarted,
+)
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
@@ -180,6 +191,7 @@ from vs_runtime._session_resolver import (
     open_session_requests,
     session_executors,
 )
+from vs_runtime._turn_lifecycle import LifecycleReportingExecutor, report_turns
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
 from vs_runtime._workspace_receipts import (
@@ -198,6 +210,7 @@ from vs_runtime._workspace_requests import (
 __all__ = [
     "EVALUATION_TOOL_ID",
     "HAND_ROLLED_ROLES",
+    "HEARTBEAT_TASK",
     "NOT_TARGET_FACTS",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
@@ -217,6 +230,7 @@ __all__ = [
     "BlockDiagnostic",
     "CancellableOwner",
     "Cancelled",
+    "CommitObserver",
     "Conflict",
     "ContinuationBinding",
     "CoreContractGapError",
@@ -240,6 +254,8 @@ __all__ = [
     "ExecutionResult",
     "ExecutorRefusal",
     "ExecutorRole",
+    "IgnoreCommits",
+    "IgnoreMeasurement",
     "Indeterminate",
     "Inspected",
     "Inspection",
@@ -249,7 +265,10 @@ __all__ = [
     "JournalPublicationDelivery",
     "JournalRunInvocations",
     "JournalSemanticEvents",
+    "LifecycleReportingExecutor",
+    "MeasurementObserver",
     "MeasurementRequests",
+    "MeasurementServices",
     "NamespaceOperationReceipts",
     "NeverBegun",
     "NextWake",
@@ -319,6 +338,9 @@ __all__ = [
     "SessionServices",
     "SessionSpecFactory",
     "Settled",
+    "StageMetric",
+    "StageSettled",
+    "StageStarted",
     "SteerArtifacts",
     "StoreWorkspaceReceipts",
     "ToolServerSource",
@@ -343,6 +365,7 @@ __all__ = [
     "production_owners",
     "receipt_executor_kinds",
     "reject_legacy_resume",
+    "report_turns",
     "resolve_core_resume",
     "result_type_name",
     "revision_ref",

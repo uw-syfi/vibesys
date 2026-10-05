@@ -237,6 +237,26 @@ def test_records_load_from_a_run_layout(tmp_path: Path) -> None:
     assert records.cluster_jobs == {"5000": "PENDING"}
 
 
+def test_core_records_load_usage_from_the_runs_log_directories(tmp_path: Path) -> None:
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "usage.jsonl").write_text('{"kind": "dynamic-orchestrator"}\n', encoding="utf-8")
+    candidate_logs = tmp_path / "runtime" / "workspaces" / "m-h1" / "logs"
+    candidate_logs.mkdir(parents=True)
+    (candidate_logs / "usage.jsonl").write_text('{"kind": "dynamic-judge"}\n', encoding="utf-8")
+    finished = [
+        _event("agent_execution_finished", agent_kind="dynamic-orchestrator"),
+        _event("agent_execution_finished", agent_kind="dynamic-judge"),
+        _event("agent_execution_finished", agent_kind="dynamic-judge"),
+    ]
+
+    records = RunRecords.from_core(finished, None, logs_dir=logs)
+
+    assert records.usage == [{"kind": "dynamic-orchestrator"}, {"kind": "dynamic-judge"}]
+    flagged = [v for v in check(records) if v.invariant is Invariant.USAGE_UNRECORDED]
+    assert [v.detail.split(":")[0] for v in flagged] == ["dynamic-judge"]
+
+
 def _envelope(
     status: str = "terminal",
     outcome: str | None = "success",

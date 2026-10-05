@@ -53,10 +53,20 @@ class Draft:
     config: DynamicConfig
     state: DynamicStrategyState
     decisions: list[Decision] = field(default_factory=list)
+    wake_at: float | None = None
+    """Earliest run-clock time a held-back turn becomes due."""
 
     def emit(self, decision: Decision) -> None:
         """Append one decision in proposal order."""
         self.decisions.append(decision)
+
+    def due(self, turn: TurnRecord) -> bool:
+        """Whether the turn may be asked now; otherwise note when to be asked again."""
+        until = turn.ask_not_before
+        if until is None or self.view.run.now_at >= until:
+            return True
+        self.wake_at = until if self.wake_at is None else min(self.wake_at, until)
+        return False
 
     def update(self, **fields: object) -> None:
         """Replace state fields without mutating the previous state."""
@@ -193,6 +203,9 @@ def measurement_plan(
         accuracy_stage="accuracy" if "accuracy" in stages else None,
         policy="ordered",
         recipe=config.recipe,
+        # Core retries a submission only after an infrastructure failure, and only within
+        # this bound, which core's own run limit repeats (`limits_for`).
+        submission_limit=config.max_input_measurement_attempts,
         submitted_at=now,
         queue_allowance=config.queue_allowance_seconds,
         deadline_at=now

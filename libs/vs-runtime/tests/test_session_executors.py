@@ -37,8 +37,15 @@ from vs_runtime.api.core import (
     SessionExecutors,
     StoreWorkspaceReceipts,
     open_session_requests,
+    report_turns,
 )
-from vs_runtime.api.infrastructure import AgentExecutionConfiguration
+from vs_runtime.api.infrastructure import (
+    AgentExecutionConfiguration,
+    AgentExecutionFinished,
+    AgentExecutionStarted,
+    AgentExecutionStatus,
+)
+from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -77,6 +84,9 @@ class Run:
     env: WorkspaceEnv
     provider: Provider
     journal: FakeAgentInvocationStore = field(default_factory=FakeAgentInvocationStore)
+    lifecycle: FakeAgentExecutionLifecycleSink = field(
+        default_factory=FakeAgentExecutionLifecycleSink
+    )
     executors: SessionExecutors = field(init=False)
     artifacts: ArtifactStore = field(init=False)
 
@@ -116,9 +126,15 @@ class Run:
             ),
             session_spec=spec,
         )
-        client = AgentClient(FakeDriver(answer={"value": 7}, on_turn=self.provider.on_turn))
+        client = report_turns(
+            AgentClient(FakeDriver(answer={"value": 7}, on_turn=self.provider.on_turn)),
+            self.lifecycle,
+        )
         self.executors = open_session_requests(
-            inputs, client=client, invocation_slot=self.journal, store=store
+            inputs,
+            client=client,
+            invocation_slot=self.journal,
+            store=store,
         )
 
     def dispatch(self) -> DispatchTurn:
@@ -207,3 +223,32 @@ async def test_a_snapshot_right_after_a_restart_is_refused_until_settlement_reve
     assert status(cancelled) is ObservationStatus.CANCELLED
     assert digest(run.path) == before
     assert await run.env.hosts[-1].root.snapshot("after")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dies", [False, True])
+async def test_each_dispatched_turn_is_one_start_and_one_finish_and_a_replay_adds_none(
+    run: Run, *, dies: bool
+) -> None:
+    run.provider.dies = dies
+    request = run.dispatch()
+    await run.execute(ensure_request())
+    await run.execute(request)
+
+    started, finished = run.lifecycle.events
+    assert isinstance(started, AgentExecutionStarted)
+    assert isinstance(finished, AgentExecutionFinished)
+    assert (started.agent_id, started.execution_id) == (ROLE.root, request.turn.invocation_id.root)
+    assert started.execution_id == finished.execution_id
+    assert started.system_prompt == "You are a worker."
+    assert started.user_prompt.strip()
+    if dies:
+        assert finished.status is AgentExecutionStatus.FAILED
+        assert "provider died after writing" in (finished.error or "")
+    else:
+        assert finished.status is AgentExecutionStatus.COMPLETED
+        assert finished.result == '{"value":7}'
+
+    await run.execute(request)
+    # A sealed turn replays; an unknown one is inspected, never re-dispatched.
+    assert len(run.lifecycle.events) == 2

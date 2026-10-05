@@ -10,6 +10,7 @@ from tests.composition.dynamic._harness import (
     PASS,
     AgentTransportError,
     CoreRecords,
+    CrashGapError,
     LoopInput,
     ScriptedAgents,
     edit_to,
@@ -81,14 +82,15 @@ def _candidate_jobs(rounds: int) -> int:
     return rounds
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=LEASE_GAP)
+@pytest.mark.xfail(strict=True, raises=CrashGapError, reason=LEASE_GAP)
 def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     _failing_input(loop_input)
     request = loop_input.request(max_rounds=1)
     first = ScriptedAgents().plan(AgentTransportError("planner died"))
     crashed = run_request(request, first)
-    assert crashed.error is not None
+    if crashed.error is None:
+        raise CrashGapError
     assert loop_input.sbatch_count() == _input_jobs()
     second = (
         ScriptedAgents()
@@ -124,23 +126,12 @@ def _interrupt_input_evaluator(loop_input: LoopInput, tmp_path: Path, failures: 
         "    attempts = int(counter.read_text()) if counter.exists() else 0\n"
         "    counter.write_text(str(attempts + 1))\n"
         f"    if attempts < {failures}:\n"
-        "        raise SystemExit(1)\n" + original,
+        '        raise SystemExit("benchmark server killed: out of memory")\n' + original,
         encoding="utf-8",
     )
     return counter
 
 
-_INFRA_GAP = (
-    "gap (owner: vs-runtime): a benchmark process that dies without a result record is "
-    "recorded as a permanent workload failure, so the input is never re-measured "
-    "(attempts stays 1). libs/vs-runtime/src/vs_runtime/_evaluation_jobs.py:263 claims "
-    "INFRASTRUCTURE only when a job produced no evidence, but the framed benchmark "
-    "always yields evidence; the decoder's BenchmarkFailureKind "
-    "(_trusted_evaluation.py:515) is not carried on TrustedEvidence. Candidates share it."
-)
-
-
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_INFRA_GAP)
 @pytest.mark.parametrize("failures", [1, 5])
 def test_transient_input_failure_is_retried_within_its_bound(tmp_path: Path, failures: int) -> None:
     loop_input = LoopInput.create(tmp_path)
@@ -163,3 +154,5 @@ def test_transient_input_failure_is_retried_within_its_bound(tmp_path: Path, fai
     else:
         assert baseline["stage"] == "unmeasurable"
         assert baseline["benchmark_passed"] is None
+        # The agents are told why the input was given up, not only that it was.
+        assert "out of memory" in baseline["failure"]

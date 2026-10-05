@@ -18,7 +18,7 @@ from ._proofs import (
     request_matches,
 )
 from ._session_checkpoints import checkpoint_matches, turn_source_matches
-from ._session_scope import attempt_for, proven_invocation, scope_active
+from ._session_scope import attempt_for, dispatching_request, proven_invocation, scope_active
 from .types.attempts import (
     AttemptChargeRefundRequested,
     InvocationCheckpointRequested,
@@ -167,6 +167,7 @@ def _inspection(
             request_id=identity,
             scope=invocation.scope,
             invocation=ref,
+            dispatch=dispatching_request(context.intents, invocation),
             admission_id=owner.admission_id if owner is not None else None,
             deadline_at=min(
                 context.run.deadline_at,

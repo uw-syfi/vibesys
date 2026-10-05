@@ -28,12 +28,14 @@ from vs_core.api import (
     Request,
     RoleId,
     RunEnvelope,
+    RunView,
     Scope,
     SessionId,
     SessionPhase,
     SessionSpec,
     SessionsState,
     SessionView,
+    StrategyEvent,
     StrategyState,
     initial_state,
 )
@@ -220,7 +222,9 @@ def test_shell_schema_version_rejects_coercion_and_unknown_versions(version: obj
 @given(
     stamps=st.lists(st.integers(min_value=0, max_value=20), min_size=1, max_size=12),
 )
-def test_an_input_stamped_before_an_earlier_commit_still_commits(stamps: list[int]) -> None:
+def test_an_input_stamped_before_an_earlier_commit_still_commits_and_renews(
+    stamps: list[int],
+) -> None:
     """A tool call that arrives during a turn is stamped before the turn's own commit.
 
     The store's time watermark never moves back, so the shell must stamp every commit
@@ -233,6 +237,7 @@ def test_an_input_stamped_before_an_earlier_commit_still_commits(stamps: list[in
         shell.submit(ClockAdvanced(now_at=event_time), now_at=stamp)
         assert shell.advance()
         assert shell.holds_lease(now_at=stamp)
+        shell.renew(now_at=stamp, lease_duration=1000)
     assert shell.record.envelope.core.run.now_at == len(stamps)
 
 
@@ -320,3 +325,31 @@ def test_a_host_that_starts_over_a_run_with_an_orphan_wait_refuses_it() -> None:
         shell.start("reader", now_at=1, lease_duration=1)
     with pytest.raises(RuntimeCommitError):
         shell.decide(now_at=2)
+
+
+class _InvalidStateStrategy(CounterStrategy):
+    """A strategy whose fold builds its state with `model_copy`, which skips validators."""
+
+    def bind(self, state: CounterState) -> _InvalidStateStrategy:
+        return _InvalidStateStrategy(state)
+
+    def on_event(self, view: RunView, event: StrategyEvent) -> CounterState:
+        del view, event
+        return self.state.model_copy(update={"callbacks": "not a count"})
+
+
+def test_a_strategy_state_that_breaks_its_own_invariant_never_becomes_durable() -> None:
+    """The commit rejects it, so the last good record stays loadable by a later process."""
+    store = FakeStateStore()
+    shell = CoreRuntime(
+        store,
+        _InvalidStateStrategy(),
+        initial_state(),
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+    )
+    shell.start("host", now_at=0, lease_duration=100)
+    before = store.load()
+    shell.submit(ClockAdvanced(now_at=1), now_at=1)
+    with pytest.raises(ValidationError):
+        shell.advance()
+    assert store.load() == before

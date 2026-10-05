@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vibesys.dynamic_roles import CORE_ROLES
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.orchestration.dynamic.agents import AGENTS, EVALUATION, IMPLEMENTER, JUDGE
 from vibesys.orchestration.dynamic.core_policy.api import (
     PolicyInputs,
     RunBounds,
@@ -36,8 +36,6 @@ from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecord
 from vibesys.run.evaluation_backend import semantic_evaluation_identity
 from vs_core.api import ArtifactId, ArtifactRef
 from vs_runtime.api import (
-    AgentCapability,
-    AgentRole,
     CoreOperation,
     CorePlan,
     CorePolicy,
@@ -140,9 +138,6 @@ def dynamic_projector() -> RuntimeRecordProjector[DynamicStrategyState]:
 # The label of the snapshot that retains a verified revision.
 RETENTION_LABEL = "verified"
 
-# Roles whose core turns may submit a measurement through the bridged evaluation tool.
-_MEASURING_ROLES = frozenset({IMPLEMENTER.id, JUDGE.id})
-
 
 def _require_candidate_sandboxes(environment: RunEnvironmentView) -> None:
     """Refuse a run environment that cannot open isolated candidate sandboxes.
@@ -238,28 +233,6 @@ def dynamic_core_policy() -> CorePolicy:
     )
 
 
-def core_agent_roles() -> tuple[AgentRole, ...]:
-    """The dynamic roles as a core session serves them.
-
-    A core turn ends with a typed reply that the strategy folds. The implementer and
-    the judge may also submit a measurement of their own workspace through the bridged
-    evaluation tool (core decides admission and budget; there is no status or wait
-    tool). No other role carries a tool, so none needs an MCP server.
-    """
-    return tuple(_core_role(role) for role in AGENTS)
-
-
-def _core_role(role: AgentRole) -> AgentRole:
-    if role.id in _MEASURING_ROLES:
-        return role.model_copy(update={"extra_tools": (EVALUATION,)})
-    return role.model_copy(
-        update={
-            "extra_tools": (),
-            "required_capabilities": role.required_capabilities - {AgentCapability.MCP_SERVERS},
-        }
-    )
-
-
 def _project_max_rounds(options: BaseModel) -> int:
     parsed = DynamicOptions.model_validate(options)
     return parsed.max_rounds * parsed.max_in_flight
@@ -269,7 +242,7 @@ def dynamic_core_registration() -> OrchestrationRegistration:
     """The dynamic search registered as a core run the built-in `DYNAMIC` registration."""
     plugin = OrchestrationPlugin(
         id=_PLUGIN_ID,
-        agents=core_agent_roles(),
+        agents=CORE_ROLES,
         options=DynamicOptions,
         core=dynamic_core_policy(),
     )

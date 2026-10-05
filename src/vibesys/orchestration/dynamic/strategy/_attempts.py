@@ -190,6 +190,8 @@ def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
     subject = subject_of(record, role)
     scope = attempt_scope(draft.view, record.attempt, record.generation)
     if record.step is Step.NEEDED:
+        if not draft.due(turn):
+            return record
         body = turn.context or _default_context(record, draft)
         identifier = render_id(subject, turn)
         draft.emit(operation(draft, identifier, scope, render_request(subject, turn, body)))
@@ -282,7 +284,7 @@ def _measure(draft: Draft, record: AttemptRecord) -> AttemptRecord:
             }
         )
     candidate = measured_revision(record)
-    identifier = ids.decision_id("measure", key_of(record))
+    identifier = ids.decision_id("measure", key_of(record), record.measurements)
     draft.emit(
         Measure(
             decision_id=identifier,
@@ -295,7 +297,13 @@ def _measure(draft: Draft, record: AttemptRecord) -> AttemptRecord:
             ),
         )
     )
-    return record.model_copy(update={"step": Step.AWAITING, "awaiting": identifier})
+    return record.model_copy(
+        update={
+            "step": Step.AWAITING,
+            "awaiting": identifier,
+            "measurements": record.measurements + 1,
+        }
+    )
 
 
 def _interpret(draft: Draft, record: AttemptRecord) -> AttemptRecord:

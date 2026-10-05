@@ -9,6 +9,7 @@ executor over the same disk, so a restart forgets exactly what a real one forget
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -130,9 +131,14 @@ def dispatch_request(
     )
 
 
-def inspect_request(request_id: str = "req-inspect", invocation: str = "inv-1") -> InspectTurn:
-    """An InspectTurn of one invocation."""
+def inspect_request(
+    request_id: str = "req-inspect",
+    invocation: str = "inv-1",
+    dispatch: str | None = None,
+) -> InspectTurn:
+    """An InspectTurn of one invocation, naming the request that dispatched it when given."""
     return InspectTurn(
+        dispatch=None if dispatch is None else RequestId(root=dispatch),
         request_id=RequestId(root=request_id),
         scope=SCOPE,
         deadline_at=100.0,
@@ -269,6 +275,9 @@ class ProviderFaults:
     down: bool = False
 
 
+_HANG_GUARD_S = 30.0
+
+
 @dataclass
 class SessionHost:
     """The durable pieces that survive a host restart."""
@@ -278,6 +287,8 @@ class SessionHost:
     journal: FakeAgentInvocationStore
     turns: list[AgentTurnRequest]
     faults: ProviderFaults
+    driver: FakeDriver | None = None
+    turn_started: threading.Event = field(default_factory=threading.Event)
 
     def executor(self, store: ReceiptStore) -> RuntimeSessionRequests:
         """A freshly started host over the same journal and provider conversation."""
@@ -319,26 +330,40 @@ def open_host(
     *,
     answer: dict[str, object] | None = None,
     effect: Callable[[], None] | None = None,
+    hang_until_cancelled: bool = False,
 ) -> SessionHost:
-    """A host whose Fake provider answers every turn with *answer*, records it, runs *effect*."""
+    """A host whose Fake provider answers every turn with *answer*, records it, runs *effect*.
+
+    With *hang_until_cancelled* every turn starts, then never returns until the provider is
+    asked to cancel it (``turn_started`` is set once the turn is running).
+    """
     turns: list[AgentTurnRequest] = []
     faults = ProviderFaults()
+
+    started = threading.Event()
 
     def on_turn(request: AgentTurnRequest) -> None:
         turns.append(request)
         if effect is not None:
             effect()
+        if hang_until_cancelled:
+            started.set()
+            # The timeout only bounds a test whose cancel never arrives.
+            driver.hold_until_cancelled(_HANG_GUARD_S)
         if faults.down:
             message = "provider died after accepting the turn"
             raise ConnectionError(message)
 
-    client = AgentClient(FakeDriver(answer=answer or {"value": 7}, on_turn=on_turn))
+    driver = FakeDriver(answer=answer or {"value": 7}, on_turn=on_turn)
+    client = AgentClient(driver)
     return SessionHost(
         FakeSessionResolver(workspace, TemplateRenderer(workspace)),
         client,
         FakeAgentInvocationStore(),
         turns,
         faults,
+        driver,
+        started,
     )
 
 

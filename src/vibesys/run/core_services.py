@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -32,6 +32,9 @@ from vs_runtime.api.core import (
     EVALUATION_TOOL_ID,
     AgentEvaluationBridge,
     CoreStartup,
+    IgnoreCommits,
+    IgnoreMeasurement,
+    MeasurementServices,
     OperationPorts,
     ProductionSessionResolver,
     ReceiptEvidenceLedger,
@@ -45,6 +48,7 @@ from vs_runtime.api.core import (
     core_bindings,
     new_core_state,
     production_owners,
+    report_turns,
     revision_ref,
 )
 
@@ -56,7 +60,9 @@ if TYPE_CHECKING:
     from vs_project.api import Project, StateNamespace, StateStore
     from vs_runtime.api import AgentRole, CorePolicy, RunFacts
     from vs_runtime.api.core import (
+        CommitObserver,
         CoreRuntimeBindings,
+        MeasurementObserver,
         OperationCatalog,
         RunClock,
         SessionSpecFactory,
@@ -64,6 +70,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
         AgentConfigurationResolver,
         AgentExecutionEnvironment,
+        AgentExecutionLifecycleSink,
         RunEnvironmentView,
         RuntimeWorkspaces,
         TrustedEvaluationPlan,
@@ -102,6 +109,11 @@ class CoreEnvironment:
     """Lifecycle capabilities this host offers the strategy."""
 
 
+def ignore_lifecycle(event: object) -> None:
+    """The lifecycle sink of a host that shows no agent progress."""
+    del event
+
+
 @dataclass(frozen=True, slots=True)
 class CoreResources:
     """What the host already opened, as one value the composition reads."""
@@ -121,6 +133,12 @@ class CoreResources:
     session_spec: SessionSpecFactory
     clock: RunClock
     """The run's clock: it places the deadline and later paces the loop on one timeline."""
+    measurement_observer: MeasurementObserver = field(default_factory=IgnoreMeasurement)
+    """Hears each measurement stage start and end, for the host's event stream."""
+    commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
+    """Hears each confirmed commit, for committed views and round events."""
+    agent_lifecycle: AgentExecutionLifecycleSink = ignore_lifecycle
+    """Receives the start and end of each provider turn, for the host's event stream."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,7 +205,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     bindings = core_bindings(
         receipts=receipts,
         workspaces=resources.workspaces,
-        evaluation=resources.evaluation,
+        measurement=MeasurementServices(resources.evaluation, resources.measurement_observer),
         sessions=SessionServices(_agent_sessions(resources), resolver, yields=bridge),
         operations=catalog,
     )
@@ -195,7 +213,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         run_id=run_id,
         strategy=plan.strategy,
         state=state,
-        bindings=bindings,
+        bindings=replace(bindings, commits=resources.commit_observer),
         catalog=catalog,
         store=resources.project.state_store(run_id),
         publications=publications,
@@ -343,7 +361,8 @@ def _agent_sessions(resources: CoreResources) -> ClientAgentSessions:
         detail = "a durable core session needs a client that implements AgentTurnExecutor"
         resource = "agent client"
         raise CoreCompositionError(resource, detail)
-    return ClientAgentSessions(client, resources.invocation_slot)
+    reported = report_turns(client, resources.agent_lifecycle)
+    return ClientAgentSessions(reported, resources.invocation_slot)
 
 
 def agent_session_spec(
@@ -352,8 +371,13 @@ def agent_session_spec(
     environment: AgentExecutionEnvironment,
     specs: Mapping[str, AgentSpec],
     variables: Callable[[], Mapping[str, str]],
+    configuration: AgentConfigurationResolver,
 ) -> SessionSpecFactory:
-    """Provider session configuration for each role, from the run's one agent environment."""
+    """Provider session configuration for each role, from the run's one agent environment.
+
+    A role's own mounts (the evaluation tool socket, profiler files) come from its
+    `configuration`; without them a confined agent cannot reach the tools it is offered.
+    """
 
     def spec_for(role: AgentRole, workspace: Path) -> AgentSessionSpec:
         spec = specs[role.id]
@@ -364,7 +388,7 @@ def agent_session_spec(
             workspace=workspace,
             policy=AgentExecutionPolicy(
                 project_paths=environment.project_path_policy,
-                host_resources=environment.host_resources,
+                host_resources=(*environment.host_resources, *configuration(role).resources),
                 require_enforcement=not environment.use_docker,
                 containerized=environment.use_docker,
             ),

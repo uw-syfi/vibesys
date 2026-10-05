@@ -1170,9 +1170,14 @@ def _observe(
                 or (intent is not None and _reports(intent, event.target))
             )
             and (
-                check.inspection == event.observation.request_id
-                if child_resource is None
-                else expected_child == event.observation.request_id
+                # A reissue proof is a durable fact about the target, whichever inspection
+                # carried it (the recovery check's own, or the turn's inspection by Sessions).
+                event.target.reissue is not None
+                or (
+                    check.inspection == event.observation.request_id
+                    if child_resource is None
+                    else expected_child == event.observation.request_id
+                )
             )
         )
         resolution = (

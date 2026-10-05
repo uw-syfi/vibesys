@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Literal
 
 from ._evaluation_history import produce_history
 from ._registry import ContractError
+from ._session_scope import dispatching_request
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
     AttemptPhase,
@@ -769,6 +770,7 @@ def _suspend(
                     scope=invocation.scope,
                     deadline_at=context.run.deadline_at,
                     invocation=invocation.invocation,
+                    dispatch=dispatching_request(context.intents, invocation),
                 ),
             ),
         )
