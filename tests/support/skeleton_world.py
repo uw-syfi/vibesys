@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
-from tests.support.runtime_evaluation import ScenarioCluster, stage_failure_text
+from tests.support.runtime_evaluation import ScenarioCluster
 from tests.support.session_world import (
     FakeSessionResolver,
     ProviderFaults,
@@ -42,6 +42,7 @@ from vs_core.api import (
 )
 from vs_project.api import run_git
 from vs_prompts.api import TemplateRenderer
+from vs_runtime.api import render_stage_failure
 from vs_runtime.api.core import (
     CoreRuntime,
     CoreRuntimeBindings,
@@ -125,7 +126,7 @@ class World:
             workspaces,
             namespace,  # type: ignore[arg-type]  # the evaluation namespace is a StateNamespace
             self.root / "handles",
-            stage_failure_text=stage_failure_text,
+            stage_failure_text=render_stage_failure,
             cluster=self.cluster,
         )
         return core_bindings(
