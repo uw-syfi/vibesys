@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.vibesys.orchestration.dynamic.strategy._shell import Run, drive_shell
+from tests.support.liveness import Budget, End, Journal, assert_live
+from tests.vibesys.orchestration.dynamic.strategy._shell import Run, Script, drive_shell
 
 from vibesys.orchestration.dynamic.core_policy.api import (
     reply_schemas,
@@ -52,20 +53,42 @@ def run(
     *,
     faults: Faults | None = None,
     limits: Limits | None = None,
+    live: bool = True,
+    end: End = End.TERMINAL,
     **overrides: object,
 ) -> Trace[DynamicStrategyState]:
-    """Drive a fresh strategy to quiescence against ``executors``."""
+    """Drive a fresh strategy to quiescence against ``executors``.
+
+    The run must satisfy the liveness invariants (`tests.support.liveness`) unless ``live``
+    is False. ``end`` says how the scenario ends the run; `End.CUT_SHORT` is for a scenario
+    this driver cannot take to the end of the run (it answers no agent turn).
+    """
+    chosen = limits or LIMITS
     harness = Harness(
         registry=dynamic_operation_registry(),
         facts=FACTS,
-        limits=limits or LIMITS,
+        limits=chosen,
         envelope_type=RunEnvelope[DynamicStrategyState],
     )
-    return drive(DynamicStrategy(config=config(**overrides)), executors, harness, faults)
+    trace = drive(DynamicStrategy(config=config(**overrides)), executors, harness, faults)
+    if live:
+        assert_live(
+            Journal.from_log(trace.log),
+            trace.core,
+            Budget(retries=chosen.max_retries),
+            end,
+        )
+    return trace
 
 
-def run_shell(executors: Executors, *, limits: Limits | None = None, **overrides: object) -> Run:
-    """Run a fresh strategy to the end of its run on the production shell."""
+def run_shell(
+    executors: Script, *, limits: Limits | None = None, live: bool = True, **overrides: object
+) -> Run:
+    """Run a fresh strategy to the end of its run on the production shell.
+
+    The run must satisfy the liveness invariants (`tests.support.liveness`) unless ``live``
+    is False.
+    """
     settings = config(**overrides)
     harness = Harness(
         registry=dynamic_operation_registry(),
@@ -74,9 +97,14 @@ def run_shell(executors: Executors, *, limits: Limits | None = None, **overrides
         envelope_type=RunEnvelope[DynamicStrategyState],
         requirements=requirements_for(settings),
     )
-    return drive_shell(
+    finished = drive_shell(
         DynamicStrategy(config=settings), executors, harness, reply_schemas(settings)
     )
+    if live:
+        assert_live(finished.journal, finished.core, Budget(retries=harness.limits.max_retries))
+    if finished.halted is not None:
+        raise finished.halted
+    return finished
 
 
 def kinds(trace: Trace[DynamicStrategyState] | Run) -> list[str]:

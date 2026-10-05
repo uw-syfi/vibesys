@@ -8,6 +8,7 @@ first planner turn: core refuses a turn reply today (see test_scenarios).
 from __future__ import annotations
 
 import pytest
+from tests.support.liveness import End
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, config, kinds, run
 
@@ -57,7 +58,7 @@ def test_the_declaration_starts_up_on_the_real_core() -> None:
 
 
 def test_a_refused_baseline_is_retried_within_budget_then_planning_goes_on() -> None:
-    trace = run(_refused_baseline())
+    trace = run(_refused_baseline(), end=End.CUT_SHORT)
     assert kinds(trace)[:3] == ["Measure", "Measure", "Measure"]
     assert "RequestTurn" in kinds(trace)
 
@@ -65,14 +66,14 @@ def test_a_refused_baseline_is_retried_within_budget_then_planning_goes_on() -> 
 @pytest.mark.parametrize("name", FAULTS)
 def test_delivery_faults_do_not_change_the_decisions(name: str) -> None:
     """Unknown, retried, duplicated, reordered and reloaded observations decide the same."""
-    plain = run(_refused_baseline())
-    faulty = run(_refused_baseline(), faults=FAULTS[name])
+    plain = run(_refused_baseline(), end=End.CUT_SHORT)
+    faulty = run(_refused_baseline(), end=End.CUT_SHORT, faults=FAULTS[name])
     assert kinds(faulty) == kinds(plain)
 
 
 def test_every_prompt_goes_through_a_render_operation() -> None:
     """Prompts are rendered by a declared operation before each turn is requested."""
-    trace = run(_refused_baseline())
+    trace = run(_refused_baseline(), end=End.CUT_SHORT)
     renders = [
         item
         for item in trace.decisions
@@ -85,8 +86,8 @@ def test_every_prompt_goes_through_a_render_operation() -> None:
 
 def test_the_state_survives_a_codec_reload_after_every_step() -> None:
     """Reloading the whole envelope after each step yields the run an unbroken one reaches."""
-    plain = run(_refused_baseline())
-    reloaded = run(_refused_baseline(), faults=Faults(reload=True))
+    plain = run(_refused_baseline(), end=End.CUT_SHORT)
+    reloaded = run(_refused_baseline(), end=End.CUT_SHORT, faults=Faults(reload=True))
     assert reloaded.strategy.state == plain.strategy.state
     # Compare the written form: a decoded value drops private codec proofs that `==` sees.
     assert reloaded.core.model_dump_json() == plain.core.model_dump_json()
