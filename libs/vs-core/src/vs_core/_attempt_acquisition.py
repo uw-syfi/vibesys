@@ -974,17 +974,20 @@ def _billing_origin(context: AttemptsContext, attempt: AttemptView, invocation: 
     )
 
 
-def _read_only_view(invocation: Invocation) -> bool:
-    """A read-only look at one revision never exceeds what its attempt's workspace allows.
+def _read_only_view(attempt: AttemptView, invocation: Invocation) -> bool:
+    """A read-only look at a revision the attempt retained exceeds nothing its workspace allows.
 
     A reviewer of an isolated candidate reads the retained revision under the
-    read-only mode that settlement requires to attribute its verdict.
+    read-only mode that settlement requires to attribute its verdict. The view
+    must name one of this attempt's own retained revisions: a read-only view of
+    any other revision is not work the attempt can be charged for.
     """
     workspace = invocation.turn.workspace
     return (
         isinstance(workspace, WorkspaceRef)
         and workspace.mode == WorkspaceMode.READ_ONLY_REVISION
         and invocation.turn.session.access == Access.READ_ONLY
+        and any(checkpoint.revision == workspace.revision for checkpoint in attempt.checkpoints)
     )
 
 
@@ -1026,7 +1029,7 @@ def _chargeable_invocation(
         or (
             isinstance(invocation.turn.workspace, WorkspaceRef)
             and invocation.turn.workspace.mode != attempt.workspace.mode
-            and not _read_only_view(invocation)
+            and not _read_only_view(attempt, invocation)
         )
         or any(charge.invocation_id == ref.invocation_id for charge in attempt.charges)
     ):
