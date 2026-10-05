@@ -38,6 +38,17 @@ the facts that differ most often:
 - Limits: enforce the same deadlines, sizes, and path rules, measured on the
   injected clock.
 
+## Faithful by default
+
+A Fake's defaults reproduce observed production behavior, not the ideal case:
+queue wait before a job runs, teardown lag after cancel (a cancelled Slurm job
+reported running for 30 to 40 seconds), and a restart that returns what real
+inspection returns, not an already complete result. An instant-cancel,
+never-queue Fake hid two live-breaking bugs that only a real-cluster smoke
+found. Express lag as a function of the injected clock with ranges measured on
+the real system, not fixed points. Every behavior a real run reveals becomes a
+scripted Fake case and a contract-suite case in the same PR.
+
 ## Keeping a Fake faithful
 
 The developer who changes real behavior updates the Fake in the same PR. Two
@@ -54,7 +65,7 @@ interface when implementations are not substitutable. See the
 
 The Fake run is part of the normal test run. Production runs requiring real
 services are opt-in with `VIBESYS_REAL_CONTRACTS=1`, triggered manually for now,
-not by CI. This gates the whole run, not individual contract cases. Run the
+not by CI. A cluster smoke test is the manual form of this run. This gates the whole run, not individual contract cases. Run the
 suite for every affected implementation when you change the interface, a
 production implementation, or its Fake. Report the results and any unavailable
 environments in the PR's Verification section. The per-language reference

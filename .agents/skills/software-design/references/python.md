@@ -51,6 +51,9 @@ new library needs its `source_roots` entry.
   implementations in a registry keyed by the enum. Match exhaustively.
 - **Errors.** Typed errors that name the offending key or path
   (`vibesys.errors.ConfigurationError` carries a diagnostic).
+- **Proof types.** Parse an external response once into a frozen type that
+  only the parser constructs, and make guards take that type, not raw fields
+  the caller supplies. Outcome unions end in `assert_never`.
 - **Resources.** Context managers or an explicit `close()`; cleanup must be
   idempotent.
 - **I/O.** Declare role-named `typing.Protocol` interfaces in the owning

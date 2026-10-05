@@ -140,6 +140,9 @@ section.
     decisions modular and makes exhaustive stress testing practical. Read
     [references/functional-core.md](references/functional-core.md) for contracts,
     placement, recovery, and naming.
+    For boundary robustness (one event per fact, monotone observations,
+    outcome unions, no orphan waits, fencing epochs), read the Crash
+    consistency and Outcomes sections of that reference.
     In prose, say "interface" and "implementation"; an interface is a
     `typing.Protocol` in its owning library's `.api`, named by role with no
     suffix (`Cluster`, `StateStore`, `AgentSessions`). Implementations are
