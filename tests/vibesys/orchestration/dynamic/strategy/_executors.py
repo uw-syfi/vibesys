@@ -96,25 +96,25 @@ class Executors:
 
     def _answer(self, request: Request) -> Answer:
         """What an executor that needs no view of core reports for ``request``."""
+        answer: Answer = Succeeded()
         match request:
             case ExecuteRegisteredOperation():
-                return self._operation(request)
+                answer = self._operation(request)
             case SubmitMeasurement():
-                return self._submit(request)
+                answer = self._submit(request)
             case DispatchTurn():
-                return self._turn(request)
+                answer = self._turn(request)
             case EnsureWorkspace() | EnsureSession():
-                return self._ensure(request)
+                answer = self._ensure(request)
             case CloseSession():
-                return Succeeded(resource_id=_lease(request.session_id))
+                answer = Succeeded(resource_id=_lease(request.session_id))
             case SnapshotAndRetain():
-                return self._retain(request)
+                answer = self._retain(request)
             case RetainRevision():
-                return Succeeded(revision=request.revision)
+                answer = Succeeded(revision=request.revision)
             case AdoptRevision() | VerifyAdoption():
-                return Succeeded(revision=request.selection.revision)
-            case _:
-                return Succeeded()
+                answer = Succeeded(revision=request.selection.revision)
+        return answer
 
     @staticmethod
     def _retain(request: SnapshotAndRetain) -> Answer:

@@ -12,9 +12,10 @@ lifecycle fact: a missing or wrong observation shows up as core rejecting it.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
 from tests.support.fake_run_clock import FakeRunClock
 
 from vs_core.api import (
@@ -57,7 +58,9 @@ from vs_runtime.api.core import (
 from vs_runtime.api.testing import FakePublicationDelivery
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
+
+    from pydantic import BaseModel
 
     from vs_core.api import (
         CoreState,
@@ -65,7 +68,9 @@ if TYPE_CHECKING:
         OperationRegistry,
         OwnerEvent,
         Request,
+        ResourceId,
         RunView,
+        SchemaRef,
         Strategy,
         StrategyEvent,
         StrategyState,
@@ -77,8 +82,17 @@ type Script = Callable[[Request, CoreState], Answer]
 """What the executors answer for one request, given core's state when it runs."""
 
 
-def _status(answer: Answer) -> tuple[ObservationStatus, bool, bool]:
+@dataclass(frozen=True)
+class _InvalidReply:
+    """The turn ran and its reply does not parse as the schema it was asked to answer."""
+
+    resource_id: ResourceId | None
+
+
+def _status(answer: Answer | _InvalidReply) -> tuple[ObservationStatus, bool, bool]:
     """Status, accepted and terminal of the observation an answer stands for."""
+    if isinstance(answer, _InvalidReply):
+        return ObservationStatus.FAILED, True, True
     if isinstance(answer, Succeeded):
         return ObservationStatus.SUCCEEDED, True, True
     if isinstance(answer, Running):
@@ -90,32 +104,72 @@ def _status(answer: Answer) -> tuple[ObservationStatus, bool, bool]:
     return ObservationStatus.FAILED, False, True
 
 
+def _lifecycle_event(request: Request, observed: RequestObserved) -> OwnerEvent | None:
+    """The owner event of a session, workspace or adoption request, none for other requests."""
+    view = observed.observation
+    match request:
+        case EnsureSession():
+            return SessionObserved(session_id=request.spec.session_id, observation=view)
+        case CloseSession():
+            return SessionObserved(session_id=request.session_id, observation=view)
+        case AdoptRevision() | VerifyAdoption():
+            return AdoptionObserved(observation=view, revision=observed.revision)
+        case EnsureWorkspace() | RestoreRevision():
+            return WorkspaceObserved(
+                attempt=request.attempt, observation=view, revision=observed.revision
+            )
+        case _:
+            return None
+
+
 class ScriptedExecutors:
     """Every executor role, answering from one script as the production translators do."""
 
     def __init__(
-        self, script: Script, core: Callable[[], CoreState], registry: OperationRegistry
+        self,
+        script: Script,
+        core: Callable[[], CoreState],
+        registry: OperationRegistry,
+        schemas: Mapping[SchemaRef, type[BaseModel]],
     ) -> None:
-        """Bind the script, a read of the run's current core state and the operation codec."""
+        """Bind the script, a read of core's state, the operation codec and the reply types."""
         self._script = script
         self._core = core
         self._registry = registry
+        self._schemas = schemas
         self._sequences: dict[str, int] = {}
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionResult:
         """What the executor reports for ``request``: one observation and its owner events."""
-        answer = self._script(request, self._core())
+        answer = self._parsed(request, self._script(request, self._core()))
         observed = self._observed(request, answer, context.now_at)
         return ExecutionResult(
             observation=observed, owner_events=self._owner_events(request, answer, observed)
         )
+
+    def _parsed(self, request: Request, answer: Answer) -> Answer | _InvalidReply:
+        """A turn's reply is what the schema parses it to, as the session executor does."""
+        if (
+            not isinstance(request, DispatchTurn | ResumeSessionTurn)
+            or not isinstance(answer, Succeeded)
+            or answer.output_json is None
+        ):
+            return answer
+        schema = self._schemas[request.turn.output_schema]
+        try:
+            reply = schema.model_validate_json(answer.output_json)
+        except ValidationError:
+            return _InvalidReply(answer.resource_id)
+        return replace(answer, output_json=reply.model_dump_json())
 
     def _next(self, key: str) -> int:
         sequence = self._sequences.get(key, 0)
         self._sequences[key] = sequence + 1
         return sequence
 
-    def _observed(self, request: Request, answer: Answer, now_at: float) -> RequestObserved:
+    def _observed(
+        self, request: Request, answer: Answer | _InvalidReply, now_at: float
+    ) -> RequestObserved:
         assert request.request_id is not None, "a dispatched request carries its identity"
         key = request.request_id.root
         sequence = self._next(key)
@@ -133,7 +187,11 @@ class ScriptedExecutors:
             terminal=terminal,
             released=terminal,
             children_complete=terminal,
-            resource_id=answer.resource_id if isinstance(answer, Succeeded | Running) else None,
+            resource_id=(
+                answer.resource_id
+                if isinstance(answer, Succeeded | Running | _InvalidReply)
+                else None
+            ),
             revision=answer.revision if succeeded else None,
         )
         if isinstance(answer, Failed):
@@ -164,33 +222,25 @@ class ScriptedExecutors:
         return self._registry.validate_event(event) if answer.outcome is not None else event
 
     def _owner_events(
-        self, request: Request, answer: Answer, observed: RequestObserved
+        self, request: Request, answer: Answer | _InvalidReply, observed: RequestObserved
     ) -> tuple[OwnerEvent, ...]:
-        if isinstance(request, DispatchTurn | ResumeSessionTurn):
-            return (self._turn_event(request, answer, observed),)
-        if isinstance(request, AdoptRevision | VerifyAdoption):
-            return (AdoptionObserved(observation=observed.observation, revision=observed.revision),)
-        if isinstance(request, EnsureWorkspace | RestoreRevision):
-            return (
-                WorkspaceObserved(
-                    attempt=request.attempt,
-                    observation=observed.observation,
-                    revision=observed.revision,
-                ),
-            )
-        if isinstance(request, EnsureSession):
-            return (SessionObserved(session_id=request.spec.session_id, observation=observed.observation),)
-        if isinstance(request, CloseSession):
-            return (SessionObserved(session_id=request.session_id, observation=observed.observation),)
-        if isinstance(request, SubmitMeasurement):
-            return self._submission_events(answer, observed)
-        if isinstance(request, ObserveOwnedJob) and isinstance(answer, Succeeded):
-            return (self._job_event(request, observed),)
-        return ()
+        """The events a production translator attaches to the observation of ``request``."""
+        match request:
+            case DispatchTurn() | ResumeSessionTurn():
+                return (self._turn_event(request, answer, observed),)
+            case SubmitMeasurement():
+                return self._submission_events(answer, observed)
+            case ObserveOwnedJob() if isinstance(answer, Succeeded):
+                return (self._job_event(request, observed),)
+            case _:
+                event = _lifecycle_event(request, observed)
+                return () if event is None else (event,)
 
     @staticmethod
     def _turn_event(
-        request: DispatchTurn | ResumeSessionTurn, answer: Answer, observed: RequestObserved
+        request: DispatchTurn | ResumeSessionTurn,
+        answer: Answer | _InvalidReply,
+        observed: RequestObserved,
     ) -> TurnObserved:
         """A turn's reply travels on the session owner's event, never on the request's own."""
         reply = answer.output_json if isinstance(answer, Succeeded) else None
@@ -207,7 +257,7 @@ class ScriptedExecutors:
 
     @staticmethod
     def _submission_events(
-        answer: Answer, observed: RequestObserved
+        answer: Answer | _InvalidReply, observed: RequestObserved
     ) -> tuple[MeasurementSubmissionObserved | JobObserved, ...]:
         """The submission's own view, which is also the job's first observation."""
         view = observed.observation
@@ -297,7 +347,10 @@ MAX_DISPATCHES = 400
 
 
 def drive_shell[S: StrategyState](
-    strategy: Strategy[S], script: Script, harness: Harness
+    strategy: Strategy[S],
+    script: Script,
+    harness: Harness,
+    schemas: Mapping[SchemaRef, type[BaseModel]],
 ) -> Run:
     """Run ``strategy`` to the end of its run on the production shell and loop."""
     decisions: list[Decision] = []
@@ -310,7 +363,9 @@ def drive_shell[S: StrategyState](
         bindings=CoreRuntimeBindings(
             registry=harness.registry,
             executors=_executors(
-                ScriptedExecutors(script, lambda: shell.record.envelope.core, harness.registry)
+                ScriptedExecutors(
+                    script, lambda: shell.record.envelope.core, harness.registry, schemas
+                )
             ),
         ),
     )

@@ -107,12 +107,17 @@ def invocation_for(role: Role, subject: str, turn: TurnRecord) -> str:
     return invocation_id(role.value, subject, turn.serial).root
 
 
-def session_for(role: Role, subject: str, access: Access, *, reuse: bool) -> SessionSpec:
-    """The conversation a role speaks in; continuations reuse their subject's session."""
+def session_for(role: Role, subject: str, access: Access) -> SessionSpec:
+    """The conversation a role speaks in.
+
+    The policy is always "reuse": core and the session executor require every turn of a
+    session (first, correction, resume) to carry one spec, and a "fresh" session cannot be
+    ensured twice, so a conversation that may continue must declare reuse on its first turn.
+    """
     return SessionSpec(
         session_id=session_id(role.value, subject),
         role_id=role_id(role.value),
-        policy="reuse" if reuse else "fresh",
+        policy="reuse",
         lifetime="owner",
         access=access,
     )
@@ -131,7 +136,6 @@ class TurnShape:
     subject: str
     workspace: WorkspaceRef | Scope
     access: Access
-    reuse: bool
     output_schema: SchemaRef
     seconds: float
 
@@ -143,7 +147,7 @@ def request_turn(draft: Draft, shape: TurnShape, turn: TurnRecord, scope: Scope)
         decision_id=turn_id(subject, turn),
         scope=scope,
         turn=TurnSpec(
-            session=session_for(role, subject, shape.access, reuse=shape.reuse),
+            session=session_for(role, subject, shape.access),
             invocation_id=InvocationId(root=invocation_for(role, subject, turn)),
             continuation_id=turn.continuation,
             workspace=shape.workspace,

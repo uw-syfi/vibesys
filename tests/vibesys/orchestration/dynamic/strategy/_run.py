@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.dynamic.core_policy.api import requirements_for
+from tests.vibesys.orchestration.dynamic.strategy._shell import Run, drive_shell
+
+from vibesys.orchestration.dynamic.core_policy.api import (
+    reply_schemas,
+    requirements_for,
+)
 from vibesys.orchestration.dynamic.strategy.api import (
     DynamicConfig,
     DynamicStrategy,
@@ -13,7 +18,6 @@ from vibesys.orchestration.dynamic.strategy.api import (
 )
 from vs_core.api import ArtifactId, ArtifactRef, Limits, RevisionRef, RunEnvelope, RunFacts
 from vs_core.testing.drive import Faults, Harness, Trace, drive
-from tests.vibesys.orchestration.dynamic.strategy._shell import Run, drive_shell
 
 if TYPE_CHECKING:
     from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
@@ -60,9 +64,7 @@ def run(
     return drive(DynamicStrategy(config=config(**overrides)), executors, harness, faults)
 
 
-def run_shell(
-    executors: Executors, *, limits: Limits | None = None, **overrides: object
-) -> Run:
+def run_shell(executors: Executors, *, limits: Limits | None = None, **overrides: object) -> Run:
     """Run a fresh strategy to the end of its run on the production shell."""
     settings = config(**overrides)
     harness = Harness(
@@ -72,7 +74,9 @@ def run_shell(
         envelope_type=RunEnvelope[DynamicStrategyState],
         requirements=requirements_for(settings),
     )
-    return drive_shell(DynamicStrategy(config=settings), executors, harness)
+    return drive_shell(
+        DynamicStrategy(config=settings), executors, harness, reply_schemas(settings)
+    )
 
 
 def kinds(trace: Trace[DynamicStrategyState] | Run) -> list[str]:
