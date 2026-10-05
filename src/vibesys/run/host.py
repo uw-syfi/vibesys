@@ -570,6 +570,7 @@ class _ProductHostFactory:
                 invocation_slot=invocations,
                 configuration=partial(self._agent_configuration, resources),
                 clock=WallRunClock(),
+                agent_lifecycle=self.integration.agent_execution_event,
                 session_spec=agent_session_spec(
                     client=client,
                     environment=environment,

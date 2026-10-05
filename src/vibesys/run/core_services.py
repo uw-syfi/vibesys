@@ -39,6 +39,7 @@ from vs_runtime.api.core import (
     core_bindings,
     new_core_state,
     production_owners,
+    report_turns,
     revision_ref,
 )
 
@@ -59,6 +60,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
         AgentConfigurationResolver,
         AgentExecutionEnvironment,
+        AgentExecutionLifecycleSink,
         RunEnvironmentView,
         RuntimeWorkspaces,
         TrustedEvaluationPlan,
@@ -97,6 +99,11 @@ class CoreEnvironment:
     """Lifecycle capabilities this host offers the strategy."""
 
 
+def ignore_lifecycle(event: object) -> None:
+    """The lifecycle sink of a host that shows no agent progress."""
+    del event
+
+
 @dataclass(frozen=True, slots=True)
 class CoreResources:
     """What the host already opened, as one value the composition reads."""
@@ -116,6 +123,8 @@ class CoreResources:
     session_spec: SessionSpecFactory
     clock: RunClock
     """The run's clock: it places the deadline and later paces the loop on one timeline."""
+    agent_lifecycle: AgentExecutionLifecycleSink = ignore_lifecycle
+    """Receives the start and end of each provider turn, for the host's event stream."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,7 +312,8 @@ def _agent_sessions(resources: CoreResources) -> ClientAgentSessions:
         detail = "a durable core session needs a client that implements AgentTurnExecutor"
         resource = "agent client"
         raise CoreCompositionError(resource, detail)
-    return ClientAgentSessions(client, resources.invocation_slot)
+    reported = report_turns(client, resources.agent_lifecycle)
+    return ClientAgentSessions(reported, resources.invocation_slot)
 
 
 def agent_session_spec(

@@ -164,6 +164,7 @@ from vs_runtime._session_resolver import (
     open_session_requests,
     session_executors,
 )
+from vs_runtime._turn_lifecycle import LifecycleReportingExecutor, report_turns
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
 from vs_runtime._workspace_receipts import (
@@ -227,6 +228,7 @@ __all__ = [
     "JournalPublicationDelivery",
     "JournalRunInvocations",
     "JournalSemanticEvents",
+    "LifecycleReportingExecutor",
     "MeasurementRequests",
     "NamespaceOperationReceipts",
     "NeverBegun",
@@ -315,6 +317,7 @@ __all__ = [
     "owner_key",
     "production_owners",
     "receipt_executor_kinds",
+    "report_turns",
     "resolve_core_resume",
     "result_type_name",
     "revision_ref",

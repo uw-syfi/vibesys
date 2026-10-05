@@ -92,7 +92,7 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentInvocationStore, AgentSessions, InvocationOutcome
     from vs_evaluation.api import EvaluationSettlements
-    from vs_runtime._agent_execution import AgentExecutionLifecycleEvent
+    from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
     from vs_runtime._run_control import RunControlTransition
     from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
 
