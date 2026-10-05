@@ -9,6 +9,7 @@ commit must be one pure core step, and concurrency must stay within the cap.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -39,13 +40,19 @@ from vibesys.orchestration.dynamic.strategy.api import (
 )
 from vs_core.api import (
     ClockAdvanced,
+    Continuation,
+    ContinuationId,
+    ContinuationPhase,
     DispatchTurn,
     IntentPhase,
+    InvocationId,
     RequestObserved,
     ResourceId,
+    ResumeSessionTurn,
     RunEnvelope,
     RunStatus,
     SubmitMeasurement,
+    TurnObserved,
     step,
 )
 from vs_core.testing.drive import Harness, Running, new_run
@@ -69,12 +76,14 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from pydantic import BaseModel
-    from tests.vibesys.orchestration.dynamic.strategy._shell import Script
+    from tests.vibesys.orchestration.dynamic.strategy._shell import Script, _InvalidReply
 
     from vs_core.api import CoreEvent, CoreState, OperationRegistry, Request, SchemaRef, Transition
+    from vs_core.testing.drive import Answer
     from vs_runtime.api.core import ExecutionContext, ExecutionResult
 
 CAPS = (1, 2, 3)
+WAITING_KIND = "waiting_for_evaluation"
 IMPLEMENTERS = 2
 
 
@@ -160,6 +169,37 @@ class _DelayedExecutors(ScriptedExecutors):
         finally:
             ledger.turns_in_flight -= 1
 
+    @staticmethod
+    def turn_event(
+        request: DispatchTurn | ResumeSessionTurn,
+        answer: Answer | _InvalidReply,
+        observed: RequestObserved,
+    ) -> TurnObserved:
+        """A turn whose reply asks to wait carries the suspension the tool bridge would offer.
+
+        The suspension names a job core does not own, so core refuses it at commit, as it
+        refuses a wait that a peer's commit made invalid after the bridge accepted it.
+        """
+        event = ScriptedExecutors.turn_event(request, answer, observed)
+        if event.output_json is None or json.loads(event.output_json).get("kind") != WAITING_KIND:
+            return event
+        name = event.invocation.invocation_id.root
+        invocation = event.invocation
+        return event.model_copy(
+            update={
+                "suspension": Continuation(
+                    continuation_id=ContinuationId(root=f"{name}/evaluation"),
+                    invocation=invocation,
+                    next_invocation=invocation.model_copy(
+                        update={"invocation_id": InvocationId(root=f"{name}/resume")}
+                    ),
+                    jobs=(ResourceId(root="job:not-owned"),),
+                    deadline_at=500.0,
+                    phase=ContinuationPhase.WAITING,
+                )
+            }
+        )
+
 
 class _TurnFailedError(RuntimeError):
     """An executor error: the turn's process died."""
@@ -192,13 +232,21 @@ def _build(
     delays: list[int],
     *,
     failing: frozenset[int] = frozenset(),
+    waiting: frozenset[int] = frozenset(),
     delivery: Callable[[FakeStateStore], FakePublicationDelivery] = FakePublicationDelivery,
 ) -> _Built:
     ledger = _Ledger(delays=deque(delays), failing=failing)
     executors = Executors(
         planner=deque([plan_reply(*(implement(f"h{n}") for n in range(IMPLEMENTERS)))]),
-        implementer=deque(implemented() for _ in range(IMPLEMENTERS)),
-        judge=deque(reviewed() for _ in range(IMPLEMENTERS)),
+        # An implementer that waits is answered again after its wait is refused.
+        implementer=deque(
+            json.dumps({"kind": WAITING_KIND, "handles": ["h"]})
+            if ordinal in waiting
+            else implemented()
+            for ordinal in range(IMPLEMENTERS)
+        )
+        + deque(implemented() for _ in range(4 * IMPLEMENTERS)),
+        judge=deque(reviewed() for _ in range(4 * IMPLEMENTERS)),
         # A job is named by its request, not by the order submissions happen to arrive in.
         submit=lambda request: Running(
             resource_id=ResourceId(root=f"job:{_request_root(request)}")
@@ -392,3 +440,27 @@ def test_a_tool_call_admitted_during_a_publish_commits_and_never_halts(*, fails:
     for event in delivery.admitted:
         # Once to answer the tool call, once in the commit that followed it.
         assert sum(1 for _, stepped, _ in built.ledger.stepped if stepped is event) == 2
+
+
+@settings(max_examples=12, deadline=None)
+@given(
+    delays=st.lists(
+        st.integers(min_value=0, max_value=6), min_size=IMPLEMENTERS, max_size=IMPLEMENTERS
+    ),
+    waiting=st.sets(st.integers(min_value=0, max_value=IMPLEMENTERS - 1), min_size=1),
+)
+def test_a_wait_refused_at_commit_ends_its_turn_and_the_run_goes_on(
+    delays: list[int], waiting: set[int]
+) -> None:
+    """An implementer's wait that core refuses at commit is not a halt, whatever the order.
+
+    The turn ends without a suspension; the strategy must see that (it keys on the
+    agent's reply, which still says "waiting") and carry on, and the peer's result stays.
+    """
+    built = _build(2, delays, waiting=frozenset(waiting))
+    outcome = asyncio.run(drive_core(built.host, built.config))
+    core = built.shell.record.envelope.core
+    assert outcome.status == RunStatus.TERMINAL
+    assert core.evaluation.continuations == ()
+    assert len(built.ledger.returned) >= IMPLEMENTERS
+    assert _winner(_Finished(core, built.ledger, built.start)) == _winner(_baseline())
