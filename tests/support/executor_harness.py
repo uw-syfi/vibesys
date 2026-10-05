@@ -10,7 +10,9 @@ registered case through the same checks:
   core receives are accepted in order;
 * a stale host (lost lease, older fence) performs zero effects and reports Unknown;
 * the observation contract (``assert_core_accepts``) over Unknown-then-final and replays;
-* the same request identity with another payload is a REJECTED observation.
+* the same request identity with another payload is a REJECTED observation;
+* ``InspectRequest`` of the request, at every crash boundary, never says "never started"
+  once an effect happened, and reports the sealed result once the request finished.
 
 A new executor kind adds a scenario here and gets all of it.
 """
@@ -22,6 +24,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
+    from pathlib import Path
 
     from pydantic import BaseModel
     from tests.support.executor_context import RevocableLease
@@ -106,6 +109,14 @@ class CaseWorld(Protocol):
 
     def writes(self) -> int:
         """Durable writes the last ``execute`` performed."""
+        ...
+
+    def receipts_namespace(self) -> StateNamespace:
+        """The real namespace the executor's ReceiptStore writes to (no fault injection)."""
+        ...
+
+    def owners_root(self) -> Path:
+        """The directory of the registered operation owners, so inspection sees their effects."""
         ...
 
     def effects(self) -> int:

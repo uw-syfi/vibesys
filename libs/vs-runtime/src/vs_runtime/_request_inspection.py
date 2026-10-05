@@ -32,7 +32,7 @@ from vs_runtime._receipt_store import (
     SealedExecution,
     result_type_name,
 )
-from vs_runtime._semantic_events import Published
+from vs_runtime._semantic_events import PUBLISHED_FACTS, Published
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -95,6 +95,12 @@ class RecordedRequestInspector:
 
     def _never_begun(self, request: InspectRequest, context: ExecutionContext) -> TargetObservation:
         if HAND_ROLLED_ROLES:
+            # A role with its own receipts leaves no execution record, but its observation
+            # row proves the request began. Re-report that row unchanged (core accepts an
+            # identical replay); with no row, report Unknown.
+            latest = self._observations.latest(request.target)
+            if latest is not None:
+                return TargetObservation(observation=latest)
             return self._unknown(
                 request, context, "no execution record, and some executors keep their own receipts"
             )
@@ -127,11 +133,7 @@ class RecordedRequestInspector:
                 suspension=observed.suspension,
             )
         if history.result_type == result_type_name(Published):
-            return self._target(
-                request,
-                context,
-                ObservationFacts(status=ObservationStatus.SUCCEEDED, accepted=True, released=True),
-            )
+            return self._target(request, context, PUBLISHED_FACTS)
         return self._unknown(
             request, context, f"no inspection for sealed result type {history.result_type}"
         )

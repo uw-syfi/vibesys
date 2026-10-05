@@ -102,6 +102,7 @@ from vs_runtime.api.core import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
 
+    from tests.support.executor_harness import CaseWorld
     from tests.support.runtime_operations import OperationScenario
 
     from vs_core.api import Request, RequestBase, RevisionRef
@@ -128,6 +129,37 @@ class _World:
 
     def writes(self) -> int:
         return self._writes
+
+    def receipts_namespace(self) -> StateNamespace:
+        return self.real_namespace()
+
+    def owners_root(self) -> Path:
+        return self.base / "owners"
+
+
+async def inspect_request_of(world: CaseWorld, target: RequestBase) -> ExecutionResult:
+    """What a recovering shell learns from ``InspectRequest`` for *target*, on a fresh executor.
+
+    Inspection is routed like production does (to the operations role), over the
+    same disk as the world's executor, whatever kind the target is.
+    """
+    target_id = cast("RequestId", target.request_id)
+    namespace = world.receipts_namespace()
+    store = ReceiptStore(namespace)
+    inspector = RegisteredOperationRequests(
+        catalog_of(scenarios(world.owners_root(), namespace)),
+        NamespaceOperationReceipts(store),
+        ObservationFactory(store),
+    )
+    request = InspectRequest(
+        request_id=RequestId(root=f"inspect-of-{target_id.root}"),
+        scope=target.scope,
+        admission_id=target.admission_id,
+        deadline_at=100.0,
+        target=target_id,
+        resource_id=None,
+    )
+    return await inspector.execute(request, context_for(request))
 
 
 # operations
@@ -447,6 +479,12 @@ class _WorkspacesWorld:
 
     def writes(self) -> int:
         return self._writes
+
+    def receipts_namespace(self) -> StateNamespace:
+        return self.env.receipts_namespace()
+
+    def owners_root(self) -> Path:
+        return self._root.parent / "owners"
 
     def effects(self) -> int:
         """Worktrees, commits and refs, plus one once the adopted content is in the root."""
