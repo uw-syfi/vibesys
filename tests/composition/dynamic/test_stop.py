@@ -152,7 +152,7 @@ _CANCEL_GAP = (
     "gap (owner: vs-runtime): when the grace bound cancels the run, a core agent turn "
     "still running is waited out and the provider turn is never cancelled "
     "(libs/vs-runtime/src/vs_runtime/_agent_sessions.py:99 await_session_operation "
-    "swallows the cancel, and _session_requests.py:661 hands it no client to cancel), so "
+    "swallows the cancel, and _session_requests.py:690 hands it no client to cancel), so "
     "a stuck provider turn outlives the grace bound. The legacy path cancelled the client."
 )
 

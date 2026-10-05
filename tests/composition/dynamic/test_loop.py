@@ -206,12 +206,12 @@ def test_an_ambiguous_dispatched_turn_stalls_the_run_without_replanning(tmp_path
 _ERROR_TEXT_GAP = (
     "TurnResult has no failure detail: the correction cannot carry the provider's "
     "validation errors, libs/vs-core/src/vs_core/types/sessions.py:378 (TurnResult) and "
-    "src/vibesys/orchestration/dynamic/strategy/_planner.py:130 (_parse); owner vs-core"
+    "src/vibesys/orchestration/dynamic/strategy/_planner.py:127 (_parse); owner vs-core"
 )
 _PLANNER_FAULT_GAP = (
     "the planner is corrected max_corrections times and then the run fails; the legacy loop "
     "asked a fresh planning turn within max_retries_per_round, "
-    "src/vibesys/orchestration/dynamic/strategy/_planner.py:199 (on_turn); owner strategy"
+    "src/vibesys/orchestration/dynamic/strategy/_planner.py:175 (on_turn); owner strategy"
 )
 
 
