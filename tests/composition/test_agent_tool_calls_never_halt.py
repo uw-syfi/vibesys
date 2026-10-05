@@ -25,7 +25,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.support.fake_run_clock import FakeRunClock
 from tests.support.session_world import ProviderFaults, SessionHost
-from tests.support.skeleton_strategy import ATTEMPT, DIGEST, SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import DIGEST
 from tests.support.skeleton_world import (
     IMPLEMENTATION,
     IMPLEMENTER,
@@ -38,25 +38,16 @@ from tests.support.skeleton_world import (
     drive,
     open_skeleton_world,
 )
+from tests.support.waiting_loop_strategy import LoopState, LoopStrategy
 
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
-    AttemptBudget,
-    DecisionId,
-    InvocationId,
     Limits,
-    Proposal,
-    RequestTurn,
-    ResumeAuthorized,
     RunStatus,
-    Scope,
-    StartAttempt,
-    TurnResult,
     TurnSpec,
-    TurnSuspended,
     WorkspaceRef,
 )
 from vs_evaluation.api.tools import (
@@ -80,7 +71,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from vs_agent.api import AgentSessionSpec, AgentTurnRequest
-    from vs_core.api import RunView, StrategyEvent
     from vs_project.api import StateNamespace
     from vs_runtime.api.core import AccessGuardedWorkspace
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
@@ -100,86 +90,6 @@ POLICY = AgentEvaluationPolicy(
 
 type Step = tuple[Literal["submit"]] | tuple[Literal["wait"], tuple[int, ...]]
 type Program = tuple[Step, ...]
-
-
-class LoopState(SkeletonState):
-    """The skeleton's state plus how far the generated turn schedule has run."""
-
-    fresh: int = 0
-    yielded: bool = False
-    suspensions: int = 0
-    resumes: int = 0
-    resume: ResumeAuthorized | None = None
-
-
-class LoopStrategy(SkeletonStrategy):
-    """Dispatch ``total`` fresh implementer turns, resuming every suspension, then measure."""
-
-    state: LoopState = LoopState(schema_version=1)  # type: ignore[assignment]
-    total: int = 1
-
-    def decide(self, view: RunView) -> Proposal[SkeletonState]:
-        """Resume the authorized turn, hold while suspended, else dispatch the next turn."""
-        state = self.state
-        if state.phase == "start":
-            proposal = super().decide(view)
-            (start,) = proposal.decisions
-            assert isinstance(start, StartAttempt)
-            budget = AttemptBudget(paid_invocation_limit=self.total)
-            return proposal.model_copy(
-                update={"decisions": (start.model_copy(update={"budget": budget}),)}
-            )
-        if state.phase != "turn":
-            return super().decide(view)
-        attempt = Scope(owner=ATTEMPT.attempt_id, generation=0)
-        if state.resume is not None:
-            event = state.resume
-            spec = self._spec(view, "implement-0").model_copy(
-                update={
-                    "invocation_id": event.next_invocation.invocation_id,
-                    "continuation_id": event.continuation_id,
-                    "charge_class": "resume",
-                }
-            )
-            decision = RequestTurn(
-                decision_id=DecisionId(root=f"turn-resume-{state.resumes}"),
-                scope=attempt,
-                turn=spec,
-            )
-            return Proposal(state=state, decisions=(decision,))
-        if state.yielded:
-            return Proposal(state=state, decisions=())
-        decision = RequestTurn(
-            decision_id=DecisionId(root=f"turn-{state.fresh}"),
-            scope=attempt,
-            turn=self._spec(view, f"implement-{state.fresh}"),
-        )
-        return Proposal(state=state, decisions=(decision,))
-
-    def _spec(self, view: RunView, invocation: str) -> TurnSpec:
-        proposal = SkeletonStrategy.decide(self, view)
-        (decision,) = proposal.decisions
-        assert isinstance(decision, RequestTurn)
-        return decision.turn.model_copy(update={"invocation_id": InvocationId(root=invocation)})
-
-    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
-        """Count suspensions and resumes; each finished turn schedules the next or measures."""
-        state = self.state
-        if isinstance(event, TurnSuspended):
-            return state.model_copy(update={"suspensions": state.suspensions + 1})
-        if isinstance(event, ResumeAuthorized):
-            return state.model_copy(
-                update={"resumes": state.resumes + 1, "resume": event, "yielded": False}
-            )
-        if isinstance(event, TurnResult) and state.phase == "turn":
-            reply = json.loads(event.output_json or "{}")
-            fresh = state.fresh + (state.resume is None)
-            if reply.get("waiting"):
-                return state.model_copy(update={"yielded": True, "resume": None, "fresh": fresh})
-            if fresh < self.total:
-                return state.model_copy(update={"fresh": fresh, "resume": None})
-            return super().on_event(view, event).model_copy(update={"resume": None, "fresh": fresh})
-        return super().on_event(view, event)
 
 
 @dataclass

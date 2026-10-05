@@ -28,6 +28,7 @@ class ToolRefusal(StrEnum):
     INVALID_PLAN = "invalid_plan"
     NOT_ALLOWED = "not_allowed"
     WORKSPACE_GONE = "workspace_gone"
+    TURN_ENDED = "turn_ended"
     UNKNOWN_HANDLES = "unknown_handles"
     WAIT_OPEN = "wait_open"
     WAIT_NOT_ACTIVE = "wait_not_active"

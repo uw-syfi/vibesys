@@ -164,10 +164,22 @@ class AgentEvaluationPolicy:
         )
 
 
+class SnapshotWorkspace(Protocol):
+    """What the bridge needs of an agent's workspace: its content as a revision."""
+
+    async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
+        """Commit the workspace's content and keep it reachable; the commit id."""
+        ...
+
+    async def matches_revision(self, revision: str) -> bool:
+        """Whether the workspace's content is exactly ``revision``."""
+        ...
+
+
 class AgentWorkspaces(Protocol):
     """Finds the live workspace a scope's agent is working in."""
 
-    async def workspace_of(self, scope: Scope) -> RuntimeWorkspace | None:
+    async def workspace_of(self, scope: Scope) -> SnapshotWorkspace | None:
         """The scope's live workspace, or None when it no longer exists."""
         ...
 
@@ -356,6 +368,10 @@ class AgentEvaluationBridge:
 
     async def _submit(self, scope: Scope) -> SubmittedReply | RunStoppingReply:
         shell, clock = self._bound()
+        if self._executing(scope) is None:
+            # A stale token: the turn it was issued for ended. Core takes no submission
+            # from a scope that has no turn running.
+            raise ToolRefusedError(ToolRefusal.TURN_ENDED)
         async with self._lock:
             workspace = await self._workspaces.workspace_of(scope)
             if workspace is None:
@@ -414,7 +430,7 @@ class AgentEvaluationBridge:
         return running[0] if len(running) == 1 else None
 
     @staticmethod
-    async def _revision(workspace: RuntimeWorkspace, scoped: _Scoped) -> str:
+    async def _revision(workspace: SnapshotWorkspace, scoped: _Scoped) -> str:
         """The workspace's content as a revision, reusing the last when nothing changed.
 
         Identity includes the revision, so a snapshot that is not content-addressed
@@ -447,8 +463,7 @@ class AgentEvaluationBridge:
         shell, _ = self._bound()
         turn = self._executing(scope)
         if turn is None:
-            # The turn already ended (a stale token), or the scope has no single turn.
-            raise ToolRefusedError(ToolRefusal.WAIT_NOT_ACTIVE)
+            raise ToolRefusedError(ToolRefusal.TURN_ENDED)
         scoped = self._scoped(scope)
         unknown = sorted(set(handles) - scoped.submitted.keys())
         if unknown:
@@ -509,4 +524,5 @@ __all__ = [
     "AgentEvaluationPolicy",
     "AgentWorkspaces",
     "ScopeWorkspaces",
+    "SnapshotWorkspace",
 ]
