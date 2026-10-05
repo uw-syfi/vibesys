@@ -56,7 +56,6 @@ from .types.attempts import (
     WorkspaceObserved,
 )
 from .types.common import (
-    Area,
     AttemptRef,
     ChargeId,
     ChargeKind,
@@ -65,7 +64,6 @@ from .types.common import (
     DecisionId,
     ExecuteRegisteredOperation,
     InvocationRef,
-    KernelNotImplementedError,
     Observation,
     ObservationStatus,
     RequestBase,
@@ -1218,9 +1216,11 @@ def _checkpoint_request(
         for row in context.sessions.invocations
     ):
         return AreaChange(state=state)
-    # Only interruption claims authorize an attempt-owned invocation checkpoint.
+    # Only interruption claims authorize an attempt-owned invocation checkpoint, and an
+    # interruption retains work in progress ("wip"): every later proof (Checkpointed, the
+    # session claim, the retention check) accepts nothing else. Anything else is declined.
     if event.retention != "wip" or not _interrupt_checkpoint(context, event.invocation, identity):
-        raise KernelNotImplementedError(Area.ATTEMPTS, event.kind, subarea="_attempt_acquisition")
+        return AreaChange(state=state)
     request = SnapshotAndRetain(
         request_id=identity,
         scope=_scope(attempt),
@@ -1560,8 +1560,11 @@ def _revision_request(
         or _intent(context, event.request.request_id) is not None
     ):
         return AreaChange(state=state)
+    # DISCARD releases the workspace hold, which only closure may do: Retirement dispatches a
+    # declared discard operation as cleanup once the attempt is closing. An active attempt
+    # declines it (the strategy must retire the attempt first).
     if event.authority == RevisionAuthority.DISCARD:
-        raise KernelNotImplementedError(Area.ATTEMPTS, event.kind, subarea="_attempt_acquisition")
+        return AreaChange(state=state)
     updated = attempt.model_copy(
         update={"pending_intents": (*attempt.pending_intents, event.request.request_id)}
     )

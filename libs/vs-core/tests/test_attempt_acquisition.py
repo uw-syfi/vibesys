@@ -927,10 +927,9 @@ def test_checkpoint_waits_for_every_competing_writer_to_terminate(
         authority=RequestId(root="checkpoint"),
     )
     if retention == "candidate" and (proof == "terminal" or access != Access.WRITE_CANDIDATE):
-        with pytest.raises(KernelNotImplementedError) as raised:
-            step(state, event)
-        assert raised.value.subarea == "_attempt_acquisition"
-        assert raised.value.event_kind == "invocation_checkpoint_requested"
+        declined = step(state, event)
+        assert declined.requests == ()
+        assert declined.state.attempts == state.attempts
         return
     result = step(state, event)
     assert result == step(reload_state(state), event)
@@ -2778,7 +2777,6 @@ def test_checkpoint_authority_must_identify_exactly_one_interruption() -> None:
     event = InvocationCheckpointRequested(
         attempt=owner_ref(), invocation=claim.invocation, retention="wip", authority=claim.authority
     )
-    with pytest.raises(KernelNotImplementedError) as raised:
-        step(reload_state(state), event)
-    assert raised.value.subarea == "_attempt_acquisition"
-    assert raised.value.event_kind == "invocation_checkpoint_requested"
+    declined = step(reload_state(state), event)
+    assert declined.requests == ()
+    assert declined.state.attempts == reload_state(state).attempts
