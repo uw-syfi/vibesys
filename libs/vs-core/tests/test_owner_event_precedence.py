@@ -13,6 +13,8 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .test_measurements import observation as observation_of
+from .test_measurements import requested
 from .test_session_turns import (
     invocation,
     reload_state,
@@ -120,3 +122,59 @@ def test_the_published_turn_carries_the_reply_for_every_delivery_order(
     assert [row.output_json for row in published] == [REPLY]
     (invocation_row,) = state.sessions.invocations
     assert invocation_row.output_json == REPLY
+
+
+def submitted_job() -> tuple[core.CoreState, core.SubmitMeasurement]:
+    """A measurement submitted and dispatched, whose own view saw the job still running."""
+    result = requested()
+    submit = result.requests[0]
+    assert isinstance(submit, core.SubmitMeasurement)
+    assert submit.request_id is not None
+    state = reload_step(result.state, core.DispatchAuthorized(request_id=submit.request_id)).state
+    first = job_observation(submit, 1)
+    state = reload_step(state, core.RequestObserved(observation=first)).state
+    return state, submit
+
+
+def job_observation(
+    submit: core.SubmitMeasurement, sequence: int, status: core.ObservationStatus | None = None
+) -> core.Observation:
+    status = status or core.ObservationStatus.PENDING
+    terminal = status not in (core.ObservationStatus.PENDING, core.ObservationStatus.UNKNOWN)
+    return observation_of(submit, sequence, status=status, terminal=terminal, released=terminal)
+
+
+def submit_phase(state: core.CoreState, submit: core.SubmitMeasurement) -> core.IntentPhase:
+    return next(row.phase for row in state.intents.intents if row.request_id == submit.request_id)
+
+
+conclusive = st.sampled_from(
+    [
+        core.ObservationStatus.SUCCEEDED,
+        core.ObservationStatus.FAILED,
+        core.ObservationStatus.CANCELLED,
+    ]
+)
+
+
+@given(running=st.integers(0, 4), ending=conclusive, replays=st.integers(0, 2))
+def test_a_submit_intent_completes_exactly_when_its_job_is_terminal(
+    running: int, ending: core.ObservationStatus, replays: int
+) -> None:
+    """The job's own observations, whichever event carries them, decide the submit's state."""
+    state, submit = submitted_job()
+    assert submit_phase(state, submit) == core.IntentPhase.DISPATCHED
+    resource = core.ResourceId(root="job")
+    sequence = 1
+    for _ in range(running):
+        sequence += 1
+        view = job_observation(submit, sequence)
+        state = reload_step(state, core.JobObserved(resource_id=resource, observation=view)).state
+        assert submit_phase(state, submit) == core.IntentPhase.DISPATCHED
+    sequence += 1
+    view = job_observation(submit, sequence, ending)
+    for _ in range(1 + replays):
+        state = reload_step(state, core.JobObserved(resource_id=resource, observation=view)).state
+    assert submit_phase(state, submit) == core.IntentPhase.COMPLETED
+    held = next(row for row in state.intents.intents if row.request_id == submit.request_id)
+    assert held.observation == view
