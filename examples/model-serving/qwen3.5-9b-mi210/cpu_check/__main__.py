@@ -25,6 +25,11 @@ accuracy checker's `echo` + `logprobs` path) are all in flight together, each
 session sending its rounds in order as the benchmark does. Set N above the
 engine's admission cap so admission, queueing, and batched decode all run.
 
+The verdict for an exact candidate tree and option set is stored (`verdicts.py`), and running
+the check again on that unchanged tree replays the stored report in under a second instead of
+running it: the result cannot change, and the report's last line names a file to read or grep.
+Edit the candidate to get a new run; `--rerun` forces one.
+
 Exit 0: pass. Exit 1: a round failed; each failure names its session and
 round, followed by the server log tail. Exit 2: the server did not start.
 
@@ -36,6 +41,7 @@ trusted evaluation's accuracy checker stays the gate.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import socket
 import subprocess
@@ -53,6 +59,7 @@ from reference.engine import Engine, SamplingParams
 
 from cpu_check import preflight, scoring, sessions
 from cpu_check.tiny_model import VOCAB_SIZE, write_checkpoint
+from cpu_check.verdicts import Verdict, Verdicts, tree_key
 
 MODEL_NAME = "tiny-qwen3.5"
 SERVER_START_SECONDS = 120.0
@@ -259,6 +266,50 @@ def check(
     return 0 if passed else 1
 
 
+def run(
+    root: Path,
+    work_dir: Path,
+    *,
+    verdicts: Verdicts,
+    rerun: bool,
+    expect_cache_hits: bool,
+    concurrency: int,
+    log=print,
+) -> int:
+    """`check`, unless this exact tree already has a stored verdict for these options."""
+    options = {"expect_cache_hits": expect_cache_hits, "concurrency": concurrency}
+    key = tree_key(root, options)
+    stored = None if rerun else verdicts.lookup(key)
+    if stored is not None:
+        log(
+            f"REPLAYED, not rerun: this exact candidate tree already ran this check "
+            f"({'PASS' if stored.exit_code == 0 else 'FAIL'}); the result cannot change until "
+            "a file changes. Edit the candidate, or pass --rerun if you suspect the "
+            "environment. Stored report:"
+        )
+        log(stored.report)
+        log(f"full report: {verdicts.report_path(key)}")
+        return stored.exit_code
+    lines: list[str] = []
+
+    def tee(message: str) -> None:
+        lines.append(message)
+        log(message)
+
+    code = check(root, work_dir, **options, log=tee)
+    verdicts.record(key, Verdict(exit_code=code, report="\n".join(lines)))
+    if code in (0, 1):
+        log(f"full report: {verdicts.report_path(key)}")
+    return code
+
+
+def _default_verdicts_dir() -> Path:
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return Path(
+        os.environ.get("QWEN35_CPU_CHECK_VERDICTS") or cache / "vibesys/qwen35-cpu-check-verdicts"
+    )
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -278,16 +329,32 @@ def main() -> None:
         help="drive the batching scheduler: N sessions, a long-prompt session, and a scoring "
         "request at once; set N above the engine's admission cap (default 0: one at a time)",
     )
+    p.add_argument(
+        "--rerun",
+        action="store_true",
+        help="run even if this exact tree already has a stored verdict for these options",
+    )
+    p.add_argument(
+        "--verdicts-dir",
+        type=Path,
+        default=_default_verdicts_dir(),
+        help="where verdicts are stored (default: the user cache)",
+    )
     args = p.parse_args()
     torch.set_num_threads(min(8, torch.get_num_threads()))
-    options = {"expect_cache_hits": args.expect_cache_hits, "concurrency": args.concurrency}
+    options = {
+        "verdicts": Verdicts(args.verdicts_dir),
+        "rerun": args.rerun,
+        "expect_cache_hits": args.expect_cache_hits,
+        "concurrency": args.concurrency,
+    }
     if args.work_dir is not None:
         args.work_dir.mkdir(parents=True, exist_ok=True)
-        sys.exit(check(args.root.resolve(), args.work_dir.resolve(), **options))
+        sys.exit(run(args.root.resolve(), args.work_dir.resolve(), **options))
     # The in-process reference engine maps the tiny checkpoint until it is collected; on an
     # NFS /tmp, deleting a mapped file leaves a `.nfs*` placeholder that blocks the rmdir.
     with tempfile.TemporaryDirectory(prefix="cpu-check-", ignore_cleanup_errors=True) as tmp:
-        sys.exit(check(args.root.resolve(), Path(tmp), **options))
+        sys.exit(run(args.root.resolve(), Path(tmp), **options))
 
 
 def _nonnegative(text: str) -> int:
