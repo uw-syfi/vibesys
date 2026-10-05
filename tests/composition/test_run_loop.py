@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from tests.support.fake_run_clock import FakeRunClock
 from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
@@ -157,6 +157,8 @@ async def test_the_deadline_ends_an_otherwise_idle_paused_run(tmp_path: Path) ->
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
+@example(poll=200.0, min_sleep=1.0)
+@example(poll=166.0, min_sleep=1.0)
 @given(
     poll=st.floats(min_value=25.0, max_value=300.0),
     min_sleep=st.floats(min_value=0.01, max_value=20.0),
@@ -183,9 +185,11 @@ async def test_an_idle_run_is_woken_a_bounded_number_of_times(
     assert outcome.status == RunStatus.TERMINAL
     assert all(seconds >= min_sleep for seconds in clock.sleeps)
     # Wakes come from the control poll and the lease renewal, each at most that often; a
-    # partial period at the end of the horizon still costs one wake, hence the ceilings.
-    assert len(clock.sleeps) <= (
-        math.ceil(horizon / max(poll, min_sleep))
+    # partial interval at the horizon costs one wake (the ceilings), and a poll that falls
+    # just after a lease wake is a second, short wake (the poll term counts twice).
+    assert (
+        len(clock.sleeps)
+        <= 2 * math.ceil(horizon / max(poll, min_sleep))
         + math.ceil(horizon / max(LEASE / 3, min_sleep))
         + 3
     )
