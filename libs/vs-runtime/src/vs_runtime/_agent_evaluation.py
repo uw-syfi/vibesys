@@ -13,7 +13,10 @@ Flow of one turn that waits on its measurements:
    ``SubmitMeasurement`` (or refuses, with a typed reason). The reply is the handle,
    which is the id core and the executor give the measurement's job.
 2. ``validate_evaluation_wait``: the handles must be this scope's own admitted
-   submissions. The scope's yield is recorded.
+   submissions, and core must accept a suspension for the scope now
+   (``suspension_refusal``: no earlier resume owed, scope active). Otherwise the agent
+   gets a typed, template-rendered tool error and nothing is recorded. The scope's yield
+   is recorded.
 3. The agent ends its turn with its waiting reply. When the session executor reports the
    turn, it asks ``yielded`` for the continuation, so the one ``TurnObserved`` carries the
    suspension. The queued event commits before that observation, so the measurement is
@@ -22,6 +25,10 @@ Flow of one turn that waits on its measurements:
 There is no status, wait or cancel tool: a suspended caller never polls. Cancel and
 deadline are core's: ``DeadlineReached`` resumes with a timeout, and a stopping run drains
 its jobs and refuses new calls (``NOT_ADMITTED``).
+
+Every failure of a call is a ``ToolRefusal`` answered to the agent; none reaches the
+shell's commit. ``yielded`` asks core again when the turn is reported and, if the scope
+changed since the wait was validated, ends the turn without suspending.
 
 The yield is held in memory until the turn is reported. A host restart in that window
 loses it; the turn then ends without suspending and its measurement result reaches the
@@ -37,7 +44,7 @@ import hashlib
 import hmac
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import TypeAdapter, ValidationError
@@ -58,8 +65,11 @@ from vs_core.api import (
     ResourceId,
     RevisionRef,
     Scope,
+    SessionPhase,
     SubmitMeasurement,
+    SuspensionRefusal,
     Transition,
+    suspension_refusal,
 )
 from vs_evaluation.api import (
     AgentEvaluationCall,
@@ -72,15 +82,18 @@ from vs_evaluation.api import (
     WaitReply,
 )
 from vs_evaluation.api.tools import CORE_EVALUATION_TOOLS, core_evaluation_mcp_descriptor
+from vs_runtime._agent_tool_errors import ToolRefusal, ToolRefusedError, render_tool_refusal
+from vs_runtime._core_loop import RuntimeCommitError
 from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._workspace_lookup import find_scope_workspace
 from vs_runtime._workspace_requests import revision_ref
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from vs_agent.api import ToolServerDescriptor
-    from vs_core.api import CoreEvent
+    from vs_core.api import CoreEvent, CoreState
     from vs_runtime._workspace_receipts import WorkspaceReceipts
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
     from vs_runtime.contracts import AgentRole
@@ -91,15 +104,24 @@ EVALUATION_TOOL_ID = "evaluation"
 _FRAME_LIMIT = 65_536
 _SNAPSHOT_LABEL = "agent-evaluation"
 _CALLS = TypeAdapter(AgentEvaluationCall)
-_REFUSAL_TEXT = {
-    AgentRejection.RUN_STOPPING: "the run is stopping",
-    AgentRejection.NOT_ADMITTED: "this workspace is no longer a current owner of evaluations",
-    AgentRejection.INVALID_PLAN: "the candidate has no revision to evaluate",
-    AgentRejection.NOT_ALLOWED: (
-        "the run's submission budget for this exact candidate is spent, or the plan exceeds a "
-        "run limit or its deadline; change the candidate before submitting again"
-    ),
+_REFUSALS = {
+    AgentRejection.RUN_STOPPING: ToolRefusal.RUN_STOPPING,
+    AgentRejection.NOT_ADMITTED: ToolRefusal.NOT_ADMITTED,
+    AgentRejection.INVALID_PLAN: ToolRefusal.INVALID_PLAN,
+    AgentRejection.NOT_ALLOWED: ToolRefusal.NOT_ALLOWED,
 }
+_WAIT_REFUSALS = {
+    SuspensionRefusal.OPEN_CONTINUATION: ToolRefusal.WAIT_OPEN,
+    SuspensionRefusal.SCOPE_NOT_ACTIVE: ToolRefusal.WAIT_NOT_ACTIVE,
+    SuspensionRefusal.NOT_RESUMABLE: ToolRefusal.WAIT_NOT_RESUMABLE,
+    SuspensionRefusal.PREFIX_MISMATCH: ToolRefusal.WAIT_OVERLAPPED,
+}
+_ADMISSION_BUSY = "admission needs an idle input queue"
+"""The shell's text for the one transient admission failure (a commit is in flight)."""
+
+
+def _ignore_diagnostic(line: str) -> None:
+    del line
 
 
 @dataclass(frozen=True)
@@ -163,8 +185,23 @@ class ScopeWorkspaces:
         return await find_scope_workspace(self._workspaces, self._receipts, scope)
 
 
+class _Envelope(Protocol):
+    @property
+    def core(self) -> CoreState: ...
+
+
+class _Record(Protocol):
+    @property
+    def envelope(self) -> _Envelope: ...
+
+
 class AdmissionShell(Protocol):
     """The shell as the bridge sees it: ask core, and queue the event for commit."""
+
+    @property
+    def record(self) -> _Record:
+        """The committed record; nothing commits while an agent turn holds the shell."""
+        ...
 
     def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
         """Run core's step on the event and queue it; ``ContractError`` queues nothing."""
@@ -181,12 +218,21 @@ class Clock(Protocol):
 
 @dataclass
 class _Scoped:
-    """One scope's in-flight submissions and its recorded yield."""
+    """One scope's last snapshot, and the submissions and recorded wait of its current turn."""
 
-    submitted: dict[str, float]
-    """Handle to the measurement's deadline, for each admitted submission not yet yielded."""
     last_revision: str | None = None
+    turn: InvocationId | None = None
+    """The turn that made ``submitted`` and ``waits``; another turn's call discards them."""
+    submitted: dict[str, float] = field(default_factory=dict)
+    """Handle to the measurement's deadline, for each submission of ``turn`` not yet yielded."""
     waits: tuple[str, ...] = ()
+
+    def begin(self, turn: InvocationId | None) -> None:
+        """Join ``turn``; a handle or wait of an earlier turn is not this turn's to use."""
+        if turn != self.turn:
+            self.turn = turn
+            self.submitted = {}
+            self.waits = ()
 
 
 class AgentEvaluationBridge:
@@ -202,11 +248,16 @@ class AgentEvaluationBridge:
         socket_path: Path,
         policy: AgentEvaluationPolicy,
         workspaces: AgentWorkspaces,
+        diagnostics: Callable[[str], None] = _ignore_diagnostic,
     ) -> None:
-        """Bind the socket path, the host's plan policy and the workspace lookup."""
+        """Bind the socket path, the host's plan policy, the workspace lookup and a log sink.
+
+        ``diagnostics`` hears one line for each call refused as busy, for the run's journal.
+        """
         self._socket_path = socket_path
         self._policy = policy
         self._workspaces = workspaces
+        self._diagnostics = diagnostics
         self._secret = os.urandom(32)
         self._shell: AdmissionShell | None = None
         self._clock: Clock | None = None
@@ -263,7 +314,14 @@ class AgentEvaluationBridge:
     async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             frame = await reader.readline()
-            reply = await self.handle(frame)
+            try:
+                reply = await self.handle(frame)
+            except Exception:
+                # Run state the bridge cannot trust: the shell's halt ends the run. Tell
+                # the agent to stop instead of retrying, then let the error surface.
+                writer.write(self._failure(ToolRefusal.RUN_FAILING) + b"\n")
+                await writer.drain()
+                raise
             writer.write(reply + b"\n")
             await writer.drain()
         except (ConnectionError, asyncio.LimitOverrunError, ValueError):
@@ -280,17 +338,19 @@ class AgentEvaluationBridge:
             elif isinstance(call, WaitCall):
                 result = self._validate_wait(self._scope_of(call.token), call.handles)
             else:
-                message = f"{call.action} is not offered on a core run"
-                return self._failure(message)
+                return self._failure(ToolRefusal.REFUSED)
         except ValidationError:
-            return self._failure("malformed evaluation call")
-        except (PermissionError, ValueError, ContractError) as error:
-            return self._failure(str(error))
+            return self._failure(ToolRefusal.MALFORMED)
+        except PermissionError:
+            return self._failure(ToolRefusal.UNKNOWN_CALLER)
+        except ToolRefusedError as error:
+            return self._failure(error.reason, error)
         return SocketSuccess(result=result.model_dump(mode="json")).model_dump_json().encode()
 
     @staticmethod
-    def _failure(message: str) -> bytes:
-        return SocketFailure(error=message).model_dump_json().encode()
+    def _failure(reason: ToolRefusal, error: ToolRefusedError | None = None) -> bytes:
+        text = str(error) if error is not None else render_tool_refusal(reason)
+        return SocketFailure(error=text).model_dump_json().encode()
 
     # submit
 
@@ -299,9 +359,8 @@ class AgentEvaluationBridge:
         async with self._lock:
             workspace = await self._workspaces.workspace_of(scope)
             if workspace is None:
-                message = "this workspace no longer exists"
-                raise ValueError(message)
-            scoped = self._scopes.setdefault(scope.model_dump_json(), _Scoped(submitted={}))
+                raise ToolRefusedError(ToolRefusal.WORKSPACE_GONE)
+            scoped = self._scoped(scope)
             revision = await self._revision(workspace, scoped)
             now = clock.now()
             call_id = f"agent:{uuid.uuid4().hex}"
@@ -310,7 +369,7 @@ class AgentEvaluationBridge:
                 plan=self._policy.plan(revision_ref(revision), now_at=now),
                 call_id=call_id,
             )
-            transition = shell.admit(event, now_at=now)
+            transition = self._admit(shell, event, now)
             request = next(
                 (r for r in transition.requests if isinstance(r, SubmitMeasurement)), None
             )
@@ -319,6 +378,40 @@ class AgentEvaluationBridge:
             handle = handle_for(request.request_id)
             scoped.submitted[handle] = request.deadline_at
             return SubmittedReply(handle_id=handle)
+
+    def _admit(self, shell: AdmissionShell, event: CoreEvent, now: float) -> Transition:
+        """Ask core about the event; only the shell's idle-queue refusal is transient.
+
+        Every other failure is run state that cannot be trusted (a halted shell, an
+        uncertain commit, a core contract gap) or a core invariant, and must reach the
+        run's halt instead of telling the agent to retry.
+        """
+        try:
+            return shell.admit(event, now_at=now)
+        except RuntimeCommitError as error:
+            if type(error) is not RuntimeCommitError or str(error) != _ADMISSION_BUSY:
+                raise
+            self._diagnostics(
+                f"agent evaluation call refused as busy: {type(error).__name__}: {error}"
+            )
+            raise ToolRefusedError(ToolRefusal.BUSY) from error
+
+    def _scoped(self, scope: Scope) -> _Scoped:
+        """The scope's record, joined to the turn executing in it now."""
+        scoped = self._scopes.setdefault(scope.model_dump_json(), _Scoped())
+        turn = self._executing(scope)
+        scoped.begin(None if turn is None else turn.invocation_id)
+        return scoped
+
+    def _executing(self, scope: Scope) -> InvocationRef | None:
+        """The turn running in ``scope`` per the committed state; None when none or several."""
+        shell, _ = self._bound()
+        running = [
+            row.invocation
+            for row in shell.record.envelope.core.sessions.invocations
+            if row.scope == scope and row.phase == SessionPhase.EXECUTING
+        ]
+        return running[0] if len(running) == 1 else None
 
     @staticmethod
     async def _revision(workspace: RuntimeWorkspace, scoped: _Scoped) -> str:
@@ -346,44 +439,59 @@ class AgentEvaluationBridge:
             raise ContractError(("agent_calls",), message)
         if call.rejection is AgentRejection.RUN_STOPPING:
             return RunStoppingReply()
-        raise ValueError(_REFUSAL_TEXT[call.rejection])
+        raise ToolRefusedError(_REFUSALS[call.rejection])
 
     # wait and yield
 
     def _validate_wait(self, scope: Scope, handles: tuple[str, ...]) -> WaitReply:
-        scoped = self._scopes.get(scope.model_dump_json())
-        owned = scoped.submitted if scoped is not None else {}
-        unknown = sorted(set(handles) - owned.keys())
-        if scoped is None or unknown:
-            message = (
-                f"handles {unknown} were not submitted by this agent in this turn; "
-                "only your own submissions can be waited on"
-            )
-            raise ValueError(message)
+        shell, _ = self._bound()
+        turn = self._executing(scope)
+        if turn is None:
+            # The turn already ended (a stale token), or the scope has no single turn.
+            raise ToolRefusedError(ToolRefusal.WAIT_NOT_ACTIVE)
+        scoped = self._scoped(scope)
+        unknown = sorted(set(handles) - scoped.submitted.keys())
+        if unknown:
+            raise ToolRefusedError(ToolRefusal.UNKNOWN_HANDLES, unknown)
+        refusal = suspension_refusal(shell.record.envelope.core, turn)
+        if refusal is not None:
+            raise ToolRefusedError(_WAIT_REFUSALS[refusal])
         scoped.waits = tuple(dict.fromkeys(handles))
         return WaitReply(handles=scoped.waits)
 
     def yielded(self, request: DispatchTurn) -> Continuation | None:
-        """The continuation of a turn whose agent validated a wait, once; else None."""
+        """The continuation of a turn whose agent validated a wait, once; else None.
+
+        The turn is over either way: its submissions and wait are forgotten here, so no
+        later turn can wait on them.
+        """
         scoped = self._scopes.get(request.scope.model_dump_json())
-        if scoped is None or not scoped.waits:
-            return None
-        handles, scoped.waits = scoped.waits, ()
-        deadline = min(scoped.submitted.pop(handle) for handle in handles)
         turn = request.turn
+        if scoped is None or scoped.turn != turn.invocation_id:
+            return None
+        handles, deadlines = scoped.waits, scoped.submitted
+        scoped.begin(None)
+        if not handles:
+            return None
         session, generation = turn.session.session_id, request.scope.generation
+        current = InvocationRef(
+            session_id=session, invocation_id=turn.invocation_id, generation=generation
+        )
+        shell, _ = self._bound()
+        if suspension_refusal(shell.record.envelope.core, current) is not None:
+            # The scope changed since the wait was validated: end the turn without
+            # suspending, as after a host restart. The measurements report ordinarily.
+            return None
         return Continuation(
             continuation_id=ContinuationId(root=f"{turn.invocation_id.root}/evaluation"),
-            invocation=InvocationRef(
-                session_id=session, invocation_id=turn.invocation_id, generation=generation
-            ),
+            invocation=current,
             next_invocation=InvocationRef(
                 session_id=session,
                 invocation_id=InvocationId(root=f"{turn.invocation_id.root}/resume"),
                 generation=generation,
             ),
             jobs=tuple(ResourceId(root=handle) for handle in handles),
-            deadline_at=deadline,
+            deadline_at=min(deadlines[handle] for handle in handles),
             phase=ContinuationPhase.WAITING,
         )
 

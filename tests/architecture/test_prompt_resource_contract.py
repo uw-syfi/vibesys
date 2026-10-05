@@ -182,6 +182,7 @@ def representative_context() -> dict[str, object]:
         "gate_approved_evaluation_artifact",
         "gate_approved_perf_unit",
         "gpu",
+        "handles",
         "history",
         "history_root",
         "hypothesis",
