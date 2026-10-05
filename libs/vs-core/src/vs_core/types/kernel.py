@@ -150,7 +150,8 @@ class RunView(Value):
     controls: tuple[ControlInput, ...]
     inputs: tuple[InputRecord, ...]
     adoption: AdoptionView | None = None
-    # Earliest core time a paced job poll comes due, None when none is scheduled.
+    # Earliest core time a ClockAdvanced does work: a paced job poll comes due, or an
+    # answered-but-open intent passes its reconciliation bound. None when neither is scheduled.
     next_observe_at: Seconds | None = None
 
 

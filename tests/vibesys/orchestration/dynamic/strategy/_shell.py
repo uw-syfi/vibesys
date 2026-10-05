@@ -22,6 +22,7 @@ from tests.support.liveness import Journal
 from vs_core.api import (
     AdoptionObserved,
     AdoptRevision,
+    CancelTurn,
     CloseSession,
     CollectEvidence,
     DispatchTurn,
@@ -192,6 +193,9 @@ class ScriptedExecutors:
         key = request.request_id.root
         sequence = self._next(key)
         status, accepted, terminal = _status(answer)
+        if isinstance(request, CancelTurn) and isinstance(answer, Succeeded):
+            # A stopped turn reports cancelled and released, as the session executor does.
+            status = ObservationStatus.CANCELLED
         succeeded = isinstance(answer, Succeeded)
         observation = Observation(
             event_id=EventId(root=f"{key}:observation:{sequence}"),

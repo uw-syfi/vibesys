@@ -1356,15 +1356,58 @@ def _deadline(
         for resource in sorted(set(resources), key=lambda value: value.root)
     )
     requests.extend(_pending_cancellations(state, tuple(cancellations)))
-    barrier, inspection = _deadline_barrier(state, context, intent, now_at)
-    if inspection is not None:
-        requests.append(inspection)
+    barrier = state.recovery
+    if barrier.phase != RecoveryPhase.READY:
+        # Recovery is gating the run: record the blocked check and inspect once more. A
+        # bound passing while the run is live (an executor answered and went silent) blocks
+        # the intent for the strategy to handle and leaves scheduling open.
+        barrier, inspection = _deadline_barrier(state, context, intent, now_at)
+        if inspection is not None:
+            requests.append(inspection)
 
     return AreaChange(
         state=state.model_copy(update={"recovery": barrier}),
         requests=tuple(requests),
         events=events,
     )
+
+
+def _answered_open(intent: Intent) -> bool:
+    """An intent whose executor answered without concluding, so nothing is in flight for it.
+
+    RECONCILING is an Unknown or an unproven acceptance; DISPATCHED with an observation is
+    a retryable failure. Both wait for an inspection or a later observation that no
+    live request is going to produce. A DISPATCHED intent with no observation may still be
+    executing, so it is not here.
+    """
+    if intent.phase == IntentPhase.RECONCILING:
+        return True
+    return intent.phase == IntentPhase.DISPATCHED and intent.observation is not None
+
+
+def _canonical(intent: Intent) -> bool:
+    return not isinstance(intent.request, InspectRequest | CancelOwnedResource | BlockIntent)
+
+
+def overdue_reconciliations(
+    state: IntentsState, now_at: float
+) -> tuple[ReconciliationDeadline, ...]:
+    """One deadline event per answered-but-open canonical intent whose bound has passed."""
+    return tuple(
+        ReconciliationDeadline(request_id=intent.request_id, now_at=now_at)
+        for intent in state.intents
+        if _answered_open(intent) and _canonical(intent) and intent.reconcile_deadline_at <= now_at
+    )
+
+
+def next_reconciliation_at(state: IntentsState) -> float | None:
+    """The earliest time a ``ClockAdvanced`` would block an answered-but-open intent."""
+    due = [
+        intent.reconcile_deadline_at
+        for intent in state.intents
+        if _answered_open(intent) and _canonical(intent)
+    ]
+    return min(due, default=None)
 
 
 def advance(

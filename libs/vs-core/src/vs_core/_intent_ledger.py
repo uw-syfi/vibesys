@@ -278,7 +278,7 @@ def _end_released_dispatch(
             intent
             for intent in state.intents
             if isinstance(intent.request, DispatchTurn)
-            and intent.phase == IntentPhase.RECONCILING
+            and intent.phase in (IntentPhase.RECONCILING, IntentPhase.BLOCKED)
             and any(
                 intent.request.turn == row.turn and intent.request.scope == row.scope
                 for row in rows
