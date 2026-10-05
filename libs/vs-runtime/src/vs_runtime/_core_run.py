@@ -125,8 +125,8 @@ class RunLoopConfig:
     min_sleep: float = 0.05
     recovery_poll_interval: float = 1.0
     max_dispatches: int = 100_000
-    max_concurrent: int = 1
-    """Requests (agent turns, evaluations) the shell executes at once."""
+    max_concurrent: int | None = None
+    """Requests the shell executes at once; None takes the run's ``Limits.max_parallel``."""
     stop_result: RunResultProposal = field(
         default_factory=lambda: RunResultProposal(
             outcome="cancelled", reason="stop requested by the operator"
@@ -144,7 +144,11 @@ class RunLoopConfig:
             if getattr(self, name) <= 0:
                 message = f"{name} must be positive"
                 raise ValueError(message)
-        if self.recovery_poll_interval <= 0 or self.max_dispatches <= 0 or self.max_concurrent <= 0:
+        if (
+            self.recovery_poll_interval <= 0
+            or self.max_dispatches <= 0
+            or (self.max_concurrent is not None and self.max_concurrent <= 0)
+        ):
             message = "recovery_poll_interval, max_dispatches and max_concurrent must be positive"
             raise ValueError(message)
 
@@ -338,7 +342,7 @@ class _Loop:
                 self._delivery,
                 now_at=now,
                 max_dispatches=remaining,
-                max_concurrent=self._config.max_concurrent,
+                max_concurrent=self._config.max_concurrent or self._core().run.limits.max_parallel,
             )
         )
         if self._controls is None:

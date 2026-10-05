@@ -145,7 +145,7 @@ class _Finished:
     start: CoreState
 
 
-def _run(cap: int, delays: list[int]) -> _Finished:
+def _run(cap: int | None, delays: list[int]) -> _Finished:
     ledger = _Ledger(delays=deque(delays))
     executors = Executors(
         planner=deque([plan_reply(*(implement(f"h{n}") for n in range(IMPLEMENTERS)))]),
@@ -265,3 +265,8 @@ def test_turns_overlap_up_to_the_cap() -> None:
     assert _run(1, long_turns).ledger.max_turns_in_flight == 1
     assert _run(2, long_turns).ledger.max_turns_in_flight == 2
     assert _run(3, long_turns).ledger.max_turns_in_flight == 2
+
+
+def test_without_an_explicit_cap_the_run_limit_sets_it() -> None:
+    """One source of truth: the run's max_parallel (LIMITS has 2) is the loop's cap."""
+    assert _run(None, [40] * IMPLEMENTERS).ledger.max_turns_in_flight == LIMITS.max_parallel
