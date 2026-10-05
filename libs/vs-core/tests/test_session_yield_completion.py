@@ -98,7 +98,11 @@ def yield_state(
         admission_id=admission,
     )
     invocation = core.Invocation(
-        invocation=ref, scope=owner_scope, turn=spec, phase=core.SessionPhase.EXECUTING
+        invocation=ref,
+        scope=owner_scope,
+        turn=spec,
+        phase=core.SessionPhase.EXECUTING,
+        evaluation_prefix=core.EvaluationHistoryCursor(),
     )
     session = core.SessionView(
         spec=spec.session,

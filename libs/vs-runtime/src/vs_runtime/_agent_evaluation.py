@@ -115,7 +115,26 @@ _WAIT_REFUSALS = {
     SuspensionRefusal.SCOPE_NOT_ACTIVE: ToolRefusal.WAIT_NOT_ACTIVE,
     SuspensionRefusal.NOT_RESUMABLE: ToolRefusal.WAIT_NOT_RESUMABLE,
     SuspensionRefusal.PREFIX_MISMATCH: ToolRefusal.WAIT_OVERLAPPED,
+    SuspensionRefusal.JOB_NOT_OWNED: ToolRefusal.UNKNOWN_HANDLES,
+    SuspensionRefusal.DEADLINE_EXCEEDED: ToolRefusal.WAIT_DEADLINE,
 }
+
+
+def _continuation(
+    current: InvocationRef, handles: tuple[str, ...], deadlines: dict[str, float]
+) -> Continuation:
+    """The wait on ``handles`` that ends ``current``'s turn and resumes in its successor."""
+    root = current.invocation_id.root
+    return Continuation(
+        continuation_id=ContinuationId(root=f"{root}/evaluation"),
+        invocation=current,
+        next_invocation=current.model_copy(
+            update={"invocation_id": InvocationId(root=f"{root}/resume")}
+        ),
+        jobs=tuple(ResourceId(root=handle) for handle in handles),
+        deadline_at=min(deadlines[handle] for handle in handles),
+        phase=ContinuationPhase.WAITING,
+    )
 
 
 def _ignore_diagnostic(line: str) -> None:
@@ -464,10 +483,13 @@ class AgentEvaluationBridge:
         unknown = sorted(set(handles) - scoped.submitted.keys())
         if unknown:
             raise ToolRefusedError(ToolRefusal.UNKNOWN_HANDLES, unknown)
-        refusal = suspension_refusal(shell.record.envelope.core, turn)
+        waits = tuple(dict.fromkeys(handles))
+        refusal = suspension_refusal(
+            shell.record.envelope.core, turn, _continuation(turn, waits, scoped.submitted)
+        )
         if refusal is not None:
-            raise ToolRefusedError(_WAIT_REFUSALS[refusal])
-        scoped.waits = tuple(dict.fromkeys(handles))
+            raise ToolRefusedError(_WAIT_REFUSALS[refusal], waits)
+        scoped.waits = waits
         return WaitReply(handles=scoped.waits)
 
     def yielded(self, request: DispatchTurn) -> Continuation | None:
@@ -484,27 +506,18 @@ class AgentEvaluationBridge:
         scoped.begin(None)
         if not handles:
             return None
-        session, generation = turn.session.session_id, request.scope.generation
         current = InvocationRef(
-            session_id=session, invocation_id=turn.invocation_id, generation=generation
+            session_id=turn.session.session_id,
+            invocation_id=turn.invocation_id,
+            generation=request.scope.generation,
         )
         shell, _ = self._bound()
-        if suspension_refusal(shell.record.envelope.core, current) is not None:
+        wait = _continuation(current, handles, deadlines)
+        if suspension_refusal(shell.record.envelope.core, current, wait) is not None:
             # The scope changed since the wait was validated: end the turn without
             # suspending, as after a host restart. The measurements report ordinarily.
             return None
-        return Continuation(
-            continuation_id=ContinuationId(root=f"{turn.invocation_id.root}/evaluation"),
-            invocation=current,
-            next_invocation=InvocationRef(
-                session_id=session,
-                invocation_id=InvocationId(root=f"{turn.invocation_id.root}/resume"),
-                generation=generation,
-            ),
-            jobs=tuple(ResourceId(root=handle) for handle in handles),
-            deadline_at=min(deadlines[handle] for handle in handles),
-            phase=ContinuationPhase.WAITING,
-        )
+        return wait
 
     def _bound(self) -> tuple[AdmissionShell, Clock]:
         if self._shell is None or self._clock is None:

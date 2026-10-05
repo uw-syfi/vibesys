@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from . import _session_checkpoints
+from ._continuations import wait_refusal_in
 from ._evaluation_history import produce_history
 from ._proofs import (
     Proven,
@@ -72,7 +73,7 @@ from .types.common import (
 from .types.evaluation import ContinuationPhase, ResumeAuthorizationReceipt
 from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import ExecuteRegisteredOperation, InspectRequest, IntentPhase
-from .types.kernel import AreaChange, DecisionCompleted
+from .types.kernel import AreaChange, DecisionCompleted, EvaluationContext
 from .types.sessions import (
     Access,
     CancelTurn,
@@ -107,6 +108,7 @@ from .types.strategy import Accepted, Operation, Rejected, RequestTurn
 
 if TYPE_CHECKING:
     from .types.common import Observation, SessionId
+    from .types.evaluation import Continuation
     from .types.evaluation_history import EvaluationHistoryCursor
     from .types.intents import Intent, Request
     from .types.kernel import SessionsContext, Signal
@@ -1584,6 +1586,23 @@ def _release_unknown(
     )
 
 
+def _suspension_refused(
+    state: SessionsState, context: SessionsContext, invocation: Invocation, wait: Continuation
+) -> bool:
+    """Whether the one suspension gate refuses ``wait`` against the state this turn ends in."""
+    return (
+        wait_refusal_in(
+            EvaluationContext(
+                run=context.run, attempts=context.attempts, sessions=state, intents=context.intents
+            ),
+            context.evaluation,
+            invocation,
+            wait,
+        )
+        is not None
+    )
+
+
 def _apply_turn_observation(
     state: SessionsState,
     context: SessionsContext,
@@ -1596,7 +1615,11 @@ def _apply_turn_observation(
     )
 
     observation = event.observation
-    if event.suspension is not None and observation.status != ObservationStatus.SUCCEEDED:
+    if event.suspension is not None and (
+        observation.status != ObservationStatus.SUCCEEDED
+        or _suspension_refused(state, context, invocation, event.suspension)
+    ):
+        # A wait core cannot honor ends the turn plainly, before anything claims it.
         event = event.model_copy(update={"suspension": None})
     phase = observed_phase(invocation, event)
     invocation = invocation.model_copy(
@@ -1636,8 +1659,7 @@ def _apply_turn_observation(
         turn_result(
             event.invocation,
             observation,
-            output_schema=event.output_schema,
-            output_json=event.output_json,
+            reply=event,
             lost=released_lost,
         ),
     )

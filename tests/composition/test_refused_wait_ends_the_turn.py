@@ -15,7 +15,6 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.support.agent_tool_world import Program, ScriptedAgent, scenario
 from tests.support.concurrent_turns_strategy import (
     FIRST,
@@ -35,7 +34,6 @@ from vs_core.api import (
     ResourceId,
     RunStatus,
 )
-from vs_runtime.api.core import ObservationRejectedError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -102,16 +100,6 @@ async def play(tmp_path: Path) -> ConcurrentTurnsState:
         return seen
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ObservationRejectedError,
-    reason=(
-        "CONCURRENCY-4 finding: core refuses a suspension when the checkpoint-retention "
-        "observation (retain-write) commits it, not when TurnObserved does. That is an "
-        "executor observation, so the shell halts (ObservationRejectedError) and "
-        "_end_turn_without_wait, which only handles a rejected TurnObserved, never runs."
-    ),
-)
 def test_a_wait_core_refuses_at_commit_ends_the_turn_and_the_strategy_is_told(
     tmp_path: Path,
 ) -> None:

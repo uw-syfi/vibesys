@@ -30,6 +30,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     ReplyCorrectionPrompt,
     ResumePrompt,
     ReviewPrompt,
+    WaitUnrecordedPrompt,
 )
 from vs_core.api import RevisionId, RevisionRef
 from vs_prompts.api import TemplateRenderer
@@ -118,6 +119,7 @@ _CONTEXTS: dict[PromptTemplate, st.SearchStrategy[PromptContext]] = {
         role=st.sampled_from(("planner", "implementer", "judge", "profiler")),
         error=_TEXT,
     ),
+    PromptTemplate.WAIT_UNRECORDED: st.builds(WaitUnrecordedPrompt),
 }
 
 

@@ -25,6 +25,7 @@ class PromptTemplate(StrEnum):
     PROFILE_REQUEST = "profile_request"
     RESUME = "resume"
     REPLY_CORRECTION = "reply_correction"
+    WAIT_UNRECORDED = "wait_unrecorded"
 
 
 class EvidenceCitation(Value):
@@ -150,6 +151,12 @@ class ReplyCorrectionPrompt(Value):
     error: str
 
 
+class WaitUnrecordedPrompt(Value):
+    """The previous reply said it was waiting for an evaluation, but the run recorded no wait."""
+
+    template: Literal[PromptTemplate.WAIT_UNRECORDED] = PromptTemplate.WAIT_UNRECORDED
+
+
 type PromptContext = Annotated[
     PlannerPrompt
     | PlannerCorrectionPrompt
@@ -157,6 +164,7 @@ type PromptContext = Annotated[
     | ReviewPrompt
     | ProfilePrompt
     | ResumePrompt
-    | ReplyCorrectionPrompt,
+    | ReplyCorrectionPrompt
+    | WaitUnrecordedPrompt,
     Field(discriminator="template"),
 ]
