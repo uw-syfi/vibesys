@@ -16,6 +16,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from cpu_check import sessions
+from cpu_check.verdicts import Verdict, Verdicts, tree_key
 
 BUNDLE = Path(__file__).resolve().parents[1]
 FAKE_SERVER = Path(__file__).parent / "testdata" / "caching_server.py"
@@ -80,7 +81,16 @@ def _run_check(
     root: Path, *args: str, bug: str = "none", scheduler_bug: str = ""
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "cpu_check", "--root", str(root), *args],
+        [
+            sys.executable,
+            "-m",
+            "cpu_check",
+            "--root",
+            str(root),
+            "--verdicts-dir",
+            str(root.parent / "verdicts"),
+            *args,
+        ],
         cwd=BUNDLE,
         env={**os.environ, "FAKE_CACHE_BUG": bug, "FAKE_SCHEDULER_BUG": scheduler_bug},
         capture_output=True,
@@ -196,3 +206,101 @@ def test_a_batched_path_bug_fails_only_the_concurrent_mode(
     assert concurrent.returncode == 1, concurrent.stdout + concurrent.stderr
     assert failure in concurrent.stdout
     assert server_exception in concurrent.stdout
+
+
+def test_an_unchanged_tree_replays_its_verdict_instead_of_rerunning(tmp_path: Path) -> None:
+    root = _candidate_root(tmp_path, FAKE_SERVER)
+
+    first = _run_check(root, bug="stale_capacity")
+    # The stored verdict is for the tree, not for the environment that produced it.
+    second = _run_check(root, bug="none")
+
+    assert first.returncode == 1, first.stdout + first.stderr
+    assert "starting engine.server" in first.stdout
+    assert second.returncode == 1, second.stdout + second.stderr
+    assert "REPLAYED, not rerun" in second.stdout
+    assert "starting engine.server" not in second.stdout.split("Stored report:")[0]
+    assert "[FAIL] session A round 2" in second.stdout
+    report = Path(second.stdout.strip().splitlines()[-1].removeprefix("full report: "))
+    assert "[FAIL] session A round 2" in report.read_text()
+
+
+def test_a_changed_tree_or_option_or_rerun_flag_runs_the_check_again(tmp_path: Path) -> None:
+    root = _candidate_root(tmp_path, FAKE_SERVER)
+    assert _run_check(root).returncode == 0
+
+    forced = _run_check(root, "--rerun")
+    other_options = _run_check(root, "--expect-cache-hits")
+    (root / "engine" / "extra.py").write_text("# an edit\n")
+    edited = _run_check(root)
+
+    for result in (forced, other_options, edited):
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "starting engine.server" in result.stdout
+        assert "REPLAYED" not in result.stdout
+
+
+def test_a_server_that_cannot_start_is_not_stored(tmp_path: Path) -> None:
+    root = _candidate_root(tmp_path, FAKE_SERVER)
+
+    first = _run_check(root, bug="no_such_bug")
+    second = _run_check(root, bug="no_such_bug")
+
+    assert (first.returncode, second.returncode) == (2, 2)
+    assert "REPLAYED" not in second.stdout
+    assert not (root.parent / "verdicts").exists()
+
+
+_FILES = st.dictionaries(
+    st.from_regex(r"[a-z]{1,6}(/[a-z]{1,6}){0,2}\.py", fullmatch=True),
+    st.binary(max_size=64),
+    min_size=1,
+    max_size=6,
+)
+
+
+def _write(root: Path, files: dict[str, bytes]) -> None:
+    for name, data in files.items():
+        path = root / name
+        if path.parent != root and path.parent.is_file():
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+
+@settings(max_examples=40, deadline=None)
+@given(files=_FILES, data=st.data())
+def test_tree_key_follows_content_not_location_and_changes_with_any_edit(
+    tmp_path_factory: pytest.TempPathFactory, files: dict[str, bytes], data: st.DataObject
+) -> None:
+    a, b = tmp_path_factory.mktemp("a"), tmp_path_factory.mktemp("b")
+    _write(a, files)
+    _write(b, files)
+    (b / "__pycache__").mkdir()
+    (b / "__pycache__" / "x.pyc").write_bytes(b"cache")
+    options = {"expect_cache_hits": False, "concurrency": 0}
+    assert tree_key(a, options) == tree_key(b, options)
+
+    written = sorted(p.relative_to(a) for p in a.rglob("*") if p.is_file())
+    victim = data.draw(st.sampled_from(written))
+    (a / victim).write_bytes((a / victim).read_bytes() + b"!")
+    assert tree_key(a, options) != tree_key(b, options)
+    assert tree_key(b, options) != tree_key(b, {**options, "concurrency": 3})
+
+
+@pytest.mark.parametrize("exit_code", [0, 1, 2, 3])
+def test_only_pass_and_round_failure_verdicts_are_stored(tmp_path: Path, exit_code: int) -> None:
+    store = Verdicts(tmp_path)
+    store.record("k", Verdict(exit_code, "report text"))
+
+    stored = store.lookup("k")
+    assert (stored is not None) == (exit_code in (0, 1))
+    if stored is not None:
+        assert stored == Verdict(exit_code, "report text")
+
+
+def test_an_unreadable_verdict_is_a_miss(tmp_path: Path) -> None:
+    store = Verdicts(tmp_path)
+    (tmp_path / "k.json").write_text("{not json")
+
+    assert store.lookup("k") is None
