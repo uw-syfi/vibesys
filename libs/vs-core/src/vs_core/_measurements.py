@@ -518,7 +518,7 @@ def _submission_observed(
             )
         }
     )
-    return _submission_job(state, event, source, request)
+    return _submission_job(state, context, event, source, request)
 
 
 def _owner_request(job: OwnedJob | RegisteredOwnedJob) -> RequestId:
@@ -596,6 +596,7 @@ def _submission_receipt(
 
 def _submission_job(
     state: EvaluationState,
+    context: EvaluationContext,
     event: MeasurementSubmissionObserved,
     source: Intent,
     request: SubmitMeasurement,
@@ -609,6 +610,10 @@ def _submission_job(
             scope=request.scope,
             plan=request.plan,
             status=ObservationStatus.PENDING,
+            # A job nobody has polled is due now. Normally the first JobObserved replaces
+            # this; after a restart that lost it (the submit ran, its job observation was
+            # never committed) this is the only thing that starts the observe cycle.
+            pacing=ObservePacing(next_at=context.run.now_at),
         )
         state = state.model_copy(update={"jobs": (*state.jobs, job)})
         return AreaChange(state=state)
@@ -864,13 +869,15 @@ def _issued_successor(
     """Whether a job observation can be one the executor issued next.
 
     Only the submission's own observation goes through the intent ledger. The job's
-    first view must be exactly that one. After it, each poll gets the next sequence,
-    so a later observation is the held one again or its direct successor; a gap means
-    an observation nobody issued or one that was lost, and changes nothing.
+    first view is that one or, when the job's own copy of it was lost (a restart between
+    the submit and its job observation), its direct successor. After that, each poll gets
+    the next sequence, so a later observation is the held one again or its direct
+    successor; a gap means an observation nobody issued or one that was lost, and changes
+    nothing.
     """
-    held = job.observation
+    held = job.observation if job.observation is not None else source.observation
     if held is None:
-        return source.observation == observation
+        return False
     return observation == held or observation.sequence == held.sequence + 1
 
 
