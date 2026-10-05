@@ -22,7 +22,14 @@ from ._proofs import (
     resolved_observation,
 )
 from ._session_checkpoints import turn_source_matches as _turn_proof
-from ._session_scope import attempt_for, scope_active
+from ._session_scope import (
+    attempt_for,
+    encode_identity,
+    retains_write_turn,
+    scope_active,
+    turn_request_id,
+    write_turn_authority,
+)
 from .types.attempts import (
     AttemptPhase,
     AttemptSetupFailed,
@@ -124,11 +131,6 @@ def _replace_invocation(state: SessionsState, invocation: Invocation) -> Session
     return state.model_copy(update={"invocations": rows})
 
 
-def _identity(namespace: str, *components: str) -> str:
-    """Encode supplied identity components injectively, including punctuation."""
-    return namespace + ":" + ":".join(f"{len(component)}:{component}" for component in components)
-
-
 def _session_id(session: SessionView, action: str) -> RequestId:
     parts = (
         session.scope.owner.kind,
@@ -138,12 +140,7 @@ def _session_id(session: SessionView, action: str) -> RequestId:
         session.spec.session_id.root,
         action,
     )
-    return RequestId(root=_identity("session", *parts))
-
-
-def _turn_id(ref: InvocationRef, action: str) -> RequestId:
-    parts = (ref.session_id.root, str(ref.generation), ref.invocation_id.root, action)
-    return RequestId(root=_identity("invocation", *parts))
+    return RequestId(root=encode_identity("session", *parts))
 
 
 def _intent(context: SessionsContext, identity: RequestId | None) -> Intent | None:
@@ -398,11 +395,13 @@ def _charge_run(
         raise ContractValidationError("run_charges", "global TURN budget exhausted")
     receipt = ChargeReceipt(
         charge_id=ChargeId(
-            root=_identity("turn", ref.session_id.root, str(ref.generation), ref.invocation_id.root)
+            root=encode_identity(
+                "turn", ref.session_id.root, str(ref.generation), ref.invocation_id.root
+            )
         ),
         kind=ChargeKind.TURN,
         invocation_id=ref.invocation_id,
-        source_request=_turn_id(ref, "dispatch"),
+        source_request=turn_request_id(ref, "dispatch"),
         charged=1,
     )
     return state.model_copy(update={"run_charges": (*state.run_charges, receipt)})
@@ -695,7 +694,7 @@ def _dispatch_reserved(
             )
         _validate_successor(state, context, event.invocation, invocation.turn, invocation.scope)
         request = ResumeSessionTurn(
-            request_id=_turn_id(event.invocation, "dispatch"),
+            request_id=turn_request_id(event.invocation, "dispatch"),
             scope=invocation.scope,
             deadline_at=invocation.turn.deadline_at,
             admission_id=_episode(context, invocation.scope),
@@ -706,7 +705,7 @@ def _dispatch_reserved(
         )
     else:
         request = DispatchTurn(
-            request_id=_turn_id(event.invocation, "dispatch"),
+            request_id=turn_request_id(event.invocation, "dispatch"),
             scope=invocation.scope,
             deadline_at=invocation.turn.deadline_at,
             admission_id=_episode(context, invocation.scope),
@@ -864,7 +863,7 @@ def _valid_observation(
 def _inspect_session(
     session: SessionView, context: SessionsContext, target: RequestId
 ) -> InspectRequest:
-    identity = RequestId(root=_identity("inspect-root", target.root))
+    identity = RequestId(root=encode_identity("inspect-root", target.root))
     previous = _intent(context, identity)
     if previous is not None and isinstance(previous.request, InspectRequest):
         return previous.request
@@ -1326,25 +1325,31 @@ def _terminal_signals(
     signals: list[Signal] = []
     owner = attempt_for(context, invocation.scope)
     claim = next((row for row in state.interrupts if row.invocation == event.invocation), None)
+    claimed = claim is not None and claim.phase in ("pending", "draining")
+    # One producer for every reason a terminal turn leaves work to retain: an interruption
+    # claim, a yield, or a conclusive write turn. The claim's authority wins when present.
+    authority = (
+        claim.authority
+        if claim is not None
+        else write_turn_authority(event.invocation)
+        if retains_write_turn(invocation)
+        else observation.request_id
+    )
     if owner is not None:
         attempt = AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
         signals.append(
             InvocationEnded(attempt=attempt, invocation=event.invocation, observation=observation)
         )
-        if event.suspension is not None or (
-            claim is not None and claim.phase in ("pending", "draining")
-        ):
+        if event.suspension is not None or claimed or retains_write_turn(invocation):
             signals.append(
                 InvocationCheckpointRequested(
                     attempt=attempt,
                     invocation=event.invocation,
                     retention="wip",
-                    authority=claim.authority if claim is not None else observation.request_id,
+                    authority=authority,
                 )
             )
-    elif event.suspension is not None or (
-        claim is not None and claim.phase in ("pending", "draining")
-    ):
+    elif event.suspension is not None or claimed:
         signals.append(
             RunInvocationCheckpointRequested(
                 invocation=event.invocation,
@@ -1390,7 +1395,7 @@ def _observed_phase(invocation: Invocation, event: TurnObserved) -> SessionPhase
 
 
 def _inspect_turn(context: SessionsContext, invocation: Invocation) -> InspectTurn:
-    identity = _turn_id(invocation.invocation, "inspect")
+    identity = turn_request_id(invocation.invocation, "inspect")
     previous = _intent(context, identity)
     if previous is not None and isinstance(previous.request, InspectTurn):
         return previous.request
@@ -1689,7 +1694,7 @@ def _cancel(
             "authority", "cancellation requires recorded interruption or cleanup intent"
         )
     request = CancelTurn(
-        request_id=_turn_id(event.invocation, f"cancel:{event.authority.root}"),
+        request_id=turn_request_id(event.invocation, f"cancel:{event.authority.root}"),
         scope=invocation.scope,
         deadline_at=min(
             context.run.deadline_at, context.run.now_at + context.run.limits.cancellation_bound

@@ -33,6 +33,7 @@ from vs_core.api import (
     ChargeId,
     ChargeKind,
     ChargeReceipt,
+    CheckpointDecline,
     CloseAttemptScope,
     Continuation,
     ContinuationId,
@@ -877,9 +878,8 @@ def checkpoint_state() -> CoreState:
 
 @pytest.mark.parametrize("proof", ["absent", "unknown", "pending", "nonterminal", "terminal"])
 @pytest.mark.parametrize("access", list(Access))
-@given(retention=st.sampled_from(("wip", "candidate")))
 def test_checkpoint_waits_for_every_competing_writer_to_terminate(
-    proof: str, retention: Literal["wip", "candidate"], access: Access
+    proof: str, access: Access
 ) -> None:
     state = checkpoint_state()
     target = state.sessions.invocations[0]
@@ -923,22 +923,20 @@ def test_checkpoint_waits_for_every_competing_writer_to_terminate(
     event = InvocationCheckpointRequested(
         attempt=owner_ref(),
         invocation=target.invocation,
-        retention=retention,
+        retention="wip",
         authority=RequestId(root="checkpoint"),
     )
-    if retention == "candidate" and (proof == "terminal" or access != Access.WRITE_CANDIDATE):
-        declined = step(state, event)
-        assert declined.requests == ()
-        assert declined.state.attempts == state.attempts
-        return
     result = step(state, event)
     assert result == step(reload_state(state), event)
     assert result.state.attempts.attempts[0].checkpoints == ()
-    if (proof == "terminal" or access != Access.WRITE_CANDIDATE) and retention == "wip":
+    if proof == "terminal" or access != Access.WRITE_CANDIDATE:
         assert len(result.requests) == 1
         assert isinstance(result.requests[0], SnapshotAndRetain)
     else:
         assert result.requests == ()
+        assert [row.reason for row in result.state.attempts.attempts[0].checkpoint_declines] == [
+            CheckpointDecline.WRITER_ACTIVE
+        ]
 
 
 def test_checkpoint_signal_requires_committed_retention_not_its_request() -> None:
@@ -1442,10 +1440,7 @@ def test_absent_invocation_cannot_mint_accounting_authority(phase: AttemptPhase)
     assert result.requests == ()
 
 
-@given(st.sampled_from(("wip", "candidate")))
-def test_checkpoint_requires_writer_termination_proof(
-    retention: Literal["wip", "candidate"],
-) -> None:
+def test_checkpoint_requires_writer_termination_proof() -> None:
     state = owned_state(AttemptPhase.ACTIVE)
     event = InvocationCheckpointRequested(
         attempt=owner_ref(),
@@ -1454,12 +1449,30 @@ def test_checkpoint_requires_writer_termination_proof(
             invocation_id=InvocationId(root="missing"),
             generation=0,
         ),
-        retention=retention,
+        retention="wip",
         authority=RequestId(root="checkpoint"),
     )
     result = step(state, event)
     assert result.requests == ()
     assert result.state.attempts.attempts[0].checkpoints == ()
+    assert result.state.attempts.attempts[0].checkpoint_declines == ()
+
+
+def test_a_candidate_cannot_be_requested_as_an_invocation_checkpoint() -> None:
+    """Candidate retention names an explicit revision at closure; the type excludes it."""
+    with pytest.raises(ValueError, match="retention"):
+        InvocationCheckpointRequested.model_validate(
+            {
+                "attempt": owner_ref(),
+                "invocation": InvocationRef(
+                    session_id=SessionId(root="s"),
+                    invocation_id=InvocationId(root="i"),
+                    generation=0,
+                ),
+                "retention": "candidate",
+                "authority": RequestId(root="checkpoint"),
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -2779,4 +2792,6 @@ def test_checkpoint_authority_must_identify_exactly_one_interruption() -> None:
     )
     declined = step(reload_state(state), event)
     assert declined.requests == ()
-    assert declined.state.attempts == reload_state(state).attempts
+    assert [row.reason for row in declined.state.attempts.attempts[0].checkpoint_declines] == [
+        CheckpointDecline.UNAUTHORIZED
+    ]

@@ -1666,7 +1666,11 @@ def _inspect_unknown(
 def is_retention_acknowledgement(context: AttemptsContext, event: WorkspaceObserved) -> bool:
     """Whether a workspace observation answers a closure's retention request."""
     intent = _intent(context, event.observation.request_id)
-    return intent is not None and isinstance(intent.request, RetainRevision | SnapshotAndRetain)
+    return (
+        intent is not None
+        and isinstance(intent.request, RetainRevision | SnapshotAndRetain)
+        and getattr(intent.request, "invocation", None) is None
+    )
 
 
 def retention_acknowledged(
