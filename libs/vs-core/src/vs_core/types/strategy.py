@@ -23,7 +23,7 @@ from .common import (
     DependencyRef,
     InvocationRef,
     ItemId,
-    LifecycleCapability,
+    LifecycleCapabilities,
     LifecycleClass,
     OperationRef,
     OperationSchemaRef,
@@ -260,8 +260,8 @@ class StrategyDeclaration(Value):
     state_schema: SchemaRef
     required_operations: tuple[OperationSchemaRef, ...] = ()
     optional_operations: tuple[OperationSchemaRef, ...] = ()
-    required: frozenset[LifecycleCapability] = frozenset()
-    optional: frozenset[LifecycleCapability] = frozenset()
+    required: LifecycleCapabilities = frozenset()
+    optional: LifecycleCapabilities = frozenset()
 
 
 class Accepted(Value):
