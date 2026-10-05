@@ -7,12 +7,16 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.run.contracts import PluginProjection, RunStatus, RunView
+from vs_core.api import ContractError
+from vs_project.api import StoredEnvelope
+from vs_runtime.api.core import RuntimeRecord
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pydantic import BaseModel
 
+    from vs_core.api import OperationRegistry, StrategyState
     from vs_project.api import OrchestrationDescriptor, Project
     from vs_runtime.api import OrchestrationPlugin, OrchestrationResumeDecision
 
@@ -94,6 +98,48 @@ def _plugin_run_view(
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeRecordProjector[S: StrategyState]:
+    """Project the strategy state of a core-driven run from its committed runtime record.
+
+    A run on the core keeps its state in the run's state store as a runtime record
+    whose strategy state is `state_type`, held as `record_type`. `project` is a pure function of that
+    state and the record's revision. `operations` decodes the record, so it must
+    hold the operations the strategy recorded.
+    """
+
+    plugin_id: str
+    state_type: type[S]
+    record_type: type[RuntimeRecord[S]]
+    operations: OperationRegistry
+    project: Callable[[S, int], PluginProjection]
+
+    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+        """Project the last committed record, or identity and status when none exists."""
+        # Probe absence first: opening the store would create it for a run that has none.
+        if project.state.state_store_namespace(run_id).read_bytes("store.json") is None:
+            return RunView(run_id=run_id, loop=loop, status=status)
+        stored = project.state_store(run_id).load()
+        if not isinstance(stored, StoredEnvelope):
+            raise ContractError(("runtime",), "a run without a readable record has no projection")
+        record = self.record_type.decode(stored, self.operations)
+        return self._view(record, run_id=run_id, status=status)
+
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+        """Project a runtime record the host just committed under this plugin's namespace."""
+        if namespace != self.plugin_id or not isinstance(state, RuntimeRecord):
+            return None
+        if not isinstance(state.envelope.strategy, self.state_type):
+            return None
+        return self._view(state, run_id=run_id, status=RunStatus.ACTIVE)
+
+    def _view(self, record: RuntimeRecord[S], *, run_id: str, status: RunStatus) -> RunView:
+        projection = _require_plugin_projection(
+            self.project(record.envelope.strategy, record.envelope.revision)
+        )
+        return _plugin_run_view(self.plugin_id, run_id, status, projection)
+
+
+@dataclass(frozen=True, slots=True)
 class OrchestrationRegistration:
     """Bind one runtime-neutral plugin to VibeSys product policy."""
 
@@ -168,5 +214,6 @@ def project_run(
 __all__ = [
     "OrchestrationProjector",
     "OrchestrationRegistration",
+    "RuntimeRecordProjector",
     "project_run",
 ]
