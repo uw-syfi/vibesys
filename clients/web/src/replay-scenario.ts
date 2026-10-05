@@ -75,7 +75,6 @@ export interface CampaignRecord {
     workstreamId: string;
     label: string;
     measurementKind: MeasurementKind;
-    sourceSessionId: string;
     sourceOrder: number | null;
     triggeredByAgentId: string | null;
     runnerAgentId: string | null;
@@ -142,7 +141,6 @@ type JsonObject = Record<string, unknown> & {
   timestamp?: unknown;
   workstreamId?: unknown;
   measurementKind?: unknown;
-  sourceSessionId?: unknown;
   sourceOrder?: unknown;
   triggeredByAgentId?: unknown;
   runnerAgentId?: unknown;
@@ -407,7 +405,6 @@ function parseMeasurement(value: unknown, path: string): ReplayScenario['measure
     'workstreamId',
     'label',
     'measurementKind',
-    'sourceSessionId',
     'sourceOrder',
     'triggeredByAgentId',
     'runnerAgentId',
@@ -449,7 +446,6 @@ function parseMeasurement(value: unknown, path: string): ReplayScenario['measure
       'diagnostic',
       'quick',
     ]),
-    sourceSessionId: stringAt(object.sourceSessionId, `${path}.sourceSessionId`),
     sourceOrder: nullablePositiveIntegerAt(object.sourceOrder, `${path}.sourceOrder`),
     triggeredByAgentId: nullableStringAt(object.triggeredByAgentId, `${path}.triggeredByAgentId`),
     runnerAgentId: nullableStringAt(object.runnerAgentId, `${path}.runnerAgentId`),

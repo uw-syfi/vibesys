@@ -28,23 +28,19 @@ test('parses the source-backed campaign record and preserves its measurements', 
     new Set(['official', 'candidate', 'control', 'diagnostic', 'quick']),
   );
   expect(
-    new Set(campaign.measurements.map(measurement => measurement.sourceSessionId)).size,
-  ).toBeGreaterThanOrEqual(2);
-  expect(
     campaign.measurements.filter(measurement => measurement.sourceOrder !== null),
   ).toHaveLength(82);
   expect(campaign.objective.target).toEqual({metricId: 'goodput', value: 2000, unit: 'tok/s'});
-  const originalSession = campaign.measurements.filter(
-    measurement => measurement.sourceSessionId === 'a2d3319a-c2c4-444f-a440-4881f158f32c',
+  const plottedMeasurements = campaign.measurements.filter(
+    measurement => measurement.sourceOrder !== null,
   );
-  expect(originalSession).toHaveLength(82);
-  expect(originalSession.map(measurement => measurement.sourceOrder)).toContain(48);
-  expect(originalSession.map(measurement => measurement.sourceOrder)).toContain(142);
+  expect(plottedMeasurements.map(measurement => measurement.sourceOrder)).toContain(48);
+  expect(plottedMeasurements.map(measurement => measurement.sourceOrder)).toContain(142);
   expect(
-    originalSession.flatMap(measurement => measurement.values.map(value => value.value)),
+    plottedMeasurements.flatMap(measurement => measurement.values.map(value => value.value)),
   ).toContain(94.7);
   expect(
-    originalSession.flatMap(measurement => measurement.values.map(value => value.value)),
+    plottedMeasurements.flatMap(measurement => measurement.values.map(value => value.value)),
   ).toContain(1154.4770391356592);
   expect(
     campaign.measurements.flatMap(measurement => measurement.values.map(value => value.value)),

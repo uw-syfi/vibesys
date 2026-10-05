@@ -16,12 +16,7 @@ test('renders the source-backed campaign as one continuous performance trajector
   await expect(performance.getByText(/TARGET\s/)).toHaveCount(0);
   await expect(page.getByText('Benchmark v6', {exact: true})).toHaveCount(0);
   await expect(page.getByText('2,242.4 tok/s', {exact: true})).toBeVisible();
-  await expect(
-    page.getByText(/82 plotted points from Claude session a2d3319a-c2c4-444f-a440-4881f158f32c/),
-  ).toBeVisible();
-  await expect(
-    page.getByText(/Round 15 continuation points from 9ae9a100-f067-4aa1-8334-2589bd573a6c/),
-  ).toBeVisible();
+  await expect(page.getByText(/82 plotted points recovered from campaign results/)).toBeVisible();
 
   const replaySlider = page.getByRole('slider', {name: 'Campaign measurement'});
   await replaySlider.fill('110');
