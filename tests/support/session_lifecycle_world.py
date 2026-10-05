@@ -122,7 +122,9 @@ def lifecycle_executor(
     resolver: SessionResolver = host.resolver
     sessions = sessions or FakeAgentSessions(host.client, host.journal)
     turns = RuntimeSessionRequests(sessions, resolver, store)
-    return SessionRequestRouter(turns, SessionLifecycleRequests(sessions, turns, store))
+    return SessionRequestRouter(
+        turns, SessionLifecycleRequests(sessions, turns, store, turns.settlement)
+    )
 
 
 def released_keys(host: SessionHost) -> int:

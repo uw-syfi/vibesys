@@ -81,6 +81,15 @@ class WorkspaceAccessRecovery:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._checkpoint: tuple[str, str, tuple[str, ...], tuple[str, ...]] | None = None
+        self._holds: set[str] = set()
+
+    def hold(self, key: str) -> None:
+        """Fence the workspace: an invocation's writer may still run, so no snapshot may baseline it."""
+        self._holds.add(key)
+
+    def release(self, key: str) -> None:
+        """Lift the fence of *key* once its writes were judged."""
+        self._holds.discard(key)
 
     def begin(
         self,
@@ -108,8 +117,24 @@ class WorkspaceAccessRecovery:
         """Restore the original baseline or retain its intent on any failure.
 
         *observer* receives the unauthorized paths before anything is restored, so a
-        caller can record the violation durably ahead of the revert.
+        caller can record the violation durably ahead of the revert. A snapshot goes
+        through here, so it is refused while any invocation holds the workspace.
         """
+        if self._holds:
+            message = (
+                "workspace is fenced: a writer may still run or its writes are not judged "
+                f"({', '.join(sorted(self._holds))})"
+            )
+            raise RuntimeContractError(message)
+        return await self.settle(workspace, observer=observer)
+
+    async def settle(
+        self,
+        workspace: WorkspaceAccessTarget,
+        *,
+        observer: Callable[[list[str]], None] | None = None,
+    ) -> WorkspaceAccessResult:
+        """Restore the baseline of a writer proven ended; unlike ``reconcile``, ignores fences."""
         async with self._lock:
             return await self._reconcile(workspace, observer)
 
@@ -170,7 +195,7 @@ async def enforce_workspace_access(
             grant.paths if limited else (),
             grant.directories if limited else (),
         )
-    result = await workspace.access_recovery.reconcile(workspace, observer=observer)
+    result = await workspace.access_recovery.settle(workspace, observer=observer)
     if grant.access is WorkspaceAccess.READ_WRITE:
         return WorkspaceAccessResult(result.restored_paths, await workspace.pending_changes())
     return result
