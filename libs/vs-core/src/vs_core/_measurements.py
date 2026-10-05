@@ -7,7 +7,7 @@ receipt. Continuation wakes carry the exact facts before the atomic job update.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from ._evaluation_history import produce_history
 from ._proofs import (
@@ -47,6 +47,8 @@ from .types.common import (
     RunStatus,
 )
 from .types.evaluation import (
+    AgentCall,
+    AgentMeasurementRequested,
     CancelOwnedJob,
     CollectEvidence,
     ContinuationJobsChanged,
@@ -356,12 +358,6 @@ def _requested(
                 ),
             ),
         )
-    matches = tuple(
-        b
-        for b in state.submission_budgets
-        if b.scope == event.scope and b.identity == identity.value
-    )
-    budget = matches[0] if matches else None
     # Replayed commands never allocate another ordinal, including changed timing.
     if any(
         isinstance(row.request, SubmitMeasurement)
@@ -369,6 +365,31 @@ def _requested(
         for row in context.intents.intents
     ):
         return AreaChange(state=state)
+    return _admit(
+        state, context, _Origin(event.scope, origin.value.decision_id), plan, identity.value
+    )
+
+
+class _Origin(NamedTuple):
+    """Who a submission is charged to: the scope and the Measure decision, if any."""
+
+    scope: Scope
+    decision_id: DecisionId | None
+
+
+def _admit(
+    state: EvaluationState,
+    context: EvaluationContext,
+    origin: _Origin,
+    plan: MeasurementPlan,
+    identity: MeasurementIdentity,
+) -> AreaChange[EvaluationState]:
+    """Charge the identity's budget and allocate one submission, or reject."""
+    scope = origin.scope
+    matches = tuple(
+        b for b in state.submission_budgets if b.scope == scope and b.identity == identity
+    )
+    budget = matches[0] if matches else None
     if len(matches) > 1 or not isinstance(_budget_ready(state, context, budget), Proven):
         failure = (
             next(
@@ -383,18 +404,42 @@ def _requested(
             if budget is not None
             else None
         )
-        return _rejected(state, event.scope, failure)
-    return _allocate(state, context, origin.value, plan, budget)
+        return _rejected(state, scope, failure)
+    return _allocate(state, context, origin, plan, budget)
+
+
+def _agent_requested(
+    state: EvaluationState, context: EvaluationContext, event: AgentMeasurementRequested
+) -> AreaChange[EvaluationState]:
+    """Admit an agent tool call: same authority, identity and budget as a Measure."""
+    if any(call.call_id == event.call_id for call in state.agent_calls):
+        return AreaChange(state=state)
+    identity = _identity(event.plan)
+    if not isinstance(_current(context, event.scope), Proven) or not isinstance(identity, Proven):
+        change = _rejected(state, event.scope)
+    else:
+        change = _admit(state, context, _Origin(event.scope, None), event.plan, identity.value)
+    request = next((r for r in change.requests if isinstance(r, SubmitMeasurement)), None)
+    call = AgentCall(
+        call_id=event.call_id,
+        scope=event.scope,
+        request_id=request.request_id if request is not None else None,
+    )
+    return change.model_copy(
+        update={
+            "state": change.state.model_copy(update={"agent_calls": (*state.agent_calls, call)})
+        }
+    )
 
 
 def _allocate(
     state: EvaluationState,
     context: EvaluationContext,
-    origin: Measure,
+    origin: _Origin,
     plan: MeasurementPlan,
     budget: SubmissionBudget | None,
 ) -> AreaChange[EvaluationState]:
-    scope = origin.scope
+    scope, decision_id = origin
     identity = _identity(plan)
     authority = _current(context, scope)
     if not isinstance(identity, Proven) or not isinstance(authority, Proven):
@@ -417,7 +462,7 @@ def _allocate(
         request_id=identity_id,
         scope=scope,
         admission_id=authority.value,
-        decision_id=origin.decision_id,
+        decision_id=decision_id,
         deadline_at=deadline,
         plan=plan,
     )
@@ -1308,6 +1353,8 @@ def advance(
     match event:
         case MeasurementRequested():
             change = _requested(state, context, event)
+        case AgentMeasurementRequested():
+            change = _agent_requested(state, context, event)
         case MeasurementSubmissionObserved():
             change = _submission_observed(state, context, event)
         case RegisteredJobRequested():
