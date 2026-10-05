@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, replace
 from threading import RLock
-from typing import TYPE_CHECKING, TypeAlias, TypedDict, Unpack
+from typing import TYPE_CHECKING, Protocol, TypeAlias, TypedDict, Unpack
+
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from .cluster import job_handle, payload_digest
 from .cluster_types import (
@@ -37,6 +40,7 @@ from .runner import (
     SlurmJobRequest,
     SlurmJobResult,
     SlurmJobStatus,
+    SlurmPhase,
     SlurmSubmissionRejectedError,
     _safe_relative_path,
 )
@@ -46,6 +50,75 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 Request: TypeAlias = SlurmJobRequest | SlurmBatchRequest
+
+
+class Clock(Protocol):
+    """The time source a Fake cluster reads. Tests advance it; nothing sleeps."""
+
+    def now(self) -> float:
+        """Seconds on the Fake's own timeline."""
+        ...
+
+
+class ManualClock:
+    """A clock that moves only when told to, so scheduler time is deterministic."""
+
+    def __init__(self, start: float = 0.0) -> None:
+        """Start the timeline at ``start`` seconds."""
+        self._now = start
+        self._lock = RLock()
+
+    def now(self) -> float:
+        """Current time on the timeline."""
+        with self._lock:
+            return self._now
+
+    def advance(self, seconds: float) -> None:
+        """Move the timeline forward."""
+        if seconds < 0:
+            raise SlurmError.invalid_script_states()
+        with self._lock:
+            self._now += seconds
+
+
+class SecondsRange(BaseModel):
+    """A measured duration range: real clusters vary, so a range, not a point."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    low: float
+    high: float
+
+    @model_validator(mode="after")
+    def _ordered(self) -> SecondsRange:
+        if not 0 <= self.low <= self.high:
+            raise SlurmError.invalid_script_states()
+        return self
+
+    @classmethod
+    def exactly(cls, seconds: float) -> SecondsRange:
+        """A range that always yields ``seconds``."""
+        return cls(low=seconds, high=seconds)
+
+
+class SlurmTimingProfile(BaseModel):
+    """Scheduler timing parameters measured on a production cluster.
+
+    Defaults are production-like: a queue wait of 5.7 to 95 s, a job of 138 to
+    168 s, and 31 to 40 s in COMPLETING after the job script exits or is cancelled.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    queue_wait_s: SecondsRange = SecondsRange(low=5.7, high=95.0)
+    run_s: SecondsRange = SecondsRange(low=138.0, high=168.0)
+    completing_s: SecondsRange = SecondsRange(low=30.9, high=40.0)
+
+    @classmethod
+    def instant(cls) -> SlurmTimingProfile:
+        """No queue wait and no teardown: for suites that compare against a lag-free peer."""
+        zero = SecondsRange.exactly(0.0)
+        return cls(queue_wait_s=zero, run_s=zero, completing_s=zero)
 
 
 class _ScriptOptions(TypedDict, total=False):
@@ -58,20 +131,23 @@ class _ScriptOptions(TypedDict, total=False):
     on_accept: Callable[[], None]
     on_dispatch: Callable[[], None]
     rejected_reason: str
-    teardown_lag: int
-
-
-# Production Slurm keeps a finished or cancelled job in COMPLETING (reported as
-# RUNNING by the public status mapping) while the node tears it down. A real
-# cluster showed 30 to 40 s of it at a 10 s poll interval, so the default lag is
-# a few inspections, never zero.
-DEFAULT_TEARDOWN_LAG = 3
+    queue_wait_s: float
+    run_s: float
+    completing_s: float
+    requeues: int
+    exit_status: SlurmJobStatus
 
 
 @dataclass
 class _Script:
-    states: tuple[SlurmJobStatus, ...] = (SlurmJobStatus.PENDING,)
-    teardown_lag: int = DEFAULT_TEARDOWN_LAG
+    # None: the job follows a timeline over the Fake's clock. A tuple scripts the
+    # exact observation sequence, one entry per inspection, with no timing.
+    states: tuple[SlurmJobStatus, ...] | None = None
+    queue_wait_s: float | None = None
+    run_s: float | None = None
+    completing_s: float | None = None
+    requeues: int = 0
+    exit_status: SlurmJobStatus = SlurmJobStatus.COMPLETED
     pending_reason: str | None = None
     estimated_start: str | None = None
     result: ClusterResult | None = None
@@ -84,6 +160,65 @@ class _Script:
     index: int = 0
 
 
+@dataclass(frozen=True)
+class _Attempt:
+    pending_from: float
+    running_from: float
+    ends_at: float
+
+
+@dataclass(frozen=True)
+class _Timeline:
+    """One job's schedule on the Fake's clock, fixed when the job is accepted."""
+
+    attempts: tuple[_Attempt, ...]
+    completing_s: float
+    terminal: SlurmJobStatus
+
+    @property
+    def exits_at(self) -> float:
+        return self.attempts[-1].ends_at
+
+    def natural(self, now: float) -> tuple[SlurmJobStatus, SlurmPhase, int]:
+        """The scheduler state at ``now`` if nobody cancels."""
+        last = len(self.attempts) - 1
+        for index, attempt in enumerate(self.attempts):
+            if now < attempt.running_from:
+                return SlurmJobStatus.PENDING, SlurmPhase.PENDING, index
+            if now < attempt.ends_at:
+                return SlurmJobStatus.RUNNING, SlurmPhase.RUNNING, index
+            if index == last:
+                if now < attempt.ends_at + self.completing_s:
+                    return SlurmJobStatus.RUNNING, SlurmPhase.COMPLETING, index
+                return self.terminal, SlurmPhase.ENDED, index
+        raise AssertionError  # unreachable: the loop returns on the last attempt
+
+    def state(
+        self, now: float, cancelled_at: float | None
+    ) -> tuple[SlurmJobStatus, SlurmPhase, int]:
+        """The scheduler state at ``now``, with a cancellation at ``cancelled_at``."""
+        if cancelled_at is None or cancelled_at >= self.exits_at:
+            return self.natural(now)
+        _, phase_then, attempt = self.natural(cancelled_at)
+        if now < cancelled_at:
+            return self.natural(now)
+        if phase_then is SlurmPhase.PENDING:
+            return SlurmJobStatus.CANCELLED, SlurmPhase.ENDED, attempt
+        if now < cancelled_at + self.completing_s:
+            return SlurmJobStatus.RUNNING, SlurmPhase.COMPLETING, attempt
+        return SlurmJobStatus.CANCELLED, SlurmPhase.ENDED, attempt
+
+
+_STATES_PHASE = {
+    SlurmJobStatus.PENDING: SlurmPhase.PENDING,
+    SlurmJobStatus.RUNNING: SlurmPhase.RUNNING,
+    SlurmJobStatus.COMPLETED: SlurmPhase.ENDED,
+    SlurmJobStatus.FAILED: SlurmPhase.ENDED,
+    SlurmJobStatus.CANCELLED: SlurmPhase.ENDED,
+    SlurmJobStatus.UNKNOWN: SlurmPhase.UNKNOWN,
+}
+
+
 @dataclass
 class _Job:
     operation_id: str
@@ -91,7 +226,8 @@ class _Job:
     handle: ClusterHandle
     result: ClusterResult
     cancelled: bool = False
-    teardown_left: int | None = None
+    cancelled_at: float | None = None
+    timeline: _Timeline | None = None
     acceptance_observed: bool = False
     accepted_published: bool = False
 
@@ -99,8 +235,23 @@ class _Job:
 class FakeCluster:
     """Same input validation and ambiguity rules as SlurmCluster, without I/O."""
 
-    def __init__(self) -> None:
-        """Create the implementation with its owned operation storage."""
+    def __init__(
+        self,
+        *,
+        clock: Clock | None = None,
+        timing: SlurmTimingProfile | None = None,
+        seed: int = 0,
+    ) -> None:
+        """Create the implementation with its owned operation storage.
+
+        Job state is a function of ``clock``: it advances only when the test
+        advances it. ``timing`` bounds queue wait, run time and COMPLETING time;
+        each job's values are drawn deterministically from ``seed`` and its
+        operation identity.
+        """
+        self.clock: Clock = clock if clock is not None else ManualClock()
+        self._timing = timing if timing is not None else SlurmTimingProfile()
+        self._seed = seed
         self._lock = RLock()
         self._scripts: dict[str, _Script] = {}
         self._jobs: dict[str, _Job] = {}
@@ -111,7 +262,7 @@ class FakeCluster:
 
     def reopen(self) -> FakeCluster:
         """Reconstruct an implementation over the same external scheduler state."""
-        reopened = FakeCluster()
+        reopened = FakeCluster(clock=self.clock, timing=self._timing, seed=self._seed)
         reopened._lock = self._lock
         reopened._scripts = self._scripts
         reopened._jobs = self._jobs
@@ -135,29 +286,41 @@ class FakeCluster:
         self,
         operation_id: str,
         *,
-        states: tuple[SlurmJobStatus, ...] = (SlurmJobStatus.PENDING,),
+        states: tuple[SlurmJobStatus, ...] | None = None,
         pending_polls: int = 0,
         **options: Unpack[_ScriptOptions],
     ) -> None:
-        """Supply deterministic observations and lost acknowledgement after acceptance.
+        """Script a job, either on the Fake's clock or as an exact observation sequence.
 
-        ``states`` is the scheduler sequence up to the job script's exit or a
-        cancellation. ``pending_polls`` prepends that many PENDING observations
-        (queue wait). ``teardown_lag`` is how many inspections report the
-        non-terminal COMPLETING state, which the public mapping reports as
-        RUNNING, between the job script's exit or a cancellation and the
-        terminal state.
+        Without ``states`` the job follows a timeline on ``clock``: PENDING for
+        its queue wait, RUNNING for its run time, then COMPLETING (public status
+        RUNNING) before the terminal ``exit_status``. A cancel of a running job
+        also passes through COMPLETING. ``queue_wait_s``, ``run_s`` and
+        ``completing_s`` override the profile's drawn values, ``requeues`` is how
+        many times the scheduler requeues the job (each starts a new attempt),
+        and ``run_s=math.inf`` never exits by itself.
+
+        With ``states`` each inspection returns the next entry, with no timing:
+        the scripted sequence is the observation. ``pending_polls`` prepends that
+        many PENDING entries.
         """
         validate_operation_id(operation_id)
-        if pending_polls < 0 or options.get("teardown_lag", 0) < 0:
+        if pending_polls < 0 or options.get("requeues", 0) < 0:
             raise SlurmError.invalid_script_states()
-        if not states or any(not isinstance(state, SlurmJobStatus) for state in states):
+        if any(options.get(name, 0.0) < 0 for name in ("queue_wait_s", "run_s", "completing_s")):
+            raise SlurmError.invalid_script_states()
+        if states is not None and (
+            not states or any(not isinstance(state, SlurmJobStatus) for state in states)
+        ):
+            raise SlurmError.invalid_script_states()
+        if states is None and pending_polls:
             raise SlurmError.invalid_script_states()
         for path, content in options.get("artifact_contents", {}).items():
             _safe_relative_path(path, SlurmError.invalid_artifact_path)
             if not isinstance(content, str):
                 raise SlurmError.invalid_artifact_path()
-        states = (SlurmJobStatus.PENDING,) * pending_polls + states
+        if states is not None:
+            states = (SlurmJobStatus.PENDING,) * pending_polls + states
         self._scripts[operation_id] = _Script(states=states, **options)
 
     def submit(self, request: Request, *, operation_id: str) -> ClusterSubmitOutcome:
@@ -251,8 +414,31 @@ class FakeCluster:
                 )
             )
         job = _Job(operation_id, digest, handle, result, acceptance_observed=False)
+        if script.states is None:
+            job.timeline = self._draw_timeline(operation_id, script)
         self._jobs[operation_id] = job
         return job
+
+    def _draw_timeline(self, operation_id: str, script: _Script) -> _Timeline:
+        """Fix a job's schedule at acceptance from the profile and the script."""
+        rng = random.Random(f"{self._seed}/{operation_id}")  # noqa: S311  # lint-waiver: LW-731201 [S311]; a seeded draw of Fake scheduler timing, not a security value.
+
+        def draw(override: float | None, bounds: SecondsRange) -> float:
+            if override is not None:
+                return override
+            return rng.uniform(bounds.low, bounds.high)
+
+        at = self.clock.now()
+        attempts = []
+        for index in range(script.requeues + 1):
+            running_from = at + draw(script.queue_wait_s, self._timing.queue_wait_s)
+            run = draw(script.run_s, self._timing.run_s)
+            # A requeued attempt is interrupted partway through its run.
+            ends_at = running_from + (run if index == script.requeues else run / 2)
+            attempts.append(_Attempt(at, running_from, ends_at))
+            at = ends_at
+        completing = draw(script.completing_s, self._timing.completing_s)
+        return _Timeline(tuple(attempts), completing, script.exit_status)
 
     def _reply(self, job: _Job, script: _Script) -> ClusterSubmitOutcome:
         operation_id = job.operation_id
@@ -307,22 +493,7 @@ class FakeCluster:
         job.acceptance_observed = True
         job.accepted_published = True
         script = self._scripts[job.operation_id]
-        status = (
-            SlurmJobStatus.CANCELLED
-            if job.cancelled
-            else script.states[min(script.index, len(script.states) - 1)]
-        )
-        status = self._through_teardown(job, script, status)
-        script.index += 1
-        if job.operation_id in self._cancelled and status in {
-            SlurmJobStatus.PENDING,
-            SlurmJobStatus.RUNNING,
-        }:
-            # Cancellation reaches the scheduler after this observation. Its
-            # next state may already be terminal, which scancel must preserve.
-            current = script.states[min(script.index, len(script.states) - 1)]
-            if current in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
-                job.cancelled = True
+        status, phase, attempt = self._observe(job, script)
         identity = job_handle(job.handle).job_id
         if status == SlurmJobStatus.UNKNOWN:
             return ClusterUnknown(
@@ -332,26 +503,34 @@ class FakeCluster:
             operation_id=job.operation_id,
             job_id=identity,
             status=status,
+            phase=phase,
+            attempt=attempt,
             pending_reason=script.pending_reason if status == SlurmJobStatus.PENDING else None,
             estimated_start=script.estimated_start if status == SlurmJobStatus.PENDING else None,
             handle=job.handle,
         )
 
-    @staticmethod
-    def _through_teardown(job: _Job, script: _Script, status: SlurmJobStatus) -> SlurmJobStatus:
-        """Hold a terminal state back behind COMPLETING (public RUNNING) for the lag."""
-        if status not in {
-            SlurmJobStatus.COMPLETED,
-            SlurmJobStatus.FAILED,
-            SlurmJobStatus.CANCELLED,
+    def _observe(self, job: _Job, script: _Script) -> tuple[SlurmJobStatus, SlurmPhase, int]:
+        """The job's state now: from the clock, or the next scripted observation."""
+        if job.timeline is not None:
+            return job.timeline.state(self.clock.now(), job.cancelled_at)
+        states = script.states if script.states is not None else (SlurmJobStatus.PENDING,)
+        status = (
+            SlurmJobStatus.CANCELLED
+            if job.cancelled
+            else states[min(script.index, len(states) - 1)]
+        )
+        script.index += 1
+        if job.operation_id in self._cancelled and status in {
+            SlurmJobStatus.PENDING,
+            SlurmJobStatus.RUNNING,
         }:
-            return status
-        if job.teardown_left is None:
-            job.teardown_left = script.teardown_lag
-        if job.teardown_left == 0:
-            return status
-        job.teardown_left -= 1
-        return SlurmJobStatus.RUNNING
+            # Cancellation reaches the scheduler after this observation. Its
+            # next state may already be terminal, which scancel must preserve.
+            current = states[min(script.index, len(states) - 1)]
+            if current in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
+                job.cancelled = True
+        return status, _STATES_PHASE[status], 0
 
     def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
         """Record cancellation intent, leaving confirmation to inspect."""
@@ -373,6 +552,8 @@ class FakeCluster:
                 return ClusterCancelRequested(operation_id=target)
             return ClusterUnknown(operation_id=None, reason="operation not found")
         self._cancelled.add(job.operation_id)
+        if job.cancelled_at is None:
+            job.cancelled_at = self.clock.now()
         if job.operation_id in self._expired_names and not job.accepted_published and not by_job_id:
             return ClusterUnknown(
                 operation_id=job.operation_id, reason="submission acceptance unresolved"

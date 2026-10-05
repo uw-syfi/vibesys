@@ -37,10 +37,12 @@ from .config import (
     load_slurm_config,
     shell_join_with_port,
 )
-from .fake_cluster import FakeCluster
+from .fake_cluster import FakeCluster, ManualClock, SecondsRange, SlurmTimingProfile
 from .fake_connector import FakeConnector
 from .identity import runtime_content_identity
+from .phase_register import MergedPhase, PhaseAnomaly, PhaseRegister
 from .runner import (
+    SchedulerReading,
     SlurmArtifactTarget,
     SlurmBatchHandle,
     SlurmBatchRequest,
@@ -56,9 +58,11 @@ from .runner import (
     SlurmJobRunner,
     SlurmJobStatus,
     SlurmJobWaitResult,
+    SlurmPhase,
     SlurmProcess,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
+    phase_of,
 )
 from .staging import tree_content_identity
 
@@ -81,6 +85,12 @@ __all__ = [
     "ClusterUnknown",
     "FakeCluster",
     "FakeConnector",
+    "ManualClock",
+    "MergedPhase",
+    "PhaseAnomaly",
+    "PhaseRegister",
+    "SchedulerReading",
+    "SecondsRange",
     "SlurmArtifactTarget",
     "SlurmBatchHandle",
     "SlurmBatchRequest",
@@ -100,13 +110,16 @@ __all__ = [
     "SlurmJobRunner",
     "SlurmJobStatus",
     "SlurmJobWaitResult",
+    "SlurmPhase",
     "SlurmProcess",
     "SlurmService",
     "SlurmSshTransport",
     "SlurmSubmissionRejectedError",
+    "SlurmTimingProfile",
     "SlurmTransport",
     "SlurmTreeArtifact",
     "load_slurm_config",
+    "phase_of",
     "runtime_content_identity",
     "shell_join_with_port",
     "tree_content_identity",

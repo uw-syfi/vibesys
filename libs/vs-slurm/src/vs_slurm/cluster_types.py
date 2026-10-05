@@ -16,6 +16,7 @@ from .runner import (
     SlurmJobHandle,
     SlurmJobResult,
     SlurmJobStatus,
+    SlurmPhase,
 )
 
 ClusterHandle: TypeAlias = SlurmJobHandle | SlurmBatchHandle
@@ -117,6 +118,11 @@ class ClusterObservation(_Outcome):
         SlurmJobStatus.FAILED,
         SlurmJobStatus.CANCELLED,
     ]
+    # Finer than ``status``: tells a tearing-down job (COMPLETING) from a computing one.
+    phase: SlurmPhase = SlurmPhase.UNKNOWN
+    # Scheduler restart count when the scheduler reports it, else 0. A higher
+    # attempt makes a drop from RUNNING back to PENDING a requeue, not a regression.
+    attempt: int = 0
     pending_reason: str | None = None
     estimated_start: str | None = None
     handle: ClusterHandle | None = None

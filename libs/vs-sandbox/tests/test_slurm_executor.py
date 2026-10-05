@@ -18,7 +18,6 @@ from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
-    ExecutorCancellationUnconfirmedError,
     ExecutorCancellationUnknownError,
     ExecutorObservation,
     ExecutorRejectedError,
@@ -1120,6 +1119,8 @@ class _PendingCancellationCluster(_BlockingCluster):
         if self.terminate:
             return super().cancel(target, by_job_id=by_job_id)
         observed = _ScenarioCluster.inspect(self, target, by_job_id=by_job_id)
+        # Like _BlockingCluster.cancel, the acknowledgement frees the blocked inspection.
+        self._release_wait.set()
         if isinstance(observed, ClusterObservation):
             self.cancellations += 1
             self.cancelled_job_ids.append(observed.job_id)
@@ -1149,11 +1150,10 @@ async def test_scancel_acknowledgement_does_not_complete_release_or_suppress_ret
     try:
         await executor.submit(_request(), handle_id="eval-pending-cancel")
         await asyncio.to_thread(runner.wait_started.wait)
-        with pytest.raises(ExecutorCancellationUnconfirmedError, match="was requested for job"):
-            await executor.cancel("eval-pending-cancel")
+        await executor.cancel("eval-pending-cancel")
         observed = await executor.inspect("eval-pending-cancel")
         assert observed is not None
-        assert observed.state is EvaluationState.RUNNING
+        assert observed.state is EvaluationState.CANCELING
         assert runner.cancellations == 1
         runner.terminate = True
         await executor.cancel("eval-pending-cancel")

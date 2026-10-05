@@ -57,6 +57,7 @@ from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, Slurm
 from vs_slurm.api import (
     FakeCluster,
     FakeConnector,
+    SchedulerReading,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
@@ -68,6 +69,7 @@ from vs_slurm.api import (
     SlurmJobHandle,
     SlurmJobRunner,
     SlurmJobStatus,
+    SlurmPhase,
     SlurmSshTransport,
 )
 
@@ -77,6 +79,15 @@ if TYPE_CHECKING:
     from tests.support.evaluation_scenarios import EvaluationScenario
 
     from vs_runtime.api import CandidateWorkspace, Workspace, Workspaces
+
+_PHASES = {
+    SlurmJobStatus.PENDING: SlurmPhase.PENDING,
+    SlurmJobStatus.RUNNING: SlurmPhase.RUNNING,
+    SlurmJobStatus.COMPLETED: SlurmPhase.ENDED,
+    SlurmJobStatus.FAILED: SlurmPhase.ENDED,
+    SlurmJobStatus.CANCELLED: SlurmPhase.ENDED,
+    SlurmJobStatus.UNKNOWN: SlurmPhase.UNKNOWN,
+}
 
 
 class _TrackedCandidate:
@@ -241,7 +252,7 @@ class _Runner(SlurmJobRunner):
         self.job_status = SlurmJobStatus.RUNNING
         return self.handle
 
-    def inspect_job(self, job_id: str) -> tuple[SlurmJobStatus, str | None, str | None]:
+    def inspect_job(self, job_id: str) -> SchedulerReading:
         """Expose the same deterministic scheduler evidence through public inspection."""
         assert self.handle is not None
         assert job_id == self.handle.job.job_id
@@ -252,7 +263,7 @@ class _Runner(SlurmJobRunner):
                 self.job_status = (
                     SlurmJobStatus.COMPLETED if self.job_exit_code == 0 else SlurmJobStatus.FAILED
                 )
-        return self.job_status, None, None
+        return SchedulerReading(status=self.job_status, phase=_PHASES[self.job_status])
 
     def wait_batch(
         self,
