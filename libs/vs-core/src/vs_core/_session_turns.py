@@ -1917,10 +1917,45 @@ def _admit_turn(
         return _turn_failure(state, context, event, error)
 
 
+def _drain_after_stop(
+    change: AreaChange[SessionsState], context: SessionsContext
+) -> AreaChange[SessionsState]:
+    """Keep a committed Stop's drain applying to run-owned sessions as they become closable.
+
+    The drain request is a one-shot signal, so a session whose creation is answered, or
+    whose cancelled turn ends, after it ran would otherwise stay open and keep the
+    closing run from becoming terminal. Re-applying the drain to the state each such
+    observation leaves behind is idempotent: it only adds what is not yet pending.
+    """
+    stop = committed_stop(context.run)
+    if not isinstance(stop, Proven):
+        return change
+    drained = _run_drain(
+        change.state,
+        context,
+        RunSessionsDrainRequested(scope=stop.value.scope, authority=stop.value.decision_id),
+    )
+    return AreaChange(
+        state=drained.state,
+        requests=(*change.requests, *drained.requests),
+        signals=(*change.signals, *drained.signals),
+        events=change.events,
+    )
+
+
 def advance(
     state: SessionsState, context: SessionsContext, event: SessionsEvent
 ) -> AreaChange[SessionsState]:
     """Consume wrapper-routed events without changing input or interruption authority."""
+    change = _advance(state, context, event)
+    if isinstance(event, SessionObserved | TurnObserved):
+        return _drain_after_stop(change, context)
+    return change
+
+
+def _advance(
+    state: SessionsState, context: SessionsContext, event: SessionsEvent
+) -> AreaChange[SessionsState]:
     match event:
         case TurnRequested() | RegisteredTurnRequested():
             change = _admit_turn(state, context, event)
