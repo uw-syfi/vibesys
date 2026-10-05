@@ -44,6 +44,9 @@ one exact offered pair. A null `parent_hypothesis_id` with no revision selects t
 revision. An invalid selection requires correction and never silently starts from base.
 Each sibling has its own workspace and session.
 {% endif %}
+Workstreams in one reply are independent: a parent must be an offered buildable
+candidate, never another workstream of this reply.{% if not buildable %} No candidate is
+offered as a parent now, so leave `parent_hypothesis_id` null.{% endif %}
 
 For work that must change code, add a feature, fix correctness, or produce a
 candidate, choose an implement workstream: `kind` "implement", `hypothesis_id`,
@@ -88,4 +91,7 @@ Older hypothesis IDs (omitted above; reuse one only to continue it): {{ older_id
 Answer with the structured response, filling its top-level fields directly:
 `reasoning` (why this portfolio), `workstreams` (one entry per new workstream), and
 `hypothesis_updates` (parks and abandonments; empty when there are none). Do not wrap
-the plan in another field or write it as JSON text inside a field.
+the plan in another field or write it as JSON text inside a field. Each workstream entry
+carries every field listed above. This reply is valid; its values are placeholders, and your
+hypothesis IDs must not occur in the history:
+{{ plan_example }}
