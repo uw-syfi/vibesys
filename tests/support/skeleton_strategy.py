@@ -99,8 +99,21 @@ def measurement(
 
 
 class SkeletonStrategy(Value):
+    """The scripted scenario; ``measured=False`` omits both measurements.
+
+    The unmeasured variant starts at the attempt and settles right after the turn, so
+    the workspace, session, retirement and adoption interfaces can be driven while the
+    measurement interfaces are still missing pieces.
+    """
+
     state: SkeletonState = SkeletonState(schema_version=1)
     declaration: StrategyDeclaration = DECLARATION
+    measured: bool = True
+
+    @classmethod
+    def unmeasured(cls) -> SkeletonStrategy:
+        """The scenario without the baseline and candidate measurements."""
+        return cls(state=SkeletonState(schema_version=1, phase="start"), measured=False)
 
     def bind(self, state: SkeletonState) -> SkeletonStrategy:
         return self.model_copy(update={"state": state})
@@ -216,6 +229,8 @@ class SkeletonStrategy(Value):
         if isinstance(event, MeasurementResult) and event.failure is not None:
             return {"phase": "failed", "failure": f"measurement {event.failure.value}"}
         phase = _NEXT.get((type(event), self.state.phase))
+        if phase == "measure" and not self.measured:
+            phase = "settle"
         if phase is None:
             return {}
         update: dict[str, object] = {"phase": phase}
