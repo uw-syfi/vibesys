@@ -1,7 +1,9 @@
 """Whole runs on the real core: baseline, plan, implement, review, measure, select, adopt.
 
 Kernel gaps keep these runs from finishing today, so every test here is a strict
-xfail that flips to a failure the day the gaps close (remove the mark then):
+xfail that flips to a failure the day the gaps close (remove the mark then).
+Owners: the observe cycle is EVAL-PATH, the session reply proof is SESSION-WIRING,
+retention is CORE-P2:
 
 - A measurement cannot complete: core never issues `ObserveOwnedJob` after a
   submission is accepted, and accepts a later `JobObserved` only when it equals the
@@ -35,7 +37,14 @@ from vs_core.api import Operation, ProposeWinner, RequestTurn, StartAttempt, Sto
 
 pending_kernel = pytest.mark.xfail(
     strict=True,
-    reason="core gaps: measurement observe cycle and session replies (module docstring)",
+    reason=(
+        "run stops at the baseline Measure: no ObserveOwnedJob after a submission, "
+        "libs/vs-core/src/vs_core/_measurements.py:452 (_source) and :571 (_submission_job), "
+        "owner EVAL-PATH (#1333). Behind it: session reply proof, "
+        "libs/vs-core/src/vs_core/_step.py:1187 vs libs/vs-runtime/src/vs_runtime/_session_requests.py:330, "
+        "owner SESSION-WIRING; non-wip retention, "
+        "libs/vs-core/src/vs_core/_attempt_acquisition.py:1161 and :1196, owner CORE-P2"
+    ),
 )
 
 

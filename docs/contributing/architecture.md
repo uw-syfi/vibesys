@@ -363,7 +363,6 @@ graph TD
     vibesys.run.resources --> vibesys.run.profilers
     vibesys.run.skill_sources --> vibesys
     vibesys.run.skill_sources --> vibesys.orchestration.skill_selection
-    vibesys.run.slurm_evaluation --> vibesys.run.evaluation_backend
     vibesys.run.validated_turn --> vibesys.orchestration.structured_turn
     vibesys.run.validated_turn --> vibesys.prompts
 ```
@@ -778,7 +777,6 @@ graph TD
     vibesys.run.skill_sources --> vibesys
     vibesys.run.skill_sources --> vibesys.orchestration.skill_selection
     vibesys.run.skill_sources --> vs_runtime
-    vibesys.run.slurm_evaluation --> vibesys.run.evaluation_backend
     vibesys.run.slurm_evaluation --> vs_evaluation.api
     vibesys.run.slurm_evaluation --> vs_project
     vibesys.run.slurm_evaluation --> vs_runtime

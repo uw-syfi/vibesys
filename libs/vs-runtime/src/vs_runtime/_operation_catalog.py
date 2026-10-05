@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import OperationRequest
+    from vs_core.api import OperationDescriptor, OperationRequest, StrategyDeclaration
     from vs_runtime._core_requests import ExecutionContext
 
 
@@ -168,6 +168,35 @@ class OperationCatalog:
     def entries(self) -> tuple[OperationEntry, ...]:
         """Every entry, in kind order."""
         return tuple(self._entries[kind] for kind in sorted(self._entries))
+
+    @property
+    def offered_operations(self) -> tuple[OperationDescriptor, ...]:
+        """Descriptors of the operations that have an owner, in kind order.
+
+        A refused entry is declared but cannot run, so it is never offered: this is
+        what a run records as its available operations, and core's startup check
+        then rejects a strategy that requires one.
+        """
+        return tuple(entry.registration.descriptor for entry in self.entries if entry.owner)
+
+    def require_owned(self, declaration: StrategyDeclaration) -> None:
+        """Fail, naming the operation, unless every required operation has an owner.
+
+        A refused entry counts as absent, because it registers the schema but every
+        attempt would fail. Optional operations are not checked: a strategy that
+        declares one must cope with its absence.
+        """
+        for index, schema in enumerate(declaration.required_operations):
+            path = ("required_operations", index, schema.kind)
+            entry = self.find(schema)
+            if entry is None:
+                raise ContractError(path, f"required operation {schema.kind!r} is not registered")
+            if entry.owner is None:
+                raise ContractError(
+                    path,
+                    f"required operation {schema.kind!r} has no owner "
+                    f"({entry.refusal}): {entry.refusal_detail}",
+                )
 
     def find(self, schema: OperationSchemaRef) -> OperationEntry | None:
         """The entry whose declared schema equals ``schema`` exactly, else None."""

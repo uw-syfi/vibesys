@@ -9,12 +9,12 @@ from __future__ import annotations
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.run.evaluation_backend import (
+from vs_evaluation.api import EvidenceKind
+from vs_runtime.api import (
     render_evaluation_failure,
     render_rejected_evidence,
     render_stage_failure,
 )
-from vs_evaluation.api import EvidenceKind
 
 _TEXT = st.text(max_size=40)
 _FAILURE = st.none() | _TEXT
