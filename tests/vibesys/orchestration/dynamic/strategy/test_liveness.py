@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.liveness import LivenessViolationError
+from tests.support.liveness import Journal, LivenessViolationError, spin_violations
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
@@ -147,3 +147,11 @@ def test_a_lost_measurement_ends_the_run_live(position: int) -> None:
 @pytest.mark.parametrize("outcome", [Turn.LOST, Turn.RETRYABLE_FAILURE])
 def test_a_turn_the_executor_never_finishes_ends_the_run_live(outcome: Turn) -> None:
     run_shell(Scenario([], [outcome]))  # type: ignore[arg-type]  # the script is callable
+
+
+@pytest.mark.parametrize("measurement", _ANSWERED_MEASUREMENTS)
+def test_the_committed_ledger_alone_shows_no_repeated_request(measurement: Measurement) -> None:
+    """A harness that sees only the committed record (the composition one) checks the same rule."""
+    finished = run_shell(Scenario([measurement], []), live=False)  # type: ignore[arg-type]  # the script is callable
+
+    assert spin_violations(Journal.from_ledger(finished.core)) == []
