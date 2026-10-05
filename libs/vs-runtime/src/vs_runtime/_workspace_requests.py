@@ -27,7 +27,7 @@ import asyncio
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, assert_never
+from typing import TYPE_CHECKING, Literal, Protocol, assert_never
 
 from vs_core.api import (
     AdoptionObserved,
@@ -148,6 +148,14 @@ _RUN_OWNER = "run"
 _HANDLED = (EnsureWorkspace, RestoreRevision, SnapshotAndRetain, RetainRevision, DiscardWorkspace)
 
 
+class RunInvocationProof(Protocol):
+    """Proof that a run-owned invocation's writer can no longer change the root workspace."""
+
+    def unproven(self, request: SnapshotAndRetainRun) -> str | None:
+        """None when the request's invocation is proven terminal, else why it is not."""
+        ...
+
+
 class RuntimeWorkspaceRequests:
     """Translate workspace requests into ``RuntimeWorkspaces`` calls, once each."""
 
@@ -155,9 +163,15 @@ class RuntimeWorkspaceRequests:
         self,
         workspaces: RuntimeWorkspaces,
         store: ReceiptStore,
+        run_invocations: RunInvocationProof,
     ) -> None:
-        """Bind the workspaces to the shared store that holds every receipt of this run."""
+        """Bind the workspaces to the shared store and to the proof run snapshots require.
+
+        A run snapshot retains the root only after *run_invocations* proves the
+        invocation's writer ended; a missing proof is Unknown and snapshots nothing.
+        """
         self._workspaces = workspaces
+        self._run_invocations = run_invocations
         self._store = store
         self._receipts: WorkspaceReceipts = StoreWorkspaceReceipts(store)
         self._observations = ObservationFactory(store)
@@ -269,20 +283,27 @@ class RuntimeWorkspaceRequests:
             case EnsureWorkspace():
                 return await self._ensure(request, resumed=resumed)
             case SnapshotAndRetainRun():
-                return await self._snapshot(
-                    self._workspaces.root,
-                    request,
-                    request.retention,
-                    resumed=resumed,
-                    resource_id=None,
-                    owner=_RUN_OWNER,
-                )
+                return await self._run_snapshot(request, resumed=resumed)
             case AdoptRevision() | VerifyAdoption():
                 return await self._adoption(request, resumed=resumed)
             case RestoreRevision() | RetainRevision() | SnapshotAndRetain() | DiscardWorkspace():
                 return await self._attempt_request(request, resumed=resumed)
             case _:
                 return _rejected(f"{request.kind} cannot be executed against a workspace")
+
+    async def _run_snapshot(self, request: SnapshotAndRetainRun, *, resumed: bool) -> _Facts:
+        """Retain the run's root, but only once the invocation's writer is proven gone."""
+        unproven = self._run_invocations.unproven(request)
+        if unproven is not None:
+            return _unknown(unproven)
+        return await self._snapshot(
+            self._workspaces.root,
+            request,
+            request.retention,
+            resumed=resumed,
+            resource_id=None,
+            owner=_RUN_OWNER,
+        )
 
     async def _attempt_request(
         self,
@@ -615,4 +636,4 @@ class RuntimeWorkspaceRequests:
         )
 
 
-__all__ = ["RuntimeWorkspaceRequests", "commit_of", "revision_ref"]
+__all__ = ["RunInvocationProof", "RuntimeWorkspaceRequests", "commit_of", "revision_ref"]
