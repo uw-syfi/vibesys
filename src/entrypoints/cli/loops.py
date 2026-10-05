@@ -267,7 +267,14 @@ def _agent_policy_descriptor(
         "max_retries_per_round": args.max_retries_per_round,
         "judge_every": args.judge_every,
         "official_eval_every": args.official_eval_every,
-        **({"max_in_flight": args.max_in_flight} if args.outer_loop == "dynamic" else {}),
+        **(
+            {
+                "max_in_flight": args.max_in_flight,
+                "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
+            }
+            if args.outer_loop == "dynamic"
+            else {}
+        ),
         "operator_constraints": [item.strip() for item in args.constraint if item.strip()],
         "metric_space": metrics.model_dump(mode="json"),
         "profile_guided": bundle.manifest.profile_guided.model_dump(mode="json")

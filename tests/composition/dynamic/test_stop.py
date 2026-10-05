@@ -10,6 +10,7 @@ import pytest
 from tests.composition.dynamic._harness import (
     PASS,
     AgentTransportError,
+    CancelGapError,
     LoopInput,
     ScriptedAgents,
     Turn,
@@ -157,7 +158,7 @@ _CANCEL_GAP = (
 )
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_CANCEL_GAP)
+@pytest.mark.xfail(strict=True, raises=CancelGapError, reason=_CANCEL_GAP)
 def test_a_stop_mid_turn_ends_at_the_grace_bound_and_starts_no_evaluation(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     handles = _Handles()
@@ -192,7 +193,8 @@ def test_a_stop_mid_turn_ends_at_the_grace_bound_and_starts_no_evaluation(tmp_pa
     assert run.error is None, run.error
     assert run.status is RunStatus.STOPPED
     assert seen["armed"] is True
-    assert seen["cancelled"] is True
+    if seen["cancelled"] is not True:
+        raise CancelGapError
     # One grace period on the injected clock bounded the run.
     assert timer.delays == [STOP_GRACE_S]
     commands_at_stop = seen["commands_at_stop"]

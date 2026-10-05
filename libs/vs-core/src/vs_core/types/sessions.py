@@ -448,6 +448,13 @@ class InspectTurn(RequestBase):
 
     kind: Literal["inspect_turn"] = "inspect_turn"
     invocation: InvocationRef
+    dispatch: RequestId | None = None
+    """The request that dispatched the turn, when core can name it.
+
+    An executor attributes its facts about a turn that never started to this request,
+    because it has no record of its own to name the dispatch by. Without it such an
+    executor can only report the turn as unknown.
+    """
 
 
 class CancelTurn(RequestBase):

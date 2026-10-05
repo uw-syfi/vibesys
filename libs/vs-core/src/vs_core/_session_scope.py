@@ -10,12 +10,21 @@ from typing import TYPE_CHECKING
 
 from ._proofs import Proven, current_admission, invocation_for
 from .types.attempts import AttemptPhase
-from .types.common import AttemptId, ObservationStatus, RequestId, RunStatus, Scope
-from .types.sessions import Access
+from .types.common import (
+    AttemptId,
+    LifecycleClass,
+    ObservationStatus,
+    RequestId,
+    RunStatus,
+    Scope,
+)
+from .types.intents import ExecuteRegisteredOperation
+from .types.sessions import Access, DispatchTurn, InspectTurn, ResumeSessionTurn
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
     from .types.common import InvocationRef
+    from .types.intents import IntentsState
     from .types.kernel import SessionsContext
     from .types.sessions import Invocation, SessionsState
 
@@ -29,6 +38,53 @@ def turn_request_id(ref: InvocationRef, action: str) -> RequestId:
     """The request identity one invocation derives for an *action* on itself."""
     parts = (ref.session_id.root, str(ref.generation), ref.invocation_id.root, action)
     return RequestId(root=encode_identity("invocation", *parts))
+
+
+def dispatching_request(intents: IntentsState, invocation: Invocation) -> RequestId | None:
+    """The one request that dispatched this invocation's turn, or None when core cannot tell.
+
+    Its observation names it once the turn was observed. Before that the canonical session-turn
+    request for the same turn in the same scope is the dispatch.
+    """
+    if invocation.observation is not None:
+        return invocation.observation.request_id
+    owners = {
+        row.request_id
+        for row in intents.intents
+        if row.lifecycle == LifecycleClass.SESSION_TURN
+        and row.request.scope == invocation.scope
+        and (
+            (
+                isinstance(row.request, DispatchTurn | ResumeSessionTurn)
+                and invocation.registered_operation is None
+                and row.request.turn == invocation.turn
+            )
+            or (
+                isinstance(row.request, ExecuteRegisteredOperation)
+                and row.request.operation_id == invocation.registered_operation
+            )
+        )
+    }
+    return next(iter(owners)) if len(owners) == 1 else None
+
+
+def inspect_turn(context: SessionsContext, invocation: Invocation) -> InspectTurn:
+    """The inspection request of one invocation's turn: the recorded one, or a new one."""
+    identity = turn_request_id(invocation.invocation, "inspect")
+    previous = next((row for row in context.intents.intents if row.request_id == identity), None)
+    if previous is not None and isinstance(previous.request, InspectTurn):
+        return previous.request
+    owner = attempt_for(context, invocation.scope)
+    return InspectTurn(
+        request_id=identity,
+        scope=invocation.scope,
+        deadline_at=min(
+            context.run.deadline_at, context.run.now_at + context.run.limits.reconciliation_bound
+        ),
+        admission_id=owner.admission_id if owner is not None else None,
+        invocation=invocation.invocation,
+        dispatch=dispatching_request(context.intents, invocation),
+    )
 
 
 def lost_turn_authority(ref: InvocationRef) -> RequestId:

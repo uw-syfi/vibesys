@@ -27,7 +27,7 @@ from tests.support.skeleton_world import (
     open_skeleton_world,
 )
 
-from vs_core.api import ArtifactRef, Limits, RunResultProposal, RunStatus
+from vs_core.api import ArtifactRef, Limits, Proposal, RunResultProposal, RunStatus
 from vs_core.testing.builders import initial_state
 from vs_runtime.api.core import (
     CoreRunHost,
@@ -244,6 +244,41 @@ async def test_a_run_nothing_can_wake_is_reported_stalled(tmp_path: Path) -> Non
         start_core(host, _config())
         with pytest.raises(RunStalledError, match="stalled"):
             await drive_core(host, _config())
+
+
+class WaitsUntil(SkeletonStrategy):
+    """Holds all work back until a run-clock time, then cancels the run."""
+
+    until: float = 0.0
+
+    def decide(self, view: RunView) -> Proposal[SkeletonState]:
+        """Ask to be woken at ``until``; from then on stop the run."""
+        if view.run.now_at < self.until:
+            return Proposal(state=self.state, decisions=(), wake_at=self.until)
+        cancelling = self.bind(self.state.model_copy(update={"phase": "cancel"}))
+        return SkeletonStrategy.decide(cancelling, view)
+
+
+@settings(max_examples=5, derandomize=True, deadline=None)
+@example(until=7.0)
+@given(until=st.floats(min_value=2.0, max_value=900.0))
+@pytest.mark.asyncio
+async def test_a_strategy_that_waits_for_a_time_is_woken_then_and_not_reported_stalled(
+    until: float,
+) -> None:
+    waiting = WaitsUntil(state=SkeletonState(schema_version=1, phase="done"), until=until)
+    clock = FakeRunClock(at=1.0)
+    with (
+        tempfile.TemporaryDirectory() as directory,
+        open_skeleton_world(Path(directory), waiting) as world,
+    ):
+        _, host = _host(world, clock)
+        start_core(host, _config())
+        outcome = await drive_core(host, _config())
+    assert outcome.status == RunStatus.TERMINAL
+    assert outcome.result == RunResultProposal(outcome="cancelled", reason="attempt cancelled")
+    # The loop slept toward the wanted time and was awake at or after it, never before.
+    assert until <= clock.at < until + _config().lease_duration
 
 
 @pytest.mark.asyncio

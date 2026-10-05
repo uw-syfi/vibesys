@@ -20,28 +20,8 @@ if TYPE_CHECKING:
     from vs_faults.api import Crossing
 
 
-# A turn that crashed after its begun record is inspected as a turn, and core rejects that
-# inspection (no canonical invocation owner exists before the turn's first observation). What
-# an interrupted turn becomes is turn policy (LIVE-ROBUST-B), so the gap is tracked there.
-_TURN_GAP = frozenset({"durable_write:receipt_begun#5"})
-
-
 def _points() -> list[object]:
-    return [
-        pytest.param(
-            c,
-            id=name(c),
-            marks=[
-                pytest.mark.xfail(
-                    strict=True,
-                    reason="core rejects the inspection of a turn that never produced an observation",
-                )
-            ]
-            if name(c) in _TURN_GAP
-            else [],
-        )
-        for c in pre_effect_points()
-    ]
+    return [pytest.param(c, id=name(c)) for c in pre_effect_points()]
 
 
 @pytest.mark.parametrize("crossing", _points())

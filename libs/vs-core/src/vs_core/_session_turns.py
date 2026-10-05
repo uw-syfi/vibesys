@@ -25,6 +25,7 @@ from ._session_checkpoints import turn_source_matches as _turn_proof
 from ._session_scope import (
     attempt_for,
     encode_identity,
+    inspect_turn,
     lost_turn_authority,
     retains_write_turn,
     scope_active,
@@ -1361,22 +1362,6 @@ def _terminal_signals(
     return tuple(signals)
 
 
-def _inspect_turn(context: SessionsContext, invocation: Invocation) -> InspectTurn:
-    identity = turn_request_id(invocation.invocation, "inspect")
-    previous = _intent(context, identity)
-    if previous is not None and isinstance(previous.request, InspectTurn):
-        return previous.request
-    return InspectTurn(
-        request_id=identity,
-        scope=invocation.scope,
-        deadline_at=min(
-            context.run.deadline_at, context.run.now_at + context.run.limits.reconciliation_bound
-        ),
-        admission_id=_episode(context, invocation.scope),
-        invocation=invocation.invocation,
-    )
-
-
 def _after_run_turn_cleanup(
     state: SessionsState, context: SessionsContext, session: SessionView
 ) -> AreaChange[SessionsState]:
@@ -1403,7 +1388,7 @@ def _after_turn_cleanup(
     if _run_reusable(session, context):
         observation = invocation.observation
         if observation is None or not (observation.released and observation.children_complete):
-            return AreaChange(state=state, requests=(_inspect_turn(context, invocation),))
+            return AreaChange(state=state, requests=(inspect_turn(context, invocation),))
         dependency = ReleaseDependency(kind="request", identity=observation.request_id)
         signals = (
             ()
@@ -1494,7 +1479,7 @@ def _late_turn_observed(
     )
     state = _replace_session(state, session)
     cleanup = _after_turn_cleanup(state, context, invocation, session)
-    requests = (_inspect_turn(context, invocation),) if acceptance_unresolved(invocation) else ()
+    requests = (inspect_turn(context, invocation),) if acceptance_unresolved(invocation) else ()
     return cleanup.model_copy(
         update={
             "signals": (*signals, *cleanup.signals),
@@ -1573,7 +1558,7 @@ def _unresolved_after_inspection(
     context: SessionsContext, invocation: Invocation, event: TurnObserved
 ) -> bool:
     """Whether the turn's inspection completed and acceptance is still unknown."""
-    inspection = _intent(context, _inspect_turn(context, invocation).request_id)
+    inspection = _intent(context, inspect_turn(context, invocation).request_id)
     return (
         invocation.phase == SessionPhase.UNKNOWN
         and event.observation.status == ObservationStatus.UNKNOWN
@@ -1643,7 +1628,7 @@ def _apply_turn_observation(
     signals = acceptance_signals(invocation, event, observation)
     requests: tuple[Request, ...] = ()
     if phase == SessionPhase.UNKNOWN or acceptance_unresolved(invocation):
-        requests = (_inspect_turn(context, invocation),)
+        requests = (inspect_turn(context, invocation),)
     if not is_terminal(invocation):
         return AreaChange(state=state, signals=signals, requests=requests)
     signals = (*signals, *_terminal_signals(state, context, invocation, event))
