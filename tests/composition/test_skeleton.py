@@ -34,18 +34,23 @@ from tests.support.skeleton_world import (
 
 import vs_core
 from vs_core.api import (
+    CancelTurn,
+    CloseSession,
     DecisionId,
+    InspectRequest,
+    InvocationId,
+    InvocationRef,
     ObservationStatus,
     RequestId,
     RevisionId,
     RevisionRef,
     RunStatus,
     Scope,
+    SessionId,
     SubmitMeasurement,
 )
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
-    CoreContractGapError,
     ExecutionResult,
     ExecutorRole,
     RefusingRequestExecution,
@@ -54,13 +59,26 @@ from vs_runtime.api.core import (
 
 LEASE = 100.0
 
-# The first gap every scenario meets, in the order the run reaches it.
-INTENT_LEDGER = pytest.mark.xfail(
-    raises=CoreContractGapError,
+# The first gap each scenario meets, in the order the run reaches it.
+DIGEST_SCHEME = pytest.mark.xfail(
+    raises=AssertionError,
     strict=True,
     reason=(
-        "vs-core intent ledger is a stub (_intent_ledger.py: dispatch_authorized raises "
-        "KernelNotImplementedError); owner #1319 feat/core-intent-ledger"
+        "the baseline measurement is rejected: the workspace executor mints revision digest "
+        "'git-commit:<sha>' (_workspace_requests.py:92) but the evaluation executor accepts only "
+        "sha256 (_evaluation_jobs.py:87); gap A, owner EVAL-PATH (fix/eval-revision-path, not on "
+        "main), probe test_a_workspace_revision_can_be_measured"
+    ),
+)
+INSPECT_OF_SUBMIT = pytest.mark.xfail(
+    raises=AssertionError,
+    strict=True,
+    reason=(
+        "recovery of a dispatched SubmitMeasurement never resolves: core's InspectRequest is "
+        "routed to the OPERATIONS executor (_core_requests.py:215), whose _target "
+        "(_operation_requests.py:326) knows only operation receipts and answers UNKNOWN for "
+        "any other request, so the intent stays reconciling; owner OPS-OWNERS "
+        "(_operation_requests.py), probe test_inspect_reports_a_recorded_measurement_submit"
     ),
 )
 
@@ -94,10 +112,10 @@ def _assert_adopted(process: Process, world: World) -> None:
 @pytest.mark.parametrize(
     "crash",
     [
-        pytest.param(None, id="straight-through", marks=INTENT_LEDGER),
-        pytest.param(CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=INTENT_LEDGER),
+        pytest.param(None, id="straight-through", marks=DIGEST_SCHEME),
+        pytest.param(CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=INSPECT_OF_SUBMIT),
         pytest.param(
-            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=INTENT_LEDGER
+            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=DIGEST_SCHEME
         ),
     ],
 )
@@ -125,8 +143,8 @@ async def test_skeleton(tmp_path: Path, crash: CrashPoint | None) -> None:
         "a revision the workspace executor mints (digest 'git-commit:<sha>', "
         "_workspace_requests.py revision_ref) is rejected by the evaluation executor, which "
         "accepts only a sha256 content address (_evaluation_jobs.py _digest), so no workspace "
-        "revision, baseline included, can be measured; no owner (contracts-a added DigestScheme "
-        "but neither side consumes it)"
+        "revision, baseline included, can be measured; gap A, owner EVAL-PATH "
+        "(fix/eval-revision-path)"
     ),
 )
 async def test_a_workspace_revision_can_be_measured(tmp_path: Path) -> None:
@@ -148,15 +166,6 @@ async def test_a_workspace_revision_can_be_measured(tmp_path: Path) -> None:
         )
 
 
-@pytest.mark.xfail(
-    raises=AssertionError,
-    strict=True,
-    reason=(
-        "no production SessionRequests exists (EnsureSession, DispatchTurn, InspectTurn, "
-        "CancelTurn, CloseSession, ResumeSessionTurn); owner lane B (design.md section 5, "
-        "runtime _core_sessions), no open PR; wip/feat/core-sessions-b has no runtime executor"
-    ),
-)
 def test_every_request_role_has_a_production_executor(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path) as world:
         executors = world.bindings().executors
@@ -188,13 +197,6 @@ def test_adoption_requests_have_a_core_producer() -> None:
     assert not _unproduced() & ADOPTION
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "vs-core attempt retirement is a stub (_attempt_retirement.py); "
-        "owner #1289 feat/core-attempt-retirement"
-    ),
-)
 def test_retirement_requests_have_a_core_producer() -> None:
     assert not _unproduced() & RETIREMENT
 
@@ -207,10 +209,11 @@ def test_retirement_requests_have_a_core_producer() -> None:
         "nothing starts the observe cycle of a submitted measurement: the submit executor "
         "returns only MeasurementSubmissionObserved (_evaluation_requests.py _submit, owner_events) "
         "and core's _submission_job (vs_core/_measurements.py) issues no request, so the first "
-        "ObserveOwnedJob is never emitted and the baseline stays pending; no owner. Also, a later "
+        "ObserveOwnedJob is never emitted and the baseline stays pending (gap B). Also, a later "
         "JobObserved names the submission request but core's _source requires it to equal the "
         "submission intent's own observation (_measurements.py _source, row.observation != "
-        "observation), so even once started it is dropped silently"
+        "observation), so even once started it is dropped silently (gap C); both owned by EVAL-PATH "
+        "(fix/eval-revision-path)"
     ),
 )
 async def test_a_submitted_measurement_starts_its_observe_cycle(tmp_path: Path) -> None:
@@ -237,6 +240,82 @@ async def test_a_submitted_measurement_starts_its_observe_cycle(tmp_path: Path) 
         assert isinstance(result, ExecutionResult), result
         kinds = [type(event).__name__ for event in result.owner_events]
         assert "JobObserved" in kinds, kinds
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    raises=AssertionError,
+    strict=True,
+    reason=(
+        "CancelTurn, CloseSession and ResumeSessionTurn are rejected as 'not executed here' by "
+        "RuntimeSessionRequests (_session_requests.py:243); their executor and the router are in "
+        "open PR #1328 (feat/runtime-session-lifecycle), and core_bindings must build "
+        "SessionRequestRouter once it merges; owner SESSION-WIRING"
+    ),
+)
+async def test_session_lifecycle_requests_are_executed(tmp_path: Path) -> None:
+    with open_skeleton_world(tmp_path) as world:
+        executors = world.bindings().executors
+        scope = Scope(owner=world.initial().run.run_id, generation=0)
+        session = SessionId(root="implementer")
+        requests = (
+            CloseSession(
+                request_id=RequestId(root="probe-close"),
+                scope=scope,
+                deadline_at=100.0,
+                session_id=session,
+            ),
+            CancelTurn(
+                request_id=RequestId(root="probe-cancel"),
+                scope=scope,
+                deadline_at=100.0,
+                invocation=InvocationRef(
+                    session_id=session, invocation_id=InvocationId(root="inv"), generation=0
+                ),
+            ),
+        )
+        for request in requests:
+            result = await executors.sessions.execute(request, context_for(request))
+            assert isinstance(result, ExecutionResult), result
+            diagnostic = result.observation.observation.diagnostic
+            assert "not executed here" not in diagnostic, f"{request.kind}: {diagnostic}"
+
+
+@pytest.mark.asyncio
+@INSPECT_OF_SUBMIT
+async def test_inspect_reports_a_recorded_measurement_submit(tmp_path: Path) -> None:
+    with open_skeleton_world(tmp_path) as world:
+        executors = world.bindings().executors
+        commit = world.env.hosts[0].root.revision
+        assert commit is not None
+        scope = Scope(owner=world.initial().run.run_id, generation=0)
+        plan = measurement(
+            RevisionRef(
+                revision_id=RevisionId(root=commit),
+                digest=hashlib.sha256(commit.encode()).hexdigest(),
+            ),
+            "baseline",
+        )
+        submit = SubmitMeasurement(
+            request_id=RequestId(root="probe-submit"),
+            scope=scope,
+            admission_id=DecisionId(root="probe-admission"),
+            deadline_at=100.0,
+            plan=plan,
+        )
+        submitted = await executors.evaluation.execute(submit, context_for(submit))
+        assert isinstance(submitted, ExecutionResult), submitted
+        inspect = InspectRequest(
+            request_id=RequestId(root="probe-inspect"),
+            scope=scope,
+            deadline_at=100.0,
+            target=RequestId(root="probe-submit"),
+        )
+        inspected = await executors.operations.execute(inspect, context_for(inspect))
+        assert isinstance(inspected, ExecutionResult), inspected
+        target = inspected.observation.target
+        assert target is not None
+        assert target.observation.status != ObservationStatus.UNKNOWN, target.observation.diagnostic
 
 
 def test_every_unproduced_request_kind_has_a_named_owner() -> None:

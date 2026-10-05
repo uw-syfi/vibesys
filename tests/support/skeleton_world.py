@@ -16,16 +16,27 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from tests.support.runtime_evaluation import ScenarioCluster, stage_failure_text
+from tests.support.session_world import Reply, SessionHost, open_host
 from tests.support.skeleton_strategy import DECLARATION, SkeletonState, SkeletonStrategy
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
 
-from vs_core.api import ClockAdvanced, IntentPhase, Limits, RecoveryPhase, RunFacts, RunStatus
+from vs_core.api import (
+    ClockAdvanced,
+    IntentPhase,
+    Limits,
+    RecoveryPhase,
+    RoleId,
+    RunFacts,
+    RunStatus,
+    SchemaRef,
+)
 from vs_runtime.api.core import (
     CoreRuntime,
     CoreRuntimeBindings,
     DispatchProgress,
     ExecutorRefusal,
     JournalPublicationDelivery,
+    SessionServices,
     core_bindings,
     new_core_state,
     revision_ref,
@@ -43,7 +54,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_core.api import CoreState
-    from vs_runtime.api.core import SessionRequests
 
 DIGEST = "ab" * 32
 LEASE = 100.0
@@ -56,7 +66,7 @@ class World:
     env: WorkspaceEnv
     root: Path
     cluster: ScenarioCluster
-    sessions: SessionRequests | None = None
+    agents: SessionHost
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -105,7 +115,7 @@ class World:
             receipts=self.env.receipts_namespace(),
             workspaces=workspaces,
             evaluation=evaluation,
-            sessions=self.sessions,
+            sessions=SessionServices(self.agents.sessions(), self.agents.resolver),
         )
 
     def runtime(self) -> Process:
@@ -230,4 +240,7 @@ async def run_until_crash(process: Process, point: CrashPoint, *, start: float) 
 def open_skeleton_world(tmp_path: Path) -> Iterator[World]:
     """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
     with open_workspace_env(tmp_path) as env:
-        yield World(env=env, root=tmp_path / "project", cluster=ScenarioCluster())
+        agents = open_host(tmp_path / "project")
+        agents.resolver.roles = frozenset({RoleId(root="implementer")})
+        agents.resolver.schemas = {SchemaRef(name="implementation", version=1): Reply}
+        yield World(env=env, root=tmp_path / "project", cluster=ScenarioCluster(), agents=agents)

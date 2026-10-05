@@ -63,7 +63,9 @@ DECLARATION = StrategyDeclaration(
     strategy_id=StrategyId(root="skeleton"), state_schema=SchemaRef(name="skeleton", version=1)
 )
 
-type Phase = Literal["baseline", "start", "turn", "measure", "settle", "propose", "stop", "done"]
+type Phase = Literal[
+    "baseline", "start", "turn", "measure", "settle", "propose", "stop", "failed", "done"
+]
 
 
 class SkeletonState(StrategyState):

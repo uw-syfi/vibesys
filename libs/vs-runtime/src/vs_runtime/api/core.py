@@ -52,7 +52,7 @@ from vs_runtime._core_requests import (
     WorkspaceRequests,
     receipt_executor_kinds,
 )
-from vs_runtime._core_wiring import core_bindings, new_core_state
+from vs_runtime._core_wiring import SessionServices, core_bindings, new_core_state
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
 from vs_runtime._observation_factory import (
     ObservationFactory,
@@ -189,6 +189,7 @@ __all__ = [
     "SessionBinding",
     "SessionRequests",
     "SessionResolver",
+    "SessionServices",
     "Settled",
     "StoreWorkspaceReceipts",
     "Transient",

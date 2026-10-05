@@ -35,13 +35,27 @@ from vs_runtime._operation_receipts import NamespaceOperationReceipts
 from vs_runtime._operation_requests import RegisteredOperationRequests
 from vs_runtime._receipt_store import ReceiptStore
 from vs_runtime._semantic_events import JournalSemanticEvents
+from vs_runtime._session_requests import JournalRunInvocations, RuntimeSessionRequests
 from vs_runtime._workspace_requests import RuntimeWorkspaceRequests
 
 if TYPE_CHECKING:
+    from vs_agent.api import ClientAgentSessions
     from vs_evaluation.api import PollingEvaluationExecutor
     from vs_project.api import StateNamespace
-    from vs_runtime._core_requests import SessionRequests
+    from vs_runtime._session_requests import SessionResolver
     from vs_runtime._workspaces import RuntimeWorkspaces
+
+
+@dataclasses.dataclass(frozen=True)
+class SessionServices:
+    """What the SESSIONS role runs on.
+
+    ``agent_sessions`` is the durable provider-conversation client. ``resolver`` maps a
+    turn's declared role, schema and prompts to concrete agent configuration.
+    """
+
+    agent_sessions: ClientAgentSessions
+    resolver: SessionResolver
 
 
 def new_core_state(
@@ -78,25 +92,26 @@ def core_bindings(
     receipts: StateNamespace,
     workspaces: RuntimeWorkspaces,
     evaluation: PollingEvaluationExecutor,
+    sessions: SessionServices,
     operations: OperationCatalog | None = None,
-    sessions: SessionRequests | None = None,
 ) -> CoreRuntimeBindings:
-    """Bind every request role that has an owner, over one shared receipt store.
+    """Bind every request role over one shared receipt store.
 
-    ``sessions`` has no production implementation yet; leaving it ``None`` keeps
-    the role refusing by name. ``operations`` defaults to the empty catalog, which
-    serves a strategy that declares no registered operations.
+    The same agent sessions also prove, for the workspace executor, that a run turn's
+    writer ended before the run is snapshotted. ``operations`` defaults to the empty
+    catalog, which serves a strategy that declares no registered operations.
     """
     store = ReceiptStore(receipts)
     catalog = operations or OperationCatalog(OperationRegistry(), ())
     executors = RequestExecutors(
-        workspaces=RuntimeWorkspaceRequests(workspaces, store),
+        workspaces=RuntimeWorkspaceRequests(
+            workspaces, store, JournalRunInvocations(sessions.agent_sessions, store)
+        ),
+        sessions=RuntimeSessionRequests(sessions.agent_sessions, sessions.resolver, store),
         evaluation=MeasurementRequests(evaluation, store),
         operations=RegisteredOperationRequests(
             catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
         ),
         semantic_events=JournalSemanticEvents(store, receipts),
     )
-    if sessions is not None:
-        executors = dataclasses.replace(executors, sessions=sessions)
     return CoreRuntimeBindings(registry=catalog.registry, executors=executors)
