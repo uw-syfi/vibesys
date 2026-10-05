@@ -20,6 +20,7 @@ from vs_core._registry import (
     operation_result,
     validate_startup,
 )
+from vs_core._session_scope import write_turn_authority
 from vs_core._step import CoreReducers, dependency_status, step, validate_terminal_inputs
 from vs_core.api.routing import EVENT_ROUTES
 from vs_core.attempts import advance_attempt
@@ -58,6 +59,8 @@ from vs_core.types.attempts import (
     AttemptsEvent,
     AttemptsState,
     AttemptView,
+    CheckpointDecline,
+    CheckpointDeclined,
     CloseAttemptScope,
     DiscardWorkspace,
     EnsureWorkspace,
@@ -286,6 +289,7 @@ from vs_core.types.scheduling import (
     AdmissionControl,
     AdmissionRequest,
     AdmitAttempt,
+    AdoptionFenceLifted,
     AttemptReady,
     AttemptReopenRequest,
     AttemptReopenRequested,
@@ -363,9 +367,12 @@ from vs_core.types.sessions import (
 )
 from vs_core.types.settlement import (
     Adoption,
+    AdoptionFailed,
+    AdoptionFailureReason,
     AdoptionObserved,
     AdoptionRequest,
     AdoptionResult,
+    AdoptionView,
     AdoptRevision,
     AssessmentAuthority,
     AssessmentProposal,
@@ -420,9 +427,13 @@ __all__ = [
     "AdmitAttempt",
     "AdoptRevision",
     "Adoption",
+    "AdoptionFailed",
+    "AdoptionFailureReason",
+    "AdoptionFenceLifted",
     "AdoptionObserved",
     "AdoptionRequest",
     "AdoptionResult",
+    "AdoptionView",
     "Area",
     "AreaChange",
     "AreaContext",
@@ -470,6 +481,8 @@ __all__ = [
     "ChargeId",
     "ChargeKind",
     "ChargeReceipt",
+    "CheckpointDecline",
+    "CheckpointDeclined",
     "ChildLease",
     "ChildManifest",
     "ChildObservationWatermark",
@@ -796,4 +809,5 @@ __all__ = [
     "v2_to_v3_migration",
     "validate_startup",
     "validate_terminal_inputs",
+    "write_turn_authority",
 ]

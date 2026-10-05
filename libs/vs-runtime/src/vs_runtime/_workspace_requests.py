@@ -390,7 +390,14 @@ class RuntimeWorkspaceRequests:
         applied = await root.matches_revision(commit)
         if isinstance(request, VerifyAdoption):
             if not applied:
-                return _unknown("root workspace does not yet prove the selected content")
+                # The root was read and its tracked content differs from the selection:
+                # a conclusive mismatch, which core treats as terminal FAILED. UNKNOWN
+                # stays for what could not be compared at all (a missing revision above).
+                return _Facts(
+                    ObservationStatus.FAILED,
+                    accepted=True,
+                    diagnostic="root workspace content differs from the selected revision",
+                )
         elif not (resumed and applied):
             failure = await self._materialize(root, commit)
             if failure is not None:

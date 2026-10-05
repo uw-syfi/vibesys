@@ -176,6 +176,8 @@ def test_profiler_yield_checkpoint_authorization_and_one_resumed_dispatch() -> N
     assert len(resumed.requests) == 1
     assert isinstance(resumed.requests[0], core.ResumeSessionTurn)
     assert resumed.requests[0].turn == spec
+    assert wait.authorization_receipt is not None
+    assert resumed.requests[0].publication == wait.authorization_receipt
     assert len(resumed.state.sessions.run_charges) == 2
     assert reload_step(resumed.state, proposal).requests == ()
     assert reload_step(committed.state, checkpoint_event(state, request)).events == ()

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .types.attempts import (
+    AttemptCheckpoint,
     AttemptClosure,
     AttemptPhase,
     AttemptReacquireRequested,
@@ -22,6 +23,7 @@ from .types.attempts import (
     ScopeReopenAdmitted,
     ScopeReopenRequested,
     SnapshotAndRetain,
+    WorkspaceObserved,
 )
 from .types.common import (
     AttemptRef,
@@ -1021,6 +1023,14 @@ def _request_release_proof(
         )
     if isinstance(intent.request, DiscardWorkspace):
         return _disposal_done(owner, context)
+    if isinstance(intent.request, SnapshotAndRetain) and intent.request.invocation is not None:
+        # An invocation's own checkpoint, not the closure's retention: any conclusive
+        # answer ends the wait. A failed snapshot retains nothing, and closure still
+        # retains the workspace itself, so the attempt must not wait on it forever.
+        return observation.terminal and observation.status not in (
+            ObservationStatus.UNKNOWN,
+            ObservationStatus.PENDING,
+        )
     if isinstance(intent.request, RetainRevision | SnapshotAndRetain):
         return (
             observation.status == ObservationStatus.SUCCEEDED
@@ -1661,6 +1671,83 @@ def _inspect_unknown(
     return (request,)
 
 
+def is_retention_acknowledgement(context: AttemptsContext, event: WorkspaceObserved) -> bool:
+    """Whether a workspace observation answers a closure's retention request."""
+    intent = _intent(context, event.observation.request_id)
+    return (
+        intent is not None
+        and isinstance(intent.request, RetainRevision | SnapshotAndRetain)
+        and getattr(intent.request, "invocation", None) is None
+    )
+
+
+def retention_acknowledged(
+    owner: AttemptView, context: AttemptsContext, event: WorkspaceObserved
+) -> tuple[AttemptView, tuple[Signal, ...], tuple[Request, ...]]:
+    """Record the closure's retention checkpoint from the workspace's typed acknowledgement.
+
+    The workspace acknowledgement names the retained revision. `_retention_done`
+    reads `owner.checkpoints`, and invocation checkpoints are the only other
+    writer, so without this the settle-close retention never completes. Once the
+    checkpoint exists, the release edge of the retention request is re-evaluated
+    with the ledger's recorded observation, exactly as if it had arrived after.
+    """
+    observation = event.observation
+    if owner.phase not in (AttemptPhase.CLOSING, AttemptPhase.BLOCKED):
+        return owner, (), ()
+    recorded = _record_retention(owner, context, observation, event.revision)
+    if recorded == owner:
+        return owner, (), ()
+    edge = ReleaseDependency(kind="workspace", identity=observation.request_id)
+    return _closure_event(
+        recorded,
+        context,
+        ReleaseDependencyObserved(attempt=_ref(owner), dependency=edge, observation=observation),
+    )
+
+
+def _record_retention(
+    owner: AttemptView,
+    context: AttemptsContext,
+    observation: Observation,
+    reported: RevisionRef | None,
+) -> AttemptView:
+    """Append the checkpoint for the retention this closure expects, when exactly proven.
+
+    The acknowledgement must answer exactly the retention request the closure
+    expects, in the closure's episode, report a terminal success with its children
+    complete, and name the retained revision.
+    """
+    expected = _retention_request(owner, context, None)
+    intent = _intent(context, observation.request_id)
+    if (
+        owner.closure is None
+        or expected is None
+        or expected.request_id != observation.request_id
+        or not isinstance(expected, RetainRevision | SnapshotAndRetain)
+        or intent is None
+        or not _request_payload_matches(expected, intent.request)
+        or intent.observation != observation
+        or observation.scope != _scope(owner)
+        or observation.admission_id != owner.closure.admission_id
+        or observation.status != ObservationStatus.SUCCEEDED
+        or not observation.terminal
+        or not observation.children_complete
+        or any(row.request_id == expected.request_id for row in owner.checkpoints)
+    ):
+        return owner
+    revision = expected.revision if isinstance(expected, RetainRevision) else reported
+    if revision is None or (isinstance(expected, RetainRevision) and reported != revision):
+        return owner
+    checkpoint = AttemptCheckpoint(
+        invocation=None,
+        request_id=expected.request_id,
+        revision=revision,
+        retention=expected.retention,
+    )
+    return owner.model_copy(update={"checkpoints": (*owner.checkpoints, checkpoint)})
+
+
 def _closure_event(
     owner: AttemptView,
     context: AttemptsContext,
@@ -1677,7 +1764,9 @@ def _closure_event(
         owner = _discover(owner, context)
         if event.observation.status == ObservationStatus.UNKNOWN:
             return owner, (), _inspect_unknown(owner, context, event)
-        if event.dependency in owner.release_dependencies and _proof_matches(owner, context, event):
+        # Discovery lists only unreleased edges, so a release that Sessions or Evaluation
+        # already recorded is absent here; the proof, not the list, authorizes progress.
+        if _proof_matches(owner, context, event):
             owner = owner.model_copy(
                 update={
                     "release_dependencies": tuple(
@@ -1719,6 +1808,8 @@ def advance(
         event, RetentionRequired | ReleaseDependencyObserved | ReleaseDependencyBlocked
     ):
         owner, signals, requests = _closure_event(owner, context, event)
+    elif isinstance(event, WorkspaceObserved):
+        owner, signals, requests = retention_acknowledged(owner, context, event)
     elif isinstance(event, ScopeReopenAdmitted):
         owner, signals, requests = _admitted(owner, context, event)
     elif isinstance(event, ReacquisitionReady):

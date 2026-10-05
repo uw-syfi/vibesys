@@ -68,6 +68,7 @@ from .types.kernel import (
 from .types.scheduling import (
     AdmissionControl,
     AdmitAttempt,
+    AdoptionFenceLifted,
     AttemptReady,
     AttemptReopenRequested,
     AttemptRequested,
@@ -133,6 +134,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | SlotReleased()
             | ClockAdvanced()
             | AdmissionControl()
+            | AdoptionFenceLifted()
             | AdmitAttempt()
             | CloseAdmission()
             | RunDrained()
