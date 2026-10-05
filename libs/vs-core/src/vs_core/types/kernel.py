@@ -281,6 +281,7 @@ class SchedulingContext(AreaContext):
     attempts: AttemptsState
     intents: IntentsState
     sessions: SessionsState
+    settlement: SettlementState
 
 
 class AttemptsContext(AreaContext):

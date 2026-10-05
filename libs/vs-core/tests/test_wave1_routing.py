@@ -155,6 +155,7 @@ EXPECTED_TARGET = {
                 "queue_entry_retired",
                 "clock_advanced",
                 "admission_control",
+                "adoption_fence_lifted",
             ),
         ),
     )

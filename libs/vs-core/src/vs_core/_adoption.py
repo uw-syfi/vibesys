@@ -39,6 +39,7 @@ from .types.common import (
     WorkspaceMode,
 )
 from .types.kernel import AreaChange
+from .types.scheduling import AdoptionFenceLifted
 from .types.settlement import (
     Adoption,
     AdoptionObserved,
@@ -378,7 +379,20 @@ def advance(
 ) -> AreaChange[SettlementState]:
     """Consume only the two adoption events, preserving sibling-owned state fields."""
     if isinstance(event, WinnerProposed):
-        return _propose(state, context, event)
-    if isinstance(event, AdoptionObserved):
-        return _observe(state, context, event)
-    raise ContractValidationError("event.kind", "event does not belong to adoption")
+        change = _propose(state, context, event)
+    elif isinstance(event, AdoptionObserved):
+        change = _observe(state, context, event)
+    else:
+        raise ContractValidationError("event.kind", "event does not belong to adoption")
+    return _announce_fence_lift(state, context, change)
+
+
+def _announce_fence_lift(
+    before: SettlementState, context: SettlementContext, change: AreaChange[SettlementState]
+) -> AreaChange[SettlementState]:
+    """Tell Scheduling once when the root fence lifts, so queued admissions retry."""
+    if fences_root_mutation(before, context.intents) and not fences_root_mutation(
+        change.state, context.intents
+    ):
+        return change.model_copy(update={"signals": (*change.signals, AdoptionFenceLifted())})
+    return change

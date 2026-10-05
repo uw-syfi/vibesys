@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._adoption import fences_root_mutation
 from ._evaluation_history import produce_history
 from ._proofs import (
     Mismatch,
@@ -458,8 +459,11 @@ def _register(state: AttemptsState, event: AttemptRegistered | AttemptAdmitted) 
     )
 
 
-def _root_conflict(state: AttemptsState, attempt: AttemptView) -> bool:
-    return attempt.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT and any(
+def _root_conflict(state: AttemptsState, context: AttemptsContext, attempt: AttemptView) -> bool:
+    """Defensive recheck of the gate in Scheduling: the root has another owner or an adoption."""
+    if attempt.workspace.mode != WorkspaceMode.EXCLUSIVE_ROOT:
+        return False
+    return fences_root_mutation(context.settlement, context.intents) or any(
         _ref(other) != _ref(attempt)
         and other.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT
         and (
@@ -468,6 +472,24 @@ def _root_conflict(state: AttemptsState, attempt: AttemptView) -> bool:
             or other.pending_intents
         )
         for other in state.attempts
+    )
+
+
+def _registered(state: AttemptsState, attempt: AttemptView) -> AttemptsState:
+    if _find(state, _ref(attempt)) is not None:
+        return state
+    return state.model_copy(update={"attempts": (*state.attempts, attempt)})
+
+
+def _decline_root(
+    attempt: AttemptView, context: AttemptsContext, admission_id: DecisionId
+) -> RetireRequested:
+    return RetireRequested(
+        attempt=_ref(attempt),
+        disposition="cancel",
+        authority=RequestId(root=f"root-conflict:{admission_id.root}"),
+        admission_id=admission_id,
+        requested_at=context.run.now_at,
     )
 
 
@@ -502,8 +524,13 @@ def _admit(
                 ),
             ),
         )
-    if _root_conflict(state, attempt):
-        raise ContractValidationError("workspace", "exclusive root is already owned")
+    if _root_conflict(state, context, attempt):
+        # Scheduling's gate should have prevented this. Decline by cancelling the
+        # admission, which frees its slot; never fail the step on an internal signal.
+        return AreaChange(
+            state=_registered(state, attempt),
+            signals=(_decline_root(attempt, context, event.admission_id),),
+        )
     attempt = attempt.model_copy(
         update={"phase": AttemptPhase.ACQUIRING, "admission_id": event.admission_id}
     )
@@ -1447,13 +1474,14 @@ def _reacquire(
     if not isinstance(proof, Proven):
         return AreaChange(state=state)
     sessions = proof.value
-    if _root_conflict(state, attempt):
-        raise ContractValidationError("workspace", "exclusive root is already owned")
-    if (
+    conflict = _root_conflict(state, context, attempt)
+    if conflict or (
         attempt.workspace.mode == WorkspaceMode.READ_ONLY_REVISION
         and event.base != attempt.workspace.base
     ):
-        return AreaChange(state=state)
+        # A root conflict declines by cancelling the admission; never fail the step.
+        decline = (_decline_root(attempt, context, event.admission_id),) if conflict else ()
+        return AreaChange(state=state, signals=decline)
     identity = RequestId(root=_identity(attempt, f"restore:{event.request_id.root}"))
     if identity in attempt.pending_intents or _intent(context, identity) is not None:
         return AreaChange(state=state)

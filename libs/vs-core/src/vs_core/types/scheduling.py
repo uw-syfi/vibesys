@@ -191,6 +191,17 @@ class RunDrained(Value):
     kind: Literal["run_drained"] = "run_drained"
 
 
+class AdoptionFenceLifted(Value):
+    """An adoption ended (verified or failed), so root-exclusive admission may proceed.
+
+    Settlement emits it once, when the adoption fence lifts. It carries no facts:
+    Scheduling re-evaluates its queue against the current state, so a duplicate is
+    harmless.
+    """
+
+    kind: Literal["adoption_fence_lifted"] = "adoption_fence_lifted"
+
+
 # Admission/closure are internal signals, never shell I/O.
 type SchedulingEvent = Annotated[
     AttemptRequested
@@ -200,6 +211,7 @@ type SchedulingEvent = Annotated[
     | SlotChargeEnded
     | QueueEntryRetired
     | ClockAdvanced
-    | AdmissionControl,
+    | AdmissionControl
+    | AdoptionFenceLifted,
     Field(discriminator="kind"),
 ]
