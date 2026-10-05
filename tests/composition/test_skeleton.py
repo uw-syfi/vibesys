@@ -255,17 +255,6 @@ async def _started(world: World, crash: CrashPoint | None) -> tuple[Process, flo
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    raises=AssertionError,
-    strict=True,
-    reason=(
-        "a revision the workspace executor mints (digest 'git-commit:<sha>', "
-        "_workspace_requests.py revision_ref) is rejected by the evaluation executor, which "
-        "accepts only a sha256 content address (_evaluation_jobs.py _digest), so no workspace "
-        "revision, baseline included, can be measured; gap A, owner EVAL-PATH "
-        "(fix/eval-revision-path)"
-    ),
-)
 async def test_a_workspace_revision_can_be_measured(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path) as world:
         executors = world.bindings().executors
