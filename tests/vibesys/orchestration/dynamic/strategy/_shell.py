@@ -66,7 +66,6 @@ if TYPE_CHECKING:
         CoreState,
         Decision,
         OperationRegistry,
-        OwnerEvent,
         Request,
         ResourceId,
         RunView,
@@ -76,7 +75,7 @@ if TYPE_CHECKING:
         StrategyState,
     )
     from vs_core.testing.drive import Answer
-    from vs_runtime.api.core import ExecutionContext
+    from vs_runtime.api.core import ExecutionContext, OwnerEvent
 
 type Script = Callable[[Request, CoreState], Answer]
 """What the executors answer for one request, given core's state when it runs."""
