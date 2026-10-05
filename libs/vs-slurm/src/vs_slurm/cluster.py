@@ -42,6 +42,7 @@ from .runner import (
     SlurmJobRequest,
     SlurmJobRunner,
     SlurmJobStatus,
+    SlurmPhase,
     SlurmSubmissionRejectedError,
     _validate_batch_request,
     _validate_request,
@@ -638,10 +639,9 @@ class SlurmCluster:
                     record.operation_id, record.model_dump_json()
                 )
             reading = self._runner.inspect_job(job.job_id)
-            if record.cancelled and reading.status in {
-                SlurmJobStatus.PENDING,
-                SlurmJobStatus.RUNNING,
-            }:
+            # A job already tearing down (COMPLETING) cannot be cancelled again;
+            # a scancel per inspection would only add round trips.
+            if record.cancelled and reading.phase in {SlurmPhase.PENDING, SlurmPhase.RUNNING}:
                 self._runner.cancel(job)
         except (
             SlurmError,
