@@ -1,7 +1,7 @@
 """In-process semantic evaluation executor for runs without a Slurm cluster.
 
 It is the sibling of ``SemanticSlurmEvaluationExecutor``: both implement the
-``EvaluationExecutor`` protocol plus ``close``, so the evaluation service and
+``PollingEvaluationExecutor`` protocol plus ``close``, so the evaluation service and
 core bindings accept either. This one runs stages as tasks of the current
 process and reports state through ``inspect``/``wait_for_change``.
 """
@@ -26,6 +26,8 @@ from vs_evaluation.api import (
     EvidenceOutcome,
     EvidenceResultIdentity,
     ExecutorObservation,
+    ExecutorPoll,
+    PollPhase,
     ResourceRequirements,
     ReuseStatus,
     SemanticEvaluationStage,
@@ -39,6 +41,16 @@ from vs_runtime.contracts import BenchmarkFailureKind
 
 if TYPE_CHECKING:
     from vs_runtime.contracts import CandidateWorkspace, Evaluation, Workspace, Workspaces
+
+
+_ENDED = frozenset(
+    {
+        EvaluationState.SUCCEEDED,
+        EvaluationState.FAILED,
+        EvaluationState.CANCELED,
+        EvaluationState.SUPERSEDED,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +99,16 @@ class PollingEvaluationExecutor:
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
         """Read process-local evidence without starting recovery tasks."""
         return self._observations.get(handle_id)
+
+    async def poll(self, handle_id: str) -> ExecutorPoll:
+        """Inspect once from process-local state; never submits, cancels or creates a workspace."""
+        observed = self._observations.get(handle_id)
+        if observed is None:
+            return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
+        if observed.state in _ENDED:
+            return ExecutorPoll(phase=PollPhase.ENDED, terminal=observed)
+        phase = PollPhase.QUEUED if observed.state is EvaluationState.QUEUED else PollPhase.RUNNING
+        return ExecutorPoll(phase=phase, current_stage=observed.current_stage)
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         return self._observations.get(handle_id)
