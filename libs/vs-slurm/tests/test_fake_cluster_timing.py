@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Unpack
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -22,10 +22,14 @@ from vs_slurm.api import (
     SlurmTimingProfile,
 )
 
+if TYPE_CHECKING:
+    # test-isolation: necessary for type-safe script options
+    from vs_slurm.fake_cluster import _ScriptOptions
+
 _PROFILE = SlurmTimingProfile()
 
 
-def _submit(cluster: FakeCluster, workspace: Path, **options: Any) -> None:  # noqa: ANN401  # lint-waiver: LW-994698 [ANN401]; pass-through options to FakeCluster.script
+def _submit(cluster: FakeCluster, workspace: Path, **options: Unpack[_ScriptOptions]) -> None:
     cluster.script("job", **options)
     assert isinstance(
         cluster.submit(SlurmJobRequest(workspace=workspace, command=("true",)), operation_id="job"),

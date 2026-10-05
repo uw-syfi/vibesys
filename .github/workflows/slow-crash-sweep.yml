@@ -6,9 +6,13 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   slow-crash-sweep:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -26,4 +30,4 @@ jobs:
         run: uv sync --dev
 
       - name: Run slow crash sweep tests
-        run: uv run pytest -m slow -n 8
+        run: uv run pytest -m slow -n auto --no-cov
