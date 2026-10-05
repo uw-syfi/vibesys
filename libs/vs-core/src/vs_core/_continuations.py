@@ -51,7 +51,7 @@ from .types.evaluation import (
 from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import InspectRequest, IntentPhase
 from .types.job_observations import JobTimeout, TimedOut
-from .types.kernel import AreaChange
+from .types.kernel import AreaChange, EvaluationContext
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
 from .types.sessions import Access, DispatchTurn, InspectTurn, ResumeSessionTurn, SessionPhase
 from .types.strategy import Accepted, Operation
@@ -67,8 +67,8 @@ if TYPE_CHECKING:
     )
     from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryCursor
     from .types.intents import ChildLease, Intent, Request
-    from .types.kernel import EvaluationContext, Signal, StrategyEvent
-    from .types.sessions import Invocation
+    from .types.kernel import SessionsContext, Signal, StrategyEvent
+    from .types.sessions import Invocation, SessionsState
 
 
 class SuspensionRefusal(StrEnum):
@@ -165,6 +165,16 @@ def _open(context: EvaluationContext, row: Continuation) -> bool:
     return row.phase == ContinuationPhase.AUTHORIZED and not any(
         held.invocation == row.next_invocation for held in context.sessions.invocations
     )
+
+
+def wait_refused_at_turn_end(
+    sessions: SessionsState, context: SessionsContext, invocation: Invocation, wait: Continuation
+) -> bool:
+    """Whether the suspension gate refuses ``wait`` against the state a turn's end produces."""
+    evaluation = EvaluationContext(
+        run=context.run, attempts=context.attempts, sessions=sessions, intents=context.intents
+    )
+    return wait_refusal_in(evaluation, context.evaluation, invocation, wait) is not None
 
 
 def suspension_refusal_in(
