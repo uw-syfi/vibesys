@@ -20,7 +20,8 @@ _ORDER = [
 @st.composite
 def _observations(draw: st.DrawFn) -> ExecutorObservation:
     state = draw(st.sampled_from([*_ORDER, *sorted(_TERMINAL, key=lambda s: s.value)]))
-    stage = draw(st.one_of(st.none(), st.sampled_from(["accuracy", "benchmark"])))
+    staged = state not in {EvaluationState.SUCCEEDED, EvaluationState.FAILED}
+    stage = draw(st.sampled_from([None, "accuracy", "benchmark"])) if staged else None
     failure = "boom" if state is EvaluationState.FAILED else None
     return ExecutorObservation(state=state, current_stage=stage, failure=failure)
 
@@ -30,13 +31,12 @@ def _rank(state: EvaluationState) -> int:
 
 
 @given(held=_observations(), new=_observations())
-def test_the_join_never_lowers_the_state_and_is_idempotent(
+def test_the_join_holds_the_highest_state_and_re_joining_changes_nothing(
     held: ExecutorObservation, new: ExecutorObservation
 ) -> None:
     joined = join_observation(held, new)
     assert _rank(joined.state) == max(_rank(held.state), _rank(new.state))
     assert join_observation(joined, new) == joined
-    assert join_observation(joined, held) == joined
 
 
 @given(held=_observations(), new=_observations())

@@ -1620,7 +1620,8 @@ async def test_read_only_pending_scheduler_does_not_regress_active_evaluation(
     inspected = await coordinator.inspect_snapshot(handle.id)
     assert inspected is not None
     assert inspected.state is EvaluationState.RUNNING
-    assert inspected.current_stage is None
+    # An unstaged reading at the same state is not news: the stage already reported stays.
+    assert inspected.current_stage == "accuracy"
     assert runner.submissions == 1
     assert runner.cancellations == 0
     await executor.close()
