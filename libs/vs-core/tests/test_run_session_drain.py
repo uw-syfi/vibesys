@@ -118,7 +118,13 @@ class Executor:
         self.feed(core.ClockAdvanced(now_at=self.now))
 
     def observation(
-        self, request: core.Request, status: core.ObservationStatus, **facts: object
+        self,
+        request: core.Request,
+        status: core.ObservationStatus,
+        *,
+        resource_id: core.ResourceId | None = None,
+        released: bool = False,
+        children_complete: bool = False,
     ) -> core.Observation:
         assert request.request_id is not None
         key = request.request_id.root
@@ -133,7 +139,9 @@ class Executor:
             status=status,
             accepted=True,
             terminal=True,
-            **facts,
+            resource_id=resource_id,
+            released=released,
+            children_complete=children_complete,
         )
 
     def answer(self, request: core.Request, status: core.ObservationStatus, *, twice: bool) -> None:
