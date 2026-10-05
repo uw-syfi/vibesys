@@ -889,6 +889,15 @@ def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
     assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == 3
     evaluation = envelope["core"]["evaluation"]
     assert [call["rejection"] for call in evaluation["agent_calls"]] == [None]
+    # The agent's own evaluations and the official one both sit in the ledger for the winner,
+    # yet only the official accuracy record is accuracy proof: the agent's are local-validation.
+    held = [item for item in evaluation["evidence"] if item["candidate"] == selection["revision"]]
+    assert {(item["purpose"], item["kind"]) for item in held} == {
+        ("local-validation", "local-validation"),
+        ("official", "correctness"),
+        ("official", "benchmark"),
+    }
+    assert [item["purpose"] for item in held if item["kind"] == "correctness"] == ["official"]
     # The turn waited once: core recorded exactly one continuation for the whole run.
     assert len(evaluation["continuations"]) == 1
     assert active_jobs(loop_input.cluster) == ()
