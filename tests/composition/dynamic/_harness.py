@@ -484,7 +484,7 @@ def run_request(
             on_handle(handle)
         try:
             result = await handle.result()
-        # lint-waiver: LW-6A0001 [BLE001]; crash scenarios assert on the run's own
+        # lint-waiver: LW-601001 [BLE001]; crash scenarios assert on the run's own
         # > failure together with its events. pytest.raises at each call site would
         # > lose the events and run id the assertions need, and naming one type would
         # > couple the harness to how the host wraps a failure.
