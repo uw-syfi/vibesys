@@ -159,6 +159,8 @@ class Trace[S: StrategyState]:
     decisions: list[Decision] = field(default_factory=list)
     events: list[StrategyEvent] = field(default_factory=list)
     requests: list[Request] = field(default_factory=list)
+    # Requests as dispatched and executor observations as delivered, interleaved in order.
+    log: list[Request | RequestObserved] = field(default_factory=list)
     finished: bool = False
     steps: int = 0
 
@@ -253,6 +255,7 @@ class _Driver[S: StrategyState]:
     def observe(self, request: Request) -> list[CoreEvent]:
         key = request.request_id.root if request.request_id is not None else ""
         self.trace.requests.append(request)
+        self.trace.log.append(request)
         answer = self.script(request, self.trace.core)
         answers = list(answer) if isinstance(answer, tuple) else [answer]
         if self.faults.retry_first(request):
@@ -325,6 +328,8 @@ class _Driver[S: StrategyState]:
 
     def consume(self, event: CoreEvent, *, proposed: S | None = None) -> None:
         trace = self.trace
+        if isinstance(event, RequestObserved):
+            trace.log.append(event)
         transition = step(trace.core, event)
         trace.steps += 1
         trace.core = transition.state
