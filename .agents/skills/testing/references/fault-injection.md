@@ -47,6 +47,24 @@ across restart and assert unfinished requests are reconciled or replayed
 idempotently, with one logical completion. These tests verify composition;
 [contract suites](fakes-and-contracts.md) verify each implementation's promises.
 
+## Deterministic simulation
+
+Drive a whole composed run from one seeded schedule, as FoundationDB and
+TigerBeetle do, instead of one scripted fault per test.
+
+- One seed drives every boundary wrapper in the run: crashes, delays,
+  reordering of completions, and external-state lag (queue wait, teardown
+  lag), all on the injected clock.
+- Generate crash points from the run's own requests and durable writes, so a
+  new request kind is covered with no new test code.
+- After the last fault, heal: the run must reach a typed terminal state in
+  bounded virtual time, and its terminal summary must match the crash-free
+  run's. Also crash inside recovery and restart again.
+- Check "no orphan waits" after every step (see
+  [functional-core.md](../../software-design/references/functional-core.md)).
+- CI runs N seeds. A failing seed prints and replays exactly.
+- Build on `vs-faults` (`FaultPlan`); do not add a second mechanism.
+
 ## Agent behavior
 
 Generate replies from the output schema the turn declares, mixing:
