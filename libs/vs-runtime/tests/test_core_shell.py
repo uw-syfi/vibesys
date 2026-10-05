@@ -18,13 +18,22 @@ from tests.support.runtime_core_shell import (
 )
 
 from vs_core.api import (
+    Access,
     ClockAdvanced,
+    CoreState,
     EventCursor,
     HostFence,
     HostId,
     OperationRegistry,
     Request,
+    RoleId,
     RunEnvelope,
+    Scope,
+    SessionId,
+    SessionPhase,
+    SessionSpec,
+    SessionsState,
+    SessionView,
     StrategyState,
     initial_state,
 )
@@ -33,6 +42,7 @@ from vs_runtime.api.core import (
     REQUEST_DISPATCH,
     CoreRuntime,
     CoreRuntimeBindings,
+    OrphanWaitError,
     RuntimeCommitError,
     RuntimeCommitUncertainError,
     RuntimeRecord,
@@ -269,3 +279,44 @@ def test_a_commit_validates_once_and_never_round_trips_the_envelope(times: list[
         assert registry.validations == index
         assert registry.encodes == 0
         assert registry.decodes == 0
+
+
+def _closing_session_with_nothing_to_end_it() -> CoreState:
+    state = initial_state()
+    session = SessionView(
+        spec=SessionSpec(
+            session_id=SessionId(root="orphan"),
+            role_id=RoleId(root="worker"),
+            policy="reuse",
+            lifetime="owner",
+            access=Access.WRITE_ARTIFACTS,
+        ),
+        scope=Scope(owner=state.run.run_id, generation=0),
+        generation=0,
+        phase=SessionPhase.CLOSING,
+    )
+    return state.model_copy(update={"sessions": SessionsState(sessions=(session,))})
+
+
+def test_a_host_that_starts_over_a_run_with_an_orphan_wait_refuses_it() -> None:
+    """A stored run that waits on something nothing will end halts at start, not later as an idle stall."""
+    store = FakeStateStore()
+    fence = store.acquire("writer", now=0, duration=1)
+    assert fence is not None
+    strategy = CounterStrategy()
+    envelope = RunEnvelope[CounterState](
+        schema_version=3,
+        fence=HostFence(host_id=HostId(root="writer"), epoch=1),
+        strategy_id=strategy.declaration.strategy_id,
+        state_schema=strategy.declaration.state_schema,
+        core=_closing_session_with_nothing_to_end_it(),
+        strategy=strategy.state,
+        event_cursor=EventCursor(sequence=0),
+    )
+    payload = RuntimeRecord[CounterState].fresh(envelope).model_dump_json().encode()
+    store.commit(None, StoredEnvelope(revision=0, schema_version=1, payload=payload), fence, now=0)
+    shell = CoreRuntime(store, CounterStrategy(), initial_state())
+    with pytest.raises(OrphanWaitError):
+        shell.start("reader", now_at=1, lease_duration=1)
+    with pytest.raises(RuntimeCommitError):
+        shell.decide(now_at=2)

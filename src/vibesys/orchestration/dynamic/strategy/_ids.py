@@ -18,6 +18,19 @@ from vs_core.api import (
 )
 
 _OPERATION_PREFIX = "operation:"
+_PLAIN = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
+
+
+def component(name: str) -> str:
+    """An agent-chosen name as one identity component.
+
+    Core identities hold no whitespace, and a hypothesis ID is free text (spaces,
+    slashes, non-ASCII). Percent-encoding is injective and keeps the name readable.
+    """
+    return "".join(
+        char if char in _PLAIN else "".join(f"%{byte:02X}" for byte in char.encode())
+        for char in name
+    )
 
 
 def decision_id(kind: str, subject: str, ordinal: int = 0) -> DecisionId:
@@ -27,12 +40,12 @@ def decision_id(kind: str, subject: str, ordinal: int = 0) -> DecisionId:
 
 def attempt_id(hypothesis_id: str, sequence: int) -> AttemptId:
     """One attempt per scheduled workstream; a continuation is a new sequence."""
-    return AttemptId(root=f"attempt:{hypothesis_id}:{sequence}")
+    return AttemptId(root=f"attempt:{component(hypothesis_id)}:{sequence}")
 
 
 def item_id(work_id: str, sequence: int) -> ItemId:
     """The scientific item an attempt works on."""
-    return ItemId(root=f"item:{work_id}:{sequence}")
+    return ItemId(root=f"item:{component(work_id)}:{sequence}")
 
 
 def attempt_ref(attempt: AttemptId, generation: int) -> AttemptRef:
