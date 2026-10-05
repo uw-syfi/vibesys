@@ -7,8 +7,6 @@ core deduplicates them by decision ID and payload digest.
 
 from __future__ import annotations
 
-from urllib.parse import quote
-
 from vs_core.api import (
     AttemptId,
     AttemptRef,
@@ -20,6 +18,7 @@ from vs_core.api import (
 )
 
 _OPERATION_PREFIX = "operation:"
+_PLAIN = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
 
 
 def component(name: str) -> str:
@@ -28,7 +27,10 @@ def component(name: str) -> str:
     Core identities hold no whitespace, and a hypothesis ID is free text (spaces,
     slashes, non-ASCII). Percent-encoding is injective and keeps the name readable.
     """
-    return quote(name, safe="")
+    return "".join(
+        char if char in _PLAIN else "".join(f"%{byte:02X}" for byte in char.encode())
+        for char in name
+    )
 
 
 def decision_id(kind: str, subject: str, ordinal: int = 0) -> DecisionId:
