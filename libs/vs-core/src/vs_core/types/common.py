@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, model_validator
 
 
 class Value(BaseModel):
@@ -20,6 +20,15 @@ type Generation = Annotated[int, Field(ge=0)]
 type RevisionNumber = Annotated[int, Field(ge=0)]
 type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend", "profile-capture"]
 """Host-offered lifecycle abilities. "profile-capture" admits profile measurements."""
+type LifecycleCapabilities = Annotated[
+    frozenset[LifecycleCapability],
+    PlainSerializer(sorted, return_type=list[LifecycleCapability], when_used="json"),
+]
+"""A set of abilities, written in sorted order so equal sets give equal JSON.
+
+A frozenset iterates in hash order, which varies with insertion history and the string
+hash seed, so a decoded copy of a set could otherwise be written differently.
+"""
 
 
 class Identity(Value):
@@ -472,7 +481,7 @@ class OperationDescriptorError(ValueError):
 class Capabilities(Value):
     """Capabilities lifecycle contract."""
 
-    lifecycle: frozenset[LifecycleCapability] = frozenset()
+    lifecycle: LifecycleCapabilities = frozenset()
     operations: tuple[OperationDescriptor, ...] = ()
 
 
