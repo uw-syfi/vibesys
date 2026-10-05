@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from vs_agent.api import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, serve_stdio
 from vs_evaluation.agent_models import EvidenceKindsArgs, SubmitCall, WaitArgs, WaitCall
@@ -33,7 +34,7 @@ def core_evaluation_mcp_descriptor(token: str, socket_path: str) -> ToolServerDe
     )
 
 
-def build_core_evaluation_tools(*, socket_path: Path, token: str) -> tuple[ToolSpec[object], ...]:
+def build_core_evaluation_tools(*, socket_path: Path, token: str) -> tuple[ToolSpec[Any], ...]:
     """The two core-path tools; every other option is absent from the schema."""
     offer = Offer(SocketClient(socket_path), token)
     return (

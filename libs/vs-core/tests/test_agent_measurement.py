@@ -40,7 +40,7 @@ def test_call_allocates_one_submission_without_a_decision() -> None:
         core.AgentCall(call_id="c1", scope=request.scope, request_id=request.request_id),
     )
     budget = result.state.evaluation.submission_budgets[0]
-    assert [r.request_id for r in budget.receipts] == [request.request_id]
+    assert [getattr(r, "request_id", None) for r in budget.receipts] == [request.request_id]
 
 
 def test_replayed_call_changes_nothing() -> None:

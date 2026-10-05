@@ -49,6 +49,7 @@ from .types.common import (
 from .types.evaluation import (
     AgentCall,
     AgentMeasurementRequested,
+    AgentRejection,
     CancelOwnedJob,
     CollectEvidence,
     ContinuationJobsChanged,
@@ -415,15 +416,25 @@ def _agent_requested(
     if any(call.call_id == event.call_id for call in state.agent_calls):
         return AreaChange(state=state)
     identity = _identity(event.plan)
-    if not isinstance(_current(context, event.scope), Proven) or not isinstance(identity, Proven):
+    rejection: AgentRejection | None = None
+    if context.run.status != RunStatus.RUNNING:
+        rejection = AgentRejection.RUN_STOPPING
+    elif not isinstance(_current(context, event.scope), Proven):
+        rejection = AgentRejection.NOT_ADMITTED
+    elif not isinstance(identity, Proven):
+        rejection = AgentRejection.INVALID_PLAN
+    if rejection is not None or not isinstance(identity, Proven):
         change = _rejected(state, event.scope)
     else:
         change = _admit(state, context, _Origin(event.scope, None), event.plan, identity.value)
     request = next((r for r in change.requests if isinstance(r, SubmitMeasurement)), None)
+    if request is None and rejection is None:
+        rejection = AgentRejection.NOT_ALLOWED
     call = AgentCall(
         call_id=event.call_id,
         scope=event.scope,
         request_id=request.request_id if request is not None else None,
+        rejection=rejection,
     )
     return change.model_copy(
         update={

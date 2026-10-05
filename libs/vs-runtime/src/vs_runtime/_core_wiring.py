@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from vs_core.api import LifecycleCapability
     from vs_evaluation.api import PollingEvaluationExecutor
     from vs_project.api import StateNamespace
-    from vs_runtime._session_requests import SessionResolver
+    from vs_runtime._session_requests import SessionResolver, TurnYields
     from vs_runtime._workspaces import RuntimeWorkspaces
 
 
@@ -59,6 +59,8 @@ class SessionServices:
 
     agent_sessions: ClientAgentSessions
     resolver: SessionResolver
+    yields: TurnYields | None = None
+    """Turns that asked to wait; None when no tool lets an agent yield."""
 
 
 def empty_catalog() -> OperationCatalog:
@@ -135,7 +137,7 @@ def core_bindings(
     """
     store = ReceiptStore(receipts)
     catalog = operations or empty_catalog()
-    session = session_executors(sessions.agent_sessions, sessions.resolver, store)
+    session = session_executors(sessions.agent_sessions, sessions.resolver, store, sessions.yields)
     proof = ReleasedRunInvocations(
         JournalRunInvocations(sessions.agent_sessions, store), sessions.agent_sessions, store
     )

@@ -503,6 +503,19 @@ class AgentMeasurementRequested(Value):
     call_id: str = Field(min_length=1)
 
 
+class AgentRejection(StrEnum):
+    """Why core refused an agent's evaluation call; nothing was charged."""
+
+    RUN_STOPPING = "run_stopping"
+    """The run is no longer running, so it starts no new work."""
+    NOT_ADMITTED = "not_admitted"
+    """The scope is not a current admitted owner: a stale generation, or a closed attempt."""
+    INVALID_PLAN = "invalid_plan"
+    """The plan names no candidate revision, so no measurement identity exists."""
+    NOT_ALLOWED = "not_allowed"
+    """The identity's submission budget is spent, or the plan exceeds a run limit or deadline."""
+
+
 class AgentCall(Value):
     """Record of one admitted or rejected agent tool call, keyed by its call_id."""
 
@@ -510,6 +523,7 @@ class AgentCall(Value):
     scope: Scope
     request_id: RequestId | None = None
     """The submission it allocated, or None when core rejected the call."""
+    rejection: AgentRejection | None = None
 
 
 class RegisteredJobRequested(Value):
