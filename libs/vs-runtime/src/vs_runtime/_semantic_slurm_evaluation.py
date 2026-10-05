@@ -39,6 +39,7 @@ from vs_evaluation.api import (
     TrustedEvidence,
     evidence_identity,
 )
+from vs_runtime._failure_classification import RecordState, classify, signal_of
 from vs_runtime._trusted_evaluation import (
     TrustedEvaluationPlan,
     build_trusted_benchmark_command,
@@ -66,8 +67,17 @@ if TYPE_CHECKING:
     from vs_slurm.api import Cluster, SlurmConfig
 
 _CLEANUP_FAILURE = "cleanup failed"
+# Kinds that end the job as failed so that it may be measured again.
+_UNSETTLED_KINDS = frozenset({BenchmarkFailureKind.INFRASTRUCTURE, BenchmarkFailureKind.AMBIGUOUS})
 
 type StageFailureText = Callable[[Sequence[tuple[str | None, EvidenceKind]], str | None], str]
+
+
+def _stage_failure_kind(evidence: TrustedEvidence) -> StageFailureKind:
+    """An ambiguous stage ran and was cut short; every other unsettled one lost its result."""
+    if evidence.failure_kind is BenchmarkFailureKind.AMBIGUOUS:
+        return StageFailureKind.EXECUTION
+    return StageFailureKind.COLLECTION
 
 
 class _DurableSemanticSubmission(BaseModel):
@@ -344,11 +354,18 @@ class SemanticSlurmEvaluationExecutor:
                 and metadata.collection_failure is None
             )
             evidence = self._evidence(
-                stage, raw, raw_step.failure, handle_id=handle_id, completed=completed
+                stage,
+                raw,
+                raw_step.failure,
+                handle_id=handle_id,
+                completed=completed,
+                service_not_ready=metadata is not None and metadata.service_not_ready,
             )
             # A job that exited cleanly can still hold a benchmark whose evaluator died
-            # before writing its result, so the evidence's own kind counts too.
-            completed &= evidence.failure_kind is not BenchmarkFailureKind.INFRASTRUCTURE
+            # before writing its result, so the evidence's own kind counts too. An
+            # ambiguous stage ends the job as failed as well, so that core may measure it
+            # once more, but its evidence stays: it is the last tail if it happens again.
+            completed &= evidence.failure_kind not in _UNSETTLED_KINDS
             infrastructure_failure |= not completed
             if evidence.outcome is EvidenceOutcome.FAILED:
                 failed_checks.append((evidence.semantic_summary, stage.kind))
@@ -360,7 +377,7 @@ class SemanticSlurmEvaluationExecutor:
                     duration_s=raw_step.duration_s,
                     stdout_tail=raw.stdout[-STAGE_OUTPUT_TAIL_CHARS:] or None,
                     stderr_tail=raw.stderr[-STAGE_OUTPUT_TAIL_CHARS:] or None,
-                    failure_kind=None if completed else StageFailureKind.COLLECTION,
+                    failure_kind=None if completed else _stage_failure_kind(evidence),
                     failure=(
                         None
                         if completed
@@ -412,16 +429,18 @@ class SemanticSlurmEvaluationExecutor:
         *,
         completed: bool,
         handle_id: str,
+        service_not_ready: bool,
     ) -> TrustedEvidence:
         passed = completed and raw.exit_code == 0
         metrics: tuple[EvidenceMetric, ...] = ()
         summary: str | None = None
         partial: PartialMeasurement | None = None
-        # A command that never reported an exit status (node loss, collection failure) is
-        # infrastructure whatever its output says. One that exited, even nonzero, is the
-        # workload's, except a benchmark whose evaluator wrote no result record.
+        # Whose fault a failure is follows from how the stage ended and what its evaluator
+        # wrote (`classify`). Only a benchmark has a result record to read; every other
+        # stage's exit status is its whole outcome.
         ran = raw.executed and raw.exit_code is not None and raw.collection_failure is None
-        kind = BenchmarkFailureKind.WORKLOAD if ran else BenchmarkFailureKind.INFRASTRUCTURE
+        signal = signal_of(raw.exit_code if ran else None, service_not_ready=service_not_ready)
+        record = RecordState.OUTCOME
         contract = self._trusted_plan.benchmark_contract
         if stage.kind is EvidenceKind.BENCHMARK and contract is not None:
             decoded = decode_trusted_benchmark_run(
@@ -431,13 +450,14 @@ class SemanticSlurmEvaluationExecutor:
             # The evaluator's own stop reason leads, as on the local executor;
             # the raw output tail would end with its command line instead.
             summary = decoded.reason
-            if decoded.violation is not None and passed:
-                summary = decoded.violation
-            elif decoded.violation is not None:
+            if decoded.violation is not None:
+                # A clean exit with no valid record still leaves the output the evaluator
+                # printed before it stopped, which is all that says what happened.
                 failure = f"{failure or raw.output}\n{decoded.violation}"
+                if passed:
+                    summary = failure
             passed = decoded.passed
-            if ran and decoded.failure_kind is not None:
-                kind = decoded.failure_kind
+            record = decoded.record
             metrics = tuple(
                 EvidenceMetric(
                     name=name,
@@ -482,7 +502,7 @@ class SemanticSlurmEvaluationExecutor:
             semantic_summary=summary,
             metrics=metrics,
             partial_measurement=partial,
-            failure_kind=None if passed else kind,
+            failure_kind=None if passed else classify(signal, record),
             accepted_round=0,
         )
 

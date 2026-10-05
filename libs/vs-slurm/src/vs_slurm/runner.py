@@ -46,6 +46,9 @@ _TERMINAL_STATES = frozenset(
     {"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "PREEMPTED"}
 )
 _ACCOUNTING_FIELD_COUNT = 2
+# The allocation's own exit status when its server never answered the readiness probe
+# (it exited or hung while starting), so no stage ran. The job script writes it.
+SERVICE_NOT_READY_EXIT_CODE = 70
 _MAX_PROCESS_EXIT_CODE = 255
 _BATCH_RESULT_ROOT = ".vibesys-slurm-results"
 _SERVICE_LOG_TAIL = "service-log-tail.txt"
@@ -1793,7 +1796,10 @@ def _service_script(
         lines.append(
             f"printf '%s\\n' $((SECONDS - service_started)) > {shlex.quote(timing_path.as_posix())}"
         )
-    lines.append('if [ "$ready" -ne 1 ]; then tail -40 .vs-slurm-service.log; job_status=70; else')
+    lines.append(
+        'if [ "$ready" -ne 1 ]; then tail -40 .vs-slurm-service.log;'
+        f" job_status={SERVICE_NOT_READY_EXIT_CODE}; else"
+    )
     return lines
 
 

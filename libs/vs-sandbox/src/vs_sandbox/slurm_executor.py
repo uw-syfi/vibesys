@@ -38,6 +38,7 @@ from vs_evaluation.api import (
 from vs_project.api import atomic_write_bytes
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
+    SERVICE_NOT_READY_EXIT_CODE,
     ClusterCollected,
     ClusterConflict,
     ClusterObservation,
@@ -196,6 +197,9 @@ class SlurmExecutionMetadata(BaseModel):
     collection_failure: str | None = None
     # Distinct from stage evidence: a contradiction can retain complete stages.
     aggregate_unknown: str | None = None
+    # The shared server exited or never answered its readiness probe, so no stage ran;
+    # its log tail is the stage output.
+    service_not_ready: bool = False
 
 
 class SlurmCommandResult(BaseModel):
@@ -797,6 +801,7 @@ class SlurmEvaluationExecutor:
             job_exit_code=batch.job_exit_code,
             collection_failure=batch.collection_failure,
             aggregate_unknown=collected.reason if isinstance(collected, ClusterUnknown) else None,
+            service_not_ready=batch.job_exit_code == SERVICE_NOT_READY_EXIT_CODE,
         )
         by_name = {item.name: item for item in batch.stages}
         results: list[EvaluationStepResult] = []

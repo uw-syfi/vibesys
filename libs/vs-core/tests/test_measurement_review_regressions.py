@@ -19,6 +19,7 @@ from .test_measurements import (
 JOB = core.ResourceId(root="job")
 S = core.ObservationStatus
 CONCLUSIVE = (S.SUCCEEDED, S.FAILED, S.CANCELLED, S.REJECTED)
+_RETRYABLE_CLAIMS = (core.MeasurementFailure.INFRASTRUCTURE, core.MeasurementFailure.AMBIGUOUS)
 
 
 def observe_job(
@@ -104,7 +105,7 @@ def test_failure_claim_cannot_grant_retry_after_accepted_execution(
     )
     conclusive = terminal and status in CONCLUSIVE
     assert bool(retried.requests) == (
-        conclusive and status != S.SUCCEEDED and claim == core.MeasurementFailure.INFRASTRUCTURE
+        conclusive and status != S.SUCCEEDED and claim in _RETRYABLE_CLAIMS
     )
 
 
@@ -422,18 +423,18 @@ def _failed_job(
 
 
 @given(claim=st.sampled_from([None, *core.MeasurementFailure]))
-def test_a_job_observation_without_facts_charges_a_retry_only_for_an_infrastructure_claim(
+def test_a_job_observation_without_facts_charges_a_retry_only_for_a_retryable_claim(
     claim: core.MeasurementFailure | None,
 ) -> None:
     state = _failed_job(claim, None)
     retried = requested(
         state, identity="again", measurement=plan(submitted_at=5.0, deadline_at=105.0)
     )
-    assert bool(retried.requests) == (claim == core.MeasurementFailure.INFRASTRUCTURE)
+    assert bool(retried.requests) == (claim in _RETRYABLE_CLAIMS)
 
 
 @given(claim=st.sampled_from([None, *core.MeasurementFailure]))
-def test_an_infrastructure_claim_never_overrides_scientific_facts(
+def test_a_retryable_claim_never_overrides_scientific_facts(
     claim: core.MeasurementFailure | None,
 ) -> None:
     facts = core.EvaluationTerminalFacts(
@@ -452,9 +453,9 @@ def test_an_infrastructure_claim_never_overrides_scientific_facts(
 
 
 @given(text=st.text(max_size=core.MEASUREMENT_DIAGNOSTIC_LIMIT * 2))
-def test_the_result_of_a_failed_job_carries_its_cut_diagnostic(text: str) -> None:
+def test_the_result_of_a_failed_job_carries_the_tail_of_its_diagnostic(text: str) -> None:
     state, request = submitted()
     fields = {"terminal": True, "released": True, "children_complete": True, "status": S.FAILED}
     failed = observation(request, 2, diagnostic=text, **fields)
     (event,) = results(observe_job(state, failed))
-    assert event.diagnostic == text[: core.MEASUREMENT_DIAGNOSTIC_LIMIT]
+    assert event.diagnostic == text[-core.MEASUREMENT_DIAGNOSTIC_LIMIT :]

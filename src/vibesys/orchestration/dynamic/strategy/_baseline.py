@@ -25,7 +25,7 @@ from vibesys.orchestration.dynamic.strategy._state import (
     BaselineState,
     DynamicStrategyState,
 )
-from vs_core.api import EvidenceKind, Measure, MeasurementResult, RunView
+from vs_core.api import EvidenceKind, Measure, MeasurementResult, RunView, may_resubmit
 
 
 def stages(config: DynamicConfig) -> tuple[str, ...]:
@@ -99,8 +99,12 @@ def on_measurement(
     if baseline.stage is not BaselineStage.AWAITING or event.scope != scope:
         return state
     evidence = trusted_keys(event, scope=scope, candidate=view.facts.baseline, purpose="baseline")
-    if evidence:
-        update: dict[str, object] = {"stage": BaselineStage.INTERPRET, "evidence": evidence}
+    if may_resubmit(
+        event.failure, submissions=baseline.attempts, limit=config.max_input_measurement_attempts
+    ):
+        update: dict[str, object] = {"stage": BaselineStage.NEEDED}
+    elif evidence:
+        update = {"stage": BaselineStage.INTERPRET, "evidence": evidence}
     elif baseline.attempts >= config.max_input_measurement_attempts:
         update = {
             "stage": BaselineStage.UNMEASURABLE,

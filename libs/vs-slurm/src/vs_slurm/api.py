@@ -43,6 +43,7 @@ from .identity import runtime_content_identity
 from .phase_register import MergedPhase, PhaseAnomaly, PhaseRegister
 from .recorded_traces import CANCEL_REACTIONS, LIFETIMES
 from .runner import (
+    SERVICE_NOT_READY_EXIT_CODE,
     SchedulerReading,
     SlurmArtifactTarget,
     SlurmBatchHandle,
@@ -80,6 +81,7 @@ __all__ = [
     "LIFETIMES",
     "PORT_PLACEHOLDER",
     "REQUESTS_FILE",
+    "SERVICE_NOT_READY_EXIT_CODE",
     "Cluster",
     "ClusterCancelOutcome",
     "ClusterCancelRequested",

@@ -267,7 +267,7 @@ def test_submission_retry_requires_conclusive_infrastructure_failure(
     allowed = (
         terminal
         and status not in (core.ObservationStatus.PENDING, core.ObservationStatus.UNKNOWN)
-        and failure == core.MeasurementFailure.INFRASTRUCTURE
+        and failure in (core.MeasurementFailure.INFRASTRUCTURE, core.MeasurementFailure.AMBIGUOUS)
         and not accepted
     )
     assert bool(retried.requests) == allowed

@@ -40,7 +40,7 @@ from vibesys.orchestration.dynamic.strategy._parents import (
     ingest,
 )
 from vibesys.orchestration.dynamic.strategy._prompts import ReplyCorrectionPrompt, ResumePrompt
-from vibesys.orchestration.dynamic.strategy._rows import reading_of
+from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading, reading_of
 from vibesys.orchestration.dynamic.strategy._settlement import STOPPED
 from vibesys.orchestration.dynamic.strategy._state import (
     AttemptRecord,
@@ -62,7 +62,6 @@ from vs_core.api import (
     EvidenceKind,
     IntentBlocked,
     InvocationRef,
-    MeasurementFailure,
     MeasurementResult,
     ObservationStatus,
     OperationResult,
@@ -73,6 +72,7 @@ from vs_core.api import (
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
+    may_resubmit,
 )
 
 _IMPLEMENTER_REPLY = TypeAdapter(ImplementerReply)
@@ -267,8 +267,10 @@ def on_measurement(
 ) -> DynamicStrategyState:
     """Record a candidate's trusted evidence keys for interpretation.
 
-    A measurement that infrastructure interrupted says nothing about the candidate, so
-    it is submitted again, within `max_input_measurement_attempts`, instead of failing it.
+    A measurement that the machinery interrupted says nothing about the candidate, and
+    one that may be either's fault might be a fluke, so both are submitted again while
+    `may_resubmit` allows it, within `max_input_measurement_attempts`. Anything else is
+    final: its evidence, failed or not, goes to interpretation, so the agent reads why.
 
     The result must come from the awaiting attempt's own scope and generation, and
     only evidence of the measured revision and purpose that core trusts is kept.
@@ -287,6 +289,14 @@ def on_measurement(
     if index is None:
         return state
     current = state.attempts[index]
+    if may_resubmit(
+        event.failure,
+        submissions=current.measurements,
+        limit=config.max_input_measurement_attempts,
+    ):
+        return _put(
+            state, index, current.model_copy(update={"step": Step.NEEDED, "awaiting": None})
+        )
     evidence = trusted_keys(
         event,
         scope=event.scope,
@@ -294,13 +304,6 @@ def on_measurement(
         purpose="profile" if current.plan.kind is WorkKind.PROFILE else "official",
     )
     if not evidence:
-        if (
-            event.failure is MeasurementFailure.INFRASTRUCTURE
-            and current.measurements < config.max_input_measurement_attempts
-        ):
-            return _put(
-                state, index, current.model_copy(update={"step": Step.NEEDED, "awaiting": None})
-            )
         reason = f"measurement produced no trusted evidence ({event.status.value})"
         return fail(state, index, f"{reason}: {event.diagnostic}" if event.diagnostic else reason)
     record = current.model_copy(
@@ -720,6 +723,20 @@ def on_exhausted(state: DynamicStrategyState, event: AttemptExhausted) -> Dynami
     return fail(state, index, f"attempt budget exhausted ({event.reason})")
 
 
+def _failure_tail(
+    record: AttemptRecord, benchmark: AcceptedReading | None, accuracy: AcceptedReading | None
+) -> str:
+    """What the round's failed trusted check printed, else why the measurement failed.
+
+    A benchmark that crashed the server leaves its output in the reading's feedback; that
+    text, not the agent's summary, is what tells the next agent why the candidate failed.
+    """
+    for reading in (benchmark, accuracy):
+        if reading is not None and not reading.passed and reading.feedback:
+            return reading.feedback
+    return record.failure or ""
+
+
 def _round(record: AttemptRecord, settled: AttemptSettled, config: DynamicConfig) -> RoundRecord:
     accuracy = reading_of(record.readings, EvidenceKind.CORRECTNESS)
     benchmark = reading_of(record.readings, EvidenceKind.BENCHMARK)
@@ -742,6 +759,7 @@ def _round(record: AttemptRecord, settled: AttemptSettled, config: DynamicConfig
         partial=None if benchmark is None else benchmark.partial,
         eligible=settled.settlement.eligible,
         failure=record.failure,
+        failure_tail=_failure_tail(record, benchmark, accuracy),
         settlement=settled.settlement.settlement_id,
         kept_active=kept,
     )

@@ -68,7 +68,8 @@ class ScenarioCluster(FakeCluster):
         super().__init__()
         self.states: tuple[SlurmJobStatus, ...] = (SlurmJobStatus.COMPLETED,)
         self.accuracy_exit = 0
-        self.benchmark_exit = 0
+        self.benchmark_exit: int | None = 0
+        self.job_exit_code = 0
         self.benchmark_output = BENCHMARK_OUTPUT
         self.submissions: list[str] = []
         self.accepted = threading.Event()
@@ -90,6 +91,17 @@ class ScenarioCluster(FakeCluster):
         return outcome
 
     def _result(self, request: SlurmBatchRequest) -> SlurmBatchResult:
+        if self.job_exit_code != 0:
+            # An allocation that failed before its stages ran, as when its server never
+            # became ready: no stage result, and the job's own output says why.
+            return SlurmBatchResult(
+                job_id="0",
+                job_exit_code=self.job_exit_code,
+                job_output=self.benchmark_output,
+                stages=(),
+                phase_timings_seconds={},
+                content_cache_hits=0,
+            )
         stages = []
         skipped = False
         for stage in request.stages:
@@ -109,7 +121,7 @@ class ScenarioCluster(FakeCluster):
             skipped = skipped or (exit_code != 0 and request.stop_on_failure)
         return SlurmBatchResult(
             job_id="0",
-            job_exit_code=0,
+            job_exit_code=self.job_exit_code,
             job_output="",
             stages=tuple(stages),
             phase_timings_seconds={},

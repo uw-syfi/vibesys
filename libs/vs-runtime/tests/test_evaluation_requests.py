@@ -43,6 +43,7 @@ from vs_core.api import (
     RevisionId,
     RevisionRef,
     SubmitMeasurement,
+    TargetObservation,
 )
 from vs_core.api.proofs import Proven, fresh_observation
 from vs_evaluation.api import ExecutorPoll, PollPhase
@@ -891,8 +892,8 @@ async def test_a_second_poll_that_reads_differently_returns_the_stored_evidence(
         assert evidence[0] == evidence[1] == evidence[2]
 
 
-# A benchmark that exits without its evaluator's result record, as after a node loss, an
-# out-of-memory kill or a GPU hang, frames nothing; one that reported a failure leaves a record.
+# A benchmark that exits without its evaluator's result record, as after an out-of-memory
+# kill or a GPU hang, frames nothing; one that reported a failure leaves a record.
 _MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
 _END_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
 _NO_RECORD = (
@@ -901,18 +902,13 @@ _NO_RECORD = (
     "",
 )
 _RECORD = (f'{_MARKER}\n{{"throughput": 12}}\n{_END_MARKER}',)
+# What the server printed before it died: the only account of why.
+_CRASH_TAIL = "HIP out of memory: tried to allocate 20.00 GiB"
 
 
-@settings(
-    max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
-)
-@given(output=st.sampled_from(_NO_RECORD), exit_code=st.sampled_from((0, 1, 137)))
-async def test_a_benchmark_without_a_result_record_is_infrastructure_whatever_its_exit(
-    output: str, exit_code: int
-) -> None:
-    cluster = ScenarioCluster()
-    cluster.benchmark_exit = exit_code
-    cluster.benchmark_output = output
+async def _failed_target(
+    cluster: ScenarioCluster,
+) -> tuple[TargetObservation, list[JobObserved]]:
     async with world(cluster) as w:
         resource = resource_of(await submit(w))
         await settled(w, resource)
@@ -920,12 +916,53 @@ async def test_a_benchmark_without_a_result_record_is_infrastructure_whatever_it
         target = (await run(w, query(InspectOwnedJob, "inspect", resource))).observation.target
         assert target is not None
         assert target.observation.status is ObservationStatus.FAILED
-        # Nothing it measured is kept, so core has no workload fact to reject the candidate on.
-        assert target.evidence == ()
-        assert target.evaluation_result is None
-        assert target.measurement_failure is MeasurementFailure.INFRASTRUCTURE
-        jobs = [e for e in result.owner_events if isinstance(e, JobObserved)]
-        assert [e.failure for e in jobs] == [MeasurementFailure.INFRASTRUCTURE]
+        return target, [e for e in result.owner_events if isinstance(e, JobObserved)]
+
+
+@settings(
+    max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(output=st.sampled_from(_NO_RECORD), exit_code=st.sampled_from((0, 1, 137)))
+async def test_a_benchmark_without_a_result_record_is_ambiguous_and_keeps_its_evidence(
+    output: str, exit_code: int
+) -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = exit_code
+    cluster.benchmark_output = f"{_CRASH_TAIL}\n{output}"
+    target, jobs = await _failed_target(cluster)
+    assert target.measurement_failure is MeasurementFailure.AMBIGUOUS
+    assert [e.failure for e in jobs] == [MeasurementFailure.AMBIGUOUS]
+    # The failure text is kept, so a second failure can tell the agent what happened.
+    assert target.evidence
+    assert _CRASH_TAIL in target.observation.diagnostic
+
+
+@settings(
+    max_examples=6, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(output=st.sampled_from(_NO_RECORD))
+async def test_a_benchmark_that_reported_no_exit_status_is_infrastructure_with_its_evidence(
+    output: str,
+) -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = None
+    cluster.benchmark_output = f"{_CRASH_TAIL}\n{output}"
+    target, jobs = await _failed_target(cluster)
+    assert target.measurement_failure is MeasurementFailure.INFRASTRUCTURE
+    assert [e.failure for e in jobs] == [MeasurementFailure.INFRASTRUCTURE]
+    # Nothing it measured counts against the candidate, but its text is not dropped.
+    assert target.evaluation_result is None
+    assert target.evidence
+
+
+async def test_a_server_that_never_became_ready_is_the_candidates_failure_with_its_log() -> None:
+    cluster = ScenarioCluster()
+    cluster.job_exit_code = 70
+    cluster.benchmark_output = _CRASH_TAIL
+    target, jobs = await _failed_target(cluster)
+    assert target.measurement_failure is MeasurementFailure.WORKLOAD
+    assert target.evidence
+    assert _CRASH_TAIL in target.observation.diagnostic
 
 
 @settings(

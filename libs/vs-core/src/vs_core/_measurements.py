@@ -81,7 +81,7 @@ from .types.evaluation import (
 )
 from .types.evaluation_history import EvaluationStageOutcome
 from .types.intents import IntentPhase, RequestObserved
-from .types.job_observations import MeasurementFailure
+from .types.job_observations import MeasurementFailure, may_resubmit
 from .types.kernel import AreaChange
 from .types.strategy import Measure
 
@@ -92,6 +92,8 @@ if TYPE_CHECKING:
     from .types.kernel import EvaluationContext, Signal
 
 __all__ = ["advance"]
+
+_RETRYABLE = (MeasurementFailure.INFRASTRUCTURE, MeasurementFailure.AMBIGUOUS)
 
 
 def _current(context: EvaluationContext, scope: Scope) -> Verdict[DecisionId | None]:
@@ -208,12 +210,12 @@ def _budget_ready(
         or not observation.terminal
     ):
         return Missing(ProofReason.UNRESOLVED)
-    if latest.failure != MeasurementFailure.INFRASTRUCTURE or (
+    if latest.failure not in _RETRYABLE or (
         observation.accepted
         and not isinstance(_submission_released(state, context, latest), Proven)
     ):
         return Missing(ProofReason.UNRESOLVED)
-    if len(budget.receipts) >= budget.limit:
+    if not may_resubmit(latest.failure, submissions=len(budget.receipts), limit=budget.limit):
         return Missing(ProofReason.ABSENT_CHARGE)
     return Proven(budget)
 
@@ -663,7 +665,7 @@ def _canonical_failure(
     if observation.accepted:
         if observation.status == ObservationStatus.SUCCEEDED:
             return None
-        if claim == MeasurementFailure.INFRASTRUCTURE and has_facts:
+        if claim in _RETRYABLE and has_facts:
             return MeasurementFailure.UNKNOWN
     return claim
 
@@ -1170,7 +1172,7 @@ def _job_observed(
                     evidence=tuple(accepted),
                     status=observation.status,
                     failure=failure,
-                    diagnostic=observation.diagnostic[:MEASUREMENT_DIAGNOSTIC_LIMIT],
+                    diagnostic=observation.diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
                 ),
             )
         elif newly or refused:
@@ -1182,7 +1184,7 @@ def _job_observed(
                     evidence=newly,
                     status=observation.status,
                     failure=failure,
-                    diagnostic=observation.diagnostic[:MEASUREMENT_DIAGNOSTIC_LIMIT],
+                    diagnostic=observation.diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
                 ),
             )
         if observation.accepted and not updated.evidence:

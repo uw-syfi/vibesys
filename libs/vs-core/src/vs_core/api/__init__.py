@@ -269,10 +269,12 @@ from vs_core.types.intents import (
     TargetObservation,
 )
 from vs_core.types.job_observations import (
+    AMBIGUOUS_SUBMISSION_LIMIT,
     JobProgress,
     JobTimeout,
     MeasurementFailure,
     TimedOut,
+    may_resubmit,
 )
 from vs_core.types.kernel import (
     AreaChange,
@@ -436,6 +438,7 @@ from vs_core.types.strategy import (
 )
 
 __all__ = [
+    "AMBIGUOUS_SUBMISSION_LIMIT",
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
@@ -825,6 +828,7 @@ __all__ = [
     "dependency_status",
     "evidence_view",
     "initial_state",
+    "may_resubmit",
     "operation_result",
     "operation_trace",
     "orphan_waits",

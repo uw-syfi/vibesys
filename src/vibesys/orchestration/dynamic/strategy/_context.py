@@ -31,6 +31,7 @@ _HISTORY_ROWS = 20
 _HISTORY_TITLE_CHARS = 200
 _HISTORY_SUMMARY_CHARS = 600
 _CUT = " [cut]"
+_HISTORY_FAILURE_CHARS = 1200
 
 
 def remaining(state: DynamicStrategyState, config: DynamicConfig) -> int:
@@ -96,6 +97,11 @@ def _bounded(text: str, limit: int) -> str:
     return text if len(text) <= limit else f"{text[:limit]}{_CUT}"
 
 
+def _tail(text: str, limit: int) -> str:
+    """The last ``limit`` characters of a failure's output, where its cause usually is."""
+    return text if len(text) <= limit else f"{_CUT.strip()} {text[-limit:]}"
+
+
 def _history_row(record: HypothesisRecord, running: frozenset[str]) -> HistoryRow:
     last = record.rounds[-1] if record.rounds else None
     return HistoryRow(
@@ -112,6 +118,7 @@ def _history_row(record: HypothesisRecord, running: frozenset[str]) -> HistoryRo
         candidate=None if last is None else last.candidate,
         metrics=() if last is None else last.metrics,
         partial=None if last is None else last.partial,
+        failure_tail="" if last is None else _tail(last.failure_tail, _HISTORY_FAILURE_CHARS),
     )
 
 
@@ -171,6 +178,9 @@ def implement_prompt(record: AttemptRecord, state: DynamicStrategyState) -> Impl
         worktree_revision=None if last is None else last.candidate,
         prior_revision=None if last is None else last.candidate,
         feedback=record.feedback,
+        prior_failure_tail=""
+        if last is None
+        else _tail(last.failure_tail, _HISTORY_FAILURE_CHARS),
     )
 
 

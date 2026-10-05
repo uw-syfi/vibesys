@@ -66,6 +66,7 @@ class HistoryRow(Value):
     candidate: RevisionRef | None = None
     metrics: tuple[MetricRow, ...] = ()
     partial: PartialRow | None = None
+    failure_tail: str = ""
 
 
 class PlannerPrompt(Value):
@@ -108,6 +109,7 @@ class ImplementPrompt(Value):
     worktree_revision: RevisionRef | None = None
     prior_revision: RevisionRef | None = None
     feedback: str | None = None
+    prior_failure_tail: str = ""
 
 
 class ReviewPrompt(Value):

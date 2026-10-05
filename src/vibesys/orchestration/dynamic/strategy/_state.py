@@ -214,6 +214,9 @@ class RoundRecord(Value):
     partial: PartialRow | None = None
     eligible: bool = False
     failure: str | None = None
+    # The end of what a failed trusted check printed (a crashed server's last log lines,
+    # say), kept whole so the next prompts can show its tail.
+    failure_tail: str = ""
     settlement: SettlementId | None = None
     # Whether the implementer asked to keep this direction and the lease allows it.
     kept_active: bool = False

@@ -250,7 +250,10 @@ class PollingEvaluationExecutor:
             kind: BenchmarkFailureKind | None = BenchmarkFailureKind.WORKLOAD
         elif stage.kind is EvidenceKind.BENCHMARK:
             result = await self._evaluation.benchmark(workspace)
-            completed = result.failure_kind is not BenchmarkFailureKind.INFRASTRUCTURE
+            completed = result.failure_kind not in {
+                BenchmarkFailureKind.INFRASTRUCTURE,
+                BenchmarkFailureKind.AMBIGUOUS,
+            }
             kind = result.failure_kind
             outcome = (
                 EvidenceOutcome.PASSED if completed and result.passed else EvidenceOutcome.FAILED

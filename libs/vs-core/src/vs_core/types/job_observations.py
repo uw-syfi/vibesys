@@ -61,8 +61,34 @@ class TimedOut(Value):
 
 
 class MeasurementFailure(StrEnum):
-    """Submission failure classification; unknown never proves workload rejection."""
+    """Submission failure classification; unknown never proves workload rejection.
+
+    ``AMBIGUOUS`` is a failure the evidence cannot assign to the candidate or to the
+    machinery. It is submitted once more (see ``may_resubmit``); a second one is final.
+    """
 
     WORKLOAD = "workload"
     INFRASTRUCTURE = "infrastructure"
+    AMBIGUOUS = "ambiguous"
     UNKNOWN = "unknown"
+
+
+# An ambiguous failure is measured at most this many times in all: once, then once more.
+AMBIGUOUS_SUBMISSION_LIMIT = 2
+
+
+def may_resubmit(failure: MeasurementFailure | None, *, submissions: int, limit: int) -> bool:
+    """Whether a submission that ended with ``failure`` may be submitted again.
+
+    ``submissions`` counts those already made for the measurement and ``limit`` is its
+    submission bound. Infrastructure failures retry up to the bound, ambiguous ones up to
+    ``AMBIGUOUS_SUBMISSION_LIMIT`` (never beyond the bound), and nothing else retries.
+    Core's budget and every strategy's retry decision call this one rule.
+    """
+    match failure:
+        case MeasurementFailure.INFRASTRUCTURE:
+            return submissions < limit
+        case MeasurementFailure.AMBIGUOUS:
+            return submissions < min(limit, AMBIGUOUS_SUBMISSION_LIMIT)
+        case _:
+            return False
