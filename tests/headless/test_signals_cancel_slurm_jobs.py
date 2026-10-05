@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
+from vs_slurm.fake_connector import JOB_ID, POLLED_FILE, SUBMITTED_FILE, recorded_commands
 
 _REPOSITORY = Path(__file__).resolve().parents[2]
 
@@ -25,6 +25,7 @@ def _write_input(base: Path, transport: str) -> tuple[Path, Path, Path]:
     cluster = base / "cluster"
     cluster.mkdir()
     os.mkfifo(cluster / SUBMITTED_FILE)
+    os.mkfifo(cluster / POLLED_FILE)
     program = [sys.executable, "-m", "vs_slurm.fake_connector", str(cluster)]
     if transport == "connector":
         table = f'{{ kind = "connector", command = {json.dumps(program)} }}'
@@ -86,8 +87,12 @@ def test_a_signal_that_ends_the_run_cancels_its_slurm_job(
     )
     os.close(writer)
     try:
-        # Blocks until the run's job is queued on the Fake cluster.
+        # Blocks until the run's job is queued on the Fake cluster, then until the run
+        # has recorded the job and asks the scheduler about it. Signalling at the
+        # submission announcement instead lands anywhere between the `sbatch` reply and
+        # the recording of the job, so each run would exercise a different interleaving.
         assert (cluster / SUBMITTED_FILE).read_text(encoding="utf-8") == JOB_ID
+        assert (cluster / POLLED_FILE).read_text(encoding="utf-8") == JOB_ID
         if closed_stdout:
             # The terminal's pipe reader (`tee`) died with the same signal.
             os.close(reader)
