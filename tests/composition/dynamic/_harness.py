@@ -66,13 +66,6 @@ if TYPE_CHECKING:
 # Simulated seconds one run may wait; a healthy scenario needs a small fraction of it.
 SIMULATED_BUDGET_S = 120.0
 
-RECOVERY_GAP = (
-    "gap (owner: vs-core crash recovery): a turn the crash interrupted is journaled "
-    "Unknown ('AgentTransportError: ...') and its dispatch_turn intent stays 'reconciling' "
-    "forever, so the resumed run waits in recovery until its deadline (here: until the "
-    "simulated-time budget). Needs a policy for an Unknown turn: re-dispatch or fail it."
-)
-
 _PLANNER_SLOTS = re.compile(r"Schedule at most (\d+) ")
 _MEMBER = re.compile(
     r"^(?:Own|Review) hypothesis `(?P<id>[^\n]*)` (?:in this isolated|without editing)"

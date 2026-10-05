@@ -7,11 +7,10 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.composition.dynamic._harness import (
     PASS,
-    RECOVERY_GAP,
-    AgentTransportError,
     CoreRecords,
     LoopInput,
     ScriptedAgents,
+    Turn,
     edit_to,
     portfolio,
     resume_request,
@@ -19,7 +18,7 @@ from tests.composition.dynamic._harness import (
     simulated_clock,
     workstream,
 )
-from tests.support.fake_run_clock import ClockLimitError
+from tests.support.fake_run_clock import HostCrashedError
 
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
 
@@ -83,19 +82,29 @@ def _candidate_jobs(rounds: int) -> int:
     return rounds
 
 
-@pytest.mark.xfail(strict=True, raises=ClockLimitError, reason=RECOVERY_GAP)
 def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     _failing_input(loop_input)
-    request = loop_input.request(max_rounds=1)
-    first = ScriptedAgents().plan(AgentTransportError("planner died"))
+    request = loop_input.request(max_rounds=2)
     clock = simulated_clock()
+
+    def host_dies(_agent: Turn) -> dict[str, object]:
+        # The host dies once this planning turn is committed, before round 2 starts.
+        clock.crash_on_next_clock_call()
+        return portfolio()
+
+    first = (
+        ScriptedAgents()
+        .plan(portfolio(workstream("H1")), host_dies)
+        .implement("H1", edit_to(2, "H1"))
+        .judge("H1", PASS)
+    )
     crashed = run_request(request, first, clock=clock)
-    assert crashed.error is not None
-    assert loop_input.sbatch_count() == _input_jobs()
+    assert isinstance(crashed.error, HostCrashedError)
+    assert loop_input.sbatch_count() == _input_jobs() + _candidate_jobs(1)
     second = (
         ScriptedAgents()
-        .plan(portfolio(workstream("H2")))
+        .plan(portfolio(workstream("H2", parent_hypothesis_id="H1")))
         .implement("H2", edit_to(3, "H2"))
         .judge("H2", PASS)
     )
@@ -107,7 +116,7 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
     assert resumed.succeeded is True
     assert first.unscripted == second.unscripted == []
     # The resumed run measures only the new candidate, never the input again.
-    assert loop_input.sbatch_count() == _input_jobs() + _candidate_jobs(1)
+    assert loop_input.sbatch_count() == _input_jobs() + _candidate_jobs(2)
     assert _UNMEASURABLE in second.prompts(ORCHESTRATOR.id)[0]
     assert CoreRecords(loop_input, crashed.run_id).strategy["baseline"]["attempts"] == 1
 

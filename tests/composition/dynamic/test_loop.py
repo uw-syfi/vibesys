@@ -14,7 +14,6 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.composition.dynamic._harness import (
     PASS,
-    RECOVERY_GAP,
     AgentTransportError,
     CoreRecords,
     LoopInput,
@@ -28,10 +27,11 @@ from tests.composition.dynamic._harness import (
     simulated_clock,
     workstream,
 )
-from tests.support.fake_run_clock import ClockLimitError
+from tests.support.fake_run_clock import HostCrashedError
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_agent.api import AgentOutputSchemaError
+from vs_project.api import Project
 from vs_runtime.api.core import RunStalledError
 
 if TYPE_CHECKING:
@@ -512,19 +512,24 @@ def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
         assert item["rounds"][0]["eligible"]
 
 
-@pytest.mark.xfail(strict=True, raises=ClockLimitError, reason=RECOVERY_GAP)
 def test_a_crashed_run_resumes_from_its_committed_record_and_finishes(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     request = loop_input.request(max_rounds=2)
+    clock = simulated_clock()
+
+    def host_dies(_agent: Turn) -> dict[str, object]:
+        # The host dies once this planning turn is committed, before round 2 starts.
+        clock.crash_on_next_clock_call()
+        return portfolio()
+
     first = (
         ScriptedAgents()
-        .plan(portfolio(workstream("H1")), AgentTransportError("planner died"))
+        .plan(portfolio(workstream("H1")), host_dies)
         .implement("H1", edit_to(2, "H1"))
         .judge("H1", PASS)
     )
-    clock = simulated_clock()
     crashed = run_request(request, first, clock=clock)
-    assert crashed.error is not None
+    assert isinstance(crashed.error, HostCrashedError)
     seen: dict[str, int] = {}
 
     def build_on_first(agent: Turn) -> dict[str, object]:
@@ -551,3 +556,32 @@ def test_a_crashed_run_resumes_from_its_committed_record_and_finishes(tmp_path: 
     records = CoreRecords(loop_input, crashed.run_id)
     assert [item["hypothesis_id"] for item in records.strategy["hypotheses"]] == ["H1", "H2"]
     assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 3\n"
+
+
+def test_a_lease_that_cannot_be_released_does_not_replace_the_runs_own_error(
+    tmp_path: Path,
+) -> None:
+    loop_input = LoopInput.create(tmp_path)
+    clock = simulated_clock()
+    run_ids: list[str] = []
+
+    def unreadable_lease() -> None:
+        state = Project.open(loop_input.root).state.state_store_namespace(run_ids[0])
+        (state.external_directory() / "store.json").write_text("{not json", encoding="utf-8")
+
+    def host_dies(_agent: Turn) -> dict[str, object]:
+        clock.crash_on_next_clock_call(aftermath=unreadable_lease)
+        return portfolio()
+
+    agents = ScriptedAgents().plan(host_dies)
+
+    crashed = run_request(
+        loop_input.request(max_rounds=1),
+        agents,
+        clock=clock,
+        on_handle=lambda handle: run_ids.append(handle.run_id),
+    )
+
+    # The release in the run's ``finally`` fails to read the lease document; the run's
+    # own failure is the one reported.
+    assert isinstance(crashed.error, HostCrashedError)

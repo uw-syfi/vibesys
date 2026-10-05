@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class ClockLimitError(RuntimeError):
     """A simulated run waited past ``FakeRunClock.limit``: it is stuck, not slow."""
+
+
+class HostCrashedError(RuntimeError):
+    """The simulated host process died (see ``FakeRunClock.crash_on_next_clock_call``)."""
 
 
 @dataclass
@@ -31,13 +39,36 @@ class FakeRunClock:
     sleeps: list[float] = field(default_factory=list)
     settle_background: bool = True
     limit: float | None = None
+    _crash_armed: bool = False
+    _aftermath: Callable[[], None] | None = None
+
+    def crash_on_next_clock_call(self, *, aftermath: Callable[[], None] | None = None) -> None:
+        """Kill the simulated host at its next clock read or wait, after everything it committed so far.
+
+        The run raises :class:`HostCrashedError` from that call, so nothing the host would
+        have done afterwards happens. A scenario arms it from inside a scripted agent turn
+        to choose the commit the crash follows. ``aftermath`` runs at the moment of death,
+        to leave behind what a dying process leaves (for example an unreadable file).
+        """
+        self._crash_armed = True
+        self._aftermath = aftermath
 
     def now(self) -> float:
         """The current logical time."""
+        self._crash_if_armed("a clock read")
         return self.at
+
+    def _crash_if_armed(self, where: str) -> None:
+        if self._crash_armed:
+            self._crash_armed = False
+            if self._aftermath is not None:
+                self._aftermath()
+            message = f"host crashed at {where} (now {self.at:g} s)"
+            raise HostCrashedError(message)
 
     async def sleep(self, seconds: float) -> None:
         """Let background work finish, then advance logical time instead of waiting."""
+        self._crash_if_armed(f"a wait of {seconds:g} s")
         if self.limit is not None and self.at + seconds > self.limit:
             message = f"simulated time passed its limit of {self.limit:g} s (now {self.at:g} s)"
             raise ClockLimitError(message)

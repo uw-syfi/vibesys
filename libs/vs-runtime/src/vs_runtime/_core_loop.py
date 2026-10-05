@@ -463,8 +463,10 @@ class CoreRuntime[S: StrategyState]:
             return
         self._time_floor = max(self._time_floor, now_at)
         self._halted = True
-        # A failed release only makes the next host wait for the lease to expire.
-        with contextlib.suppress(OSError):
+        # Any failure to release, not only an OSError (a corrupt lease document fails
+        # validation), only makes the next host wait for the lease to expire. This runs
+        # in a ``finally``, so letting it raise would replace the run's own exception.
+        with contextlib.suppress(Exception):
             self._store.release(self._fence, now=self._time_floor)
 
     def holds_lease(self, *, now_at: float) -> bool:
