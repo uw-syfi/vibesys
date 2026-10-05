@@ -1523,7 +1523,7 @@ def _adopting(state: core.CoreState, *, verified: bool = False) -> core.CoreStat
     )
 
 
-def _queued_root_behind_full_slot(
+def queued_root_behind_full_slot(
     mode: core.WorkspaceMode,
 ) -> tuple[core.CoreState, core.SlotReleased]:
     running, head = _request(0), _request(1)
@@ -1544,7 +1544,7 @@ def test_an_exclusive_root_head_waits_out_an_adoption_and_never_fails_the_step(
     mode: core.WorkspaceMode,
 ) -> None:
     """D3: the adoption fence is one term of Scheduling's gate, not an Attempts exception."""
-    state, released = _queued_root_behind_full_slot(mode)
+    state, released = queued_root_behind_full_slot(mode)
     fenced = _adopting(state)
     result = _step(fenced, released)
     queued = _ref(_request(1))
@@ -1560,7 +1560,7 @@ def test_an_exclusive_root_head_waits_out_an_adoption_and_never_fails_the_step(
 
 
 def test_a_lifted_adoption_fence_admits_the_waiting_exclusive_root_head() -> None:
-    state, released = _queued_root_behind_full_slot(core.WorkspaceMode.EXCLUSIVE_ROOT)
+    state, released = queued_root_behind_full_slot(core.WorkspaceMode.EXCLUSIVE_ROOT)
     waiting = _step(_adopting(state), released).state
     done = _adopting(waiting, verified=True)
     _assert_attempts_boundary(done, core.AdoptionFenceLifted(), "attempt_admitted")
