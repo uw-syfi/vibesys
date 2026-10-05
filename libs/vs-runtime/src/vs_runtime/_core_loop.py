@@ -585,6 +585,11 @@ class CoreRuntime[S: StrategyState]:
         # on every load by `_decode`. `model_copy` skips validators, so the record's own
         # invariants are rechecked here.
         self._registry.validate_envelope(candidate.envelope)
+        # A strategy state built with `model_copy(update=...)` never ran its field validators;
+        # validating it on the value keeps an invalid state from becoming a durable record
+        # that no later process can load.
+        strategy = candidate.envelope.strategy
+        type(strategy).model_validate(strategy.model_dump(warnings=False))
         candidate.check_publications()
         self._check_identity(candidate.envelope)
         stored = StoredEnvelope(
