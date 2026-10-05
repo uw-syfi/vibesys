@@ -15,9 +15,9 @@ from vibesys.api.auxiliary import (
 from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.api.store import open_run_store
 from vibesys.composition import resolve_agent_specs
-from vibesys.events import CoreEventType, EventStatus, RunStartedData
+from vibesys.events import CoreEventType, EventStatus, RunFailedData, RunStartedData
 from vibesys.plugin_catalog import project_run
-from vibesys.run.core_run import drive_core_run, ensure_not_legacy_resume
+from vibesys.run.core_run import RunEnd, drive_core_run, ensure_not_legacy_resume
 from vibesys.run.host import open_product_core_host, open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
 from vibesys.run.profilers import validate_run_request
@@ -47,7 +47,6 @@ if TYPE_CHECKING:
         OrchestrationPlugin,
         OrchestrationResumeDecision,
     )
-    from vs_runtime.api import RunStatus as PluginRunStatus
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
         RunState,
@@ -91,7 +90,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     | None = None,
     stop_timer: StopTimer,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore],
-) -> PluginRunStatus:
+) -> RunEnd:
     """Compose the private runtime host and run one validated plugin.
 
     A plugin with a ``core`` policy is driven by the runtime's core run loop over
@@ -129,7 +128,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         stop_timer=stop_timer,
         invocation_store_factory=invocation_store_factory,
     ) as host:
-        return await plugin.orchestrate(host, options)
+        return RunEnd(await plugin.orchestrate(host, options))
 
 
 class _LocalRunSession:
@@ -310,7 +309,7 @@ class _LocalRunSession:
                 stop_timer=self._implementations.stop_timer,
                 invocation_store_factory=self._implementations.invocation_store_factory,
             )
-            succeeded = outcome.value == "succeeded"
+            succeeded = outcome.status.value == "succeeded"
         except RunStopped:
             self._status = RunStatus.STOPPED
             self._integration.events.emit(
@@ -332,14 +331,23 @@ class _LocalRunSession:
             raise
         else:
             self._status = RunStatus.COMPLETED if succeeded else RunStatus.FAILED
-            self._integration.events.emit(
-                CoreEventType.RUN_FINISHED if succeeded else CoreEventType.RUN_FAILED,
-                status=EventStatus.COMPLETED if succeeded else EventStatus.FAILED,
-            )
+            failure = None if succeeded else outcome.failure
+            if succeeded:
+                self._integration.events.emit(
+                    CoreEventType.RUN_FINISHED, status=EventStatus.COMPLETED
+                )
+            else:
+                self._integration.events.emit(
+                    CoreEventType.RUN_FAILED,
+                    "" if failure is None else failure.reason,
+                    status=EventStatus.FAILED,
+                    data=None if failure is None else RunFailedData(failure=failure),
+                )
             return RunResult(
                 run_id=self._run_id(),
                 loop=request.orchestration.id,
                 succeeded=succeeded,
+                failure=failure,
             )
         finally:
             if self._unsubscribe is not None:

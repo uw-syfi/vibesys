@@ -22,6 +22,8 @@ from vibesys.api import (
     DomainName,
     OrchestrationDescriptor,
     ResumeRef,
+    RunFailure,
+    RunFailureKind,
     RunRequest,
     RunResult,
     boot_trace,
@@ -382,7 +384,25 @@ def _run_request(args: argparse.Namespace) -> None:
         sys.stdout.write(f"\n{request.orchestration.id} run completed.\n")
     else:
         sys.stdout.write(f"\n{request.orchestration.id} run stopped early.\n")
+        if result.failure is not None:
+            sys.stdout.write(f"{_describe_failure(result.failure)}\n")
         sys.exit(1)
+
+
+_FAILURE_HEADLINES = {
+    RunFailureKind.BUDGET_EXHAUSTED: "the workstream budget ran out with no result to keep",
+    RunFailureKind.DEADLINE: "the run's time limit ended it with no result to keep",
+    RunFailureKind.NO_RESULT: "the run ended with no result to keep",
+}
+
+
+def _describe_failure(failure: RunFailure) -> str:
+    """One line saying why a run failed: the reason's headline, the counts, then its account."""
+    counts = (
+        f"{failure.workstreams_started} of {failure.workstream_budget} workstreams started, "
+        f"{failure.candidates_kept} candidates kept"
+    )
+    return f"Reason: {_FAILURE_HEADLINES[failure.kind]} ({counts}). {failure.reason}"
 
 
 def _execute_run_request(request: RunRequest) -> RunResult:

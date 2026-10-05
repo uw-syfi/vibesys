@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from pydantic import ValidationError
 from tests.support.fake_run_clock import FakeRunClock
@@ -68,6 +68,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import (
+        CoreEvent,
         CoreState,
         Decision,
         OperationRegistry,
@@ -78,9 +79,18 @@ if TYPE_CHECKING:
         Strategy,
         StrategyEvent,
         StrategyState,
+        Transition,
     )
     from vs_core.testing.drive import Answer
     from vs_runtime.api.core import ExecutionContext, OwnerEvent
+
+
+@runtime_checkable
+class Admitting(Protocol):
+    """A script whose executors call into the shell, as the agent evaluation bridge does."""
+
+    admit: Callable[[CoreEvent, float], Transition] | None
+
 
 type Script = Callable[[Request, CoreState], Answer]
 """What the executors answer for one request, given core's state when it runs."""
@@ -397,6 +407,8 @@ def drive_shell[S: StrategyState](
             ),
         ),
     )
+    if isinstance(script, Admitting):
+        script.admit = lambda event, now_at: shell.admit(event, now_at=now_at)
     clock = FakeRunClock(1.0)
     host = CoreRunHost(shell, FakePublicationDelivery(store), clock)
     config = RunLoopConfig(host_id="scenario", lease_duration=LEASE, max_dispatches=MAX_DISPATCHES)

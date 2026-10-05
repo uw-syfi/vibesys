@@ -22,7 +22,8 @@ from tests.composition.dynamic._harness import (
     workstream,
 )
 
-from vibesys.api import RunStatus
+from vibesys.api import RunFailureKind, RunStatus
+from vibesys.events import CoreEventType
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -115,3 +116,31 @@ def test_an_unmeasurable_input_still_succeeds_when_a_candidate_is_trusted(
     assert (run.succeeded, run.status) == (True, RunStatus.COMPLETED)
     records = CoreRecords(loop_input, run.run_id)
     assert records.run["result"]["reason"].startswith("adopted: ")
+
+
+def test_a_failed_run_reports_a_typed_reason_with_its_counts(tmp_path: Path) -> None:
+    loop_input = LoopInput.create(tmp_path)
+    _failing_input(loop_input)
+    agents = _one_candidate(_FAILS_ACCURACY)
+
+    run = run_request(loop_input.request(), agents)
+
+    assert run.result is not None
+    failure = run.result.failure
+    assert failure is not None
+    assert failure.kind is RunFailureKind.BUDGET_EXHAUSTED
+    assert failure.reason.startswith("no trusted result")
+    assert failure.workstreams_started == 1
+    assert failure.workstream_budget >= failure.workstreams_started
+    assert failure.candidates_kept == 0
+    published = [event.data for event in run.events if event.type is CoreEventType.RUN_FAILED]
+    assert [getattr(data, "failure", None) for data in published] == [failure]
+
+
+def test_a_successful_run_reports_no_failure(tmp_path: Path) -> None:
+    loop_input = LoopInput.create(tmp_path)
+
+    run = run_request(loop_input.request(), _one_candidate(2))
+
+    assert run.result is not None
+    assert run.result.failure is None

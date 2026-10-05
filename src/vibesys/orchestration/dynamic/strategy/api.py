@@ -48,6 +48,7 @@ from vibesys.orchestration.dynamic.strategy._prompts import (
     PromptTemplate,
     ReplyCorrectionPrompt,
     ResumePrompt,
+    ReviewEvaluation,
     ReviewPrompt,
 )
 from vibesys.orchestration.dynamic.strategy._rows import (
@@ -111,6 +112,7 @@ __all__ = [
     "ResumePrompt",
     "RetainVerifiedRevision",
     "RetentionReceipt",
+    "ReviewEvaluation",
     "ReviewPrompt",
     "Role",
     "RoundRecord",

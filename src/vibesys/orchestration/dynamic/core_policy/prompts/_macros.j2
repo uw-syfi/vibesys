@@ -18,3 +18,17 @@
 none
 {% endif %}
 {%- endmacro %}
+
+{% macro evaluation_list(items) -%}
+{% if items %}
+{% for item in items %}
+- evidence `{{ item.evidence_id.root }}`, {{ 'accuracy' if item.kind.value == 'correctness' else item.kind.value }} at revision `{{ rev(item.revision) }}`: {% if item.passed is none %}result not decoded (observation {{ item.status.value }}){% elif item.passed %}PASS{% else %}FAIL{% endif %}
+{%- for row in item.metrics %}; {{ metric(row) }}{% endfor %}
+{%- if item.partial %}; partial {{ partial(item.partial) }}{% endif %}
+{%- if item.feedback %}{{ "\n" }}  {% if item.feedback_cut %}[...] {% endif %}{{ item.feedback | replace("\n", "\n  ") }}{% endif %}
+
+{% endfor %}
+{% else %}
+none: no trusted evaluation of this candidate exists yet
+{% endif %}
+{%- endmacro %}

@@ -3410,6 +3410,7 @@
                   "phase": "#/$defs/PhaseData",
                   "round_finished": "#/$defs/RoundFinishedData",
                   "run_configured": "#/$defs/RunConfiguredData",
+                  "run_failed": "#/$defs/RunFailedData",
                   "run_interrupted": "#/$defs/RunInterruptedData",
                   "run_started": "#/$defs/RunStartedData",
                   "run_status_changed": "#/$defs/RunStatusChangedData",
@@ -3453,6 +3454,9 @@
                 },
                 {
                   "$ref": "#/$defs/RunStartedData"
+                },
+                {
+                  "$ref": "#/$defs/RunFailedData"
                 },
                 {
                   "$ref": "#/$defs/RunInterruptedData"
@@ -3527,6 +3531,73 @@
       ],
       "title": "RunEvent",
       "type": "object"
+    },
+    "RunFailedData": {
+      "description": "Why a run ended without a result to keep, with the counts behind it.",
+      "properties": {
+        "kind": {
+          "const": "run_failed",
+          "default": "run_failed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "failure": {
+          "$ref": "#/$defs/RunFailure"
+        }
+      },
+      "required": [
+        "kind",
+        "failure"
+      ],
+      "title": "RunFailedData",
+      "type": "object"
+    },
+    "RunFailure": {
+      "additionalProperties": false,
+      "description": "What a failed run did and why it stopped; frontends choose the wording.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RunFailureKind"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "workstreams_started": {
+          "minimum": 0,
+          "title": "Workstreams Started",
+          "type": "integer"
+        },
+        "workstream_budget": {
+          "minimum": 0,
+          "title": "Workstream Budget",
+          "type": "integer"
+        },
+        "candidates_kept": {
+          "minimum": 0,
+          "title": "Candidates Kept",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "reason",
+        "workstreams_started",
+        "workstream_budget",
+        "candidates_kept"
+      ],
+      "title": "RunFailure",
+      "type": "object"
+    },
+    "RunFailureKind": {
+      "description": "Why a run ended without a result the operator can keep.",
+      "enum": [
+        "budget_exhausted",
+        "deadline",
+        "no_result"
+      ],
+      "title": "RunFailureKind",
+      "type": "string"
     },
     "RunInterruptedData": {
       "description": "Reason and optional signal for an interrupted run.",

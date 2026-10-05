@@ -19,6 +19,7 @@ from vibesys.orchestration.dynamic.models import (
     WaitingForEvaluation,
 )
 from vibesys.orchestration.dynamic.strategy import _ids as ids
+from vibesys.orchestration.dynamic.strategy import _review_evidence as review_evidence
 from vibesys.orchestration.dynamic.strategy._attempts import measured_revision, role_of, subject_of
 from vibesys.orchestration.dynamic.strategy._baseline import stages
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
@@ -229,6 +230,10 @@ def _interpreted(
     state: DynamicStrategyState, index: int, outcome: EvidenceReadings, view: RunView
 ) -> DynamicStrategyState:
     record = state.attempts[index]
+    if record.phase is WorkPhase.REVIEW:
+        # The decoded evaluations are for the judge's prompt; the judge turn is next.
+        read = review_evidence.with_readings(record, view, outcome)
+        return _put(state, index, read.model_copy(update={"step": Step.NEEDED, "awaiting": None}))
     readings = accept_readings(outcome, ledger_refs(view, record.evidence) or ())
     if isinstance(readings, str):
         return fail(state, index, f"evidence readings refused: {readings}")

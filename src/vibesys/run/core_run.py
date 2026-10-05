@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import os
 import uuid
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.events import RunFailure, RunFailureKind
 from vs_core.api import RetainedCandidate, RunResultProposal
 from vs_project.api import Project
 from vs_runtime.api import RunStatus
@@ -46,6 +48,14 @@ LEASE_SECONDS = 60.0
 
 _STOP_RESULT = RunResultProposal(outcome="cancelled", reason="stop requested by the operator")
 _DEADLINE_RESULT = RunResultProposal(outcome="cancelled", reason="run deadline reached")
+
+
+@dataclass(frozen=True)
+class RunEnd:
+    """How a run ended: its status and, for a failure, the data that says why."""
+
+    status: RunStatus
+    failure: RunFailure | None = None
 
 
 class CoreRunRefusedError(RuntimeError):
@@ -112,7 +122,7 @@ def ensure_not_legacy_resume(project_root: Path, run_id: str) -> None:
         ) from error
 
 
-async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> RunStatus:
+async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> RunEnd:
     """Run one core run to its terminal status over ``host.services``.
 
     Raises ``RunStopped`` when the operator's stop ended the run, so the session reports
@@ -145,7 +155,10 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
             await bridge.close()
     if outcome.refusal is not None:
         raise CoreRunRefusedError(services.run_id, outcome.refusal)
-    return _status_of(outcome.result, shell)
+    status = _status_of(outcome.result, shell)
+    return RunEnd(
+        status, _failure_of(outcome.result, shell) if status is RunStatus.FAILED else None
+    )
 
 
 def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatus:
@@ -165,6 +178,33 @@ def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatu
     return RunStatus.SUCCEEDED if result.outcome == "success" or kept else RunStatus.FAILED
 
 
+def _failure_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunFailure | None:
+    """Why a failed run stopped, read from the result and the counts core kept.
+
+    A run ends in failure with nothing to keep when its time ran out, when every
+    workstream it was allowed had run, or when its strategy gave up earlier. A run that
+    recorded no result at all (an unfinished record) has no reason to report.
+    """
+    if result is None:
+        return None
+    core = shell.record.envelope.core
+    started = len(core.attempts.attempts)
+    budget = core.run.limits.max_attempts
+    if result == _DEADLINE_RESULT:
+        kind = RunFailureKind.DEADLINE
+    elif started >= budget:
+        kind = RunFailureKind.BUDGET_EXHAUSTED
+    else:
+        kind = RunFailureKind.NO_RESULT
+    return RunFailure(
+        kind=kind,
+        reason=result.reason,
+        workstreams_started=started,
+        workstream_budget=budget,
+        candidates_kept=sum(1 for item in core.settlement.settlements if item.eligible),
+    )
+
+
 def _adopted_retained_candidate(shell: CoreRuntime) -> bool:
     """Whether core verified the adoption of a retained candidate."""
     adoption = shell.record.envelope.core.settlement.adoption
@@ -175,4 +215,10 @@ def _adopted_retained_candidate(shell: CoreRuntime) -> bool:
     )
 
 
-__all__ = ["LEASE_SECONDS", "CoreRunRefusedError", "drive_core_run", "ensure_not_legacy_resume"]
+__all__ = [
+    "LEASE_SECONDS",
+    "CoreRunRefusedError",
+    "RunEnd",
+    "drive_core_run",
+    "ensure_not_legacy_resume",
+]

@@ -7,6 +7,7 @@ prompt text.
 
 import hashlib
 
+from vibesys.orchestration.dynamic.strategy import _review_evidence as review_evidence
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._parents import ParentOption, options
 from vibesys.orchestration.dynamic.strategy._prompts import (
@@ -174,8 +175,8 @@ def implement_prompt(record: AttemptRecord, state: DynamicStrategyState) -> Impl
     )
 
 
-def review_prompt(record: AttemptRecord) -> ReviewPrompt:
-    """Independent review of the exact candidate the implementer retained."""
+def review_prompt(record: AttemptRecord, view: RunView) -> ReviewPrompt:
+    """Independent review of the exact candidate, with every trusted evaluation of it."""
     if record.candidate is None:
         message = "review requires a retained candidate"
         raise ValueError(message)
@@ -186,6 +187,7 @@ def review_prompt(record: AttemptRecord) -> ReviewPrompt:
         candidate=record.candidate,
         summary=record.summary,
         evidence=tuple(EvidenceCitation(location=item) for item in record.plan.evidence),
+        evaluations=review_evidence.evaluations(record, view),
     )
 
 

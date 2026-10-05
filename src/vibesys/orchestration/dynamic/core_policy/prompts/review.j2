@@ -1,4 +1,4 @@
-{% from '_macros.j2' import rev, citations %}
+{% from '_macros.j2' import rev, citations, evaluation_list %}
 Review hypothesis `{{ hypothesis_id }}` without editing its candidate.
 
 {% include 'run_context.j2' %}
@@ -10,12 +10,19 @@ Implementer summary: {{ summary }}
 Evidence references:
 {{ citations(evidence) }}
 
-Start from the referenced evidence and the candidate's diff against its parent. The
-implementer already ran the local checks and the framework owns trusted accuracy and
-performance evaluation, so do not run local checks, benchmarks, or other commands that take
-more than a few seconds; run one only when the evidence you need for the verdict is
-missing, and then run it once. Inspect only the source and evidence needed to decide
-correctness, activation, and whether the declared outcome is supported. Passing
-trusted evaluation is not enough: reject a candidate that violates any rule or
+Trusted evaluations of this candidate (run by the framework; every record is listed):
+{{ evaluation_list(evaluations) }}
+
+Start from the referenced evidence and the candidate's diff against its parent. Decide
+correctness, activation, and whether the declared outcome is supported. The source
+decides correctness and rule violations. Only a trusted evaluation decides a claim about
+accuracy or speed: fail the candidate on such a claim only when a listed result shows
+it. When none is listed and your verdict depends on one, {% if agent_evaluation %}measure
+the workspace once with `submit_evaluation` and wait for the result before you decide,
+instead of judging the claim from the code. If you cannot, {% endif %}do not fail the
+candidate for the missing measurement: the framework measures every candidate that passes
+review. Otherwise do not run local checks, benchmarks, or other commands that take more
+than a few seconds.
+Passing trusted evaluation is not enough: reject a candidate that violates any rule or
 constraint the objective states. Return only the schema-valid review JSON.
 {% include 'agent_evaluation.j2' %}
