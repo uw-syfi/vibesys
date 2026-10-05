@@ -35,6 +35,7 @@ _HISTORY_TITLE_CHARS = 200
 _HISTORY_SUMMARY_CHARS = 600
 _CUT = " [cut]"
 _HISTORY_FAILURE_CHARS = 1200
+_RETRY_TEXT_CHARS = 1200
 
 
 def remaining(state: DynamicStrategyState, config: DynamicConfig) -> int:
@@ -203,10 +204,16 @@ def implement_prompt(record: AttemptRecord, state: DynamicStrategyState) -> Impl
         evidence=tuple(EvidenceCitation(location=item) for item in record.plan.evidence),
         worktree_revision=None if last is None else last.candidate,
         prior_revision=None if last is None else last.candidate,
-        feedback=record.feedback,
-        failure_tail=tail,
-        failure_fence=_fence(tail),
-        failure=_unexplained(last),
+        feedback=None if record.feedback is None else _bounded(record.feedback, _RETRY_TEXT_CHARS),
+        prior_failure_tail=tail,
+        prior_failure_fence=_fence(tail),
+        blocker=None if failed is None else _bounded(failed.summary, _RETRY_TEXT_CHARS),
+        narrowed_step=(
+            None
+            if failed is None or not failed.next_step.strip()
+            else _bounded(failed.next_step, _RETRY_TEXT_CHARS)
+        ),
+        turns_without_candidate=len(record.blockers),
     )
 
 

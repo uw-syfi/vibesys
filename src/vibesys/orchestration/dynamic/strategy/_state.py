@@ -243,20 +243,25 @@ class BlockerKind(StrEnum):
 
     FAILED = "failed"
     REJECTED = "rejected"
+    NO_REPLY = "no_reply"
 
 
 class Blocker(Value):
     """One turn of a workstream that ended without a measurable candidate.
 
-    ``FAILED`` is the implementer's own account (its summary, the next step it names and
-    the evidence it cites). ``REJECTED`` is the reviewer's feedback on a candidate that was
-    not measured.
+    ``FAILED`` is the implementer's own account (its summary and the next step it names).
+    ``REJECTED`` is the reviewer's feedback on a candidate that was not measured.
+    ``NO_REPLY`` is a turn that timed out or returned nothing usable. ``revision`` and
+    ``digest`` are what the framework observed, and the only facts that make another turn
+    worth asking: the revision the turn retained, and a digest of the failure output the
+    framework captured (empty when it captured none).
     """
 
     kind: BlockerKind
     summary: str
     next_step: str = ""
-    cited: tuple[str, ...] = ()
+    revision: RevisionRef | None = None
+    digest: str = ""
 
 
 class AttemptRecord(Value):

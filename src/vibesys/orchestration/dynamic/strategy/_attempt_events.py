@@ -5,6 +5,7 @@ decision `_attempts.advance` proposes next. Duplicate or late events find no
 matching awaiting record and leave the state unchanged.
 """
 
+import hashlib
 from typing import Literal
 
 from pydantic import TypeAdapter, ValidationError
@@ -454,12 +455,12 @@ def _retry_unmeasured(
     record = state.attempts[index]
     blockers = (*record.blockers, blocker)
     state = _put(state, index, record.model_copy(update={"blockers": blockers}))
-    refused = refusal(blockers, config)
+    refused = refusal(blockers, config, record.parent)
     if refused is not None:
         return fail(state, index, refused)
-    # A rejection's feedback reaches the next turn as such; an implementer's own blocker is
-    # rendered from `blockers` by the prompt context.
-    feedback = blocker.summary if blocker.kind is BlockerKind.REJECTED else None
+    # A rejection's feedback and a lost turn's error reach the next turn as feedback; an
+    # implementer's own blocker is rendered from `blockers` by the prompt context.
+    feedback = None if blocker.kind is BlockerKind.FAILED else blocker.summary
     return _retry(state, index, config, feedback, reason)
 
 
@@ -521,12 +522,13 @@ def _measure_or_settle(record: AttemptRecord, config: DynamicConfig) -> AttemptR
     )
 
 
-def _nominates(result: ImplementerResult) -> bool:
-    """Whether the reply claims a candidate, so core's checkpoint of the turn decides it."""
-    return result.outcome not in (
-        HypothesisOutcome.IMPLEMENTATION_FAILED,
-        HypothesisOutcome.BLOCKED,
-    )
+def _awaits_checkpoint(result: ImplementerResult) -> bool:
+    """Whether core's checkpoint of the turn must be read before the reply is acted on.
+
+    A nominating reply is decided by it. A failed one is judged by it too: the revision the
+    turn retained, if any, is the framework's evidence of whether the turn changed anything.
+    """
+    return result.outcome is not HypothesisOutcome.BLOCKED
 
 
 def settle_retained(
@@ -581,7 +583,7 @@ def _implemented(
             kind=BlockerKind.FAILED,
             summary=result.summary,
             next_step=result.next_step,
-            cited=tuple(item.location for item in result.evidence),
+            revision=candidate,
         )
         return _retry_unmeasured(state, index, config, blocker, "implementation failed")
     if result.outcome is HypothesisOutcome.BLOCKED:
@@ -612,7 +614,7 @@ def _reviewed(
     if result.passed:
         return _put(state, index, _measure_or_settle(record, config))
     feedback = result.feedback or result.analysis
-    blocker = Blocker(kind=BlockerKind.REJECTED, summary=feedback)
+    blocker = Blocker(kind=BlockerKind.REJECTED, summary=feedback, revision=record.candidate)
     return _retry_unmeasured(state, index, config, blocker, "review rejected the candidate")
 
 
@@ -641,7 +643,13 @@ def _unfinished(
         return _ask_again(state, index, config, event, view.run.now_at)
     reason = f"{role.value} turn did not complete ({event.observation.status.value})"
     if role is Role.IMPLEMENTER:
-        return _retry(state, index, config, event.detail or reason, reason)
+        detail = event.detail or reason
+        blocker = Blocker(
+            kind=BlockerKind.NO_REPLY,
+            summary=detail,
+            digest=hashlib.sha256(" ".join(detail.split()).encode()).hexdigest(),
+        )
+        return _retry_unmeasured(state, index, config, blocker, reason)
     return fail(state, index, reason)
 
 
@@ -680,7 +688,7 @@ def _answered(
         return _yielded(state, index, view)
     if isinstance(reply, ImplementerResult):
         candidate = turn_candidate(view, state.attempts[index].attempt, event.invocation)
-        if candidate is None and _nominates(reply):
+        if candidate is None and _awaits_checkpoint(reply):
             return _put(
                 state,
                 index,
