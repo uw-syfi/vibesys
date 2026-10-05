@@ -64,7 +64,13 @@ from .types.intents import (
     request_lifecycle,
 )
 from .types.kernel import AreaChange, DecisionCompleted
-from .types.sessions import RegisteredTurnRequested
+from .types.sessions import (
+    CancelTurn,
+    DispatchTurn,
+    InspectTurn,
+    RegisteredTurnRequested,
+    TurnObserved,
+)
 from .types.strategy import Cancel, Withdraw
 
 if TYPE_CHECKING:
@@ -226,6 +232,8 @@ def _observed(
     if root is None:
         raise ContractError(("observation", "request_id"), "observation names no canonical request")
     change = _apply(state, context, root, event)
+    if isinstance(root.request, CancelTurn):
+        return _finish(change, _end_released_dispatch(change.state, context, root, event))
     target = event.target
     if target is None or target.target_resource is not None:
         return change
@@ -237,7 +245,57 @@ def _observed(
         return change
     if target.reissue is not None and _reissuable(original, target.reissue):
         return _finish(change, _reissue(change.state, original))
-    return _finish(change, _apply(change.state, context, original, target))
+    change = _finish(change, _apply(change.state, context, original, target))
+    if isinstance(root.request, InspectTurn):
+        # An inspection that learned nothing new still ends: Sessions must hear that the
+        # inspection of this turn completed, or an unresolved turn would wait for no one.
+        restated = TurnObserved(invocation=root.request.invocation, observation=target.observation)
+        return _finish(change, AreaChange(state=change.state, signals=(restated,)))
+    return change
+
+
+def _end_released_dispatch(
+    state: IntentsState, context: IntentsContext, root: Intent, event: RequestObserved
+) -> AreaChange[IntentsState]:
+    """A cancellation that released an unresolved turn ends that turn's open dispatch.
+
+    The dispatch never learned its own outcome (the transport died after sending), so the
+    release is the only fact that can close it.
+    """
+    request = root.request
+    observation = event.observation
+    if (
+        not isinstance(request, CancelTurn)
+        or observation.status != ObservationStatus.CANCELLED
+        or not observation.terminal
+    ):
+        return AreaChange(state=state)
+    rows = tuple(
+        row for row in context.sessions.invocations if row.invocation == request.invocation
+    )
+    dispatch = next(
+        (
+            intent
+            for intent in state.intents
+            if isinstance(intent.request, DispatchTurn)
+            and intent.phase == IntentPhase.RECONCILING
+            and any(
+                intent.request.turn == row.turn and intent.request.scope == row.scope
+                for row in rows
+            )
+        ),
+        None,
+    )
+    if dispatch is None or dispatch.observation is None:
+        return AreaChange(state=state)
+    ended = observation.model_copy(
+        update={
+            "request_id": dispatch.request_id,
+            "sequence": dispatch.observation.sequence + 1,
+            "accepted": False,
+        }
+    )
+    return _apply(state, context, dispatch, TargetObservation(observation=ended))
 
 
 def _reissuable(intent: Intent, proof: ReissueProof) -> bool:

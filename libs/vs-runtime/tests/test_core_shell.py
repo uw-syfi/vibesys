@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import json
 from types import UnionType
-from typing import Annotated, get_args, get_origin
+from typing import Annotated, Any, get_args, get_origin
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.support.runtime_core_shell import CounterState, CounterStrategy, runtime
+from tests.support.runtime_core_shell import (
+    CounterState,
+    CounterStrategy,
+    ShellTraceTransitions,
+    runtime,
+)
 
 from vs_core.api import (
     Access,
@@ -19,6 +24,7 @@ from vs_core.api import (
     EventCursor,
     HostFence,
     HostId,
+    OperationRegistry,
     Request,
     RoleId,
     RunEnvelope,
@@ -28,12 +34,14 @@ from vs_core.api import (
     SessionSpec,
     SessionsState,
     SessionView,
+    StrategyState,
     initial_state,
 )
 from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
     CoreRuntime,
+    CoreRuntimeBindings,
     OrphanWaitError,
     RuntimeCommitError,
     RuntimeCommitUncertainError,
@@ -69,6 +77,17 @@ def test_every_committed_input_reloads_the_exact_envelope(times: list[int]) -> N
         assert isinstance(stored, StoredEnvelope)
         restored = RuntimeRecord[CounterState].model_validate_json(stored.payload)
         assert restored == shell.record
+        # The commit path no longer decodes what it wrote, so this is where the codec
+        # properties live: the persisted bytes decode (through the registry codec, as a
+        # resume does) to the committed record, and re-encoding gives the same bytes in
+        # both the stored form and the canonical envelope form.
+        registry = OperationRegistry()
+        decoded = RuntimeRecord[CounterState].decode(stored, registry)
+        assert decoded == shell.record
+        assert decoded.model_dump_json().encode() == stored.payload
+        assert registry.encode_envelope(decoded.envelope) == registry.encode_envelope(
+            shell.record.envelope
+        )
         assert restored.envelope.strategy.callbacks == index
         assert restored.envelope.event_cursor.sequence == index
         assert len(restored.pending_publications) == index
@@ -218,6 +237,51 @@ def test_an_input_stamped_before_an_earlier_commit_still_commits_and_renews(
         assert shell.holds_lease(now_at=stamp)
         shell.renew(now_at=stamp, lease_duration=1000)
     assert shell.record.envelope.core.run.now_at == len(stamps)
+
+
+class CountingRegistry(OperationRegistry):
+    """The real codec, counting whole-envelope encodes and decodes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.encodes = 0
+        self.decodes = 0
+        self.validations = 0
+
+    def encode_envelope(self, envelope: RunEnvelope[Any]) -> str:
+        self.encodes += 1
+        return super().encode_envelope(envelope)
+
+    def decode_envelope[S: StrategyState](
+        self, model: type[RunEnvelope[S]], source: str
+    ) -> RunEnvelope[S]:
+        self.decodes += 1
+        return super().decode_envelope(model, source)
+
+    def validate_envelope(self, envelope: RunEnvelope[Any]) -> None:
+        self.validations += 1
+        super().validate_envelope(envelope)
+
+
+@given(times=st.lists(st.integers(min_value=1, max_value=20), min_size=1, max_size=10))
+def test_a_commit_validates_once_and_never_round_trips_the_envelope(times: list[int]) -> None:
+    registry = CountingRegistry()
+    store = FakeStateStore()
+    shell = CoreRuntime(
+        store,
+        CounterStrategy(),
+        initial_state(),
+        bindings=CoreRuntimeBindings(registry=registry, transitions=ShellTraceTransitions()),
+    )
+    shell.start("host", now_at=0, lease_duration=100)
+    registry.encodes = registry.decodes = registry.validations = 0
+    for index, time in enumerate(sorted(times), start=1):
+        shell.submit(ClockAdvanced(now_at=time), now_at=time)
+        assert shell.advance()
+        assert shell.storage_revision is not None
+        assert registry.validations == index
+        assert registry.encodes == 0
+        assert registry.decodes == 0
 
 
 def _closing_session_with_nothing_to_end_it() -> CoreState:

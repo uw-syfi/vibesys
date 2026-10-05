@@ -337,6 +337,7 @@ from vs_core.types.session_inputs import (
     SessionInput,
 )
 from vs_core.types.sessions import (
+    TURN_FAILURE_DETAIL_LIMIT,
     Access,
     CancelTurn,
     CloseSession,
@@ -374,6 +375,7 @@ from vs_core.types.sessions import (
     SessionView,
     SnapshotAndRetainRun,
     SteerReceived,
+    TurnFailureKind,
     TurnInputsReserved,
     TurnObserved,
     TurnRequested,
@@ -435,6 +437,7 @@ from vs_core.types.strategy import (
 __all__ = [
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
+    "TURN_FAILURE_DETAIL_LIMIT",
     "Accepted",
     "Access",
     "AdmissionControl",
@@ -791,6 +794,7 @@ __all__ = [
     "TraceFrame",
     "Transition",
     "TrustedBaseline",
+    "TurnFailureKind",
     "TurnInputsReserved",
     "TurnObserved",
     "TurnRequested",

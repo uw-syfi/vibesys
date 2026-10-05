@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, PROFILER
 from vibesys.run.evaluation_backend import (
     EvidenceReusingEvaluation,

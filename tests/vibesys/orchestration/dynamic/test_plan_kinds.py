@@ -23,8 +23,8 @@ from tests.support.evaluation_scenarios import (
     ScenarioSpec,
     build_scenario,
 )
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.models import (
     DynamicProfile,
     DynamicState,

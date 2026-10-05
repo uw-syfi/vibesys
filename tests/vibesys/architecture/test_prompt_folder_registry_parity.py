@@ -11,12 +11,20 @@ from pathlib import Path
 
 from launch import built_in_orchestrations
 
+_ORCHESTRATION = Path(__file__).parents[3].resolve() / "src" / "vibesys" / "orchestration"
+
 
 def _registered_strategy_folders() -> set[str]:
     registry = built_in_orchestrations()
     folders = set()
     for registration in registry._registrations.values():  # noqa: SLF001  # LW-040196 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
-        module = registration.plugin.orchestrate.__module__
+        plugin = registration.plugin
+        if plugin.core is not None:
+            # A core policy has no orchestrate function: its prompt folder names its strategy.
+            location = Path(plugin.core.prompt_templates).resolve().relative_to(_ORCHESTRATION)
+            folders.add(location.parts[0])
+            continue
+        module = plugin.orchestrate.__module__
         prefix = "vibesys.orchestration."
         assert module.startswith(prefix), f"registered policy {module!r} is not under {prefix}"
         folders.add(module.split(".")[2])
@@ -25,7 +33,7 @@ def _registered_strategy_folders() -> set[str]:
 
 def test_every_registered_strategy_has_a_local_prompt_owner() -> None:
     folders = _registered_strategy_folders()
-    orchestration = Path(__file__).parents[3] / "src" / "vibesys" / "orchestration"
+    orchestration = _ORCHESTRATION
     missing = sorted(
         folder
         for folder in folders

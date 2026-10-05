@@ -67,7 +67,7 @@ _TURN_PHASES = {
 
 
 def key_of(record: AttemptRecord) -> str:
-    """Stable subject of one workstream."""
+    """Stable raw subject of one workstream; the id constructors encode it."""
     return f"{record.plan.work_id}.{record.sequence}"
 
 
@@ -81,8 +81,10 @@ def role_of(phase: WorkPhase) -> Role | None:
     return _TURN_PHASES.get(phase)
 
 
-def _first_turn(role: Role) -> TurnRecord:
-    return TurnRecord(role=role, serial=0, charge="free" if role is Role.JUDGE else "paid")
+def _first_turn(record: AttemptRecord, role: Role) -> TurnRecord:
+    return TurnRecord(
+        role=role, serial=record.next_serial, charge="free" if role is Role.JUDGE else "paid"
+    )
 
 
 def decide(draft: Draft) -> None:
@@ -165,7 +167,9 @@ def _start(draft: Draft, record: AttemptRecord) -> AttemptRecord:
                 base=record.parent,
             ),
             budget=AttemptBudget(
-                admission_charge=1, paid_invocation_limit=draft.config.max_retries_per_round
+                admission_charge=1,
+                paid_invocation_limit=draft.config.max_retries_per_round,
+                retry_limit=draft.config.max_corrections + draft.config.max_turn_drops,
             ),
         )
     )
@@ -182,7 +186,7 @@ def _default_context(record: AttemptRecord, draft: Draft) -> PromptContext:
 
 def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
     role = _TURN_PHASES[record.phase]
-    turn = record.turn or _first_turn(role)
+    turn = record.turn or _first_turn(record, role)
     subject = subject_of(record, role)
     scope = attempt_scope(draft.view, record.attempt, record.generation)
     if record.step is Step.NEEDED:
@@ -190,7 +194,12 @@ def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
         identifier = render_id(subject, turn)
         draft.emit(operation(draft, identifier, scope, render_request(subject, turn, body)))
         return record.model_copy(
-            update={"turn": turn, "step": Step.RENDERING, "awaiting": identifier}
+            update={
+                "turn": turn,
+                "step": Step.RENDERING,
+                "awaiting": identifier,
+                "next_serial": max(record.next_serial, turn.serial + 1),
+            }
         )
     if record.step is not Step.RENDERED:
         return record
