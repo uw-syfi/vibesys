@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 
 from vs_evaluation.api import (
     MAX_EVIDENCE_SUMMARY_CHARS,
+    STAGE_OUTPUT_TAIL_CHARS,
     AvailabilitySnapshot,
     EvaluationRequest,
     EvaluationState,
@@ -43,7 +44,7 @@ from vs_runtime._trusted_evaluation import (
     build_trusted_benchmark_command,
     decode_trusted_benchmark_run,
 )
-from vs_runtime.contracts import RunCleanupError
+from vs_runtime.contracts import BenchmarkFailureKind, RunCleanupError
 from vs_sandbox.api.slurm import (
     PROFILE_OUTPUT_ROOT,
     SharedSlurmAdmission,
@@ -342,10 +343,13 @@ class SemanticSlurmEvaluationExecutor:
                 and metadata.job_exit_code == 0
                 and metadata.collection_failure is None
             )
-            infrastructure_failure |= not completed
             evidence = self._evidence(
                 stage, raw, raw_step.failure, handle_id=handle_id, completed=completed
             )
+            # A job that exited cleanly can still hold a benchmark whose evaluator died
+            # before writing its result, so the evidence's own kind counts too.
+            completed &= evidence.failure_kind is not BenchmarkFailureKind.INFRASTRUCTURE
+            infrastructure_failure |= not completed
             if evidence.outcome is EvidenceOutcome.FAILED:
                 failed_checks.append((evidence.semantic_summary, stage.kind))
             results.append(
@@ -354,6 +358,8 @@ class SemanticSlurmEvaluationExecutor:
                     state=StageState.SUCCEEDED if completed else StageState.FAILED,
                     result=evidence.model_dump(mode="json"),
                     duration_s=raw_step.duration_s,
+                    stdout_tail=raw.stdout[-STAGE_OUTPUT_TAIL_CHARS:] or None,
+                    stderr_tail=raw.stderr[-STAGE_OUTPUT_TAIL_CHARS:] or None,
                     failure_kind=None if completed else StageFailureKind.COLLECTION,
                     failure=(
                         None
@@ -411,6 +417,11 @@ class SemanticSlurmEvaluationExecutor:
         metrics: tuple[EvidenceMetric, ...] = ()
         summary: str | None = None
         partial: PartialMeasurement | None = None
+        # A command that never reported an exit status (node loss, collection failure) is
+        # infrastructure whatever its output says. One that exited, even nonzero, is the
+        # workload's, except a benchmark whose evaluator wrote no result record.
+        ran = raw.executed and raw.exit_code is not None and raw.collection_failure is None
+        kind = BenchmarkFailureKind.WORKLOAD if ran else BenchmarkFailureKind.INFRASTRUCTURE
         contract = self._trusted_plan.benchmark_contract
         if stage.kind is EvidenceKind.BENCHMARK and contract is not None:
             decoded = decode_trusted_benchmark_run(
@@ -425,6 +436,8 @@ class SemanticSlurmEvaluationExecutor:
             elif decoded.violation is not None:
                 failure = f"{failure or raw.output}\n{decoded.violation}"
             passed = decoded.passed
+            if ran and decoded.failure_kind is not None:
+                kind = decoded.failure_kind
             metrics = tuple(
                 EvidenceMetric(
                     name=name,
@@ -469,6 +482,7 @@ class SemanticSlurmEvaluationExecutor:
             semantic_summary=summary,
             metrics=metrics,
             partial_measurement=partial,
+            failure_kind=None if passed else kind,
             accepted_round=0,
         )
 

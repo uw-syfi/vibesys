@@ -8,11 +8,10 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass, replace
 from datetime import timedelta
-from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from vs_agent.api import (
     AgentExecutionPolicy,
@@ -30,6 +29,13 @@ from vs_agent.api import (
     Unknown,
     build_agent_client,
     parse_typed_response,
+)
+from vs_runtime._agent_lifecycle import (
+    AgentExecutionFinished,
+    AgentExecutionLifecycleEvent,
+    AgentExecutionLifecycleSink,
+    AgentExecutionStarted,
+    AgentExecutionStatus,
 )
 from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
 
@@ -222,52 +228,6 @@ class AgentExecutionScope:
     invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None
     #: Root of the run's dedicated agent CLI homes (see ``build_agent_client``).
     agent_homes_directory: Path | None = None
-
-
-class AgentExecutionStatus(StrEnum):
-    """Driver-neutral outcome of one agent execution."""
-
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    INTERRUPTED = "interrupted"
-
-
-class AgentExecutionStarted(BaseModel):
-    """Semantic start of one provider invocation."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    agent_id: str
-    label: str
-    execution_id: str
-    system_prompt: str
-    user_prompt: str
-    driver: str | None = None
-    provider: str | None = None
-    model: str | None = None
-
-
-class AgentExecutionFinished(BaseModel):
-    """Semantic terminal observation for one provider invocation."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    agent_id: str
-    label: str
-    execution_id: str
-    status: AgentExecutionStatus
-    result: Any = None
-    error: str | None = None
-
-
-type AgentExecutionLifecycleEvent = AgentExecutionStarted | AgentExecutionFinished
-
-
-class AgentExecutionLifecycleSink(Protocol):
-    """Record one semantic execution lifecycle observation synchronously."""
-
-    def __call__(self, event: AgentExecutionLifecycleEvent) -> object: ...
 
 
 type AgentMessageRouter = Callable[[str, tuple[str, ...]], str]

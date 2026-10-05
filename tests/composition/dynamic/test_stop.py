@@ -6,11 +6,9 @@ import os
 import threading
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.composition.dynamic._harness import (
     PASS,
     AgentTransportError,
-    CancelGapError,
     LoopInput,
     ScriptedAgents,
     Turn,
@@ -149,16 +147,6 @@ def test_a_stop_during_a_candidate_evaluation_cancels_its_job_and_starts_no_new_
     assert any(command.startswith("scancel ") for command in commands)
 
 
-_CANCEL_GAP = (
-    "gap (owner: vs-runtime): when the grace bound cancels the run, a core agent turn "
-    "still running is waited out and the provider turn is never cancelled "
-    "(libs/vs-runtime/src/vs_runtime/_agent_sessions.py:99 await_session_operation "
-    "swallows the cancel, and _session_requests.py:690 hands it no client to cancel), so "
-    "a stuck provider turn outlives the grace bound. The legacy path cancelled the client."
-)
-
-
-@pytest.mark.xfail(strict=True, raises=CancelGapError, reason=_CANCEL_GAP)
 def test_a_stop_mid_turn_ends_at_the_grace_bound_and_starts_no_evaluation(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     handles = _Handles()
@@ -193,8 +181,7 @@ def test_a_stop_mid_turn_ends_at_the_grace_bound_and_starts_no_evaluation(tmp_pa
     assert run.error is None, run.error
     assert run.status is RunStatus.STOPPED
     assert seen["armed"] is True
-    if seen["cancelled"] is not True:
-        raise CancelGapError
+    assert seen["cancelled"] is True
     # One grace period on the injected clock bounded the run.
     assert timer.delays == [STOP_GRACE_S]
     commands_at_stop = seen["commands_at_stop"]

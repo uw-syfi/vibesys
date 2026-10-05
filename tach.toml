@@ -336,12 +336,17 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts", "vibesys.run.core_services"]
+depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events"]
 
 [[modules]]
 path = "vibesys.run.core_services"
 layer = "orchestration_host"
 depends_on = ["vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.run.measurement_events"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.core_run"
@@ -1054,7 +1059,7 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.dynamic.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.dynamic.agents", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.run.contracts"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.run.contracts"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.core_policy"]
@@ -1069,7 +1074,18 @@ expose = ["ResolvedRun", "dynamic_core_registration", "dynamic_operation_catalog
 # place that stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.dynamic_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.orchestration.dynamic.agents", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.run.evaluation_backend"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.dynamic_roles", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.run.evaluation_backend"]
+
+[[interfaces]]
+from = ["vibesys.dynamic_roles"]
+expose = ["CORE_ROLES", "IMPLEMENTER", "JUDGE", "ORCHESTRATOR", "PROFILER"]
+
+[[modules]]
+# The agent roles of a core dynamic run: host wiring (vs_runtime values, template file
+# paths) that the pure core_policy may not hold.
+path = "vibesys.dynamic_roles"
+layer = "loops"
+depends_on = ["vs_prompts", "vs_runtime", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.strategy"]
 
 [[modules]]
 path = "vs_core._session_scope"

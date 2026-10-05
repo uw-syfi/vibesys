@@ -132,12 +132,14 @@ class _SharedCancelClient(FakeAgentClient):
         capabilities: AgentCapabilities,
         session_store: SessionStore | None,
         skill_selection: SkillSelection,
+        log_dir: Path | None,
     ) -> None:
         super().__init__(
             capabilities=capabilities,
             session_reuse=True,
             session_store=session_store,
             skill_selection=skill_selection,
+            log_dir=log_dir,
         )
         self._seen = seen
 
@@ -164,22 +166,6 @@ class CrashGapError(KnownGapError):
     def __init__(self) -> None:
         """Say why there is nothing to resume."""
         super().__init__("the scripted planner death was retried: the run never crashed")
-
-
-class InfraRetryGapError(KnownGapError):
-    """A benchmark process that dies without a result is not measured again."""
-
-    def __init__(self, measured: int, expected: int) -> None:
-        """Say how often the input was measured."""
-        super().__init__(f"input measured {measured} times, expected {expected}")
-
-
-class CancelGapError(KnownGapError):
-    """A stuck provider turn is not cancelled when the stop grace bound ends the run."""
-
-    def __init__(self) -> None:
-        """Say what was not cancelled."""
-        super().__init__("the stuck provider turn was never cancelled")
 
 
 class ScriptExhaustedError(AssertionError):
@@ -289,6 +275,7 @@ class ScriptedAgents:
         *,
         session_store: SessionStore | None = None,
         skill_selection: SkillSelection = NULL_SKILL_SELECTION,
+        log_dir: Path | None = None,
         **_kwargs: object,
     ) -> FakeAgentClient:
         """Build a Fake client with the capabilities the agent CLI drivers report."""
@@ -297,6 +284,7 @@ class ScriptedAgents:
             capabilities=AgentCapabilities(session_reuse=True, provider_session_resume=True),
             session_store=session_store,
             skill_selection=skill_selection,
+            log_dir=log_dir,
         )
         for role in (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id):
             client.set_response(role, self._answer)
@@ -592,6 +580,7 @@ def _assert_invariants(request: RunRequest, run: LoopRun) -> None:
         [event.model_dump(mode="json") for event in run.events],
         load_envelope(root, run.run_id),
         root.parent / "cluster",
+        Project.log_directory_for(root, run.run_id),
     )
     violations = check(records)
     assert not violations, [f"{v.invariant}: {v.detail}" for v in violations]

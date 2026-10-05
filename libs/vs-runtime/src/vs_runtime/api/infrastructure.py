@@ -24,16 +24,18 @@ from vs_agent.api import (
 from vs_runtime._agent_execution import (
     AgentExecutionConfiguration,
     AgentExecutionEnvironment,
-    AgentExecutionFinished,
-    AgentExecutionLifecycleEvent,
-    AgentExecutionLifecycleSink,
     AgentExecutionScope,
-    AgentExecutionStarted,
-    AgentExecutionStatus,
     AgentMessageRouter,
     ScopedAgentEnvironment,
     SharedAgentEnvironmentConflictError,
     open_agent_execution_environment,
+)
+from vs_runtime._agent_lifecycle import (
+    AgentExecutionFinished,
+    AgentExecutionLifecycleEvent,
+    AgentExecutionLifecycleSink,
+    AgentExecutionStarted,
+    AgentExecutionStatus,
 )
 from vs_runtime._agent_sessions import RuntimeWorkspaceAgentSessions
 from vs_runtime._bounded_stop import (
