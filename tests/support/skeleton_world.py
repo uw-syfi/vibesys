@@ -32,6 +32,7 @@ from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
 from vs_core.api import (
     ClockAdvanced,
+    Limits,
     RoleId,
     RunFacts,
     RunStatus,
@@ -154,6 +155,7 @@ class World:
     operations: OperationCatalog = field(default_factory=empty_catalog)
     timed: tuple[FakeRunClock, float] | None = None
     polls: list[str] = field(default_factory=list)
+    limits: Limits = field(default_factory=Limits)
     yields: Callable[[RuntimeWorkspaces, StateNamespace], TurnYields] | None = None
     """Builds the turn-yield source from the host's workspaces and receipts, per process."""
 
@@ -176,7 +178,7 @@ class World:
             facts,
             DECLARATION,
             offered=self.operations,
-            startup=CoreStartup(deadline_at=1000.0),
+            startup=CoreStartup(deadline_at=1000.0, limits=self.limits),
         )
 
     def bindings(self) -> CoreRuntimeBindings:
@@ -409,15 +411,16 @@ def open_skeleton_world(
     strategy: SkeletonStrategy | None = None,
     cluster: ScenarioCluster | None = None,
     timed: tuple[FakeRunClock, float] | None = None,
+    agents: Callable[[Path], SessionHost] | None = None,
 ) -> Iterator[World]:
     """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
     with open_workspace_env(tmp_path) as env:
-        agents = _open_agents(tmp_path / "project")
+        hosted = (agents or _open_agents)(tmp_path / "project")
         yield World(
             env=env,
             root=tmp_path / "project",
             cluster=cluster or ScenarioCluster(),
-            agents=agents,
+            agents=hosted,
             strategy=strategy or SkeletonStrategy(),
             timed=timed,
         )

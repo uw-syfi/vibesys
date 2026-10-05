@@ -53,6 +53,7 @@ from .types.evaluation import (
     CancelOwnedJob,
     CollectEvidence,
     ContinuationJobsChanged,
+    ContinuationPhase,
     EvidenceAcceptanceReceipt,
     InspectOwnedJob,
     JobObserved,
@@ -553,6 +554,53 @@ def _source(
 def _submission_observed(
     state: EvaluationState, context: EvaluationContext, event: MeasurementSubmissionObserved
 ) -> AreaChange[EvaluationState]:
+    """Apply a submission's own observation, then re-derive the attempt's history.
+
+    The ledger takes a job's end as its submission's own observation after the job event
+    that carried it, so the history that event produced could not yet read the closed
+    submission. This is the first moment it can.
+    """
+    change = _submission_receipted(state, context, event)
+    proof = _source(context, event.observation)
+    if (
+        not _conclusive(event.observation)
+        or not isinstance(proof, Proven)
+        or not isinstance(proof.value.request, SubmitMeasurement)
+    ):
+        return change
+    scope = proof.value.request.scope
+    wake = _deferred_wake(change.state, event, proof.value)
+    # A waiting continuation derives and publishes the history itself when it authorizes.
+    history = () if wake else _history_signals(change.state, context, scope)
+    return change.model_copy(update={"signals": (*change.signals, *history, *wake)})
+
+
+def _deferred_wake(
+    state: EvaluationState, event: MeasurementSubmissionObserved, source: Intent
+) -> tuple[ContinuationJobsChanged, ...]:
+    """The wake of a job's end that waited for the ledger to close its submission."""
+    job = next((j for j in state.jobs if j.submission_id == source.request_id), None)
+    if job is None or job.resource_id is None or job.observation != event.observation:
+        return ()
+    if not _conclusive(event.observation):
+        return ()
+    if not any(
+        c.phase == ContinuationPhase.WAITING and job.resource_id in c.jobs
+        for c in state.continuations
+    ):
+        return ()
+    return (
+        ContinuationJobsChanged(
+            resource_id=job.resource_id,
+            observation=event.observation,
+            previous=UnobservedJobFacts(resource_id=job.resource_id),
+        ),
+    )
+
+
+def _submission_receipted(
+    state: EvaluationState, context: EvaluationContext, event: MeasurementSubmissionObserved
+) -> AreaChange[EvaluationState]:
     proof = _source(context, event.observation)
     if not isinstance(proof, Proven):
         return AreaChange(state=state)
@@ -895,12 +943,20 @@ def _job_source(
     )
 
 
-def _builtin_source(
-    state: EvaluationState, context: EvaluationContext, job: OwnedJob, source: Intent
-) -> Verdict[OwnedJob]:
-    request = source.request
-    if not isinstance(request, SubmitMeasurement) or request.plan != job.plan:
-        return Mismatch(ProofField.PAYLOAD)
+def _measure_origin(
+    state: EvaluationState, context: EvaluationContext, source: Intent, request: SubmitMeasurement
+) -> Verdict[None]:
+    """Prove where a submission came from: an accepted Measure, or a recorded agent call.
+
+    An agent call has no decision. Core's own record of the call it admitted names the
+    request it allocated, so the same scope and request id prove the origin.
+    """
+    if request.decision_id is None:
+        admitted = any(
+            call.request_id == source.request_id and call.scope == request.scope
+            for call in state.agent_calls
+        )
+        return Proven(None) if admitted else Missing(ProofReason.ABSENT_RECEIPT)
     receipt = accepted_receipt_for(context.run.receipts, request.decision_id, None)
     if not isinstance(receipt, Proven):
         return receipt
@@ -916,6 +972,18 @@ def _builtin_source(
         return resolved
     if resolved.value != request.plan:
         return Mismatch(ProofField.PAYLOAD)
+    return Proven(None)
+
+
+def _builtin_source(
+    state: EvaluationState, context: EvaluationContext, job: OwnedJob, source: Intent
+) -> Verdict[OwnedJob]:
+    request = source.request
+    if not isinstance(request, SubmitMeasurement) or request.plan != job.plan:
+        return Mismatch(ProofField.PAYLOAD)
+    origin = _measure_origin(state, context, source, request)
+    if not isinstance(origin, Proven):
+        return origin
     budget = submission_budget_for(request, state.submission_budgets, context.run.receipts)
     return Proven(job) if isinstance(budget, Proven) else budget
 
@@ -1103,9 +1171,13 @@ def _job_observed(
             )
         if observation.accepted and not updated.evidence:
             requests = (_job_request(CollectEvidence, updated, context, "evidence"),)
+    closing = _ended(context, job, event)
     return AreaChange(
         state=state,
-        signals=(*_history_signals(state, context, job.scope), wake, *_ended(context, job, event)),
+        # While the ledger still has to take the job's end as its submission's own, the
+        # history and the wake wait for it (see `_submission_observed`): both would read a
+        # history in which this submission is not closed.
+        signals=closing or (*_history_signals(state, context, job.scope), wake),
         requests=requests if context.run.status != RunStatus.TERMINAL else (),
         events=events,
     )
@@ -1119,7 +1191,8 @@ def _ended(
     """The job's first conclusive observation, handed to the ledger as its submission's own.
 
     A job's observations carry its submission's request id and sequence, so the end of
-    the job is a fact about the submit request. When the submit's own view was taken
+    the job is a fact about the submit request, with the terminal facts the history reads.
+    When the submit's own view was taken
     while the job still ran, nothing else completes that intent, and a closing run waits
     for every open one. A submission the ledger already closed needs nothing, and one it
     never dispatched cannot have been observed.
@@ -1135,7 +1208,9 @@ def _ended(
     )
     if intent is None or intent.phase in (IntentPhase.PREPARED, IntentPhase.COMPLETED):
         return ()
-    return (RequestObserved(observation=event.observation),)
+    return (
+        RequestObserved(observation=event.observation, evaluation_result=event.evaluation_result),
+    )
 
 
 def _next_poll(
