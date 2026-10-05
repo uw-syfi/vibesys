@@ -54,6 +54,14 @@ def baseline_resolved(state: DynamicStrategyState) -> bool:
     }
 
 
+def input_trusted(state: DynamicStrategyState) -> bool:
+    """Whether the input revision has a trusted reading, or no gate is configured to give one."""
+    return (
+        state.baseline.stage in {BaselineStage.MEASURED, BaselineStage.NOT_CONFIGURED}
+        and state.baseline.accuracy_passed is not False
+    )
+
+
 def offered(state: DynamicStrategyState, view: RunView) -> tuple[ParentOption, ...]:
     """Parents the planner may name: provable by core and not withheld."""
     return tuple(

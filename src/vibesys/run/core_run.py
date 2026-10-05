@@ -14,7 +14,7 @@ import os
 import uuid
 from typing import TYPE_CHECKING
 
-from vs_core.api import RunResultProposal
+from vs_core.api import RetainedCandidate, RunResultProposal
 from vs_runtime.api import RunStatus
 from vs_runtime.api.core import (
     CoreRunHost,
@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 LEASE_SECONDS = 60.0
 
 _STOP_RESULT = RunResultProposal(outcome="cancelled", reason="stop requested by the operator")
+_DEADLINE_RESULT = RunResultProposal(outcome="cancelled", reason="run deadline reached")
 
 
 class CoreRunRefusedError(RuntimeError):
@@ -76,6 +77,8 @@ def _loop_config(run_id: str) -> RunLoopConfig:
     return RunLoopConfig(
         host_id=f"vibesys:{run_id}:{os.getpid()}:{uuid.uuid4().hex[:8]}",
         lease_duration=LEASE_SECONDS,
+        stop_result=_STOP_RESULT,
+        deadline_result=_DEADLINE_RESULT,
     )
 
 
@@ -112,12 +115,34 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
             await bridge.close()
     if outcome.refusal is not None:
         raise CoreRunRefusedError(services.run_id, outcome.refusal)
-    result = outcome.result
-    if result is not None and result.outcome == "success":
-        return RunStatus.SUCCEEDED
-    if result is not None and result == _STOP_RESULT:
+    return _status_of(outcome.result, shell)
+
+
+def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatus:
+    """Map the run's recorded result to the status a plugin returns.
+
+    The kernel keeps the first stop result, so a run that reaches its deadline records
+    "cancelled" even when its strategy drained into an adopted candidate. A time budget
+    is the normal way an optimization run ends, so a deadline that found a verified
+    retained candidate is a success; with none it is a failure. An operator stop is
+    reported as stopped.
+    """
+    if result is None:
+        return RunStatus.FAILED
+    if result == _STOP_RESULT:
         raise RunStopped
-    return RunStatus.FAILED
+    kept = result == _DEADLINE_RESULT and _adopted_retained_candidate(shell)
+    return RunStatus.SUCCEEDED if result.outcome == "success" or kept else RunStatus.FAILED
+
+
+def _adopted_retained_candidate(shell: CoreRuntime) -> bool:
+    """Whether core verified the adoption of a retained candidate."""
+    adoption = shell.record.envelope.core.settlement.adoption
+    return (
+        adoption is not None
+        and adoption.verified
+        and isinstance(adoption.selection, RetainedCandidate)
+    )
 
 
 __all__ = ["LEASE_SECONDS", "CoreRunRefusedError", "drive_core_run"]
