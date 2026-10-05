@@ -28,6 +28,7 @@ from tests.support.session_world import (
 
 from vs_core.api import (
     ObservationStatus,
+    ReissueProof,
     ResourceId,
 )
 from vs_project.api import Project
@@ -298,21 +299,42 @@ async def test_unknown_acceptance_is_inspected_and_never_dispatched_again() -> N
 
 
 @pytest.mark.asyncio
-async def test_inspect_translates_a_completed_turn_and_a_never_dispatched_one() -> None:
+async def test_inspect_translates_a_completed_turn() -> None:
     async with world() as w:
         await w.execute(ensure_request())
-        never = await w.execute(inspect_request("req-i1", "inv-1"))
-        assert never.observation.target is not None
-        target = never.observation.target.observation
-        assert target.status is ObservationStatus.FAILED
-        assert target.terminal
-        assert not target.accepted
         dispatched = await w.execute(dispatch_request())
-        seen = await w.execute(inspect_request("req-i2", "inv-1"))
+        seen = await w.execute(inspect_request("req-i2", "inv-1", dispatch="req-dispatch"))
         assert seen.observation.target is not None
         assert seen.observation.target.observation.status is ObservationStatus.SUCCEEDED
         assert turn_output(seen) == turn_output(dispatched) is not None
         assert_core_accepts([dispatched, seen], expect_retry=False)
+
+
+@pytest.mark.asyncio
+async def test_a_turn_with_no_dispatch_record_is_proven_never_began_for_its_named_dispatch() -> (
+    None
+):
+    async with world() as w:
+        await w.execute(ensure_request())
+        never = await w.execute(inspect_request("req-i1", "inv-1", dispatch="req-dispatch"))
+        assert never.observation.target is not None
+        target = never.observation.target
+        assert target.observation.request_id.root == "req-dispatch"
+        assert target.reissue is ReissueProof.NEVER_BEGAN
+        assert not target.observation.accepted
+        assert never.owner_events == ()
+        assert w.host.turns == []
+        assert_core_accepts([never], expect_retry=False)
+
+
+@pytest.mark.asyncio
+async def test_a_turn_with_no_dispatch_record_and_no_named_dispatch_stays_unknown() -> None:
+    async with world() as w:
+        await w.execute(ensure_request())
+        unnamed = await w.execute(inspect_request("req-i1", "inv-1"))
+        assert unnamed.observation.target is None
+        assert status(unnamed) is ObservationStatus.UNKNOWN
+        assert w.host.turns == []
 
 
 @pytest.mark.asyncio

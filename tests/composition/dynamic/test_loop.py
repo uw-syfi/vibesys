@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import tempfile
 import unicodedata
 from pathlib import Path
@@ -17,6 +18,7 @@ from tests.composition.dynamic._harness import (
     PASS,
     AgentTransportError,
     CoreRecords,
+    CrashGapError,
     LoopInput,
     ScriptedAgents,
     Turn,
@@ -29,7 +31,7 @@ from tests.composition.dynamic._harness import (
 )
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vs_agent.api import AgentOutputSchemaError
+from vs_agent.api import AgentOutputSchemaError, AgentSpawnError, AgentTurnTimeoutError
 from vs_runtime.api.core import RunStalledError
 
 if TYPE_CHECKING:
@@ -510,7 +512,7 @@ def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
         assert item["rounds"][0]["eligible"]
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=LEASE_GAP)
+@pytest.mark.xfail(strict=True, raises=CrashGapError, reason=LEASE_GAP)
 def test_a_crashed_run_resumes_from_its_committed_record_and_finishes(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     request = loop_input.request(max_rounds=2)
@@ -521,7 +523,8 @@ def test_a_crashed_run_resumes_from_its_committed_record_and_finishes(tmp_path: 
         .judge("H1", PASS)
     )
     crashed = run_request(request, first)
-    assert crashed.error is not None
+    if crashed.error is None:
+        raise CrashGapError
     seen: dict[str, int] = {}
 
     def build_on_first(agent: Turn) -> dict[str, object]:
@@ -547,3 +550,29 @@ def test_a_crashed_run_resumes_from_its_committed_record_and_finishes(tmp_path: 
     records = CoreRecords(loop_input, crashed.run_id)
     assert [item["hypothesis_id"] for item in records.strategy["hypotheses"]] == ["H1", "H2"]
     assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 3\n"
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        AgentSpawnError("claude", "exit status 1"),
+        AgentTurnTimeoutError(30),
+        OSError("broken pipe"),
+        subprocess.CalledProcessError(1, ["claude"]),
+        RuntimeError("claude exited with code 1"),
+    ],
+    ids=lambda failure: type(failure).__name__,
+)
+def test_a_planner_turn_killed_by_any_cli_failure_ends_the_run_without_a_stall(
+    tmp_path: Path, failure: Exception
+) -> None:
+    loop_input = LoopInput.create(tmp_path)
+    agents = ScriptedAgents().plan(*[failure] * (_DROP_BUDGET + 1))
+
+    run = run_request(loop_input.request(), agents)
+
+    assert not isinstance(run.error, RunStalledError), run.error
+    assert agents.unscripted == []
+    status, outcome = CoreRecords(loop_input, run.run_id).outcome
+    assert status == "terminal"
+    assert outcome != "success"

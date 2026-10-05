@@ -28,12 +28,14 @@ from vs_core.api import (
     Request,
     RoleId,
     RunEnvelope,
+    RunView,
     Scope,
     SessionId,
     SessionPhase,
     SessionSpec,
     SessionsState,
     SessionView,
+    StrategyEvent,
     StrategyState,
     initial_state,
 )
@@ -320,3 +322,31 @@ def test_a_host_that_starts_over_a_run_with_an_orphan_wait_refuses_it() -> None:
         shell.start("reader", now_at=1, lease_duration=1)
     with pytest.raises(RuntimeCommitError):
         shell.decide(now_at=2)
+
+
+class _InvalidStateStrategy(CounterStrategy):
+    """A strategy whose fold builds its state with `model_copy`, which skips validators."""
+
+    def bind(self, state: CounterState) -> _InvalidStateStrategy:
+        return _InvalidStateStrategy(state)
+
+    def on_event(self, view: RunView, event: StrategyEvent) -> CounterState:
+        del view, event
+        return self.state.model_copy(update={"callbacks": "not a count"})
+
+
+def test_a_strategy_state_that_breaks_its_own_invariant_never_becomes_durable() -> None:
+    """The commit rejects it, so the last good record stays loadable by a later process."""
+    store = FakeStateStore()
+    shell = CoreRuntime(
+        store,
+        _InvalidStateStrategy(),
+        initial_state(),
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+    )
+    shell.start("host", now_at=0, lease_duration=100)
+    before = store.load()
+    shell.submit(ClockAdvanced(now_at=1), now_at=1)
+    with pytest.raises(ValidationError):
+        shell.advance()
+    assert store.load() == before

@@ -10,6 +10,7 @@ from tests.composition.dynamic._harness import (
     PASS,
     AgentTransportError,
     CoreRecords,
+    CrashGapError,
     LoopInput,
     ScriptedAgents,
     edit_to,
@@ -81,14 +82,15 @@ def _candidate_jobs(rounds: int) -> int:
     return rounds
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=LEASE_GAP)
+@pytest.mark.xfail(strict=True, raises=CrashGapError, reason=LEASE_GAP)
 def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     _failing_input(loop_input)
     request = loop_input.request(max_rounds=1)
     first = ScriptedAgents().plan(AgentTransportError("planner died"))
     crashed = run_request(request, first)
-    assert crashed.error is not None
+    if crashed.error is None:
+        raise CrashGapError
     assert loop_input.sbatch_count() == _input_jobs()
     second = (
         ScriptedAgents()

@@ -131,9 +131,14 @@ def dispatch_request(
     )
 
 
-def inspect_request(request_id: str = "req-inspect", invocation: str = "inv-1") -> InspectTurn:
-    """An InspectTurn of one invocation."""
+def inspect_request(
+    request_id: str = "req-inspect",
+    invocation: str = "inv-1",
+    dispatch: str | None = None,
+) -> InspectTurn:
+    """An InspectTurn of one invocation, naming the request that dispatched it when given."""
     return InspectTurn(
+        dispatch=None if dispatch is None else RequestId(root=dispatch),
         request_id=RequestId(root=request_id),
         scope=SCOPE,
         deadline_at=100.0,

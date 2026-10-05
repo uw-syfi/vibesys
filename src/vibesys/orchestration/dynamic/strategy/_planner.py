@@ -88,6 +88,8 @@ def decide(draft: Draft) -> None:
     if turn is None:
         return
     if planner.step is Step.NEEDED:
+        if not draft.due(turn):
+            return
         prompt = context.planner_prompt(draft.state, draft.config, draft.view)
         body = (
             prompt
@@ -192,7 +194,7 @@ def on_turn(
     if turn is None:
         return state
     if event.failure is TurnFailureKind.TRANSPORT_LOST:
-        return _ask_again(state, planner, turn, config, event)
+        return _ask_again(state, config, event, view.run.now_at)
     plan, parse_error = _parse(state, view, config, event)
     check = (
         None
@@ -275,17 +277,18 @@ def _exhausted(
 
 
 def _ask_again(
-    state: DynamicStrategyState,
-    planner: PlannerState,
-    turn: TurnRecord,
-    config: DynamicConfig,
-    event: TurnResult,
+    state: DynamicStrategyState, config: DynamicConfig, event: TurnResult, now: float
 ) -> DynamicStrategyState:
     """The transport lost the planning turn: ask the same question again, within the budget.
 
-    The new turn corrects the lost one, so it spends no correction and no fresh-turn retry.
+    The new turn corrects the lost one, so it spends no correction and no fresh-turn retry,
+    and waits out the drop backoff on the run clock.
     Past ``max_turn_drops`` this planning call ends empty, as when corrections run out.
     """
+    planner = state.planner
+    turn = planner.turn
+    if turn is None:
+        return state
     if turn.drops >= config.max_turn_drops:
         return _nothing_valid(state, planner, event.detail or "the planner turn was lost", None)
     again = turn.model_copy(
@@ -294,6 +297,7 @@ def _ask_again(
             "drops": turn.drops + 1,
             "charge": "correction",
             "invocation": event.invocation,
+            "ask_not_before": now + config.drop_backoff(turn.drops),
         }
     )
     return state.model_copy(

@@ -252,6 +252,12 @@ class Proposal[S: StrategyState](Value):
 
     state: S
     decisions: tuple[Decision, ...]
+    wake_at: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    """The earliest run-clock time the strategy wants to be asked again, when it waits for time.
+
+    A strategy that holds work back until a time returns that time here, so the run loop
+    wakes then instead of concluding that nothing can happen. None means it waits for no time.
+    """
 
 
 class StrategyDeclaration(Value):

@@ -365,12 +365,17 @@ def _correct(
 
 
 def _ask_again(
-    state: DynamicStrategyState, index: int, config: DynamicConfig, event: TurnResult
+    state: DynamicStrategyState,
+    index: int,
+    config: DynamicConfig,
+    event: TurnResult,
+    now: float,
 ) -> DynamicStrategyState:
     """The transport lost the turn: ask the role again, or fail the workstream.
 
     The new turn is a correction of the lost one (it consumes no paid retry), asks the
-    same question, and counts against ``max_turn_drops`` for this logical turn. A resume
+    same question after the drop backoff on the run clock, and counts against
+    ``max_turn_drops`` for this logical turn. A resume
     cannot be asked again: core authorizes each continuation's resume once.
     """
     record = state.attempts[index]
@@ -391,6 +396,7 @@ def _ask_again(
             "charge": "correction",
             "invocation": event.invocation,
             "prompts": (),
+            "ask_not_before": now + config.drop_backoff(turn.drops),
         }
     )
     return _put(
@@ -586,14 +592,17 @@ def _decode(
 
 def _unfinished(
     state: DynamicStrategyState,
+    view: RunView,
     index: int,
     config: DynamicConfig,
-    role: Role,
     event: TurnResult,
 ) -> DynamicStrategyState:
     """A turn ended without a usable reply: ask again if lost, retry the implementer or fail."""
+    role = role_of(state.attempts[index].phase)
+    if role is None:
+        return state
     if event.failure is TurnFailureKind.TRANSPORT_LOST:
-        return _ask_again(state, index, config, event)
+        return _ask_again(state, index, config, event, view.run.now_at)
     reason = f"{role.value} turn did not complete ({event.observation.status.value})"
     if role is Role.IMPLEMENTER:
         return _retry(state, index, config, event.detail or reason, reason)
@@ -612,7 +621,7 @@ def on_turn(
     if role is None:
         return state
     if event.observation.status is not ObservationStatus.SUCCEEDED or event.output_json is None:
-        return _unfinished(state, index, config, role, event)
+        return _unfinished(state, view, index, config, event)
     if role is Role.PROFILER:
         return _put(state, index, _profiled(record, config))
     return _answered(state, index, view, config, event)

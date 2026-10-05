@@ -16,29 +16,8 @@ CI_DEPTH = 1
 SLOW_DEPTH = 3
 
 
-# A turn that crashed after its begun record is inspected as a turn, and core rejects that
-# inspection (no canonical invocation owner exists before the turn's first observation). What
-# an interrupted turn becomes is turn policy (LIVE-ROBUST-B, #1364); flip when it lands.
-_TURN_GAP = frozenset({"durable_write:receipt_begun#5"})
-
-
-def _marks(crossing: Crossing) -> list[pytest.MarkDecorator]:
-    if name(crossing) not in _TURN_GAP:
-        return []
-    return [
-        pytest.mark.xfail(
-            strict=True,
-            reason="core rejects the inspection of a turn that never produced an observation",
-        )
-    ]
-
-
 def _firsts() -> list[object]:
-    return [
-        pytest.param(c, id=name(c), marks=_marks(c))
-        for c in all_crossings()
-        if c.target != "commit"
-    ]
+    return [pytest.param(c, id=name(c)) for c in all_crossings() if c.target != "commit"]
 
 
 @pytest.mark.parametrize("first", _firsts())

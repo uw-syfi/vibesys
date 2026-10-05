@@ -190,6 +190,8 @@ def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
     subject = subject_of(record, role)
     scope = attempt_scope(draft.view, record.attempt, record.generation)
     if record.step is Step.NEEDED:
+        if not draft.due(turn):
+            return record
         body = turn.context or _default_context(record, draft)
         identifier = render_id(subject, turn)
         draft.emit(operation(draft, identifier, scope, render_request(subject, turn, body)))

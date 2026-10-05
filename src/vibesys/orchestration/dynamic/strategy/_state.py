@@ -137,6 +137,8 @@ class TurnRecord(Value):
     corrections: int = Field(default=0, ge=0)
     # Times this logical turn was lost to the transport and asked again.
     drops: int = Field(default=0, ge=0)
+    # Run-clock time before which a lost turn must not be asked again; None when due.
+    ask_not_before: float | None = Field(default=None, ge=0)
     charge: Literal["free", "paid", "correction", "resume"] = "paid"
     context: PromptContext | None = None
     prompts: tuple[ArtifactRef, ...] = ()

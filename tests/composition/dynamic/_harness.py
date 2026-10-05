@@ -150,6 +150,22 @@ class _SharedCancelClient(FakeAgentClient):
         self._seen.set()
 
 
+class KnownGapError(AssertionError):
+    """A scenario step that fails today for a tracked gap in another owner's code.
+
+    Each gap has its own subclass so an expected failure names the gap it waits on: an xfail
+    with ``raises=<subclass>`` still fails on any other mistake in the scenario.
+    """
+
+
+class CrashGapError(KnownGapError):
+    """A run cannot be crashed and resumed: a scripted agent error is retried, not fatal."""
+
+    def __init__(self) -> None:
+        """Say why there is nothing to resume."""
+        super().__init__("the scripted planner death was retried: the run never crashed")
+
+
 class ScriptExhaustedError(AssertionError):
     """An agent turn arrived that the scenario did not script."""
 
@@ -452,13 +468,18 @@ class LoopInput:
         """Return the cluster's pending-job announcement path (create a FIFO there)."""
         return self.cluster / SUBMITTED_FILE
 
-    def request(self, **flags: int | str) -> RunRequest:
+    def request(self, **flags: float | str) -> RunRequest:
         """Build the run request from the command line, as the operator's CLI does.
 
         ``flags`` are long options without the dashes, underscores for hyphens:
         ``max_rounds=2`` is ``--max-rounds 2``.
         """
-        chosen: dict[str, int | str] = {"max_rounds": 1, "max_in_flight": 1, **flags}
+        chosen: dict[str, float | str] = {
+            "max_rounds": 1,
+            "max_in_flight": 1,
+            "turn_drop_backoff_seconds": 0.01,
+            **flags,
+        }
         argv = [
             "--outer-loop", "dynamic",
             "--input", str(self.root),

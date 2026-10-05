@@ -57,6 +57,7 @@ from vs_core.api import (
     InspectTurn,
     InvocationRef,
     ObservationStatus,
+    ReissueProof,
     RequestId,
     RequestObserved,
     ResourceId,
@@ -864,13 +865,7 @@ class RuntimeSessionRequests:
             raise _RefusalError(_rejected("no ensured session for this invocation"))
         link = load_dispatch_record(self._store, bkey, invocation.invocation_id)
         if link is None:
-            # The link is written before any provider call: no link means no dispatch began.
-            target = _Facts(
-                ObservationStatus.FAILED,
-                resource_id=binding.resource_id,
-                diagnostic="the invocation was never dispatched",
-            )
-            return self._inspected(request, context, target, request.request_id)
+            return self._never_dispatched(request, context)
         schema = self._resolver.output_schema(link.output_schema)
         if schema is None:
             raise _RefusalError(
@@ -898,6 +893,37 @@ class RuntimeSessionRequests:
         else:
             self.settlement.fence(AccessKey(binding=bkey, invocation=invocation.invocation_id.root))
         return self._inspected(request, context, target, link.request_id)
+
+    def _never_dispatched(self, request: InspectTurn, context: ExecutionContext) -> ExecutionResult:
+        """Prove the dispatch never began, so core sends it again.
+
+        The dispatch record is written before any provider call, so its absence proves no
+        provider call was made. The proof is about the dispatching request, which only core
+        can name: without it the turn stays unknown. The owner hears nothing: the turn was
+        never interrupted, it is simply sent again.
+        """
+        if request.dispatch is None:
+            raise _RefusalError(_unknown("no dispatch record, and no named dispatching request"))
+        own = self._observations.observe(
+            ObservationSubject.of(request),
+            ObservationFacts(status=ObservationStatus.SUCCEEDED, accepted=True),
+            observed_at=context.now_at,
+        )
+        seen = self._observations.observe(
+            ObservationSubject.of(request, request_id=request.dispatch),
+            ObservationFacts(
+                status=ObservationStatus.REJECTED,
+                terminal=True,
+                diagnostic="no dispatch record: the turn never reached the provider",
+            ),
+            observed_at=context.now_at,
+        )
+        return ExecutionResult(
+            observation=RequestObserved(
+                observation=own,
+                target=TargetObservation(observation=seen, reissue=ReissueProof.NEVER_BEGAN),
+            )
+        )
 
     def _inspected(
         self,
