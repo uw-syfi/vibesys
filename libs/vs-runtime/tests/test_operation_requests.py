@@ -56,6 +56,10 @@ from vs_runtime.api.core import (
     ReceiptStore,
     RegisteredOperationRequests,
     RequestExecutors,
+    ResultReceipt,
+    Settled,
+    Transient,
+    owner_key,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -422,13 +426,36 @@ async def test_inspection_seals_an_effect_the_owner_proves_never_happened() -> N
         items = scenarios(root, namespace)
         echo = pick(items, "echo")
         request = execute_request(catalog_of(items), echo.request, "req-never")
-        receipts = NamespaceOperationReceipts(ReceiptStore(namespace))
-        receipts.record_intent(
-            IntentReceipt(
-                request_id="req-never",
-                payload_digest=context_for(request).payload_digest,
-                operation=request.operation,
+        store = ReceiptStore(namespace)
+        receipts = NamespaceOperationReceipts(store)
+        context = context_for(request)
+
+        async def crash_after_intent(
+            *, resumed: bool
+        ) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
+            del resumed
+            receipts.record_intent(
+                IntentReceipt(
+                    request_id="req-never",
+                    payload_digest=context.payload_digest,
+                    operation=request.operation,
+                )
             )
+            return Transient(
+                ResultReceipt(
+                    request_id="req-never",
+                    payload_digest=context.payload_digest,
+                    schema_ref=request.operation.schema_ref,
+                    status=ObservationStatus.UNKNOWN,
+                )
+            )
+
+        await store.run_once(
+            "req-never",
+            owner=owner_key(request),
+            context=context,
+            result_type=ResultReceipt,
+            perform=crash_after_intent,
         )
         runner = RegisteredOperationRequests(
             catalog_of(items), receipts, ObservationFactory(ReceiptStore(namespace))

@@ -55,6 +55,40 @@ class ExecutionRecord(BaseModel):
     payload_digest: str
     phase: ExecutionPhase
     result_json: str | None = None
+    result_type: str | None = None
+
+
+@dataclass(frozen=True)
+class NeverBegun:
+    """No execution record exists: the store holds no trace that the effect began.
+
+    ``run_once`` writes the begun marker before the effect, so for a kind that runs
+    on it this is positive proof that the effect never started.
+    """
+
+
+@dataclass(frozen=True)
+class BegunUnsealed:
+    """The effect may have started and has no sealed result yet."""
+
+    result_type: str | None
+
+
+@dataclass(frozen=True)
+class SealedExecution:
+    """The sealed result of the request, still encoded as ``result_type``."""
+
+    result_type: str | None
+    payload_digest: str
+    result_json: str
+
+
+type ExecutionHistory = NeverBegun | BegunUnsealed | SealedExecution
+
+
+def result_type_name(model: type[BaseModel]) -> str:
+    """The tag a record carries so an inspection can decode its result without its executor."""
+    return f"{model.__module__}.{model.__qualname__}"
 
 
 @dataclass(frozen=True)
@@ -199,6 +233,22 @@ class ReceiptStore:
             return None
         return record.payload_digest, _decode(record, result_type)
 
+    def history(self, key: str) -> ExecutionHistory:
+        """What the store recorded about request *key*: never begun, begun, or sealed.
+
+        This is the one answer to "did this request's effect happen?" for every kind
+        that runs on ``run_once``. Raises ``ReceiptCorruptError`` for an unreadable record.
+        """
+        record = self.load(self._EXECUTIONS, "execution", key, ExecutionRecord)
+        if record is None:
+            return NeverBegun()
+        if record.phase is not ExecutionPhase.DONE:
+            return BegunUnsealed(record.result_type)
+        if record.result_json is None:
+            message = "sealed execution receipt has no result"
+            raise ReceiptCorruptError(message)
+        return SealedExecution(record.result_type, record.payload_digest, record.result_json)
+
     def seal(self, key: str, digest: str, result: BaseModel) -> None:
         """Seal *result* for request *key* outside ``run_once`` (an inspection that proved it).
 
@@ -206,7 +256,10 @@ class ReceiptStore:
         for a sealed identity raises ``ContractError``.
         """
         sealed = ExecutionRecord(
-            payload_digest=digest, phase=ExecutionPhase.DONE, result_json=result.model_dump_json()
+            payload_digest=digest,
+            phase=ExecutionPhase.DONE,
+            result_json=result.model_dump_json(),
+            result_type=result_type_name(type(result)),
         )
         with self.exclusive():
             prior = self.load(self._EXECUTIONS, "execution", key, ExecutionRecord)
@@ -276,6 +329,7 @@ class ReceiptStore:
                     payload_digest=context.payload_digest,
                     phase=ExecutionPhase.DONE,
                     result_json=settled.result.model_dump_json(),
+                    result_type=result_type_name(result_type),
                 ),
             )
             return Performed(settled.result)
@@ -294,7 +348,11 @@ class ReceiptStore:
         reason = self.authorize(owner, context)
         if reason is not None:
             return Declined(reason)
-        begun = ExecutionRecord(payload_digest=context.payload_digest, phase=ExecutionPhase.BEGUN)
+        begun = ExecutionRecord(
+            payload_digest=context.payload_digest,
+            phase=ExecutionPhase.BEGUN,
+            result_type=result_type_name(result_type),
+        )
 
         def begin(stored: ExecutionRecord | None) -> tuple[ExecutionRecord | None, bool]:
             return (begun if stored is None else None), stored is not None
@@ -319,17 +377,22 @@ def _decode[ResultT: BaseModel](record: ExecutionRecord, model: type[ResultT]) -
 
 
 __all__ = [
+    "BegunUnsealed",
     "Conflict",
     "Declined",
     "Execution",
+    "ExecutionHistory",
     "ExecutionPhase",
     "ExecutionRecord",
+    "NeverBegun",
     "Performed",
     "Performer",
     "ReceiptCorruptError",
     "ReceiptStore",
     "Replayed",
+    "SealedExecution",
     "Settled",
     "Transient",
     "owner_key",
+    "result_type_name",
 ]
