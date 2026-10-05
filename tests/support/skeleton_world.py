@@ -30,9 +30,9 @@ from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_e
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
 from vs_core.api import (
+    Capabilities,
     ClockAdvanced,
     IntentPhase,
-    Limits,
     RecoveryPhase,
     RoleId,
     RunFacts,
@@ -95,7 +95,9 @@ class World:
             workload_digest=DIGEST,
             environment_digest=DIGEST,
         )
-        return new_core_state(RUN_ID, facts, DECLARATION, deadline_at=1000.0, limits=Limits())
+        return new_core_state(
+            RUN_ID, facts, DECLARATION, offered=Capabilities(), deadline_at=1000.0
+        )
 
     def bindings(self) -> CoreRuntimeBindings:
         """Executors for one host process: new workspaces and evaluation over the shared disk."""

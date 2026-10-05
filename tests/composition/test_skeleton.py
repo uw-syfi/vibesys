@@ -28,7 +28,7 @@ from tests.support.session_world import (
     dispatch_request,
     ensure_request,
 )
-from tests.support.skeleton_strategy import SkeletonStrategy, measurement
+from tests.support.skeleton_strategy import DECLARATION, DIGEST, SkeletonStrategy, measurement
 from tests.support.skeleton_world import (
     CrashPoint,
     Process,
@@ -42,16 +42,22 @@ from tests.support.skeleton_world import (
 import vs_core
 from vs_core.api import (
     CancelTurn,
+    Capabilities,
     CloseSession,
+    ContractError,
     DecisionId,
     InspectRequest,
     InvocationId,
     InvocationRef,
+    LifecycleClass,
     ObservationStatus,
+    OperationSchemaRef,
     RequestId,
     RevisionId,
     RevisionRef,
+    RunFacts,
     RunStatus,
+    SchemaRef,
     Scope,
     SessionId,
     SubmitMeasurement,
@@ -63,6 +69,7 @@ from vs_runtime.api.core import (
     ObservationRejectedError,
     ReceiptCorruptError,
     RefusingRequestExecution,
+    new_core_state,
     revision_ref,
 )
 
@@ -450,6 +457,31 @@ async def test_a_turn_observation_passes_core_ingress(tmp_path: Path) -> None:
         assert observed.outcome_is_registered, (
             "output on RequestObserved without a registered proof"
         )
+
+
+def test_a_declaration_requiring_an_unoffered_operation_is_refused_by_name() -> None:
+    declaration = DECLARATION.model_copy(
+        update={
+            "required_operations": (
+                OperationSchemaRef(
+                    kind="needs-this-operation",
+                    request_schema=SchemaRef(name="request", version=1),
+                    outcome_schema=SchemaRef(name="outcome", version=1),
+                    lifecycle=LifecycleClass.QUERY,
+                ),
+            )
+        }
+    )
+    facts = RunFacts(
+        objective="x",
+        baseline=revision_ref("0" * 40),
+        evaluator_digest=DIGEST,
+        workload_digest=DIGEST,
+        environment_digest=DIGEST,
+    )
+    with pytest.raises(ContractError, match="required operation unavailable") as refused:
+        new_core_state("run", facts, declaration, offered=Capabilities(), deadline_at=10.0)
+    assert "needs-this-operation" in str(refused.value)
 
 
 def test_every_unproduced_request_kind_has_a_named_owner() -> None:

@@ -63,15 +63,16 @@ def new_core_state(
     facts: RunFacts,
     declaration: StrategyDeclaration,
     *,
+    offered: Capabilities,
     deadline_at: float,
-    limits: Limits | None = None,
 ) -> CoreState:
     """Build the state of a run that has not started, validated against its declaration.
 
-    The host offers no lifecycle capabilities or registered operations yet, so a
-    strategy that requires one fails here, by name, instead of mid-run.
+    ``offered`` is what the host can serve (lifecycle capabilities and registered
+    operations, from the operation catalog); there is no default. A strategy that
+    requires something not offered fails here, naming it, instead of mid-run.
     """
-    selected = validate_startup(declaration, Capabilities())
+    selected = validate_startup(declaration, offered)
     return CoreState(
         registry=selected.operations,
         intents=IntentsState(recovery=RecoveryBarrier(phase=RecoveryPhase.READY)),
@@ -81,7 +82,7 @@ def new_core_state(
             deadline_at=deadline_at,
             facts=facts,
             capabilities=selected,
-            limits=limits or Limits(),
+            limits=Limits(),
             declaration=declaration,
         ),
     )
