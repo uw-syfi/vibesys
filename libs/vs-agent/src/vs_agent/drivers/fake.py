@@ -22,7 +22,7 @@ knowledge of application response schemas or policy defaults.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from threading import Lock
+from threading import Event, Lock
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, TypeAdapter
@@ -97,6 +97,11 @@ class FakeDriverError(RuntimeError):
         return cls("`turns` must contain at least one turn")
 
     @classmethod
+    def cancelled(cls) -> FakeDriverError:
+        """Describe a turn the caller cancelled while it ran."""
+        return cls("fake agent turn was cancelled")
+
+    @classmethod
     def driver_closed(cls) -> FakeDriverError:
         """Describe session creation after the fake driver was closed."""
         return cls("fake agent driver is closed")
@@ -108,6 +113,37 @@ class FakeDriverError(RuntimeError):
             f"no fake answer was supplied for response schema {schema_name!r}; "
             "pass answer= when constructing FakeDriver"
         )
+
+
+class FakeCancels:
+    """Cancellation requests every session of one fake driver received."""
+
+    def __init__(self) -> None:
+        """Start with no request."""
+        self._lock = Lock()
+        self._count = 0
+        self._event = Event()
+
+    def record(self) -> None:
+        """Count one request and release anything waiting for it."""
+        with self._lock:
+            self._count += 1
+        self._event.set()
+
+    @property
+    def requested(self) -> bool:
+        """Whether any request arrived."""
+        return self._event.is_set()
+
+    @property
+    def count(self) -> int:
+        """How many requests arrived."""
+        with self._lock:
+            return self._count
+
+    def wait(self, timeout: float) -> bool:
+        """Block a turn until a request arrives; ``timeout`` only guards a lost cancel."""
+        return self._event.wait(timeout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +164,14 @@ class FakeTurnScript:
             raise ValueError(message)
 
 
+@dataclass(frozen=True, slots=True)
+class _TurnHooks:
+    """What a session reports to and takes from its test: a turn barrier and cancel log."""
+
+    on_turn: Callable[[AgentTurnRequest], None] | None
+    cancels: FakeCancels
+
+
 class FakeSession:
     """One fake conversation. Its state is which scripted turn runs next."""
 
@@ -138,11 +182,13 @@ class FakeSession:
         turns: tuple[tuple[AgentEvent, ...], ...],
         script: FakeTurnScript,
         resumed_session_ids: list[str],
-        on_turn: Callable[[AgentTurnRequest], None] | None = None,
+        hooks: _TurnHooks | None = None,
     ) -> None:
         """Create a session bound to ``turns``/``answer`` for ``spec``'s role."""
+        hooks = hooks if hooks is not None else _TurnHooks(None, FakeCancels())
+        self._cancels = hooks.cancels
         self._spec = spec
-        self._on_turn = on_turn
+        self._on_turn = hooks.on_turn
         self._turns = turns
         self._answers = script.answers
         self._resumed_session_ids = resumed_session_ids
@@ -172,6 +218,9 @@ class FakeSession:
         try:
             if self._on_turn is not None:
                 self._on_turn(request)
+            if self._cancels.requested:
+                # A production driver ends a cancelled in-flight turn with an error.
+                raise FakeDriverError.cancelled()
             self._invocations += 1
             events = self._turns[min(self._invocations, len(self._turns)) - 1]
             for event in events:
@@ -208,12 +257,16 @@ class FakeSession:
                 self._turns_in_progress -= 1
 
     def cancel(self) -> None:
-        """Do nothing: a fake turn is synchronous and always already finished.
+        """Record the request and end a turn blocked in ``on_turn`` with an error.
 
-        ``run_turn`` emits its scripted events on the calling thread and
-        returns, so there is never an in-flight turn for another thread to
-        stop. Kept so the fake satisfies the whole session contract.
+        Scripted turns finish on their own; only a turn an ``on_turn`` barrier holds
+        open can be in flight, and the barrier learns of the cancel through
+        :meth:`FakeDriver.wait_cancelled`.
         """
+        with self._state_lock:
+            running = self._turns_in_progress > 0
+        if running:  # cancelling an idle session is a no-op, as in production
+            self._cancels.record()
 
     def close(self) -> None:
         """Release this session. Idempotent; the fake owns no resources."""
@@ -272,6 +325,7 @@ class FakeDriver:
         if script is not None and answer is not None:
             raise FakeDriverError.conflicting_turn_inputs()
         self._on_turn = on_turn
+        self._cancels = FakeCancels()
         self._turns = resolved_turns
         self._script = script if script is not None else FakeTurnScript((answer,))
         self._sessions: list[FakeSession] = []
@@ -282,6 +336,15 @@ class FakeDriver:
     def capabilities(self) -> AgentCapabilities:
         """Describe what the fake honors; see :data:`FAKE_CAPABILITIES`."""
         return FAKE_CAPABILITIES
+
+    @property
+    def cancel_count(self) -> int:
+        """Cancellation requests received by every session of this driver."""
+        return self._cancels.count
+
+    def wait_cancelled(self, timeout: float) -> bool:
+        """Hold an ``on_turn`` barrier open until a cancel arrives (``timeout`` guards a lost one)."""
+        return self._cancels.wait(timeout)
 
     @property
     def resumed_session_ids(self) -> tuple[str, ...]:
@@ -297,7 +360,7 @@ class FakeDriver:
             turns=self._turns,
             script=self._script,
             resumed_session_ids=self._resumed_session_ids,
-            on_turn=self._on_turn,
+            hooks=_TurnHooks(self._on_turn, self._cancels),
         )
         self._sessions.append(session)
         return session

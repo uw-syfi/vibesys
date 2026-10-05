@@ -380,3 +380,22 @@ def test_no_schedule_dispatches_an_invocation_to_the_provider_twice(
                 assert len(w.host.turns) <= len(dispatched)
 
     asyncio.run(run())
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_dispatch_cancels_the_hung_provider_turn_exactly_once() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        base = Path(raw)
+        (base / "project").mkdir()
+        (base / "workspace").mkdir()
+        project = Project.open(base / "project")
+        host = open_host(base / "workspace", hang_until_cancelled=True)
+        store = ReceiptStore(project.state.state_store_namespace("run"))
+        await host.run(ensure_request(), store)
+        dispatch = asyncio.ensure_future(host.run(dispatch_request(), store))
+        # The turn is running in the provider and would never return on its own.
+        assert await asyncio.to_thread(host.turn_started.wait, 30.0)
+        dispatch.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await dispatch
+        assert host.driver.cancel_count == 1

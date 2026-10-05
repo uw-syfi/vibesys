@@ -690,7 +690,8 @@ class RuntimeSessionRequests:
         return await await_session_operation(
             asyncio.create_task(
                 asyncio.to_thread(self._start_or_resume, dispatch, established=established)
-            )
+            ),
+            stop=lambda: self._sessions.cancel(dispatch.key, dispatch.invocation),
         )
 
     async def _established(self, bkey: str, *, excluding: str | None) -> bool:

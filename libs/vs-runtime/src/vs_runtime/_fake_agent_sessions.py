@@ -235,7 +235,8 @@ class FakeAgentSession:
                         asyncio.to_thread(
                             transport.resume, self._session_key, message, invocation_id
                         )
-                    )
+                    ),
+                    stop=lambda: transport.cancel(self._session_key, invocation_id),
                 )
             finally:
                 await await_session_operation(
