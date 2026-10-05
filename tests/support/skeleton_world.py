@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
+from tests.support.fake_run_clock import FakeRunClock
 from tests.support.runtime_evaluation import ScenarioCluster
 from tests.support.session_world import (
     FakeSessionResolver,
@@ -32,8 +33,6 @@ from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
 from vs_core.api import (
     Capabilities,
     ClockAdvanced,
-    IntentPhase,
-    RecoveryPhase,
     RoleId,
     RunFacts,
     RunStatus,
@@ -44,13 +43,17 @@ from vs_project.api import run_git
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import render_stage_failure
 from vs_runtime.api.core import (
+    CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
     DispatchProgress,
     ExecutorRefusal,
     JournalPublicationDelivery,
+    RunLoopConfig,
+    RunStalledError,
     SessionServices,
     core_bindings,
+    drive_core,
     new_core_state,
     revision_ref,
 )
@@ -167,59 +170,31 @@ def finished(process: Process) -> bool:
     return process.shell.record.envelope.core.run.status == RunStatus.TERMINAL
 
 
-def _recovered(process: Process) -> bool:
-    """Whether core finished reconciling unfinished work, so the strategy may be asked."""
-    barrier = process.shell.record.envelope.core.intents.recovery
-    return barrier.phase == RecoveryPhase.READY
-
-
 class StalledError(AssertionError):
     """The run is not terminal, nothing is dispatchable and the strategy has nothing to add."""
 
 
-async def drive(process: Process, *, start: float, rounds: int = 40) -> ExecutorRefusal | None:
-    """Deliver the clock, ask the strategy once recovered, and run to idle, until terminal.
+async def drive(
+    process: Process, *, start: float, clock: FakeRunClock | None = None
+) -> ExecutorRefusal | None:
+    """Run the production loop to a terminal run, on a fake clock that starts at ``start``.
 
-    Time is a logical counter the caller supplies; no sleeps and no wall clock.
-    Raises ``StalledError`` when a round changes nothing, which names a request
-    nobody issues rather than burning the remaining rounds.
+    No sleeps and no wall clock. A stall (nothing to do and nothing time can wake)
+    surfaces as ``StalledError``; a request cycle that never goes idle fails the
+    loop's dispatch cap.
     """
-    now = start
-    for _ in range(rounds):
-        if finished(process):
-            return None
-        before = process.shell.record.envelope.core.revision
-        process.shell.submit(ClockAdvanced(now_at=now), now_at=now)
-        refusal = await process.shell.run_until_idle(process.delivery, now_at=now)
-        if refusal is None and _recovered(process):
-            process.shell.decide(now_at=now)
-            refusal = await process.shell.run_until_idle(process.delivery, now_at=now)
-        if refusal is not None:
-            return refusal
-        if finished(process):
-            return None
-        if _stalled(process, before):
-            raise StalledError(_describe(process))
-        now += 1.0
-    message = f"run did not finish in {rounds} rounds"
-    raise AssertionError(message)
-
-
-def _stalled(process: Process, before: int) -> bool:
-    core = process.shell.record.envelope.core
-    return core.revision - before <= 2 and not any(
-        intent.phase == IntentPhase.PREPARED for intent in core.intents.intents
+    host = CoreRunHost(process.shell, process.delivery, clock or FakeRunClock(start))
+    config = RunLoopConfig(
+        host_id="skeleton",
+        lease_duration=LEASE,
+        recovery_poll_interval=50.0,
+        max_dispatches=60,
     )
-
-
-def _describe(process: Process) -> str:
-    core = process.shell.record.envelope.core
-    open_intents = [
-        f"{intent.request.kind}:{intent.phase.value}"
-        for intent in core.intents.intents
-        if intent.phase != IntentPhase.COMPLETED
-    ]
-    return f"stalled at core revision {core.revision}; open intents {open_intents}"
+    try:
+        outcome = await drive_core(host, config)
+    except RunStalledError as error:
+        raise StalledError(str(error)) from error
+    return outcome.refusal
 
 
 class CrashPoint(StrEnum):

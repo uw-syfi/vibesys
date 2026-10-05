@@ -89,6 +89,10 @@ class RunControlChannel(Protocol):
         """Return whether a stop is pending, without landing it."""
         ...
 
+    def pause_requested(self) -> bool:
+        """Return whether a pause is pending, without parking on it."""
+        ...
+
     def on_stop_requested(self, listener: Callable[[], object]) -> Callable[[], None]:
         """Call *listener* after each stop request; return its unsubscribe callable.
 
@@ -148,6 +152,11 @@ class RuntimeRunControlChannel:
         """Return whether a stop is pending, without landing it."""
         with self._lock:
             return self._stop_requested
+
+    def pause_requested(self) -> bool:
+        """Return whether a pause is pending, without parking on it."""
+        with self._lock:
+            return self._paused
 
     def on_stop_requested(self, listener: Callable[[], object]) -> Callable[[], None]:
         """Call *listener* after each stop request; return its unsubscribe callable."""
