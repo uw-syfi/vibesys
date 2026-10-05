@@ -6,7 +6,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_evaluation.api import EvaluationState, ExecutorObservation
-from vs_sandbox.slurm_executor import join_observation
+from vs_sandbox.api import join_observation
 
 _TERMINAL = {EvaluationState.SUCCEEDED, EvaluationState.FAILED, EvaluationState.CANCELED}
 _ORDER = [

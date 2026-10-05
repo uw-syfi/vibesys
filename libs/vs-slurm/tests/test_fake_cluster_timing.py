@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -24,7 +25,7 @@ from vs_slurm.api import (
 _PROFILE = SlurmTimingProfile()
 
 
-def _submit(cluster: FakeCluster, workspace: Path, **options: float) -> None:
+def _submit(cluster: FakeCluster, workspace: Path, **options: Any) -> None:  # noqa: ANN401  # lint-waiver: LW-994698 [ANN401]; pass-through options to FakeCluster.script
     cluster.script("job", **options)
     assert isinstance(
         cluster.submit(SlurmJobRequest(workspace=workspace, command=("true",)), operation_id="job"),

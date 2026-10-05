@@ -11,15 +11,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vs_slurm.api import (
+    REQUESTS_FILE,
+    FakeConnector,
     SlurmBatchRequest,
     SlurmBatchStage,
+    SlurmCluster,
     SlurmConfig,
     SlurmConnectorTransport,
     SlurmJobRunner,
     SlurmJobStatus,
 )
-from vs_slurm.fake_connector import REQUESTS_FILE, FakeConnector
-from vs_slurm.wiring import SlurmCluster
 
 if TYPE_CHECKING:
     from pathlib import Path

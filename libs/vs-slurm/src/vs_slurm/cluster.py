@@ -411,7 +411,7 @@ class SlurmCluster:
         target: ClusterTarget,
         *,
         by_job_id: bool = False,
-        observed: ClusterObservation | None = None,
+        observed: ClusterInspectOutcome | None = None,
     ) -> ClusterCollectOutcome:
         """Collect terminal evidence, preserving partial results as Unknown.
 

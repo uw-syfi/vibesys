@@ -38,7 +38,7 @@ from .config import (
     shell_join_with_port,
 )
 from .fake_cluster import FakeCluster, ManualClock, SecondsRange, SlurmTimingProfile
-from .fake_connector import FakeConnector
+from .fake_connector import REQUESTS_FILE, FakeConnector
 from .identity import runtime_content_identity
 from .phase_register import MergedPhase, PhaseAnomaly, PhaseRegister
 from .runner import (
@@ -68,6 +68,7 @@ from .staging import tree_content_identity
 
 __all__ = [
     "PORT_PLACEHOLDER",
+    "REQUESTS_FILE",
     "Cluster",
     "ClusterCancelOutcome",
     "ClusterCancelRequested",
