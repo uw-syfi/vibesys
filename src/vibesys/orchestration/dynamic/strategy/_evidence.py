@@ -11,8 +11,10 @@ never reaches a decision.
 from vibesys.orchestration.dynamic.strategy._operations import EvidenceReadings
 from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading
 from vs_core.api import (
+    AttemptId,
     EvidenceKey,
     EvidenceRef,
+    InvocationRef,
     MeasurementResult,
     ObservationStatus,
     RevisionRef,
@@ -77,3 +79,18 @@ def accept_readings(
             return f"reading {reading.evidence_id.root} repeated"
         accepted.append(AcceptedReading(**reading.model_dump(), source_request=ref.source_request))
     return tuple(accepted)
+
+
+def turn_candidate(
+    view: RunView, attempt: AttemptId, invocation: InvocationRef
+) -> RevisionRef | None:
+    """The revision this very turn retained, never an earlier turn's checkpoint.
+
+    A retry turn that retained nothing new yields None even when the attempt holds
+    older checkpoints, so it reports "retained no changed candidate".
+    """
+    live = next((item for item in view.attempts if item.attempt_id == attempt), None)
+    if live is None:
+        return None
+    mine = tuple(item for item in live.checkpoints if item.invocation == invocation)
+    return mine[-1].revision if mine else None

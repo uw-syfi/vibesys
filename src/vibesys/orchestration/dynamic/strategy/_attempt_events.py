@@ -27,6 +27,7 @@ from vibesys.orchestration.dynamic.strategy._evidence import (
     accept_readings,
     ledger_refs,
     trusted_keys,
+    turn_candidate,
 )
 from vibesys.orchestration.dynamic.strategy._operations import (
     EvidenceReadings,
@@ -60,7 +61,6 @@ from vs_core.api import (
     AttemptSettled,
     EvidenceKind,
     IntentBlocked,
-    InvocationRef,
     MeasurementResult,
     ObservationStatus,
     OperationResult,
@@ -405,17 +405,6 @@ def on_suspended(state: DynamicStrategyState, event: TurnSuspended) -> DynamicSt
     )
 
 
-def _candidate(
-    view: RunView, record: AttemptRecord, invocation: InvocationRef
-) -> RevisionRef | None:
-    """The revision this very turn retained, never an earlier turn's checkpoint."""
-    live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
-    if live is None:
-        return None
-    mine = tuple(item for item in live.checkpoints if item.invocation == invocation)
-    return mine[-1].revision if mine else None
-
-
 def _next_after_candidate(record: AttemptRecord, config: DynamicConfig) -> AttemptRecord:
     if record.outcome is None:
         return record
@@ -540,7 +529,11 @@ def _answered(
         return _yielded(state, index, view)
     if isinstance(reply, ImplementerResult):
         return _implemented(
-            state, index, config, reply, _candidate(view, state.attempts[index], event.invocation)
+            state,
+            index,
+            config,
+            reply,
+            turn_candidate(view, state.attempts[index].attempt, event.invocation),
         )
     return _reviewed(state, index, config, reply, event)
 

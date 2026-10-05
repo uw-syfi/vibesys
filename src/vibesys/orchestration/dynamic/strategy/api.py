@@ -1,6 +1,12 @@
 """Public surface of the dynamic strategy package."""
 
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
+from vibesys.orchestration.dynamic.strategy._evidence import (
+    accept_readings,
+    ledger_refs,
+    trusted_keys,
+    turn_candidate,
+)
 from vibesys.orchestration.dynamic.strategy._operations import (
     EvidenceReadings,
     InterpretEvidence,
@@ -56,10 +62,14 @@ __all__ = [
     "RetainVerifiedRevision",
     "RetentionReceipt",
     "VerifyParentRevision",
+    "accept_readings",
     "dynamic_operation_registrations",
     "dynamic_operation_registry",
     "ingest",
+    "ledger_refs",
     "options",
     "resolve",
+    "trusted_keys",
+    "turn_candidate",
     "validate",
 ]
