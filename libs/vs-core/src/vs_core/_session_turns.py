@@ -25,6 +25,7 @@ from ._session_checkpoints import turn_source_matches as _turn_proof
 from ._session_scope import (
     attempt_for,
     encode_identity,
+    lost_turn_authority,
     retains_write_turn,
     scope_active,
     turn_request_id,
@@ -1381,6 +1382,7 @@ def _turn_result(
     *,
     output_schema: SchemaRef | None = None,
     output_json: str | None = None,
+    lost: bool = False,
 ) -> TurnResult:
     """The terminal result of a turn, with its failure kind and bounded executor text."""
     if observation.status == ObservationStatus.SUCCEEDED:
@@ -1390,7 +1392,9 @@ def _turn_result(
             output_schema=output_schema,
             output_json=output_json,
         )
-    if observation.status == ObservationStatus.CANCELLED:
+    if lost:
+        failure = TurnFailureKind.TRANSPORT_LOST
+    elif observation.status == ObservationStatus.CANCELLED:
         failure = TurnFailureKind.CANCELLED
     else:
         failure = TurnFailureKind.PROVIDER_FAILED
@@ -1621,6 +1625,8 @@ def _turn_observed(
     ):
         return AreaChange(state=state)
     previous = invocation.observation
+    if _unresolved_after_inspection(context, invocation, event):
+        return _release_unknown(state, context, event)
     event, inspected = _correlated_turn_observation(context, invocation, event)
     if _terminal(invocation):
         return _late_turn_observed(state, context, invocation, event, inspected=inspected)
@@ -1628,6 +1634,64 @@ def _turn_observed(
         not inspected and previous is not None and event.observation.sequence <= previous.sequence
     ) or invocation.phase == SessionPhase.ACQUIRING:
         return AreaChange(state=state)
+    return _apply_turn_observation(state, context, event, invocation)
+
+
+def _acceptance_signals(
+    invocation: Invocation, event: TurnObserved, observation: Observation
+) -> tuple[Signal, ...]:
+    if observation.accepted and observation.status != ObservationStatus.UNKNOWN:
+        return (InputAcceptanceObserved(invocation=event.invocation, observation=observation),)
+    if _terminal(invocation) and observation.status in (
+        ObservationStatus.REJECTED,
+        ObservationStatus.FAILED,
+        ObservationStatus.CANCELLED,
+    ):
+        return (InputReservationReleased(invocation=event.invocation, observation=observation),)
+    return ()
+
+
+def _unresolved_after_inspection(
+    context: SessionsContext, invocation: Invocation, event: TurnObserved
+) -> bool:
+    """Whether the turn's inspection completed and acceptance is still unknown."""
+    inspection = _intent(context, _inspect_turn(context, invocation).request_id)
+    return (
+        invocation.phase == SessionPhase.UNKNOWN
+        and event.observation.status == ObservationStatus.UNKNOWN
+        and inspection is not None
+        and inspection.phase == IntentPhase.COMPLETED
+    )
+
+
+def _release_unknown(
+    state: SessionsState, context: SessionsContext, event: TurnObserved
+) -> AreaChange[SessionsState]:
+    """Cancel a turn whose acceptance the executor's own inspection could not settle.
+
+    The cancellation releases the executor's record of the unfinished dispatch, so a
+    successor turn can continue the conversation; its result ends this turn as lost.
+    """
+    return _cancel(
+        state,
+        context,
+        InvocationCancellationRequested(
+            invocation=event.invocation, authority=lost_turn_authority(event.invocation)
+        ),
+    )
+
+
+def _apply_turn_observation(
+    state: SessionsState,
+    context: SessionsContext,
+    event: TurnObserved,
+    invocation: Invocation,
+) -> AreaChange[SessionsState]:
+    released_lost = (
+        invocation.phase == SessionPhase.UNKNOWN
+        and event.observation.status == ObservationStatus.CANCELLED
+    )
+
     observation = event.observation
     if event.suspension is not None and observation.status != ObservationStatus.SUCCEEDED:
         event = event.model_copy(update={"suspension": None})
@@ -1658,31 +1722,20 @@ def _turn_observed(
         }
     )
     state = _replace_session(state, session)
-    signals: list[Signal] = []
-    if observation.accepted and observation.status != ObservationStatus.UNKNOWN:
-        signals.append(
-            InputAcceptanceObserved(invocation=event.invocation, observation=observation)
-        )
-    elif _terminal(invocation) and observation.status in (
-        ObservationStatus.REJECTED,
-        ObservationStatus.FAILED,
-        ObservationStatus.CANCELLED,
-    ):
-        signals.append(
-            InputReservationReleased(invocation=event.invocation, observation=observation)
-        )
+    signals = _acceptance_signals(invocation, event, observation)
     requests: tuple[Request, ...] = ()
     if phase == SessionPhase.UNKNOWN or _acceptance_unresolved(invocation):
         requests = (_inspect_turn(context, invocation),)
     if not _terminal(invocation):
-        return AreaChange(state=state, signals=tuple(signals), requests=requests)
-    signals.extend(_terminal_signals(state, context, invocation, event))
+        return AreaChange(state=state, signals=signals, requests=requests)
+    signals = (*signals, *_terminal_signals(state, context, invocation, event))
     events = (
         _turn_result(
             event.invocation,
             observation,
             output_schema=event.output_schema,
             output_json=event.output_json,
+            lost=released_lost,
         ),
     )
     cleanup = _after_turn_cleanup(state, context, invocation, session)
@@ -1720,7 +1773,10 @@ def _cancel(
         and stop.value.scope == invocation.scope
         and event.authority == RequestId(root=f"stop:{stop.value.decision_id.root}")
     )
-    if claim is None and not cleanup and not run_cleanup:
+    lost = invocation.phase == SessionPhase.UNKNOWN and event.authority == lost_turn_authority(
+        event.invocation
+    )
+    if claim is None and not cleanup and not run_cleanup and not lost:
         raise ContractValidationError(
             "authority", "cancellation requires recorded interruption or cleanup intent"
         )

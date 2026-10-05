@@ -135,6 +135,8 @@ class TurnRecord(Value):
     role: Role
     serial: int = Field(default=0, ge=0)
     corrections: int = Field(default=0, ge=0)
+    # Times this logical turn was lost to the transport and asked again.
+    drops: int = Field(default=0, ge=0)
     charge: Literal["free", "paid", "correction", "resume"] = "paid"
     context: PromptContext | None = None
     prompts: tuple[ArtifactRef, ...] = ()

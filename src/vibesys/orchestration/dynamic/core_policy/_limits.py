@@ -26,21 +26,25 @@ def limits_for(
 
     Every workstream is one admitted attempt, so attempts are `max_rounds * max_in_flight`
     and a refund (an unsupported profile) can return at most that many. A correction
-    chain of depth `d` counts its first reply, so `max_corrections` corrections need
-    `max_retries = max_corrections + 1`. Turn chains: one planner chain per workstream
-    plus the first, and per workstream its paid turns, one judge and one resume per
-    measurement submission; each chain is a first reply plus its corrections. The
+    chain of depth `d` counts its first reply, so `max_corrections` corrections and
+    `max_turn_drops` asks after a lost turn need
+    `max_retries = max_corrections + max_turn_drops + 1`. Turn chains: per planning
+    call (one per workstream plus the first) a first turn and up to
+    `max_retries_per_round` fresh ones, and per workstream its paid turns, one judge and
+    one resume per measurement submission; each chain is a first reply plus its
+    corrections and asks after a lost turn. The
     polling pace of a running measurement job comes from the run's evaluation config.
     """
     starts = config.start_budget
-    chain = 1 + config.max_corrections
+    chain = 1 + config.max_corrections + config.max_turn_drops
+    planning = 1 + config.max_retries_per_round
     submissions = config.max_input_measurement_attempts
     per_workstream = config.max_retries_per_round + 1 + submissions
     return Limits(
         max_attempts=starts,
-        max_turns=chain * ((starts + 1) + starts * per_workstream),
+        max_turns=chain * ((starts + 1) * planning + starts * per_workstream),
         max_parallel=config.max_in_flight,
-        max_retries=config.max_corrections + 1,
+        max_retries=config.max_corrections + config.max_turn_drops + 1,
         max_refunds=starts,
         max_measurement_submissions=submissions,
         queue_allowance=config.queue_allowance_seconds,

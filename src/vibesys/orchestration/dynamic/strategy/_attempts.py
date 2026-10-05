@@ -167,7 +167,9 @@ def _start(draft: Draft, record: AttemptRecord) -> AttemptRecord:
                 base=record.parent,
             ),
             budget=AttemptBudget(
-                admission_charge=1, paid_invocation_limit=draft.config.max_retries_per_round
+                admission_charge=1,
+                paid_invocation_limit=draft.config.max_retries_per_round,
+                retry_limit=draft.config.max_corrections + draft.config.max_turn_drops,
             ),
         )
     )
