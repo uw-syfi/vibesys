@@ -42,6 +42,7 @@ from .runner import (
     SlurmJobRequest,
     SlurmJobRunner,
     SlurmJobStatus,
+    SlurmPhase,
     SlurmSubmissionRejectedError,
     _validate_batch_request,
     _validate_request,
@@ -638,10 +639,9 @@ class SlurmCluster:
                     record.operation_id, record.model_dump_json()
                 )
             reading = self._runner.inspect_job(job.job_id)
-            if record.cancelled and reading.status in {
-                SlurmJobStatus.PENDING,
-                SlurmJobStatus.RUNNING,
-            }:
+            # A job already tearing down (COMPLETING) cannot be cancelled again;
+            # a scancel per inspection would only add round trips.
+            if record.cancelled and reading.phase in {SlurmPhase.PENDING, SlurmPhase.RUNNING}:
                 self._runner.cancel(job)
         except (
             SlurmError,
@@ -654,7 +654,33 @@ class SlurmCluster:
             return ClusterUnknown(
                 operation_id=record.operation_id, job_id=job.job_id, reason=str(exc)
             )
-        return self._observation(record.operation_id, job.job_id, reading, handle)
+        return self._with_progress(
+            self._observation(record.operation_id, job.job_id, reading, handle), reading, handle
+        )
+
+    def _with_progress(
+        self,
+        observed: ClusterInspectOutcome,
+        reading: SchedulerReading,
+        handle: ClusterHandle | None,
+    ) -> ClusterInspectOutcome:
+        """Add the finished-stage count to the observation of a computing multi-stage batch."""
+        if (
+            isinstance(observed, ClusterObservation)
+            and reading.phase is SlurmPhase.RUNNING
+            and isinstance(handle, SlurmBatchHandle)
+            and len(handle.stages) > 1
+        ):
+            return observed.model_copy(update={"completed_stages": self._completed_stages(handle)})
+        return observed
+
+    def _completed_stages(self, handle: SlurmBatchHandle) -> int | None:
+        try:
+            return self._runner.completed_stages(handle)
+        except (SlurmError, OSError, UnicodeError, subprocess.SubprocessError):
+            # Stage progress is advisory: failing to read it must not hide the
+            # scheduler reading that was already obtained.
+            return None
 
     @staticmethod
     def _observation(

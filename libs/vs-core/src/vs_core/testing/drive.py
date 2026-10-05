@@ -99,9 +99,14 @@ class Retryable:
 
 @dataclass(frozen=True)
 class Failed:
-    """The request was refused or ran and failed for good (terminal, not accepted)."""
+    """The request ran and failed for good (terminal).
+
+    The executor did not accept a refused request. With ``accepted`` the executor took the
+    request and the job it owns ended failed, as a scheduler reports a failed batch job.
+    """
 
     measurement_failure: MeasurementFailure | None = None
+    accepted: bool = False
 
 
 type Answer = Succeeded | Running | Unknown | Retryable | Failed
@@ -123,7 +128,7 @@ def _shape(answer: Answer) -> tuple[ObservationStatus, bool, bool]:
         case Retryable():
             return ObservationStatus.FAILED, False, False
         case Failed():
-            return ObservationStatus.FAILED, False, True
+            return ObservationStatus.FAILED, answer.accepted, True
 
 
 @dataclass(frozen=True)
@@ -154,6 +159,8 @@ class Trace[S: StrategyState]:
     decisions: list[Decision] = field(default_factory=list)
     events: list[StrategyEvent] = field(default_factory=list)
     requests: list[Request] = field(default_factory=list)
+    # Requests as dispatched and executor observations as delivered, interleaved in order.
+    log: list[Request | RequestObserved] = field(default_factory=list)
     finished: bool = False
     steps: int = 0
 
@@ -248,6 +255,7 @@ class _Driver[S: StrategyState]:
     def observe(self, request: Request) -> list[CoreEvent]:
         key = request.request_id.root if request.request_id is not None else ""
         self.trace.requests.append(request)
+        self.trace.log.append(request)
         answer = self.script(request, self.trace.core)
         answers = list(answer) if isinstance(answer, tuple) else [answer]
         if self.faults.retry_first(request):
@@ -320,6 +328,8 @@ class _Driver[S: StrategyState]:
 
     def consume(self, event: CoreEvent, *, proposed: S | None = None) -> None:
         trace = self.trace
+        if isinstance(event, RequestObserved):
+            trace.log.append(event)
         transition = step(trace.core, event)
         trace.steps += 1
         trace.core = transition.state

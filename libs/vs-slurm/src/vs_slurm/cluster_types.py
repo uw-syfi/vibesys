@@ -126,6 +126,10 @@ class ClusterObservation(_Outcome):
     pending_reason: str | None = None
     estimated_start: str | None = None
     handle: ClusterHandle | None = None
+    # For a batch that is computing: how many of its stages have finished, so the
+    # stage at this index is the one running. None when not observed (not a
+    # batch, not computing, or the read failed): callers must not assume stage 0.
+    completed_stages: int | None = None
 
 
 class ClusterCancelRequested(_Outcome):

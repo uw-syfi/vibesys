@@ -773,6 +773,21 @@ class SlurmJobRunner:
             stop_on_failure=request.stop_on_failure,
         )
 
+    def completed_stages(self, handle: SlurmBatchHandle) -> int:
+        """How many stages of a batch have written their result, in one remote command.
+
+        Stages run in order, so with ``n`` results written, stage ``n`` is the one
+        running. A stage that is running has not written its exit code yet.
+        """
+        root = PurePosixPath(handle.job.remote_workspace) / _BATCH_RESULT_ROOT
+        output = self._transport.exec(
+            f"ls -1 {shlex.quote(root.as_posix())}/*/exit-code.txt 2>/dev/null | wc -l"
+        ).stdout
+        try:
+            return max(0, int(output.strip() or "0"))
+        except ValueError as error:
+            raise SlurmError.malformed_result() from error
+
     def poll_batch(self, handle: SlurmBatchHandle) -> SlurmJobStatus:
         """Read the scheduler state of a batch handle."""
         return self.poll(handle.job)
@@ -1151,17 +1166,27 @@ class SlurmJobRunner:
             fields = active.splitlines()[0].split("|")
             reason = fields[1].strip() if len(fields) > 1 else None
             start = fields[2].strip() if len(fields) > _ACCOUNTING_FIELD_COUNT else None
-            return _reading(
+            queued = _reading(
                 fields[0].strip().upper(),
                 reason=reason or None,
                 estimated_start=None if start in {None, "", "N/A", "Unknown"} else start,
             )
+            if queued.phase is not SlurmPhase.COMPLETING:
+                return queued
+        else:
+            queued = None
         accounting = self._transport.exec(f"sacct -n -X -j {job_id} --format=State,ExitCode").stdout
         parsed = _accounting_state(accounting)
-        if parsed is None:
-            return _reading("UNKNOWN")
-        state, code = parsed
-        return _reading(state, exit_code=code)
+        if parsed is not None:
+            ended = _reading(parsed[0], exit_code=parsed[1])
+            # Slurm keeps a finished or cancelled job in COMPLETING for 20 to 40 s
+            # while the node tears down, but accounting already records its final
+            # state, and the job script has exited. The job has ended for every
+            # purpose of this API; waiting for the queue to forget it only delays
+            # the result.
+            if queued is None or ended.phase is SlurmPhase.ENDED:
+                return ended
+        return queued if queued is not None else _reading("UNKNOWN")
 
     def collect_evidence(
         self, handle: SlurmJobHandle, *, observed: SlurmJobStatus | None = None
