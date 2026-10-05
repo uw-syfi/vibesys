@@ -136,10 +136,17 @@ def _canonical(value: object, serialized: object) -> object:
         return serialized
     if isinstance(value, BaseModel) and isinstance(serialized, dict):
         names = _wire_names(type(value))
-        return {
-            name: _canonical(getattr(value, names[name]), child) if name in names else child
-            for name, child in serialized.items()
-        }
+        result: dict[str, object] = {}
+        for name, child in serialized.items():
+            attribute = names.get(name)
+            if attribute is None:
+                result[name] = child
+                continue
+            member = getattr(value, attribute)
+            result[name] = (
+                child if type(member) in _IMMUTABLE_LEAF_TYPES else _canonical(member, child)
+            )
+        return result
     if isinstance(value, tuple | frozenset) and isinstance(serialized, list):
         children = [
             wire if type(child) in _IMMUTABLE_LEAF_TYPES else _canonical(child, wire)
