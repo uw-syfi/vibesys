@@ -55,6 +55,10 @@ class BlockDiagnostic(BaseModel):
     diagnostic: str
 
 
+# What every published (sealed) block reports; inspection reports the same facts.
+PUBLISHED_FACTS = ObservationFacts(ObservationStatus.SUCCEEDED, accepted=True)
+
+
 class Published(BaseModel):
     """The sealed result of one request: the journal position its diagnostic holds."""
 
@@ -116,7 +120,7 @@ class JournalSemanticEvents:
         )
         match execution:
             case Replayed() | Performed():
-                facts = ObservationFacts(ObservationStatus.SUCCEEDED, accepted=True)
+                facts = PUBLISHED_FACTS
             case Conflict():
                 facts = ObservationFacts(
                     ObservationStatus.REJECTED,
