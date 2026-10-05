@@ -1941,3 +1941,44 @@ def test_late_child_cleanup_survives_previous_parent_block_and_cancel_requests()
     assert repeated.requests == ()
     assert repeated.state.intents == result.state.intents
     assert repeated.events == ()
+
+
+@pytest.mark.parametrize("request_model", [DiscardWorkspace, CloseAttemptScope])
+@pytest.mark.parametrize("names_resource", [False, True])
+def test_a_request_that_completed_before_the_restart_resolves_its_own_recovery_check(
+    request_model: type[DiscardWorkspace] | type[CloseAttemptScope], *, names_resource: bool
+) -> None:
+    """A terminal observation answers its own check, whether or not it names a resource.
+
+    Such a request reports the workspace another request owns, so the report says nothing
+    about that workspace's release and recovery has nothing left to wait on.
+    """
+    original = pending_intent(identity="finished", phase=IntentPhase.COMPLETED)
+    attempt = AttemptRef(attempt_id=AttemptId(root="owner"), generation=0)
+    request = request_model(
+        request_id=original.request_id,
+        scope=Scope(owner=attempt.attempt_id, generation=attempt.generation),
+        attempt=attempt,
+        admission_id=DecisionId(root="admission"),
+        deadline_at=100.0,
+    )
+    swapped = original.model_copy(
+        update={"request": request, "lifecycle": LifecycleClass.IDEMPOTENT_WRITE}
+    )
+    finished = swapped.model_copy(
+        update={
+            "observation": observed(
+                swapped,
+                admission_id=request.admission_id,
+                resource_id=ResourceId(root="workspace") if names_resource else None,
+                status=ObservationStatus.SUCCEEDED,
+                accepted=True,
+                terminal=True,
+                released=True,
+                children_complete=True,
+            ),
+        }
+    )
+    result = step(reload(recovering_state(finished)), RecoveryStarted(epoch=1, now_at=11.0))
+    assert [check.resolution for check in result.state.intents.recovery.checks] != ["pending"]
+    assert result.state.intents.recovery.phase != RecoveryPhase.RECOVERING

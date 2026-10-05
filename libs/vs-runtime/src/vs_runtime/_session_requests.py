@@ -393,7 +393,7 @@ class RuntimeSessionRequests:
                 terminal=facts.terminal,
                 accepted=facts.accepted,
                 released=isinstance(request, DispatchTurn) and facts.terminal,
-                children_complete=isinstance(request, DispatchTurn) and facts.terminal,
+                children_complete=facts.terminal,
                 resource_id=facts.resource_id,
                 diagnostic=facts.diagnostic,
             ),

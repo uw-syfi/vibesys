@@ -68,13 +68,20 @@ from .types.intents import (
 )
 from .types.kernel import AreaChange
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
-from .types.sessions import CancelTurn, CloseSession, DispatchTurn, EnsureSession, ResumeSessionTurn
+from .types.sessions import (
+    CancelTurn,
+    CloseSession,
+    DispatchTurn,
+    EnsureSession,
+    ResumeSessionTurn,
+    SessionPhase,
+)
 
 if TYPE_CHECKING:
     from .types.common import Observation, ResourceId
     from .types.intents import Intent, IntentsEvent, IntentsState, Request
     from .types.kernel import IntentsContext
-    from .types.sessions import Invocation
+    from .types.sessions import Invocation, SessionView
     from .types.strategy import Operation
 
 type Resolution = Literal["pending", "safe-prepared", "reattached", "terminal", "blocked"]
@@ -291,6 +298,23 @@ def _workspace_owner(intent: Intent, context: IntentsContext, observation: Obser
     )
 
 
+def _session_created(intent: Intent, observation: Observation, session: SessionView) -> bool:
+    """The session is the one this completed ensure created, and it is busy with its first turn.
+
+    A session's own acceptance waits for that turn's reply, and the turn waits for recovery
+    to be ready, so recovery cannot wait for acceptance to recognise the ensure's resource.
+    An idle session has no turn to wait on, so it needs its acceptance as before.
+    """
+    return (
+        intent.phase == IntentPhase.COMPLETED
+        and observation.accepted
+        and observation.status == ObservationStatus.SUCCEEDED
+        and session.phase in (SessionPhase.ACQUIRING, SessionPhase.EXECUTING)
+        and session.resource_id is not None
+        and observation.resource_id == session.resource_id
+    )
+
+
 def _known_owner(intent: Intent, context: IntentsContext, observation: Observation) -> bool:
     if any(
         _typed_job_owner(intent, context, observation, job)
@@ -311,6 +335,7 @@ def _known_owner(intent: Intent, context: IntentsContext, observation: Observati
         and (
             (session.accepted and session.resource_id is not None)
             or intent.request_id in session.pending_intents
+            or _session_created(intent, observation, session)
         )
         for session in context.sessions.sessions
     ):
@@ -437,13 +462,22 @@ def _session_resources(intent: Intent, context: IntentsContext) -> set[ResourceI
     }
 
 
-def _resource_identified(intent: Intent, context: IntentsContext, observation: Observation) -> bool:
-    request = intent.request
-    resource_bearing = intent.lifecycle in (
+def _owns_resource(intent: Intent) -> bool:
+    """Whether the request creates or ends the lifecycle of the resource it reports.
+
+    Every other request only names a resource that another request owns (a snapshot, a
+    retain or an adoption names the workspace), so its observation says nothing about
+    that resource's release.
+    """
+    return intent.lifecycle in (
         LifecycleClass.OWNED_JOB,
         LifecycleClass.SESSION_TURN,
-    ) or isinstance(request, EnsureSession | EnsureWorkspace | CloseSession)
-    if not resource_bearing:
+    ) or isinstance(intent.request, EnsureSession | EnsureWorkspace | CloseSession)
+
+
+def _resource_identified(intent: Intent, context: IntentsContext, observation: Observation) -> bool:
+    request = intent.request
+    if not _owns_resource(intent):
         return True
     if observation.resource_id is None:
         return not observation.accepted and observation.status in (
@@ -480,11 +514,18 @@ def _resolution(intent: Intent, context: IntentsContext) -> Resolution:
     if not _resource_identified(intent, context, observation):
         return "pending"
     terminal = observation.terminal and observation.status != ObservationStatus.PENDING
+    # A completed request that does not own its resource has nothing left to recover: it
+    # creates no children and its resource is another request's to release.
+    names_only = (
+        not _owns_resource(intent)
+        and observation.accepted
+        and observation.status == ObservationStatus.SUCCEEDED
+    )
     resource_free = (
         intent.lifecycle not in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
-        and observation.resource_id is None
+        and (observation.resource_id is None or names_only)
         and not observation.children
-        and observation.children_complete
+        and (observation.children_complete or names_only)
     )
     if terminal and (
         intent.lifecycle == LifecycleClass.QUERY
