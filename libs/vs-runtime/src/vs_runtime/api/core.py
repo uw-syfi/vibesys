@@ -21,6 +21,7 @@ from vs_runtime._agent_evaluation import (
     SnapshotWorkspace,
 )
 from vs_runtime._core_loop import (
+    AdmissionBusyError,
     CommitObserver,
     CoreContractGapError,
     CoreRuntime,
@@ -225,6 +226,7 @@ __all__ = [
     "AccessSettlement",
     "AccessSettlementError",
     "AccessViolation",
+    "AdmissionBusyError",
     "AgentEvaluationBridge",
     "AgentEvaluationPolicy",
     "AgentWorkspaces",

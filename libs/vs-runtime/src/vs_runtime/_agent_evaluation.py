@@ -83,7 +83,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.tools import CORE_EVALUATION_TOOLS, core_evaluation_mcp_descriptor
 from vs_runtime._agent_tool_errors import ToolRefusal, ToolRefusedError, render_tool_refusal
-from vs_runtime._core_loop import RuntimeCommitError
+from vs_runtime._core_loop import AdmissionBusyError
 from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._workspace_lookup import find_scope_workspace
 from vs_runtime._workspace_requests import revision_ref
@@ -116,8 +116,6 @@ _WAIT_REFUSALS = {
     SuspensionRefusal.NOT_RESUMABLE: ToolRefusal.WAIT_NOT_RESUMABLE,
     SuspensionRefusal.PREFIX_MISMATCH: ToolRefusal.WAIT_OVERLAPPED,
 }
-_ADMISSION_BUSY = "admission needs an idle input queue"
-"""The shell's text for the one transient admission failure (a commit is in flight)."""
 
 
 def _ignore_diagnostic(line: str) -> None:
@@ -396,7 +394,7 @@ class AgentEvaluationBridge:
             return SubmittedReply(handle_id=handle)
 
     def _admit(self, shell: AdmissionShell, event: CoreEvent, now: float) -> Transition:
-        """Ask core about the event; only the shell's idle-queue refusal is transient.
+        """Ask core about the event; only the shell's busy refusal (``AdmissionBusyError``) is transient.
 
         Every other failure is run state that cannot be trusted (a halted shell, an
         uncertain commit, a core contract gap) or a core invariant, and must reach the
@@ -404,9 +402,7 @@ class AgentEvaluationBridge:
         """
         try:
             return shell.admit(event, now_at=now)
-        except RuntimeCommitError as error:
-            if type(error) is not RuntimeCommitError or str(error) != _ADMISSION_BUSY:
-                raise
+        except AdmissionBusyError as error:
             self._diagnostics(
                 f"agent evaluation call refused as busy: {type(error).__name__}: {error}"
             )

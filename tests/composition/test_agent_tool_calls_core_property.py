@@ -479,7 +479,7 @@ def test_an_admission_refused_for_a_busy_queue_is_busy_and_is_journaled() -> Non
         "the run could not take this call right now; call the tool again"
     ]
     assert played.agent.diagnostics == [
-        "agent evaluation call refused as busy: RuntimeCommitError: admission needs an idle input queue"
+        "agent evaluation call refused as busy: AdmissionBusyError: admission needs an idle input queue"
     ]
 
 
@@ -520,13 +520,14 @@ def _failing_admission(error: Exception | None) -> Callable[[Agent], Awaitable[N
         None,
         RuntimeCommitUncertainError(candidate_visible=True),
         OrphanWaitError(()),
+        RuntimeCommitError("admission needs an idle input queue"),
     ],
-    ids=["halted-or-inactive-shell", "uncertain-commit", "orphan-wait"],
+    ids=["halted-or-inactive-shell", "uncertain-commit", "orphan-wait", "busy-lookalike"],
 )
 def test_a_shell_that_cannot_be_trusted_is_never_reported_to_the_agent_as_busy(
     error: Exception | None,
 ) -> None:
-    """Only the idle-queue refusal is busy; every other shell failure reaches the halt."""
+    """Only ``AdmissionBusyError`` is busy, whatever the text; every other failure reaches the halt."""
     played = play((Turn(at_start=_failing_admission(error)),), 1)
     check(played)
     assert played.agent.errors == []

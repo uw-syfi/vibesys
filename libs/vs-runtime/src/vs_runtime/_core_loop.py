@@ -86,6 +86,17 @@ class RuntimeCommitError(RuntimeError):
     """Commit failed or lost authority; this shell cannot dispatch again."""
 
 
+class AdmissionBusyError(RuntimeCommitError):
+    """An admission arrived while a commit was in flight; the caller may try again.
+
+    The one transient admission refusal. Nothing was queued and the shell is intact,
+    unlike every other ``RuntimeCommitError``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("admission needs an idle input queue")
+
+
 class CoreContractGapError(RuntimeCommitError):
     """An explicitly missing core leaf. No transition or I/O is authorized."""
 
@@ -534,8 +545,7 @@ class CoreRuntime[S: StrategyState]:
         if tail is not None and tail[0] == self.record.envelope.core.revision:
             base = tail[1]
         elif self._queue:
-            message = "admission needs an idle input queue"
-            raise RuntimeCommitError(message)
+            raise AdmissionBusyError
         else:
             base = self.record.envelope.core
         transition = self._transitions.step(base, event)
