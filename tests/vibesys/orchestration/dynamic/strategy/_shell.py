@@ -382,6 +382,8 @@ def drive_shell[S: StrategyState](
     script: Script,
     harness: Harness,
     schemas: Mapping[SchemaRef, type[BaseModel]],
+    *,
+    max_concurrent: int = 1,
 ) -> Run:
     """Run ``strategy`` to the end of its run on the production shell and loop."""
     decisions: list[Decision] = []
@@ -403,7 +405,12 @@ def drive_shell[S: StrategyState](
     )
     clock = FakeRunClock(1.0)
     host = CoreRunHost(shell, FakePublicationDelivery(store), clock)
-    config = RunLoopConfig(host_id="scenario", lease_duration=LEASE, max_dispatches=MAX_DISPATCHES)
+    config = RunLoopConfig(
+        host_id="scenario",
+        lease_duration=LEASE,
+        max_dispatches=MAX_DISPATCHES,
+        max_concurrent=max_concurrent,
+    )
     start_core(host, config)
     halted = None
     try:
