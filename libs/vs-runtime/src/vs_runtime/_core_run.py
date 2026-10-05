@@ -292,7 +292,7 @@ class _Loop:
                 await self._wait(now)
         return self._outcome()
 
-    async def _drain(self, now: float):  # noqa: ANN202 - the shell's own return type
+    async def _drain(self, now: float) -> ExecutorRefusal | None:
         total = self._shell.dispatched - self._first_dispatch
         remaining = max(self._config.max_dispatches - total, 0)
         return await self._shell.run_until_idle(
