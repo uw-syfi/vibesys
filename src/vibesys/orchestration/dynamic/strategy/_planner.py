@@ -80,6 +80,7 @@ def decide(draft: Draft) -> None:
                 "step": Step.NEEDED,
                 "blocked_at_done": None,
                 "retries": 0,
+                "capacity": context.capacity(draft.state, draft.config),
                 "turn": TurnRecord(role=Role.PLANNER, serial=serial, charge="free"),
             }
         )
@@ -204,7 +205,12 @@ def on_turn(
             profiling=config.profiling,
         )
     )
-    want = context.capacity(state, config)
+    # The planner was asked to fill the slots free when the call began. A workstream that
+    # finished while it was answering frees another slot, and the next call fills that one;
+    # judging the reply against the later capacity would spend a correction turn on a slot
+    # the planner was never offered.
+    free = context.capacity(state, config)
+    want = min(planner.capacity, free) if planner.capacity else free
     complete = check is not None and check.valid and len(check.accepted) >= want
     if complete and check is not None:
         return schedule(state, view, check)

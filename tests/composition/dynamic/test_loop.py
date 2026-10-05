@@ -412,13 +412,21 @@ def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
 
         return turn
 
+    later = ["C", "D"]
+
+    def refill(agent: Turn) -> dict[str, object]:
+        """Fill exactly the free slots the prompt offers from the workstreams not yet planned.
+
+        A and B run in parallel threads, so they may finish one after the other (two
+        refills of one slot each) or together (one refill of two slots). Each order is
+        a legitimate run, so the script answers the slots it is asked for.
+        """
+        taken = [later.pop(0) for _ in range(min(agent.slots, len(later)))]
+        return portfolio(*(workstream(name) for name in taken))
+
     agents = (
         ScriptedAgents()
-        .plan(
-            portfolio(workstream("A"), workstream("B")),
-            portfolio(workstream("C")),
-            portfolio(workstream("D")),
-        )
+        .plan(portfolio(workstream("A"), workstream("B")), refill, refill)
         .implement("A", reach(14, "A"))
         .judge("A", PASS)
         .implement("B", reach(38, "B"))
@@ -451,9 +459,13 @@ def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
         assert rounds[identifier]["metrics"] == []
         assert rounds[identifier]["partial"] == measured(value)
     planner = agents.prompts(ORCHESTRATOR.id)
-    assert len(planner) == 3
-    # The third plan is the first that sees both finished candidates.
-    buildable = planner[2].split("Buildable candidates")[1]
+    # One planning call per refill, none beyond the two scripted and none to correct one.
+    assert 2 <= len(planner) <= 3
+    assert later == []
+    assert sorted(rounds) == ["A", "B", "C", "D"]
+    # The last plan is the first that sees both finished candidates, whichever order they
+    # finished in.
+    buildable = planner[-1].split("Buildable candidates")[1]
     order = re.findall(r"hypothesis `([A-Z])`", buildable)
     assert order[:2] == ["B", "A"]
     assert "partial warmup_rounds_per_s = 38.0 rounds/s" in buildable

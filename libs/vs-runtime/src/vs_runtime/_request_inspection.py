@@ -6,7 +6,8 @@ happened. Every receipt-backed executor records its request through
 after it. So the store's ``history`` is the single source for the answer, whatever
 the kind:
 
-* sealed: the sealed result, translated to the target's terminal facts;
+* sealed: the whole sealed result: the target's terminal facts and the owner events the
+  executor committed with it, so adopting it feeds core exactly what the live path did;
 * begun without a result: the effect may have run, so Unknown, unless a kind-specific
   probe can re-observe an external effect (a registered operation's owner);
 * nothing recorded: the effect never began, but only for kinds that run on
@@ -18,11 +19,17 @@ A probe is registered per sealed result type, not per request kind or backend na
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ValidationError
 
-from vs_core.api import InspectRequest, ObservationStatus, TargetObservation
+from vs_core.api import (
+    InspectRequest,
+    ObservationStatus,
+    RequestObserved,
+    TargetObservation,
+)
 from vs_runtime._core_requests import HAND_ROLLED_ROLES, ExecutionResult
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 from vs_runtime._receipt_store import (
@@ -37,9 +44,38 @@ from vs_runtime._semantic_events import PUBLISHED_FACTS, Published
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from vs_runtime._core_requests import ExecutionContext
+    from vs_runtime._core_requests import ExecutionContext, OwnerEvent
     from vs_runtime._observation_factory import ObservationFactory
     from vs_runtime._receipt_store import ReceiptStore
+
+
+# Fields of an executor's RequestObserved that are not a target's facts. ``target`` is the
+# nested inspection answer itself; ``outcome`` is decoded from ``outcome_json`` at the codec
+# boundary and never serialized.
+NOT_TARGET_FACTS = frozenset({"kind", "target", "outcome"})
+
+
+def as_target(observed: RequestObserved) -> TargetObservation:
+    """The target's facts from an executor's observation: every field, none dropped.
+
+    The projection is by field name, so a field added to ``RequestObserved`` reaches
+    inspection with no edit here (and fails the completeness test if ``TargetObservation``
+    cannot carry it).
+    """
+    names = (name for name in RequestObserved.model_fields if name not in NOT_TARGET_FACTS)
+    return TargetObservation(**{name: getattr(observed, name) for name in names})
+
+
+@dataclass(frozen=True)
+class Inspected:
+    """What a target left behind: its facts, and the owner events committed with them.
+
+    A sealed result is replayed whole. The owner events travel on the inspecting request's
+    own result, so the shell commits and applies them as it does for any executed request.
+    """
+
+    target: TargetObservation
+    owner_events: tuple[OwnerEvent, ...] = ()
 
 
 class TargetProbe(Protocol):
@@ -78,22 +114,24 @@ class RecordedRequestInspector:
             result_type_name(probe.result_type): probe for probe in probes
         }
 
-    async def answer(self, request: InspectRequest, context: ExecutionContext) -> TargetObservation:
-        """The target's facts: sealed, unknown, or proven never started."""
+    async def answer(self, request: InspectRequest, context: ExecutionContext) -> Inspected:
+        """The target's result: sealed, unknown, or proven never started."""
         try:
             history = self._store.history(request.target.root)
         except ReceiptCorruptError as error:
-            return self._unknown(request, context, str(error))
+            return Inspected(self._unknown(request, context, str(error)))
         if isinstance(history, NeverBegun):
-            return self._never_begun(request, context)
+            return Inspected(self._never_begun(request, context))
         probe = None if history.result_type is None else self._probes.get(history.result_type)
         if probe is not None:
             try:
-                return await probe.answer(request, context, history)
+                return Inspected(await probe.answer(request, context, history))
             except ReceiptCorruptError as error:
-                return self._unknown(request, context, str(error))
+                return Inspected(self._unknown(request, context, str(error)))
         if isinstance(history, BegunUnsealed):
-            return self._unknown(request, context, "the effect began and has no recorded result")
+            return Inspected(
+                self._unknown(request, context, "the effect began and has no recorded result")
+            )
         return self._sealed(request, context, history)
 
     def _never_begun(self, request: InspectRequest, context: ExecutionContext) -> TargetObservation:
@@ -118,27 +156,19 @@ class RecordedRequestInspector:
 
     def _sealed(
         self, request: InspectRequest, context: ExecutionContext, history: SealedExecution
-    ) -> TargetObservation:
+    ) -> Inspected:
         if history.result_type == result_type_name(ExecutionResult):
             try:
                 result = ExecutionResult.model_validate_json(history.result_json)
             except ValidationError:
-                return self._unknown(request, context, "sealed result is unreadable")
-            observed = result.observation
-            return TargetObservation(
-                observation=observed.observation,
-                setup_failure=observed.setup_failure,
-                revision=observed.revision,
-                evidence=observed.evidence,
-                progress=observed.progress,
-                measurement_failure=observed.measurement_failure,
-                evaluation_result=observed.evaluation_result,
-                suspension=observed.suspension,
-            )
+                return Inspected(self._unknown(request, context, "sealed result is unreadable"))
+            return Inspected(as_target(result.observation), result.owner_events)
         if history.result_type == result_type_name(Published):
-            return self._target(request, context, PUBLISHED_FACTS)
-        return self._unknown(
-            request, context, f"no inspection for sealed result type {history.result_type}"
+            return Inspected(self._target(request, context, PUBLISHED_FACTS))
+        return Inspected(
+            self._unknown(
+                request, context, f"no inspection for sealed result type {history.result_type}"
+            )
         )
 
     def _unknown(
@@ -161,4 +191,4 @@ class RecordedRequestInspector:
         return TargetObservation(observation=observation)
 
 
-__all__ = ["RecordedRequestInspector", "TargetProbe"]
+__all__ = ["Inspected", "RecordedRequestInspector", "TargetProbe", "as_target"]
