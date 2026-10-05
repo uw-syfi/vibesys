@@ -86,7 +86,7 @@ if TYPE_CHECKING:
         ResourceRequirements,
     )
     from vs_project.api import StateNamespace
-    from vs_runtime.api.core import AccessGuardedWorkspace, TurnYields
+    from vs_runtime.api.core import AccessGuardedWorkspace, CommitObserver, TurnYields
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
 
 LEASE = 100.0
@@ -159,6 +159,8 @@ class World:
     limits: Limits = field(default_factory=Limits)
     yields: Callable[[RuntimeWorkspaces, StateNamespace], TurnYields] | None = None
     """Builds the turn-yield source from the host's workspaces and receipts, per process."""
+    commits: CommitObserver | None = None
+    """Told of every confirmed commit of each shell this world starts."""
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -234,6 +236,8 @@ class World:
         A fresh run when the store is empty, a recovery of the durable envelope otherwise.
         """
         bindings = self.bindings()
+        if self.commits is not None:
+            bindings = dataclasses.replace(bindings, commits=self.commits)
         store = self.env.project.state_store(RUN_ID)
         shell: CoreRuntime[SkeletonState] = CoreRuntime(
             store, self.strategy, self.initial(), bindings=bindings
