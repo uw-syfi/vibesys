@@ -65,6 +65,7 @@ class _World:
     executor: _Executor
     snapshot: str
     stage_running: Callable[[], Awaitable[None]]
+    submission_visible: Callable[[], Awaitable[None]]
 
 
 class _Script(StrEnum):
@@ -93,7 +94,10 @@ async def _local(root: Path, script: _Script) -> _World:
         if gate is not None:
             await gate.entered.wait()
 
-    return _World(PollingEvaluationExecutor(evaluation, workspaces), snapshot, running)
+    async def visible() -> None:
+        return None
+
+    return _World(PollingEvaluationExecutor(evaluation, workspaces), snapshot, running, visible)
 
 
 async def _slurm(root: Path, script: _Script) -> _World:
@@ -106,7 +110,12 @@ async def _slurm(root: Path, script: _Script) -> _World:
     async def running() -> None:
         return None
 
-    return _World(stack.executor, stack.snapshot, running)
+    async def visible() -> None:
+        # submit() returns before the provider has the job: the cluster call runs
+        # in a background task, and until it lands a poll honestly reports Unknown.
+        await asyncio.to_thread(cluster.accepted.wait)
+
+    return _World(stack.executor, stack.snapshot, running, visible)
 
 
 BUILDERS = [pytest.param(_local, id="polling"), pytest.param(_slurm, id="semantic-slurm")]
@@ -218,6 +227,7 @@ async def test_poll_reports_each_phase_without_submitting_or_cancelling(
     assert await world.executor.inspect(_HANDLE) is None  # polling submitted nothing
 
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
+    await world.submission_visible()
     polled: ExecutorPoll = await world.executor.poll(_HANDLE)
     while polled.phase is not PollPhase.ENDED:
         assert polled.phase in (PollPhase.QUEUED, PollPhase.RUNNING)
