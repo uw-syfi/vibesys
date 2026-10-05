@@ -291,11 +291,12 @@ def counts_toward_concurrency(request: Request) -> bool:
 def settles_through_core(request: Request, intents: Iterable[Intent]) -> bool:
     """Whether a stop ends this running request through requests core itself issues.
 
-    A cancellation is such a request. A turn is one once core has asked to cancel its
+    A cancellation is such a request, and so are the session requests core issues to settle
+    a cancelled turn (inspect, close). A turn is one once core has asked to cancel its
     invocation. Any other running request has no cancellation in core: it ends on its own
     or not at all.
     """
-    if not counts_toward_concurrency(request):
+    if not counts_toward_concurrency(request) or isinstance(request, InspectTurn | CloseSession):
         return True
     if not isinstance(request, DispatchTurn | ResumeSessionTurn):
         return False

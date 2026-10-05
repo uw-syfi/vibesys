@@ -45,6 +45,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
 )
 from vibesys.run.core_run import LEASE_SECONDS
 from vs_core.api import (
+    CancelTurn,
     DispatchTurn,
     JobObserved,
     ObservationStatus,
@@ -55,12 +56,13 @@ from vs_core.api import (
     RunResultProposal,
     SubmitMeasurement,
 )
-from vs_core.testing.drive import Answer, Harness, Running, Succeeded, new_run
+from vs_core.testing.drive import Answer, Harness, Running, Succeeded, Unknown, new_run
 from vs_project.api import FakeStateStore, StoreFence
 from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
+    ExecutionResult,
     RunControlBridge,
     RunLoopConfig,
     RunOutcome,
@@ -85,7 +87,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import CoreState, OperationRegistry, Request, SchemaRef
-    from vs_runtime.api.core import ExecutionContext, ExecutionResult
+    from vs_runtime.api.core import ExecutionContext
 
 IMPLEMENTERS = 2
 # A mid-turn tool call happens this far into a turn.
@@ -223,8 +225,11 @@ class _TimedExecutors(ScriptedExecutors):
         self._clock = world.clock
         self._profile = world.profile
         self._turns = world.turns
+        self._cancels: dict[str, asyncio.Event] = {}
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionResult:
+        if isinstance(request, CancelTurn):
+            self._cancels.setdefault(request.invocation.invocation_id.root, asyncio.Event()).set()
         if isinstance(request, ObserveOwnedJob):
             return self._polled(request, await super().execute(request, context))
         if not isinstance(request, DispatchTurn | ResumeSessionTurn):
@@ -233,17 +238,38 @@ class _TimedExecutors(ScriptedExecutors):
         role = request.turn.session.role_id.root.removeprefix("dynamic-")
         duration = self._profile.turn_duration(request.request_id.root)
         start = self._clock.now()
+        cancel = self._cancels.setdefault(request.turn.invocation_id.root, asyncio.Event())
         try:
-            await self._clock.sleep(duration * _TOOL_CALL_AT)
-            # The tool bridge renews with the time of the request the call belongs to.
-            if context.lease is not None:
-                context.lease.renew(now_at=context.now_at, lease_duration=LEASE_SECONDS)
-            await self._clock.sleep(duration * (1 - _TOOL_CALL_AT))
+            interrupted = await self._sleep_unless(duration * _TOOL_CALL_AT, cancel)
+            if not interrupted:
+                # The tool bridge renews with the time of the request the call belongs to.
+                if context.lease is not None:
+                    context.lease.renew(now_at=context.now_at, lease_duration=LEASE_SECONDS)
+                interrupted = await self._sleep_unless(duration * (1 - _TOOL_CALL_AT), cancel)
         except BaseException:
             self._turns.append(TurnSpan(role, start, self._clock.now(), cancelled=True))
             raise
+        if interrupted:
+            # As the session executor does: the provider turn ended with no reply (Unknown).
+            self._turns.append(TurnSpan(role, start, self._clock.now(), cancelled=True))
+            observed = self._observed(request, Unknown(), context.now_at)
+            return ExecutionResult(
+                observation=observed, owner_events=self._owner_events(request, Unknown(), observed)
+            )
         self._turns.append(TurnSpan(role, start, self._clock.now()))
         return await super().execute(request, context)
+
+    async def _sleep_unless(self, seconds: float, cancel: asyncio.Event) -> bool:
+        """Sleep virtual time; returns True when a CancelTurn ended the turn first."""
+        sleeping = asyncio.ensure_future(self._clock.sleep(seconds))
+        cancelled = asyncio.ensure_future(cancel.wait())
+        try:
+            await asyncio.wait({sleeping, cancelled}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in (sleeping, cancelled):
+                task.cancel()
+            await asyncio.gather(sleeping, cancelled, return_exceptions=True)
+        return cancel.is_set()
 
     def _polled(self, request: ObserveOwnedJob, result: ExecutionResult) -> ExecutionResult:
         """A poll is a terminal request; the job it saw is non-terminal until the cluster ends it.

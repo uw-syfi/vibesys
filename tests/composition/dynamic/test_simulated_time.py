@@ -146,23 +146,15 @@ def test_a_stop_during_a_turn_is_acted_on_within_the_bound(
     stop_after = start + position * (end - start) - _finished(profile).started_at
     run = run_timed(profile, stop_after=stop_after)
     assert run.stopped_at is not None
-    assert isinstance(run.error, RunStopped), run.error
+    # Core cancels the running turns and ends the run terminal; only a request core cannot
+    # cancel (a submission, a poll) in flight makes the loop give up with RunStopped.
+    assert run.error is None or isinstance(run.error, RunStopped), run.error
     assert run.ended_at - run.stopped_at <= STOP_BOUND_S
     assert run.turns[-1].cancelled
     # Nothing new started after the stop.
     assert all(span.start <= run.stopped_at for span in run.turns)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=RunStopped,
-    reason=(
-        "gap (owner: vs-runtime _core_run.py): a stop cancels the in-flight dispatch from "
-        "outside and raises RunStopped, so core never commits CancelTurn and the run record "
-        "is not terminal. The shell should dispatch CancelTurn for each in-flight turn and "
-        "end the run through core."
-    ),
-)
 def test_a_stop_during_a_turn_cancels_it_through_core_and_ends_the_run_terminal() -> None:
     reference = _finished(EXACT)
     start, end = _turn_windows(reference)[0]
