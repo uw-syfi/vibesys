@@ -78,7 +78,6 @@
 {"path": "src/vibesys/orchestration/dynamic/planner_driver.py", "module": "vibesys.orchestration.dynamic.control.core", "symbol": "HostCore", "count": 1}
 {"path": "src/vibesys/orchestration/dynamic/planner_driver.py", "module": "vibesys.orchestration.dynamic.control.core", "symbol": "HostEvent", "count": 1}
 {"path": "src/vibesys/orchestration/dynamic/planner_driver.py", "module": "vibesys.orchestration.dynamic.control.core", "symbol": "WorkItem", "count": 1}
-{"path": "src/vibesys/orchestration/dynamic/plugin.py", "module": "vibesys.orchestration.dynamic.models", "symbol": "DynamicState", "count": 1}
 {"path": "src/vibesys/orchestration/dynamic/profiles.py", "module": "vibesys.orchestration.dynamic.lifecycle", "symbol": "CompleteIntent", "count": 1}
 {"path": "src/vibesys/orchestration/dynamic/profiles.py", "module": "vibesys.orchestration.dynamic.models", "symbol": "DynamicState", "count": 1}
 {"path": "src/vibesys/orchestration/dynamic/prompts/__init__.py", "module": "vibesys.orchestration.dynamic.lifecycle", "symbol": "TimedOut", "count": 1}
