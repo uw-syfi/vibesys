@@ -685,3 +685,60 @@ def test_adoption_properties_hold_for_any_order_of_proposals_and_observations(
         # Request identities are unique per request.
         ids = [request.request_id for request in run.adoption_requests()]
         assert len(ids) == len(set(ids))
+
+
+def _completion(run: Run, decision_id: core.DecisionId) -> core.CompletionStatus | None:
+    receipt = next(item for item in run.state.run.receipts if item.decision_id == decision_id)
+    return receipt.completion
+
+
+def _executor_answer(
+    run: Run,
+    request: core.Request,
+    status: core.ObservationStatus,
+    revision: core.RevisionRef | None = None,
+) -> core.Transition:
+    """Answer through the intent ledger, the way an executor's result enters the core."""
+    assert request.request_id is not None
+    key = request.request_id.root
+    run.sequences[key] = run.sequences.get(key, 0) + 1
+    if run.sequences[key] == 1:
+        run.feed(core.DispatchAuthorized(request_id=request.request_id))
+    observation = core.Observation(
+        event_id=core.EventId(root=f"{key}:{run.sequences[key]}"),
+        request_id=request.request_id,
+        scope=RUN_SCOPE,
+        sequence=run.sequences[key],
+        observed_at=2.0,
+        status=status,
+        accepted=True,
+        terminal=True,
+        revision=revision,
+    )
+    return run.feed(core.RequestObserved(observation=observation, revision=revision))
+
+
+def test_the_winner_decision_completes_only_after_its_adoption_is_verified() -> None:
+    """INTENTS-A gap: completing on the restore alone would precede the verification."""
+    run = start()
+    selection = GOOD[0]
+    (adopt,) = new_requests(run.propose(selection))
+    decision = adopt.decision_id
+    assert decision is not None
+    assert _completion(run, decision) is None
+    (verify,) = new_requests(
+        _executor_answer(run, adopt, core.ObservationStatus.SUCCEEDED, selection.revision)
+    )
+    assert _completion(run, decision) is None
+    _executor_answer(run, verify, core.ObservationStatus.SUCCEEDED, selection.revision)
+    assert _completion(run, decision) == core.CompletionStatus.SUCCEEDED
+
+
+def test_the_winner_decision_completes_as_failed_when_its_adoption_fails() -> None:
+    run = start()
+    (adopt,) = new_requests(run.propose(GOOD[0]))
+    decision = adopt.decision_id
+    assert decision is not None
+    _executor_answer(run, adopt, core.ObservationStatus.REJECTED)
+    assert run.failures()
+    assert _completion(run, decision) == core.CompletionStatus.FAILED

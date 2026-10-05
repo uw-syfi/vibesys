@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from ._values import digest
 from .types.attempts import AttemptPhase
 from .types.common import (
+    CompletionStatus,
     ContractValidationError,
     DecisionId,
     Observation,
@@ -43,7 +44,7 @@ from .types.common import (
     Scope,
     WorkspaceMode,
 )
-from .types.kernel import AreaChange
+from .types.kernel import AreaChange, DecisionCompleted
 from .types.scheduling import AdoptionFenceLifted
 from .types.settlement import (
     Adoption,
@@ -405,6 +406,7 @@ def _verify_observed(
         done = Adoption(selection=selection, observation=observation, verified=True)
         return AreaChange[SettlementState](
             state=state.model_copy(update={"adoption": done}),
+            signals=_completion(context, selection, CompletionStatus.SUCCEEDED),
             events=(AdoptionResult(selection=selection, observation=observation),),
         )
     recorded = adoption.model_copy(update={"observation": observation})
@@ -420,6 +422,18 @@ def _verify_observed(
     return _fail(state, context, recorded, AdoptionFailureReason.RETRIES_EXHAUSTED)
 
 
+def _completion(
+    context: SettlementContext, selection: Selection, status: CompletionStatus
+) -> tuple[DecisionCompleted, ...]:
+    """Complete the proposing command only once its adoption is verified or failed.
+
+    The restore request finishing proves nothing, so this is the sole completion
+    of a ProposeWinner decision. A bare WinnerProposed event has no command.
+    """
+    decision = _canonical_receipt(context, selection)
+    return () if decision is None else (DecisionCompleted(decision_id=decision, status=status),)
+
+
 def _fail(
     state: SettlementState,
     context: SettlementContext,
@@ -433,6 +447,7 @@ def _fail(
     failed = adoption.model_copy(update={"failure": reason})
     return AreaChange[SettlementState](
         state=state.model_copy(update={"adoption": failed}),
+        signals=_completion(context, adoption.selection, CompletionStatus.FAILED),
         events=(
             AdoptionFailed(
                 selection=adoption.selection,
