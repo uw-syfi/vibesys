@@ -1,9 +1,8 @@
 """The strategy on the real core: delivery faults never change what it decides.
 
 Each run calls the real `step` and `project`. The executors are scripted, so a
-test says what an executor saw, never what core concluded. Runs that reach the
-intent ledger need #1319; until it merges they raise `KernelNotImplementedError`
-from the ledger stub, which is why they are strict xfails.
+test says what an executor saw, never what core concluded. The runs stop at the
+first planner turn: core refuses a turn reply today (see test_scenarios).
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ from vibesys.orchestration.dynamic.strategy.api import (
 from vs_core.api import (
     ControlId,
     ControlInput,
-    KernelNotImplementedError,
     MeasurementFailure,
     Operation,
     RequestTurn,
@@ -29,10 +27,6 @@ from vs_core.api import (
     StartAttempt,
 )
 from vs_core.testing.drive import Failed, Faults, Harness, drive, new_run
-
-needs_ledger = pytest.mark.xfail(
-    strict=True, raises=KernelNotImplementedError, reason="needs the intent ledger, #1319"
-)
 
 FAULTS = {
     "unknown_first": Faults(unknown_first=lambda _request: True),
@@ -62,14 +56,12 @@ def test_the_declaration_starts_up_on_the_real_core() -> None:
     assert core.run.declaration == strategy.declaration
 
 
-@needs_ledger
 def test_a_refused_baseline_is_retried_within_budget_then_planning_goes_on() -> None:
     trace = run(_refused_baseline())
     assert kinds(trace)[:3] == ["Measure", "Measure", "Measure"]
     assert "RequestTurn" in kinds(trace)
 
 
-@needs_ledger
 @pytest.mark.parametrize("name", FAULTS)
 def test_delivery_faults_do_not_change_the_decisions(name: str) -> None:
     """Unknown, retried, duplicated, reordered and reloaded observations decide the same."""
@@ -78,7 +70,6 @@ def test_delivery_faults_do_not_change_the_decisions(name: str) -> None:
     assert kinds(faulty) == kinds(plain)
 
 
-@needs_ledger
 def test_every_prompt_goes_through_a_render_operation() -> None:
     """Prompts are rendered by a declared operation before each turn is requested."""
     trace = run(_refused_baseline())
@@ -92,7 +83,6 @@ def test_every_prompt_goes_through_a_render_operation() -> None:
     assert len(renders) == len(turns)
 
 
-@needs_ledger
 def test_the_state_survives_a_codec_reload_after_every_step() -> None:
     """Reloading the whole envelope after each step yields the run an unbroken one reaches."""
     plain = run(_refused_baseline())

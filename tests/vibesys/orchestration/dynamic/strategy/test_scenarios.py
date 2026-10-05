@@ -1,14 +1,15 @@
 """Whole runs on the real core: baseline, plan, implement, review, measure, select, adopt.
 
 Two kernel gaps keep these runs from finishing today, so every test here is a
-strict xfail that flips to a failure the day the gap closes (remove the mark then):
+strict xfail that flips to a failure the day the gaps close (remove the mark then):
 
-- #1319, the intent ledger, is a stub on main.
 - A measurement cannot complete: core never issues `ObserveOwnedJob` after a
   submission is accepted, and accepts a later `JobObserved` only when it equals the
   submission request's own first observation (`vs_core/_measurements.py`,
-  `_submission_job`, `_source`). Session replies are also refused at ingress
-  (`vs_core/_step.py`, `_validate_observation_ingress`). The handoff lists both.
+  `_submission_job`, `_source`).
+- Core refuses a session reply: a `RequestObserved` carrying `outcome_json` without a
+  registered-codec proof is rejected (`vs_core/_step.py`, `_validate_observation_ingress`),
+  yet `vs_runtime/_session_requests.py` builds exactly that observation.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from vs_core.api import Operation, ProposeWinner, RequestTurn, StartAttempt, Sto
 
 pending_kernel = pytest.mark.xfail(
     strict=True,
-    reason="needs #1319 (intent ledger) and the measurement observe cycle and session replies in core",
+    reason="core gaps: measurement observe cycle and session replies (module docstring)",
 )
 
 
