@@ -91,6 +91,17 @@ def intents_own(descriptor: OperationDescriptor) -> bool:
     )
 
 
+def reply_owed(observation: Observation, facts: Facts) -> bool:
+    """Whether a plain turn's observation proves a success whose reply only its owner event carries."""
+    return (
+        observation.terminal
+        and observation.accepted
+        and observation.status == ObservationStatus.SUCCEEDED
+        and facts.suspension is None
+        and facts.outcome_json is None
+    )
+
+
 def _invocation(context: IntentsContext, intent: Intent) -> InvocationRef:
     request = intent.request
     matches: tuple[Invocation, ...]
@@ -248,15 +259,16 @@ def _owner_signal(context: IntentsContext, intent: Intent, facts: Facts) -> tupl
                 ),
             )
         case DispatchTurn() | ResumeSessionTurn():
-            signals = (
-                TurnObserved(
-                    invocation=_invocation(context, intent),
-                    observation=observation,
-                    suspension=facts.suspension,
-                    output_schema=facts.outcome_schema,
-                    output_json=facts.outcome_json,
-                ),
-            )
+            if not reply_owed(observation, facts):
+                signals = (
+                    TurnObserved(
+                        invocation=_invocation(context, intent),
+                        observation=observation,
+                        suspension=facts.suspension,
+                        output_schema=facts.outcome_schema,
+                        output_json=facts.outcome_json,
+                    ),
+                )
         case SnapshotAndRetainRun():
             signals = (
                 RunInvocationCheckpointObserved(

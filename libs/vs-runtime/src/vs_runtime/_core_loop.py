@@ -149,6 +149,18 @@ class OwnerEventRejectedError(RuntimeCommitError):
         )
 
 
+class DispatchCapExceededError(RuntimeCommitError):
+    """``run_until_idle`` executed more requests than its cap: a request cycle that never ends.
+
+    ``kinds`` counts the request kinds dispatched, so the cycle is named in the failure.
+    """
+
+    def __init__(self, cap: int, kinds: dict[str, int]) -> None:
+        self.cap = cap
+        self.kinds = dict(kinds)
+        super().__init__(f"more than {cap} dispatches without going idle; kinds seen: {kinds}")
+
+
 class DispatchProgress(StrEnum):
     """Distinguish no eligible request from a completed executor call."""
 
@@ -245,6 +257,8 @@ class CoreRuntime[S: StrategyState]:
         self._fence: StoreFence | None = None
         self._halted = False
         self._busy = False
+        self._dispatched = 0
+        self._last_kind: str | None = None
         # Latest time a lease renewal or check supplied; commits never use an earlier time.
         self._time_floor = 0.0
         self._queue: deque[_Input[S] | _Decide] = deque()
@@ -275,6 +289,11 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime not started"
             raise RuntimeError(message)
         return self._record
+
+    @property
+    def dispatched(self) -> int:
+        """Requests this shell has executed so far (not durable; counts from process start)."""
+        return self._dispatched
 
     @property
     def storage_revision(self) -> int | None:
@@ -629,6 +648,8 @@ class CoreRuntime[S: StrategyState]:
         except ContractError:
             self._halted = True
             raise
+        self._dispatched += 1
+        self._last_kind = intent.request.kind
         self._queue.append(
             _Input[S](
                 event=observed,
@@ -701,16 +722,26 @@ class CoreRuntime[S: StrategyState]:
             self._busy = False
         return True
 
+    def _check_cap(self, cap: int | None, started: int, kinds: dict[str, int]) -> None:
+        if cap is not None and self._dispatched - started > cap:
+            raise DispatchCapExceededError(cap, kinds)
+
     async def run_until_idle(
-        self, delivery: PublicationDelivery, *, now_at: float
+        self, delivery: PublicationDelivery, *, now_at: float, max_dispatches: int | None = None
     ) -> ExecutorRefusal | None:
         """Drive the serialized queue, prepared intents and committed publication outbox.
 
         Publication is diagnostic, so a failing delivery never blocks dispatch
         (cancellations must still go out). Publishing stops after the first
         failure, dispatch continues to idle, and that failure is then re-raised.
+
+        ``max_dispatches`` bounds the requests executed by this call. A cycle that keeps
+        issuing requests raises ``DispatchCapExceededError`` naming the kinds seen, so a
+        spinning run fails loudly instead of hanging.
         """
         publication_error: OSError | ContractError | None = None
+        started = self._dispatched
+        kinds: dict[str, int] = {}
         while True:
             if self.advance():
                 continue
@@ -720,9 +751,12 @@ class CoreRuntime[S: StrategyState]:
                         continue
                 except (OSError, ContractError) as error:
                     publication_error = error
+            self._check_cap(max_dispatches, started, kinds)
             outcome = await self.dispatch_one(now_at=now_at)
             if isinstance(outcome, ExecutorRefusal):
                 return outcome
+            if outcome == DispatchProgress.DISPATCHED and self._last_kind is not None:
+                kinds[self._last_kind] = kinds.get(self._last_kind, 0) + 1
             if outcome == DispatchProgress.IDLE:
                 if publication_error is not None:
                     raise publication_error

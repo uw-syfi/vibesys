@@ -151,6 +151,6 @@ def project(state: CoreState) -> RunView:
         settlements=settlement_view(state.settlement),
         artifacts=run.artifacts,
         controls=run.controls,
-        next_observe_at=next_observe_at(state.evaluation),
         adoption=adoption_view(state.settlement, state.intents),
+        next_observe_at=next_observe_at(state.evaluation),
     )

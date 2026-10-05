@@ -418,6 +418,7 @@ def test_snapshot_replay_makes_one_commit_and_binds_the_receipt(tmp_path: Path) 
         first = await _run(executor, request)
         observed = first.observation
         assert observed.observation.status is ObservationStatus.SUCCEEDED
+        assert observed.observation.released  # a closure retention (no invocation)
         assert observed.revision is not None
         assert observed.revision.digest == f"git-commit:{observed.revision.revision_id.root}"
         commits = _commits(workspaces)
@@ -482,6 +483,7 @@ def test_a_write_turns_snapshot_keeps_its_edits_and_a_candidate_can_retain_it(
             ),
         )
         assert _status(edited) is ObservationStatus.SUCCEEDED
+        assert not edited.observation.observation.released  # one checkpoint among many
         assert edited.observation.revision is not None
         assert edited.observation.revision != unchanged.observation.revision
         assert _commits(workspaces) == commits + 1
@@ -606,6 +608,8 @@ def test_retain_receipt_names_the_exact_revision_and_dedups_by_request(tmp_path:
         first = await _run(executor, retain)
         assert first.observation.revision == ensure.plan.base
         assert first.observation.observation.status is ObservationStatus.SUCCEEDED
+        # The closure waits for its retention to be released before it discards the workspace.
+        assert first.observation.observation.released
         after_first = _git(workspaces.root.path, "for-each-ref", "--count=1000")
         assert after_first != refs
         assert await _run(executor, retain) == first

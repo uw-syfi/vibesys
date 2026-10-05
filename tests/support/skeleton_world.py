@@ -18,39 +18,44 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
+from tests.support.fake_run_clock import FakeRunClock
 from tests.support.runtime_evaluation import ScenarioCluster
 from tests.support.session_world import (
     FakeSessionResolver,
     ProviderFaults,
     SessionHost,
 )
-from tests.support.skeleton_strategy import DECLARATION, SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import DECLARATION, DIGEST, SkeletonState, SkeletonStrategy
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
 
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
 from vs_core.api import (
-    Capabilities,
     ClockAdvanced,
-    IntentPhase,
-    RecoveryPhase,
     RoleId,
     RunFacts,
     RunStatus,
     SchemaRef,
     TurnSpec,
 )
+from vs_evaluation.api import ExecutorPoll, PollPhase
 from vs_project.api import run_git
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import render_stage_failure
 from vs_runtime.api.core import (
+    CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
     DispatchProgress,
     ExecutorRefusal,
     JournalPublicationDelivery,
+    OperationCatalog,
+    RunLoopConfig,
+    RunStalledError,
     SessionServices,
     core_bindings,
+    drive_core,
+    empty_catalog,
     new_core_state,
     revision_ref,
 )
@@ -60,17 +65,78 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
 )
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_slurm.api import SlurmConfig, SlurmSshTransport
+from vs_slurm.api import (
+    SlurmConfig,
+    SlurmSshTransport,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from vs_agent.api import AgentSessionSpec, AgentTurnRequest
     from vs_core.api import CoreState
+    from vs_evaluation.api import (
+        AvailabilitySnapshot,
+        EvaluationRequest,
+        ExecutorObservation,
+        PollingEvaluationExecutor,
+        ResourceRequirements,
+    )
     from vs_runtime.api.core import AccessGuardedWorkspace
 
-DIGEST = "ab" * 32
 LEASE = 100.0
+
+
+@dataclass
+class TimedPolls:
+    """The world's evaluation executor, except that each job runs ``runtime`` clock seconds.
+
+    A job reports RUNNING until the shared run clock has moved ``runtime`` past the first
+    poll that saw it submitted; then it reports what the real executor reports. Everything
+    else is the real executor. ``polls`` is one entry per poll core asked for, which is what
+    pacing bounds.
+    """
+
+    inner: PollingEvaluationExecutor
+    clock: FakeRunClock
+    runtime: float
+    polls: list[str]
+    _seen: dict[str, float] = field(default_factory=dict)
+
+    async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
+        """The real executor's availability."""
+        return await self.inner.availability(requirements)
+
+    async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
+        """The real submission."""
+        await self.inner.submit(request, handle_id=handle_id)
+
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        """The real read."""
+        return await self.inner.inspect_only(handle_id)
+
+    async def inspect(self, handle_id: str) -> ExecutorObservation | None:
+        """The real read."""
+        return await self.inner.inspect(handle_id)
+
+    async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
+        """The real wait."""
+        await self.inner.wait_for_change(handle_id, timeout_s)
+
+    async def cancel(self, handle_id: str) -> None:
+        """The real cancellation."""
+        await self.inner.cancel(handle_id)
+
+    async def poll(self, handle_id: str) -> ExecutorPoll:
+        """Report RUNNING while the job's runtime has not elapsed on the run clock."""
+        self.polls.append(handle_id)
+        polled = await self.inner.poll(handle_id)
+        if polled.phase is PollPhase.UNSUBMITTED:
+            return polled
+        seen = self._seen.setdefault(handle_id, self.clock.now())
+        if self.clock.now() >= seen + self.runtime:
+            return polled
+        return ExecutorPoll(phase=PollPhase.RUNNING, current_stage=polled.current_stage)
 
 
 @dataclass
@@ -82,6 +148,9 @@ class World:
     cluster: ScenarioCluster
     agents: SessionHost
     strategy: SkeletonStrategy = field(default_factory=SkeletonStrategy)
+    operations: OperationCatalog = field(default_factory=empty_catalog)
+    timed: tuple[FakeRunClock, float] | None = None
+    polls: list[str] = field(default_factory=list)
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -98,7 +167,7 @@ class World:
             environment_digest=DIGEST,
         )
         return new_core_state(
-            RUN_ID, facts, DECLARATION, offered=Capabilities(), deadline_at=1000.0
+            RUN_ID, facts, DECLARATION, offered=self.operations, deadline_at=1000.0
         )
 
     def bindings(self) -> CoreRuntimeBindings:
@@ -130,11 +199,15 @@ class World:
             stage_failure_text=render_stage_failure,
             cluster=self.cluster,
         )
+        if self.timed is not None:
+            clock, runtime = self.timed
+            evaluation = TimedPolls(evaluation, clock, runtime, self.polls)
         return core_bindings(
             receipts=self.env.receipts_namespace(),
             workspaces=workspaces,
             evaluation=evaluation,
             sessions=SessionServices(self.agents.sessions(), self.agents.resolver),
+            operations=self.operations,
         )
 
     def runtime(self) -> Process:
@@ -168,59 +241,31 @@ def finished(process: Process) -> bool:
     return process.shell.record.envelope.core.run.status == RunStatus.TERMINAL
 
 
-def _recovered(process: Process) -> bool:
-    """Whether core finished reconciling unfinished work, so the strategy may be asked."""
-    barrier = process.shell.record.envelope.core.intents.recovery
-    return barrier.phase == RecoveryPhase.READY
-
-
 class StalledError(AssertionError):
     """The run is not terminal, nothing is dispatchable and the strategy has nothing to add."""
 
 
-async def drive(process: Process, *, start: float, rounds: int = 40) -> ExecutorRefusal | None:
-    """Deliver the clock, ask the strategy once recovered, and run to idle, until terminal.
+async def drive(
+    process: Process, *, start: float, clock: FakeRunClock | None = None
+) -> ExecutorRefusal | None:
+    """Run the production loop to a terminal run, on a fake clock that starts at ``start``.
 
-    Time is a logical counter the caller supplies; no sleeps and no wall clock.
-    Raises ``StalledError`` when a round changes nothing, which names a request
-    nobody issues rather than burning the remaining rounds.
+    No sleeps and no wall clock. A stall (nothing to do and nothing time can wake)
+    surfaces as ``StalledError``; a request cycle that never goes idle fails the
+    loop's dispatch cap.
     """
-    now = start
-    for _ in range(rounds):
-        if finished(process):
-            return None
-        before = process.shell.record.envelope.core.revision
-        process.shell.submit(ClockAdvanced(now_at=now), now_at=now)
-        refusal = await process.shell.run_until_idle(process.delivery, now_at=now)
-        if refusal is None and _recovered(process):
-            process.shell.decide(now_at=now)
-            refusal = await process.shell.run_until_idle(process.delivery, now_at=now)
-        if refusal is not None:
-            return refusal
-        if finished(process):
-            return None
-        if _stalled(process, before):
-            raise StalledError(_describe(process))
-        now += 1.0
-    message = f"run did not finish in {rounds} rounds"
-    raise AssertionError(message)
-
-
-def _stalled(process: Process, before: int) -> bool:
-    core = process.shell.record.envelope.core
-    return core.revision - before <= 2 and not any(
-        intent.phase == IntentPhase.PREPARED for intent in core.intents.intents
+    host = CoreRunHost(process.shell, process.delivery, clock or FakeRunClock(start))
+    config = RunLoopConfig(
+        host_id="skeleton",
+        lease_duration=LEASE,
+        recovery_poll_interval=50.0,
+        max_dispatches=60,
     )
-
-
-def _describe(process: Process) -> str:
-    core = process.shell.record.envelope.core
-    open_intents = [
-        f"{intent.request.kind}:{intent.phase.value}"
-        for intent in core.intents.intents
-        if intent.phase != IntentPhase.COMPLETED
-    ]
-    return f"stalled at core revision {core.revision}; open intents {open_intents}"
+    try:
+        outcome = await drive_core(host, config)
+    except RunStalledError as error:
+        raise StalledError(str(error)) from error
+    return outcome.refusal
 
 
 class CrashPoint(StrEnum):
@@ -271,7 +316,7 @@ IMPLEMENTER = RoleId(root="implementer")
 class CandidateWriter:
     """The Fake provider's implementer: each turn commits one change in its candidate worktree.
 
-    The worktree is found through Git (the one that is not the root checkout), so
+    The worktree is found through Git (the one in an attempt member directory), so
     nothing here reaches into the executors. The reply names the new commit.
     """
 
@@ -287,8 +332,12 @@ class CandidateWriter:
             for line in listing.splitlines()
             if line.startswith("worktree ")
         ]
-        candidates = [path for path in paths if path.resolve() != self.root.resolve()]
-        assert len(candidates) == 1, f"expected one candidate worktree, found {candidates}"
+        # An attempt's candidate lives in a member directory ``m-attempt-<id>``; the
+        # evaluation executor keeps its own measurement worktrees (``s<id>``) beside it.
+        candidates = [path for path in paths if path.parent.name.startswith("m-attempt-")]
+        # A probe that runs a turn with no attempt has only the root checkout to write in.
+        candidates = candidates or [self.root]
+        assert len(candidates) == 1, listing
         return candidates[0]
 
     def __call__(self, request: AgentTurnRequest) -> None:
@@ -340,7 +389,10 @@ def _open_agents(root: Path) -> SessionHost:
 
 @contextmanager
 def open_skeleton_world(
-    tmp_path: Path, strategy: SkeletonStrategy | None = None
+    tmp_path: Path,
+    strategy: SkeletonStrategy | None = None,
+    cluster: ScenarioCluster | None = None,
+    timed: tuple[FakeRunClock, float] | None = None,
 ) -> Iterator[World]:
     """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
     with open_workspace_env(tmp_path) as env:
@@ -348,7 +400,8 @@ def open_skeleton_world(
         yield World(
             env=env,
             root=tmp_path / "project",
-            cluster=ScenarioCluster(),
+            cluster=cluster or ScenarioCluster(),
             agents=agents,
             strategy=strategy or SkeletonStrategy(),
+            timed=timed,
         )

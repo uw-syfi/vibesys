@@ -35,10 +35,7 @@ from vs_runtime._operation_receipts import NamespaceOperationReceipts
 from vs_runtime._operation_requests import RegisteredOperationRequests
 from vs_runtime._receipt_store import ReceiptStore
 from vs_runtime._semantic_events import JournalSemanticEvents
-from vs_runtime._session_lifecycle_requests import (
-    ReleasedRunInvocations,
-    SessionRequestRouter,
-)
+from vs_runtime._session_lifecycle_requests import ReleasedRunInvocations, SessionRequestRouter
 from vs_runtime._session_requests import JournalRunInvocations
 from vs_runtime._session_resolver import session_executors
 from vs_runtime._workspace_requests import RuntimeWorkspaceRequests
@@ -63,21 +60,28 @@ class SessionServices:
     resolver: SessionResolver
 
 
+def empty_catalog() -> OperationCatalog:
+    """The catalog of a host that registers no operations."""
+    return OperationCatalog(OperationRegistry(), ())
+
+
 def new_core_state(
     run_id: str,
     facts: RunFacts,
     declaration: StrategyDeclaration,
     *,
-    offered: Capabilities,
+    offered: OperationCatalog,
     deadline_at: float,
 ) -> CoreState:
     """Build the state of a run that has not started, validated against its declaration.
 
-    ``offered`` is what the host can serve (lifecycle capabilities and registered
-    operations, from the operation catalog); there is no default. A strategy that
-    requires something not offered fails here, naming it, instead of mid-run.
+    ``offered`` is the catalog the run's executors are bound from (``core_bindings``
+    takes the same object), so the operations core is told it may use are exactly the
+    ones with an owner; there is no default. No executor serves a lifecycle capability
+    (park, interrupt, ...) yet, so none is offered. A strategy that requires something
+    not offered fails here, naming it, instead of mid-run.
     """
-    selected = validate_startup(declaration, offered)
+    selected = validate_startup(declaration, Capabilities(operations=offered.offered_operations))
     return CoreState(
         registry=selected.operations,
         intents=IntentsState(recovery=RecoveryBarrier(phase=RecoveryPhase.READY)),
@@ -103,19 +107,23 @@ def core_bindings(
 ) -> CoreRuntimeBindings:
     """Bind every request role over one shared receipt store.
 
+    The session role is ``session_executors``: EnsureSession, DispatchTurn and
+    InspectTurn go to its ``turns`` executor, CancelTurn, CloseSession and
+    ResumeSessionTurn to its ``lifecycle`` executor, both over one access settlement.
     The same agent sessions also prove, for the workspace executor, that a run turn's
-    writer ended (settled, or interrupted and released) before the run is snapshotted. ``operations`` defaults to the empty
-    catalog, which serves a strategy that declares no registered operations.
+    writer ended (settled, or interrupted and released) before the run is snapshotted.
+    ``operations`` defaults to the empty catalog, which serves a strategy that declares
+    no registered operations; pass the same catalog to ``new_core_state(offered=)``.
     """
     store = ReceiptStore(receipts)
-    catalog = operations or OperationCatalog(OperationRegistry(), ())
-    session_pair = session_executors(sessions.agent_sessions, sessions.resolver, store)
+    catalog = operations or empty_catalog()
+    session = session_executors(sessions.agent_sessions, sessions.resolver, store)
     proof = ReleasedRunInvocations(
         JournalRunInvocations(sessions.agent_sessions, store), sessions.agent_sessions, store
     )
     executors = RequestExecutors(
         workspaces=RuntimeWorkspaceRequests(workspaces, store, proof),
-        sessions=SessionRequestRouter(session_pair.turns, session_pair.lifecycle),
+        sessions=SessionRequestRouter(session.turns, session.lifecycle),
         evaluation=MeasurementRequests(evaluation, store),
         operations=RegisteredOperationRequests(
             catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
