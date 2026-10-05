@@ -26,7 +26,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _SUBMIT_BUDGET = 19
-_ACTIVE_POLL_BUDGET = 2
+# A poll of a computing multi-stage batch also reads how many stages have finished.
+_ACTIVE_POLL_BUDGET = 3
 _TERMINAL_POLL_BUDGET = 3
 _COLLECT_BUDGET = 6
 
