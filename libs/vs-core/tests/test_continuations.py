@@ -2177,3 +2177,27 @@ def test_a_suspension_needs_the_turns_exact_paid_prefix(
     )
     expected = None if exact else core.SuspensionRefusal.PREFIX_MISMATCH
     assert core.suspension_refusal(state, continuation.invocation) == expected
+
+
+@given(owned=st.booleans(), late=st.booleans(), repeated=st.booleans())
+def test_a_wait_names_only_owned_jobs_within_the_run_deadline(
+    *, owned: bool, late: bool, repeated: bool
+) -> None:
+    """The one suspension gate also refuses a wait on a job the scope does not own, or one
+    that ends after the run; a repeated job is a malformed wait, not a refusal."""
+    state, continuation = fixture(settled=True)
+    jobs = (
+        continuation.jobs if owned else (*continuation.jobs, core.ResourceId(root="job:not-owned"))
+    )
+    deadline = state.run.deadline_at + (1.0 if late else 0.0)
+    wait = continuation.model_copy(update={"jobs": jobs, "deadline_at": deadline})
+    if repeated:
+        wait = wait.model_copy(update={"jobs": (*jobs, *jobs)})
+    expected = (
+        core.SuspensionRefusal.JOB_NOT_OWNED
+        if not owned
+        else core.SuspensionRefusal.DEADLINE_EXCEEDED
+        if late
+        else None
+    )
+    assert core.suspension_refusal(prefixed(state), wait.invocation, wait) == expected

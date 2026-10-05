@@ -15,6 +15,7 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import pytest
 from tests.support.agent_tool_world import Program, ScriptedAgent, scenario
 from tests.support.concurrent_turns_strategy import (
     FIRST,
@@ -47,6 +48,7 @@ class RefusedWaits:
     """Stands in for an accepted wait that core will refuse: the turn yields a wait on an unowned job."""
 
     bridge: AgentEvaluationBridge
+    job: str = "job:not-owned"
 
     def yielded(self, request: DispatchTurn) -> Continuation | None:
         """A wait the commit cannot honor for the first turn; the bridge's answer otherwise."""
@@ -65,22 +67,22 @@ class RefusedWaits:
                 invocation_id=InvocationId(root=f"{name}/resume"),
                 generation=generation,
             ),
-            jobs=(ResourceId(root="job:not-owned"),),
+            jobs=(ResourceId(root=self.job),),
             deadline_at=500.0,
             phase=ContinuationPhase.WAITING,
         )
 
 
-async def play(tmp_path: Path) -> ConcurrentTurnsState:
+async def play(tmp_path: Path, job: str) -> ConcurrentTurnsState:
     """Run a one-turn attempt whose wait is refused at commit; it must reach a terminal state."""
-    programs: tuple[Program, ...] = ((("submit",),),)
+    programs: tuple[Program, ...] = ((),)
     limits = Limits(max_turns=20, max_measurement_submissions=64)
 
     def agent(root: Path) -> ScriptedAgent:
         return ScriptedAgent(root, programs=programs)
 
     def refused(bridge: AgentEvaluationBridge) -> TurnYields:
-        return RefusedWaits(bridge)
+        return RefusedWaits(bridge, job)
 
     async with scenario(
         tmp_path, ConcurrentTurnsStrategy(wave=()), limits, agent, yields_over=refused
@@ -100,13 +102,16 @@ async def play(tmp_path: Path) -> ConcurrentTurnsState:
         return seen
 
 
+@pytest.mark.parametrize(
+    "job", ["job:not-owned", "vs-" + "0" * 40, "x"], ids=["unowned", "handle-shaped", "short"]
+)
 def test_a_wait_core_refuses_at_commit_ends_the_turn_and_the_strategy_is_told(
-    tmp_path: Path,
+    job: str, tmp_path: Path
 ) -> None:
     """The run ends terminally; the turn's result is ordinary and marked as a refused wait."""
     root = tmp_path / uuid.uuid4().hex[:6]
     root.mkdir()
-    seen = asyncio.run(play(root))
+    seen = asyncio.run(play(root, job))
     assert seen.results == (FIRST,)
     assert seen.failed == ()
     assert seen.suspended == ()
