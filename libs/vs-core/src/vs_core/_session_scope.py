@@ -1,4 +1,4 @@
-"""Scope and invocation lookups shared by the Sessions leaves.
+"""Scope, invocation and turn-identity definitions shared by the Sessions and Attempts leaves.
 
 One definition of "the owning attempt", "the scope is live" and "the proven
 invocation row", so Turns, Inputs and Checkpoints cannot drift apart.

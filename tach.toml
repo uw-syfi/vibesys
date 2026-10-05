@@ -1027,7 +1027,7 @@ depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common"]
 
 [[interfaces]]
 from = ["vs_core._session_scope"]
-expose = ["attempt_for", "proven_invocation", "scope_active"]
+expose = ["attempt_for", "encode_identity", "proven_invocation", "retains_write_turn", "scope_active", "turn_request_id", "write_turn_authority"]
 
 [[modules]]
 path = "vs_core._session_checkpoints"

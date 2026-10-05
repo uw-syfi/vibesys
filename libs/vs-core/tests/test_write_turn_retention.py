@@ -239,6 +239,8 @@ def test_write_turns_never_fail_the_step_or_strand_a_closing_attempt(plan: list[
         core.ObservationStatus.CANCELLED,
     )
     owner = state.attempts.attempts[0]
+    admission = owner.admission_id
+    assert admission is not None
     target = core.AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
     for kind, index in plan:
         if kind == "end":
@@ -286,7 +288,7 @@ def test_write_turns_never_fail_the_step_or_strand_a_closing_attempt(plan: list[
                     attempt=target,
                     disposition=("cancel", "park", "settle")[index],
                     authority=core.RequestId(root="withdraw"),
-                    admission_id=owner.admission_id,
+                    admission_id=admission,
                     requested_at=3.0,
                 )
             )
@@ -315,8 +317,10 @@ def test_a_closing_attempt_stops_waiting_on_its_invocation_snapshot(
     """
     state, request = write_turn_world()
     owner = state.attempts.attempts[0]
+    assert owner.admission_id is not None
     ended = core.step(state, terminal_yield(state, request, None))
     [snapshot] = snapshots(ended)
+    assert snapshot.request_id is not None
     retired = core.step(
         ended.state,
         core.RetireRequested(
