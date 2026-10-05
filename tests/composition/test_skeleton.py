@@ -217,8 +217,8 @@ async def test_skeleton_discarded_attempt(tmp_path: Path, crash: CrashPoint | No
     "crash",
     [
         None,
-        pytest.param(CrashPoint.AFTER_DISPATCH, marks=RECOVERY_UNRESOLVED),
-        pytest.param(CrashPoint.AFTER_OBSERVATION, marks=RECOVERY_UNRESOLVED),
+        pytest.param(CrashPoint.AFTER_DISPATCH),
+        pytest.param(CrashPoint.AFTER_OBSERVATION),
     ],
 )
 async def test_skeleton_cancelled_attempt(tmp_path: Path, crash: CrashPoint | None) -> None:
