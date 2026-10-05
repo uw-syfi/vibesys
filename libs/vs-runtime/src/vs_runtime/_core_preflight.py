@@ -96,6 +96,37 @@ def _missing_envelope(project: Project, run_id: str) -> CoreResumeError:
     )
 
 
+def _reject_legacy_state(project: Project, run_id: str) -> None:
+    """Raise when the run's legacy dynamic state file exists, even as a directory."""
+    legacy_namespace = project.state.portable_namespace(run_id, "dynamic")
+    try:
+        legacy = legacy_namespace.read_bytes("state.json")
+    except ProjectStateError:
+        # A directory or unreadable file at the legacy name is still legacy evidence.
+        raise _legacy(_path(legacy_namespace, "state.json"), "unreadable") from None
+    if legacy is not None:
+        raise _legacy(_path(legacy_namespace, "state.json"), _schema(legacy))
+
+
+def reject_legacy_resume(project: Project, run_id: str) -> None:
+    """Raise `CoreResumeError` when the run was created by the legacy dynamic loop.
+
+    A cheap read-only check for request validation: it needs no strategy or executor.
+    A run with no committed core record is legacy when it holds legacy files (a state
+    file or journals); a run that never committed anything is left to the resume
+    itself. A missing run is also left to the resume.
+    """
+    try:
+        selected = project.state.resolve_run(run_id)
+    except ProjectStateError:
+        return
+    _reject_legacy_state(project, selected.run_id)
+    if project.state.state_store_namespace(selected.run_id).read_bytes("store.json") is None:
+        failure = _missing_envelope(project, selected.run_id)
+        if failure.diagnostic.code == "dynamic_legacy_resume_unsupported":
+            raise failure
+
+
 def resolve_core_resume[S: StrategyState](
     project: Project,
     strategy: Strategy[S],
@@ -111,14 +142,7 @@ def resolve_core_resume[S: StrategyState](
     before selecting or opening any concrete execution implementation.
     """
     selected = project.state.resolve_run(run_id)
-    legacy_namespace = project.state.portable_namespace(selected.run_id, "dynamic")
-    try:
-        legacy = legacy_namespace.read_bytes("state.json")
-    except ProjectStateError:
-        # A directory or unreadable file at the legacy name is still legacy evidence.
-        raise _legacy(_path(legacy_namespace, "state.json"), "unreadable") from None
-    if legacy is not None:
-        raise _legacy(_path(legacy_namespace, "state.json"), _schema(legacy))
+    _reject_legacy_state(project, selected.run_id)
     store_namespace = project.state.state_store_namespace(selected.run_id)
     # StateStore.load synchronizes an existing record under its lock. Probe
     # absence through Project first so rejecting journal-only legacy runs does

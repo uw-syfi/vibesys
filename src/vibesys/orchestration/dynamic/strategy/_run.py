@@ -3,7 +3,18 @@
 The winner is the best winner-eligible retained candidate by the configured metric
 space, else the trusted baseline. Adoption is proposed once, and the run stops
 only after core reports the adoption result.
+
+A run ends in one of three typed ways, so that success always means the operator
+has a trusted, measured result to use:
+
+- ``adopted``: a retained, accuracy-verified candidate beat the input (success);
+- ``no improvement``: no candidate did, but the input was measured and trusted, so
+  the operator keeps it (success);
+- ``no trusted result``: the input failed its measurement and no trusted candidate
+  was found, so there is nothing to keep (failure).
 """
+
+from enum import StrEnum
 
 from vibesys.orchestration.dynamic.strategy import _context as context
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
@@ -28,6 +39,18 @@ from vs_core.api import (
     Stop,
     TrustedBaseline,
 )
+
+
+class RunEnding(StrEnum):
+    """How a finished run ends; the leading words of the result reason."""
+
+    ADOPTED = "adopted"
+    NO_IMPROVEMENT = "no improvement"
+    NO_TRUSTED_RESULT = "no trusted result"
+
+
+def _reason(ending: RunEnding, detail: str) -> str:
+    return f"{ending.value}: {detail}"
 
 
 def search_over(state: DynamicStrategyState, config: DynamicConfig) -> bool:
@@ -91,7 +114,8 @@ def decide(draft: Draft) -> None:
 
 def _propose(draft: Draft) -> None:
     state = draft.state
-    if state.planner.failed and not _eligible(state):
+    nothing_to_keep = not _eligible(state) and not context.input_trusted(state)
+    if (state.planner.failed and not _eligible(state)) or nothing_to_keep:
         draft.update(phase=RunPhase.STOPPING, winner=None)
         _stop(draft)
         return
@@ -109,16 +133,16 @@ def _propose(draft: Draft) -> None:
 def _stop(draft: Draft) -> None:
     state = draft.state
     winner = state.winner
+    stopping = state.stopping
     if winner is None:
         result = RunResultProposal(
-            outcome="failure",
-            reason=state.planner.last_error or "no candidate could be adopted",
+            outcome="cancelled" if stopping else "failure", reason=_no_winner_reason(state)
         )
     else:
-        label = "the trusted baseline" if winner.hypothesis_id is None else winner.hypothesis_id
+        ending = RunEnding.NO_IMPROVEMENT if winner.hypothesis_id is None else RunEnding.ADOPTED
         result = RunResultProposal(
-            outcome="cancelled" if state.stopping else "success",
-            reason=f"adopted {label}",
+            outcome="cancelled" if stopping else "success",
+            reason=_reason(ending, winner.hypothesis_id or "kept the trusted input"),
             selection=selection_of(winner),
         )
     draft.emit(
@@ -130,6 +154,15 @@ def _stop(draft: Draft) -> None:
         )
     )
     draft.update(phase=RunPhase.FINISHED)
+
+
+def _no_winner_reason(state: DynamicStrategyState) -> str:
+    if context.input_trusted(state) or _eligible(state):
+        return state.planner.last_error or "no candidate could be adopted"
+    detail = state.baseline.failure or "the input did not pass its measurement"
+    if state.planner.last_error:
+        detail = f"{detail}; {state.planner.last_error}"
+    return _reason(RunEnding.NO_TRUSTED_RESULT, detail)
 
 
 def on_adoption(state: DynamicStrategyState, event: AdoptionResult) -> DynamicStrategyState:

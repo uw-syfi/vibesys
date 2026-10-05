@@ -243,7 +243,7 @@ def _project_max_rounds(options: BaseModel) -> int:
 
 
 def dynamic_core_registration() -> OrchestrationRegistration:
-    """The dynamic search registered as a core run (selected by test wiring until the switch)."""
+    """The dynamic search registered as a core run the built-in `DYNAMIC` registration."""
     plugin = OrchestrationPlugin(
         id=_PLUGIN_ID,
         agents=core_agent_roles(),
