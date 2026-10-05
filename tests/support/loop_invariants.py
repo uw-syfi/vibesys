@@ -103,11 +103,23 @@ class RunRecords:
 
     @classmethod
     def from_core(
-        cls, events: Sequence[Record], envelope: Record | None, cluster: Path | None = None
+        cls,
+        events: Sequence[Record],
+        envelope: Record | None,
+        cluster: Path | None = None,
+        logs_dir: Path | None = None,
     ) -> RunRecords:
-        """Build records from a core-path run: its events, committed envelope and Fake cluster."""
+        """Build records from a core-path run: events, committed envelope, Fake cluster, usage.
+
+        ``logs_dir`` is the run's log directory, where its agent clients append usage rows.
+        """
         loaded = cls.load(Path("/nonexistent"), None, cluster)
-        return cls(events=events, cluster_jobs=loaded.cluster_jobs, envelope=envelope)
+        return cls(
+            events=events,
+            cluster_jobs=loaded.cluster_jobs,
+            envelope=envelope,
+            usage=[] if logs_dir is None else _usage_rows(logs_dir),
+        )
 
     @classmethod
     def load(
@@ -132,18 +144,23 @@ class RunRecords:
         return cls(
             events=_jsonl(logs_dir / "core-events.jsonl"),
             state=state,
-            # A turn's usage row lands in its workspace's log directory:
-            # the run's own for root-workspace roles, a candidate's otherwise.
-            usage=[
-                row
-                for path in (
-                    logs_dir / "usage.jsonl",
-                    *sorted(logs_dir.parent.glob("runtime/workspaces/*/logs/usage.jsonl")),
-                )
-                for row in _jsonl(path)
-            ],
+            usage=_usage_rows(logs_dir),
             cluster_jobs=jobs,
         )
+
+
+def _usage_rows(logs_dir: Path) -> list[Record]:
+    """Every turn's usage row. It lands in its workspace's log directory:
+    the run's own for root-workspace roles, a candidate's otherwise.
+    """
+    return [
+        row
+        for path in (
+            logs_dir / "usage.jsonl",
+            *sorted(logs_dir.parent.glob("runtime/workspaces/*/logs/usage.jsonl")),
+        )
+        for row in _jsonl(path)
+    ]
 
 
 def _jsonl(path: Path) -> list[Record]:

@@ -206,7 +206,8 @@ def test_core_host_yields_services_whose_state_starts_the_strategy(tmp_path: Pat
 def test_missing_resource_fails_at_composition_naming_it(
     tmp_path: Path,
     client_factory: Callable[..., AgentClientProtocol] | None,
-    journal: bool,  # noqa: FBT001  # lint-waiver: LW-948093 [FBT001]; pytest passes the parametrized journal flag positionally by name, so a keyword-only bool is not possible.
+    *,
+    journal: bool,
     missing: str,
 ) -> None:
     with pytest.raises(CoreCompositionError, match=missing) as raised:

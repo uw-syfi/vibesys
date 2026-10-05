@@ -71,7 +71,7 @@ from vs_sandbox.api.slurm import load_slurm_policy, read_slurm_evaluation_plan
 from vs_slurm.api import load_slurm_config
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Mapping
+    from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
     from contextlib import ExitStack
 
     from pydantic import BaseModel
@@ -689,22 +689,23 @@ class _ProductHostFactory:
             await close_evaluation_services(self.evaluation_service, self.profiler_service)
         )
         if self.profiler_provision is not None:
-            try:
-                await self.profiler_provision.close()
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930074 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-                errors.append(error)
+            await _collect_close_error(errors, self.profiler_provision.close)
         if self.evaluation_backend is not None:
-            try:
-                await self.evaluation_backend.close()
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930075 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-                errors.append(error)
+            await _collect_close_error(errors, self.evaluation_backend.close)
         if self.core_services is not None:
-            try:
-                await self.core_services.close()
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948091 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-                errors.append(error)
+            await _collect_close_error(errors, self.core_services.close)
         if errors:
             raise RunCleanupError(_EVALUATION_CLEANUP_FAILURE, tuple(errors))
+
+
+async def _collect_close_error(
+    errors: list[BaseException], close: Callable[[], Awaitable[None]]
+) -> None:
+    """Run one resource's ``close``; record its failure so the next resource still closes."""
+    try:
+        await close()
+    except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930074 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
+        errors.append(error)
 
 
 async def close_evaluation_services(
