@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tests.support.virtual_time import VirtualClock, run_virtual
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
+from tests.vibesys.orchestration.dynamic.strategy._executors import Executors, _lease
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
     implemented,
@@ -47,6 +47,7 @@ from vibesys.run.core_run import LEASE_SECONDS
 from vs_core.api import (
     CancelTurn,
     DispatchTurn,
+    InvocationRef,
     JobObserved,
     ObservationStatus,
     ObserveOwnedJob,
@@ -55,8 +56,9 @@ from vs_core.api import (
     RunEnvelope,
     RunResultProposal,
     SubmitMeasurement,
+    TurnObserved,
 )
-from vs_core.testing.drive import Answer, Harness, Running, Succeeded, Unknown, new_run
+from vs_core.testing.drive import Answer, Harness, Running, Succeeded, new_run
 from vs_project.api import FakeStateStore, StoreFence
 from vs_runtime.api.core import (
     CoreRunHost,
@@ -230,6 +232,7 @@ class _TimedExecutors(ScriptedExecutors):
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionResult:
         if isinstance(request, CancelTurn):
             self._cancels.setdefault(request.invocation.invocation_id.root, asyncio.Event()).set()
+            return self._cancelled(request, context)
         if isinstance(request, ObserveOwnedJob):
             return self._polled(request, await super().execute(request, context))
         if not isinstance(request, DispatchTurn | ResumeSessionTurn):
@@ -250,14 +253,38 @@ class _TimedExecutors(ScriptedExecutors):
             self._turns.append(TurnSpan(role, start, self._clock.now(), cancelled=True))
             raise
         if interrupted:
-            # As the session executor does: the provider turn ended with no reply (Unknown).
+            # The provider turn was interrupted: accepted, ended, no reply.
             self._turns.append(TurnSpan(role, start, self._clock.now(), cancelled=True))
-            observed = self._observed(request, Unknown(), context.now_at)
-            return ExecutionResult(
-                observation=observed, owner_events=self._owner_events(request, Unknown(), observed)
-            )
+            return self._cancelled(request, context)
         self._turns.append(TurnSpan(role, start, self._clock.now()))
         return await super().execute(request, context)
+
+    def _cancelled(
+        self, request: CancelTurn | DispatchTurn | ResumeSessionTurn, context: ExecutionContext
+    ) -> ExecutionResult:
+        """What the executor reports for a request that ended cancelled: accepted, released."""
+        session = (
+            request.invocation.session_id
+            if isinstance(request, CancelTurn)
+            else request.turn.session.session_id
+        )
+        observed = self._observed(request, Succeeded(resource_id=_lease(session)), context.now_at)
+        view = observed.observation.model_copy(update={"status": ObservationStatus.CANCELLED})
+        events = (
+            (TurnObserved(
+                invocation=InvocationRef(
+                    session_id=request.turn.session.session_id,
+                    invocation_id=request.turn.invocation_id,
+                    generation=request.scope.generation,
+                ),
+                observation=view,
+            ),)
+            if isinstance(request, DispatchTurn | ResumeSessionTurn)
+            else ()
+        )
+        return ExecutionResult(
+            observation=observed.model_copy(update={"observation": view}), owner_events=events
+        )
 
     async def _sleep_unless(self, seconds: float, cancel: asyncio.Event) -> bool:
         """Sleep virtual time; returns True when a CancelTurn ended the turn first."""
