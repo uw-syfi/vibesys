@@ -16,9 +16,9 @@ from vs_evaluation.agent_wire import EvaluationServiceClientError
 
 __all__ = [
     "CORE_EVALUATION_TOOLS",
-    "EvaluationServiceClientError",
     "SUBMIT_TOOL",
     "VALIDATE_WAIT_TOOL",
+    "EvaluationServiceClientError",
     "build_core_evaluation_tools",
     "build_evaluation_tools",
     "core_evaluation_mcp_descriptor",
