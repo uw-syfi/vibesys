@@ -84,10 +84,7 @@ class ScenarioCluster(FakeCluster):
         """Script the job's ending on first sight of its identity, then behave as Fake."""
         if isinstance(request, SlurmBatchRequest) and operation_id not in self.submissions:
             self.submissions.append(operation_id)
-            # Observed once, as the tests that use it assume: no COMPLETING lag.
-            self.script(
-                operation_id, states=self.states, result=self._result(request), teardown_lag=0
-            )
+            self.script(operation_id, states=self.states, result=self._result(request))
         outcome = super().submit(request, operation_id=operation_id)
         self.accepted.set()
         return outcome

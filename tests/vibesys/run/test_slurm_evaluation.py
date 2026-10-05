@@ -280,7 +280,10 @@ class _Runner(SlurmJobRunner):
             self.job_status = SlurmJobStatus.COMPLETED
         return SlurmBatchWaitResult(handle=handle, status=self.job_status, timed_out=False)
 
-    def collect_batch(self, handle: SlurmBatchHandle) -> SlurmBatchResult:
+    def collect_batch(
+        self, handle: SlurmBatchHandle, *, observed: object = None
+    ) -> SlurmBatchResult:
+        del observed
         result = super().collect_batch(handle)
         # Explicit scheduler/collection faults are raw boundary inputs. Keep the
         # actual producer's job attribution, artifact targets and result envelope.
