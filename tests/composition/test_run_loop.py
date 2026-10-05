@@ -181,10 +181,12 @@ async def test_an_idle_run_is_woken_a_bounded_number_of_times(
         horizon = process.shell.record.envelope.core.run.deadline_at - 1.0
     assert outcome.status == RunStatus.TERMINAL
     assert all(seconds >= min_sleep for seconds in clock.sleeps)
-    # Wakes come from the control poll and the lease renewal, each at most that often.
-    assert (
-        len(clock.sleeps)
-        <= horizon / max(poll, min_sleep) + horizon / max(LEASE / 3, min_sleep) + 3
+    # Wakes come from the control poll and the lease renewal, each at most that often; a
+    # partial period at the end of the horizon still costs one wake, hence the ceilings.
+    assert len(clock.sleeps) <= (
+        math.ceil(horizon / max(poll, min_sleep))
+        + math.ceil(horizon / max(LEASE / 3, min_sleep))
+        + 3
     )
 
 
