@@ -165,6 +165,8 @@ class PlannerState(Value):
     held_plan_json: str | None = None
     last_error: str | None = None
     failed: bool = False
+    # Fresh planning turns asked in this call after corrections ran out.
+    retries: int = Field(default=0, ge=0)
 
 
 class BaselineStage(StrEnum):

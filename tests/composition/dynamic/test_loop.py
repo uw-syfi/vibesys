@@ -201,21 +201,9 @@ def test_an_ambiguous_dispatched_turn_stalls_the_run_without_replanning(tmp_path
     assert records.selection is None
 
 
-_PLANNER_FAULT_GAP = (
-    "the planner is corrected max_corrections times and then the run fails; the legacy loop "
-    "asked a fresh planning turn within max_retries_per_round, "
-    "src/vibesys/orchestration/dynamic/strategy/_planner.py:175 (on_turn); owner strategy"
-)
-
-
 @pytest.mark.parametrize(
     "schema_failures",
-    [
-        1,
-        pytest.param(
-            2, marks=pytest.mark.xfail(strict=True, reason=_PLANNER_FAULT_GAP), id="2-xfail"
-        ),
-    ],
+    [1, 2],
 )
 def test_a_provider_schema_failure_is_corrected_instead_of_ending_the_run(
     tmp_path: Path, schema_failures: int

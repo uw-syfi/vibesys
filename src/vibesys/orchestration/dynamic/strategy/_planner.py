@@ -72,6 +72,7 @@ def decide(draft: Draft) -> None:
                 "active": True,
                 "step": Step.NEEDED,
                 "blocked_at_done": None,
+                "retries": 0,
                 "turn": TurnRecord(role=Role.PLANNER, serial=serial, charge="free"),
             }
         )
@@ -231,7 +232,34 @@ def on_turn(
     chosen = _final_choice(state, view, config, check)
     if chosen is not None:
         return schedule(state, view, chosen)
+    if planner.retries < config.max_retries_per_round:
+        return _fresh_turn(state, planner, turn, parse_error, check)
     return _nothing_valid(state, planner, parse_error, check)
+
+
+def _fresh_turn(
+    state: DynamicStrategyState,
+    planner: PlannerState,
+    turn: TurnRecord,
+    parse_error: str,
+    check: PlanCheck | None,
+) -> DynamicStrategyState:
+    """Corrections ran out: ask a new planning turn, within the call's retry budget."""
+    detail = parse_error or "; ".join(item.render() for item in (check.violations if check else ()))
+    return state.model_copy(
+        update={
+            "planner": planner.model_copy(
+                update={
+                    "step": Step.NEEDED,
+                    "awaiting": None,
+                    "held_plan_json": None,
+                    "last_error": detail or planner.last_error,
+                    "retries": planner.retries + 1,
+                    "turn": TurnRecord(role=Role.PLANNER, serial=turn.serial + 1, charge="free"),
+                }
+            )
+        }
+    )
 
 
 def _nothing_valid(
