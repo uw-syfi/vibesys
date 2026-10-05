@@ -7,6 +7,7 @@ a reading and the evidence it decodes always agree.
 
 from __future__ import annotations
 
+import hashlib
 from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -24,8 +25,10 @@ from vibesys.orchestration.dynamic.strategy.api import (
     dynamic_operation_registry,
 )
 from vs_core.api import (
+    AdoptRevision,
     ArtifactId,
     ArtifactRef,
+    CloseSession,
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
@@ -42,8 +45,12 @@ from vs_core.api import (
     OwnedJob,
     Request,
     ResourceId,
+    RetainRevision,
     RevisionRef,
+    SessionId,
+    SnapshotAndRetain,
     SubmitMeasurement,
+    VerifyAdoption,
 )
 from vs_core.testing.drive import Answer, Running, Succeeded, Unknown
 
@@ -57,6 +64,11 @@ _KINDS = {
     "benchmark": EvidenceKind.BENCHMARK,
     "profile": EvidenceKind.PROFILING,
 }
+
+
+def _lease(session_id: SessionId) -> ResourceId:
+    """The lease an executor holds for a session: the same name from ensure through close."""
+    return ResourceId(root=f"lease:{session_id.root}")
 
 
 @dataclass
@@ -76,19 +88,39 @@ class Executors:
     seen: list[Request] = field(default_factory=list)
     readings: dict[EvidenceId, EvidenceReading] = field(default_factory=dict)
 
-    def __call__(self, request: Request, core: CoreState) -> Answer | tuple[Answer, ...]:
+    def __call__(self, request: Request, core: CoreState) -> Answer:
         self.seen.append(request)
-        if isinstance(request, ExecuteRegisteredOperation):
-            return self._operation(request)
-        if isinstance(request, SubmitMeasurement):
-            return self._submit(request)
         if isinstance(request, ObserveOwnedJob):
             return self._observe(request, core)
-        if isinstance(request, DispatchTurn):
-            return self._turn(request)
-        if isinstance(request, EnsureWorkspace | EnsureSession):
-            return self._ensure(request)
-        return Succeeded()
+        return self._answer(request)
+
+    def _answer(self, request: Request) -> Answer:
+        """What an executor that needs no view of core reports for ``request``."""
+        answer: Answer = Succeeded()
+        match request:
+            case ExecuteRegisteredOperation():
+                answer = self._operation(request)
+            case SubmitMeasurement():
+                answer = self._submit(request)
+            case DispatchTurn():
+                answer = self._turn(request)
+            case EnsureWorkspace() | EnsureSession():
+                answer = self._ensure(request)
+            case CloseSession():
+                answer = Succeeded(resource_id=_lease(request.session_id))
+            case SnapshotAndRetain():
+                answer = self._retain(request)
+            case RetainRevision():
+                answer = Succeeded(revision=request.revision)
+            case AdoptRevision() | VerifyAdoption():
+                answer = Succeeded(revision=request.selection.revision)
+        return answer
+
+    @staticmethod
+    def _retain(request: SnapshotAndRetain) -> Answer:
+        """The commit the workspace executor retained for the attempt, one per attempt."""
+        digest = hashlib.sha256(request.attempt.attempt_id.root.encode()).hexdigest()[:40]
+        return Succeeded(revision=RevisionRef.of_git_commit(digest))
 
     @staticmethod
     def _ensure(request: EnsureWorkspace | EnsureSession) -> Answer:
@@ -100,7 +132,7 @@ class Executors:
                 ),
                 revision=request.plan.base,
             )
-        return Succeeded(resource_id=ResourceId(root=f"lease:{request.spec.session_id.root}"))
+        return Succeeded(resource_id=_lease(request.spec.session_id))
 
     def _submit(self, request: SubmitMeasurement) -> Answer:
         if self.submit is not None:
@@ -119,7 +151,8 @@ class Executors:
         }[role]
         if not queue:
             return Unknown()
-        return Succeeded(output_json=queue.popleft())
+        lease = _lease(request.turn.session.session_id)
+        return Succeeded(output_json=queue.popleft(), resource_id=lease)
 
     # -- evaluator --------------------------------------------------------
 

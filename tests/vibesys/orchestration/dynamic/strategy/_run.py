@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tests.vibesys.orchestration.dynamic.strategy._shell import Run, drive_shell
+
+from vibesys.orchestration.dynamic.core_policy.api import (
+    reply_schemas,
+    requirements_for,
+)
 from vibesys.orchestration.dynamic.strategy.api import (
     DynamicConfig,
     DynamicStrategy,
@@ -58,5 +64,20 @@ def run(
     return drive(DynamicStrategy(config=config(**overrides)), executors, harness, faults)
 
 
-def kinds(trace: Trace[DynamicStrategyState]) -> list[str]:
+def run_shell(executors: Executors, *, limits: Limits | None = None, **overrides: object) -> Run:
+    """Run a fresh strategy to the end of its run on the production shell."""
+    settings = config(**overrides)
+    harness = Harness(
+        registry=dynamic_operation_registry(),
+        facts=FACTS,
+        limits=limits or LIMITS,
+        envelope_type=RunEnvelope[DynamicStrategyState],
+        requirements=requirements_for(settings),
+    )
+    return drive_shell(
+        DynamicStrategy(config=settings), executors, harness, reply_schemas(settings)
+    )
+
+
+def kinds(trace: Trace[DynamicStrategyState] | Run) -> list[str]:
     return [type(item).__name__ for item in trace.decisions]

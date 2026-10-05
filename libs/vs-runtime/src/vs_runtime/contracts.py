@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from vs_evaluation.api import EvaluationSettlements
     from vs_project.api import OrchestrationDescriptor, StateModels
     from vs_prompts.api import RenderedPrompt
+    from vs_runtime._agent_evaluation import AgentEvaluationPolicy
     from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._operation_wiring import OperationRole
     from vs_runtime._run_environment import RunEnvironmentView
@@ -1291,6 +1292,8 @@ class CorePlan:
     prompt_variables: Mapping[str, object] = field(default_factory=dict)
     requirements: EvidenceRequirements = field(default_factory=EvidenceRequirements)
     """Who may vouch for a candidate and which proofs make it winner-eligible."""
+    agent_evaluation: AgentEvaluationPolicy | None = None
+    """The plan an agent measures with through its in-turn tool; None offers no tool."""
     """Run-level template variables (such as the objective) every rendered prompt can read."""
 
 

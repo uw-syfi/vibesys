@@ -328,8 +328,9 @@ def _correct(
     index: int,
     config: DynamicConfig,
     error: str,
-    answered: InvocationRef,
+    invalid: InvocationRef,
 ) -> DynamicStrategyState | None:
+    """Ask the role to fix its reply; the correction names the invalid turn as its predecessor."""
     record = state.attempts[index]
     turn = record.turn
     role = role_of(record.phase)
@@ -340,9 +341,8 @@ def _correct(
         serial=turn.serial + 1,
         corrections=turn.corrections + 1,
         charge="correction",
+        invocation=invalid,
         context=ReplyCorrectionPrompt(role=_CORRECTION_ROLE[role], error=error),
-        # Core ties a correction to the turn it corrects, in the same session.
-        invocation=answered,
     )
     return _put(
         state,

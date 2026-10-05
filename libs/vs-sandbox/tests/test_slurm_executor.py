@@ -18,6 +18,7 @@ from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
+    ExecutorCancellationUnconfirmedError,
     ExecutorCancellationUnknownError,
     ExecutorObservation,
     ExecutorRejectedError,
@@ -405,6 +406,9 @@ def _config() -> SlurmConfig:
         name="fake-cluster",
         remote_workspace_root="/runs",
         transport=SlurmSshTransport(host="fake-cluster"),
+        # The Fake scheduler reports teardown for a few inspections; pace the
+        # wait loop tightly so those inspections do not cost real seconds.
+        poll_interval_seconds=0.001,
     )
 
 
@@ -1140,11 +1144,12 @@ async def test_scancel_acknowledgement_does_not_complete_release_or_suppress_ret
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        cancel_confirmation_seconds=3 * config.poll_interval_seconds,
     )
     try:
         await executor.submit(_request(), handle_id="eval-pending-cancel")
         await asyncio.to_thread(runner.wait_started.wait)
-        with pytest.raises(ExecutorCancellationUnknownError):
+        with pytest.raises(ExecutorCancellationUnconfirmedError, match="was requested for job"):
             await executor.cancel("eval-pending-cancel")
         observed = await executor.inspect("eval-pending-cancel")
         assert observed is not None

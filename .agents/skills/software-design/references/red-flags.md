@@ -60,6 +60,15 @@ Apply [functional-core.md](functional-core.md) when a transition needs recovery:
 - Missing evidence turned into success, such as `exit_code or 0`.
 - Concrete implementation checks or I/O imports in the core.
 - An implementation absent from its interface's shared contract suite.
+- Recovery, inspection, or replay that builds its record through a different
+  path than live execution, or drops fields the live path carries.
+- Two functions mapping one system's raw states to the lifecycle, or a
+  consumer that raises when a later reading is lower.
+- An outcome type with no variant for an intermediate state (cancel requested,
+  unconfirmed), or a guard that takes raw fields instead of a parsed proof type.
+- A waiting entity with no request or timer that will end the wait.
+- A fence, lock, or flag in memory guarding a durable effect, or a file
+  rewritten in place.
 
 Move decisions into pure transitions. Commit state with intent before I/O, then
 record outcomes, completion, and resulting state atomically. Reconcile

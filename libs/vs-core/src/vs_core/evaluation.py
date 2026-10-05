@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from . import _continuations, _measurements
 from .types.evaluation import (
+    AgentMeasurementRequested,
     ContinuationJobsChanged,
     ContinuationReopenRequested,
     ContinuationRetireRequested,
@@ -46,6 +47,7 @@ EVENT_TO_SUBAREA: Mapping[type[EvaluationEvent], Reducer] = MappingProxyType(
         RegisteredJobObserved: _measurements.advance,
         RegisteredJobRequested: _measurements.advance,
         MeasurementRequested: _measurements.advance,
+        AgentMeasurementRequested: _measurements.advance,
         JobObserved: _measurements.advance,
         TurnSuspended: _continuations.advance,
         DeadlineReached: _continuations.advance,

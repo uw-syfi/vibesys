@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import get_args
 
 from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_core.api import Capabilities
-from vs_core.types.common import LifecycleCapability
 
-ABILITIES = list(get_args(LifecycleCapability.__value__))
+ABILITIES = ["park", "interrupt", "steer", "suspend", "profile-capture"]
 
 
 ORDERINGS = st.lists(st.sampled_from(ABILITIES), unique=True).flatmap(

@@ -108,12 +108,11 @@ def invocation_for(role: Role, subject: str, turn: TurnRecord) -> str:
 
 
 def session_for(role: Role, subject: str, access: Access) -> SessionSpec:
-    """The conversation a role speaks in: one spec for every turn of the subject.
+    """The conversation a role speaks in.
 
-    Core compares the whole spec of a session across its turns, and the runtime
-    refuses a second turn on a ``fresh`` session. A subject's turns (its first, a
-    correction, a retry after a rejected review, a resume) are one conversation, so the
-    policy is ``reuse`` from the first turn.
+    The policy is always "reuse": core and the session executor require every turn of a
+    session (first, correction, resume) to carry one spec, and a "fresh" session cannot be
+    ensured twice, so a conversation that may continue must declare reuse on its first turn.
     """
     return SessionSpec(
         session_id=session_id(role.value, subject),
@@ -157,7 +156,8 @@ def request_turn(draft: Draft, shape: TurnShape, turn: TurnRecord, scope: Scope)
             tool_policy=turn.tool_policy,
             deadline_at=draft.view.run.now_at + shape.seconds,
             charge_class=turn.charge,
-            predecessor=turn.invocation,
+            # A resume names its continuation, never a predecessor: core rejects both together.
+            predecessor=None if turn.charge == "resume" else turn.invocation,
         ),
     )
 

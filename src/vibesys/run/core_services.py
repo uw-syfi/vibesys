@@ -10,7 +10,10 @@ cannot serve, fails at composition with the name of what is missing, never mid-r
 
 from __future__ import annotations
 
+import hashlib
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel
@@ -26,12 +29,15 @@ from vs_evaluation.api import PollingEvaluationExecutor as PollingEvaluation
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import ArtifactStore, CorePlan, CoreRunContext
 from vs_runtime.api.core import (
+    EVALUATION_TOOL_ID,
+    AgentEvaluationBridge,
     CoreStartup,
     OperationPorts,
     ProductionSessionResolver,
     ReceiptEvidenceLedger,
     ReceiptStore,
     ResolverInputs,
+    ScopeWorkspaces,
     SessionServices,
     StoreWorkspaceReceipts,
     build_operation_catalog,
@@ -44,7 +50,6 @@ from vs_runtime.api.core import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
-    from pathlib import Path
 
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
     from vs_core.api import CoreState, LifecycleCapability, Strategy
@@ -140,6 +145,8 @@ class CoreServices:
     evaluation: ClosableEvaluation
     artifacts: ArtifactStore
     clock: RunClock
+    agent_evaluation: AgentEvaluationBridge | None = None
+    """The in-turn evaluation tool service, when the plan offers one; the run loop serves it."""
 
     async def close(self) -> None:
         """Release the evaluation executor; workspaces and the client close with the host."""
@@ -148,7 +155,6 @@ class CoreServices:
 
 def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreServices:
     """Join one policy with the host's resources, or fail naming what is missing."""
-    _refuse_unbridged_tools(resources.roles)
     run_id = resources.run_id
     state_dir = resources.project.state
     receipts = state_dir.local_namespace(run_id, "receipts")
@@ -158,6 +164,8 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     try:
         plan = policy.plan(_context(resources, artifacts))
         _validate_plan(plan)
+        _refuse_unbridged_tools(resources.roles, bridged=plan.agent_evaluation is not None)
+        bridge = _agent_bridge(plan, resources, receipt_store)
         catalog = _catalog(policy, plan, resources, artifacts, ReceiptEvidenceLedger(receipt_store))
         catalog.require_owned(plan.strategy.declaration)
         resolver = ProductionSessionResolver(
@@ -170,16 +178,17 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
                 configuration=resources.configuration,
                 session_spec=resources.session_spec,
                 artifact_directories=policy.artifact_directories,
+                tool_servers=bridge,
             )
         )
-        state = _initial_state(plan, resources, catalog)
+        state = _initial_state(plan, resources, catalog, suspendable=bridge is not None)
     except ContractError as error:
         raise CoreCompositionError(".".join(map(str, error.path)), error.detail) from error
     bindings = core_bindings(
         receipts=receipts,
         workspaces=resources.workspaces,
         evaluation=resources.evaluation,
-        sessions=SessionServices(_agent_sessions(resources), resolver),
+        sessions=SessionServices(_agent_sessions(resources), resolver, yields=bridge),
         operations=catalog,
     )
     return CoreServices(
@@ -194,6 +203,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         evaluation=resources.evaluation,
         artifacts=artifacts,
         clock=resources.clock,
+        agent_evaluation=bridge,
     )
 
 
@@ -237,7 +247,7 @@ def _validate_plan(plan: CorePlan) -> None:
 
 
 def _initial_state(
-    plan: CorePlan, resources: CoreResources, catalog: OperationCatalog
+    plan: CorePlan, resources: CoreResources, catalog: OperationCatalog, *, suspendable: bool
 ) -> CoreState:
     """The state of a run that has not started.
 
@@ -253,27 +263,57 @@ def _initial_state(
         startup=CoreStartup(
             deadline_at=resources.clock.now() + plan.deadline_seconds,
             limits=plan.limits,
-            lifecycle=resources.environment.lifecycle,
+            lifecycle=_lifecycle(resources, suspendable=suspendable),
             requirements=plan.requirements,
         ),
     )
 
 
-def _refuse_unbridged_tools(roles: Iterable[AgentRole]) -> None:
-    """Agent tools are not served to core sessions yet (the evaluation-tool bridge).
+def _lifecycle(resources: CoreResources, *, suspendable: bool) -> frozenset[LifecycleCapability]:
+    """The lifecycle capabilities the host offers; a bridged tool lets a turn suspend."""
+    offered = resources.environment.lifecycle
+    if not suspendable:
+        return offered
+    suspend: frozenset[LifecycleCapability] = frozenset({"suspend"})
+    return offered | suspend
 
-    An agent tool talks to a legacy service that records into legacy state, so handing
-    one to a core session would leave the run with two writers. Refusing here is explicit;
-    the bridge lifts it.
+
+def _refuse_unbridged_tools(roles: Iterable[AgentRole], *, bridged: bool) -> None:
+    """Agent tools other than the bridged evaluation tool are not served to core sessions.
+
+    Any other tool talks to a legacy service that records into legacy state, so handing
+    one to a core session would leave the run with two writers. The evaluation tool is
+    bridged to core events when the plan carries an ``AgentEvaluationPolicy``.
     """
     for role in roles:
         for tool in role.extra_tools:
+            if bridged and tool.id == EVALUATION_TOOL_ID:
+                continue
             detail = (
                 "agent tools are not yet bridged to core requests, so a core run "
                 "cannot give this role the tool"
             )
             resource = f"agent role {role.id!r} tool {tool.id!r}"
             raise CoreCompositionError(resource, detail)
+
+
+def evaluation_socket_path(project_root: Path, run_id: str) -> Path:
+    """The unix socket of one run's in-turn evaluation tool; the host also mounts it for agents."""
+    suffix = hashlib.sha256(f"{project_root}:{run_id}".encode()).hexdigest()
+    return Path(tempfile.gettempdir()) / f"vse-{suffix[:16]}.sock"
+
+
+def _agent_bridge(
+    plan: CorePlan, resources: CoreResources, receipts: ReceiptStore
+) -> AgentEvaluationBridge | None:
+    """The in-turn evaluation tool service, when the plan offers the tool."""
+    if plan.agent_evaluation is None:
+        return None
+    return AgentEvaluationBridge(
+        evaluation_socket_path(resources.project.root, resources.run_id),
+        plan.agent_evaluation,
+        ScopeWorkspaces(resources.workspaces, StoreWorkspaceReceipts(receipts)),
+    )
 
 
 def _catalog(
@@ -345,4 +385,5 @@ __all__ = [
     "CoreServices",
     "agent_session_spec",
     "build_core_services",
+    "evaluation_socket_path",
 ]

@@ -219,7 +219,6 @@ def on_turn(
                                 "serial": turn.serial + 1,
                                 "corrections": turn.corrections + 1,
                                 "charge": "correction",
-                                # Core ties a correction to the turn it corrects.
                                 "invocation": event.invocation,
                             }
                         ),

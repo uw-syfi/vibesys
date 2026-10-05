@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 
 class Value(BaseModel):
@@ -20,15 +20,6 @@ type Generation = Annotated[int, Field(ge=0)]
 type RevisionNumber = Annotated[int, Field(ge=0)]
 type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend", "profile-capture"]
 """Host-offered lifecycle abilities. "profile-capture" admits profile measurements."""
-type LifecycleCapabilities = Annotated[
-    frozenset[LifecycleCapability],
-    PlainSerializer(sorted, return_type=list[LifecycleCapability], when_used="json"),
-]
-"""A set of abilities, written in sorted order so equal sets give equal JSON.
-
-A frozenset iterates in hash order, which varies with insertion history and the string
-hash seed, so a decoded copy of a set could otherwise be written differently.
-"""
 
 
 class Identity(Value):
@@ -481,8 +472,15 @@ class OperationDescriptorError(ValueError):
 class Capabilities(Value):
     """Capabilities lifecycle contract."""
 
-    lifecycle: LifecycleCapabilities = frozenset()
+    lifecycle: frozenset[LifecycleCapability] = frozenset()
     operations: tuple[OperationDescriptor, ...] = ()
+
+    @field_serializer("lifecycle", when_used="json")
+    def _sorted_lifecycle(self, value: frozenset[LifecycleCapability]) -> list[str]:
+        # A frozenset iterates in hash order, which varies with insertion history and the
+        # string hash seed, so two equal sets could otherwise be written differently.
+        """Write the set sorted, so equal sets give equal JSON."""
+        return sorted(value)
 
 
 class PoolCapacity(Value):

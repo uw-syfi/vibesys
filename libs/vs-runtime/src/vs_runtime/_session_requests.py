@@ -106,7 +106,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.api import AgentSessions, AgentSessionSpec, ClientAgentSessions, InvocationOutcome
-    from vs_core.api import InvocationId, Observation, RequestBase
+    from vs_core.api import Continuation, InvocationId, Observation, RequestBase
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
@@ -308,16 +308,33 @@ class _Call:
     context: ExecutionContext
 
 
+class TurnYields(Protocol):
+    """Where a turn that asked to wait gets its continuation.
+
+    Asked once when a dispatched turn ends. A returned continuation becomes the turn's
+    ``suspension``; core validates it and publishes it after the checkpoint.
+    """
+
+    def yielded(self, request: DispatchTurn) -> Continuation | None:
+        """The continuation this turn yielded, or None when it did not wait."""
+        ...
+
+
 class RuntimeSessionRequests:
     """Translate session requests into durable ``ClientAgentSessions`` calls, once each."""
 
     def __init__(
-        self, sessions: ClientAgentSessions, resolver: SessionResolver, store: ReceiptStore
+        self,
+        sessions: ClientAgentSessions,
+        resolver: SessionResolver,
+        store: ReceiptStore,
+        yields: TurnYields | None = None,
     ) -> None:
         """Bind the durable agent sessions and the run's resolver to the shared store."""
         self._sessions = sessions
         self._resolver = resolver
         self._store = store
+        self._yields = yields
         self.settlement = AccessSettlement(store, resolver.workspace_for)
         resolver.guard_snapshots(self.settlement.fenced_by)
         """Judges each invocation's writes; the lifecycle executors share it."""
@@ -414,7 +431,15 @@ class RuntimeSessionRequests:
                 invocation_id=request.turn.invocation_id,
                 generation=request.scope.generation,
             )
-            events = (self._turn_event(invocation, observation, facts),)
+            suspension = (
+                self._yields.yielded(request)
+                if self._yields is not None
+                and facts.accepted
+                and facts.terminal
+                and facts.status == ObservationStatus.SUCCEEDED
+                else None
+            )
+            events = (self._turn_event(invocation, observation, facts, suspension),)
         return ExecutionResult(
             observation=RequestObserved(
                 observation=observation,
@@ -425,9 +450,13 @@ class RuntimeSessionRequests:
 
     @staticmethod
     def _turn_event(
-        invocation: InvocationRef, observation: Observation, facts: _Facts
+        invocation: InvocationRef,
+        observation: Observation,
+        facts: _Facts,
+        suspension: Continuation | None = None,
     ) -> TurnObserved:
         return TurnObserved(
+            suspension=suspension,
             invocation=invocation,
             observation=observation,
             output_schema=facts.output_schema,

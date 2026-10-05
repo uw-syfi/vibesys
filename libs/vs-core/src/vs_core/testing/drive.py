@@ -31,6 +31,7 @@ from vs_core.api import (
     DispatchAuthorized,
     EventCursor,
     EventId,
+    EvidenceRequirements,
     HostFence,
     HostId,
     IntentPhase,
@@ -373,6 +374,7 @@ class Harness:
     envelope_type: type[RunEnvelope] | None = None
     deadline_at: float = 100000.0
     max_steps: int = 2000
+    requirements: EvidenceRequirements = field(default_factory=EvidenceRequirements)
 
 
 def new_run[S: StrategyState](strategy: Strategy[S], harness: Harness) -> CoreState:
@@ -392,6 +394,7 @@ def new_run[S: StrategyState](strategy: Strategy[S], harness: Harness) -> CoreSt
                     "capabilities": capabilities,
                     "limits": harness.limits,
                     "deadline_at": harness.deadline_at,
+                    "requirements": harness.requirements,
                 }
             ),
         }
