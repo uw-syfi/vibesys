@@ -22,6 +22,7 @@ from vs_core.api import (
     SessionPhase,
     SessionsState,
     SessionView,
+    WaitingPhase,
     WaitKind,
     orphan_waits,
     phase_waits,
@@ -36,8 +37,6 @@ from .test_intent_recovery import (
 )
 
 if TYPE_CHECKING:
-    from enum import StrEnum
-
     from vs_core.api import CoreState, Intent
 
 _WAITING = {
@@ -60,7 +59,7 @@ _WAITING = {
     ],
     ids=lambda phase: f"{type(phase).__name__}.{phase.name}",
 )
-def test_every_phase_is_classified_as_waiting_or_not(phase: StrEnum) -> None:
+def test_every_phase_is_classified_as_waiting_or_not(phase: WaitingPhase) -> None:
     """A new phase raises in ``phase_waits`` until someone names what ends its wait."""
     assert phase_waits(phase) is (phase in _WAITING)
 
