@@ -44,7 +44,6 @@ from tests.support.loop_invariants import (
     summarize,
     terminal_event,
 )
-from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
 from tests.vibesys.orchestration.dynamic.loop._harness import (
     CAPTURE_RUNTIME_PYTHON,
     PASS,
@@ -57,6 +56,7 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
     run_request,
     workstream,
 )
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation

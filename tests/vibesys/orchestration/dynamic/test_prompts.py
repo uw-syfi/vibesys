@@ -19,7 +19,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     throughput,
     two_epoch_script,
 )
-from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.orchestration.dynamic import DynamicState, PortfolioPlan, WorkstreamPlan

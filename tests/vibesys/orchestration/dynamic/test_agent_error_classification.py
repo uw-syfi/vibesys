@@ -15,7 +15,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     portfolio,
     throughput,
 )
-from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 from tests.vibesys.orchestration.dynamic.test_suspension_shell import (
     _prepared_shell,
     _retry_state,

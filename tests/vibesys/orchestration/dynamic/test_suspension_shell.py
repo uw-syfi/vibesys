@@ -13,7 +13,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     dynamic_options,
     implementation,
 )
-from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 from tests.vibesys.orchestration.dynamic.test_plugin_suspension import ResumeScript, _open
 from tests.vibesys.orchestration.dynamic.test_suspension_deadline import (
     _drive,

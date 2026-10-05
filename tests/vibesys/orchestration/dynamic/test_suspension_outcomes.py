@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.legacy_plugin import LEGACY_PLUGIN as PLUGIN
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 from tests.vibesys.orchestration.dynamic.test_plugin_suspension import _open
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
