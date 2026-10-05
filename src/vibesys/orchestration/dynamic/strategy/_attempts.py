@@ -98,7 +98,7 @@ def advance(draft: Draft, record: AttemptRecord) -> AttemptRecord:
         record = _stopped(record)
         if record.phase is WorkPhase.DONE:
             return record
-    if record.step is Step.SUSPENDED or (
+    if record.step in (Step.SUSPENDED, Step.RETAINING) or (
         record.step is Step.AWAITING and record.phase is not WorkPhase.SETTLE
     ):
         return record

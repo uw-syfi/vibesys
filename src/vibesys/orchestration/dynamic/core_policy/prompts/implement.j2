@@ -1,0 +1,37 @@
+{% from '_macros.j2' import rev, citations %}
+Own hypothesis `{{ hypothesis_id }}` in this isolated candidate workspace.
+
+{% include 'run_context.j2' %}
+
+Claim: {{ hypothesis }}
+Task: {{ task }}
+Pass criteria: {{ pass_criteria }}
+Parent revision: `{{ rev(parent_revision) }}`
+
+Evidence references:
+{{ citations(evidence) }}
+{% if worktree_revision %}
+
+This continues your earlier work on this hypothesis. The worktree is at the
+same path, but it was recreated at `{{ rev(worktree_revision) }}`: edits that are not
+in that revision, including files outside version control, are gone. Check the
+tree before relying on what you remember.
+{% if prior_revision and prior_revision != worktree_revision %}
+Your earlier attempt ended at `{{ rev(prior_revision) }}`;
+`git diff {{ rev(prior_revision) }} {{ rev(worktree_revision) }}` shows what differs.
+{% elif prior_revision %}
+That is the revision your earlier attempt ended at.
+{% endif %}
+{% endif %}
+{% if feedback %}
+
+Feedback from the prior attempt:
+{{ feedback }}
+{% endif %}
+
+Inspect referenced artifacts only as needed. Keep evidence in files and return compact
+references with their applicable revision. Implement and run the cheapest checks that
+cover the changed behavior. The framework runs trusted evaluation on the candidate you
+nominate; do not duplicate it. Return only schema-valid JSON: `summary`, `outcome`
+(use `nominated` only when the candidate is ready for independent review and framework
+gates) and `evidence`.

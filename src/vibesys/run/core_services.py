@@ -158,7 +158,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     try:
         plan = policy.plan(_context(resources, artifacts))
         _validate_plan(plan)
-        catalog = _catalog(policy, resources, artifacts, ReceiptEvidenceLedger(receipt_store))
+        catalog = _catalog(policy, plan, resources, artifacts, ReceiptEvidenceLedger(receipt_store))
         catalog.require_owned(plan.strategy.declaration)
         resolver = ProductionSessionResolver(
             ResolverInputs(
@@ -254,6 +254,7 @@ def _initial_state(
             deadline_at=resources.clock.now() + plan.deadline_seconds,
             limits=plan.limits,
             lifecycle=resources.environment.lifecycle,
+            requirements=plan.requirements,
         ),
     )
 
@@ -277,6 +278,7 @@ def _refuse_unbridged_tools(roles: Iterable[AgentRole]) -> None:
 
 def _catalog(
     policy: CorePolicy,
+    plan: CorePlan,
     resources: CoreResources,
     artifacts: ArtifactStore,
     evidence: ReceiptEvidenceLedger,
@@ -290,6 +292,7 @@ def _catalog(
         evidence=evidence,
         commit_of=commit_of,
         retention_label=policy.retention_label,
+        variables=plan.prompt_variables,
     )
     return build_operation_catalog(registrations, production_owners(registrations, ports))
 

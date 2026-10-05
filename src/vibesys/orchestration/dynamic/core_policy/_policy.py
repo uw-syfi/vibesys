@@ -7,10 +7,18 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vibesys.orchestration.dynamic.agents import JUDGE
 from vibesys.orchestration.dynamic.core_policy._limits import limits_for, run_deadline_at
 from vibesys.orchestration.dynamic.core_policy._replies import reply_schemas
-from vibesys.orchestration.dynamic.strategy.api import DynamicConfig, DynamicStrategy
-from vs_core.api import ArtifactRef, RevisionRef
+from vibesys.orchestration.dynamic.strategy.api import JUDGE_REPLY, DynamicConfig, DynamicStrategy
+from vs_core.api import (
+    ArtifactRef,
+    AssessmentAuthority,
+    AssessmentKind,
+    EvidenceRequirements,
+    RevisionRef,
+    RoleId,
+)
 from vs_core.api import RunFacts as CoreRunFacts
 
 if TYPE_CHECKING:
@@ -75,6 +83,28 @@ class DynamicCorePolicy:
     limits: Limits
     deadline_at: float
     reply_schemas: Mapping[SchemaRef, type[BaseModel]]
+    requirements: EvidenceRequirements
+
+
+def requirements_for(config: DynamicConfig) -> EvidenceRequirements:
+    """The judge vouches for local validation; each configured gate must be satisfied.
+
+    Core grants no role implicit authority, so without the judge's declared authority its
+    verdict is not a valid assessment and no candidate is ever winner-eligible.
+    """
+    return EvidenceRequirements(
+        assessment_authorities=(
+            AssessmentAuthority(
+                kind=AssessmentKind.LOCAL_VALIDATION,
+                role_id=RoleId(root=JUDGE.id),
+                output_schema=JUDGE_REPLY,
+            ),
+        ),
+        required_assessments=(
+            *((AssessmentKind.CORRECTNESS,) if config.accuracy_configured else ()),
+            *((AssessmentKind.BENCHMARK,) if config.benchmark_configured else ()),
+        ),
+    )
 
 
 def build_core_policy(
@@ -121,4 +151,5 @@ def build_core_policy(
         ),
         deadline_at=run_deadline_at(bounds.max_run_seconds),
         reply_schemas=reply_schemas(config),
+        requirements=requirements_for(config),
     )

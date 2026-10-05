@@ -8,11 +8,11 @@ a run's committed record.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import vibesys.orchestration.dynamic.prompts as prompt_templates
+import vibesys.orchestration.dynamic.core_policy.prompts as prompt_templates
 from vibesys.orchestration.dynamic.agents import AGENTS
 from vibesys.orchestration.dynamic.core_policy.api import (
     PolicyInputs,
@@ -169,6 +169,8 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         facts=policy.facts,
         limits=policy.limits,
         deadline_seconds=policy.deadline_at,
+        prompt_variables={"objective": policy.facts.objective},
+        requirements=policy.requirements,
     )
 
 
@@ -193,10 +195,11 @@ def core_agent_roles() -> tuple[AgentRole, ...]:
     profiler tool and none needs an MCP server.
     """
     return tuple(
-        replace(
-            role,
-            extra_tools=(),
-            required_capabilities=role.required_capabilities - {AgentCapability.MCP_SERVERS},
+        role.model_copy(
+            update={
+                "extra_tools": (),
+                "required_capabilities": role.required_capabilities - {AgentCapability.MCP_SERVERS},
+            }
         )
         for role in AGENTS
     )

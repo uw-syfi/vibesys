@@ -24,6 +24,7 @@ from vibesys.dynamic_core import (
     resolve_core_policy,
 )
 from vibesys.orchestration.dynamic import REGISTRATION, DynamicOptions
+from vibesys.orchestration.dynamic.agents import JUDGE
 from vibesys.orchestration.dynamic.core_policy.api import (
     UNBOUNDED_DEADLINE_AT,
     RunBounds,
@@ -37,7 +38,15 @@ from vibesys.orchestration.dynamic.strategy.api import (
     DynamicStrategy,
 )
 from vibesys.run.evaluation_backend import semantic_evaluation_identity
-from vs_core.api import Capabilities, RevisionRef, RunFacts, RunId, RunState, validate_startup
+from vs_core.api import (
+    AssessmentKind,
+    Capabilities,
+    RevisionRef,
+    RunFacts,
+    RunId,
+    RunState,
+    validate_startup,
+)
 from vs_runtime.api.infrastructure import TrustedEvaluationPlan
 
 if TYPE_CHECKING:
@@ -98,6 +107,23 @@ def test_policy_from_a_real_request_starts_on_the_production_catalog(tmp_path: P
     assert state.facts.baseline == RevisionRef.of_git_commit(COMMIT)
     assert state.limits.max_attempts == 6
     assert state.limits.max_parallel == 2
+
+
+def test_the_judge_may_vouch_for_a_candidate_and_each_configured_gate_is_required(
+    tmp_path: Path,
+) -> None:
+    """Core grants no role implicit authority, so an undeclared judge makes no candidate eligible."""
+    policy, _ = _policy(tmp_path)
+
+    authorities = policy.requirements.assessment_authorities
+
+    assert [(item.kind, item.role_id.root, item.output_schema) for item in authorities] == [
+        (AssessmentKind.LOCAL_VALIDATION, JUDGE.id, JUDGE_REPLY)
+    ]
+    assert set(policy.requirements.required_assessments) == {
+        AssessmentKind.CORRECTNESS,
+        AssessmentKind.BENCHMARK,
+    }
 
 
 @settings(max_examples=25, deadline=None)

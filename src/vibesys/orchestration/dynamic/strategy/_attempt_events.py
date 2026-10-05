@@ -429,6 +429,43 @@ def _measure_or_settle(record: AttemptRecord, config: DynamicConfig) -> AttemptR
     )
 
 
+def _nominates(result: ImplementerResult) -> bool:
+    """Whether the reply claims a candidate, so core's checkpoint of the turn decides it."""
+    return result.outcome not in (
+        HypothesisOutcome.IMPLEMENTATION_FAILED,
+        HypothesisOutcome.BLOCKED,
+    )
+
+
+def settle_retained(
+    state: DynamicStrategyState, view: RunView, config: DynamicConfig
+) -> DynamicStrategyState:
+    """Fold each held implementer reply once core has retained or declined its checkpoint.
+
+    Core delivers a turn's reply before the executor snapshots the workspace, so the
+    candidate is readable from the view only later. Until then the reply stays held.
+    """
+    for index, record in enumerate(state.attempts):
+        invocation = record.held_invocation
+        if record.step is not Step.RETAINING or invocation is None or record.held_reply is None:
+            continue
+        live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
+        candidate = turn_candidate(view, record.attempt, invocation)
+        declined = live is not None and any(
+            row.invocation == invocation for row in live.checkpoint_declines
+        )
+        if candidate is None and not declined:
+            continue
+        reply = _decode(Role.IMPLEMENTER, record.held_reply)
+        released = record.model_copy(
+            update={"step": Step.NEEDED, "held_reply": None, "held_invocation": None}
+        )
+        state = _put(state, index, released)
+        if isinstance(reply, ImplementerResult):
+            state = _implemented(state, index, config, reply, candidate)
+    return state
+
+
 def _implemented(
     state: DynamicStrategyState,
     index: int,
@@ -528,13 +565,21 @@ def _answered(
     if isinstance(reply, WaitingForEvaluation):
         return _yielded(state, index, view)
     if isinstance(reply, ImplementerResult):
-        return _implemented(
-            state,
-            index,
-            config,
-            reply,
-            turn_candidate(view, state.attempts[index].attempt, event.invocation),
-        )
+        candidate = turn_candidate(view, state.attempts[index].attempt, event.invocation)
+        if candidate is None and _nominates(reply):
+            return _put(
+                state,
+                index,
+                state.attempts[index].model_copy(
+                    update={
+                        "step": Step.RETAINING,
+                        "awaiting": None,
+                        "held_reply": event.output_json,
+                        "held_invocation": event.invocation,
+                    }
+                ),
+            )
+        return _implemented(state, index, config, reply, candidate)
     return _reviewed(state, index, config, reply, event)
 
 

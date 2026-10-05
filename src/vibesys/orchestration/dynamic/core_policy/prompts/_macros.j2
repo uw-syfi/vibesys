@@ -1,0 +1,20 @@
+{#- Shared renderings of typed context values. -#}
+{% macro rev(ref) -%}
+{{ ref.revision_id.root }}
+{%- endmacro %}
+{% macro metric(row) -%}
+{{ row.name }} = {{ row.value }}{% if row.unit %} {{ row.unit }}{% endif %} (better: {{ row.direction }})
+{%- endmacro %}
+{% macro partial(row) -%}
+{{ row.name }} = {{ row.value }}{% if row.unit %} {{ row.unit }}{% endif %} (better: {{ row.direction }}){% if row.target is not none %}, pass requires {{ row.target }}{% endif %}{% if row.completed is not none and row.required is not none %}, progress {{ row.completed }} of {{ row.required }}{% if row.progress_unit %} {{ row.progress_unit }}{% endif %}{% endif %}
+{%- endmacro %}
+{% macro citations(items) -%}
+{% if items %}
+{% for item in items %}
+- {{ item.location }}{% if item.revision %} (measured at `{{ item.revision }}`){% endif %}{% if item.purpose %}: {{ item.purpose }}{% endif %}
+
+{% endfor %}
+{% else %}
+none
+{% endif %}
+{%- endmacro %}

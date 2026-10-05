@@ -1,0 +1,17 @@
+{% from '_macros.j2' import rev, citations %}
+Review hypothesis `{{ hypothesis_id }}` without editing its candidate.
+
+{% include 'run_context.j2' %}
+
+Claim: {{ hypothesis }}
+Pass criteria: {{ pass_criteria }}
+Candidate revision: `{{ rev(candidate) }}`
+Implementer summary: {{ summary }}
+Evidence references:
+{{ citations(evidence) }}
+
+Inspect only the source and referenced evidence needed to decide correctness,
+activation, and whether the declared outcome is supported. The framework owns trusted
+accuracy and performance evaluation, so do not duplicate those commands. Passing
+trusted evaluation is not enough: reject a candidate that violates any rule or
+constraint the objective states. Return only the schema-valid review JSON.

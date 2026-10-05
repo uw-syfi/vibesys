@@ -21,6 +21,7 @@ one-line summary of wall time, tokens, and cost.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -28,6 +29,7 @@ import signal
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -55,15 +57,21 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
     workstream,
 )
 
+import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
-from vibesys.api import ComputeBackend, ProfilerKind, RunStatus
+from entrypoints.run import run_headless
+from launch import LaunchSettings
+from vibesys.api import ComputeBackend, OrchestrationRegistry, ProfilerKind, RunStatus
+from vibesys.dynamic_core import dynamic_core_registration
 from vibesys.orchestration.dynamic import PLUGIN
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER
-from vs_project.api import Project
-from vs_slurm.fake_connector import active_jobs, executing_cluster
+from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vs_agent.api import AgentCapabilities
+from vs_agent.api.testing import FakeAgentClient, FakeInvocation
+from vs_project.api import Project, StoredEnvelope
+from vs_slurm.fake_connector import active_jobs, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterator, Mapping
 
     from pydantic import BaseModel
 
@@ -459,3 +467,184 @@ def test_ctrl_c_mid_run_stops_within_the_grace_and_leaves_no_job(tmp_path: Path)
     smoke.watch(process)
 
     assert smoke.verdict(stop_grace_s=_STOP_BOUND_S) == []
+
+
+# The legacy dynamic loop: modules that must never run on the core path. A module is
+# listed by its import name; a package stands for every file under it.
+_LEGACY_LOOP_MODULES = (
+    "vibesys.orchestration.dynamic.orchestration",
+    "vibesys.orchestration.dynamic.workstream",
+    "vibesys.orchestration.dynamic.agent_loop",
+    "vibesys.orchestration.dynamic.lifecycle",
+    "vibesys.orchestration.dynamic.transitions",
+    "vibesys.orchestration.dynamic.planner_driver",
+    "vibesys.orchestration.dynamic.control",
+    "vibesys.orchestration.dynamic.rounds",
+    "vibesys.orchestration.dynamic.profiles",
+    "vibesys.orchestration.dynamic.input_gate",
+    "vibesys.orchestration.dynamic.steers",
+    "vibesys.run.dynamic_suspension",
+)
+
+
+def _legacy_loop_files() -> frozenset[str]:
+    files: set[str] = set()
+    for name in _LEGACY_LOOP_MODULES:
+        spec = importlib.util.find_spec(name)
+        assert spec is not None
+        if spec.submodule_search_locations is not None:
+            for location in spec.submodule_search_locations:
+                files.update(str(path) for path in Path(location).rglob("*.py"))
+        elif spec.origin is not None:
+            files.add(spec.origin)
+    return frozenset(files)
+
+
+@contextmanager
+def _executed_legacy_files() -> Iterator[set[str]]:
+    """Collect the legacy loop files whose code runs inside the block.
+
+    Importing the built-in catalog loads these modules, so "loaded" proves nothing.
+    ``sys.monitoring`` reports the first call of every code object; a call from a
+    legacy file is the loop running.
+    """
+    legacy = _legacy_loop_files()
+    executed: set[str] = set()
+    monitoring = sys.monitoring
+    tool = monitoring.PROFILER_ID
+
+    def on_start(code: object, offset: int) -> object:
+        del offset
+        filename = getattr(code, "co_filename", "")
+        if filename in legacy:
+            executed.add(filename)
+        return monitoring.DISABLE
+
+    monitoring.use_tool_id(tool, "core-path-smoke")
+    monitoring.register_callback(tool, monitoring.events.PY_START, on_start)
+    monitoring.set_events(tool, monitoring.events.PY_START)
+    try:
+        yield executed
+    finally:
+        monitoring.set_events(tool, 0)
+        monitoring.register_callback(tool, monitoring.events.PY_START, None)
+        monitoring.free_tool_id(tool)
+
+
+def _core_agents(**_kwargs: object) -> FakeAgentClient:
+    """A Fake provider that answers each role with its typed reply, as a real agent would.
+
+    The implementer edits the candidate's workspace before replying, so the candidate
+    differs from the baseline and the trusted benchmark can tell them apart.
+    """
+    client = FakeAgentClient(
+        capabilities=AgentCapabilities(session_reuse=True, provider_session_resume=True),
+        session_reuse=True,
+    )
+
+    def implement(invocation: FakeInvocation) -> dict[str, object]:
+        (invocation.workspace / "queue.py").write_text("VALUE = 2\n", encoding="utf-8")
+        return {
+            "summary": "Raised VALUE.",
+            "outcome": "nominated",
+            "evidence": [{"location": "queue.py", "purpose": "the change"}],
+        }
+
+    client.set_response(
+        ORCHESTRATOR.id,
+        {
+            "reasoning": "one mechanism limits throughput",
+            "workstreams": [
+                {
+                    "kind": "implement",
+                    "hypothesis_id": "raise-value",
+                    "title": "Raise the value",
+                    "hypothesis": "A larger VALUE raises throughput.",
+                    "task": "Set VALUE in queue.py.",
+                    "pass_criteria": "Accuracy passes and throughput improves.",
+                }
+            ],
+        },
+    )
+    client.set_response(IMPLEMENTER.id, implement)
+    client.set_response(
+        JUDGE.id, {"passed": True, "analysis": "The change is correct.", "feedback": ""}
+    )
+    return client
+
+
+def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The product launcher drives a dynamic run on the core path, and no legacy loop code runs.
+
+    The core policy is selected by test wiring only: the built-in DYNAMIC stays legacy
+    until the switch. Everything else is production: the CLI-built request, the launcher,
+    the host composition, the runtime loop, the executing Fake Slurm cluster and the
+    trusted evaluation scripts.
+    """
+    loop_input = LoopInput.create(tmp_path)
+    (tmp_path / "agent.toml").write_text(
+        '[model]\nname = "scripted"\n[evaluation]\n'
+        "observe_interval_seconds = 1\nobserve_backoff_cap_seconds = 1\n",
+        encoding="utf-8",
+    )
+    request = build_run_request(
+        parse_cli_invocation(
+            [
+                "--outer-loop",
+                "dynamic",
+                "--input",
+                str(loop_input.root),
+                "--config",
+                str(tmp_path / "agent.toml"),
+                "--run-environment",
+                "slurm",
+                "--slurm-config",
+                str(loop_input.slurm_config),
+                "--profiler",
+                "none",
+                "--backend",
+                "cpu",
+                "--max-rounds",
+                "1",
+                "--max-in-flight",
+                "1",
+            ]
+        )
+    )
+    registry = OrchestrationRegistry()
+    registry.register(dynamic_core_registration())
+    runs = launch.default_runs(LaunchSettings(registry=registry, agent_client_factory=_core_agents))
+
+    with _executed_legacy_files() as executed:
+        result = run_headless(request, runs)
+
+    assert result.succeeded is True
+    assert result.status is RunStatus.COMPLETED
+    assert sorted(executed) == [], "the legacy dynamic loop executed on the core path"
+    run = Project.open(loop_input.root)
+    stored = run.state_store(result.run_id).load()
+    assert isinstance(stored, StoredEnvelope)
+    envelope = json.loads(stored.payload)["envelope"]
+    assert envelope["strategy"]["schema_version"] >= 1
+    assert (envelope["core"]["run"]["status"], envelope["core"]["run"]["result"]["outcome"]) == (
+        "terminal",
+        "success",
+    )
+    publications = run.state.portable_namespace(result.run_id, "publications")
+    assert publications.read_bytes("publications.json")
+    assert (
+        not run.state.portable_namespace(result.run_id, PLUGIN.id)
+        .external_directory()
+        .joinpath("state.json")
+        .exists()
+    )
+    # The search kept the candidate it measured, not the trusted baseline.
+    selection = envelope["core"]["run"]["result"]["selection"]
+    assert selection["kind"] == "retained_candidate"
+    assert selection["revision"] != envelope["core"]["run"]["facts"]["baseline"]
+    # The baseline and the one candidate were each submitted to the cluster exactly once.
+    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == 2
+    assert active_jobs(loop_input.cluster) == ()
+    assert capsys.readouterr().out.strip()
