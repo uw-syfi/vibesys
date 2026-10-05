@@ -360,6 +360,23 @@ class _BlockingCluster(_ScenarioCluster):
         return cancelled
 
 
+class _GatedScancelCluster(_BlockingCluster):
+    """A scheduler whose scancel is slow: it ends only when the test opens its gate."""
+
+    def __init__(self, config: SlurmConfig) -> None:
+        super().__init__(config)
+        self.scancel_entered = threading.Event()
+        self.scancel_gate = threading.Event()
+        self.scancel_done = threading.Event()
+
+    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+        self.scancel_entered.set()
+        self.scancel_gate.wait()
+        cancelled = super().cancel(target, by_job_id=by_job_id)
+        self.scancel_done.set()
+        return cancelled
+
+
 class _UnreachableSchedulerCluster(_BlockingCluster):
     def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
         cancelled = super().cancel(target, by_job_id=by_job_id)
@@ -1014,6 +1031,46 @@ async def test_cancelling_the_execution_task_cancels_the_submitted_slurm_job(
         assert observed is not None
         assert observed.state is EvaluationState.CANCELED
     finally:
+        runner.release()
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_cancel_still_finishes_the_scancel_before_it_returns(
+    tmp_path: Path,
+) -> None:
+    config = _config()
+    runner = _GatedScancelCluster(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=runner,
+    )
+    try:
+        await executor.submit(_request(), handle_id="eval-double-cancel")
+        await asyncio.to_thread(runner.wait_started.wait)
+        canceller = asyncio.create_task(executor.cancel("eval-double-cancel"))
+        await asyncio.to_thread(runner.scancel_entered.wait)
+
+        # A second cancellation (teardown cancelling a task already being cancelled)
+        # must not abandon the scancel worker thread mid-flight.
+        canceller.cancel()
+        for _ in range(50):
+            await asyncio.sleep(0)
+        assert not canceller.done()
+
+        runner.scancel_gate.set()
+        outcome = await asyncio.gather(canceller, return_exceptions=True)
+
+        assert [type(item) for item in outcome] == [asyncio.CancelledError]
+        assert runner.scancel_done.is_set()
+        assert runner.handle is not None
+        assert runner.cancelled_job_ids == [runner.handle.job.job_id]
+    finally:
+        runner.scancel_gate.set()
         runner.release()
 
 
