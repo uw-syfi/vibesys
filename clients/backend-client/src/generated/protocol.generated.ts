@@ -1098,7 +1098,11 @@ export interface RunFailedData {
   [k: string]: unknown;
 }
 /**
- * What a failed run did and why it stopped; frontends choose the wording.
+ * What a failed run did and why it stopped, as data; frontends choose the wording.
+ *
+ * ``reason`` is the strategy's own account of the stop. ``workstreams_started`` counts
+ * attempts core admitted, against the ``workstream_budget`` the run was allowed.
+ * ``candidates_kept`` counts settled candidates eligible for adoption.
  */
 export interface RunFailure {
   kind: RunFailureKind;

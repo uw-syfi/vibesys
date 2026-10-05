@@ -3554,7 +3554,7 @@
     },
     "RunFailure": {
       "additionalProperties": false,
-      "description": "What a failed run did and why it stopped; frontends choose the wording.",
+      "description": "What a failed run did and why it stopped, as data; frontends choose the wording.\n\n``reason`` is the strategy's own account of the stop. ``workstreams_started`` counts\nattempts core admitted, against the ``workstream_budget`` the run was allowed.\n``candidates_kept`` counts settled candidates eligible for adoption.",
       "properties": {
         "kind": {
           "$ref": "#/$defs/RunFailureKind"

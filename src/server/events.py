@@ -24,6 +24,7 @@ from server.run_lifecycle import RunStatus
 from vibesys.api import (
     AgentOutputChannel,
     AgentStatusData,
+    RunFailedData,
     TodoItemData,
     ToolResultPayload,
 )
@@ -239,33 +240,6 @@ class RunStartedData(EventPayload):
     # Policy-owned role hints let frontends seed per-round placeholders.
     # Empty when the policy does not declare roles.
     expected_roles: tuple[str, ...] = ()
-
-
-class RunFailureKind(StrEnum):
-    """Why a run ended without a result the operator can keep."""
-
-    BUDGET_EXHAUSTED = "budget_exhausted"
-    DEADLINE = "deadline"
-    NO_RESULT = "no_result"
-
-
-class RunFailure(BaseModel):
-    """What a failed run did and why it stopped; frontends choose the wording."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    kind: RunFailureKind
-    reason: str
-    workstreams_started: int = Field(ge=0)
-    workstream_budget: int = Field(ge=0)
-    candidates_kept: int = Field(ge=0)
-
-
-class RunFailedData(EventPayload):
-    """Why a run ended without a result to keep, with the counts behind it."""
-
-    kind: Literal["run_failed"] = "run_failed"
-    failure: RunFailure
 
 
 class RunInterruptedData(EventPayload):
