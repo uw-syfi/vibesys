@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.composition.dynamic._harness import (
+    LEASE_GAP,
     PASS,
     AgentTransportError,
     CoreRecords,
@@ -80,16 +81,7 @@ def _candidate_jobs(rounds: int) -> int:
     return rounds
 
 
-_LEASE_GAP = (
-    "gap (owner: host composition and vs-runtime): the host builds its run clock itself "
-    "(src/vibesys/run/host.py:572, WallRunClock) and a crashed process keeps its 60 s "
-    "lease (src/vibesys/run/core_run.py:39), so resuming in the same minute fails with "
-    "'runtime lease unavailable' and a scenario cannot advance time. Needs a clock seam "
-    "on LaunchSettings or a lease release when a run ends."
-)
-
-
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_LEASE_GAP)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=LEASE_GAP)
 def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     _failing_input(loop_input)

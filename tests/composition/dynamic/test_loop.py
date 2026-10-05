@@ -13,6 +13,7 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.composition.dynamic._harness import (
+    LEASE_GAP,
     PASS,
     AgentTransportError,
     CoreRecords,
@@ -22,6 +23,7 @@ from tests.composition.dynamic._harness import (
     edit_to,
     implemented,
     portfolio,
+    resume_request,
     run_request,
     workstream,
 )
@@ -141,6 +143,11 @@ def test_a_judge_rejection_is_retried_with_its_feedback(tmp_path: Path) -> None:
     assert "Feedback from the prior attempt" not in first
     assert "Show the queue bound holds." in second
     assert len(agents.prompts(JUDGE.id, "H1")) == 2
+    # The retry continues the implementer's provider conversation and workspace
+    # (the core analog of resuming after an accepted evaluation wait).
+    one, two = agents.invocations(IMPLEMENTER.id, "H1")
+    assert one.session_key == two.session_key
+    assert one.workspace == two.workspace
     records = CoreRecords(loop_input, run.run_id)
     assert records.outcome == ("terminal", "success")
     (item,) = records.strategy["hypotheses"]
@@ -461,3 +468,42 @@ def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
         (item,) = CoreRecords(loop_input, run.run_id).strategy["hypotheses"]
         assert item["hypothesis_id"] == identifier
         assert item["rounds"][0]["eligible"]
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=LEASE_GAP)
+def test_a_crashed_run_resumes_from_its_committed_record_and_finishes(tmp_path: Path) -> None:
+    loop_input = LoopInput.create(tmp_path)
+    request = loop_input.request(max_rounds=2)
+    first = (
+        ScriptedAgents()
+        .plan(portfolio(workstream("H1")), AgentTransportError("planner died"))
+        .implement("H1", edit_to(2, "H1"))
+        .judge("H1", PASS)
+    )
+    crashed = run_request(request, first)
+    assert crashed.error is not None
+    seen: dict[str, int] = {}
+
+    def build_on_first(agent: Turn) -> dict[str, object]:
+        seen["start"] = agent.value()
+        agent.set_value(3)
+        return implemented("H2")
+
+    second = (
+        ScriptedAgents()
+        .plan(portfolio(workstream("H2", parent_hypothesis_id="H1")))
+        .implement("H2", build_on_first)
+        .judge("H2", PASS)
+    )
+
+    resumed = run_request(resume_request(request, crashed.run_id), second)
+
+    assert resumed.error is None
+    assert resumed.succeeded is True
+    assert first.unscripted == second.unscripted == []
+    # H1's finished work is not redone.
+    assert second.prompts(IMPLEMENTER.id, "H1") == []
+    assert seen["start"] == 2
+    records = CoreRecords(loop_input, crashed.run_id)
+    assert [item["hypothesis_id"] for item in records.strategy["hypotheses"]] == ["H1", "H2"]
+    assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 3\n"

@@ -63,6 +63,14 @@ if TYPE_CHECKING:
     from vs_agent.api.testing import FakeInvocation
     from vs_runtime.api.infrastructure import StopTimer
 
+LEASE_GAP = (
+    "gap (owner: host composition and vs-runtime): the host builds its run clock itself "
+    "(src/vibesys/run/host.py:572, WallRunClock) and a crashed process keeps its 60 s "
+    "lease (src/vibesys/run/core_run.py:39), so resuming in the same minute fails with "
+    "'runtime lease unavailable' and a scenario cannot advance time. Needs a clock seam "
+    "on LaunchSettings or a lease release when a run ends."
+)
+
 _PLANNER_SLOTS = re.compile(r"Schedule at most (\d+) ")
 _MEMBER = re.compile(
     r"^(?:Own|Review) hypothesis `(?P<id>[^\n]*)` (?:in this isolated|without editing)"
