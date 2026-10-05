@@ -5,6 +5,13 @@ observations enter one queue; only confirmed commits authorize dispatch or
 publication. Unbound executor roles return named typed refusals.
 """
 
+from vs_runtime._access_settlement import (
+    AccessKey,
+    AccessReceipt,
+    AccessSettlement,
+    AccessSettlementError,
+    AccessViolation,
+)
 from vs_runtime._core_loop import (
     CoreContractGapError,
     CoreRuntime,
@@ -100,8 +107,6 @@ from vs_runtime._session_lifecycle_requests import (
     TurnDispatcher,
 )
 from vs_runtime._session_requests import (
-    AccessReceipt,
-    AccessViolation,
     JournalRunInvocations,
     RuntimeSessionRequests,
     SessionBinding,
@@ -132,7 +137,10 @@ __all__ = [
     "RUNTIME_SCHEMA_VERSION",
     "AccessGrant",
     "AccessGuardedWorkspace",
+    "AccessKey",
     "AccessReceipt",
+    "AccessSettlement",
+    "AccessSettlementError",
     "AccessViolation",
     "Applied",
     "AttemptBinding",
