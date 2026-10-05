@@ -7,6 +7,8 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from . import _session_inputs, _session_turns
+from ._proofs import Proven, committed_stop
+from .types.kernel import AreaChange
 from .types.sessions import (
     InputAcceptanceObserved,
     InputReservationReleased,
@@ -31,7 +33,7 @@ from .types.sessions import (
 )
 
 if TYPE_CHECKING:
-    from .types.kernel import AreaChange, SessionsContext
+    from .types.kernel import SessionsContext
     from .types.sessions import SessionsEvent, SessionsState
 
 
@@ -70,6 +72,33 @@ def _shared_observation(
     )
 
 
+def _observed_after_stop(
+    state: SessionsState, context: SessionsContext, event: SessionsEvent
+) -> AreaChange[SessionsState]:
+    """Keep a committed Stop's drain applying to run-owned sessions as they become closable.
+
+    The drain request is a one-shot signal, so a session whose creation is answered, or
+    whose cancelled turn ends, after it ran would otherwise stay open and keep the
+    closing run from becoming terminal. Re-applying the drain to the state such an
+    observation leaves behind is idempotent: it only adds what is not yet pending.
+    """
+    change = _session_turns.advance(state, context, event)
+    stop = committed_stop(context.run)
+    if not isinstance(stop, Proven):
+        return change
+    drained = _session_turns.advance_run_authority(
+        change.state,
+        context,
+        RunSessionsDrainRequested(scope=stop.value.scope, authority=stop.value.decision_id),
+    )
+    return AreaChange(
+        state=drained.state,
+        requests=(*change.requests, *drained.requests),
+        signals=(*change.signals, *drained.signals),
+        events=(*change.events, *drained.events),
+    )
+
+
 # Only this wrapper changes event ownership; leaves preserve sibling-owned fields.
 EVENT_TO_SUBAREA: Mapping[type[SessionsEvent], Reducer] = MappingProxyType(
     {
@@ -89,8 +118,8 @@ EVENT_TO_SUBAREA: Mapping[type[SessionsEvent], Reducer] = MappingProxyType(
         InvocationChargeRefunded: _session_inputs.advance,
         RegisteredTurnRequested: _session_turns.advance,
         TurnRequested: _session_turns.advance,
-        TurnObserved: _session_turns.advance,
-        SessionObserved: _session_turns.advance,
+        TurnObserved: _observed_after_stop,
+        SessionObserved: _observed_after_stop,
         SteerReceived: _session_inputs.advance,
         InterruptRequested: _session_inputs.advance,
     }
