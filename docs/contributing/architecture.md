@@ -217,6 +217,7 @@ graph TD
     vibesys.api.wiring --> vibesys.run
     vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
+    vibesys.dynamic_core --> vibesys.orchestration.dynamic.agents
     vibesys.dynamic_core --> vibesys.orchestration.dynamic.core_policy
     vibesys.dynamic_core --> vibesys.orchestration.dynamic.models
     vibesys.dynamic_core --> vibesys.orchestration.dynamic.strategy
@@ -250,6 +251,7 @@ graph TD
     vibesys.orchestration.dynamic.agents --> vibesys.orchestration.dynamic.prompts
     vibesys.orchestration.dynamic.core_policy --> vibesys.hypothesis
     vibesys.orchestration.dynamic.core_policy --> vibesys.hypothesis.readmodel
+    vibesys.orchestration.dynamic.core_policy --> vibesys.orchestration.dynamic.agents
     vibesys.orchestration.dynamic.core_policy --> vibesys.orchestration.dynamic.models
     vibesys.orchestration.dynamic.core_policy --> vibesys.orchestration.dynamic.strategy
     vibesys.orchestration.dynamic.core_policy --> vibesys.run.contracts
@@ -574,6 +576,7 @@ graph TD
     vibesys.api.wiring --> vibesys.run
     vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
+    vibesys.dynamic_core --> vibesys.orchestration.dynamic.agents
     vibesys.dynamic_core --> vibesys.orchestration.dynamic.core_policy
     vibesys.dynamic_core --> vibesys.orchestration.dynamic.models
     vibesys.dynamic_core --> vibesys.orchestration.dynamic.strategy
@@ -620,6 +623,7 @@ graph TD
     vibesys.orchestration.dynamic.agents --> vs_runtime
     vibesys.orchestration.dynamic.core_policy --> vibesys.hypothesis
     vibesys.orchestration.dynamic.core_policy --> vibesys.hypothesis.readmodel
+    vibesys.orchestration.dynamic.core_policy --> vibesys.orchestration.dynamic.agents
     vibesys.orchestration.dynamic.core_policy --> vibesys.orchestration.dynamic.models
     vibesys.orchestration.dynamic.core_policy --> vibesys.orchestration.dynamic.strategy
     vibesys.orchestration.dynamic.core_policy --> vibesys.run.contracts

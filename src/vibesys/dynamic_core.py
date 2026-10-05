@@ -12,13 +12,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import vibesys.orchestration.dynamic.core_policy.prompts as prompt_templates
 from vibesys.orchestration.dynamic.agents import AGENTS
 from vibesys.orchestration.dynamic.core_policy.api import (
     PolicyInputs,
     RunBounds,
     build_core_policy,
     project_strategy_state,
+    prompts,
 )
 from vibesys.orchestration.dynamic.models import DynamicOptions
 from vibesys.orchestration.dynamic.strategy.api import (
@@ -183,7 +183,7 @@ def dynamic_core_policy() -> CorePolicy:
             CoreOperation(_ROLE_OF_KIND[item.descriptor.kind], item) for item in registrations
         ),
         retention_label=RETENTION_LABEL,
-        prompt_templates=Path(prompt_templates.__file__).parent,
+        prompt_templates=Path(prompts.__file__).parent,
     )
 
 

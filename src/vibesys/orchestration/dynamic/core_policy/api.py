@@ -1,5 +1,6 @@
 """Public surface of the dynamic core policy."""
 
+from vibesys.orchestration.dynamic.core_policy import prompts
 from vibesys.orchestration.dynamic.core_policy._limits import (
     UNBOUNDED_DEADLINE_AT,
     limits_for,
@@ -21,5 +22,6 @@ __all__ = [
     "build_core_policy",
     "limits_for",
     "project_strategy_state",
+    "prompts",
     "run_deadline_at",
 ]
