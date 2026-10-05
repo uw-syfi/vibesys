@@ -73,6 +73,7 @@ from vs_agent.api import AgentClient
 from vs_agent.drivers.fake import (
     FAKE_CAPABILITIES,
     FakeDriver,
+    FakeTurnScript,
     assistant_text,
     thinking,
     todo_write,
@@ -80,6 +81,7 @@ from vs_agent.drivers.fake import (
     tool_result,
     usage,
 )
+from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools
 from vs_project.api import Project, StoredEnvelope
 from vs_slurm.fake_connector import active_jobs, executing_cluster, recorded_commands
 
@@ -584,9 +586,36 @@ class _RoleDrivers:
         self._drivers: list[FakeDriver] = []
 
     def create_session(self, spec: AgentSessionSpec) -> AgentSession:
-        def edit_workspace(turn: AgentTurnRequest) -> None:
+        waiting: dict[str, object] = {"kind": "waiting_for_evaluation", "handles": []}
+
+        def measure_own_edit(turn: AgentTurnRequest) -> None:
+            """On the first turn, edit the workspace and submit it through the offered tool.
+
+            The calls go over the tool server's unix socket with the token the host
+            issued, as the MCP process a provider launches would make them. The second
+            turn is the continuation after the evaluation settled.
+            """
             del turn
+            if waiting["handles"]:
+                return
             (spec.workspace / "queue.py").write_text("VALUE = 2\n", encoding="utf-8")
+            env = dict(
+                next(
+                    s for s in spec.mcp_servers if "VS_EVALUATION_SOCKET" in dict(s.runtime_env)
+                ).runtime_env
+            )
+            tools = {
+                tool.name: tool
+                for tool in build_core_evaluation_tools(
+                    socket_path=Path(env["VS_EVALUATION_SOCKET"]),
+                    token=env["VS_EVALUATION_TOKEN"],
+                )
+            }
+            submit = tools[SUBMIT_TOOL]
+            handle = json.loads(submit.handler(submit.input_schema()))["handle_id"]
+            wait = tools[VALIDATE_WAIT_TOOL]
+            wait.handler(wait.input_schema(handles=(handle,)))
+            waiting["handles"] = [handle]
 
         scripts = {
             ORCHESTRATOR.id: FakeDriver(
@@ -605,8 +634,8 @@ class _RoleDrivers:
                     assistant_text("Raised VALUE."),
                     usage(input_tokens=3000, output_tokens=200),
                 ],
-                answer=_IMPLEMENTED,
-                on_turn=edit_workspace,
+                script=FakeTurnScript(answers=(waiting, _IMPLEMENTED)),
+                on_turn=measure_own_edit,
             ),
             JUDGE.id: FakeDriver(turn=[assistant_text("The change is correct.")], answer=_JUDGED),
         }
@@ -697,7 +726,7 @@ def _assert_headless_stream(
     turns = {
         event.execution_id for event in events if event.type is CoreEventType.INVOCATION_STARTED
     }
-    assert len(turns) == 3, turns  # planner, implementer and judge each ran one turn
+    assert len(turns) == 4, turns  # planner, implementer (twice: it waited once) and judge
     for turn in turns:
         mine = [(i, e.type) for i, e in enumerate(events) if e.execution_id == turn]
         lifecycle = [kind for _, kind in mine if kind in _AGENT_LIFECYCLE]
@@ -714,9 +743,16 @@ def _assert_headless_stream(
         assert all(opened < i < closed for i, kind in mine if kind in _AGENT_CONTENT)
 
     jobs = {event.execution_id for event in events if event.type is CoreEventType.GATE_STARTED}
-    assert len(jobs) == 2, jobs  # the baseline measurement and the candidate's
+    assert len(jobs) == 3, jobs  # the baseline, the implementer's own and the candidate's
     for job in jobs:
-        for gate in ("accuracy", "benchmark"):
+        # A job runs the gates its kind needs: a validation run has fewer than a trusted one.
+        gates = {
+            str(getattr(e.data, "gate", ""))
+            for e in events
+            if e.execution_id == job and e.type is CoreEventType.GATE_STARTED
+        }
+        assert gates, job
+        for gate in gates:
             at = [
                 (i, e.type)
                 for i, e in enumerate(events)
@@ -724,7 +760,7 @@ def _assert_headless_stream(
                 and (
                     (
                         e.type in (CoreEventType.GATE_STARTED, CoreEventType.GATE_FINISHED)
-                        and getattr(e.data, "gate", None) == gate
+                        and str(getattr(e.data, "gate", "")) == gate
                     )
                     or (
                         e.type is CoreEventType.SUBPROCESS_OUTPUT
@@ -852,8 +888,13 @@ def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
     selection = envelope["core"]["run"]["result"]["selection"]
     assert selection["kind"] == "retained_candidate"
     assert selection["revision"] != envelope["core"]["run"]["facts"]["baseline"]
-    # The baseline and the one candidate were each submitted to the cluster exactly once.
-    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == 2
+    # The baseline, the implementer's own in-turn measurement through the tool, and the
+    # trusted measurement of the one candidate were each submitted exactly once.
+    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == 3
+    evaluation = envelope["core"]["evaluation"]
+    assert [call["rejection"] for call in evaluation["agent_calls"]] == [None]
+    # The turn waited once: core recorded exactly one continuation for the whole run.
+    assert len(evaluation["continuations"]) == 1
     assert active_jobs(loop_input.cluster) == ()
     _assert_headless_stream(
         renderer.events,

@@ -408,7 +408,7 @@ depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "v
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations"]
+depends_on = ["vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations"]
 
 [[modules]]
 path = "vs_runtime._fake_agent_invocations"
@@ -483,7 +483,7 @@ depends_on = ["vs_evaluator_protocol", "vs_evaluation.agent_evidence", "vs_evalu
 [[modules]]
 path = "vs_evaluation.api.tools"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_mcp"]
+depends_on = ["vs_evaluation.agent_mcp", "vs_evaluation.agent_core_mcp", "vs_evaluation.agent_wire"]
 
 [[modules]]
 path = "vs_evaluation.api.testing"
@@ -497,6 +497,18 @@ depends_on = ["vs_evaluator_protocol"]
 
 [[modules]]
 path = "vs_evaluation.agent_mcp"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_agent", "vs_evaluation.agent_models", "vs_evaluation.agent_wire", "vs_evaluation.profiler_models"]
+
+[[modules]]
+# The core-path tool server: submit and validate-wait only, over the shared wire.
+path = "vs_evaluation.agent_core_mcp"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_agent", "vs_evaluation.agent_models", "vs_evaluation.agent_wire"]
+
+[[modules]]
+# Client side of the evaluation tool wire shared by both tool servers.
+path = "vs_evaluation.agent_wire"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_agent", "vs_evaluation.agent_models", "vs_evaluation.profiler_models"]
 
@@ -970,7 +982,7 @@ layer = "roles_search"
 depends_on = ["vibesys.orchestration.dynamic.prompts", "vs_runtime"]
 
 [[interfaces]]
-expose = ["IMPLEMENTER", "JUDGE", "ORCHESTRATOR", "AGENTS"]
+expose = ["IMPLEMENTER", "JUDGE", "ORCHESTRATOR", "AGENTS", "EVALUATION"]
 from = ["vibesys.orchestration.dynamic.agents"]
 
 [[modules]]

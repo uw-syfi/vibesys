@@ -46,6 +46,8 @@ from vs_evaluation.agent_models import (
     RunStoppingReply,
     ScopeRelease,
     ScopeReleasedReply,
+    SocketFailure,
+    SocketSuccess,
     StatusCall,
     StatusReply,
     SubmitCall,
@@ -358,4 +360,6 @@ __all__ += [
     "ScopeState",
     "ScopeSubmissionTracker",
     "SemanticEvaluationStage",
+    "SocketFailure",
+    "SocketSuccess",
 ]

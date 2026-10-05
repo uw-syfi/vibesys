@@ -204,7 +204,7 @@ def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
                 workspace=workspace_for(scope, revision, mode),
                 access=access,
                 reuse=(record.plan.continue_hypothesis and role is Role.IMPLEMENTER)
-                or turn.serial > 0,
+                or _yielded_serial(turn) > 0,
                 output_schema=schema,
                 seconds=seconds,
             ),
@@ -219,6 +219,15 @@ def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
             "turns_spent": record.turns_spent + (1 if turn.charge == "paid" else 0),
         }
     )
+
+
+def _yielded_serial(turn: TurnRecord) -> int:
+    """The serial of the turn whose session this turn speaks in.
+
+    Core requires a resume to keep the exact session of the turn it resumes, and a
+    resume is the yielded turn's next serial, so it takes that turn's session policy.
+    """
+    return turn.serial - 1 if turn.charge == "resume" else turn.serial
 
 
 def _turn_shape(

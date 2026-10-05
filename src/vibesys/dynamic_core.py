@@ -41,6 +41,7 @@ from vs_runtime.api import (
     OrchestrationPlugin,
 )
 from vs_runtime.api.core import (
+    AgentEvaluationPolicy,
     OperationCatalog,
     OperationPorts,
     OperationRole,
@@ -136,7 +137,6 @@ def dynamic_projector() -> RuntimeRecordProjector[DynamicStrategyState]:
 # The label of the snapshot that retains a verified revision.
 RETENTION_LABEL = "verified"
 
-
 def _core_plan(context: CoreRunContext) -> CorePlan:
     """The plan of one run: the policy resolved from what the host opened for it."""
     options = DynamicOptions.model_validate(context.options)
@@ -167,8 +167,32 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         facts=policy.facts,
         limits=policy.limits,
         deadline_seconds=policy.deadline_at,
-        prompt_variables={"objective": policy.facts.objective},
+        prompt_variables={"objective": policy.facts.objective, "agent_evaluation": True},
         requirements=policy.requirements,
+        agent_evaluation=_agent_evaluation(policy),
+    )
+
+
+def _agent_evaluation(policy: DynamicCorePolicy) -> AgentEvaluationPolicy:
+    """The plan an implementer or judge measures with: the run's configured gates, once each.
+
+    It reads the same digests, recipe and stage budgets as the strategy's own trusted
+    measurement plans, so an agent measurement and a trusted one share one identity.
+    """
+    config = policy.strategy.config
+    facts = policy.facts
+    gates = (
+        ("accuracy", config.accuracy_seconds, config.accuracy_configured),
+        ("benchmark", config.benchmark_seconds, config.benchmark_configured),
+    )
+    return AgentEvaluationPolicy(
+        evaluator_digest=facts.evaluator_digest,
+        workload_digest=facts.workload_digest,
+        environment_digest=facts.environment_digest,
+        recipe=config.recipe,
+        stages=tuple((name, seconds) for name, seconds, configured in gates if configured),
+        queue_allowance=config.queue_allowance_seconds,
+        accuracy_stage="accuracy" if config.accuracy_configured else None,
     )
 
 
