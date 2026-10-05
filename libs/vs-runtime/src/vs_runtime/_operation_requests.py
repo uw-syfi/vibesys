@@ -6,9 +6,10 @@ receipt. A restarted host that finds an intent without a result asks the owner t
 inspect: it only repeats the effect when the owner proves it never happened, and
 otherwise reports a typed Unknown. Nothing here performs an effect twice.
 
-Inspection routes by target identity through the receipts. A target with no
-receipt is reported Unknown, because this executor cannot tell whether the
-target was ever started or belongs to another owner.
+``InspectRequest`` is answered by the generic ``RecordedRequestInspector`` over
+the shared store, for every request kind. This executor registers itself as the
+probe for operation results, because only it can decode an operation outcome and
+re-observe an operation's external effect through its owner.
 """
 
 from __future__ import annotations
@@ -43,14 +44,17 @@ from vs_runtime._operation_catalog import (
 )
 from vs_runtime._operation_receipts import IntentReceipt, ResultReceipt
 from vs_runtime._receipt_store import (
+    BegunUnsealed,
     Conflict,
     Declined,
     Performed,
     Replayed,
+    SealedExecution,
     Settled,
     Transient,
     owner_key,
 )
+from vs_runtime._request_inspection import RecordedRequestInspector
 
 if TYPE_CHECKING:
     from vs_core.api import OperationRequest
@@ -73,6 +77,9 @@ class RegisteredOperationRequests:
         self._catalog = catalog
         self._receipts = receipts
         self._observations = observations
+        self._inspector = RecordedRequestInspector(receipts.store, observations, (self,))
+
+    result_type = ResultReceipt
 
     async def execute(
         self, request: OperationRoleRequest, context: ExecutionContext
@@ -315,16 +322,21 @@ class RegisteredOperationRequests:
                 ObservationStatus.REJECTED,
                 "registered operations own no child resources",
             )
-        target = await self._target(request, context)
+        target = await self._inspector.answer(request, context)
         observed = RequestObserved(
             observation=self._observe(request, context, ObservationStatus.SUCCEEDED, ""),
             target=target,
         )
         return ExecutionResult(observation=self._catalog.registry.validate_event(observed))
 
-    async def _target(
-        self, request: InspectRequest, context: ExecutionContext
+    async def answer(
+        self,
+        request: InspectRequest,
+        context: ExecutionContext,
+        history: BegunUnsealed | SealedExecution,
     ) -> TargetObservation:
+        """Probe for operation targets: decode a sealed result, or ask the owner when begun."""
+        del history  # the receipts below are the same records, decoded as operation receipts
         target_id = request.target
         sealed = self._receipts.result(target_id.root)
         intent = self._receipts.intent(target_id.root)

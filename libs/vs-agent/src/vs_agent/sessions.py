@@ -148,6 +148,21 @@ class AgentSessions(Protocol):
         """Journal a keyed initial turn, replaying only durable completion evidence."""
         ...
 
+    def cancel(self, key: AgentSessionKey, invocation_id: str) -> None:
+        """Ask the provider to stop *invocation_id* if this instance is running it.
+
+        A request, not a proof: only a later ``inspect`` that is not ``Pending``
+        shows the turn ended. Any other invocation is left alone.
+        """
+        ...
+
+    def release(self, key: AgentSessionKey) -> None:
+        """Release the key's live provider resources, keeping its durable checkpoint.
+
+        Raises InvocationConflictError while an invocation of the key is active.
+        """
+        ...
+
     def release_interrupted(self, key: AgentSessionKey, invocation_id: str) -> None:
         """Release key ownership after the caller drains an explicit interruption."""
         ...
@@ -299,6 +314,14 @@ class AgentTurnExecutor(Protocol):
         """Return the conversation the next keyed turn will continue."""
         ...
 
+    def cancel_session(self, key: AgentSessionKey) -> None:
+        """Ask the keyed conversation's in-flight turn to stop, keeping its checkpoint."""
+        ...
+
+    def release_session(self, key: AgentSessionKey) -> None:
+        """Release the keyed conversation's live resources, keeping its checkpoint."""
+        ...
+
     def run(
         self,
         *,
@@ -361,6 +384,25 @@ class ClientAgentSessions:
                 detail = f"session key {key} is already bound"
                 raise SessionConfigurationError.because(detail)
             self._bindings[key] = (spec, turn)
+
+    def cancel(self, key: AgentSessionKey, invocation_id: str) -> None:
+        """Ask the provider to stop *invocation_id* if this instance is running it."""
+        self._validate_invocation(key, invocation_id)
+        with self._lock:
+            running = invocation_id in self._active
+        if running:
+            self._client.cancel_session(key)
+
+    def release(self, key: AgentSessionKey) -> None:
+        """Release the key's live provider resources, keeping its durable checkpoint."""
+        if not key.durable:
+            detail = f"session key {key} is not durable"
+            raise SessionConfigurationError.because(detail)
+        with self._lock:
+            if key in self._active_keys:
+                detail = f"session {key} has an active invocation"
+                raise InvocationConflictError.because(detail)
+            self._client.release_session(key)
 
     def checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint:
         """Report an existing durable conversation, refusing missing checkpoints."""
