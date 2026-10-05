@@ -137,6 +137,7 @@ def dynamic_projector() -> RuntimeRecordProjector[DynamicStrategyState]:
 # The label of the snapshot that retains a verified revision.
 RETENTION_LABEL = "verified"
 
+
 def _core_plan(context: CoreRunContext) -> CorePlan:
     """The plan of one run: the policy resolved from what the host opened for it."""
     options = DynamicOptions.model_validate(context.options)
