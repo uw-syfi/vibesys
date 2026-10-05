@@ -10,9 +10,12 @@ Implementer summary: {{ summary }}
 Evidence references:
 {{ citations(evidence) }}
 
-Inspect only the source and referenced evidence needed to decide correctness,
-activation, and whether the declared outcome is supported. The framework owns trusted
-accuracy and performance evaluation, so do not duplicate those commands. Passing
+Start from the referenced evidence and the candidate's diff against its parent. The
+implementer already ran the local checks and the framework owns trusted accuracy and
+performance evaluation, so do not run local checks, benchmarks, or other commands that take
+more than a few seconds; run one only when the evidence you need for the verdict is
+missing, and then run it once. Inspect only the source and evidence needed to decide
+correctness, activation, and whether the declared outcome is supported. Passing
 trusted evaluation is not enough: reject a candidate that violates any rule or
 constraint the objective states. Return only the schema-valid review JSON.
 {% include 'agent_evaluation.j2' %}

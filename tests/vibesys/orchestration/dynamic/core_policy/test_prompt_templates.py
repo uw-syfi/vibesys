@@ -194,3 +194,41 @@ def test_a_workstream_of_the_reply_is_never_offered_a_sibling_as_parent(
     for text in _planner_texts(context):
         assert "never another workstream of this reply" in text
         assert ("leave `parent_hypothesis_id` null" in text) is True  # no buildable rows here
+
+
+@given(data=st.data(), offered=st.booleans())
+def test_the_implementer_is_told_to_submit_early_and_not_to_repeat_a_passed_check(
+    data: st.DataObject, *, offered: bool
+) -> None:
+    # live-1: implementer turns ran the local check 11 to 14 times and took 12 to 13 minutes.
+    context = data.draw(_CONTEXTS[PromptTemplate.IMPLEMENT])
+
+    text = TemplateRenderer(_ROOT).render_template(
+        "implement.j2", **_variables(context, agent_evaluation=offered)
+    )
+
+    assert "Once the candidate builds and one local check passes, stop checking" in text
+    assert "Never\nrerun a local check on files that already passed it" in text
+    assert ("submit it for trusted evaluation" in text) is offered
+    assert ("nominate it" in text.split("stop checking and")[1][:60]) is not offered
+
+
+@given(data=st.data(), offered=st.booleans())
+def test_the_judge_reads_evidence_and_the_diff_before_running_anything(
+    data: st.DataObject, *, offered: bool
+) -> None:
+    # live-1: judges ran the local check 10 to 19 times in turns of 96 to 166 s.
+    context = data.draw(_CONTEXTS[PromptTemplate.REVIEW])
+
+    text = TemplateRenderer(_ROOT).render_template(
+        "review.j2", **_variables(context, agent_evaluation=offered)
+    )
+
+    assert "Start from the referenced evidence and the candidate's diff" in text
+    assert "do not run local checks, benchmarks" in text
+
+
+def test_strategy_prompts_name_no_domain_command() -> None:
+    # Domain commands live in the bundle's objective; the strategy's prompts stay generic.
+    for template in sorted(_ROOT.glob("*.j2")):
+        assert "cpu_check" not in template.read_text(), template.name
