@@ -28,6 +28,7 @@ from vs_core.api import (
     ArtifactRef,
     DispatchTurn,
     EnsureSession,
+    EnsureWorkspace,
     EvaluationStageOutcome,
     EvaluationStageResult,
     EvaluationTerminalFacts,
@@ -85,6 +86,11 @@ class Executors:
             return self._observe(request, core)
         if isinstance(request, DispatchTurn):
             return self._turn(request)
+        if isinstance(request, EnsureWorkspace):
+            return Succeeded(
+                resource_id=ResourceId(root=f"workspace:{request.request_id.root}"),
+                revision=request.plan.base,
+            )
         if isinstance(request, EnsureSession):
             return Succeeded(resource_id=ResourceId(root=f"lease:{request.spec.session_id.root}"))
         return Succeeded()

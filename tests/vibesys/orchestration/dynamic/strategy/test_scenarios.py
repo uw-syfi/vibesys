@@ -1,7 +1,7 @@
 """Whole runs on the real core: baseline, plan, implement, review, measure, select, adopt.
 
-Two kernel gaps keep these runs from finishing today, so every test here is a
-strict xfail that flips to a failure the day the gaps close (remove the mark then):
+Kernel gaps keep these runs from finishing today, so every test here is a strict
+xfail that flips to a failure the day the gaps close (remove the mark then):
 
 - A measurement cannot complete: core never issues `ObserveOwnedJob` after a
   submission is accepted, and accepts a later `JobObserved` only when it equals the
@@ -10,6 +10,11 @@ strict xfail that flips to a failure the day the gaps close (remove the mark the
 - Core refuses a session reply: a `RequestObserved` carrying `outcome_json` without a
   registered-codec proof is rejected (`vs_core/_step.py`, `_validate_observation_ingress`),
   yet `vs_runtime/_session_requests.py` builds exactly that observation.
+- Nothing retains a candidate checkpoint after an implementer turn:
+  `vs_core/_attempt_acquisition.py` (`_checkpoint_request`) raises
+  `KernelNotImplementedError` for any retention but "wip", and no runtime executor
+  handles `CloseAttemptScope`. With the first gap patched out, a run reaches the
+  implementer turn and then settles the attempt as failed, "retained no candidate".
 """
 
 from __future__ import annotations

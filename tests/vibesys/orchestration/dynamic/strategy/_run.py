@@ -37,6 +37,10 @@ FACTS = RunFacts(
 )
 
 
+# Room for a planner turn, a few attempts and their implement, review and correction turns.
+LIMITS = Limits(max_attempts=4, max_turns=40, max_parallel=2, max_retries=2, max_refunds=2)
+
+
 def run(
     executors: Executors,
     *,
@@ -48,7 +52,7 @@ def run(
     harness = Harness(
         registry=dynamic_operation_registry(),
         facts=FACTS,
-        limits=limits or Limits(),
+        limits=limits or LIMITS,
         envelope_type=RunEnvelope[DynamicStrategyState],
     )
     return drive(DynamicStrategy(config=config(**overrides)), executors, harness, faults)
