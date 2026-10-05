@@ -54,6 +54,13 @@ from vs_runtime._core_requests import (
     receipt_executor_kinds,
 )
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
+from vs_runtime._evidence_ledger import (
+    EvidenceEntry,
+    EvidenceLookup,
+    EvidenceRecorder,
+    ReceiptEvidenceLedger,
+)
+from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
@@ -79,6 +86,13 @@ from vs_runtime._operation_receipts import (
     ResultReceipt,
 )
 from vs_runtime._operation_requests import RegisteredOperationRequests
+from vs_runtime._operation_wiring import (
+    OperationPorts,
+    OperationRole,
+    bind_operations,
+    build_operation_catalog,
+    production_owners,
+)
 from vs_runtime._receipt_store import (
     BegunUnsealed,
     Conflict,
@@ -122,6 +136,7 @@ from vs_runtime._workspace_receipts import (
 from vs_runtime._workspace_requests import (
     RunInvocationProof,
     RuntimeWorkspaceRequests,
+    commit_of,
     revision_ref,
 )
 
@@ -145,6 +160,9 @@ __all__ = [
     "Declined",
     "DispatchProgress",
     "EvaluationRequests",
+    "EvidenceEntry",
+    "EvidenceLookup",
+    "EvidenceRecorder",
     "ExecutionContext",
     "ExecutionHistory",
     "ExecutionLease",
@@ -155,6 +173,7 @@ __all__ = [
     "Indeterminate",
     "Inspection",
     "IntentReceipt",
+    "InterpretEvidenceOwner",
     "JobRecord",
     "JournalPublicationDelivery",
     "JournalRunInvocations",
@@ -172,7 +191,9 @@ __all__ = [
     "OperationEntry",
     "OperationExecutor",
     "OperationOwner",
+    "OperationPorts",
     "OperationReceipts",
+    "OperationRole",
     "OwnerEvent",
     "OwnerEventRejectedError",
     "Performed",
@@ -184,7 +205,7 @@ __all__ = [
     "PublicationDelivery",
     "PublicationHistory",
     "ReceiptCorruptError",
-    "ReceiptCorruptError",
+    "ReceiptEvidenceLedger",
     "ReceiptStore",
     "RecordedRequestInspector",
     "RefusalReason",
@@ -197,6 +218,7 @@ __all__ = [
     "ResolvedCoreResume",
     "ResultReceipt",
     "ResumeDiagnostic",
+    "RetainRevisionOwner",
     "RootGrant",
     "RunInvocationProof",
     "RuntimeCommitError",
@@ -219,7 +241,11 @@ __all__ = [
     "VerifyRevisionOwner",
     "WorkspaceReceipts",
     "WorkspaceRequests",
+    "bind_operations",
+    "build_operation_catalog",
+    "commit_of",
     "owner_key",
+    "production_owners",
     "receipt_executor_kinds",
     "resolve_core_resume",
     "result_type_name",

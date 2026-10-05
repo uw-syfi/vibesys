@@ -94,6 +94,9 @@ class _Resource:
             raise ValueError(revision)
         return revision
 
+    def is_retained(self, revision: str) -> bool:
+        return revision not in self.unavailable_revisions
+
     def trusted_input_changes(self) -> list[str]:
         return []
 
