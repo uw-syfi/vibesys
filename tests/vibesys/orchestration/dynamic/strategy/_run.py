@@ -82,16 +82,12 @@ def run(
 
 
 def run_shell(
-<<<<<<< HEAD
     executors: Script,
     *,
     limits: Limits | None = None,
     live: bool = True,
     max_concurrent: int = 1,
     **overrides: object,
-=======
-    executors: Script, *, limits: Limits | None = None, live: bool = True, **overrides: object
->>>>>>> origin/main
 ) -> Run:
     """Run a fresh strategy to the end of its run on the production shell.
 
@@ -107,15 +103,11 @@ def run_shell(
         requirements=requirements_for(settings),
     )
     finished = drive_shell(
-<<<<<<< HEAD
         DynamicStrategy(config=settings),
         executors,
         harness,
         reply_schemas(settings),
         max_concurrent=max_concurrent,
-=======
-        DynamicStrategy(config=settings), executors, harness, reply_schemas(settings)
->>>>>>> origin/main
     )
     if live:
         assert_live(finished.journal, finished.core, Budget(retries=harness.limits.max_retries))
