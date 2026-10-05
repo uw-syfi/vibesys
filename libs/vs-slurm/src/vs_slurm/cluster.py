@@ -596,12 +596,8 @@ class SlurmCluster:
         job = job_handle(handle)
         try:
             self._runner.validate_handle(handle)
-            remote = (
-                evidence
-                if evidence is not None
-                else self._runner.inspect_operation(record.operation_id)
-            )
-            original = self._from_remote(record.operation_id, remote)
+            remote = self._remote_evidence(record, job.job_id, evidence)
+            original = None if remote is None else self._from_remote(record.operation_id, remote)
             if (
                 original is not None
                 and original.payload_digest is not None
@@ -622,7 +618,7 @@ class SlurmCluster:
                     handle = original.handle
                     job = accepted
                     self._save(record)
-            if remote.cancelled and not record.cancelled:
+            if remote is not None and remote.cancelled and not record.cancelled:
                 record = record.model_copy(update={"cancelled": True})
                 self._save(record)
             if job.job_id == "0":
@@ -657,6 +653,31 @@ class SlurmCluster:
         return self._with_progress(
             self._observation(record.operation_id, job.job_id, reading, handle), reading, handle
         )
+
+    def _remote_evidence(
+        self, record: Operation, job_id: str, evidence: RemoteOperationEvidence | None
+    ) -> RemoteOperationEvidence | None:
+        """The scheduler-wide evidence of an operation; ``None`` if a known job's cannot be read.
+
+        The evidence resolves an unresolved job identity and carries a cancel marker
+        written by another process. A record whose job is already accepted does not
+        need it to be inspected, and the next inspection reads it again, so one lost
+        read must not hide the scheduler's own reading of the job.
+        """
+        if evidence is not None:
+            return evidence
+        try:
+            return self._runner.inspect_operation(record.operation_id)
+        except (
+            SlurmError,
+            OSError,
+            UnicodeError,
+            subprocess.SubprocessError,
+            RemoteOperationError,
+        ):
+            if job_id == "0":
+                raise
+            return None
 
     def _with_progress(
         self,

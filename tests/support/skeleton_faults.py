@@ -106,6 +106,10 @@ class FaultingStore:
         """The inner store's lease renewal."""
         return self._inner.renew(fence, now, duration)
 
+    def release(self, fence: StoreFence, now: float) -> bool:
+        """The inner store's lease release."""
+        return self._inner.release(fence, now)
+
     def verify(self, fence: StoreFence, now: float) -> bool:
         """The inner store's fence check."""
         return self._inner.verify(fence, now)

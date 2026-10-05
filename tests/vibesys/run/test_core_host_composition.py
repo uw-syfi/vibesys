@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import pytest
+from tests.support.fake_run_clock import FakeRunClock
 from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
 from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
 
@@ -46,7 +47,7 @@ from vs_runtime.api import (
     OrchestrationPlugin,
     RunStatus,
 )
-from vs_runtime.api.core import OperationRole
+from vs_runtime.api.core import OperationRole, RunTiming
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
@@ -172,6 +173,7 @@ def _open(
                 integration,
                 plugin=_plugin(templates),
                 options=EmptyOptions(),
+                timing=RunTiming(FakeRunClock(), 60.0),
                 agent_client_factory=client_factory,
                 invocation_store_factory=(
                     (lambda _state, _key: FakeAgentInvocationStore()) if journal else None
@@ -278,6 +280,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
             agent_client_factory=_resumable_client,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
             stop_timer=asyncio.sleep,
+            timing=RunTiming(FakeRunClock(), 60.0),
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
         )
 
