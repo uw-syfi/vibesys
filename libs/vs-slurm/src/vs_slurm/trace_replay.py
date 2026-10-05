@@ -131,8 +131,9 @@ class SchedulerTrace(BaseModel):
 
 
 class _Job:
-    def __init__(self, job_id: str, name: str, submitted_at: float) -> None:
+    def __init__(self, job_id: str, name: str, submitted_at: float, base: str) -> None:
         self.job_id = job_id
+        self.base = base
         self.name = name
         self.submitted_at = submitted_at
         self.cancelled_at: float | None = None
@@ -156,13 +157,20 @@ class TraceConnector:
         on_cancel_pending: SchedulerTrace,
         on_cancel_running: SchedulerTrace,
         command_seconds: float = DEFAULT_COMMAND_SECONDS,
+        stage_weights: tuple[float, ...] = (),
     ) -> None:
-        """Replay ``lifetime`` for every submitted job, advancing ``clock`` per command."""
+        """Replay ``lifetime`` for every submitted job, advancing ``clock`` per command.
+
+        ``stage_weights`` are the relative lengths of a batch's stages. The job script
+        runs locally and finishes at once, so without them every stage result already
+        exists; with them, stage results appear in order across the traced run.
+        """
         self.clock = clock
         self.lifetime = lifetime
         self.on_cancel_pending = on_cancel_pending
         self.on_cancel_running = on_cancel_running
         self._command_seconds = command_seconds
+        self._stage_weights = stage_weights
         self._inner = FakeConnector(state)
         self._jobs: dict[str, _Job] = {}
 
@@ -197,11 +205,7 @@ class TraceConnector:
             if request.get("operation") == "exec"
             else []
         )
-        answer = (
-            self._scheduler(tokens)
-            if tokens and tokens[0] in {"squeue", "sacct", "scancel"}
-            else None
-        )
+        answer = self._answer(request, tokens)
         if answer is None:
             completed = self._inner(argv, stdin=stdin, timeout=timeout)
             if "sbatch" in tokens:
@@ -217,6 +221,39 @@ class TraceConnector:
         self.clock.advance(self._command_seconds)
         return completed
 
+    def _answer(self, request: dict[str, object], tokens: list[str]) -> str | None:
+        if tokens and tokens[0] in {"squeue", "sacct", "scancel"}:
+            return self._scheduler(tokens)
+        command = str(request.get("command", ""))
+        if self._stage_weights and "exit-code.txt" in command and "wc -l" in command:
+            return f"{self._finished_stages(command)}\n"
+        return None
+
+    def _finished_stages(self, command: str) -> int:
+        """How many stage results exist, spread over the traced run in proportion to weights."""
+        job = next(
+            (item for item in self._jobs.values() if item.base and item.base in command),
+            None,
+        )
+        if job is None:
+            return 0
+        elapsed = self.clock.now() - job.submitted_at
+        start = next(
+            (step.at_seconds for step in self.lifetime.steps if step.accounting_state == "RUNNING"),
+            float("inf"),
+        )
+        end = self.lifetime.ended_at_seconds
+        if elapsed < start:
+            return 0
+        if elapsed >= end:
+            return len(self._stage_weights)
+        done = (elapsed - start) / (end - start) * sum(self._stage_weights)
+        finished, total = 0, 0.0
+        for weight in self._stage_weights:
+            total += weight
+            finished += done >= total
+        return finished
+
     def _log(self, request: dict[str, object]) -> None:
         with (self.state / REQUESTS_FILE).open("a", encoding="utf-8") as log:
             log.write(json.dumps(request) + "\n")
@@ -227,8 +264,10 @@ class TraceConnector:
         name = next(
             (token.split("=", 1)[1] for token in tokens if token.startswith("--job-name=")), ""
         )
+        start = tokens.index("sbatch")
+        base = tokens[tokens.index("cd") + 1] if "cd" in tokens[:start] else ""
         if job_id:
-            self._jobs[job_id] = _Job(job_id, name, self.clock.now())
+            self._jobs[job_id] = _Job(job_id, name, self.clock.now(), base)
 
     def _step(self, job: _Job) -> TraceStep:
         now = self.clock.now()

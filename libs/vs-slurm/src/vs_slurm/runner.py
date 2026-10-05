@@ -773,6 +773,21 @@ class SlurmJobRunner:
             stop_on_failure=request.stop_on_failure,
         )
 
+    def completed_stages(self, handle: SlurmBatchHandle) -> int:
+        """How many stages of a batch have written their result, in one remote command.
+
+        Stages run in order, so with ``n`` results written, stage ``n`` is the one
+        running. A stage that is running has not written its exit code yet.
+        """
+        root = PurePosixPath(handle.job.remote_workspace) / _BATCH_RESULT_ROOT
+        output = self._transport.exec(
+            f"ls -1 {shlex.quote(root.as_posix())}/*/exit-code.txt 2>/dev/null | wc -l"
+        ).stdout
+        try:
+            return max(0, int(output.strip() or "0"))
+        except ValueError as error:
+            raise SlurmError.malformed_result() from error
+
     def poll_batch(self, handle: SlurmBatchHandle) -> SlurmJobStatus:
         """Read the scheduler state of a batch handle."""
         return self.poll(handle.job)

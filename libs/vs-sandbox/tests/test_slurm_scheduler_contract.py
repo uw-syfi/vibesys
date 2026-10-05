@@ -194,6 +194,7 @@ def _replay_world(
         lifetime=lifetime,
         on_cancel_pending=pending or CANCEL_REACTIONS["cancel-pending"],
         on_cancel_running=running,
+        stage_weights=(3.0, 1.0),
     )
     runner = SlurmJobRunner(
         SlurmConfig(
@@ -251,11 +252,14 @@ def _request() -> EvaluationRequest:
     )
 
 
-def _stack(world: _World) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator]:
+def _executor(
+    world: _World, pause: Callable[[float], None] | None = None
+) -> SlurmEvaluationExecutor:
+    """An executor over the world; by default its waiting advances the world's clock."""
     workspace = world.root / "workspace"
-    workspace.mkdir()
+    workspace.mkdir(exist_ok=True)
     (workspace / "input.txt").write_text("x", encoding="utf-8")
-    executor = SlurmEvaluationExecutor(
+    return SlurmEvaluationExecutor(
         _config(),
         workspace=workspace,
         setup_script=None,
@@ -263,9 +267,15 @@ def _stack(world: _World) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinato
         support_trees={},
         handle_root=world.root / "handles",
         cluster=world.cluster,
-        pause=world.clock.advance,
+        pause=pause or world.clock.advance,
         cancel_confirmation_seconds=_CONFIRMATION_S,
     )
+
+
+def _stack(
+    world: _World, pause: Callable[[float], None] | None = None
+) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator]:
+    executor = _executor(world, pause)
     store = evaluation_testing.InMemoryEvaluationStore()
     return executor, EvaluationCoordinator(executor, store, FakeClock())
 
@@ -436,3 +446,44 @@ def test_an_evaluation_ends_when_accounting_reports_the_job_ended(spec: _WorldSp
     # lag (35 s) is longer than this, so waiting for the queue to forget the job fails.
     slack = 25.0
     assert finished <= submitted_at + lifetime.ended_at_seconds + slack
+
+
+async def _stages_reported_while_running(spec: _WorldSpec) -> list[str]:
+    with tempfile.TemporaryDirectory() as raw:
+        world = spec.build(Path(raw))
+        parked = threading.Event()
+        # The submitting executor's own waiting is parked, so this test alone moves time.
+        submitter, coordinator = _stack(world, pause=lambda _seconds: parked.wait())
+        handle = await coordinator.submit(_request())
+        await asyncio.to_thread(world.cluster.accepted.wait)
+        reader = _executor(world)
+        seen: list[str] = []
+        try:
+            for _ in range(10_000):
+                world.clock.advance(5.0)
+                polled = await reader.poll(handle.id)
+                if polled.phase is PollPhase.ENDED:
+                    break
+                if polled.phase is PollPhase.RUNNING and polled.current_stage is not None:
+                    seen.append(polled.current_stage)
+        finally:
+            parked.set()
+            await submitter.close()
+        return seen
+
+
+# A 12.9 s run is shorter than the commands that submit it, so it cannot be sampled.
+_LONG_RUNS = tuple(
+    spec for spec in WORLDS if spec.label == "fake" or "pending-then-running" in spec.label
+)
+
+
+@pytest.mark.parametrize("spec", _LONG_RUNS, ids=lambda spec: spec.label)
+def test_the_reported_stage_follows_the_stage_that_is_running(spec: _WorldSpec) -> None:
+    """A fused job shows each of its stages in order, not the first stage throughout."""
+    seen = asyncio.run(_stages_reported_while_running(spec))
+    order = [stage.name for stage in _request().stages]
+    indexes = [order.index(name) for name in seen]
+    assert indexes == sorted(indexes)
+    assert seen[0] == order[0]
+    assert seen[-1] == order[-1]

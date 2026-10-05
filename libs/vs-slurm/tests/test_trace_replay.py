@@ -30,6 +30,8 @@ from vs_slurm.api import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+_SUBMIT_BUDGET = 19
+_POLL_BUDGET = 3
 _ALL = {**LIFETIMES, **CANCEL_REACTIONS}
 _KNOWN_STATES = {"PENDING", "RUNNING", "COMPLETING", "COMPLETED", "CANCELLED+"}
 _SAFE_TEXT = re.compile(r"[A-Za-z0-9+:|._ -]*")
@@ -189,3 +191,31 @@ def test_a_cancelled_operation_does_not_resend_scancel_while_the_job_tears_down(
         clock.advance(10)
         cluster.inspect("op")
     assert connector.scancels() == 1
+
+
+@pytest.mark.parametrize("lifetime", LIFETIMES)
+def test_replayed_submit_and_poll_stay_within_the_command_budget(
+    tmp_path: Path, lifetime: str
+) -> None:
+    """Every poll, whatever the scheduler shows, costs at most three remote commands."""
+    runner, connector, clock = _runner(
+        tmp_path, LIFETIMES[lifetime], CANCEL_REACTIONS["cancel-running"]
+    )
+    cluster = SlurmCluster(runner, state_root=tmp_path / "ids")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request = SlurmBatchRequest(
+        workspace=workspace,
+        stages=(
+            SlurmBatchStage(name="accuracy", command=("true",)),
+            SlurmBatchStage(name="benchmark", command=("true",)),
+        ),
+    )
+    before = len(connector.commands())
+    cluster.submit(request, operation_id="op")
+    assert len(connector.commands()) - before <= _SUBMIT_BUDGET
+    for _ in range(40):
+        clock.advance(10)
+        before = len(connector.commands())
+        cluster.inspect("op")
+        assert len(connector.commands()) - before <= _POLL_BUDGET
