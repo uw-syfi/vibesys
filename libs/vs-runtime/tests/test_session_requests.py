@@ -23,6 +23,7 @@ from tests.support.session_world import (
     open_host,
     reuse_ensure,
     run_snapshot,
+    turn_output,
 )
 
 from vs_core.api import (
@@ -197,7 +198,7 @@ async def test_a_late_retry_after_a_crash_replays_the_turn_that_already_ran() ->
         retried = await w.execute(dispatch_request(), now_at=500.0)
         inspected = await w.execute(inspect_request(), now_at=500.0)
         assert status(retried) is ObservationStatus.SUCCEEDED
-        assert retried.owner_events[0].output_json == '{"value":7}'
+        assert turn_output(retried) == '{"value":7}'
         assert inspected.observation.target is not None
         assert inspected.observation.target.observation.status is ObservationStatus.SUCCEEDED
         assert len(w.host.turns) == 1
@@ -291,7 +292,7 @@ async def test_inspect_translates_a_completed_turn_and_a_never_dispatched_one() 
         seen = await w.execute(inspect_request("req-i2", "inv-1"))
         assert seen.observation.target is not None
         assert seen.observation.target.observation.status is ObservationStatus.SUCCEEDED
-        assert seen.owner_events[0].output_json == dispatched.owner_events[0].output_json
+        assert turn_output(seen) == turn_output(dispatched) is not None
         assert_core_accepts([dispatched, seen], expect_retry=False)
 
 

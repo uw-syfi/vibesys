@@ -42,6 +42,7 @@ from vs_core.api import (
     SessionInput,
     SessionSpec,
     SnapshotAndRetainRun,
+    TurnObserved,
     TurnSpec,
     WorkspaceRef,
 )
@@ -233,6 +234,14 @@ class FakeSessionResolver:
             invocation=turn.invocation_id.root,
             count=len(inputs),
         )
+
+
+def turn_output(result: ExecutionResult) -> str | None:
+    """The structured output JSON a result's TurnObserved event carries."""
+    for event in result.owner_events:
+        if isinstance(event, TurnObserved):
+            return event.output_json
+    return None
 
 
 class CrashOnReplace(ReceiptStore):

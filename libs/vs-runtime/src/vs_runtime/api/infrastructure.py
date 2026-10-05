@@ -246,6 +246,7 @@ from vs_runtime._workspace_runtime import (
 )
 from vs_runtime._workspaces import (
     OwnedWorkspaces,
+    RuntimeWorkspace,
     RuntimeWorkspaces,
     WorkspaceResource,
     WorkspaceResourceProvider,
@@ -519,6 +520,7 @@ __all__ = [
     "RuntimeAccuracyRun",
     "RuntimeBenchmarkRun",
     "RuntimeRunHost",
+    "RuntimeWorkspace",
     "RuntimeWorkspaceEvaluation",
     "SDKRoots",
     "ScalarBenchmarkContract",
