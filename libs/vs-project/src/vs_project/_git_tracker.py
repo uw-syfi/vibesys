@@ -452,7 +452,8 @@ class GitTracker:
         for state_file in plan.files:
             state_file.destination.parent.mkdir(parents=True, exist_ok=True)
             state_file.destination.write_bytes(state_file.contents)
-            self.run(["git", "add", "--force", "--", state_file.pathspec])
+        if plan.files:
+            self.run(["git", "add", "--force", "--", *(file.pathspec for file in plan.files)])
         self._commit_staged(label)
 
     def snapshot_framework_metadata_only(
