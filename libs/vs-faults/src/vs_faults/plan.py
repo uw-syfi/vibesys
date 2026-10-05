@@ -26,6 +26,8 @@ class Boundary(StrEnum):
     AGENT_TURN = "agent_turn"
     TOOL_CALL = "tool_call"
     CLUSTER = "cluster"
+    EXECUTOR_REQUEST = "executor_request"  # a request the host's shell hands to an executor
+    DURABLE_WRITE = "durable_write"  # one atomic write of the host's durable run record
 
 
 class AgentFault(StrEnum):
@@ -68,10 +70,22 @@ class ClusterFault(StrEnum):
     WRONG_STATE = "wrong_state"  # squeue/sacct: the answer is garbage the parser has to reject
 
 
-_FAULT_TYPES: dict[Boundary, type[AgentFault | ToolFault | ClusterFault]] = {
+class HostFault(StrEnum):
+    """What a faulted host-boundary call does.
+
+    Crash is the first kind; later kinds (delay, reorder, external-state lag) are new
+    members handled by the gate, so the wrappers do not change.
+    """
+
+    CRASH_AFTER = "crash_after"  # the call completes and takes effect, then the host process dies
+
+
+_FAULT_TYPES: dict[Boundary, type[AgentFault | ToolFault | ClusterFault | HostFault]] = {
     Boundary.AGENT_TURN: AgentFault,
     Boundary.TOOL_CALL: ToolFault,
     Boundary.CLUSTER: ClusterFault,
+    Boundary.EXECUTOR_REQUEST: HostFault,
+    Boundary.DURABLE_WRITE: HostFault,
 }
 
 
@@ -83,7 +97,7 @@ class FaultRule(BaseModel):
     boundary: Boundary
     target: str | None = None
     at: int = Field(ge=1)
-    fault: AgentFault | ToolFault | ClusterFault
+    fault: AgentFault | ToolFault | ClusterFault | HostFault
 
     @model_validator(mode="before")
     @classmethod
@@ -99,6 +113,8 @@ _FAULTS: dict[Boundary, tuple[StrEnum, ...]] = {
     Boundary.AGENT_TURN: tuple(AgentFault),
     Boundary.TOOL_CALL: tuple(ToolFault),
     Boundary.CLUSTER: tuple(ClusterFault),
+    Boundary.EXECUTOR_REQUEST: tuple(HostFault),
+    Boundary.DURABLE_WRITE: tuple(HostFault),
 }
 _CLUSTER_FAULTS: dict[ClusterFault, tuple[ClusterOperation, ...]] = {
     ClusterFault.SSH_DOWN: tuple(ClusterOperation),
@@ -170,7 +186,7 @@ class FaultPlan(BaseModel):
             boundary = rng.choice(boundaries)
             if boundary is Boundary.CLUSTER:
                 cluster_fault = rng.choice(tuple(ClusterFault))
-                fault: AgentFault | ToolFault | ClusterFault = cluster_fault
+                fault: AgentFault | ToolFault | ClusterFault | HostFault = cluster_fault
                 target: str | None = rng.choice(_CLUSTER_FAULTS[cluster_fault]).value
             else:
                 fault = rng.choice(_FAULTS[boundary])

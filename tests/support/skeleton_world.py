@@ -25,6 +25,7 @@ from tests.support.session_world import (
     ProviderFaults,
     SessionHost,
 )
+from tests.support.skeleton_faults import FaultingExecutors, FaultingStore
 from tests.support.skeleton_strategy import DECLARATION, DIGEST, SkeletonState, SkeletonStrategy
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
 
@@ -83,6 +84,8 @@ if TYPE_CHECKING:
         PollingEvaluationExecutor,
         ResourceRequirements,
     )
+    from vs_faults.api import FaultGate
+    from vs_project.api import StateStore
     from vs_runtime.api.core import AccessGuardedWorkspace
 
 LEASE = 100.0
@@ -152,6 +155,7 @@ class World:
     operations: OperationCatalog = field(default_factory=empty_catalog)
     timed: tuple[FakeRunClock, float] | None = None
     polls: list[str] = field(default_factory=list)
+    gate: FaultGate | None = None
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -207,12 +211,17 @@ class World:
         if self.timed is not None:
             clock, runtime = self.timed
             evaluation = TimedPolls(evaluation, clock, runtime, self.polls)
-        return core_bindings(
+        bindings = core_bindings(
             receipts=self.env.receipts_namespace(),
             workspaces=workspaces,
             evaluation=evaluation,
             sessions=SessionServices(self.agents.sessions(), self.agents.resolver),
             operations=self.operations,
+        )
+        if self.gate is None:
+            return bindings
+        return dataclasses.replace(
+            bindings, executors=FaultingExecutors.around(bindings.executors, self.gate)
         )
 
     def runtime(self) -> Process:
@@ -221,7 +230,9 @@ class World:
         A fresh run when the store is empty, a recovery of the durable envelope otherwise.
         """
         bindings = self.bindings()
-        store = self.env.project.state_store(RUN_ID)
+        store: StateStore = self.env.project.state_store(RUN_ID)
+        if self.gate is not None:
+            store = FaultingStore(store, self.gate)
         shell: CoreRuntime[SkeletonState] = CoreRuntime(
             store, self.strategy, self.initial(), bindings=bindings
         )
@@ -328,6 +339,7 @@ class CandidateWriter:
     root: Path
     answer: dict[str, object] = field(default_factory=lambda: {"commit": ""})
     turns: int = 0
+    invocations: list[str | None] = field(default_factory=list)
 
     def worktree(self) -> Path:
         """The path of the run's single candidate worktree."""
@@ -347,7 +359,7 @@ class CandidateWriter:
 
     def __call__(self, request: AgentTurnRequest) -> None:
         """Write and commit one change, then name the commit in the reply."""
-        del request
+        self.invocations.append(request.invocation_id)
         self.turns += 1
         tree = self.worktree()
         (tree / "candidate.py").write_text(f"VALUE = {self.turns + 1}\n", encoding="utf-8")
@@ -398,6 +410,7 @@ def open_skeleton_world(
     strategy: SkeletonStrategy | None = None,
     cluster: ScenarioCluster | None = None,
     timed: tuple[FakeRunClock, float] | None = None,
+    gate: FaultGate | None = None,
 ) -> Iterator[World]:
     """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
     with open_workspace_env(tmp_path) as env:
@@ -409,4 +422,5 @@ def open_skeleton_world(
             agents=agents,
             strategy=strategy or SkeletonStrategy(),
             timed=timed,
+            gate=gate,
         )
