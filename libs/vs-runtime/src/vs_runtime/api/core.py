@@ -35,6 +35,7 @@ from vs_runtime._core_record import (
     RuntimeRecord,
 )
 from vs_runtime._core_requests import (
+    HAND_ROLLED_ROLES,
     REQUEST_DISPATCH,
     EvaluationRequests,
     ExecutionContext,
@@ -53,6 +54,13 @@ from vs_runtime._core_requests import (
     receipt_executor_kinds,
 )
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
+from vs_runtime._evidence_ledger import (
+    EvidenceEntry,
+    EvidenceLookup,
+    EvidenceRecorder,
+    ReceiptEvidenceLedger,
+)
+from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
@@ -78,20 +86,40 @@ from vs_runtime._operation_receipts import (
     ResultReceipt,
 )
 from vs_runtime._operation_requests import RegisteredOperationRequests
+from vs_runtime._operation_wiring import (
+    OperationPorts,
+    OperationRole,
+    bind_operations,
+    build_operation_catalog,
+    production_owners,
+)
 from vs_runtime._receipt_store import (
+    BegunUnsealed,
     Conflict,
     Declined,
+    ExecutionHistory,
+    NeverBegun,
     Performed,
     Performer,
     ReceiptCorruptError,
     ReceiptStore,
     Replayed,
+    SealedExecution,
     Settled,
     Transient,
     owner_key,
+    result_type_name,
 )
 from vs_runtime._render_operation import RenderArtifactsOwner
+from vs_runtime._request_inspection import RecordedRequestInspector
 from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
+from vs_runtime._session_lifecycle_requests import (
+    ContinuationBinding,
+    ReleasedRunInvocations,
+    SessionLifecycleRequests,
+    SessionRequestRouter,
+    TurnDispatcher,
+)
 from vs_runtime._session_requests import (
     JournalRunInvocations,
     RuntimeSessionRequests,
@@ -108,18 +136,22 @@ from vs_runtime._workspace_receipts import (
 from vs_runtime._workspace_requests import (
     RunInvocationProof,
     RuntimeWorkspaceRequests,
+    commit_of,
     revision_ref,
 )
 
 __all__ = [
+    "HAND_ROLLED_ROLES",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
     "Applied",
     "AttemptBinding",
+    "BegunUnsealed",
     "BlockDiagnostic",
     "CancellableOwner",
     "Cancelled",
     "Conflict",
+    "ContinuationBinding",
     "CoreContractGapError",
     "CoreResumeError",
     "CoreRuntime",
@@ -128,7 +160,11 @@ __all__ = [
     "Declined",
     "DispatchProgress",
     "EvaluationRequests",
+    "EvidenceEntry",
+    "EvidenceLookup",
+    "EvidenceRecorder",
     "ExecutionContext",
+    "ExecutionHistory",
     "ExecutionLease",
     "ExecutionOutcome",
     "ExecutionResult",
@@ -137,12 +173,14 @@ __all__ = [
     "Indeterminate",
     "Inspection",
     "IntentReceipt",
+    "InterpretEvidenceOwner",
     "JobRecord",
     "JournalPublicationDelivery",
     "JournalRunInvocations",
     "JournalSemanticEvents",
     "MeasurementRequests",
     "NamespaceOperationReceipts",
+    "NeverBegun",
     "NotApplied",
     "ObservationFactory",
     "ObservationFacts",
@@ -153,7 +191,9 @@ __all__ = [
     "OperationEntry",
     "OperationExecutor",
     "OperationOwner",
+    "OperationPorts",
     "OperationReceipts",
+    "OperationRole",
     "OwnerEvent",
     "OwnerEventRejectedError",
     "Performed",
@@ -165,17 +205,20 @@ __all__ = [
     "PublicationDelivery",
     "PublicationHistory",
     "ReceiptCorruptError",
-    "ReceiptCorruptError",
+    "ReceiptEvidenceLedger",
     "ReceiptStore",
+    "RecordedRequestInspector",
     "RefusalReason",
     "RefusingRequestExecution",
     "RegisteredOperationRequests",
+    "ReleasedRunInvocations",
     "RenderArtifactsOwner",
     "Replayed",
     "RequestExecutors",
     "ResolvedCoreResume",
     "ResultReceipt",
     "ResumeDiagnostic",
+    "RetainRevisionOwner",
     "RootGrant",
     "RunInvocationProof",
     "RuntimeCommitError",
@@ -184,18 +227,27 @@ __all__ = [
     "RuntimeRecord",
     "RuntimeSessionRequests",
     "RuntimeWorkspaceRequests",
+    "SealedExecution",
     "SemanticEvents",
     "SessionBinding",
+    "SessionLifecycleRequests",
+    "SessionRequestRouter",
     "SessionRequests",
     "SessionResolver",
     "Settled",
     "StoreWorkspaceReceipts",
     "Transient",
+    "TurnDispatcher",
     "VerifyRevisionOwner",
     "WorkspaceReceipts",
     "WorkspaceRequests",
+    "bind_operations",
+    "build_operation_catalog",
+    "commit_of",
     "owner_key",
+    "production_owners",
     "receipt_executor_kinds",
     "resolve_core_resume",
+    "result_type_name",
     "revision_ref",
 ]

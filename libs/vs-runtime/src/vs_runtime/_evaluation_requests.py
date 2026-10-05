@@ -53,6 +53,7 @@ from vs_runtime._evaluation_jobs import (
     job_view,
     measurement_request,
 )
+from vs_runtime._evidence_ledger import ReceiptEvidenceLedger
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
@@ -208,6 +209,7 @@ class MeasurementRequests:
             lambda facts: self._observations.observe(
                 subject, facts, observed_at=context.now_at, fresh=True
             ),
+            ReceiptEvidenceLedger(self._store),
         )
         return view, polled.phase is PollPhase.ENDED
 

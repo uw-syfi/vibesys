@@ -497,6 +497,19 @@ class Workspaces(Protocol):
         ...
 
 
+class RevisionLedger(Protocol):
+    """The run's record of which revisions it keeps reachable."""
+
+    async def retains(self, revision: str) -> bool:
+        """Whether this run keeps the revision reachable, not merely present.
+
+        True for the root's history and for every revision a candidate retained or
+        snapshotted. False for an unreferenced commit that still exists, and for an
+        unknown revision. Exporting a patch proves only that an object exists.
+        """
+        ...
+
+
 class CommandResult(BaseModel):
     """Bounded output from one sandboxed argv invocation."""
 

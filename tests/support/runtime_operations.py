@@ -43,9 +43,10 @@ from vs_runtime.api.core import (
     NotApplied,
     OperationCatalog,
     OperationEntry,
-    RefusalReason,
+    OperationRole,
     RenderArtifactsOwner,
     VerifyRevisionOwner,
+    build_operation_catalog,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
 
@@ -246,73 +247,68 @@ def scenarios(root: Path, namespace: StateNamespace) -> tuple[OperationScenario,
     workspace = FakeWorkspace(known_revisions={"abc"})
     workspaces = FakeWorkspaces(workspace)
     artifacts = root_artifacts(namespace)
+    echo_entry = OperationEntry.owned(
+        _registration(
+            "test.echo", EchoRequest, EchoOutcome, LifecycleClass.IDEMPOTENT_WRITE, cancel=True
+        ),
+        EchoOwner(log),
+    )
+    built = build_operation_catalog(
+        {
+            OperationRole.RENDER_ARTIFACTS: _registration(
+                "test.render",
+                RenderRoleArtifacts,
+                RenderedArtifacts,
+                LifecycleClass.IDEMPOTENT_WRITE,
+            ),
+            OperationRole.VERIFY_REVISION: _registration(
+                "test.verify", VerifyParentRevision, ParentVerification, LifecycleClass.QUERY
+            ),
+            OperationRole.INTERPRET_EVIDENCE: _registration(
+                "test.interpret", InterpretEvidence, Readings, LifecycleClass.QUERY
+            ),
+            OperationRole.RETAIN_REVISION: _registration(
+                "test.retain", RetainVerifiedRevision, Retained, LifecycleClass.IDEMPOTENT_WRITE
+            ),
+        },
+        {
+            OperationRole.RENDER_ARTIFACTS: RenderArtifactsOwner(
+                TemplateRenderer(templates), store
+            ),
+            OperationRole.VERIFY_REVISION: VerifyRevisionOwner(workspaces, workspaces, commit_of),
+        },
+        extra=(echo_entry,),
+    )
+    entries = {entry.registration.descriptor.kind: entry for entry in built.entries}
     return (
         OperationScenario(
             "echo",
-            OperationEntry.owned(
-                _registration(
-                    "test.echo",
-                    EchoRequest,
-                    EchoOutcome,
-                    LifecycleClass.IDEMPOTENT_WRITE,
-                    cancel=True,
-                ),
-                EchoOwner(log),
-            ),
+            entries["test.echo"],
             EchoRequest(text="one"),
             lambda: len(log.lines()),
         ),
         OperationScenario(
             "render",
-            OperationEntry.owned(
-                _registration(
-                    "test.render",
-                    RenderRoleArtifacts,
-                    RenderedArtifacts,
-                    LifecycleClass.IDEMPOTENT_WRITE,
-                ),
-                RenderArtifactsOwner(TemplateRenderer(templates), store),
-            ),
+            entries["test.render"],
             RenderRoleArtifacts(subject="planner", ordinal=0, context=PromptContext(who="world")),
             lambda: len(list(artifacts.iterdir())) if artifacts.exists() else 0,
         ),
         OperationScenario(
             "verify",
-            OperationEntry.owned(
-                _registration(
-                    "test.verify",
-                    VerifyParentRevision,
-                    ParentVerification,
-                    LifecycleClass.QUERY,
-                ),
-                VerifyRevisionOwner(workspaces, commit_of),
-            ),
+            entries["test.verify"],
             VerifyParentRevision(parent=revision("abc")),
             lambda: 0,
         ),
         OperationScenario(
             "interpret",
-            OperationEntry.refused(
-                _registration("test.interpret", InterpretEvidence, Readings, LifecycleClass.QUERY),
-                RefusalReason.NO_EVIDENCE_LOOKUP,
-                "no evidence lookup",
-            ),
+            entries["test.interpret"],
             InterpretEvidence(evidence=("e",)),
             lambda: 0,
             refused=True,
         ),
         OperationScenario(
             "retain",
-            OperationEntry.refused(
-                _registration(
-                    "test.retain",
-                    RetainVerifiedRevision,
-                    Retained,
-                    LifecycleClass.IDEMPOTENT_WRITE,
-                ),
-                RefusalReason.NO_ACCURACY_PROOF,
-                "no accuracy proof",
-            ),
+            entries["test.retain"],
             RetainVerifiedRevision(revision=revision("abc")),
             lambda: 0,
             refused=True,

@@ -829,6 +829,20 @@ class AgentClient:
         for session in active:
             session.cancel()
 
+    def cancel_session(self, key: AgentSessionKey) -> None:
+        """Stop the in-flight turn of one keyed conversation, keeping its checkpoint.
+
+        Unlike :meth:`cancel` this leaves the client usable for every other key,
+        and a key with no live session is a no-op.
+        """
+        cached = self._sessions.get(key)
+        if cached is not None:
+            cached.session.cancel()
+
+    def release_session(self, key: AgentSessionKey) -> None:
+        """Release the live provider session of one key but keep its stored checkpoint."""
+        self._evict(key)
+
     def _run_ephemeral(
         self,
         session_spec: AgentSessionSpec,
