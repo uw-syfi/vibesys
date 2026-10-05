@@ -7,6 +7,7 @@ strategy proposes nothing: the run stays open until a control or the deadline en
 from __future__ import annotations
 
 import itertools
+import math
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
