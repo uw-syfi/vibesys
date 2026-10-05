@@ -5,13 +5,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import vs_core
-
-SOURCE = Path(vs_core.__file__).parent
+SOURCE = Path(__file__).parents[1] / "src" / "vs_core"
 
 
 def test_no_leaf_raises_kernel_not_implemented() -> None:
     """A leaf declines an input it does not support; it never raises the stub error."""
+    assert SOURCE.is_dir()
     raising = [
         str(path.relative_to(SOURCE))
         for path in sorted(SOURCE.rglob("*.py"))
