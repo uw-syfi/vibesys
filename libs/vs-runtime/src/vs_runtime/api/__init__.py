@@ -20,12 +20,18 @@ from vs_runtime._artifact_store import (
     ArtifactStore,
     ArtifactStoreError,
 )
+from vs_runtime._evaluation_failure_text import (
+    render_evaluation_failure,
+    render_rejected_evidence,
+    render_stage_failure,
+)
 from vs_runtime._local_validation import (
     VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
     ValidationRecipe,
     ValidationRecipeArtifact,
     ValidationRecipeArtifactPath,
 )
+from vs_runtime._polling_evaluation import PollingEvaluationExecutor
 from vs_runtime._profile_completion import ProfileCompletion, complete_profile
 
 # A stop lands in policy code as this BaseException; a policy that runs work
@@ -155,6 +161,7 @@ __all__ = [
     "OrchestrationPlugin",
     "OrchestrationResumeDecision",
     "PartialMeasurement",
+    "PollingEvaluationExecutor",
     "PreparedConversation",
     "ProfileCompletion",
     "ProfileExecution",
@@ -202,6 +209,9 @@ __all__ = [
     "boot_trace",
     "complete_profile",
     "member_workspace_id",
+    "render_evaluation_failure",
+    "render_rejected_evidence",
+    "render_stage_failure",
     "validate_command",
     "validate_member_id",
     "validate_trusted_shell_command",
