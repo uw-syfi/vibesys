@@ -68,7 +68,7 @@ _TURN_PHASES = {
 
 def key_of(record: AttemptRecord) -> str:
     """Stable subject of one workstream."""
-    return f"{record.plan.work_id}.{record.sequence}"
+    return f"{ids.component(record.plan.work_id)}.{record.sequence}"
 
 
 def subject_of(record: AttemptRecord, role: Role) -> str:
@@ -81,8 +81,10 @@ def role_of(phase: WorkPhase) -> Role | None:
     return _TURN_PHASES.get(phase)
 
 
-def _first_turn(role: Role) -> TurnRecord:
-    return TurnRecord(role=role, serial=0, charge="free" if role is Role.JUDGE else "paid")
+def _first_turn(record: AttemptRecord, role: Role) -> TurnRecord:
+    return TurnRecord(
+        role=role, serial=record.next_serial, charge="free" if role is Role.JUDGE else "paid"
+    )
 
 
 def decide(draft: Draft) -> None:
@@ -182,7 +184,7 @@ def _default_context(record: AttemptRecord, draft: Draft) -> PromptContext:
 
 def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
     role = _TURN_PHASES[record.phase]
-    turn = record.turn or _first_turn(role)
+    turn = record.turn or _first_turn(record, role)
     subject = subject_of(record, role)
     scope = attempt_scope(draft.view, record.attempt, record.generation)
     if record.step is Step.NEEDED:
@@ -190,7 +192,12 @@ def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
         identifier = render_id(subject, turn)
         draft.emit(operation(draft, identifier, scope, render_request(subject, turn, body)))
         return record.model_copy(
-            update={"turn": turn, "step": Step.RENDERING, "awaiting": identifier}
+            update={
+                "turn": turn,
+                "step": Step.RENDERING,
+                "awaiting": identifier,
+                "next_serial": max(record.next_serial, turn.serial + 1),
+            }
         )
     if record.step is not Step.RENDERED:
         return record
@@ -203,8 +210,6 @@ def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
                 subject=subject,
                 workspace=workspace_for(scope, revision, mode),
                 access=access,
-                reuse=(record.plan.continue_hypothesis and role is Role.IMPLEMENTER)
-                or turn.serial > 0,
                 output_schema=schema,
                 seconds=seconds,
             ),

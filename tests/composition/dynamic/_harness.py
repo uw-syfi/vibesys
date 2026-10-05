@@ -48,6 +48,7 @@ from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATO
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, StoredEnvelope
+from vs_runtime.api.testing import FakeStopTimer
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
@@ -56,8 +57,9 @@ if TYPE_CHECKING:
     from typing import Any
 
     from vibesys.api import CoreEvent, RunHandle
-    from vs_agent.api import AgentSessionKey, SessionStore, SkillSelection
+    from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
+    from vs_runtime.api.infrastructure import StopTimer
 
 _PLANNER_SLOTS = re.compile(r"Schedule at most (\d+) ")
 _MEMBER = re.compile(
@@ -465,12 +467,18 @@ def run_request(
     agents: ScriptedAgents,
     *,
     on_handle: Callable[[RunHandle], None] | None = None,
+    stop_timer: StopTimer | None = None,
+    client_factory: Callable[..., AgentClientProtocol] | None = None,
 ) -> LoopRun:
     """Execute a built request through the production host composition."""
     registry = OrchestrationRegistry()
     registry.register(dynamic_core_registration())
     runs = launch.default_runs(
-        LaunchSettings(registry=registry, agent_client_factory=agents.client)
+        LaunchSettings(
+            registry=registry,
+            agent_client_factory=client_factory or agents.client,
+            stop_timer=stop_timer or FakeStopTimer(),
+        )
     )
     events: list[CoreEvent] = []
 
