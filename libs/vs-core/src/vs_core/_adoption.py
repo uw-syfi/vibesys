@@ -18,13 +18,18 @@ Adoption stores its progress in ``SettlementState.adoption``:
 - an adopt observation that is applied or unknown: VerifyAdoption is outstanding.
 - a verify observation that is pending: VerifyAdoption is outstanding.
 - ``verified``: complete. Later events change nothing.
-- any other observation: the round failed and the fence is released.
+- ``failure`` set: the adoption failed for good, AdoptionFailed was emitted once,
+  and the fence is released.
+
+Rounds are bounded in one place, ``_may_start_round``: the ledger holds at most
+``Limits.max_retries + 1`` AdoptRevision rounds per selection, whether they came
+from an automatic retry or from the strategy proposing the winner again.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
 
 from ._values import digest
 from .types.attempts import AttemptPhase
@@ -42,8 +47,11 @@ from .types.kernel import AreaChange
 from .types.scheduling import AdoptionFenceLifted
 from .types.settlement import (
     Adoption,
+    AdoptionFailed,
+    AdoptionFailureReason,
     AdoptionObserved,
     AdoptionResult,
+    AdoptionView,
     AdoptRevision,
     Selection,
     SettlementState,
@@ -89,6 +97,11 @@ def _rounds(intents: IntentsState, selection: Selection) -> int:
     )
 
 
+def _may_start_round(context: SettlementContext, selection: Selection) -> bool:
+    """The one bound on rounds: the first round plus ``max_retries`` more."""
+    return _rounds(context.intents, selection) <= context.run.limits.max_retries
+
+
 def _ledger_has(intents: IntentsState, request_id: RequestId, selection: Selection) -> bool:
     return any(
         row.request_id == request_id
@@ -103,6 +116,8 @@ def _phase(adoption: Adoption | None, intents: IntentsState) -> _Phase:
         return _Phase.IDLE
     if adoption.verified:
         return _Phase.DONE
+    if adoption.failure is not None:
+        return _Phase.FAILED
     if adoption.observation is None:
         return _Phase.ADOPTING
     return _observed_phase(adoption.selection, adoption.observation, intents)
@@ -138,6 +153,29 @@ def fences_root_mutation(state: SettlementState, intents: IntentsState) -> bool:
     (an exclusive-root attempt, a root restore) must refuse while this is true.
     """
     return _phase(state.adoption, intents) in (_Phase.ADOPTING, _Phase.VERIFYING)
+
+
+_VIEW_PHASE = {
+    _Phase.IDLE: "adopting",
+    _Phase.ADOPTING: "adopting",
+    _Phase.VERIFYING: "verifying",
+    _Phase.DONE: "verified",
+    _Phase.FAILED: "failed",
+}
+
+
+def view(state: SettlementState, intents: IntentsState) -> AdoptionView | None:
+    """The strategy-facing summary of the current adoption."""
+    adoption = state.adoption
+    if adoption is None:
+        return None
+    phase = _phase(adoption, intents)
+    return AdoptionView(
+        selection=adoption.selection,
+        phase=cast("Literal['adopting', 'verifying', 'verified', 'failed']", _VIEW_PHASE[phase]),
+        rounds=_rounds(intents, adoption.selection),
+        failure=adoption.failure,
+    )
 
 
 def _run_scope(run: RunState) -> Scope:
@@ -270,6 +308,9 @@ def _propose(
     if _root_holder(context):
         detail = "an attempt still holds the root workspace"
         return _refuse(state, context, selection, RejectionCode.DEPENDENCY, detail)
+    if not _may_start_round(context, selection):
+        detail = "adoption retries are exhausted for this selection"
+        return _refuse(state, context, selection, RejectionCode.BUDGET, detail)
     round_ = _rounds(context.intents, selection)
     return _with_adoption(state, Adoption(selection=selection), _adopt(context, selection, round_))
 
@@ -339,8 +380,10 @@ def _adopt_observed(
     round_: int,
 ) -> AreaChange[SettlementState]:
     recorded = adoption.model_copy(update={"observation": observation})
-    if observation.status == ObservationStatus.PENDING or not _awaits_inspection(observation):
+    if observation.status == ObservationStatus.PENDING:
         return _with_adoption(state, recorded)
+    if not _awaits_inspection(observation):
+        return _fail(state, context, recorded, AdoptionFailureReason.ADOPT_FAILED)
     selection = adoption.selection
     if _ledger_has(context.intents, _verify_id(selection, round_), selection):
         return _with_adoption(state, recorded)
@@ -364,14 +407,41 @@ def _verify_observed(
             state=state.model_copy(update={"adoption": done}),
             events=(AdoptionResult(selection=selection, observation=observation),),
         )
-    retryable = (
-        _awaits_inspection(observation) and observation.status != ObservationStatus.SUCCEEDED
-    )
-    if retryable and round_ < context.run.limits.max_retries:
+    recorded = adoption.model_copy(update={"observation": observation})
+    if observation.status == ObservationStatus.SUCCEEDED:
+        # Applied content differs from the selection: definite, so no retry.
+        return _fail(state, context, recorded, AdoptionFailureReason.CONTENT_MISMATCH)
+    if not _awaits_inspection(observation):
+        return _fail(state, context, recorded, AdoptionFailureReason.VERIFY_FAILED)
+    if _may_start_round(context, selection):
         return _with_adoption(
             state, Adoption(selection=selection), _adopt(context, selection, round_ + 1)
         )
-    return _with_adoption(state, adoption.model_copy(update={"observation": observation}))
+    return _fail(state, context, recorded, AdoptionFailureReason.RETRIES_EXHAUSTED)
+
+
+def _fail(
+    state: SettlementState,
+    context: SettlementContext,
+    adoption: Adoption,
+    reason: AdoptionFailureReason,
+) -> AreaChange[SettlementState]:
+    """Record the terminal failure and tell the strategy, once."""
+    observation = adoption.observation
+    if observation is None:
+        raise ContractValidationError("observation", "an adoption fails on an observation")
+    failed = adoption.model_copy(update={"failure": reason})
+    return AreaChange[SettlementState](
+        state=state.model_copy(update={"adoption": failed}),
+        events=(
+            AdoptionFailed(
+                selection=adoption.selection,
+                reason=reason,
+                observation=observation,
+                rounds=_rounds(context.intents, adoption.selection),
+            ),
+        ),
+    )
 
 
 def advance(

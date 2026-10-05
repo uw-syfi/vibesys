@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._adoption import view as adoption_view
 from .types.common import ChargeKind
 from .types.intents import (
     ExecuteRegisteredOperation,
@@ -140,4 +141,5 @@ def project(state: CoreState) -> RunView:
         settlements=settlement_view(state.settlement),
         artifacts=run.artifacts,
         controls=run.controls,
+        adoption=adoption_view(state.settlement, state.intents),
     )

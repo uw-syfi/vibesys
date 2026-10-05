@@ -64,7 +64,9 @@ from .sessions import (
     TurnResult,
 )
 from .settlement import (
+    AdoptionFailed,
     AdoptionResult,
+    AdoptionView,
     AttemptSettled,
     EvidenceRequirements,
     RunResultProposal,
@@ -147,6 +149,7 @@ class RunView(Value):
     artifacts: tuple[ArtifactRef, ...]
     controls: tuple[ControlInput, ...]
     inputs: tuple[InputRecord, ...]
+    adoption: AdoptionView | None = None
 
 
 class DecisionSubmitted(Value):
@@ -241,6 +244,7 @@ type StrategyEvent = Annotated[
     | IntentBlocked
     | ControlChanged
     | AdoptionResult
+    | AdoptionFailed
     | RunEnded,
     Field(discriminator="kind"),
 ]

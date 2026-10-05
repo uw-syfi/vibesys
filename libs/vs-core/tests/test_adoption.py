@@ -193,6 +193,14 @@ class Run:
     def results(self) -> list[core.AdoptionResult]:
         return [event for event in self.events if isinstance(event, core.AdoptionResult)]
 
+    def failures(self) -> list[core.AdoptionFailed]:
+        return [event for event in self.events if isinstance(event, core.AdoptionFailed)]
+
+    def view(self) -> core.AdoptionView:
+        view = core.project(self.state).adoption
+        assert view is not None
+        return view
+
     def rejections(self) -> list[core.Rejected]:
         return [event for event in self.events if isinstance(event, core.Rejected)]
 
@@ -355,9 +363,59 @@ def test_exhausted_retries_fail_the_round_and_release_the_fence() -> None:
     assert new_requests(failed) == []
     assert run.results() == []
     assert not _start_root_attempt(run).rejections_for_fence()
-    # The strategy may propose again: the new round gets a fresh identity.
-    (again,) = new_requests(run.propose(selection))
-    assert again.request_id != adopt.request_id
+    (event,) = run.failures()
+    assert event.reason == core.AdoptionFailureReason.RETRIES_EXHAUSTED
+    assert event.rounds == 1
+    # max_retries=0 allows one round, so proposing again is refused, not re-run.
+    again = run.propose(selection)
+    assert new_requests(again) == []
+    assert [r.code for r in run.rejections()] == [core.RejectionCode.BUDGET]
+
+
+def test_a_failed_round_is_reported_once_and_the_view_shows_it() -> None:
+    run = start(max_retries=1)
+    (adopt,) = new_requests(run.propose(GOOD[0]))
+    assert (run.view().phase, run.view().rounds) == ("adopting", 1)
+    run.answer(adopt, core.ObservationStatus.REJECTED)
+    run.feed(run.delivered[-1])
+    (event,) = run.failures()
+    assert event.reason == core.AdoptionFailureReason.ADOPT_FAILED
+    assert run.view().phase == "failed"
+    assert run.view().failure == core.AdoptionFailureReason.ADOPT_FAILED
+
+
+def test_re_proposals_share_the_retry_bound_with_automatic_retries() -> None:
+    """D4: proposing again after a failure must not buy rounds beyond max_retries."""
+    run = start(max_retries=2)
+    selection = GOOD[0]
+    for _ in range(3):
+        (adopt,) = new_requests(run.propose(selection))
+        run.answer(adopt, core.ObservationStatus.REJECTED)
+    assert len(run.failures()) == 3
+    assert new_requests(run.propose(selection)) == []
+    assert run.rejections()[-1].code == core.RejectionCode.BUDGET
+    assert run.view().rounds == 3
+    # Another selection has its own rounds.
+    assert len(new_requests(run.propose(GOOD[1]))) == 1
+
+
+@pytest.mark.parametrize("revision", [None, rev("rev-b")])
+def test_a_verification_naming_other_content_fails_fast_with_an_event(
+    revision: core.RevisionRef | None,
+) -> None:
+    run = start(max_retries=3)
+    selection = GOOD[0]
+    (adopt,) = new_requests(run.propose(selection))
+    (verify,) = new_requests(
+        run.answer(adopt, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    )
+    again = run.answer(verify, core.ObservationStatus.SUCCEEDED, revision=revision)
+    assert new_requests(again) == []
+    (event,) = run.failures()
+    assert event.reason == core.AdoptionFailureReason.CONTENT_MISMATCH
+    assert not _start_root_attempt(run).rejections_for_fence()
+    run.answer(verify, core.ObservationStatus.SUCCEEDED, revision=revision)
+    assert len(run.failures()) == 1
 
 
 def test_a_wrong_revision_in_a_verification_never_completes() -> None:
@@ -597,6 +655,17 @@ def test_adoption_properties_hold_for_any_order_of_proposals_and_observations(
         # Completes at most once, and only with the exact selection verified.
         results = run.results()
         assert len(results) <= 1
+        # Rounds per selection never pass the first plus max_retries, however they began.
+        for selection in SELECTIONS:
+            rounds = sum(
+                isinstance(request, core.AdoptRevision) and request.selection == selection
+                for request in run.adoption_requests()
+            )
+            assert rounds <= retries + 1
+        # A failure is reported once per terminal round, so never more often than rounds.
+        assert len(run.failures()) <= len(
+            [r for r in run.adoption_requests() if isinstance(r, core.AdoptRevision)]
+        )
         adoption = run.state.settlement.adoption
         if adoption is not None and adoption.verified:
             assert len(results) == 1
