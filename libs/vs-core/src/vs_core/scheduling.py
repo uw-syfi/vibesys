@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, assert_never
 
 from ._adoption import fences_root_mutation
+from ._intent_recovery import overdue_reconciliations
 from ._proofs import (
     Proven,
     accepted_receipt_for,
@@ -649,7 +650,13 @@ def schedule(
             filled = _fill(state, context)
             # Core time is the only trigger of paced job polls, so every tick asks.
             change = filled.model_copy(
-                update={"signals": (*filled.signals, ObservationsDue(now_at=context.run.now_at))}
+                update={
+                    "signals": (
+                        *filled.signals,
+                        ObservationsDue(now_at=context.run.now_at),
+                        *overdue_reconciliations(context.intents, context.run.now_at),
+                    )
+                }
             )
         case AdmissionControl():
             return _control(state, context, event)

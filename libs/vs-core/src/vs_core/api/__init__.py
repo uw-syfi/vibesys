@@ -1,5 +1,6 @@
 """Published pure lifecycle API. Area implementations land in wave 1."""
 
+from vs_core._continuations import SuspensionRefusal
 from vs_core._migration import v2_to_v3_migration
 from vs_core._projection import (
     attempt_view,
@@ -21,7 +22,13 @@ from vs_core._registry import (
     validate_startup,
 )
 from vs_core._session_scope import write_turn_authority
-from vs_core._step import CoreReducers, dependency_status, step, validate_terminal_inputs
+from vs_core._step import (
+    CoreReducers,
+    dependency_status,
+    step,
+    suspension_refusal,
+    validate_terminal_inputs,
+)
 from vs_core._waits import (
     Producer,
     Wait,
@@ -793,6 +800,7 @@ __all__ = [
     "SubmissionBudget",
     "SubmissionReceipt",
     "SubmitMeasurement",
+    "SuspensionRefusal",
     "TargetObservation",
     "TimedOut",
     "TraceChange",
@@ -842,6 +850,7 @@ __all__ = [
     "settle",
     "settlement_view",
     "step",
+    "suspension_refusal",
     "trace_step",
     "v2_to_v3_migration",
     "validate_startup",

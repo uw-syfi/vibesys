@@ -125,6 +125,9 @@ class EvidenceAcceptanceReceipt(Value):
         return self
 
 
+_PROOF_KINDS = frozenset({EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK})
+
+
 class EvidenceRef(Value):
     """Evidence ref lifecycle contract."""
 
@@ -147,6 +150,23 @@ class EvidenceRef(Value):
     def key(self) -> EvidenceKey:
         """Run-wide identity: evidence IDs are unique only within a source request."""
         return EvidenceKey(source_request=self.source_request, evidence_id=self.evidence_id)
+
+    @model_validator(mode="after")
+    def local_validation_is_never_proof(self) -> EvidenceRef:
+        """Keep an agent's own evaluation out of the kinds that prove eligibility.
+
+        Local-validation purpose records come from the agent's in-turn
+        ``submit_evaluation`` tool. They are advice, never accuracy or benchmark
+        proof, so they carry a kind that no eligibility requirement or
+        ``accuracy_proof`` ever selects. Without this, a candidate with an agent
+        record and its official record would hold two CORRECTNESS rows and
+        ``accuracy_proof`` would call them ambiguous.
+        """
+        if self.purpose == "local-validation" and self.kind in _PROOF_KINDS:
+            raise ContractValidationError(
+                "kind", "a local-validation record cannot be correctness or benchmark proof"
+            )
+        return self
 
     @model_validator(mode="after")
     def original_acceptance(self) -> EvidenceRef:
