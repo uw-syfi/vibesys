@@ -41,6 +41,7 @@ from vs_core.api import (
 )
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence, Unknown
 from vs_runtime._core_preflight import resolve_core_resume
+from vs_runtime._evaluation_jobs import awaits_submissions
 from vs_runtime._core_record import (
     Publication,
     PublicationAcknowledgement,
@@ -351,6 +352,8 @@ class CoreRuntime[S: StrategyState]:
         # Latest time a lease renewal or check supplied; commits never use an earlier time.
         self._time_floor = 0.0
         self._queue: deque[_Input[S] | _Decide] = deque()
+        # Durable turn ends whose wait names a job its submission has not made core's yet.
+        self._held: list[_Input[S]] = []
         # State after the admitted inputs still queued, valid while core stays at one revision
         # (a publication or lease commit changes the storage revision, not core).
         self._tail: tuple[int, CoreState] | None = None
@@ -492,6 +495,7 @@ class CoreRuntime[S: StrategyState]:
                 self._record = previous_record
             raise
         # Owner events committed with an observation before a crash resume here.
+        self._held.clear()
         self._queue.extend(
             _Input[S](event=event, now_at=now_at, durable=True)
             for event in self.record.pending_inputs
@@ -613,6 +617,9 @@ class CoreRuntime[S: StrategyState]:
         if not self._queue:
             return False
         item = self._queue.popleft()
+        if isinstance(item, _Input) and self._awaits_submissions(item):
+            self._held.append(item)
+            return True
         if isinstance(item, _Decide):
             if self.record.envelope.core.intents.recovery.phase != RecoveryPhase.READY:
                 raise ContractError(("recovery",), "strategy proposals require ready recovery")
@@ -644,6 +651,29 @@ class CoreRuntime[S: StrategyState]:
                 raise OwnerEventRejectedError(item.event, error) from error
             raise
         return True
+
+    def _awaits_submissions(self, item: _Input[S]) -> bool:
+        """Whether a turn end carries a wait on jobs whose submissions are still in flight.
+
+        An agent submits a measurement and waits on it in one turn, so the turn is observed
+        before the submission's request has run. The turn end stays in the outbox, and
+        is committed once the jobs are owned, when core's wait gate can judge it; or, once
+        a submission ended without a job, when that gate refuses it and the turn ends plainly.
+        """
+        event = item.event
+        return (
+            item.durable
+            and isinstance(event, TurnObserved)
+            and event.suspension is not None
+            and awaits_submissions(self.record.envelope.core, event.suspension.jobs)
+        )
+
+    def _release_held(self) -> None:
+        """Queue the held turn ends whose submissions are no longer in flight, in hold order."""
+        ready = [item for item in self._held if not self._awaits_submissions(item)]
+        if ready:
+            self._held = [item for item in self._held if item not in ready]
+            self._queue.extendleft(reversed(ready))
 
     def _end_turn_without_wait(self, item: _Input[S]) -> bool:
         """Replace a rejected turn event that carries a wait with the same turn ending plainly.
@@ -705,6 +735,7 @@ class CoreRuntime[S: StrategyState]:
         self._queue.extend(
             _Input[S](event=event, now_at=item.now_at, durable=True) for event in item.owner_events
         )
+        self._release_held()
 
     def _commit(self, candidate: RuntimeRecord[S], now_at: float) -> None:
         # One serialization per commit. What the candidate must satisfy is checked on the

@@ -20,6 +20,7 @@ from vs_core.api import (
     ArtifactRef,
     BenchmarkFailure,
     ContractError,
+    CoreState,
     EvaluationStageOutcome,
     EvaluationStageResult,
     EvaluationTerminalFacts,
@@ -31,6 +32,7 @@ from vs_core.api import (
     MeasurementPlan,
     Observation,
     ObservationStatus,
+    PreparedSubmissionReceipt,
     RequestId,
     ResourceId,
     RevisionRef,
@@ -84,6 +86,26 @@ class RejectedPlanError(ValueError):
 def handle_for(request_id: RequestId) -> str:
     """The stable executor handle, and the core resource id, of one submission."""
     return "vs-" + hashlib.sha256(request_id.root.encode()).hexdigest()[:40]
+
+
+def awaits_submissions(core: CoreState, jobs: tuple[ResourceId, ...]) -> bool:
+    """Whether every job in ``jobs`` that core does not own yet belongs to a submission in flight.
+
+    A submission owns its job when its request's observation commits, and that comes
+    after the agent's turn ends, because the request runs once the loop is free. A wait
+    that names such a job is judged once the job is owned, so the answer is True until
+    then. It turns False when every job is owned (core's gate judges the wait) and when a
+    submission was observed without owning its job (the gate refuses the wait).
+    """
+    owned = {row.resource_id for row in (*core.evaluation.jobs, *core.evaluation.registered_jobs)}
+    unowned = [job for job in jobs if job not in owned]
+    in_flight = {
+        handle_for(receipt.request_id)
+        for budget in core.evaluation.submission_budgets
+        for receipt in budget.receipts
+        if isinstance(receipt, PreparedSubmissionReceipt) and receipt.observation is None
+    }
+    return bool(unowned) and all(job.root in in_flight for job in unowned)
 
 
 def _digest(field: str, value: str) -> ContentDigest:
