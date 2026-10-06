@@ -97,6 +97,36 @@ def test_headless_entry_starts_and_renders_launch_run(
     assert "launched through an injected run service" in capsys.readouterr().out
 
 
+class _CoreRejectedError(Exception):
+    """A typed failure standing in for a run-halting core error."""
+
+
+async def _fail(_run: Run, _options: BaseModel) -> RunStatus:
+    message = "core rejected\nthe observation"
+    raise _CoreRejectedError(message)
+
+
+def test_headless_entry_prints_one_run_failed_line_with_the_typed_reason(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry = OrchestrationRegistry()
+    registry.register_plugin(
+        OrchestrationPlugin(id="launch-test", agents=(), options=EmptyOptions, orchestrate=_fail)
+    )
+    runs = default_runs(
+        LaunchSettings(
+            registry=registry,
+            agent_client_factory=_fake_agent,
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+        )
+    )
+    with pytest.raises(Exception, match="core rejected"):
+        run_headless(_request(tmp_path / "project"), runs)
+
+    lines = [line for line in capsys.readouterr().err.splitlines() if line.startswith("run failed")]
+    assert lines == ["run failed: _CoreRejectedError: core rejected the observation"]
+
+
 def test_server_entry_starts_launch_run_and_projects_events(tmp_path: Path) -> None:
     runs = _runs()
     runtime = ServerRuntime(socket_path=tmp_path / "control.sock", runs=runs)
