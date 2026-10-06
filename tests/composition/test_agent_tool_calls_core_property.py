@@ -486,7 +486,7 @@ _TURNS = st.lists(
 )
 @given(turns=_TURNS, total=st.integers(1, 2), finished_in_submit_round=st.booleans())
 def test_no_tool_call_sequence_halts_the_run(
-    turns: tuple[Turn, ...], total: int, finished_in_submit_round: bool
+    turns: tuple[Turn, ...], total: int, *, finished_in_submit_round: bool
 ) -> None:
     """Whatever the agents call, before, between and after their turns, the run goes on.
 
