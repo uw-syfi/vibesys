@@ -7,6 +7,7 @@ import vs_core.api as core
 
 from .proof_digest import canonical_source
 from .test_proof_ownership_regressions import stopped
+from .test_silent_executor_deadline import _silent
 
 
 def released_observation(scope: core.Scope, resource: core.ResourceId | None) -> core.Observation:
@@ -287,3 +288,27 @@ def test_inspection_command_success_cannot_release_its_parent_targets_child(
         }
     )
     assert close_run(state) == core.RunStatus.CLOSING
+
+
+@given(accepted=st.booleans(), identified=st.booleans())
+def test_a_blocked_intent_releases_closure_only_when_it_was_never_accepted_and_unnamed(
+    *, accepted: bool, identified: bool
+) -> None:
+    state = _silent(core.IntentPhase.BLOCKED, core.ObservationStatus.UNKNOWN, terminal=False)
+    intent = state.intents.intents[0]
+    assert intent.observation is not None
+    observation = intent.observation.model_copy(
+        update={
+            "accepted": accepted,
+            "resource_id": core.ResourceId(root="job") if identified else None,
+        }
+    )
+    state = state.model_copy(
+        update={
+            "intents": state.intents.model_copy(
+                update={"intents": (intent.model_copy(update={"observation": observation}),)}
+            )
+        }
+    )
+    closed = close_run(state) == core.RunStatus.TERMINAL
+    assert closed == (not accepted and not identified)
