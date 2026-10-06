@@ -130,7 +130,9 @@ def _owned_wait(
     the scope rules apply; the commit of the turn's suspension follows the submission's.
     """
     owned = {
-        row.resource_id.root for row in (*core.evaluation.jobs, *core.evaluation.registered_jobs)
+        row.resource_id.root
+        for row in (*core.evaluation.jobs, *core.evaluation.registered_jobs)
+        if row.resource_id is not None
     }
     if not set(handles) <= owned:
         return None
