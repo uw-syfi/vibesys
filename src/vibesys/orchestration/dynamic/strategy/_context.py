@@ -22,8 +22,10 @@ from vibesys.orchestration.dynamic.strategy._prompts import (
 from vibesys.orchestration.dynamic.strategy._state import (
     AttemptRecord,
     BaselineStage,
+    BlockerKind,
     DynamicStrategyState,
     HypothesisRecord,
+    RoundRecord,
     WorkPhase,
 )
 from vs_core.api import RunView
@@ -33,6 +35,7 @@ _HISTORY_TITLE_CHARS = 200
 _HISTORY_SUMMARY_CHARS = 600
 _CUT = " [cut]"
 _HISTORY_FAILURE_CHARS = 1200
+_RETRY_TEXT_CHARS = 1200
 
 
 def remaining(state: DynamicStrategyState, config: DynamicConfig) -> int:
@@ -131,7 +134,15 @@ def _history_row(record: HypothesisRecord, running: frozenset[str]) -> HistoryRo
         partial=None if last is None else last.partial,
         failure_tail=tail,
         failure_fence=_fence(tail),
+        failure=_unexplained(last),
     )
+
+
+def _unexplained(last: RoundRecord | None) -> str:
+    """The reason a round ended, unless its failure tail already says it."""
+    if last is None or not last.failure or last.failure == last.failure_tail:
+        return ""
+    return _bounded(last.failure, _HISTORY_SUMMARY_CHARS)
 
 
 def _buildable(item: ParentOption) -> BuildableRow:
@@ -180,6 +191,9 @@ def implement_prompt(record: AttemptRecord, state: DynamicStrategyState) -> Impl
         (item for item in state.hypotheses if item.hypothesis_id == record.plan.work_id), None
     )
     last = prior.rounds[-1] if prior is not None and prior.rounds else None
+    failed = next(
+        (item for item in reversed(record.blockers) if item.kind is BlockerKind.FAILED), None
+    )
     tail = "" if last is None else _tail(last.failure_tail, _HISTORY_FAILURE_CHARS)
     return ImplementPrompt(
         hypothesis_id=record.plan.work_id,
@@ -190,9 +204,16 @@ def implement_prompt(record: AttemptRecord, state: DynamicStrategyState) -> Impl
         evidence=tuple(EvidenceCitation(location=item) for item in record.plan.evidence),
         worktree_revision=None if last is None else last.candidate,
         prior_revision=None if last is None else last.candidate,
-        feedback=record.feedback,
+        feedback=None if record.feedback is None else _bounded(record.feedback, _RETRY_TEXT_CHARS),
         prior_failure_tail=tail,
         prior_failure_fence=_fence(tail),
+        blocker=None if failed is None else _bounded(failed.summary, _RETRY_TEXT_CHARS),
+        narrowed_step=(
+            None
+            if failed is None or not failed.next_step.strip()
+            else _bounded(failed.next_step, _RETRY_TEXT_CHARS)
+        ),
+        turns_without_candidate=len(record.blockers),
     )
 
 

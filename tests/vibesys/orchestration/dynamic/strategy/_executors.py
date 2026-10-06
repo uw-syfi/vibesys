@@ -8,7 +8,7 @@ a reading and the evidence it decodes always agree.
 from __future__ import annotations
 
 import hashlib
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -75,9 +75,14 @@ def _lease(session_id: SessionId) -> ResourceId:
 class Executors:
     """Scripted answers for one run, popped in the order requests are authorized."""
 
-    planner: deque[str] = field(default_factory=deque)
-    implementer: deque[str] = field(default_factory=deque)
-    judge: deque[str] = field(default_factory=deque)
+    # A reply is the agent's JSON, or an `Answer` for a turn that ends another way (as a
+    # `Failed` turn, which returns nothing usable).
+    planner: deque[str | Answer] = field(default_factory=deque)
+    implementer: deque[str | Answer] = field(default_factory=deque)
+    judge: deque[str | Answer] = field(default_factory=deque)
+    # False retains one commit per attempt, whatever its turns did. True retains a new commit
+    # after every turn, as a worktree that changed between turns would.
+    retain_per_turn: bool = False
     # Throughput per candidate commit; None makes the benchmark fail.
     benchmark: Callable[[str], float | None] = lambda _commit: 100.0
     accuracy: Callable[[str], bool] = lambda _commit: True
@@ -90,6 +95,7 @@ class Executors:
     jobs: int = 0
     seen: list[Request] = field(default_factory=list)
     readings: dict[EvidenceId, EvidenceReading] = field(default_factory=dict)
+    retained: Counter[str] = field(default_factory=Counter)
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
         self.seen.append(request)
@@ -119,10 +125,12 @@ class Executors:
                 answer = Succeeded(revision=request.selection.revision)
         return answer
 
-    @staticmethod
-    def _retain(request: SnapshotAndRetain) -> Answer:
-        """The commit the workspace executor retained for the attempt, one per attempt."""
-        digest = hashlib.sha256(request.attempt.attempt_id.root.encode()).hexdigest()[:40]
+    def _retain(self, request: SnapshotAndRetain) -> Answer:
+        """The commit the workspace executor retained for the attempt (see `retain_per_turn`)."""
+        attempt = request.attempt.attempt_id.root
+        name = f"{attempt}:{self.retained[attempt]}" if self.retain_per_turn else attempt
+        self.retained[attempt] += 1
+        digest = hashlib.sha256(name.encode()).hexdigest()[:40]
         return Succeeded(revision=RevisionRef.of_git_commit(digest))
 
     @staticmethod
@@ -154,8 +162,11 @@ class Executors:
         }[role]
         if not queue:
             return Unknown()
+        reply = queue.popleft()
+        if not isinstance(reply, str):
+            return reply
         lease = _lease(request.turn.session.session_id)
-        return Succeeded(output_json=queue.popleft(), resource_id=lease)
+        return Succeeded(output_json=reply, resource_id=lease)
 
     # -- evaluator --------------------------------------------------------
 

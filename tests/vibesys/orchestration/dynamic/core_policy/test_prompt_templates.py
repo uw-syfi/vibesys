@@ -94,6 +94,9 @@ _CONTEXTS: dict[PromptTemplate, st.SearchStrategy[PromptContext]] = {
         worktree_revision=st.none() | _REVISIONS,
         prior_revision=st.none() | _REVISIONS,
         feedback=st.none() | _TEXT,
+        blocker=st.none() | _TEXT,
+        narrowed_step=st.none() | _TEXT,
+        turns_without_candidate=st.integers(0, 3),
     ),
     PromptTemplate.REVIEW: st.builds(
         ReviewPrompt,
@@ -234,3 +237,50 @@ def test_strategy_prompts_name_no_domain_command() -> None:
     # Domain commands live in the bundle's objective; the strategy's prompts stay generic.
     for template in sorted(_ROOT.glob("*.j2")):
         assert "cpu_check" not in template.read_text(), template.name
+
+
+@given(data=st.data(), blocker=_TEXT, step=st.none() | _TEXT)
+def test_a_retried_implementer_is_shown_its_own_blocker_and_narrowed_step(
+    data: st.DataObject, blocker: str, step: str | None
+) -> None:
+    # live-2: three turns in a row ended "not ready for trusted evaluation" on one workstream;
+    # the retry received only the previous summary and no narrower step.
+    context = data.draw(_CONTEXTS[PromptTemplate.IMPLEMENT]).model_copy(
+        update={"blocker": blocker, "narrowed_step": step, "turns_without_candidate": 1}
+    )
+
+    text = TemplateRenderer(_ROOT).render_template("implement.j2", **_variables(context))
+
+    assert "The blocker you stated:" in text
+    assert blocker in text
+    assert (step is not None and "The narrower step you named for this turn:" in text) or (
+        step is None and "The narrower step you named" not in text
+    )
+    if step is not None:
+        assert step in text
+
+
+@given(data=st.data())
+def test_a_first_attempt_is_not_shown_a_blocker(data: st.DataObject) -> None:
+    context = data.draw(_CONTEXTS[PromptTemplate.IMPLEMENT]).model_copy(
+        update={"blocker": None, "narrowed_step": None, "turns_without_candidate": 0}
+    )
+
+    text = TemplateRenderer(_ROOT).render_template("implement.j2", **_variables(context))
+
+    assert "The blocker you stated:" not in text
+
+
+@given(data=st.data())
+def test_planner_and_implementer_share_one_first_measurable_step(data: st.DataObject) -> None:
+    # live-2: the planner chose architecture-scale hypotheses that no single turn could finish.
+    renderer = TemplateRenderer(_ROOT)
+    planner = data.draw(_PLANNER)
+    implement = data.draw(_CONTEXTS[PromptTemplate.IMPLEMENT])
+
+    assert "first measurable step" in renderer.render_template(
+        "portfolio.j2", **_variables(planner)
+    )
+    assert "first measurable step" in renderer.render_template(
+        "implement.j2", **_variables(implement)
+    )

@@ -265,13 +265,20 @@ def _exhausted(
     check: PlanCheck | None,
     parse_error: str,
 ) -> DynamicStrategyState:
-    """Corrections ran out: keep the best valid plan, else ask a fresh turn, else give up."""
+    """Corrections ran out: keep the best valid plan, else ask a fresh turn, else give up.
+
+    A fresh turn repeats the same question over the same state. While a workstream is in
+    flight the state is about to change, and `blocked_at_done` re-opens planning when one
+    finishes, so the call ends empty instead (live-2 spent four planner turns in 45 s on one
+    free slot, each 20 to 40k input tokens, with the same plan).
+    """
     planner = state.planner
     chosen = _final_choice(state, view, config, check)
     if chosen is not None:
         return schedule(state, view, chosen)
     turn = planner.turn
-    if turn is not None and planner.retries < config.max_retries_per_round:
+    waiting = bool(context.active(state))
+    if turn is not None and not waiting and planner.retries < config.max_retries_per_round:
         return _fresh_turn(state, planner, turn, parse_error, check)
     return _nothing_valid(state, planner, parse_error, check)
 
