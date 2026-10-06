@@ -314,16 +314,17 @@ def _build(
     """A run of the dynamic strategy; a restart passes the dead process's disk and ledger."""
     process = process or _Process()
     ledger = process.ledger or _Ledger(delays=deque(delays), failing=failing)
+    implementer_replies: deque[str | Answer] = deque(
+        json.dumps({"kind": WAITING_KIND, "handles": ["h"]})
+        if ordinal in waiting
+        else implemented()
+        for ordinal in range(IMPLEMENTERS)
+    )
+    implementer_replies.extend(implemented() for _ in range(4 * IMPLEMENTERS))
     executors = Executors(
         planner=deque([plan_reply(*(implement(f"h{n}") for n in range(IMPLEMENTERS)))]),
         # An implementer that waits is answered again after its wait is refused.
-        implementer=deque(
-            json.dumps({"kind": WAITING_KIND, "handles": ["h"]})
-            if ordinal in waiting
-            else implemented()
-            for ordinal in range(IMPLEMENTERS)
-        )
-        + deque(implemented() for _ in range(4 * IMPLEMENTERS)),
+        implementer=implementer_replies,
         judge=deque(reviewed() for _ in range(4 * IMPLEMENTERS)),
         # A job is named by its request, not by the order submissions happen to arrive in.
         submit=lambda request: Running(
