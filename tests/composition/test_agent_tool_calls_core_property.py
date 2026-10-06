@@ -298,12 +298,16 @@ class Agent:
         return waiting
 
     async def late_calls(self) -> None:
-        """Calls of turns that already ended, with the token those turns held."""
+        """Calls of turns that already ended, with the token those turns held.
+
+        A token names a scope, not a turn, so a late wait the bridge accepts joins the turn
+        that is executing in that scope; it counts as an accepted wait.
+        """
         pending, self.pending = self.pending, ()
         for scope, program in pending:
             token = self.token(scope)
             for step in program:
-                await self.call(token, step, count=False)
+                await self.call(token, step)
 
 
 class AgentExecutors(ScriptedExecutors):
@@ -565,3 +569,20 @@ def test_a_turn_whose_wait_is_refused_at_its_end_releases_the_handles_it_waited_
     check(played)
     assert played.agent.waits_accepted == 1
     assert played.shell.record.envelope.core.evaluation.continuations == ()
+
+
+@pytest.mark.parametrize(
+    "turns",
+    [
+        (Turn(late=(("submit",), ("wait", (0,)))),),
+        (Turn(late=(("submit",),)), Turn(program=(("submit",), ("wait", (0,))))),
+    ],
+    ids=["late-submit-then-wait", "late-submit-then-next-turn-waits"],
+)
+@pytest.mark.parametrize("total", [1, 2])
+def test_a_submission_still_running_at_a_resume_does_not_halt_the_run(
+    turns: tuple[Turn, ...], total: int
+) -> None:
+    """A resume is never authorized over an attempt history that a running submission leaves open."""
+    played = play(turns, total)
+    check(played)

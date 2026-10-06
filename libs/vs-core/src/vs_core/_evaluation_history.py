@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from .types.intents import Intent, IntentsState
     from .types.kernel import RunState
 
-__all__ = ["produce_history"]
+__all__ = ["attempt_settled", "produce_history"]
 
 
 class _VerdictTruthError(TypeError):
@@ -72,15 +72,11 @@ class Mismatch(_Verdict):
 type Verdict[T] = Proven[T] | Missing | Mismatch
 
 
-def produce_history(
-    scope: Scope,
-    evaluation: EvaluationState,
-    intents: IntentsState,
-    owner: AttemptView,
-    run: RunState,
-) -> AttemptEvaluationHistory:
-    """Certify exact submission coverage, retaining unavailable partial history."""
-    submissions = tuple(
+def _submission_rows(
+    scope: Scope, evaluation: EvaluationState, intents: IntentsState
+) -> tuple[Intent, ...]:
+    """The scope's measurement submissions in canonical outbox order."""
+    return tuple(
         row
         for row in intents.intents
         if row.request.scope == scope
@@ -96,6 +92,35 @@ def produce_history(
             )
         )
     )
+
+
+def attempt_settled(scope: Scope, evaluation: EvaluationState, intents: IntentsState) -> bool:
+    """Whether every measurement submission issued in ``scope`` has a terminal observation.
+
+    Invariant: core never authorizes a resume for a scope while this is False. A resume is
+    proven against the attempt's evaluation history, and that history is complete only when
+    each submission's outcome is final; a submission that is still running (or whose request
+    has not run) leaves it incomplete, so the resume would be unprovable. Authorization is
+    deferred, not refused: each submission's conclusive observation wakes the scope's
+    waiting continuations again.
+    """
+    return all(
+        row.observation is not None
+        and row.observation.terminal
+        and row.observation.status not in (ObservationStatus.PENDING, ObservationStatus.UNKNOWN)
+        for row in _submission_rows(scope, evaluation, intents)
+    )
+
+
+def produce_history(
+    scope: Scope,
+    evaluation: EvaluationState,
+    intents: IntentsState,
+    owner: AttemptView,
+    run: RunState,
+) -> AttemptEvaluationHistory:
+    """Certify exact submission coverage, retaining unavailable partial history."""
+    submissions = _submission_rows(scope, evaluation, intents)
     ids = tuple(row.request_id for row in submissions)
     expected = {job.submission_id for job in evaluation.jobs if job.scope == scope} | {
         job.request_id

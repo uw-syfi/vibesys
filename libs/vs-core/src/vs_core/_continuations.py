@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
-from ._evaluation_history import produce_history
+from ._evaluation_history import attempt_settled, produce_history
 from ._registry import ContractError
 from ._session_scope import dispatching_request
 from .types.attempts import (
@@ -516,6 +516,9 @@ def _authorize(
     _deadline_proof(state, continuation)
     invocation = _invocation(context, continuation)
     if not _active(context, invocation.scope):
+        return AreaChange(state=state)
+    if not attempt_settled(invocation.scope, state, context.intents):
+        # Stay WAITING: each submission's conclusive observation wakes this again.
         return AreaChange(state=state)
     _successor(context, continuation)
     _yield_proof(state, context, invocation, continuation, retained=reopened)
