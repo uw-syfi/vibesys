@@ -6,7 +6,10 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from vs_runtime.api.core import HEARTBEAT_TASK
+from vs_runtime.api.core import HEARTBEAT_TASK, WAIT_TASK
+
+#: Event-loop turns ``sleep`` lets background tasks run before logical time moves.
+SETTLE_TURNS = 200
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -85,11 +88,29 @@ class FakeRunClock:
         """Let background work finish, then advance logical time instead of waiting.
 
         The lease heartbeat waits for logical time that others advance: it only yields.
+
+        Waiting is bounded to ``SETTLE_TURNS`` event-loop turns. A task that is waiting on
+        time itself (another sleeper, or a controller that awaits one) cannot finish until
+        this sleep returns, so waiting for every task unconditionally deadlocks as soon
+        as two tasks wait on the clock. Work that needs real time to finish belongs on a
+        ``tests.support.virtual_time.VirtualClock``, which has no such bound.
         """
         current = asyncio.current_task()
         if current is not None and current.get_name() == HEARTBEAT_TASK:
             await asyncio.sleep(0)
             return
+        if current is not None and current.get_name() == WAIT_TASK:
+            # The loop sleeps beside running requests and a real sleep would end when one
+            # finishes: no logical time passes until they are done (they may need threads), and
+            # none passes after, since the loop stops waiting then.
+            running = [
+                task
+                for task in asyncio.all_tasks()
+                if task.get_name().startswith("dispatch:") and not task.done()
+            ]
+            if running:
+                await asyncio.wait(running)
+                return
         self._crash_if_armed(f"a wait of {seconds:g} s")
         if self.limit is not None and self.at + seconds > self.limit:
             message = f"simulated time passed its limit of {self.limit:g} s (now {self.at:g} s)"
@@ -101,7 +122,9 @@ class FakeRunClock:
             for task in asyncio.all_tasks()
             if self.settle_background and task is not current and task.get_name() != HEARTBEAT_TASK
         ]
-        if background:
-            await asyncio.gather(*background, return_exceptions=True)
+        for _ in range(SETTLE_TURNS):
+            if all(task.done() for task in background):
+                break
+            await asyncio.sleep(0)
         self.sleeps.append(seconds)
         self.at += seconds

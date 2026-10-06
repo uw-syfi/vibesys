@@ -9,7 +9,6 @@ from .types.common import (
     InvocationRef,
     Observation,
     ObservationStatus,
-    SchemaRef,
 )
 from .types.sessions import (
     TURN_FAILURE_DETAIL_LIMIT,
@@ -30,17 +29,24 @@ def turn_result(
     ref: InvocationRef,
     observation: Observation,
     *,
-    output_schema: SchemaRef | None = None,
-    output_json: str | None = None,
+    reply: TurnObserved | None = None,
     lost: bool = False,
 ) -> TurnResult:
-    """The terminal result of a turn, with its failure kind and bounded executor text."""
+    """The terminal result of a turn, with its failure kind and bounded executor text.
+
+    ``reply`` is the turn's observation as core accepted it: its output, and whether it
+    still carries the suspension core recorded.
+    """
+    output_schema = None if reply is None else reply.output_schema
+    output_json = None if reply is None else reply.output_json
+    suspending = reply is not None and reply.suspension is not None
     if observation.status == ObservationStatus.SUCCEEDED:
         return TurnResult(
             invocation=ref,
             observation=observation,
             output_schema=output_schema,
             output_json=output_json,
+            suspending=suspending,
         )
     if lost:
         failure = TurnFailureKind.TRANSPORT_LOST

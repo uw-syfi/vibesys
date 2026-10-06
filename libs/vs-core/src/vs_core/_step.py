@@ -10,12 +10,7 @@ from typing import TYPE_CHECKING, assert_never
 from pydantic import TypeAdapter
 
 from . import attempts, evaluation, intents, scheduling, sessions, settlement
-from ._continuations import (
-    SuspensionRefusal,
-    exhausted,
-    paid_prefix_refusal,
-    suspension_refusal_in,
-)
+from ._continuations import SuspensionRefusal, exhausted, paid_prefix_refusal, wait_refusal_in
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
 from ._proofs import (
@@ -176,6 +171,7 @@ from .types.strategy import (
 if TYPE_CHECKING:
     from .attempts import Reducer as AttemptsReducer
     from .evaluation import Reducer as EvaluationReducer
+    from .types.evaluation import Continuation
     from .types.evaluation_history import EvaluationHistoryCursor
 
 MAX_SIGNALS = 1024
@@ -211,34 +207,21 @@ def _context[C: AreaContext](state: CoreState, model: type[C]) -> C:
     return model(**{name: getattr(state, name) for name in model.model_fields})
 
 
-def suspension_refusal(state: CoreState, invocation: InvocationRef) -> SuspensionRefusal | None:
+def suspension_refusal(
+    state: CoreState, invocation: InvocationRef, wait: Continuation | None = None
+) -> SuspensionRefusal | None:
     """Why ``invocation`` cannot take a new suspension now, or None when it can.
 
-    The same rule core applies when it commits a suspension and authorizes its resume, so
-    a host can refuse an agent's request to wait with a typed reason before the turn ends.
+    The one gate for a suspension: core applies it when a turn is observed with a wait (so
+    a refused wait ends the turn before anything claims it), and a host applies the same
+    rule when an agent asks to wait, so the agent gets a typed reason instead of a turn
+    that silently ends. With ``wait`` it also checks the continuation's jobs and deadline.
     An invocation core does not hold is not active.
     """
     held = next((row for row in state.sessions.invocations if row.invocation == invocation), None)
     if held is None:
         return SuspensionRefusal.SCOPE_NOT_ACTIVE
-    context = _context(state, EvaluationContext)
-    refusal = suspension_refusal_in(context, state.evaluation, held.scope)
-    if refusal is not None:
-        return refusal
-    # Committing the suspension is valid in both cases below; authorizing its resume raises.
-    if exhausted(state.attempts, held.scope):
-        return SuspensionRefusal.NOT_RESUMABLE
-    owner = next(
-        (
-            row
-            for row in state.attempts.attempts
-            if row.attempt_id == held.scope.owner and row.generation == held.scope.generation
-        ),
-        None,
-    )
-    if owner is not None:
-        return paid_prefix_refusal(owner.evaluation_history, held.evaluation_prefix)
-    return None
+    return wait_refusal_in(_context(state, EvaluationContext), state.evaluation, held, wait)
 
 
 def _dispatch(

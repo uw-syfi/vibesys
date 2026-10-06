@@ -34,6 +34,7 @@ class ToolRefusal(StrEnum):
     WAIT_NOT_ACTIVE = "wait_not_active"
     WAIT_NOT_RESUMABLE = "wait_not_resumable"
     WAIT_OVERLAPPED = "wait_overlapped"
+    WAIT_DEADLINE = "wait_deadline"
     BUSY = "busy"
     RUN_FAILING = "run_failing"
     MALFORMED = "malformed"

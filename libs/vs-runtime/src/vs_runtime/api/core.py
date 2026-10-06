@@ -21,6 +21,7 @@ from vs_runtime._agent_evaluation import (
     SnapshotWorkspace,
 )
 from vs_runtime._core_loop import (
+    AdmissionBusyError,
     CommitObserver,
     CoreContractGapError,
     CoreRuntime,
@@ -78,6 +79,7 @@ from vs_runtime._core_requests import (
 from vs_runtime._core_run import (
     HEARTBEAT_TASK,
     PRODUCTION_LEASE_SECONDS,
+    WAIT_TASK,
     CoreRunHost,
     NextWake,
     RunClock,
@@ -221,6 +223,7 @@ __all__ = [
     "PRODUCTION_LEASE_SECONDS",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
+    "WAIT_TASK",
     "AccessGrant",
     "AccessGuardedWorkspace",
     "AccessKey",
@@ -228,6 +231,7 @@ __all__ = [
     "AccessSettlement",
     "AccessSettlementError",
     "AccessViolation",
+    "AdmissionBusyError",
     "AgentEvaluationBridge",
     "AgentEvaluationPolicy",
     "AgentWorkspaces",

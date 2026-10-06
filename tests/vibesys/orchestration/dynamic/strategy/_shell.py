@@ -249,7 +249,7 @@ class ScriptedExecutors:
         """The events a production translator attaches to the observation of ``request``."""
         match request:
             case DispatchTurn() | ResumeSessionTurn():
-                return (self._turn_event(request, answer, observed),)
+                return (self.turn_event(request, answer, observed),)
             case SubmitMeasurement():
                 return self._submission_events(answer, observed)
             case ObserveOwnedJob() | CollectEvidence() if _reports_job(answer):
@@ -259,7 +259,7 @@ class ScriptedExecutors:
                 return () if event is None else (event,)
 
     @staticmethod
-    def _turn_event(
+    def turn_event(
         request: DispatchTurn | ResumeSessionTurn,
         answer: Answer | _InvalidReply,
         observed: RequestObserved,

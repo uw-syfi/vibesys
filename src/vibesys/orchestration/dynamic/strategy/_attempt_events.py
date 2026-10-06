@@ -41,7 +41,11 @@ from vibesys.orchestration.dynamic.strategy._parents import (
     ingest,
 )
 from vibesys.orchestration.dynamic.strategy._progress import refusal
-from vibesys.orchestration.dynamic.strategy._prompts import ReplyCorrectionPrompt, ResumePrompt
+from vibesys.orchestration.dynamic.strategy._prompts import (
+    ReplyCorrectionPrompt,
+    ResumePrompt,
+    WaitUnrecordedPrompt,
+)
 from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading, reading_of
 from vibesys.orchestration.dynamic.strategy._settlement import STOPPED
 from vibesys.orchestration.dynamic.strategy._state import (
@@ -347,10 +351,14 @@ def _correct(
     state: DynamicStrategyState,
     index: int,
     config: DynamicConfig,
-    error: str,
+    error: str | None,
     invalid: InvocationRef,
 ) -> DynamicStrategyState | None:
-    """Ask the role to fix its reply; the correction names the invalid turn as its predecessor."""
+    """Ask the role to fix its reply; the correction names the invalid turn as its predecessor.
+
+    ``error`` is the schema violation to name, or None when the reply was valid but asked
+    to wait and the run recorded no wait.
+    """
     record = state.attempts[index]
     turn = record.turn
     role = role_of(record.phase)
@@ -362,7 +370,9 @@ def _correct(
         corrections=turn.corrections + 1,
         charge="correction",
         invocation=invalid,
-        context=ReplyCorrectionPrompt(role=_CORRECTION_ROLE[role], error=error),
+        context=WaitUnrecordedPrompt()
+        if error is None
+        else ReplyCorrectionPrompt(role=_CORRECTION_ROLE[role], error=error),
     )
     return _put(
         state,
@@ -685,6 +695,12 @@ def _answered(
             state, index, f"invalid {role.value} reply"
         )
     if isinstance(reply, WaitingForEvaluation):
+        if not event.suspending:
+            # Core recorded no wait (it refused it, or the host lost it), so no
+            # TurnSuspended will come: waiting for one would stall the run.
+            return _correct(state, index, config, None, event.invocation) or fail(
+                state, index, "the turn asked to wait and the run recorded no wait"
+            )
         return _yielded(state, index, view)
     if isinstance(reply, ImplementerResult):
         candidate = turn_candidate(view, state.attempts[index].attempt, event.invocation)

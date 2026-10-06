@@ -406,6 +406,13 @@ class TurnResult(Value):
     output_json: str | None = None
     failure: TurnFailureKind | None = None
     detail: str = Field(default="", max_length=TURN_FAILURE_DETAIL_LIMIT)
+    suspending: bool = False
+    """Core recorded the turn's wait, so a ``TurnSuspended`` follows when it checkpoints.
+
+    False for a turn that ends without one, whatever its reply says: the agent never
+    asked to wait, core refused the wait it asked for, or the host lost the wait. A
+    strategy must not wait for a resume of a turn that is not suspending.
+    """
 
     @model_validator(mode="after")
     def failure_matches_status(self) -> TurnResult:

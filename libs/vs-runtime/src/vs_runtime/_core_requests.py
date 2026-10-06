@@ -54,7 +54,9 @@ from vs_core.api import (
 from vs_runtime._receipt_store import Settled, Transient
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
+
+    from vs_core.api import Intent
 
 
 class ExecutorRole(StrEnum):
@@ -274,6 +276,36 @@ def receipt_executor_kinds() -> frozenset[type[RequestBase]]:
     """
     return SESSION_RECEIPT_KINDS | frozenset(
         kind for kind, role in REQUEST_DISPATCH.items() if role in RECEIPT_BACKED_ROLES
+    )
+
+
+def counts_toward_concurrency(request: Request) -> bool:
+    """Whether the request occupies one of the shell's concurrent slots.
+
+    A cancellation never waits for a free slot: it exists to end work that holds one, so
+    a full set of running turns must not keep it from starting.
+    """
+    return not isinstance(request, CancelTurn | CancelOwnedJob | CancelOwnedResource)
+
+
+def settles_through_core(request: Request, intents: Iterable[Intent]) -> bool:
+    """Whether a stop ends this running request through requests core itself issues.
+
+    A cancellation is such a request, and so are the session requests core issues to settle
+    a cancelled turn (inspect, close). A turn is one once core has asked to cancel its
+    invocation. Any other running request has no cancellation in core: it ends on its own
+    or not at all.
+    """
+    if not counts_toward_concurrency(request) or isinstance(request, InspectTurn | CloseSession):
+        return True
+    if not isinstance(request, DispatchTurn | ResumeSessionTurn):
+        return False
+    turn = request.turn
+    return any(
+        isinstance(intent.request, CancelTurn)
+        and intent.request.invocation.session_id == turn.session.session_id
+        and intent.request.invocation.invocation_id == turn.invocation_id
+        for intent in intents
     )
 
 

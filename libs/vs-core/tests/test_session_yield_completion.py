@@ -98,7 +98,11 @@ def yield_state(
         admission_id=admission,
     )
     invocation = core.Invocation(
-        invocation=ref, scope=owner_scope, turn=spec, phase=core.SessionPhase.EXECUTING
+        invocation=ref,
+        scope=owner_scope,
+        turn=spec,
+        phase=core.SessionPhase.EXECUTING,
+        evaluation_prefix=core.EvaluationHistoryCursor(),
     )
     session = core.SessionView(
         spec=spec.session,
@@ -391,3 +395,61 @@ def test_yield_checkpoint_completes_original_turn_not_checkpoint_request_origin(
     result = core.step(state, event, reducers=REDUCERS)
     assert result.state.run.receipts[0].completion == core.CompletionStatus.SUCCEEDED
     assert result.state.run.receipts[1].completion is None
+
+
+def _peer_claim(state: core.CoreState, suspension: core.Continuation) -> core.CoreState:
+    """A second turn of the same scope that was observed with a wait core has not recorded yet."""
+    (first,) = state.sessions.invocations
+    other = first.invocation.model_copy(update={"invocation_id": core.InvocationId(root="peer")})
+    peer = first.model_copy(
+        update={
+            "invocation": other,
+            "pending_suspension": suspension.model_copy(
+                update={
+                    "continuation_id": core.ContinuationId(root="peer-wait"),
+                    "invocation": other,
+                }
+            ),
+        }
+    )
+    sessions = state.sessions.model_copy(update={"invocations": (first, peer)})
+    return state.model_copy(update={"sessions": sessions})
+
+
+def _unowned_job(state: core.CoreState, suspension: core.Continuation) -> core.Continuation:
+    del state
+    return suspension.model_copy(update={"jobs": (core.ResourceId(root="job:not-owned"),)})
+
+
+def _retired_scope(state: core.CoreState) -> core.CoreState:
+    (owner,) = state.attempts.attempts
+    closing = owner.model_copy(update={"phase": core.AttemptPhase.CLOSING})
+    return state.model_copy(update={"attempts": core.AttemptsState(attempts=(closing,))})
+
+
+@pytest.mark.parametrize("origin", ["dispatch", "resume"])
+@pytest.mark.parametrize("world", ["clear", "unowned_job", "peer_claim", "retired_scope"])
+def test_a_wait_core_refuses_ends_the_turn_plainly_and_the_result_says_so(
+    world: Literal["clear", "unowned_job", "peer_claim", "retired_scope"],
+    origin: Literal["dispatch", "resume"],
+) -> None:
+    """The one gate runs when the turn is observed, before anything claims the wait.
+
+    A refused wait is dropped there: the turn's result is ordinary and says it is not
+    suspending, so no ``TurnSuspended`` is awaited and no later commit can refuse it.
+    """
+    state, request, suspension = yield_state(origin)
+    if world == "peer_claim":
+        state = _peer_claim(state, suspension)
+    if world == "retired_scope":
+        state = _retired_scope(state)
+    if world == "unowned_job":
+        suspension = _unowned_job(state, suspension)
+    result = core.step(state, terminal_yield(state, request, suspension), reducers=REDUCERS)
+    (turn,) = (row for row in result.events if isinstance(row, core.TurnResult))
+    recorded = result.state.sessions.invocations[0].pending_suspension
+    accepted = world == "clear"
+    assert turn.suspending is accepted
+    assert (recorded == suspension) is accepted
+    assert (recorded is None) is (not accepted)
+    assert turn.failure is None
