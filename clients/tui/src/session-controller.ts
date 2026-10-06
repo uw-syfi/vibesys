@@ -256,8 +256,6 @@ export interface SessionController {
 const BOOTSTRAP_TAIL = 1_000;
 const BACKFILL_CHUNK = 1_000;
 
-type ProtocolErrorMessage = Extract<ServerMessage, {message: string}>;
-
 export class SocketSessionController implements SessionController {
   #state: SessionState;
   readonly #listeners = new Set<(state: SessionState) => void>();
@@ -1361,33 +1359,37 @@ export class SocketSessionController implements SessionController {
   }
 
   #dispatchMessage(message: ServerMessage, resumed: boolean): readonly RunEvent[] | null {
-    if ('event' in message) {
-      this.#setState(applyEvent(this.#state, message.event));
-      return [message.event];
+    switch (message.type) {
+      case 'event':
+        this.#setState(applyEvent(this.#state, message.event));
+        return [message.event];
+      case 'event_batch': {
+        const reconciliation = this.#reconciler.reconcileBatch(message, {resumed});
+        this.#setState(
+          (reconciliation.kind === 'rebootstrap' ? applyEventRebootstrap : applyEventBatch)(
+            this.#state,
+            message.events,
+            message.active_executions,
+            message.through_sequence,
+            reconciliation.historyFloor,
+          ),
+        );
+        return message.events;
+      }
+      case 'protocol_error':
+        this.#streamProtocolError = true;
+        this.#setState(
+          reportError(markEventStreamUnavailable(this.#state), message.message, {
+            scope: 'protocol',
+            diagnostic: message.diagnostic ?? null,
+          }),
+        );
+        return null;
+      case 'subscribed':
+        return null;
+      default:
+        return assertNever(message);
     }
-    if ('events' in message) {
-      const reconciliation = this.#reconciler.reconcileBatch(message, {resumed});
-      this.#setState(
-        (reconciliation.kind === 'rebootstrap' ? applyEventRebootstrap : applyEventBatch)(
-          this.#state,
-          message.events,
-          message.active_executions,
-          message.through_sequence,
-          reconciliation.historyFloor,
-        ),
-      );
-      return message.events;
-    }
-    if (!('message' in message)) return null;
-    const protocolError = message as ProtocolErrorMessage;
-    this.#streamProtocolError = true;
-    this.#setState(
-      reportError(markEventStreamUnavailable(this.#state), protocolError.message, {
-        scope: 'protocol',
-        diagnostic: protocolError.diagnostic ?? null,
-      }),
-    );
-    return null;
   }
 
   /**

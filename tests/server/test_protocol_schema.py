@@ -79,6 +79,19 @@ def test_committed_schema_discriminants_are_literal_tags() -> None:
     assert non_literal == []
 
 
+def test_committed_schema_reuses_the_active_execution_list_definition() -> None:
+    """Snapshots and event batches expose one shared execution checkpoint type."""
+    document = _committed_schema()
+    definitions = document["$defs"]
+
+    assert definitions["RunSnapshot"]["properties"]["active_executions"] == {
+        "$ref": "#/$defs/ActiveExecutions"
+    }
+    assert definitions["EventBatchMessage"]["properties"]["active_executions"] == {
+        "$ref": "#/$defs/ActiveExecutions"
+    }
+
+
 @pytest.mark.parametrize("alias", TAGGED_UNION_ALIASES)
 def test_validator_rejects_a_member_without_its_discriminant(alias: object) -> None:
     """Why the schema may require the tag: the union never accepts it missing."""

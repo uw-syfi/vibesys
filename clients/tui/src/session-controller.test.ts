@@ -118,6 +118,27 @@ describe('session controller', () => {
     expect(transport.closed).toBe(true);
   });
 
+  it('does not treat another tagged message carrying events as an event batch', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    // A future `subscribed` member could add observability events. Dispatch is
+    // by its wire tag, never by an incidental payload field.
+    const subscribedWithEvents = {
+      type: 'subscribed' as const,
+      request_id: 'subscription',
+      run_id: 'run',
+      latest_sequence: 0,
+      events: [event(1, 'agent_output_chunk', 'must not fold\n')],
+    };
+    transport.emit(subscribedWithEvents);
+
+    expect(controller.state.core.sequence).toBe(0);
+    expect(controller.state.core.transcript).toEqual([]);
+    await controller.stop();
+  });
+
   // A chat RPC answers with the journal tail written while the request was in
   // flight, so its events can outrun the subscription by a whole poll
   // interval. Folding them used to advance the contiguous stream cursor, and

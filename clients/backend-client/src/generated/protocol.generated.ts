@@ -591,7 +591,6 @@ export type Type17 = "event";
 export type Type18 = "event_batch";
 export type Events1 = RunEvent[];
 export type ThroughSequence = number;
-export type ActiveExecutions1 = ActiveAgentExecution[];
 export type StoreId1 = string;
 export type HistoryAfterSequence = number;
 export type Type19 = "protocol_error";
@@ -1555,7 +1554,7 @@ export interface EventBatchMessage {
   type: Type18;
   events: Events1;
   through_sequence?: ThroughSequence;
-  active_executions?: ActiveExecutions1;
+  active_executions?: ActiveExecutions;
   store_id?: StoreId1;
   history_after_sequence?: HistoryAfterSequence;
 }

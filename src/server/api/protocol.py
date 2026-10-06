@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAliasType
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
@@ -24,6 +24,11 @@ from vibesys.api.hypothesis import (
 )
 
 PROTOCOL_VERSION = 1
+
+# Both snapshots and streamed batches publish the same execution checkpoint.
+# Naming the list keeps the generated client contract referentially identical,
+# rather than making the generator invent one alias per inline occurrence.
+ActiveExecutions = TypeAliasType("ActiveExecutions", list[ActiveAgentExecution])
 
 
 class ProtocolModel(BaseModel):
@@ -248,7 +253,7 @@ class RunSnapshot(ProtocolModel):
     status: RunStatus
     agent_kind: str | None = None
     round_label: str | None = None
-    active_executions: list[ActiveAgentExecution] = Field(default_factory=list)
+    active_executions: ActiveExecutions = Field(default_factory=list)
     # Server-owned projection: a thread's title is backfilled from a later
     # CHAT event, so a client that folds only a tail cannot rebuild the
     # registry from the events it holds.
@@ -555,7 +560,7 @@ class EventBatchMessage(ProtocolModel):
     type: Literal["event_batch"] = "event_batch"
     events: list[RunEvent]
     through_sequence: int = Field(default=0, ge=0)
-    active_executions: list[ActiveAgentExecution] = Field(default_factory=list)
+    active_executions: ActiveExecutions = Field(default_factory=list)
     # Names the event store these sequences number. A run attaches its durable
     # log after clients subscribe, and sequences are only comparable within one
     # store, so a batch whose id differs from the previous one supersedes what

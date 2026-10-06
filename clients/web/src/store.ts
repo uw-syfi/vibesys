@@ -1,8 +1,8 @@
 import type {
   BatchReconciliation,
+  EventBatchMessage,
   RunEvent,
   RunSnapshot,
-  ServerMessage,
 } from '@vibesys/backend-client';
 import {
   type ActiveExecutionCheckpoint,
@@ -18,10 +18,7 @@ export interface CoreStateStore {
   subscribe(listener: () => void): () => void;
   append(events: readonly RunEvent[]): void;
   applySnapshot(snapshot: RunSnapshot): void;
-  applyBatch(
-    message: Extract<ServerMessage, {type?: 'event_batch'}>,
-    reconciliation: BatchReconciliation,
-  ): void;
+  applyBatch(message: EventBatchMessage, reconciliation: BatchReconciliation): void;
 }
 
 export function createCoreStateStore(seed: CoreState = initialCoreState()): CoreStateStore {
@@ -43,8 +40,8 @@ export function createCoreStateStore(seed: CoreState = initialCoreState()): Core
       for (const listener of listeners) listener();
     },
     applyBatch(message, reconciliation) {
-      const events = message.events ?? [];
-      const activeExecutions = (message.active_executions ?? []) as ActiveExecutionCheckpoint;
+      const events = message.events;
+      const activeExecutions: ActiveExecutionCheckpoint = message.active_executions ?? [];
       state =
         reconciliation.kind === 'rebootstrap'
           ? reduceEventRebootstrap(
