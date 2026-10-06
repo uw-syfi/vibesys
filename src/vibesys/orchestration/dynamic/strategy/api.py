@@ -50,6 +50,7 @@ from vibesys.orchestration.dynamic.strategy._prompts import (
     ResumePrompt,
     ReviewEvaluation,
     ReviewPrompt,
+    WaitUnrecordedPrompt,
 )
 from vibesys.orchestration.dynamic.strategy._rows import (
     AcceptedReading,
@@ -117,6 +118,7 @@ __all__ = [
     "Role",
     "RoundRecord",
     "VerifyParentRevision",
+    "WaitUnrecordedPrompt",
     "Winner",
     "accept_readings",
     "decision_id",

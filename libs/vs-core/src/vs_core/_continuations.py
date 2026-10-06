@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
-from ._evaluation_history import produce_history
+from ._evaluation_history import attempt_settled, produce_history
 from ._registry import ContractError
 from ._session_scope import dispatching_request
 from .types.attempts import (
@@ -51,14 +51,14 @@ from .types.evaluation import (
 from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import InspectRequest, IntentPhase
 from .types.job_observations import JobTimeout, TimedOut
-from .types.kernel import AreaChange
+from .types.kernel import AreaChange, EvaluationContext
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
 from .types.sessions import Access, DispatchTurn, InspectTurn, ResumeSessionTurn, SessionPhase
 from .types.strategy import Accepted, Operation
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsState, AttemptView
-    from .types.common import EvidenceKey, Observation, ResourceId
+    from .types.common import EvidenceKey, InvocationRef, Observation, ResourceId
     from .types.evaluation import (
         EvaluationEvent,
         EvaluationState,
@@ -67,8 +67,8 @@ if TYPE_CHECKING:
     )
     from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryCursor
     from .types.intents import ChildLease, Intent, Request
-    from .types.kernel import EvaluationContext, Signal, StrategyEvent
-    from .types.sessions import Invocation
+    from .types.kernel import SessionsContext, Signal, StrategyEvent
+    from .types.sessions import Invocation, SessionsState
 
 
 class SuspensionRefusal(StrEnum):
@@ -92,6 +92,11 @@ class SuspensionRefusal(StrEnum):
     none, and core authorizes a resume only from an exact prefix.
     """
 
+    JOB_NOT_OWNED = "job_not_owned"
+    """A job the suspension waits on is not one of the scope's owned jobs."""
+    DEADLINE_EXCEEDED = "deadline_exceeded"
+    """The suspension's deadline is later than the run's."""
+
     @property
     def detail(self) -> str:
         """The contract-error text for this reason."""
@@ -103,6 +108,8 @@ _REFUSAL_DETAIL = {
     SuspensionRefusal.OPEN_CONTINUATION: "already owns an unfinished continuation",
     SuspensionRefusal.NOT_RESUMABLE: "attempt is exhausted, so its resume cannot be authorized",
     SuspensionRefusal.PREFIX_MISMATCH: "attempt resume requires exact paid-cycle history prefix",
+    SuspensionRefusal.JOB_NOT_OWNED: "dependency requires exactly one job owned by the scope",
+    SuspensionRefusal.DEADLINE_EXCEEDED: "exceeds run deadline",
 }
 
 
@@ -160,17 +167,100 @@ def _open(context: EvaluationContext, row: Continuation) -> bool:
     )
 
 
+def wait_refused_at_turn_end(
+    sessions: SessionsState, context: SessionsContext, invocation: Invocation, wait: Continuation
+) -> bool:
+    """Whether the suspension gate refuses ``wait`` against the state a turn's end produces."""
+    evaluation = EvaluationContext(
+        run=context.run, attempts=context.attempts, sessions=sessions, intents=context.intents
+    )
+    return wait_refusal_in(evaluation, context.evaluation, invocation, wait) is not None
+
+
 def suspension_refusal_in(
-    context: EvaluationContext, state: EvaluationState, scope: Scope
+    context: EvaluationContext,
+    state: EvaluationState,
+    scope: Scope,
+    *,
+    holder: InvocationRef | None = None,
 ) -> SuspensionRefusal | None:
-    """The reason ``scope`` cannot take a new suspension, or None when it can."""
+    """The reason ``scope`` cannot take a new suspension, or None when it can.
+
+    A suspension is claimed from the moment a turn is observed with one (it is pending
+    on its invocation) until it is recorded as a continuation, so a second turn of the
+    scope is refused while the first holds the claim. ``holder`` is the invocation asking:
+    its own claim is not a reason to refuse it.
+    """
     if not _active(context, scope):
         return SuspensionRefusal.SCOPE_NOT_ACTIVE
-    if any(
+    claimed = any(
+        row.pending_suspension is not None and row.scope == scope and row.invocation != holder
+        for row in context.sessions.invocations
+    )
+    if claimed or any(
         _open(context, row) and _invocation(context, row).scope == scope
         for row in state.continuations
     ):
         return SuspensionRefusal.OPEN_CONTINUATION
+    return None
+
+
+def commit_refusal_in(
+    context: EvaluationContext,
+    state: EvaluationState,
+    invocation: Invocation,
+    wait: Continuation | None = None,
+) -> SuspensionRefusal | None:
+    """Why recording a suspension of ``invocation`` would be refused, or None.
+
+    These are the refusals core's commit of a suspension raises for what the world did
+    (a peer's claim, a retired scope, a job the scope does not own), as opposed to a
+    malformed continuation. With ``wait`` it also checks the continuation's jobs and
+    deadline.
+    """
+    refusal = suspension_refusal_in(context, state, invocation.scope, holder=invocation.invocation)
+    if refusal is not None or wait is None:
+        return refusal
+    owned = (*state.jobs, *state.registered_jobs)
+    # An empty or repeating job list is a malformed continuation, not a refusal: it halts.
+    for identity in wait.jobs:
+        matching = tuple(row for row in owned if row.resource_id == identity)
+        if len(matching) != 1 or matching[0].scope != invocation.scope:
+            return SuspensionRefusal.JOB_NOT_OWNED
+    if wait.deadline_at > context.run.deadline_at:
+        return SuspensionRefusal.DEADLINE_EXCEEDED
+    return None
+
+
+def wait_refusal_in(
+    context: EvaluationContext,
+    state: EvaluationState,
+    invocation: Invocation,
+    wait: Continuation | None = None,
+) -> SuspensionRefusal | None:
+    """Why ``invocation`` cannot suspend now, or None when it can: the one suspension gate.
+
+    Asked when an agent requests a wait and again when its turn is observed with the
+    suspension, before anything durable claims it. It adds the refusals that are valid
+    to commit but make the resume raise (an exhausted attempt, a prefix mismatch) to
+    ``commit_refusal_in``.
+    """
+    refusal = commit_refusal_in(context, state, invocation, wait)
+    if refusal is not None:
+        return refusal
+    if exhausted(context.attempts, invocation.scope):
+        return SuspensionRefusal.NOT_RESUMABLE
+    owner = next(
+        (
+            row
+            for row in context.attempts.attempts
+            if row.attempt_id == invocation.scope.owner
+            and row.generation == invocation.scope.generation
+        ),
+        None,
+    )
+    if owner is not None:
+        return paid_prefix_refusal(owner.evaluation_history, invocation.evaluation_prefix)
     return None
 
 
@@ -427,6 +517,9 @@ def _authorize(
     invocation = _invocation(context, continuation)
     if not _active(context, invocation.scope):
         return AreaChange(state=state)
+    if not attempt_settled(invocation.scope, state, context.intents):
+        # Stay WAITING: each submission's conclusive observation wakes this again.
+        return AreaChange(state=state)
     _successor(context, continuation)
     _yield_proof(state, context, invocation, continuation, retained=reopened)
     if reopened:
@@ -540,7 +633,7 @@ def _validate_new(
         raise ContractError(("continuation", "jobs"), "dependency belongs to a different scope")
     if continuation.deadline_at > context.run.deadline_at:
         raise ContractError(("continuation", "deadline_at"), "exceeds run deadline")
-    if refusal := suspension_refusal_in(context, state, invocation.scope):
+    if refusal := commit_refusal_in(context, state, invocation, continuation):
         raise ContractError(("continuation", "invocation"), refusal.detail)
     if any(
         row.invocation == current or row.next_invocation == continuation.next_invocation

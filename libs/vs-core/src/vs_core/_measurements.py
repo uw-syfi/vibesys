@@ -585,21 +585,39 @@ def _submission_observed(
 def _deferred_wake(
     state: EvaluationState, event: MeasurementSubmissionObserved, source: Intent
 ) -> tuple[ContinuationJobsChanged, ...]:
-    """The wake of a job's end that waited for the ledger to close its submission."""
-    job = next((j for j in state.jobs if j.submission_id == source.request_id), None)
-    if job is None or job.resource_id is None or job.observation != event.observation:
-        return ()
+    """Wake the scope's waiting continuations when one of its submissions concludes.
+
+    A continuation's authorization waits for the scope to be settled (every submission
+    concluded), so the conclusion of any submission of the scope, with or without a job, is
+    a moment it can proceed. Each wake names one of the continuation's own jobs at its
+    current observation, which the continuation handler accepts as its own job event.
+    """
     if not _conclusive(event.observation):
         return ()
-    if not _awaited(state, job.resource_id):
-        return ()
-    return (
-        ContinuationJobsChanged(
-            resource_id=job.resource_id,
-            observation=event.observation,
-            previous=UnobservedJobFacts(resource_id=job.resource_id),
-        ),
-    )
+    wakes: list[ContinuationJobsChanged] = []
+    for continuation in state.continuations:
+        if continuation.phase != ContinuationPhase.WAITING:
+            continue
+        job = next(
+            (
+                j
+                for j in (*state.jobs, *state.registered_jobs)
+                if j.resource_id in continuation.jobs
+                and j.scope == source.request.scope
+                and j.observation is not None
+            ),
+            None,
+        )
+        if job is None or job.resource_id is None or job.observation is None:
+            continue
+        wakes.append(
+            ContinuationJobsChanged(
+                resource_id=job.resource_id,
+                observation=job.observation,
+                previous=UnobservedJobFacts(resource_id=job.resource_id),
+            )
+        )
+    return tuple(wakes)
 
 
 def _awaited(state: EvaluationState, resource_id: ResourceId) -> bool:

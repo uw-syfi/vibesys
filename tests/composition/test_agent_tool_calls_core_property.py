@@ -202,6 +202,11 @@ class ShellView:
         """The state the bridge reads."""
         return self.shown if self.shown is not None else self._shell.record.envelope.core
 
+    @property
+    def admitted_core(self) -> CoreState:
+        """The state the bridge reads, with the shell's admitted inputs."""
+        return self.shown if self.shown is not None else self._shell.admitted_core
+
     def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
         """The real shell's admission, unless a test made the shell fail."""
         if self.admit_error is not None:
@@ -293,12 +298,16 @@ class Agent:
         return waiting
 
     async def late_calls(self) -> None:
-        """Calls of turns that already ended, with the token those turns held."""
+        """Calls of turns that already ended, with the token those turns held.
+
+        A token names a scope, not a turn, so a late wait the bridge accepts joins the turn
+        that is executing in that scope; it counts as an accepted wait.
+        """
         pending, self.pending = self.pending, ()
         for scope, program in pending:
             token = self.token(scope)
             for step in program:
-                await self.call(token, step, count=False)
+                await self.call(token, step)
 
 
 class AgentExecutors(ScriptedExecutors):
@@ -479,7 +488,7 @@ def test_an_admission_refused_for_a_busy_queue_is_busy_and_is_journaled() -> Non
         "the run could not take this call right now; call the tool again"
     ]
     assert played.agent.diagnostics == [
-        "agent evaluation call refused as busy: RuntimeCommitError: admission needs an idle input queue"
+        "agent evaluation call refused as busy: AdmissionBusyError: admission needs an idle input queue"
     ]
 
 
@@ -520,13 +529,14 @@ def _failing_admission(error: Exception | None) -> Callable[[Agent], Awaitable[N
         None,
         RuntimeCommitUncertainError(candidate_visible=True),
         OrphanWaitError(()),
+        RuntimeCommitError("admission needs an idle input queue"),
     ],
-    ids=["halted-or-inactive-shell", "uncertain-commit", "orphan-wait"],
+    ids=["halted-or-inactive-shell", "uncertain-commit", "orphan-wait", "busy-lookalike"],
 )
 def test_a_shell_that_cannot_be_trusted_is_never_reported_to_the_agent_as_busy(
     error: Exception | None,
 ) -> None:
-    """Only the idle-queue refusal is busy; every other shell failure reaches the halt."""
+    """Only ``AdmissionBusyError`` is busy, whatever the text; every other failure reaches the halt."""
     played = play((Turn(at_start=_failing_admission(error)),), 1)
     check(played)
     assert played.agent.errors == []
@@ -559,3 +569,20 @@ def test_a_turn_whose_wait_is_refused_at_its_end_releases_the_handles_it_waited_
     check(played)
     assert played.agent.waits_accepted == 1
     assert played.shell.record.envelope.core.evaluation.continuations == ()
+
+
+@pytest.mark.parametrize(
+    "turns",
+    [
+        (Turn(late=(("submit",), ("wait", (0,)))),),
+        (Turn(late=(("submit",),)), Turn(program=(("submit",), ("wait", (0,))))),
+    ],
+    ids=["late-submit-then-wait", "late-submit-then-next-turn-waits"],
+)
+@pytest.mark.parametrize("total", [1, 2])
+def test_a_submission_still_running_at_a_resume_does_not_halt_the_run(
+    turns: tuple[Turn, ...], total: int
+) -> None:
+    """A resume is never authorized over an attempt history that a running submission leaves open."""
+    played = play(turns, total)
+    check(played)

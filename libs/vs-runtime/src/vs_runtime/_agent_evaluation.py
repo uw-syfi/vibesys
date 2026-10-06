@@ -83,7 +83,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.tools import CORE_EVALUATION_TOOLS, core_evaluation_mcp_descriptor
 from vs_runtime._agent_tool_errors import ToolRefusal, ToolRefusedError, render_tool_refusal
-from vs_runtime._core_loop import RuntimeCommitError
+from vs_runtime._core_loop import AdmissionBusyError
 from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._workspace_lookup import find_scope_workspace
 from vs_runtime._workspace_requests import revision_ref
@@ -115,9 +115,45 @@ _WAIT_REFUSALS = {
     SuspensionRefusal.SCOPE_NOT_ACTIVE: ToolRefusal.WAIT_NOT_ACTIVE,
     SuspensionRefusal.NOT_RESUMABLE: ToolRefusal.WAIT_NOT_RESUMABLE,
     SuspensionRefusal.PREFIX_MISMATCH: ToolRefusal.WAIT_OVERLAPPED,
+    SuspensionRefusal.JOB_NOT_OWNED: ToolRefusal.UNKNOWN_HANDLES,
+    SuspensionRefusal.DEADLINE_EXCEEDED: ToolRefusal.WAIT_DEADLINE,
 }
-_ADMISSION_BUSY = "admission needs an idle input queue"
-"""The shell's text for the one transient admission failure (a commit is in flight)."""
+
+
+def _owned_wait(
+    core: CoreState, current: InvocationRef, handles: tuple[str, ...], deadlines: dict[str, float]
+) -> Continuation | None:
+    """The wait to check against core's job rules, or None while a submission is uncommitted.
+
+    A submission owns its job once its request's observation commits, and the loop commits
+    that after the agent's call returns. Until then core cannot say the job is owned, so only
+    the scope rules apply; the commit of the turn's suspension follows the submission's.
+    """
+    owned = {
+        row.resource_id.root
+        for row in (*core.evaluation.jobs, *core.evaluation.registered_jobs)
+        if row.resource_id is not None
+    }
+    if not set(handles) <= owned:
+        return None
+    return _continuation(current, handles, deadlines)
+
+
+def _continuation(
+    current: InvocationRef, handles: tuple[str, ...], deadlines: dict[str, float]
+) -> Continuation:
+    """The wait on ``handles`` that ends ``current``'s turn and resumes in its successor."""
+    root = current.invocation_id.root
+    return Continuation(
+        continuation_id=ContinuationId(root=f"{root}/evaluation"),
+        invocation=current,
+        next_invocation=current.model_copy(
+            update={"invocation_id": InvocationId(root=f"{root}/resume")}
+        ),
+        jobs=tuple(ResourceId(root=handle) for handle in handles),
+        deadline_at=min(deadlines[handle] for handle in handles),
+        phase=ContinuationPhase.WAITING,
+    )
 
 
 def _ignore_diagnostic(line: str) -> None:
@@ -212,7 +248,12 @@ class AdmissionShell(Protocol):
 
     @property
     def record(self) -> _Record:
-        """The committed record; nothing commits while an agent turn holds the shell."""
+        """The committed record; the loop may commit while an agent turn runs."""
+        ...
+
+    @property
+    def admitted_core(self) -> CoreState:
+        """Core's state including the admitted inputs not yet committed."""
         ...
 
     def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
@@ -396,7 +437,7 @@ class AgentEvaluationBridge:
             return SubmittedReply(handle_id=handle)
 
     def _admit(self, shell: AdmissionShell, event: CoreEvent, now: float) -> Transition:
-        """Ask core about the event; only the shell's idle-queue refusal is transient.
+        """Ask core about the event; only the shell's busy refusal (``AdmissionBusyError``) is transient.
 
         Every other failure is run state that cannot be trusted (a halted shell, an
         uncertain commit, a core contract gap) or a core invariant, and must reach the
@@ -404,9 +445,7 @@ class AgentEvaluationBridge:
         """
         try:
             return shell.admit(event, now_at=now)
-        except RuntimeCommitError as error:
-            if type(error) is not RuntimeCommitError or str(error) != _ADMISSION_BUSY:
-                raise
+        except AdmissionBusyError as error:
             self._diagnostics(
                 f"agent evaluation call refused as busy: {type(error).__name__}: {error}"
             )
@@ -468,10 +507,15 @@ class AgentEvaluationBridge:
         unknown = sorted(set(handles) - scoped.submitted.keys())
         if unknown:
             raise ToolRefusedError(ToolRefusal.UNKNOWN_HANDLES, unknown)
-        refusal = suspension_refusal(shell.record.envelope.core, turn)
+        waits = tuple(dict.fromkeys(handles))
+        refusal = suspension_refusal(
+            shell.admitted_core,
+            turn,
+            _owned_wait(shell.admitted_core, turn, waits, scoped.submitted),
+        )
         if refusal is not None:
-            raise ToolRefusedError(_WAIT_REFUSALS[refusal])
-        scoped.waits = tuple(dict.fromkeys(handles))
+            raise ToolRefusedError(_WAIT_REFUSALS[refusal], waits)
+        scoped.waits = waits
         return WaitReply(handles=scoped.waits)
 
     def yielded(self, request: DispatchTurn) -> Continuation | None:
@@ -488,27 +532,25 @@ class AgentEvaluationBridge:
         scoped.begin(None)
         if not handles:
             return None
-        session, generation = turn.session.session_id, request.scope.generation
         current = InvocationRef(
-            session_id=session, invocation_id=turn.invocation_id, generation=generation
+            session_id=turn.session.session_id,
+            invocation_id=turn.invocation_id,
+            generation=request.scope.generation,
         )
         shell, _ = self._bound()
-        if suspension_refusal(shell.record.envelope.core, current) is not None:
+        wait = _continuation(current, handles, deadlines)
+        if (
+            suspension_refusal(
+                shell.admitted_core,
+                current,
+                _owned_wait(shell.admitted_core, current, handles, deadlines),
+            )
+            is not None
+        ):
             # The scope changed since the wait was validated: end the turn without
             # suspending, as after a host restart. The measurements report ordinarily.
             return None
-        return Continuation(
-            continuation_id=ContinuationId(root=f"{turn.invocation_id.root}/evaluation"),
-            invocation=current,
-            next_invocation=InvocationRef(
-                session_id=session,
-                invocation_id=InvocationId(root=f"{turn.invocation_id.root}/resume"),
-                generation=generation,
-            ),
-            jobs=tuple(ResourceId(root=handle) for handle in handles),
-            deadline_at=min(deadlines[handle] for handle in handles),
-            phase=ContinuationPhase.WAITING,
-        )
+        return wait
 
     def _bound(self) -> tuple[AdmissionShell, Clock]:
         if self._shell is None or self._clock is None:

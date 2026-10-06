@@ -12,10 +12,11 @@ design has three parts, so that a busy loop on a running job cannot happen:
 * Core decides when the next observation is due and exposes it as a core time
   (``RunView.next_observe_at``, the default ``next_wake``). Core emits the next observe
   only once ``ClockAdvanced`` reaches that time.
-* The loop never calls the executor on its own. Between drains it either made progress
-  (state changed) or it sleeps until the earliest of: the next time core asks for, the
-  next lease renewal, the run deadline, and the next control poll. Every no-progress
-  iteration sleeps at least ``min_sleep`` seconds, so no iteration can spin.
+* The loop never calls the executor on its own. Between settles it either made progress
+  (state changed) or it waits until the earliest of: the next time core asks for, the
+  next lease renewal, the run deadline, and the next control poll. While requests run it
+  also wakes when one finishes or the operator stops. Every no-progress iteration
+  waits at least ``min_sleep`` seconds, so no iteration can spin.
 * A dispatch cap fails a cycle that never goes idle, naming the request kinds seen.
 
 Time. The clock is a timeline shared across processes (seconds since the epoch in
@@ -29,7 +30,7 @@ import asyncio
 import hashlib
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from vs_core.api import (
     ArtifactId,
@@ -73,6 +74,9 @@ class RunClock(Protocol):
 
 #: Name of the task that renews the lease while a drain is in flight; fakes recognize it.
 HEARTBEAT_TASK = "lease-heartbeat"
+
+#: Name of the task that sleeps while requests run; the sleep ends early when one finishes.
+WAIT_TASK = "loop-wait"
 
 
 class WallRunClock:
@@ -151,8 +155,8 @@ class RunLoopConfig:
     min_sleep: float = 0.05
     recovery_poll_interval: float = 1.0
     max_dispatches: int = 100_000
-    max_concurrent: int = 1
-    """Requests (agent turns, evaluations) the shell executes at once."""
+    max_concurrent: int | None = None
+    """Requests the shell executes at once; None takes the run's ``Limits.max_parallel``."""
     stop_result: RunResultProposal = field(
         default_factory=lambda: RunResultProposal(
             outcome="cancelled", reason="stop requested by the operator"
@@ -170,7 +174,11 @@ class RunLoopConfig:
             if getattr(self, name) <= 0:
                 message = f"{name} must be positive"
                 raise ValueError(message)
-        if self.recovery_poll_interval <= 0 or self.max_dispatches <= 0 or self.max_concurrent <= 0:
+        if (
+            self.recovery_poll_interval <= 0
+            or self.max_dispatches <= 0
+            or (self.max_concurrent is not None and self.max_concurrent <= 0)
+        ):
             message = "recovery_poll_interval, max_dispatches and max_concurrent must be positive"
             raise ValueError(message)
 
@@ -210,12 +218,12 @@ class RunControlBridge:
         self._paused = False
         self._stopped = False
 
-    def stop_undelivered(self) -> bool:
-        """Whether the operator asked to stop and no poll has turned that into a core event."""
-        return self._channel.stop_requested() and not self._stopped
-
     def watch_stop(self, listener: Callable[[], object]) -> Callable[[], None]:
-        """Call ``listener`` (on the requesting thread) at each stop request; returns unsubscribe."""
+        """Call ``listener`` (on the requesting thread) at each stop request; returns unsubscribe.
+
+        Only wakes the loop so it reads the channel now; the stop reaches core through
+        ``poll`` like every control.
+        """
         return self._channel.on_stop_requested(listener)
 
     def poll(self, core: CoreState, now_at: float) -> tuple[RunControlEvent, ...]:
@@ -307,10 +315,15 @@ async def drive_core(
     """Run a started shell until its run is terminal, an executor is refused, or it fails.
 
     Each iteration: renew the lease when a third of it has passed, submit controls and
-    the deadline stop, deliver the clock, drain the shell, ask the strategy once recovery
-    is READY, drain again. An iteration that changed nothing sleeps (see the module
-    docstring); one that cannot be woken by time raises ``RunStalledError``. A stop that
-    arrives while a dispatch is in flight cancels it and raises ``RunStopped``.
+    the deadline stop, deliver the clock, settle the shell, ask the strategy once recovery
+    is READY, settle again. Requests (agent turns, submissions) keep running across
+    iterations, so the strategy decides, the clock ticks and controls are read whenever
+    any request finishes, not only when all have. An iteration that changed nothing waits
+    (see the module docstring); one that cannot be woken by time raises ``RunStalledError``.
+
+    A stop is a control like the others: core commits it and cancels the running turns
+    itself, and the run ends terminal. If a request core cannot cancel is running, the
+    loop cancels it and raises ``RunStopped`` instead.
     """
     return await _Loop(host, config, next_wake).run()
 
@@ -329,6 +342,9 @@ class _Loop:
             c.control_id.root == "deadline" for c in self._core().run.controls
         )
         self._first_dispatch = self._shell.dispatched
+        self._lease: asyncio.Task[None] | None = None
+        # Set when the operator asks to stop, so a wait that has requests running ends now.
+        self._woken = asyncio.Event()
 
     def _core(self) -> CoreState:
         return self._shell.record.envelope.core
@@ -343,84 +359,95 @@ class _Loop:
         return RunOutcome(status=run.status, result=run.result, refusal=refusal)
 
     async def run(self) -> RunOutcome:
-        """The loop body."""
+        """The loop body, with the stop wake-up subscribed and running requests released."""
+        loop = asyncio.get_running_loop()
+        unsubscribe = (
+            self._controls.watch_stop(lambda: loop.call_soon_threadsafe(self._woken.set))
+            if self._controls is not None
+            else _noop
+        )
+        # Requests outlast the lease, so it is renewed from beside the loop, which may be
+        # waiting for them or publishing. A renewal that fails ends the loop.
+        heartbeat = asyncio.create_task(self._heartbeat(), name=HEARTBEAT_TASK)
+        self._lease = heartbeat
+        try:
+            return await self._iterate()
+        finally:
+            unsubscribe()
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
+            if self._shell.in_flight:
+                await self._shell.abandon()
+            if not heartbeat.cancelled() and (failure := heartbeat.exception()) is not None:
+                raise failure
+
+    async def _iterate(self) -> RunOutcome:
         while self._core().run.status != RunStatus.TERMINAL:
+            self._raise_if_lease_lost()
             now = self._read()
             self._renew(now)
+            self._woken.clear()
             for event in self._due_controls(now):
                 self._shell.submit(event, now_at=now)
             self._shell.submit(ClockAdvanced(now_at=now), now_at=now)
             before = self._signature()
-            refusal = await self._drain(now)
+            refusal = await self._settle(now)
             if refusal is None and self._core().intents.recovery.phase == RecoveryPhase.READY:
                 self._shell.decide(now_at=now)
-                refusal = await self._drain(now)
+                refusal = await self._settle(now)
             if refusal is not None:
+                # Requests already running finish and commit before the refusal ends the run.
+                await self._shell.finish_in_flight(self._delivery, now_at=now, refusal=refusal)
                 return self._outcome(refusal)
             if self._core().run.status == RunStatus.TERMINAL:
                 break
+            self._stop_what_core_cannot()
             if self._signature() == before:
                 await self._wait(now)
         return self._outcome()
 
-    async def _drain(self, now: float) -> ExecutorRefusal | None:
+    def _slots(self) -> int:
+        return self._config.max_concurrent or self._core().run.limits.max_parallel
+
+    def _stop_what_core_cannot(self) -> None:
+        """Give up on running requests when an operator stop cannot finish through core.
+
+        A stop makes core cancel each running turn; the turns end, their observations
+        commit and the run ends terminal. A request core has no cancellation for (a
+        submission, a poll) is not waited for: the loop cancels it and raises
+        ``RunStopped`` with the run's record still open, as the host's grace bound would
+        a minute later. Work that does not end on cancel is still bounded by that grace.
+        """
+        stopped = any(
+            c.action == "stop" and c.control_id.root != "deadline"
+            for c in self._core().run.controls
+        )
+        if stopped and self._shell.in_flight and not self._shell.stop_ends_in_core:
+            raise RunStopped
+
+    async def _settle(self, now: float) -> ExecutorRefusal | None:
         total = self._shell.dispatched - self._first_dispatch
         remaining = max(self._config.max_dispatches - total, 0)
-        # One dispatch (an agent turn) can outlast the lease, and the loop does not
-        # iterate while it runs, so the lease is renewed from beside the drain.
-        heartbeat = asyncio.create_task(self._heartbeat(), name=HEARTBEAT_TASK)
         try:
-            return await self._run_until_stop(now, remaining)
-        finally:
-            heartbeat.cancel()
-            await asyncio.gather(heartbeat, return_exceptions=True)
-            if not heartbeat.cancelled() and (failure := heartbeat.exception()) is not None:
-                raise failure
-
-    async def _run_until_stop(self, now: float, remaining: int) -> ExecutorRefusal | None:
-        """Drain the shell, but cancel the in-flight dispatch when the operator stops.
-
-        Controls are otherwise read between drains, so a stop that arrives during an agent
-        turn would wait for the turn to end, or for the host's grace bound to cancel the
-        run. A stop first seen here cancels the dispatch at once and ends the run as
-        stopped, the same end the grace bound produces, without waiting for it. Work that
-        does not end on cancel is still bounded by the host's grace.
-        """
-        work = asyncio.ensure_future(
-            self._shell.run_until_idle(
+            return await self._shell.settle(
                 self._delivery,
                 now_at=now,
                 max_dispatches=remaining,
-                max_concurrent=self._config.max_concurrent,
+                max_concurrent=self._slots(),
             )
-        )
-        if self._controls is None:
-            return await work
-        stop: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-        loop = asyncio.get_running_loop()
-
-        def notify() -> None:
-            loop.call_soon_threadsafe(_resolve, stop)
-
-        unsubscribe = self._controls.watch_stop(notify)
-        try:
-            if self._controls.stop_undelivered():
-                _resolve(stop)
-            await asyncio.wait({work, stop}, return_when=asyncio.FIRST_COMPLETED)
-            if work.done():
-                return work.result()
-            work.cancel()
-            await asyncio.wait({work})
-            if work.cancelled():
-                raise RunStopped
-            return work.result()
         finally:
-            unsubscribe()
-            if not work.done():
-                work.cancel()
-                await asyncio.gather(work, return_exceptions=True)
-            if not stop.done():
-                stop.cancel()
+            self._raise_if_lease_lost()
+
+    def _raise_if_lease_lost(self) -> None:
+        """Surface a failed renewal as soon as the loop looks, not when the run ends."""
+        lease = self._lease
+        if (
+            lease is not None
+            and lease.done()
+            and not lease.cancelled()
+            and (failure := lease.exception()) is not None
+        ):
+            raise failure
 
     async def _heartbeat(self) -> None:
         """Renew the lease every third of its duration until cancelled."""
@@ -468,6 +495,9 @@ class _Loop:
         asked = self._shell.strategy_wake_at
         if asked is not None and asked > now:
             due = asked if due is None else min(due, asked)
+        if self._shell.in_flight:
+            await self._wait_while_running(due)
+            return
         paused = core.run.status == RunStatus.PAUSED
         recovering = core.intents.recovery.phase != RecoveryPhase.READY
         past_deadline = now >= core.run.deadline_at
@@ -484,10 +514,50 @@ class _Loop:
             wake.append(core.run.deadline_at)
         await self._clock.sleep(max(min(wake) - now, self._config.min_sleep))
 
+    async def _wait_while_running(self, due: float | None) -> None:
+        """Wait while requests run, until something needs core: the next iteration.
 
-def _resolve(future: asyncio.Future[None]) -> None:
-    if not future.done():
-        future.set_result(None)
+        That is a request finishing, an operator stop, the time core asked for next (a
+        job poll, or a wake the strategy requested), the next control poll (pause and
+        steer are read there) or the run deadline. A turn can run for many minutes, so
+        these are timers of the wait itself; the heartbeat renews the lease. With none
+        due the loop does not sleep at all.
+        """
+        now = self._read()
+        wake = [due] if due is not None and due > now else []
+        if self._controls is not None:
+            wake.append(now + self._config.control_poll_interval)
+        if not self._deadline_stop:
+            wake.append(self._shell.record.envelope.core.run.deadline_at)
+        await self._race(max(min(wake) - now, 0.0) if wake else None)
+
+    async def _race(self, seconds: float | None) -> None:
+        """Wait for a request to finish, the operator to stop, or ``seconds`` to pass."""
+        waiting: list[asyncio.Future[Any]] = [
+            asyncio.ensure_future(self._shell.wait_for_flight()),
+            asyncio.ensure_future(self._woken.wait()),
+        ]
+        if seconds is not None:
+            waiting.append(
+                asyncio.create_task(
+                    self._clock.sleep(max(seconds, self._config.min_sleep)), name=WAIT_TASK
+                )
+            )
+        if self._lease is not None:
+            waiting.append(self._lease)
+        try:
+            await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in waiting:
+                if task is not self._lease:
+                    task.cancel()
+            await asyncio.gather(
+                *waiting[: len(waiting) - (self._lease is not None)], return_exceptions=True
+            )
+
+
+def _noop() -> None:
+    return None
 
 
 def _describe(core: CoreState) -> str:

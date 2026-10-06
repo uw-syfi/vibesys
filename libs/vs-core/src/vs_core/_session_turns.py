@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from . import _session_checkpoints
+from ._continuations import wait_refused_at_turn_end
 from ._evaluation_history import produce_history
 from ._proofs import (
     Proven,
@@ -1596,7 +1597,11 @@ def _apply_turn_observation(
     )
 
     observation = event.observation
-    if event.suspension is not None and observation.status != ObservationStatus.SUCCEEDED:
+    if event.suspension is not None and (
+        observation.status != ObservationStatus.SUCCEEDED
+        or wait_refused_at_turn_end(state, context, invocation, event.suspension)
+    ):
+        # A wait core cannot honor ends the turn plainly, before anything claims it.
         event = event.model_copy(update={"suspension": None})
     phase = observed_phase(invocation, event)
     invocation = invocation.model_copy(
@@ -1636,8 +1641,7 @@ def _apply_turn_observation(
         turn_result(
             event.invocation,
             observation,
-            output_schema=event.output_schema,
-            output_json=event.output_json,
+            reply=event,
             lost=released_lost,
         ),
     )

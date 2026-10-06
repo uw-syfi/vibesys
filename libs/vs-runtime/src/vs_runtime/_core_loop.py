@@ -33,6 +33,7 @@ from vs_core.api import (
     Strategy,
     StrategyState,
     Transition,
+    TurnObserved,
     orphan_waits,
     project,
     step,
@@ -51,7 +52,10 @@ from vs_runtime._core_requests import (
     ExecutorRefusal,
     OwnerEvent,
     RequestExecutors,
+    counts_toward_concurrency,
+    settles_through_core,
 )
+from vs_runtime._evaluation_jobs import awaits_submissions
 
 if TYPE_CHECKING:
     from vs_core.api import Request, Wait
@@ -82,6 +86,17 @@ class ProductionCoreTransitions:
 
 class RuntimeCommitError(RuntimeError):
     """Commit failed or lost authority; this shell cannot dispatch again."""
+
+
+class AdmissionBusyError(RuntimeCommitError):
+    """An admission arrived while a commit was in flight; the caller may try again.
+
+    The one transient admission refusal. Nothing was queued and the shell is intact,
+    unlike every other ``RuntimeCommitError``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("admission needs an idle input queue")
 
 
 class LeaseUnavailableError(RuntimeCommitError):
@@ -248,6 +263,11 @@ class _ShellLease:
         return self.shell.holds_lease(now_at=now_at)
 
 
+def _task_failure(task: asyncio.Task[Any]) -> BaseException | None:
+    """What a finished task raised, without raising it."""
+    return asyncio.CancelledError() if task.cancelled() else task.exception()
+
+
 @dataclass(frozen=True)
 class _Decide:
     now_at: float
@@ -319,14 +339,24 @@ class CoreRuntime[S: StrategyState]:
         self._halted = False
         self._strategy_wake_at: float | None = None
         self._busy = False
+        # Authorized requests whose executors are still running. They outlive the calls
+        # that start them, so the run loop can decide, tick the clock and read controls
+        # while they run; only `settle` completes them.
+        self._flights: list[_Flight] = []
         self._dispatched = 0
         self._authorizations = 0
         self._last_kind: str | None = None
+        self._kinds: dict[str, int] = {}
+        # A delivery failure waits here, with publishing paused, until nothing is running.
+        self._publication_failure: OSError | ContractError | None = None
         # Latest time a lease renewal or check supplied; commits never use an earlier time.
         self._time_floor = 0.0
         self._queue: deque[_Input[S] | _Decide] = deque()
-        # State after the admitted inputs still queued, valid at one storage revision.
-        self._tail: tuple[int | None, CoreState] | None = None
+        # Durable turn ends whose wait names a job its submission has not made core's yet.
+        self._held: list[_Input[S]] = []
+        # State after the admitted inputs still queued, valid while core stays at one revision
+        # (a publication or lease commit changes the storage revision, not core).
+        self._tail: tuple[int, CoreState] | None = None
         # The (run, registry) values `_check_identity` last accepted. Both are frozen, so
         # the same objects always give the same verdict.
         self._identity_verified: tuple[object, object] | None = None
@@ -465,6 +495,7 @@ class CoreRuntime[S: StrategyState]:
                 self._record = previous_record
             raise
         # Owner events committed with an observation before a crash resume here.
+        self._held.clear()
         self._queue.extend(
             _Input[S](event=event, now_at=now_at, durable=True)
             for event in self.record.pending_inputs
@@ -536,17 +567,28 @@ class CoreRuntime[S: StrategyState]:
         """
         self._require_active(queue_only=True)
         tail = self._tail
-        if tail is not None and tail[0] == self._storage_revision:
+        if tail is not None and tail[0] == self.record.envelope.core.revision:
             base = tail[1]
         elif self._queue:
-            message = "admission needs an idle input queue"
-            raise RuntimeCommitError(message)
+            raise AdmissionBusyError
         else:
             base = self.record.envelope.core
         transition = self._transitions.step(base, event)
         self._queue.append(_Input[S](event=event, now_at=now_at))
-        self._tail = (self._storage_revision, transition.state)
+        self._tail = (self.record.envelope.core.revision, transition.state)
         return transition
+
+    @property
+    def admitted_core(self) -> CoreState:
+        """Core's state after the admitted inputs still queued, or the committed state.
+
+        An agent's tool call is admitted while the loop keeps committing, so what the call
+        asked for (a submission, which owns a job) may not be committed yet. A caller that
+        asks core whether a later call is valid asks this state.
+        """
+        core = self.record.envelope.core
+        tail = self._tail
+        return tail[1] if tail is not None and tail[0] == core.revision else core
 
     @property
     def strategy_wake_at(self) -> float | None:
@@ -575,6 +617,9 @@ class CoreRuntime[S: StrategyState]:
         if not self._queue:
             return False
         item = self._queue.popleft()
+        if isinstance(item, _Input) and self._awaits_submissions(item):
+            self._held.append(item)
+            return True
         if isinstance(item, _Decide):
             if self.record.envelope.core.intents.recovery.phase != RecoveryPhase.READY:
                 raise ContractError(("recovery",), "strategy proposals require ready recovery")
@@ -600,9 +645,52 @@ class CoreRuntime[S: StrategyState]:
                 self._halted = True
                 raise ObservationRejectedError(item.executed, error) from error
             if item.durable:
+                if self._end_turn_without_wait(item):
+                    return True
                 self._halted = True
                 raise OwnerEventRejectedError(item.event, error) from error
             raise
+        return True
+
+    def _awaits_submissions(self, item: _Input[S]) -> bool:
+        """Whether a turn end carries a wait on jobs whose submissions are still in flight.
+
+        An agent submits a measurement and waits on it in one turn, so the turn is observed
+        before the submission's request has run. The turn end stays in the outbox, and
+        is committed once the jobs are owned, when core's wait gate can judge it; or, once
+        a submission ended without a job, when that gate refuses it and the turn ends plainly.
+        """
+        event = item.event
+        return (
+            item.durable
+            and isinstance(event, TurnObserved)
+            and event.suspension is not None
+            and awaits_submissions(self.record.envelope.core, event.suspension.jobs)
+        )
+
+    def _release_held(self) -> None:
+        """Queue the held turn ends whose submissions are no longer in flight, in hold order."""
+        ready = [item for item in self._held if not self._awaits_submissions(item)]
+        if ready:
+            self._held = [item for item in self._held if item not in ready]
+            self._queue.extendleft(reversed(ready))
+
+    def _end_turn_without_wait(self, item: _Input[S]) -> bool:
+        """Replace a rejected turn event that carries a wait with the same turn ending plainly.
+
+        The wait is an agent tool call, and a tool call must never halt the run. Turns in
+        one scope can run at once, so a wait the tool bridge accepted from committed state
+        can be refused at commit by a peer's. The agent's turn already ran; it ends without
+        suspending. Returns False when the event carries no wait, or when ending it plainly
+        is rejected too (a committed-state inconsistency, which does halt).
+        """
+        event = item.event
+        if not isinstance(event, TurnObserved) or event.suspension is None:
+            return False
+        ended = event.model_copy(update={"suspension": None})
+        pending = tuple(ended if p == event else p for p in self.record.pending_inputs)
+        self._commit(self.record.model_copy(update={"pending_inputs": pending}), item.now_at)
+        self._queue.appendleft(_Input[S](event=ended, now_at=item.now_at, durable=True))
         return True
 
     def _consume(self, item: _Input[S], transition: Transition | None = None) -> None:
@@ -647,6 +735,7 @@ class CoreRuntime[S: StrategyState]:
         self._queue.extend(
             _Input[S](event=event, now_at=item.now_at, durable=True) for event in item.owner_events
         )
+        self._release_held()
 
     def _commit(self, candidate: RuntimeRecord[S], now_at: float) -> None:
         # One serialization per commit. What the candidate must satisfy is checked on the
@@ -718,11 +807,16 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime inactive, busy or commit unconfirmed"
             raise RuntimeCommitError(message)
 
-    def _authorized(self) -> tuple[Intent, Transition] | None:
-        """Ask core for dispatch authority; blocked prerequisites remain pending."""
+    def _authorized(self, *, exempt_only: bool = False) -> tuple[Intent, Transition] | None:
+        """Ask core for dispatch authority; blocked prerequisites remain pending.
+
+        ``exempt_only`` considers only requests that never wait for a free slot.
+        """
         core = self.record.envelope.core
         for intent in core.intents.intents:
             if intent.phase != IntentPhase.PREPARED:
+                continue
+            if exempt_only and counts_toward_concurrency(intent.request):
                 continue
             try:
                 transition = self._transitions.step(
@@ -753,10 +847,16 @@ class CoreRuntime[S: StrategyState]:
         except BaseException:
             self._halted = True
             raise
-        self._finish(started)
+        try:
+            self._finish(started)
+        except BaseException:
+            self._halted = True
+            raise
         return DispatchProgress.DISPATCHED
 
-    def _start(self, *, now_at: float) -> ExecutorRefusal | _Flight | None:
+    def _start(
+        self, *, now_at: float, exempt_only: bool = False
+    ) -> ExecutorRefusal | _Flight | None:
         """Authorize the next prepared request durably and start its executor.
 
         Synchronous: the commit and the task start cannot interleave with another commit.
@@ -766,7 +866,7 @@ class CoreRuntime[S: StrategyState]:
         if self._queue:
             message = "consume queued inputs before dispatch"
             raise RuntimeError(message)
-        authorized = self._authorized()
+        authorized = self._authorized(exempt_only=exempt_only)
         if authorized is None:
             return None
         intent, transition = authorized
@@ -818,28 +918,25 @@ class CoreRuntime[S: StrategyState]:
         )
 
     def _finish(self, flight: _Flight) -> str:
-        """Validate a finished executor's result and queue its observation; returns the kind."""
+        """Validate a finished executor's result and queue its observation; returns the kind.
+
+        Raises what the executor raised. The caller halts the shell on any failure.
+        """
+        return self._accept(flight, flight.task.result())
+
+    def _accept(self, flight: _Flight, outcome: ExecutionOutcome) -> str:
         intent = flight.intent
-        try:
-            outcome = flight.task.result()
-        except BaseException:
-            self._halted = True
-            raise
         if isinstance(outcome, ExecutorRefusal):
-            self._halted = True
             raise RuntimeExecutionError(
                 intent.request_id, f"executor refused after authorization: {outcome.detail}"
             )
-        try:
-            self._validate_observation(intent.request, outcome.observation.observation)
-            observed = self._registry.validate_event(outcome.observation)
-            for event in outcome.owner_events:
-                self._validate_owner_event(intent.request, event)
-        except ContractError:
-            self._halted = True
-            raise
+        self._validate_observation(intent.request, outcome.observation.observation)
+        observed = self._registry.validate_event(outcome.observation)
+        for event in outcome.owner_events:
+            self._validate_owner_event(intent.request, event)
         self._dispatched += 1
         self._last_kind = intent.request.kind
+        self._kinds[intent.request.kind] = self._kinds.get(intent.request.kind, 0) + 1
         self._queue.append(
             _Input[S](
                 event=observed,
@@ -916,41 +1013,86 @@ class CoreRuntime[S: StrategyState]:
             self._busy = False
         return True
 
-    def _check_cap(
-        self, cap: int | None, started: int, in_flight: int, kinds: dict[str, int]
-    ) -> None:
-        if cap is not None and self._dispatched + in_flight - started > cap:
-            raise DispatchCapExceededError(cap, kinds)
+    def _check_cap(self, cap: int | None) -> None:
+        if cap is not None and self._dispatched + len(self._flights) > cap:
+            raise DispatchCapExceededError(cap, self._kinds)
 
-    def _finish_done(self, flights: list[_Flight], kinds: dict[str, int]) -> bool:
-        """Queue the observations of finished flights, ties in authorization order."""
-        done = sorted((f for f in flights if f.task.done()), key=lambda f: f.order)
+    @property
+    def in_flight(self) -> tuple[Request, ...]:
+        """The requests whose executors are running, in authorization order."""
+        return tuple(flight.intent.request for flight in self._flights)
+
+    @property
+    def stop_ends_in_core(self) -> bool:
+        """Whether core will end every running request itself once a stop is committed.
+
+        True when each is a cancellation, or a turn core has asked to cancel. A request
+        with no cancellation in core (a measurement submission, a job poll) ends on its
+        own or not at all, so a stop that finds one cannot finish through core.
+        """
+        intents = self.record.envelope.core.intents.intents
+        return all(settles_through_core(f.intent.request, intents) for f in self._flights)
+
+    def _finish_done(self) -> bool:
+        """Queue the observations of finished flights, ties in authorization order.
+
+        A flight that failed does not drop the observations of the flights that finished
+        with it: those are committed first. The failure then halts the shell, and the
+        peers still running are cancelled by the caller, because a halted shell can no
+        longer commit what they would return. Their intents stay DISPATCHED, like the
+        failed one, for the next epoch to inspect.
+        """
+        done = sorted((f for f in self._flights if f.task.done()), key=lambda f: f.order)
+        failure: BaseException | None = None
+        queued = len(self._queue)
         for flight in done:
-            flights.remove(flight)
-            kind = self._finish(flight)
-            kinds[kind] = kinds.get(kind, 0) + 1
+            self._flights.remove(flight)
+            error = _task_failure(flight.task)
+            if error is None:
+                try:
+                    self._finish(flight)
+                except (ContractError, RuntimeExecutionError) as rejected:
+                    error = rejected
+            failure = failure or error
+        if failure is not None:
+            self._halt_with(failure, commit=len(self._queue) > queued)
         return bool(done)
+
+    def _halt_with(self, failure: BaseException, *, commit: bool) -> None:
+        """Commit what finished flights queued beside the failure, then halt and raise it.
+
+        With no such observation nothing commits: a failing request is not a reason to
+        write anything else.
+        """
+        try:
+            while commit and not self._halted and self._queue:
+                self.advance()
+        finally:
+            self._halted = True
+        raise failure
 
     def _start_available(
         self,
-        flights: list[_Flight],
         now_at: float,
         max_concurrent: int,
-        cap: tuple[int | None, int, dict[str, int]],
+        cap: int | None,
     ) -> ExecutorRefusal | None:
-        """Start eligible requests until ``max_concurrent`` run; returns a refusal if one hit."""
+        """Start eligible requests while a slot is free; returns a refusal if one hit.
+
+        Cancellations start whether or not a slot is free.
+        """
         if max_concurrent < 1:
             message = "max_concurrent must be at least 1"
             raise ValueError(message)
-        while len(flights) < max_concurrent:
-            self._check_cap(cap[0], cap[1], len(flights), cap[2])
-            began = self._start(now_at=now_at)
+        while True:
+            self._check_cap(cap)
+            occupied = sum(1 for f in self._flights if counts_toward_concurrency(f.intent.request))
+            began = self._start(now_at=now_at, exempt_only=occupied >= max_concurrent)
             if isinstance(began, ExecutorRefusal):
                 return began
             if began is None:
                 return None
-            flights.append(began)
-        return None
+            self._flights.append(began)
 
     @staticmethod
     def _idle_result(
@@ -972,16 +1114,80 @@ class CoreRuntime[S: StrategyState]:
         except (OSError, ContractError) as error:
             return False, error
 
-    async def _abandon(self, flights: list[_Flight]) -> None:
-        """Halt and cancel flights the loop will not complete (failure, stop or cancellation).
+    async def abandon(self) -> None:
+        """Halt and cancel the running requests the loop will not complete.
 
+        For a failure, a stop that core cannot carry out, or the cancellation of the loop.
         Their intents stay DISPATCHED, so the next epoch inspects them.
         """
         self._halted = True
+        flights = list(self._flights)
+        self._flights.clear()
         for flight in flights:
             flight.task.cancel()
         await asyncio.gather(*(f.task for f in flights), return_exceptions=True)
-        flights.clear()
+
+    async def wait_for_flight(self) -> None:
+        """Return once a running request has finished (at once when one already has).
+
+        Does not complete anything: ``settle`` commits the finished request's observation.
+        Returns immediately when nothing is running.
+        """
+        if self._flights:
+            await asyncio.wait([f.task for f in self._flights], return_when=asyncio.FIRST_COMPLETED)
+
+    async def settle(
+        self,
+        delivery: PublicationDelivery,
+        *,
+        now_at: float,
+        max_dispatches: int | None = None,
+        max_concurrent: int = 1,
+        refusal: ExecutorRefusal | None = None,
+    ) -> ExecutorRefusal | None:
+        """Do everything that does not wait for a running request, then return.
+
+        Commits the input queue and the finished requests' observations, publishes the
+        outbox, and starts prepared requests while a slot is free. Requests that are
+        still running stay running and are completed by a later ``settle``, so the caller
+        can decide, tick the clock and read controls while they run. A refusal (an unbound
+        role) is returned; passing a refusal already hit starts nothing more.
+
+        Publication is diagnostic, so a failing delivery never blocks dispatch
+        (cancellations must still go out). Publishing stops after the first failure and
+        that failure is re-raised once nothing is running.
+
+        Only this method authorizes, commits and queues observations, so the record has
+        one writer; observations commit in completion order, same-tick completions in
+        authorization order. A failure cancels the requests still running (see
+        ``_finish_done``). ``max_dispatches`` bounds the requests executed from now on:
+        a cycle that keeps issuing requests raises ``DispatchCapExceededError`` naming the
+        kinds seen, so a spinning run fails loudly instead of hanging.
+        """
+        entered = self._dispatched
+        try:
+            while True:
+                # A failed request surfaces before anything else commits.
+                if self._finish_done():
+                    continue
+                if self.advance():
+                    continue
+                if self._publication_failure is None:
+                    published, self._publication_failure = await self._try_publish(delivery, now_at)
+                    if published or self._publication_failure is not None:
+                        # The await let tools admit inputs and heartbeats commit: consume
+                        # them before the next request starts.
+                        continue
+                if refusal is None:
+                    budget = None if max_dispatches is None else max_dispatches + entered
+                    refusal = self._start_available(now_at, max_concurrent, budget)
+                if self._flights:
+                    return refusal
+                failure, self._publication_failure = self._publication_failure, None
+                return self._idle_result(refusal, failure)
+        except BaseException:
+            await self.abandon()
+            raise
 
     async def run_until_idle(
         self,
@@ -991,45 +1197,33 @@ class CoreRuntime[S: StrategyState]:
         max_dispatches: int | None = None,
         max_concurrent: int = 1,
     ) -> ExecutorRefusal | None:
-        """Drive the input queue, prepared intents and committed publication outbox.
+        """``settle`` repeatedly, waiting for running requests, until none is running.
 
-        Publication is diagnostic, so a failing delivery never blocks dispatch
-        (cancellations must still go out). Publishing stops after the first
-        failure, dispatch continues to idle, and that failure is then re-raised.
-
-        Up to ``max_concurrent`` authorized requests execute at once. Only this loop
-        authorizes, commits and queues observations, so the record has one writer;
-        observations commit in completion order, same-tick completions in authorization
-        order. A refusal (unbound role) stops new starts, lets the requests already
-        executing finish and commit, then is returned.
-
-        ``max_dispatches`` bounds the requests executed by this call. A cycle that keeps
-        issuing requests raises ``DispatchCapExceededError`` naming the kinds seen, so a
-        spinning run fails loudly instead of hanging.
+        A refusal stops new starts, lets the requests already running finish and commit,
+        then is returned. ``max_dispatches`` bounds the requests executed by this call.
         """
-        publication_error: OSError | ContractError | None = None
-        started = self._dispatched
-        kinds: dict[str, int] = {}
-        flights: list[_Flight] = []
         refusal: ExecutorRefusal | None = None
-        try:
-            while True:
-                if self.advance():
-                    continue
-                if publication_error is None:
-                    published, publication_error = await self._try_publish(delivery, now_at)
-                    if published:
-                        continue
-                if self._finish_done(flights, kinds):
-                    continue
-                if refusal is None:
-                    refusal = self._start_available(
-                        flights, now_at, max_concurrent, (max_dispatches, started, kinds)
-                    )
-                if not flights:
-                    return self._idle_result(refusal, publication_error)
-                await asyncio.wait([f.task for f in flights], return_when=asyncio.FIRST_COMPLETED)
-                self._finish_done(flights, kinds)
-        finally:
-            if flights:
-                await self._abandon(flights)
+        first = self._dispatched
+        while True:
+            refusal = await self.settle(
+                delivery,
+                now_at=now_at,
+                max_dispatches=None
+                if max_dispatches is None
+                else max_dispatches - (self._dispatched - first),
+                max_concurrent=max_concurrent,
+                refusal=refusal,
+            )
+            if not self._flights:
+                return refusal
+            await self.wait_for_flight()
+
+    async def finish_in_flight(
+        self, delivery: PublicationDelivery, *, now_at: float, refusal: ExecutorRefusal
+    ) -> None:
+        """Let the running requests finish and commit after ``refusal``, starting nothing."""
+        while True:
+            await self.settle(delivery, now_at=now_at, refusal=refusal)
+            if not self._flights:
+                return
+            await self.wait_for_flight()
