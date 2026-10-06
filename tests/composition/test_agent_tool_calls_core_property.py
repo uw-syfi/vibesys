@@ -202,6 +202,11 @@ class ShellView:
         """The state the bridge reads."""
         return self.shown if self.shown is not None else self._shell.record.envelope.core
 
+    @property
+    def admitted_core(self) -> CoreState:
+        """The state the bridge reads, with the shell's admitted inputs."""
+        return self.shown if self.shown is not None else self._shell.admitted_core
+
     def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
         """The real shell's admission, unless a test made the shell fail."""
         if self.admit_error is not None:

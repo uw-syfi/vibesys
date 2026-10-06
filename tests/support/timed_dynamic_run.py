@@ -43,7 +43,6 @@ from vibesys.orchestration.dynamic.strategy.api import (
     DynamicStrategyState,
     dynamic_operation_registry,
 )
-from vibesys.run.core_run import LEASE_SECONDS
 from vs_core.api import (
     CancelTurn,
     DispatchTurn,
@@ -61,6 +60,7 @@ from vs_core.api import (
 )
 from vs_core.testing.drive import Answer, Harness, Running, Succeeded, new_run
 from vs_project.api import FakeStateStore, StoreFence
+from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS as LEASE_SECONDS
 from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,

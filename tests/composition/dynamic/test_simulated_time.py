@@ -32,8 +32,8 @@ from tests.support.timed_dynamic_run import (
     run_timed,
 )
 
-from vibesys.run.core_run import LEASE_SECONDS
 from vs_core.api import RunStatus
+from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS as LEASE_SECONDS
 from vs_runtime.api.infrastructure import RunStopped
 from vs_slurm.api import SecondsRange, SlurmTimingProfile
 

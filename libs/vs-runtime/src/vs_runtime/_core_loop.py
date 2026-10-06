@@ -575,6 +575,18 @@ class CoreRuntime[S: StrategyState]:
         return transition
 
     @property
+    def admitted_core(self) -> CoreState:
+        """Core's state after the admitted inputs still queued, or the committed state.
+
+        An agent's tool call is admitted while the loop keeps committing, so what the call
+        asked for (a submission, which owns a job) may not be committed yet. A caller that
+        asks core whether a later call is valid asks this state.
+        """
+        core = self.record.envelope.core
+        tail = self._tail
+        return tail[1] if tail is not None and tail[0] == core.revision else core
+
+    @property
     def strategy_wake_at(self) -> float | None:
         """The time the strategy's latest proposal waits for, or None when it waits for none."""
         return self._strategy_wake_at

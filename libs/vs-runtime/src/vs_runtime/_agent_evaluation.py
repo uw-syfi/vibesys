@@ -120,6 +120,23 @@ _WAIT_REFUSALS = {
 }
 
 
+def _owned_wait(
+    core: CoreState, current: InvocationRef, handles: tuple[str, ...], deadlines: dict[str, float]
+) -> Continuation | None:
+    """The wait to check against core's job rules, or None while a submission is uncommitted.
+
+    A submission owns its job once its request's observation commits, and the loop commits
+    that after the agent's call returns. Until then core cannot say the job is owned, so only
+    the scope rules apply; the commit of the turn's suspension follows the submission's.
+    """
+    owned = {
+        row.resource_id.root for row in (*core.evaluation.jobs, *core.evaluation.registered_jobs)
+    }
+    if not set(handles) <= owned:
+        return None
+    return _continuation(current, handles, deadlines)
+
+
 def _continuation(
     current: InvocationRef, handles: tuple[str, ...], deadlines: dict[str, float]
 ) -> Continuation:
@@ -229,7 +246,12 @@ class AdmissionShell(Protocol):
 
     @property
     def record(self) -> _Record:
-        """The committed record; nothing commits while an agent turn holds the shell."""
+        """The committed record; the loop may commit while an agent turn runs."""
+        ...
+
+    @property
+    def admitted_core(self) -> CoreState:
+        """Core's state including the admitted inputs not yet committed."""
         ...
 
     def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
@@ -485,7 +507,9 @@ class AgentEvaluationBridge:
             raise ToolRefusedError(ToolRefusal.UNKNOWN_HANDLES, unknown)
         waits = tuple(dict.fromkeys(handles))
         refusal = suspension_refusal(
-            shell.record.envelope.core, turn, _continuation(turn, waits, scoped.submitted)
+            shell.admitted_core,
+            turn,
+            _owned_wait(shell.admitted_core, turn, waits, scoped.submitted),
         )
         if refusal is not None:
             raise ToolRefusedError(_WAIT_REFUSALS[refusal], waits)
@@ -513,7 +537,14 @@ class AgentEvaluationBridge:
         )
         shell, _ = self._bound()
         wait = _continuation(current, handles, deadlines)
-        if suspension_refusal(shell.record.envelope.core, current, wait) is not None:
+        if (
+            suspension_refusal(
+                shell.admitted_core,
+                current,
+                _owned_wait(shell.admitted_core, current, handles, deadlines),
+            )
+            is not None
+        ):
             # The scope changed since the wait was validated: end the turn without
             # suspending, as after a host restart. The measurements report ordinarily.
             return None
