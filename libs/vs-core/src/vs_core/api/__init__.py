@@ -1,5 +1,6 @@
 """Published pure lifecycle API. Area implementations land in wave 1."""
 
+from vs_core._continuations import SuspensionRefusal
 from vs_core._migration import v2_to_v3_migration
 from vs_core._projection import (
     attempt_view,
@@ -21,7 +22,13 @@ from vs_core._registry import (
     validate_startup,
 )
 from vs_core._session_scope import write_turn_authority
-from vs_core._step import CoreReducers, dependency_status, step, validate_terminal_inputs
+from vs_core._step import (
+    CoreReducers,
+    dependency_status,
+    step,
+    suspension_refusal,
+    validate_terminal_inputs,
+)
 from vs_core._waits import (
     Producer,
     Wait,
@@ -269,10 +276,12 @@ from vs_core.types.intents import (
     TargetObservation,
 )
 from vs_core.types.job_observations import (
+    AMBIGUOUS_SUBMISSION_LIMIT,
     JobProgress,
     JobTimeout,
     MeasurementFailure,
     TimedOut,
+    may_resubmit,
 )
 from vs_core.types.kernel import (
     AreaChange,
@@ -436,6 +445,7 @@ from vs_core.types.strategy import (
 )
 
 __all__ = [
+    "AMBIGUOUS_SUBMISSION_LIMIT",
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
@@ -790,6 +800,7 @@ __all__ = [
     "SubmissionBudget",
     "SubmissionReceipt",
     "SubmitMeasurement",
+    "SuspensionRefusal",
     "TargetObservation",
     "TimedOut",
     "TraceChange",
@@ -825,6 +836,7 @@ __all__ = [
     "dependency_status",
     "evidence_view",
     "initial_state",
+    "may_resubmit",
     "operation_result",
     "operation_trace",
     "orphan_waits",
@@ -838,6 +850,7 @@ __all__ = [
     "settle",
     "settlement_view",
     "step",
+    "suspension_refusal",
     "trace_step",
     "v2_to_v3_migration",
     "validate_startup",

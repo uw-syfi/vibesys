@@ -587,6 +587,7 @@ class _ProductHostFactory:
                 configuration=configuration,
                 clock=self.timing.clock,
                 agent_lifecycle=self.integration.agent_execution_event,
+                evaluation_diagnostics=self._evaluation_diagnostic,
                 measurement_observer=CoreMeasurementEvents(self.integration.events),
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id
@@ -623,6 +624,15 @@ class _ProductHostFactory:
             observe_backoff_cap_seconds=config.evaluation.observe_backoff_cap_seconds,
             max_run_seconds=config.run.max_run_seconds,
             lifecycle=lifecycle,
+        )
+
+    def _evaluation_diagnostic(self, line: str) -> None:
+        """Journal one agent evaluation call the run refused as busy."""
+        self.integration.events.emit(
+            CoreEventType.FRAMEWORK_WARNING,
+            data=FrameworkWarningData(
+                summary=line, source=FrameworkSource.LOOP, source_label="agent-evaluation"
+            ),
         )
 
     @staticmethod

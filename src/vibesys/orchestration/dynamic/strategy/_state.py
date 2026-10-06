@@ -219,6 +219,9 @@ class RoundRecord(Value):
     partial: PartialRow | None = None
     eligible: bool = False
     failure: str | None = None
+    # The end of what a failed trusted check printed (a crashed server's last log lines,
+    # say), kept whole so the next prompts can show its tail.
+    failure_tail: str = ""
     settlement: SettlementId | None = None
     # Whether the implementer asked to keep this direction and the lease allows it.
     kept_active: bool = False
@@ -238,6 +241,32 @@ class HypothesisRecord(Value):
     last_task: str = ""
     continuation_rounds: int = Field(default=0, ge=0)
     rounds: tuple[RoundRecord, ...] = ()
+
+
+class BlockerKind(StrEnum):
+    """Why an implementer turn ended without a candidate that reached measurement."""
+
+    FAILED = "failed"
+    REJECTED = "rejected"
+    NO_REPLY = "no_reply"
+
+
+class Blocker(Value):
+    """One turn of a workstream that ended without a measurable candidate.
+
+    ``FAILED`` is the implementer's own account (its summary and the next step it names).
+    ``REJECTED`` is the reviewer's feedback on a candidate that was not measured.
+    ``NO_REPLY`` is a turn that timed out or returned nothing usable. ``revision`` and
+    ``digest`` are what the framework observed, and the only facts that make another turn
+    worth asking: the revision the turn retained, and a digest of the failure output the
+    framework captured (empty when it captured none).
+    """
+
+    kind: BlockerKind
+    summary: str
+    next_step: str = ""
+    revision: RevisionRef | None = None
+    digest: str = ""
 
 
 class AttemptRecord(Value):
@@ -272,6 +301,9 @@ class AttemptRecord(Value):
     ready: bool = False
     # Implementer turns charged so far, bounded by `max_retries_per_round`.
     turns_spent: int = Field(default=0, ge=0)
+    # Every turn that ended without a measurable candidate, in order; its length is bounded
+    # by `max_unmeasured_turns`.
+    blockers: tuple[Blocker, ...] = ()
     # Measurements submitted for this attempt, bounded by `max_input_measurement_attempts`
     # when infrastructure interrupts them.
     measurements: int = Field(default=0, ge=0)

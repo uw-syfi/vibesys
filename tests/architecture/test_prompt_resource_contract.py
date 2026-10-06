@@ -182,6 +182,7 @@ def representative_context() -> dict[str, object]:
         "gate_approved_evaluation_artifact",
         "gate_approved_perf_unit",
         "gpu",
+        "handles",
         "history",
         "history_root",
         "hypothesis",
@@ -522,6 +523,11 @@ def core_policy_context() -> dict[str, object]:
         "base_accuracy_passed": True,
         "repeated_failure": None,
         "required_fields": (),
+        "prior_failure_tail": "AssertionError: fixture",
+        "prior_failure_fence": "```",
+        "blocker": "tests/test_engine.py::test_decode fails to import",
+        "narrowed_step": "Make the import resolve first.",
+        "turns_without_candidate": 2,
     }
 
 

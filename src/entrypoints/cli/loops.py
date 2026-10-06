@@ -274,6 +274,7 @@ def _agent_policy_descriptor(
             {
                 "max_in_flight": args.max_in_flight,
                 "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
+                "max_unmeasured_turns": args.max_unmeasured_turns,
             }
             if args.outer_loop == "dynamic"
             else {}

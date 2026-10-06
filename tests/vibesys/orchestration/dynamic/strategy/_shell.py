@@ -22,6 +22,7 @@ from tests.support.liveness import Journal
 from vs_core.api import (
     AdoptionObserved,
     AdoptRevision,
+    CancelTurn,
     CloseSession,
     CollectEvidence,
     DispatchTurn,
@@ -202,6 +203,9 @@ class ScriptedExecutors:
         key = request.request_id.root
         sequence = self._next(key)
         status, accepted, terminal = _status(answer)
+        if isinstance(request, CancelTurn) and isinstance(answer, Succeeded):
+            # A stopped turn reports cancelled and released, as the session executor does.
+            status = ObservationStatus.CANCELLED
         succeeded = isinstance(answer, Succeeded)
         observation = Observation(
             event_id=EventId(root=f"{key}:observation:{sequence}"),
@@ -388,6 +392,8 @@ def drive_shell[S: StrategyState](
     script: Script,
     harness: Harness,
     schemas: Mapping[SchemaRef, type[BaseModel]],
+    *,
+    max_concurrent: int = 1,
 ) -> Run:
     """Run ``strategy`` to the end of its run on the production shell and loop."""
     decisions: list[Decision] = []
@@ -411,7 +417,12 @@ def drive_shell[S: StrategyState](
         script.admit = lambda event, now_at: shell.admit(event, now_at=now_at)
     clock = FakeRunClock(1.0)
     host = CoreRunHost(shell, FakePublicationDelivery(store), clock)
-    config = RunLoopConfig(host_id="scenario", lease_duration=LEASE, max_dispatches=MAX_DISPATCHES)
+    config = RunLoopConfig(
+        host_id="scenario",
+        lease_duration=LEASE,
+        max_dispatches=MAX_DISPATCHES,
+        max_concurrent=max_concurrent,
+    )
     start_core(host, config)
     halted = None
     try:

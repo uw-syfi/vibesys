@@ -37,6 +37,7 @@ from vs_evaluation.api import (
     evidence_identity,
 )
 from vs_runtime._evaluation_failure_text import render_evaluation_failure, render_stage_failure
+from vs_runtime._failure_classification import is_unsettled
 from vs_runtime.contracts import BenchmarkFailureKind
 
 if TYPE_CHECKING:
@@ -250,7 +251,7 @@ class PollingEvaluationExecutor:
             kind: BenchmarkFailureKind | None = BenchmarkFailureKind.WORKLOAD
         elif stage.kind is EvidenceKind.BENCHMARK:
             result = await self._evaluation.benchmark(workspace)
-            completed = result.failure_kind is not BenchmarkFailureKind.INFRASTRUCTURE
+            completed = not is_unsettled(result.failure_kind)
             kind = result.failure_kind
             outcome = (
                 EvidenceOutcome.PASSED if completed and result.passed else EvidenceOutcome.FAILED

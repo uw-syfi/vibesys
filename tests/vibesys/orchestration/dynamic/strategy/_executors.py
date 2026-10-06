@@ -8,7 +8,7 @@ a reading and the evidence it decodes always agree.
 from __future__ import annotations
 
 import hashlib
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -82,9 +82,14 @@ def _lease(session_id: SessionId) -> ResourceId:
 class Executors:
     """Scripted answers for one run, popped in the order requests are authorized."""
 
-    planner: deque[str] = field(default_factory=deque)
-    implementer: deque[str] = field(default_factory=deque)
-    judge: deque[str] = field(default_factory=deque)
+    # A reply is the agent's JSON, or an `Answer` for a turn that ends another way (as a
+    # `Failed` turn, which returns nothing usable).
+    planner: deque[str | Answer] = field(default_factory=deque)
+    implementer: deque[str | Answer] = field(default_factory=deque)
+    judge: deque[str | Answer] = field(default_factory=deque)
+    # False retains one commit per attempt, whatever its turns did. True retains a new commit
+    # after every turn, as a worktree that changed between turns would.
+    retain_per_turn: bool = False
     # Throughput per candidate commit; None makes the benchmark fail.
     benchmark: Callable[[str], float | None] = lambda _commit: 100.0
     accuracy: Callable[[str], bool] = lambda _commit: True
@@ -103,6 +108,7 @@ class Executors:
     now_at: float = 0.0
     seen: list[Request] = field(default_factory=list)
     readings: dict[EvidenceId, EvidenceReading] = field(default_factory=dict)
+    retained: Counter[str] = field(default_factory=Counter)
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
         self.seen.append(request)
@@ -133,13 +139,16 @@ class Executors:
                 answer = Succeeded(revision=request.selection.revision)
         return answer
 
-    @staticmethod
-    def _retained(attempt: str) -> RevisionRef:
-        """The commit the workspace executor retains for an attempt, one per attempt."""
-        return RevisionRef.of_git_commit(hashlib.sha256(attempt.encode()).hexdigest()[:40])
+    def _retained(self, attempt: str) -> RevisionRef:
+        """The commit the workspace executor retains next for the attempt (see `retain_per_turn`)."""
+        name = f"{attempt}:{self.retained[attempt]}" if self.retain_per_turn else attempt
+        return RevisionRef.of_git_commit(hashlib.sha256(name.encode()).hexdigest()[:40])
 
     def _retain(self, request: SnapshotAndRetain) -> Answer:
-        return Succeeded(revision=self._retained(request.attempt.attempt_id.root))
+        attempt = request.attempt.attempt_id.root
+        revision = self._retained(attempt)
+        self.retained[attempt] += 1
+        return Succeeded(revision=revision)
 
     def _finished_agent_evaluation(self, request: SubmitMeasurement) -> Answer:
         """An agent's evaluation that ends as soon as it is accepted, with trusted evidence."""
@@ -221,10 +230,13 @@ class Executors:
         }[role]
         if not queue:
             return Unknown()
+        reply = queue.popleft()
+        if not isinstance(reply, str):
+            return reply
         if role == "implementer" and self.agent_evaluation:
             self._evaluate_from_turn(request)
         lease = _lease(request.turn.session.session_id)
-        return Succeeded(output_json=queue.popleft(), resource_id=lease)
+        return Succeeded(output_json=reply, resource_id=lease)
 
     # -- evaluator --------------------------------------------------------
 
@@ -271,7 +283,11 @@ class Executors:
         assert isinstance(plan.candidate, RevisionRef)
         return EvidenceRef(
             evidence_id=reading.evidence_id,
-            kind=reading.kind,
+            kind=(
+                EvidenceKind.LOCAL_VALIDATION
+                if plan.purpose == "local-validation"
+                else reading.kind
+            ),
             purpose=plan.purpose,
             scope=scope,
             source_request=source,

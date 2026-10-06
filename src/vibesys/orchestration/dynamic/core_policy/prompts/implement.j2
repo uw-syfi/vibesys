@@ -28,6 +28,32 @@ That is the revision your earlier attempt ended at.
 Feedback from the prior attempt:
 {{ feedback }}
 {% endif %}
+{% if blocker %}
+
+Your earlier turn on this hypothesis ended without a candidate ({{ turns_without_candidate }} such
+turn{{ 's' if turns_without_candidate != 1 }} so far). The blocker you stated:
+{{ blocker }}
+{% if narrowed_step %}
+The narrower step you named for this turn:
+{{ narrowed_step }}
+Do that step and {% if agent_evaluation %}send it for trusted evaluation{% else %}nominate it{% endif %}. Do not retry the whole task.
+{% endif %}
+Another turn that ends without a candidate settles this workstream as failed.
+{% endif %}
+{% if prior_failure_tail %}
+
+The trusted check of your earlier attempt failed. Its output ends with:
+{{ prior_failure_fence }}
+{{ prior_failure_tail }}
+{{ prior_failure_fence }}
+{% endif %}
+
+Start from the first measurable step: the smallest change to the claim that you can finish
+and submit in this turn, so the framework measures something real. Submit that step
+{% if agent_evaluation %}for trusted evaluation{% else %}as your nomination{% endif %} before you attempt
+the rest of the task. If you cannot finish a step, do not end the turn on partial work:
+state the concrete blocker (the exact file, function, check or error that stops you) and,
+in `next_step`, the narrower step that would get past it.
 
 Inspect referenced artifacts only as needed. Keep evidence in files and return compact
 references with their applicable revision. Implement and run the cheapest checks that
@@ -43,5 +69,6 @@ it to a file and read the file, instead of rerunning the check to see another pa
 After a failure, change the code before you run the check again.
 
 Return only schema-valid JSON: `summary`, `outcome` (use `nominated` only when the
-candidate is ready for independent review and framework gates) and `evidence`.
+candidate is ready for independent review and framework gates), `evidence` and, when
+the outcome is `implementation_failed`, `next_step`.
 {% include 'agent_evaluation.j2' %}

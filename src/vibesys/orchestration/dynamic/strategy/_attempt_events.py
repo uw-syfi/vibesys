@@ -5,6 +5,7 @@ decision `_attempts.advance` proposes next. Duplicate or late events find no
 matching awaiting record and leave the state unchanged.
 """
 
+import hashlib
 from typing import Literal
 
 from pydantic import TypeAdapter, ValidationError
@@ -40,11 +41,14 @@ from vibesys.orchestration.dynamic.strategy._parents import (
     ParentSnapshot,
     ingest,
 )
+from vibesys.orchestration.dynamic.strategy._progress import refusal
 from vibesys.orchestration.dynamic.strategy._prompts import ReplyCorrectionPrompt, ResumePrompt
-from vibesys.orchestration.dynamic.strategy._rows import reading_of
+from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading, reading_of
 from vibesys.orchestration.dynamic.strategy._settlement import STOPPED
 from vibesys.orchestration.dynamic.strategy._state import (
     AttemptRecord,
+    Blocker,
+    BlockerKind,
     DynamicStrategyState,
     HypothesisRecord,
     Role,
@@ -63,7 +67,6 @@ from vs_core.api import (
     EvidenceKind,
     IntentBlocked,
     InvocationRef,
-    MeasurementFailure,
     MeasurementResult,
     ObservationStatus,
     OperationResult,
@@ -74,6 +77,7 @@ from vs_core.api import (
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
+    may_resubmit,
 )
 
 _IMPLEMENTER_REPLY = TypeAdapter(ImplementerReply)
@@ -272,8 +276,10 @@ def on_measurement(
 ) -> DynamicStrategyState:
     """Record a candidate's trusted evidence keys for interpretation.
 
-    A measurement that infrastructure interrupted says nothing about the candidate, so
-    it is submitted again, within `max_input_measurement_attempts`, instead of failing it.
+    A measurement that the machinery interrupted says nothing about the candidate, and
+    one that may be either's fault might be a fluke, so both are submitted again while
+    `may_resubmit` allows it, within `max_input_measurement_attempts`. Anything else is
+    final: its evidence, failed or not, goes to interpretation, so the agent reads why.
 
     The result must come from the awaiting attempt's own scope and generation, and
     only evidence of the measured revision and purpose that core trusts is kept.
@@ -292,6 +298,14 @@ def on_measurement(
     if index is None:
         return state
     current = state.attempts[index]
+    if may_resubmit(
+        event.failure,
+        submissions=current.measurements,
+        limit=config.max_input_measurement_attempts,
+    ):
+        return _put(
+            state, index, current.model_copy(update={"step": Step.NEEDED, "awaiting": None})
+        )
     evidence = trusted_keys(
         event,
         scope=event.scope,
@@ -299,13 +313,6 @@ def on_measurement(
         purpose="profile" if current.plan.kind is WorkKind.PROFILE else "official",
     )
     if not evidence:
-        if (
-            event.failure is MeasurementFailure.INFRASTRUCTURE
-            and current.measurements < config.max_input_measurement_attempts
-        ):
-            return _put(
-                state, index, current.model_copy(update={"step": Step.NEEDED, "awaiting": None})
-            )
         reason = f"measurement produced no trusted evidence ({event.status.value})"
         return fail(state, index, f"{reason}: {event.diagnostic}" if event.diagnostic else reason)
     record = current.model_copy(
@@ -412,7 +419,11 @@ def _ask_again(
 
 
 def _retry(
-    state: DynamicStrategyState, index: int, config: DynamicConfig, feedback: str, reason: str
+    state: DynamicStrategyState,
+    index: int,
+    config: DynamicConfig,
+    feedback: str | None,
+    reason: str,
 ) -> DynamicStrategyState:
     record = state.attempts[index]
     turn = record.turn
@@ -436,6 +447,26 @@ def _retry(
         }
     )
     return _put(state, index, retried)
+
+
+def _retry_unmeasured(
+    state: DynamicStrategyState, index: int, config: DynamicConfig, blocker: Blocker, reason: str
+) -> DynamicStrategyState:
+    """Ask a workstream again after a turn that ended without a measurable candidate.
+
+    The turn is recorded, then `refusal` decides: a turn with nothing new for the agent, or
+    one past `max_unmeasured_turns`, settles the workstream as failed instead.
+    """
+    record = state.attempts[index]
+    blockers = (*record.blockers, blocker)
+    state = _put(state, index, record.model_copy(update={"blockers": blockers}))
+    refused = refusal(blockers, config, record.parent)
+    if refused is not None:
+        return fail(state, index, refused)
+    # A rejection's feedback and a lost turn's error reach the next turn as feedback; an
+    # implementer's own blocker is rendered from `blockers` by the prompt context.
+    feedback = None if blocker.kind is BlockerKind.FAILED else blocker.summary
+    return _retry(state, index, config, feedback, reason)
 
 
 def _yielded(state: DynamicStrategyState, index: int, view: RunView) -> DynamicStrategyState:
@@ -496,12 +527,13 @@ def _measure_or_settle(record: AttemptRecord, config: DynamicConfig) -> AttemptR
     )
 
 
-def _nominates(result: ImplementerResult) -> bool:
-    """Whether the reply claims a candidate, so core's checkpoint of the turn decides it."""
-    return result.outcome not in (
-        HypothesisOutcome.IMPLEMENTATION_FAILED,
-        HypothesisOutcome.BLOCKED,
-    )
+def _awaits_checkpoint(result: ImplementerResult) -> bool:
+    """Whether core's checkpoint of the turn must be read before the reply is acted on.
+
+    A nominating reply is decided by it. A failed one is judged by it too: the revision the
+    turn retained, if any, is the framework's evidence of whether the turn changed anything.
+    """
+    return result.outcome is not HypothesisOutcome.BLOCKED
 
 
 def settle_retained(
@@ -552,7 +584,13 @@ def _implemented(
     )
     state = _put(state, index, record)
     if result.outcome is HypothesisOutcome.IMPLEMENTATION_FAILED:
-        return _retry(state, index, config, result.summary, "implementation failed")
+        blocker = Blocker(
+            kind=BlockerKind.FAILED,
+            summary=result.summary,
+            next_step=result.next_step,
+            revision=candidate,
+        )
+        return _retry_unmeasured(state, index, config, blocker, "implementation failed")
     if result.outcome is HypothesisOutcome.BLOCKED:
         return _put(
             state, index, record.model_copy(update={"phase": WorkPhase.SETTLE, "step": Step.NEEDED})
@@ -580,9 +618,9 @@ def _reviewed(
     state = _put(state, index, record)
     if result.passed:
         return _put(state, index, _measure_or_settle(record, config))
-    return _retry(
-        state, index, config, result.feedback or result.analysis, "review rejected the candidate"
-    )
+    feedback = result.feedback or result.analysis
+    blocker = Blocker(kind=BlockerKind.REJECTED, summary=feedback, revision=record.candidate)
+    return _retry_unmeasured(state, index, config, blocker, "review rejected the candidate")
 
 
 def _decode(
@@ -610,7 +648,13 @@ def _unfinished(
         return _ask_again(state, index, config, event, view.run.now_at)
     reason = f"{role.value} turn did not complete ({event.observation.status.value})"
     if role is Role.IMPLEMENTER:
-        return _retry(state, index, config, event.detail or reason, reason)
+        detail = event.detail or reason
+        blocker = Blocker(
+            kind=BlockerKind.NO_REPLY,
+            summary=detail,
+            digest=hashlib.sha256(" ".join(detail.split()).encode()).hexdigest(),
+        )
+        return _retry_unmeasured(state, index, config, blocker, reason)
     return fail(state, index, reason)
 
 
@@ -649,7 +693,7 @@ def _answered(
         return _yielded(state, index, view)
     if isinstance(reply, ImplementerResult):
         candidate = turn_candidate(view, state.attempts[index].attempt, event.invocation)
-        if candidate is None and _nominates(reply):
+        if candidate is None and _awaits_checkpoint(reply):
             return _put(
                 state,
                 index,
@@ -725,6 +769,20 @@ def on_exhausted(state: DynamicStrategyState, event: AttemptExhausted) -> Dynami
     return fail(state, index, f"attempt budget exhausted ({event.reason})")
 
 
+def _failure_tail(
+    record: AttemptRecord, benchmark: AcceptedReading | None, accuracy: AcceptedReading | None
+) -> str:
+    """What the round's failed trusted check printed, else why the measurement failed.
+
+    A benchmark that crashed the server leaves its output in the reading's feedback; that
+    text, not the agent's summary, is what tells the next agent why the candidate failed.
+    """
+    for reading in (benchmark, accuracy):
+        if reading is not None and not reading.passed and reading.feedback:
+            return reading.feedback
+    return record.failure or ""
+
+
 def _round(record: AttemptRecord, settled: AttemptSettled, config: DynamicConfig) -> RoundRecord:
     accuracy = reading_of(record.readings, EvidenceKind.CORRECTNESS)
     benchmark = reading_of(record.readings, EvidenceKind.BENCHMARK)
@@ -747,6 +805,7 @@ def _round(record: AttemptRecord, settled: AttemptSettled, config: DynamicConfig
         partial=None if benchmark is None else benchmark.partial,
         eligible=settled.settlement.eligible,
         failure=record.failure,
+        failure_tail=_failure_tail(record, benchmark, accuracy),
         settlement=settled.settlement.settlement_id,
         kept_active=kept,
     )

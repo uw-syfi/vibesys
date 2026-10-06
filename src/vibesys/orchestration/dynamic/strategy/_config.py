@@ -31,6 +31,9 @@ class DynamicConfig(BaseModel):
     max_in_flight: Positive = 2
     judge_every: Positive = 1
     max_retries_per_round: Positive = 1
+    # Turns of one workstream that may end without a candidate reaching measurement (a
+    # failed implementation or a rejected review) before it settles as failed.
+    max_unmeasured_turns: Positive = 2
     # Planner correction bound: the first reply plus this many corrections.
     max_corrections: Annotated[int, Field(ge=0)] = 1
     # Turns the provider connection drops before a reply: each is asked again, up to this
@@ -77,6 +80,7 @@ class DynamicConfig(BaseModel):
                 "max_in_flight": options.max_in_flight,
                 "judge_every": options.judge_every,
                 "max_retries_per_round": options.max_retries_per_round,
+                "max_unmeasured_turns": options.max_unmeasured_turns,
                 "metric_space": options.metric_space,
                 "turn_drop_backoff_seconds": options.turn_drop_backoff_seconds,
                 **overrides,

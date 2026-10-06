@@ -43,10 +43,13 @@ def cleanup_pending(state: CoreState) -> bool:
                 for job in (*state.evaluation.jobs, *state.evaluation.registered_jobs)
             ),
             any(
-                intent.phase != IntentPhase.COMPLETED
-                or (
-                    intent.lifecycle in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
-                    and (not _intent_release_confirmed(intent, state.intents.intents))
+                not _blocked_unnamed(intent)
+                and (
+                    intent.phase != IntentPhase.COMPLETED
+                    or (
+                        intent.lifecycle in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
+                        and (not _intent_release_confirmed(intent, state.intents.intents))
+                    )
                 )
                 for intent in state.intents.intents
             ),
@@ -62,6 +65,25 @@ def cleanup_pending(state: CoreState) -> bool:
                 _invocation_pending(state, invocation) for invocation in state.sessions.invocations
             ),
         )
+    )
+
+
+def _blocked_unnamed(intent: Intent) -> bool:
+    """A blocked intent that was never accepted and named nothing owns nothing to release.
+
+    Reconciliation blocked it after its executor answered without a conclusion. With the
+    launch unaccepted and no resource or children in that answer there is no identity left
+    to cancel or wait on, so the block ends the intent's claim on the run's closure; the strategy has
+    already been told (``IntentBlocked``). A blocked intent that named a resource still
+    holds closure until that resource is proven released.
+    """
+    observation = intent.observation
+    return (
+        intent.phase == IntentPhase.BLOCKED
+        and observation is not None
+        and not observation.accepted
+        and observation.resource_id is None
+        and not observation.children
     )
 
 

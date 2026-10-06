@@ -1010,7 +1010,7 @@ depends_on = ["vs_core.types.common", "vs_core._outcomes"]
 
 [[interfaces]]
 from = ["vs_core.types"]
-expose = ["[a-z_]+\\.[A-Z].*", "intents\\.request_lifecycle"]
+expose = ["[a-z_]+\\.[A-Z].*", "intents\\.request_lifecycle", "job_observations\\.may_resubmit"]
 
 [[modules]]
 path = "vs_core.types.common"

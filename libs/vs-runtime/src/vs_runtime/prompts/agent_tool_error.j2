@@ -1,0 +1,18 @@
+{# Context: `reason` (ToolRefusal value), `handles` (list[str], unknown handles). Text an agent reads when an evaluation tool call is refused. No trailing newline. #}
+{% if reason == "run_stopping" %}the run is stopping; finish your turn without evaluating
+{%- elif reason == "not_admitted" %}this workspace is no longer a current owner of evaluations; finish your turn without evaluating
+{%- elif reason == "invalid_plan" %}the candidate has no revision to evaluate; commit your change, then submit again
+{%- elif reason == "not_allowed" %}the run's submission budget for this exact candidate is spent, or the plan exceeds a run limit or its deadline; change the candidate before submitting again
+{%- elif reason == "workspace_gone" %}this workspace no longer exists; finish your turn without evaluating
+{%- elif reason == "turn_ended" %}this turn has ended, so the run takes no more evaluation calls from it; do not call this tool again
+{%- elif reason == "unknown_handles" %}handles {{ handles | join(", ") }} were not submitted by this agent in this turn; wait only on handles that submit_evaluation returned to you in this turn
+{%- elif reason == "wait_open" %}this workspace already has an evaluation wait that the run has not resumed yet, so a second wait cannot be recorded; do not call validate_evaluation_wait, and finish your turn with your normal reply. Your submission still runs and its result reaches the run
+{%- elif reason == "wait_not_active" %}the run no longer accepts a wait for this workspace (the run is stopping or this workspace was retired); finish your turn with your normal reply
+{%- elif reason == "wait_not_resumable" %}this workspace has used its last turn allowance, so the run cannot resume you after a wait; do not call validate_evaluation_wait, and finish this turn with your normal reply. Your submission still runs and its result reaches the run
+{%- elif reason == "wait_overlapped" %}this turn started while an earlier evaluation of this workspace was still running, so the run cannot resume you after a wait; do not call validate_evaluation_wait, and finish this turn with your normal reply. Your submission still runs and its result reaches the run
+{%- elif reason == "run_failing" %}the run hit an internal error and is ending; finish your turn without evaluating
+{%- elif reason == "busy" %}the run could not take this call right now; call the tool again
+{%- elif reason == "malformed" %}malformed evaluation call; send exactly the fields the tool schema lists
+{%- elif reason == "unknown_caller" %}unknown evaluation token; this tool only works in the turn it was issued for
+{%- else %}the run refused this evaluation call
+{%- endif %}

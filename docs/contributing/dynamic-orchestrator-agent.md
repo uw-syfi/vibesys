@@ -371,8 +371,8 @@ code with the same field path.
   `wall_minutes` bounds elapsed time.
 - **Workstream count.** The minimum charge bounds the number of starts at
   `slot_minutes / 2`. That value replaces `max_rounds * max_in_flight` as the
-  hypothesis search's round limit and the projected maximum round count in
-  agent mode.
+  hypothesis search's round limit. The `run_started` event keeps reporting the
+  operator's `max_rounds`.
 - **r15 under this rule.** The 7 no-edit dispatches cost only their real
   minutes, so budget remains and the second slot does not idle for 44.4
   slot-minutes. Cancelling `mi210_continuous_batching` after the second
