@@ -47,6 +47,7 @@ if TYPE_CHECKING:
         OrchestrationPlugin,
         OrchestrationResumeDecision,
     )
+    from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
         RunState,
@@ -89,6 +90,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     ]
     | None = None,
     stop_timer: StopTimer,
+    timing: RunTiming,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore],
 ) -> RunEnd:
     """Compose the private runtime host and run one validated plugin.
@@ -112,6 +114,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
             plugin=plugin,
             options=options,
             stop_timer=stop_timer,
+            timing=timing,
             invocation_store_factory=invocation_store_factory,
         ) as core_host:
             return await drive_core_run(core_host, integration)
@@ -307,6 +310,7 @@ class _LocalRunSession:
                 backend_factory=self._implementations.backend_factory,
                 agent_tool_bindings=self._implementations.agent_tool_bindings,
                 stop_timer=self._implementations.stop_timer,
+                timing=self._implementations.timing,
                 invocation_store_factory=self._implementations.invocation_store_factory,
             )
             succeeded = outcome.status.value == "succeeded"
