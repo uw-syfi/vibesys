@@ -272,7 +272,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
     )
 
     async def exercise() -> RunStatus:
-        return await run_plugin(
+        end = await run_plugin(
             request,
             integration,
             plugin,
@@ -283,6 +283,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
             timing=RunTiming(FakeRunClock(), 60.0),
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
         )
+        return end.status
 
     try:
         status = asyncio.run(exercise())

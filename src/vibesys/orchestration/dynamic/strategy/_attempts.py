@@ -11,6 +11,7 @@ whether a turn is dispatched or a slot is held stay in core.
 
 from vibesys.orchestration.dynamic.strategy import _context as context
 from vibesys.orchestration.dynamic.strategy import _ids as ids
+from vibesys.orchestration.dynamic.strategy import _review_evidence as review_evidence
 from vibesys.orchestration.dynamic.strategy._baseline import stages
 from vibesys.orchestration.dynamic.strategy._draft import (
     Draft,
@@ -50,6 +51,7 @@ from vibesys.orchestration.dynamic.strategy._state import (
 from vs_core.api import (
     Access,
     AttemptBudget,
+    EvidenceRef,
     Measure,
     RevisionRef,
     SchemaRef,
@@ -181,7 +183,17 @@ def _default_context(record: AttemptRecord, draft: Draft) -> PromptContext:
         return context.implement_prompt(record, draft.state)
     if record.phase is WorkPhase.PROFILE:
         return context.profile_prompt(record)
-    return context.review_prompt(record)
+    return context.review_prompt(record, draft.view)
+
+
+def _read_review_evidence(
+    draft: Draft, record: AttemptRecord, refs: tuple[EvidenceRef, ...]
+) -> AttemptRecord:
+    """Ask the evidence owner to decode the candidate's trusted evaluations before it is judged."""
+    identifier = ids.decision_id("review-evidence", key_of(record), record.next_serial)
+    scope = attempt_scope(draft.view, record.attempt, record.generation)
+    draft.emit(operation(draft, identifier, scope, InterpretEvidence(evidence=refs)))
+    return record.model_copy(update={"step": Step.AWAITING, "awaiting": identifier})
 
 
 def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
@@ -190,6 +202,10 @@ def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
     subject = subject_of(record, role)
     scope = attempt_scope(draft.view, record.attempt, record.generation)
     if record.step is Step.NEEDED:
+        if record.phase is WorkPhase.REVIEW and (
+            refs := review_evidence.awaits_reading(record, draft.view)
+        ):
+            return _read_review_evidence(draft, record, refs)
         if not draft.due(turn):
             return record
         body = turn.context or _default_context(record, draft)

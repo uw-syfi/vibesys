@@ -10,7 +10,7 @@ from typing import Protocol
 
 from vibesys.config import Config
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.events import CoreEvent, EventStatus
+from vibesys.events import CoreEvent, EventStatus, RunFailure, RunFailureKind
 from vibesys.run.contracts import (
     PluginProjection,
     ProfilerKind,
@@ -35,6 +35,8 @@ __all__ = [
     "PluginProjection",
     "ProfilerKind",
     "ResumeRef",
+    "RunFailure",
+    "RunFailureKind",
     "RunRequest",
     "RunResult",
     "RunStatus",

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 from jinja2 import Environment, meta
 
-from vs_core.api import RevisionId, RevisionRef
+from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionId, RevisionRef
 
 if __name__ != "packaged_prompt_contract":
     from tests.support import run_test_command
@@ -35,7 +35,7 @@ from vibesys.orchestration.dynamic.prompts import (
     FailureTail,
     RepeatedFailureLine,
 )
-from vibesys.orchestration.dynamic.strategy.api import PlannerPrompt
+from vibesys.orchestration.dynamic.strategy.api import PlannerPrompt, ReviewEvaluation
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
@@ -496,7 +496,17 @@ def core_policy_context() -> dict[str, object]:
         input_failure=None,
         profiling=False,
     )
+    evaluation = ReviewEvaluation(
+        evidence_id=EvidenceId(root="e1"),
+        kind=EvidenceKind.CORRECTNESS,
+        revision=revision,
+        status=ObservationStatus.SUCCEEDED,
+        passed=False,
+        feedback="fixture failure",
+        feedback_cut=True,
+    )
     return {
+        "evaluations": (evaluation,),
         "planner": planner,
         "base_revision": revision,
         "parent_revision": revision,

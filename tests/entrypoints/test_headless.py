@@ -43,6 +43,7 @@ from vibesys.orchestration.evolve.models import EvolveOptions
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue import IssueQueueOptions
 from vibesys.orchestration.profilers import ProfilerKind
+from vibesys.run.core_run import RunEnd
 from vs_project.api import (
     AgentRoleExecutionRecord,
     OrchestrationDescriptor,
@@ -1929,7 +1930,7 @@ def test_main_routes_to_the_selected_loop(
 ) -> None:
     """The selected descriptor reaches the shared orchestration runner."""
     project = _write_input_project(tmp_path)
-    runner = AsyncMock(return_value=PluginRunStatus.SUCCEEDED)
+    runner = AsyncMock(return_value=RunEnd(PluginRunStatus.SUCCEEDED))
     monkeypatch.setattr(_LOOP_RUN_TARGETS[loop], runner)
     argv = ["vibesys", "--outer-loop", loop, "--input", str(project)]
 
@@ -1952,7 +1953,7 @@ def test_dispatch_owns_headless_rendering(
     renderer = Mock()
     monkeypatch.setattr(headless_run_module, "HeadlessRenderer", lambda: renderer)
     monkeypatch.setattr(
-        _LOOP_RUN_TARGETS["agent"], AsyncMock(return_value=PluginRunStatus.SUCCEEDED)
+        _LOOP_RUN_TARGETS["agent"], AsyncMock(return_value=RunEnd(PluginRunStatus.SUCCEEDED))
     )
 
     cli.dispatch(["--input", str(project)])

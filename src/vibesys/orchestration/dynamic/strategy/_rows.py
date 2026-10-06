@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from vs_core.api import EvidenceId, EvidenceKey, EvidenceKind, RequestId, Value
+from vs_core.api import EvidenceId, EvidenceKey, EvidenceKind, RequestId, RevisionRef, Value
 
 type Finite = Annotated[float, Field(allow_inf_nan=False)]
 type Direction = Literal["max", "min"]
@@ -74,3 +74,17 @@ def reading_of[R: EvidenceReading](readings: tuple[R, ...], kind: EvidenceKind) 
     """The latest decoded reading of one evidence kind, or None when absent."""
     matching = [item for item in readings if item.kind is kind]
     return matching[-1] if matching else None
+
+
+class ReviewEvidence(Value):
+    """The readings of the trusted evaluations a judge was shown for one candidate.
+
+    ``keys`` names the evidence the strategy asked core's evidence owner to decode, so
+    the readings count as current only while the ledger still holds exactly that set
+    for exactly that candidate. An empty ``readings`` after a non-empty ``keys`` means
+    the owner could not decode them; the prompt then lists the evidence without numbers.
+    """
+
+    candidate: RevisionRef
+    keys: tuple[EvidenceKey, ...]
+    readings: tuple[AcceptedReading, ...] = ()

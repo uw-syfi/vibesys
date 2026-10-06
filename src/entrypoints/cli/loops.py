@@ -22,8 +22,11 @@ from vibesys.api import (
     DomainName,
     OrchestrationDescriptor,
     ResumeRef,
+    RunFailure,
+    RunFailureKind,
     RunRequest,
     RunResult,
+    Runs,
     boot_trace,
 )
 from vibesys.api.evolve import resolve_openevolve_options
@@ -376,16 +379,39 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
         )
 
 
-def _run_request(args: argparse.Namespace) -> None:
+def _run_request(args: argparse.Namespace, runs: Runs | None = None) -> None:
     request = _build_run_request(args)
-    result = _execute_run_request(request)
+    result = _execute_run_request(request, default_runs() if runs is None else runs)
     if result.succeeded:
         sys.stdout.write(f"\n{request.orchestration.id} run completed.\n")
     else:
         sys.stdout.write(f"\n{request.orchestration.id} run stopped early.\n")
+        if result.failure is not None:
+            sys.stdout.write(f"{describe_failure(result.failure)}\n")
         sys.exit(1)
 
 
-def _execute_run_request(request: RunRequest) -> RunResult:
+_FAILURE_HEADLINES = {
+    RunFailureKind.BUDGET_EXHAUSTED: "the workstream budget ran out",
+    RunFailureKind.DEADLINE: "the run's time limit ended it",
+    RunFailureKind.NO_RESULT: "the run ended",
+}
+
+
+def describe_failure(failure: RunFailure) -> str:
+    """One line saying why a run failed: the cause, what was kept, the counts, then its account.
+
+    Candidates can be kept yet not adopted, so the line says "no result to keep" only
+    when none was kept.
+    """
+    kept = "with no result to keep" if failure.candidates_kept == 0 else "with no candidate adopted"
+    counts = (
+        f"{failure.workstreams_started} of {failure.workstream_budget} workstreams started, "
+        f"{failure.candidates_kept} candidates kept"
+    )
+    return f"Reason: {_FAILURE_HEADLINES[failure.kind]} {kept} ({counts}). {failure.reason}"
+
+
+def _execute_run_request(request: RunRequest, runs: Runs) -> RunResult:
     """Run *request* to completion via `headless.run`."""
-    return run_headless(request, default_runs())
+    return run_headless(request, runs)

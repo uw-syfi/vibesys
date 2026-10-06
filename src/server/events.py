@@ -24,6 +24,7 @@ from server.run_lifecycle import RunStatus
 from vibesys.api import (
     AgentOutputChannel,
     AgentStatusData,
+    RunFailedData,
     TodoItemData,
     ToolResultPayload,
 )
@@ -473,6 +474,7 @@ EventData = Annotated[
     | OutputData
     | ServerReadyData
     | RunStartedData
+    | RunFailedData
     | RunInterruptedData
     | RunStatusChangedData
     | ExperimentsChangedData

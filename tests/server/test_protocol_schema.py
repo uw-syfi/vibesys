@@ -14,7 +14,7 @@ from pydantic import TypeAdapter, ValidationError
 from server.api.protocol import ProtocolRequest, ServerMessage
 from server.api.schema import protocol_json_schema, require_tagged_union_discriminants
 from server.events import EventData
-from vibesys.api import ToolResultPayload
+from vibesys.api import RunFailedData, RunFailure, ToolResultPayload
 
 SCHEMA_PATH = Path("clients/backend-client/src/generated/protocol.schema.json")
 
@@ -176,3 +176,13 @@ def test_member_missing_the_discriminant_property_names_its_path() -> None:
     }
     with pytest.raises(ValueError, match=r"mapping/a: union member declares no 'kind'"):
         require_tagged_union_discriminants(document)
+
+
+def test_wire_run_failure_is_the_core_contract() -> None:
+    """The published RunFailure schema is core's own model, so the two cannot diverge."""
+    defs = protocol_json_schema()["$defs"]
+    core = RunFailure.model_json_schema()
+    assert defs["RunFailure"]["properties"] == core["properties"]
+    assert defs["RunFailure"]["required"] == core["required"]
+    assert defs["RunFailureKind"]["enum"] == core["$defs"]["RunFailureKind"]["enum"]
+    assert RunFailedData.model_fields["failure"].annotation is RunFailure

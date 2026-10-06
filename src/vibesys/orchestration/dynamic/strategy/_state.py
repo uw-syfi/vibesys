@@ -18,7 +18,12 @@ from pydantic import Field
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.orchestration.dynamic.strategy._parents import ParentSnapshot
 from vibesys.orchestration.dynamic.strategy._prompts import PromptContext
-from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading, MetricRow, PartialRow
+from vibesys.orchestration.dynamic.strategy._rows import (
+    AcceptedReading,
+    MetricRow,
+    PartialRow,
+    ReviewEvidence,
+)
 from vs_core.api import (
     ArtifactRef,
     AttemptId,
@@ -287,6 +292,8 @@ class AttemptRecord(Value):
     feedback: str | None = None
     evidence: tuple[EvidenceKey, ...] = ()
     readings: tuple[AcceptedReading, ...] = ()
+    # The decoded trusted evaluations the judge of this workstream's candidate is shown.
+    review_evidence: ReviewEvidence | None = None
     judge_invocation: InvocationRef | None = None
     failure: str | None = None
     withdrawn: bool = False

@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from vs_core.api import EvidenceId, RevisionRef, Value
+from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionRef, Value
 
 from ._rows import MetricRow, PartialRow
 
@@ -123,6 +123,25 @@ class ImplementPrompt(Value):
     prior_failure_fence: str = "```"
 
 
+class ReviewEvaluation(Value):
+    """One trusted evaluation result of the candidate under review, as the judge reads it.
+
+    ``passed`` is None when the evidence owner could not decode the record; the status
+    is core's own observation of the evaluation job. ``feedback`` is the end of the
+    evaluator's failure text and ``feedback_cut`` says its start was dropped.
+    """
+
+    evidence_id: EvidenceId
+    kind: EvidenceKind
+    revision: RevisionRef
+    status: ObservationStatus
+    passed: bool | None = None
+    metrics: tuple[MetricRow, ...] = ()
+    partial: PartialRow | None = None
+    feedback: str = ""
+    feedback_cut: bool = False
+
+
 class ReviewPrompt(Value):
     """Independent review of one exact candidate snapshot."""
 
@@ -133,6 +152,8 @@ class ReviewPrompt(Value):
     candidate: RevisionRef
     summary: str
     evidence: tuple[EvidenceCitation, ...] = ()
+    evaluations: tuple[ReviewEvaluation, ...] = ()
+    """Every trusted evaluation of ``candidate``, oldest first; empty when none exists yet."""
 
 
 class ProfilePrompt(Value):
