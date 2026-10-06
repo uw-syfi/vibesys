@@ -1,0 +1,6 @@
+{
+  "model_id": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+  "revision": "7f0dc925e0d0afb0322d96f9255cfddf2ba5636e",
+  "quantization_bits": 4,
+  "quantization_group_size": 64
+}
