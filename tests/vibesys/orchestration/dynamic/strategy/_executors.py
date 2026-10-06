@@ -59,7 +59,7 @@ from vs_core.api import (
     VerifyAdoption,
 )
 from vs_core.testing.drive import Answer, Failed, Running, Succeeded, Unknown
-from vs_runtime.api.core import AgentEvaluationPolicy
+from vs_runtime.api.core import AgentEvaluationPolicy, handle_for
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -150,7 +150,7 @@ class Executors:
         self.retained[attempt] += 1
         return Succeeded(revision=revision)
 
-    def _finished_agent_evaluation(self, request: SubmitMeasurement) -> Answer:
+    def finished_agent_evaluation(self, request: SubmitMeasurement) -> Answer:
         """An agent's evaluation that ends as soon as it is accepted, with trusted evidence."""
         assert isinstance(request.plan.candidate, RevisionRef)
         assert request.request_id is not None
@@ -169,7 +169,7 @@ class Executors:
             stages.append(EvaluationStageResult(stage_id=stage.stage_id, outcome=outcome))
         self.jobs += 1
         return Succeeded(
-            resource_id=ResourceId(root=f"job:{self.jobs}"),
+            resource_id=ResourceId(root=handle_for(request.request_id)),
             evidence=tuple(refs),
             facts=EvaluationTerminalFacts(
                 stages=tuple(stages), accuracy_passed=all(i.passed for i in self.readings.values())
@@ -212,8 +212,8 @@ class Executors:
         self.admit(event, now)
 
     def _submit(self, request: SubmitMeasurement) -> Answer:
-        if request.plan.purpose == "local-validation":
-            return self._finished_agent_evaluation(request)
+        if request.plan.purpose == "local-validation" and self.submit is None:
+            return self.finished_agent_evaluation(request)
         if self.submit is not None:
             return self.submit(request)
         self.jobs += 1

@@ -313,8 +313,15 @@ class Agent:
 class AgentExecutors(ScriptedExecutors):
     """The scripted executors, with the agent running inside each agent turn."""
 
-    def __init__(self, agent: Agent, core: Callable[[], CoreState]) -> None:
+    def __init__(
+        self,
+        agent: Agent,
+        core: Callable[[], CoreState],
+        *,
+        finished_in_submit_round: bool = False,
+    ) -> None:
         self._agent = agent
+        self._finished_in_submit_round = finished_in_submit_round
         self._evaluator = Executors(submit=_submitted)
         self._reply = ""
         super().__init__(self._answer, core, OperationRegistry(), {IMPLEMENTATION: Implementation})
@@ -323,6 +330,12 @@ class AgentExecutors(ScriptedExecutors):
         if isinstance(request, DispatchTurn | ResumeSessionTurn):
             lease = ResourceId(root=f"lease:{request.turn.session.session_id.root}")
             return Succeeded(output_json=self._reply, resource_id=lease)
+        if (
+            self._finished_in_submit_round
+            and isinstance(request, SubmitMeasurement)
+            and request.plan.purpose == "local-validation"
+        ):
+            return self._evaluator.finished_agent_evaluation(request)
         return self._evaluator(request, core)
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionResult:
@@ -362,8 +375,17 @@ class Played:
     view: ShellView
 
 
-def play(turns: tuple[Turn, ...], total: int) -> Played:
-    """Drive a fresh run, with ``turns`` as the agent's fresh turns, to its end."""
+def play(
+    turns: tuple[Turn, ...],
+    total: int,
+    *,
+    finished_in_submit_round: bool = False,
+) -> Played:
+    """Drive a fresh run, with ``turns`` as the agent's fresh turns, to its end.
+
+    With ``finished_in_submit_round`` the executor answers each of the agent's own submissions as
+    already finished, with its evidence, as a verdict-cache replay does; otherwise the job is
+    still running."""
     limits = Limits(max_turns=4 * total + 4, max_measurement_submissions=64)
     state = new_core_state(
         "run",
@@ -385,7 +407,11 @@ def play(turns: tuple[Turn, ...], total: int) -> Played:
         return bridge
 
     agent = Agent(turns, workspaces, make_bridge, diagnostics=diagnostics)
-    executors = AgentExecutors(agent, lambda: shells[0].record.envelope.core)
+    executors = AgentExecutors(
+        agent,
+        lambda: shells[0].record.envelope.core,
+        finished_in_submit_round=finished_in_submit_round,
+    )
     shell = cast(
         "CoreRuntime[LoopState]",
         CoreRuntime(
@@ -458,10 +484,14 @@ _TURNS = st.lists(
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
 )
-@given(turns=_TURNS, total=st.integers(1, 2))
-def test_no_tool_call_sequence_halts_the_run(turns: tuple[Turn, ...], total: int) -> None:
-    """Whatever the agents call, before, between and after their turns, the run goes on."""
-    played = play(turns, total)
+@given(turns=_TURNS, total=st.integers(1, 2), finished_in_submit_round=st.booleans())
+def test_no_tool_call_sequence_halts_the_run(
+    turns: tuple[Turn, ...], total: int, finished_in_submit_round: bool
+) -> None:
+    """Whatever the agents call, before, between and after their turns, the run goes on.
+
+    A submission's job may still be running or already finished when the executor accepts it."""
+    played = play(turns, total, finished_in_submit_round=finished_in_submit_round)
     check(played)
     after_run(played)
     assert all(isinstance(text, str) and text for text in played.agent.errors)
@@ -586,3 +616,20 @@ def test_a_submission_still_running_at_a_resume_does_not_halt_the_run(
     """A resume is never authorized over an attempt history that a running submission leaves open."""
     played = play(turns, total)
     check(played)
+
+
+@pytest.mark.parametrize(
+    "turns",
+    [
+        (Turn(program=(("submit",), ("wait", (0,)))),),
+        (Turn(late=(("submit",), ("wait", (0,)))),),
+        (Turn(late=(("submit",),)), Turn(program=(("submit",), ("wait", (0,))))),
+    ],
+    ids=["submit-then-wait", "late-submit-then-wait", "late-submit-then-next-turn-waits"],
+)
+@pytest.mark.parametrize("total", [1, 2])
+def test_a_submission_finished_in_its_submit_round_does_not_halt_the_run(
+    turns: tuple[Turn, ...], total: int
+) -> None:
+    """An executor that answers a submission as finished wakes the turns that wait on it."""
+    check(play(turns, total, finished_in_submit_round=True))
