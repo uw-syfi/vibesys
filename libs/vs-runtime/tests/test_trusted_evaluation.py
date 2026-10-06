@@ -324,17 +324,19 @@ def test_failure_kind_requires_a_completed_trusted_benchmark_frame(
 
     assert not result.passed
     assert reason in (result.failure or "")
-    expected = (
-        BenchmarkFailureKind.WORKLOAD
-        if framed and exit_code is not None and exit_code >= 0
-        else BenchmarkFailureKind.INFRASTRUCTURE
-    )
+    if exit_code is None or exit_code < 0:
+        expected = BenchmarkFailureKind.INFRASTRUCTURE
+    elif framed:
+        expected = BenchmarkFailureKind.WORKLOAD
+    else:
+        # It exited but wrote no result record: the process may have been killed.
+        expected = BenchmarkFailureKind.AMBIGUOUS
     assert result.failure_kind is expected
     if framed:
         assert result.failure_reason == reason
 
 
-def test_evaluator_disappearing_without_a_record_is_retryable(tmp_path: Path) -> None:
+def test_evaluator_disappearing_without_a_record_is_retried_once(tmp_path: Path) -> None:
     executor = _executor(
         tmp_path,
         TrustedEvaluationPlan(
@@ -348,7 +350,7 @@ def test_evaluator_disappearing_without_a_record_is_retryable(tmp_path: Path) ->
     result = asyncio.run(executor.benchmark())
 
     assert not result.passed
-    assert result.failure_kind is BenchmarkFailureKind.INFRASTRUCTURE
+    assert result.failure_kind is BenchmarkFailureKind.AMBIGUOUS
     assert result.failure_reason is None
 
 

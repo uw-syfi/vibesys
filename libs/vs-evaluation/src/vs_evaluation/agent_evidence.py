@@ -38,13 +38,16 @@ class EvidenceFailureKind(StrEnum):
     """Whose fault a failed stage is: the candidate's workload, or the machinery running it.
 
     A workload failure is a permanent fact about the candidate, so it is never retried.
-    An infrastructure failure (a node loss, an out-of-memory kill, an evaluator that
-    died before writing its result record) says nothing about the candidate, so the
-    measurement may be repeated.
+    An infrastructure failure (a node loss, a preemption, a job that never reported an
+    exit status) says nothing about the candidate, so the measurement may be repeated up
+    to the submission bound. An ambiguous failure (a process killed with no outcome
+    record, for example) may be the candidate's or the machinery's: it is measured once
+    more, and a second one is final and counts against the candidate.
     """
 
     WORKLOAD = "workload"
     INFRASTRUCTURE = "infrastructure"
+    AMBIGUOUS = "ambiguous"
 
 
 class ContentDigest(BaseModel):
