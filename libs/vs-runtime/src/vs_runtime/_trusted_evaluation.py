@@ -26,6 +26,12 @@ from vs_evaluator_protocol.api import (
     parse_records,
     read_measurement,
 )
+from vs_runtime._failure_classification import (
+    RecordState,
+    TerminalSignal,
+    classify,
+    signal_of,
+)
 from vs_runtime._model_requests import ModelRequestError
 from vs_runtime.contracts import BenchmarkFailureKind
 from vs_sandbox.api import SandboxExecutionResult
@@ -446,7 +452,9 @@ class RuntimeTrustedEvaluation:
                 output=output,
                 failure=None if passed else output,
                 failure_kind=(
-                    None if passed else _benchmark_failure_kind(framed, result, execution_failure)
+                    None
+                    if passed
+                    else _benchmark_failure_kind(record_state(framed), result, execution_failure)
                 ),
                 failure_reason=decoded.reason,
                 stdout=result.stdout,
@@ -510,40 +518,46 @@ class TrustedBenchmarkDecoding:
     partial: PartialMeasurement | None = None
     reason: str | None = None
     violation: str | None = None
-    # Set on every failed run: a run whose evaluator wrote no result record, whatever
-    # the exit status, is infrastructure; any record, even a malformed one, is the workload's.
-    failure_kind: BenchmarkFailureKind | None = None
+    # What the evaluator left in its result file; with the exit status it decides whose
+    # fault a failed run is (`classify`).
+    record: RecordState = RecordState.ABSENT
 
 
-def _has_result_record(framed: str) -> bool:
-    """Whether the evaluator wrote any result record between the trusted wrapper's markers.
+def record_state(framed: str) -> RecordState:
+    """What the evaluator wrote between the trusted wrapper's markers.
 
     The wrapper prints both markers even when the evaluator dies first, so a run whose
-    evaluator never wrote its record frames nothing.
+    evaluator never wrote its file frames nothing. An evaluator that only declared its
+    schema (a ``hello`` record, written before anything is measured) started but left no
+    outcome. Any other content is an outcome, even a malformed one: it is the evaluator's own.
     """
     _, marker, framed_result = framed.rpartition(_BENCHMARK_MARKER)
     encoded, end_marker, _ = framed_result.partition(_BENCHMARK_END_MARKER)
-    return bool(marker and end_marker and encoded.strip())
+    if not (marker and end_marker and encoded.strip()):
+        return RecordState.ABSENT
+    try:
+        records = parse_records(encoded)
+    except (ProtocolError, ValueError):
+        return RecordState.OUTCOME
+    if records and all(isinstance(item, Hello) for item in records):
+        return RecordState.DECLARED
+    return RecordState.OUTCOME
 
 
 def _benchmark_failure_kind(
-    framed: str, result: SandboxExecutionResult, execution_failure: str | None
+    record: RecordState, result: SandboxExecutionResult, execution_failure: str | None
 ) -> BenchmarkFailureKind:
-    """Only a completed framed command proves that the workload rejected the input.
+    """Whose fault a failed benchmark run is, by its exit status and its record.
 
-    A shell launch error can also exit 1. The trusted wrapper emits both markers
-    even when the evaluator writes nothing, so empty or absent results remain retryable.
-    Negative or absent exit codes describe cancellation, timeout, or transport loss.
+    A command that could not run, was cancelled, or timed out in the sandbox reported
+    no exit status (negative or absent), which says nothing about the candidate.
     """
-    if (
-        execution_failure is None
-        and result.exit_code is not None
-        and result.exit_code >= 0
-        and not result.cancelled
-        and _has_result_record(framed)
-    ):
-        return BenchmarkFailureKind.WORKLOAD
-    return BenchmarkFailureKind.INFRASTRUCTURE
+    signal = (
+        TerminalSignal.NO_EXIT_STATUS
+        if execution_failure is not None or result.cancelled
+        else signal_of(result.exit_code)
+    )
+    return classify(signal, record)
 
 
 def decode_trusted_benchmark_run(
@@ -558,26 +572,22 @@ def decode_trusted_benchmark_run(
     The evaluator's own `error` record decides first, so a run that reported a
     failure keeps its partial measurement even if its exit status was lost.
     """
-    kind = (
-        BenchmarkFailureKind.WORKLOAD
-        if _has_result_record(framed)
-        else BenchmarkFailureKind.INFRASTRUCTURE
-    )
+    kind = record_state(framed)
     try:
         failure = _decode_benchmark_failure(framed, contract)
     except ValueError as error:
-        return TrustedBenchmarkDecoding(passed=False, violation=str(error), failure_kind=kind)
+        return TrustedBenchmarkDecoding(passed=False, violation=str(error), record=kind)
     if failure is not None:
         return TrustedBenchmarkDecoding(
-            passed=False, partial=failure.partial, reason=failure.failure, failure_kind=kind
+            passed=False, partial=failure.partial, reason=failure.failure, record=kind
         )
     if not exited_cleanly:
-        return TrustedBenchmarkDecoding(passed=False, failure_kind=kind)
+        return TrustedBenchmarkDecoding(passed=False, record=kind)
     try:
         row, metrics = decode_trusted_benchmark_output(framed, contract, required_metrics)
     except (ProtocolError, ValueError, TypeError, json.JSONDecodeError) as error:
-        return TrustedBenchmarkDecoding(passed=False, violation=str(error), failure_kind=kind)
-    return TrustedBenchmarkDecoding(passed=True, row=row, metrics=metrics)
+        return TrustedBenchmarkDecoding(passed=False, violation=str(error), record=kind)
+    return TrustedBenchmarkDecoding(passed=True, row=row, metrics=metrics, record=kind)
 
 
 def _decode_framed(

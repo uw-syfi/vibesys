@@ -513,6 +513,8 @@ def core_policy_context() -> dict[str, object]:
         "base_accuracy_passed": True,
         "repeated_failure": None,
         "required_fields": (),
+        "prior_failure_tail": "AssertionError: fixture",
+        "prior_failure_fence": "```",
     }
 
 

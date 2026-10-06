@@ -41,7 +41,6 @@ from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
-    EvidenceFailureKind,
     EvidenceFingerprints,
     EvidenceOutcome,
     ExecutorObservation,
@@ -53,6 +52,7 @@ from vs_evaluation.api import (
     failure_signature,
 )
 from vs_evaluation.api import EvidenceKind as StageKind
+from vs_runtime._failure_classification import job_failure
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 
 STAGE_KINDS: dict[str, StageKind] = {
@@ -263,29 +263,22 @@ def _terminal_view(
     )
     observation = make(status, accepted=True, terminal=True, diagnostic=diagnostic)
     evidence, outcomes = _evidence(terminal, plan, subject, observation.sequence)
-    failure = _failure_claim(outcomes) if status is ObservationStatus.FAILED else None
-    if failure is MeasurementFailure.INFRASTRUCTURE:
-        # A measurement the machinery interrupted proves nothing about the candidate: no
-        # evidence and no scientific facts reach the core, so it may retry the measurement.
-        return JobView(observation, None, (), None, failure)
+    failure = (
+        job_failure(
+            item.failure_kind
+            for item in outcomes.values()
+            if item.outcome is EvidenceOutcome.FAILED
+        )
+        if status is ObservationStatus.FAILED
+        else None
+    )
+    if failure is not None and failure.retryable:
+        # A measurement the machinery may have interrupted proves nothing about the
+        # candidate yet, so no scientific facts reach the core and it may retry. Its
+        # evidence still does: the failure text is all an agent learns if the last try
+        # fails too.
+        return JobView(observation, None, evidence, None, failure)
     return JobView(observation, None, evidence, _facts(terminal, plan, outcomes), failure)
-
-
-def _failure_claim(outcomes: dict[str, TrustedEvidence]) -> MeasurementFailure:
-    """Classify a failed job from its stage evidence.
-
-    No evidence means the executor died before measuring anything. Otherwise any stage the
-    machinery failed makes the job retryable; the workload is blamed only when every failed
-    stage says so, and evidence that does not say proves neither.
-    """
-    kinds = {
-        item.failure_kind for item in outcomes.values() if item.outcome is EvidenceOutcome.FAILED
-    }
-    if not outcomes or EvidenceFailureKind.INFRASTRUCTURE in kinds:
-        return MeasurementFailure.INFRASTRUCTURE
-    if kinds == {EvidenceFailureKind.WORKLOAD}:
-        return MeasurementFailure.WORKLOAD
-    return MeasurementFailure.UNKNOWN
 
 
 def _core_kind(kind: StageKind, purpose: str) -> EvidenceKind:

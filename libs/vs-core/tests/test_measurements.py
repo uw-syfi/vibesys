@@ -267,13 +267,44 @@ def test_submission_retry_requires_conclusive_infrastructure_failure(
     allowed = (
         terminal
         and status not in (core.ObservationStatus.PENDING, core.ObservationStatus.UNKNOWN)
-        and failure == core.MeasurementFailure.INFRASTRUCTURE
+        and failure in (core.MeasurementFailure.INFRASTRUCTURE, core.MeasurementFailure.AMBIGUOUS)
         and not accepted
     )
     assert bool(retried.requests) == allowed
     budget = retried.state.evaluation.submission_budgets[0]
     assert budget.limit == 3
     assert len(budget.receipts) == 1 + int(allowed)
+
+
+@given(
+    failure=st.sampled_from([f for f in core.MeasurementFailure if f.retryable]),
+    stopped=st.sampled_from([s for s in core.RunStatus if s is not core.RunStatus.RUNNING]),
+)
+def test_a_failure_after_the_run_stopped_is_never_resubmitted(
+    failure: core.MeasurementFailure, stopped: core.RunStatus
+) -> None:
+    """The cancel a stop sends ends the job as a failure the machinery caused, which retries
+    while the run is live; once the run is stopping, cancelled, or past its deadline it must not."""
+    result = requested()
+    request = result.requests[0]
+    assert isinstance(request, core.SubmitMeasurement)
+    observed = observation(
+        request, accepted=False, terminal=True, status=core.ObservationStatus.FAILED
+    )
+    state = committed(result.state, observed)
+    state = transition(
+        state, core.MeasurementSubmissionObserved(observation=observed, failure=failure)
+    ).state
+    stopped_state = state.model_copy(
+        update={"run": state.run.model_copy(update={"status": stopped})}
+    )
+    retried = requested(
+        stopped_state,
+        identity="retry",
+        measurement=plan(submitted_at=2.0, deadline_at=102.0, submission_limit=99),
+    )
+    assert retried.requests == ()
+    assert len(retried.state.evaluation.submission_budgets[0].receipts) == 1
 
 
 @given(count=st.integers(min_value=4, max_value=10))

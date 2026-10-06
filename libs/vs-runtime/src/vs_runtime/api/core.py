@@ -78,8 +78,8 @@ from vs_runtime._core_requests import (
 )
 from vs_runtime._core_run import (
     HEARTBEAT_TASK,
-    WAIT_TASK,
     PRODUCTION_LEASE_SECONDS,
+    WAIT_TASK,
     CoreRunHost,
     NextWake,
     RunClock,

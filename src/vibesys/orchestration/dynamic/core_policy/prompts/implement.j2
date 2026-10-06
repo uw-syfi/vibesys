@@ -28,6 +28,13 @@ That is the revision your earlier attempt ended at.
 Feedback from the prior attempt:
 {{ feedback }}
 {% endif %}
+{% if prior_failure_tail %}
+
+The trusted check of your earlier attempt failed. Its output ends with:
+{{ prior_failure_fence }}
+{{ prior_failure_tail }}
+{{ prior_failure_fence }}
+{% endif %}
 
 Inspect referenced artifacts only as needed. Keep evidence in files and return compact
 references with their applicable revision. Implement and run the cheapest checks that

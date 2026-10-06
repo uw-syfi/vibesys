@@ -67,6 +67,9 @@ class HistoryRow(Value):
     candidate: RevisionRef | None = None
     metrics: tuple[MetricRow, ...] = ()
     partial: PartialRow | None = None
+    failure_tail: str = ""
+    # The Markdown fence that holds the tail: longer than any backtick run inside it.
+    failure_fence: str = "```"
 
 
 class PlannerPrompt(Value):
@@ -109,6 +112,8 @@ class ImplementPrompt(Value):
     worktree_revision: RevisionRef | None = None
     prior_revision: RevisionRef | None = None
     feedback: str | None = None
+    prior_failure_tail: str = ""
+    prior_failure_fence: str = "```"
 
 
 class ReviewPrompt(Value):

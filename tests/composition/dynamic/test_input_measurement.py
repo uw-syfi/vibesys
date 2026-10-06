@@ -25,7 +25,8 @@ from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
 if TYPE_CHECKING:
     from pathlib import Path
 
-MAX_INPUT_ATTEMPTS = 3  # strategy/_config.py: max_input_measurement_attempts
+# A benchmark killed with no result record is ambiguous: measured once more, then final.
+MAX_INPUT_ATTEMPTS = 2
 _UNMEASURABLE = "Input not measurable: warmup stopped: 1/100 rounds"
 
 
@@ -126,7 +127,7 @@ def _interrupt_input_evaluator(loop_input: LoopInput, tmp_path: Path, failures: 
     benchmark = loop_input.root / "benchmark.py"
     original = benchmark.read_text(encoding="utf-8")
     counter = tmp_path / "input-attempts"
-    # A missing result is infrastructure evidence, not a workload verdict. Only the
+    # A missing result is ambiguous evidence, not a workload verdict. Only the
     # input (VALUE == 1) fails; candidate jobs are unchanged.
     benchmark.write_text(
         "import pathlib\n"
@@ -164,6 +165,7 @@ def test_transient_input_failure_is_retried_within_its_bound(tmp_path: Path, fai
         assert baseline["benchmark_passed"] is True
     else:
         assert baseline["stage"] == "unmeasurable"
-        assert baseline["benchmark_passed"] is None
+        # The second killed attempt is final: a failed benchmark, not a missing one.
+        assert baseline["benchmark_passed"] is False
         # The agents are told why the input was given up, not only that it was.
         assert "out of memory" in baseline["failure"]
