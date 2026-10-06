@@ -166,3 +166,69 @@ def test_accuracy_proof_is_the_unique_trusted_accepted_successful_correctness_re
         assert state.evidence_for(item.key) == item
     missing = row.key.model_copy(update={"source_request": core.RequestId(root="x")})
     assert state.evidence_for(missing) is None
+
+
+PURPOSES = ("baseline", "local-validation", "official", "profile")
+
+
+@given(purpose=st.sampled_from(PURPOSES), kind=st.sampled_from(list(core.EvidenceKind)))
+def test_a_local_validation_record_is_never_correctness_or_benchmark_evidence(
+    purpose: str, kind: core.EvidenceKind
+) -> None:
+    """An agent's own evaluation cannot sit beside the official record as a second proof."""
+    allowed = not (
+        purpose == "local-validation"
+        and kind in (core.EvidenceKind.CORRECTNESS, core.EvidenceKind.BENCHMARK)
+    )
+    updates: dict[str, object] = {"purpose": purpose, "kind": kind}
+    if allowed:
+        assert evidence_row("e", updates=updates).purpose == purpose
+    else:
+        with pytest.raises(ValueError, match="local-validation"):
+            evidence_row("e", updates=updates)
+
+
+@given(
+    rows=st.lists(
+        st.tuples(
+            st.sampled_from(PURPOSES),
+            st.sampled_from(list(core.EvidenceKind)),
+            st.sampled_from([core.ObservationStatus.SUCCEEDED, core.ObservationStatus.FAILED]),
+            st.booleans(),
+        ),
+        max_size=5,
+    )
+)
+def test_an_agent_record_beside_the_official_one_never_changes_the_accuracy_proof(
+    rows: list[tuple[str, core.EvidenceKind, core.ObservationStatus, bool]],
+) -> None:
+    """Records of every purpose and kind: the proof is the one successful CORRECTNESS row.
+
+    A record for another revision never counts, and neither does any row the contract
+    refuses, so an agent evaluation next to the official record cannot make it ambiguous.
+    """
+    baseline = core.initial_state().run.facts.baseline
+    elsewhere = baseline.model_copy(update={"digest": "elsewhere"})
+    evidence: list[core.EvidenceRef] = []
+    for index, (purpose, kind, status, same_revision) in enumerate(rows):
+        if purpose == "local-validation" and kind in (
+            core.EvidenceKind.CORRECTNESS,
+            core.EvidenceKind.BENCHMARK,
+        ):
+            continue
+        updates: dict[str, object] = {
+            "purpose": purpose,
+            "kind": kind,
+            "status": status,
+            "candidate": baseline if same_revision else elsewhere,
+        }
+        evidence.append(evidence_row(f"e{index}", request=f"r{index}", updates=updates))
+    qualifying = [
+        item
+        for item in evidence
+        if item.candidate == baseline
+        and item.kind == core.EvidenceKind.CORRECTNESS
+        and item.status == core.ObservationStatus.SUCCEEDED
+    ]
+    state = core.EvaluationState(evidence=tuple(evidence))
+    assert state.accuracy_proof(baseline) == (qualifying[0] if len(qualifying) == 1 else None)

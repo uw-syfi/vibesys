@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
+import sys
 import threading
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
 # Ctrl-C asks for a cooperative stop. These, and any repeated signal, end the
 # run now: its task is cancelled, so its teardown cancels external work (Slurm
 # jobs) before the process exits.
-__all__ = ["run_headless", "supervise"]
+__all__ = ["failure_reason", "run_headless", "supervise"]
 
 _TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
 _HANDLED_SIGNALS = (signal.SIGINT, *_TERMINATION_SIGNALS)
@@ -150,4 +151,17 @@ def run_headless(request: RunRequest, runs: Runs) -> RunResult:
         handle = runs.resume(request) if request.resume is not None else runs.start(request)
         return await supervise(handle, render_run(handle))
 
-    return asyncio.run(execute())
+    try:
+        return asyncio.run(execute())
+    except RunStopped:
+        raise
+    except Exception as error:
+        # The traceback still follows; this is the one line a reader of the output needs.
+        sys.stderr.write(f"run failed: {failure_reason(error)}\n")
+        raise
+
+
+def failure_reason(error: BaseException) -> str:
+    """The typed reason a run failed: the error's type, then its message on one line."""
+    message = " ".join(str(error).split())
+    return f"{type(error).__name__}: {message}" if message else type(error).__name__

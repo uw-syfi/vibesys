@@ -239,8 +239,12 @@ def dynamic_core_policy() -> CorePolicy:
 
 
 def _project_max_rounds(options: BaseModel) -> int:
-    parsed = DynamicOptions.model_validate(options)
-    return parsed.max_rounds * parsed.max_in_flight
+    """The operator's ``--max-rounds``, which ``run_started`` reports as ``max_rounds``.
+
+    The search schedules ``max_rounds * max_in_flight`` workstreams; that product is the
+    search's own limit (``hypothesis_config``), not the number the operator asked for.
+    """
+    return DynamicOptions.model_validate(options).max_rounds
 
 
 def dynamic_core_registration() -> OrchestrationRegistration:

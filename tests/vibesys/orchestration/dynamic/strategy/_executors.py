@@ -211,7 +211,11 @@ class Executors:
         assert isinstance(plan.candidate, RevisionRef)
         return EvidenceRef(
             evidence_id=reading.evidence_id,
-            kind=reading.kind,
+            kind=(
+                EvidenceKind.LOCAL_VALIDATION
+                if plan.purpose == "local-validation"
+                else reading.kind
+            ),
             purpose=plan.purpose,
             scope=job.scope,
             source_request=job.submission_id,

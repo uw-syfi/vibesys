@@ -1164,7 +1164,8 @@ class SlurmJobRunner:
         """Read scheduler state with queue reason and estimated start evidence."""
         if re.fullmatch(r"[0-9]+", job_id) is None:
             raise SlurmError.invalid_job_id()
-        active = self._transport.exec(f"squeue -h -j {job_id} -o '%T|%r|%S'").stdout.strip()
+        active = self._queue_state(job_id)
+        queued = None
         if active:
             fields = active.splitlines()[0].split("|")
             reason = fields[1].strip() if len(fields) > 1 else None
@@ -1176,9 +1177,17 @@ class SlurmJobRunner:
             )
             if queued.phase is not SlurmPhase.COMPLETING:
                 return queued
-        else:
-            queued = None
-        accounting = self._transport.exec(f"sacct -n -X -j {job_id} --format=State,ExitCode").stdout
+        try:
+            accounting = self._transport.exec(
+                f"sacct -n -X -j {job_id} --format=State,ExitCode"
+            ).stdout
+        except SlurmError:
+            # Accounting only refines what the queue said (a COMPLETING job may have
+            # ended). Without it the queue reading stands; with no queue reading
+            # either, the job's state is unknown and the failure is the answer.
+            if queued is None:
+                raise
+            return queued
         parsed = _accounting_state(accounting)
         if parsed is not None:
             ended = _reading(parsed[0], exit_code=parsed[1])
@@ -1190,6 +1199,14 @@ class SlurmJobRunner:
             if queued is None or ended.phase is SlurmPhase.ENDED:
                 return ended
         return queued if queued is not None else _reading("UNKNOWN")
+
+    def _queue_state(self, job_id: str) -> str:
+        """The queue's line for the job; one lost read is retried, a second one raises."""
+        command = f"squeue -h -j {job_id} -o '%T|%r|%S'"
+        try:
+            return self._transport.exec(command).stdout.strip()
+        except SlurmError:
+            return self._transport.exec(command).stdout.strip()
 
     def collect_evidence(
         self, handle: SlurmJobHandle, *, observed: SlurmJobStatus | None = None

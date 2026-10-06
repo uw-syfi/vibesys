@@ -278,7 +278,7 @@ def _end_released_dispatch(
             intent
             for intent in state.intents
             if isinstance(intent.request, DispatchTurn)
-            and intent.phase == IntentPhase.RECONCILING
+            and intent.phase in (IntentPhase.RECONCILING, IntentPhase.BLOCKED)
             and any(
                 intent.request.turn == row.turn and intent.request.scope == row.scope
                 for row in rows
@@ -377,6 +377,12 @@ def _refine(
     return AreaChange(state=_replace(state, updated))
 
 
+RETRYABLE_FAILURES = frozenset(
+    {ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED}
+)
+"""Observation statuses that keep an intent DISPATCHED and wait for a retry nobody drives."""
+
+
 def _retry_limit(context: IntentsContext, intent: Intent) -> int:
     request = intent.request
     if isinstance(request, ExecuteRegisteredOperation):
@@ -395,11 +401,7 @@ def _next_phase(
     if observation.status == ObservationStatus.UNKNOWN or observation.terminal:
         # Unknown, or success whose acceptance is unproven: inspect before any retry.
         return IntentPhase.RECONCILING, intent.retry_count
-    if observation.status in (
-        ObservationStatus.FAILED,
-        ObservationStatus.REJECTED,
-        ObservationStatus.CANCELLED,
-    ):
+    if observation.status in RETRYABLE_FAILURES:
         retries = intent.retry_count + 1
         if retries > _retry_limit(context, intent):
             return IntentPhase.BLOCKED, intent.retry_count

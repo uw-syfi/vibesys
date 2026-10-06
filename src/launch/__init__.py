@@ -22,6 +22,7 @@ from vibesys.api.wiring import SessionImplementations
 from vibesys.api.wiring import create_session as _create_session
 from vs_agent.api import AgentInvocationState, agent_catalog, build_agent_client
 from vs_project.api import generate_run_id
+from vs_runtime.api.core import RunTiming
 from vs_runtime.api.wiring import InProcessRuns
 from vs_sandbox.api import create_compute_backend
 
@@ -54,6 +55,7 @@ class LaunchSettings:
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None
     backend_factory: Callable[..., ComputeBackendImpl] | None = None
     stop_timer: StopTimer = asyncio.sleep
+    timing: RunTiming | None = None
     agents: SessionAgents | None = None
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore] | None = (
         None
@@ -95,6 +97,7 @@ def create_session(
             backend_factory=backend_factory,
             agents=agents,
             stop_timer=selected.stop_timer,
+            timing=RunTiming.production() if selected.timing is None else selected.timing,
             invocation_store_factory=(
                 _durable_invocation_store
                 if selected.invocation_store_factory is None

@@ -7,6 +7,7 @@ no-new-evaluation policy must consume the durable history and publication bounds
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 from ._evaluation_history import produce_history
@@ -19,6 +20,7 @@ from .types.attempts import (
     ScopeReopenRequested,
 )
 from .types.common import (
+    AttemptId,
     AttemptRef,
     CompletionStatus,
     ExecuteRegisteredOperation,
@@ -55,7 +57,7 @@ from .types.sessions import Access, DispatchTurn, InspectTurn, ResumeSessionTurn
 from .types.strategy import Accepted, Operation
 
 if TYPE_CHECKING:
-    from .types.attempts import AttemptView
+    from .types.attempts import AttemptsState, AttemptView
     from .types.common import EvidenceKey, Observation, ResourceId
     from .types.evaluation import (
         EvaluationEvent,
@@ -63,10 +65,113 @@ if TYPE_CHECKING:
         EvidenceRef,
         OwnedJob,
     )
-    from .types.evaluation_history import EvaluationHistoryCursor
+    from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryCursor
     from .types.intents import ChildLease, Intent, Request
     from .types.kernel import EvaluationContext, Signal, StrategyEvent
     from .types.sessions import Invocation
+
+
+class SuspensionRefusal(StrEnum):
+    """Why a scope cannot take a new suspension now.
+
+    Each reason is caused by what an agent does or when it does it, so a caller that
+    forwards an agent's request to wait asks ``suspension_refusal`` first and tells the
+    agent, instead of letting the suspension reach the commit that would reject it.
+    """
+
+    SCOPE_NOT_ACTIVE = "scope_not_active"
+    """The run is not running, or the scope's owner is retired, closing or unadmitted."""
+    OPEN_CONTINUATION = "open_continuation"
+    """An earlier continuation in the scope is still waiting for its single resume."""
+    NOT_RESUMABLE = "not_resumable"
+    """The attempt is exhausted, so core would refuse the resume."""
+    PREFIX_MISMATCH = "prefix_mismatch"
+    """The turn has no paid-cycle history prefix that matches the attempt's history.
+
+    A turn dispatched while an earlier measurement of its attempt was still in flight has
+    none, and core authorizes a resume only from an exact prefix.
+    """
+
+    @property
+    def detail(self) -> str:
+        """The contract-error text for this reason."""
+        return _REFUSAL_DETAIL[self]
+
+
+_REFUSAL_DETAIL = {
+    SuspensionRefusal.SCOPE_NOT_ACTIVE: "requires current active ownership",
+    SuspensionRefusal.OPEN_CONTINUATION: "already owns an unfinished continuation",
+    SuspensionRefusal.NOT_RESUMABLE: "attempt is exhausted, so its resume cannot be authorized",
+    SuspensionRefusal.PREFIX_MISMATCH: "attempt resume requires exact paid-cycle history prefix",
+}
+
+
+def paid_prefix_refusal(
+    history: AttemptEvaluationHistory, prefix: EvaluationHistoryCursor | None
+) -> SuspensionRefusal | None:
+    """Whether ``prefix`` is an exact prefix of the attempt's covered submissions.
+
+    One rule for two callers: the suspension gate asks it of the turn that wants to
+    wait, and resume authorization asks it of the turn that waited. Coverage only grows,
+    so a prefix that holds at the wait still holds at the resume.
+    """
+    if (
+        prefix is None
+        or prefix.ordinal > len(history.covered_submissions)
+        or (
+            prefix.ordinal
+            and history.covered_submissions[prefix.ordinal - 1] != prefix.submission_id
+        )
+    ):
+        return SuspensionRefusal.PREFIX_MISMATCH
+    return None
+
+
+def exhausted(attempts: AttemptsState, scope: Scope) -> bool:
+    """Whether ``scope`` is an attempt that ended (a spent paid limit, for one).
+
+    Core authorizes no resume for such an attempt, so a suspension in it can never end.
+    An attempt's history completes only after its measurements end, so history
+    completeness is a property of the resume, not of the suspension.
+    """
+    return isinstance(scope.owner, AttemptId) and any(
+        row.attempt_id == scope.owner
+        and row.generation == scope.generation
+        and row.terminal_reason is not None
+        for row in attempts.attempts
+    )
+
+
+def _open(context: EvaluationContext, row: Continuation) -> bool:
+    """Whether the continuation still owes its single resume.
+
+    A waiting, parked or reopening continuation does. An authorized one does until its
+    successor invocation was dispatched: a successor that ran has consumed the resume,
+    even when it ended without yielding again (nothing else marks it resumed then).
+    """
+    if row.phase in (
+        ContinuationPhase.WAITING,
+        ContinuationPhase.PARKED,
+        ContinuationPhase.REOPENING,
+    ):
+        return True
+    return row.phase == ContinuationPhase.AUTHORIZED and not any(
+        held.invocation == row.next_invocation for held in context.sessions.invocations
+    )
+
+
+def suspension_refusal_in(
+    context: EvaluationContext, state: EvaluationState, scope: Scope
+) -> SuspensionRefusal | None:
+    """The reason ``scope`` cannot take a new suspension, or None when it can."""
+    if not _active(context, scope):
+        return SuspensionRefusal.SCOPE_NOT_ACTIVE
+    if any(
+        _open(context, row) and _invocation(context, row).scope == scope
+        for row in state.continuations
+    ):
+        return SuspensionRefusal.OPEN_CONTINUATION
+    return None
 
 
 def _invocation(context: EvaluationContext, continuation: Continuation) -> Invocation:
@@ -429,31 +534,20 @@ def _validate_new(
         invocation.turn.invocation_id != current.invocation_id
         or invocation.turn.session.session_id != current.session_id
         or invocation.scope.generation != current.generation
-        or not _active(context, invocation.scope)
     ):
         raise ContractError(("continuation", "invocation"), "requires current active ownership")
     if any(job.scope != invocation.scope for job in _jobs(state, continuation)):
         raise ContractError(("continuation", "jobs"), "dependency belongs to a different scope")
     if continuation.deadline_at > context.run.deadline_at:
         raise ContractError(("continuation", "deadline_at"), "exceeds run deadline")
+    if refusal := suspension_refusal_in(context, state, invocation.scope):
+        raise ContractError(("continuation", "invocation"), refusal.detail)
     if any(
-        row.invocation == current
-        or row.next_invocation == continuation.next_invocation
-        or (
-            row.phase
-            in (
-                ContinuationPhase.WAITING,
-                ContinuationPhase.PARKED,
-                ContinuationPhase.REOPENING,
-                ContinuationPhase.AUTHORIZED,
-            )
-            and row.next_invocation != current
-            and _invocation(context, row).scope == invocation.scope
-        )
+        row.invocation == current or row.next_invocation == continuation.next_invocation
         for row in state.continuations
     ):
         raise ContractError(
-            ("continuation", "invocation"), "already owns an unfinished continuation"
+            ("continuation", "invocation"), SuspensionRefusal.OPEN_CONTINUATION.detail
         )
     return invocation
 
