@@ -41,7 +41,6 @@ from vs_core.api import (
 )
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence, Unknown
 from vs_runtime._core_preflight import resolve_core_resume
-from vs_runtime._evaluation_jobs import awaits_submissions
 from vs_runtime._core_record import (
     Publication,
     PublicationAcknowledgement,
@@ -56,6 +55,7 @@ from vs_runtime._core_requests import (
     counts_toward_concurrency,
     settles_through_core,
 )
+from vs_runtime._evaluation_jobs import awaits_submissions
 
 if TYPE_CHECKING:
     from vs_core.api import Request, Wait
