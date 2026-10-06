@@ -520,6 +520,16 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         help="Maximum independent dynamic workstreams dispatched concurrently (default: 2).",
     )
     parser.add_argument(
+        "--max-unmeasured-turns",
+        type=int,
+        default=2,
+        metavar="N",
+        help=(
+            "Dynamic loop: turns of one workstream that may end without a candidate "
+            "reaching measurement before it settles as failed (default: 2)."
+        ),
+    )
+    parser.add_argument(
         "--turn-drop-backoff-seconds",
         type=float,
         default=5.0,

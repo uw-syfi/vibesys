@@ -56,6 +56,13 @@ for a new ID and true to continue an existing one; `parent_hypothesis_id` select
 starting candidate, and `evidence` cites measurements by location and measured revision.
 A measurement applies only to the revision it measured.
 
+Every implement workstream must start with a first measurable step: begin its `task` with
+the smallest change to the claim that one implementer turn can finish and submit for
+trusted evaluation, then say what follows. An architecture-scale hypothesis is split so
+that its first step already produces a measurement. A workstream whose implementer turns
+end without a candidate settles as failed, and its history row says why: do not assign the
+same task again, narrow it to a first step that fits one turn.
+
 Fill every free slot: a slot left free idles until a running workstream finishes.
 {% if profiling %}
 For measurement-only work, choose a profile workstream: `kind` "profile", a new
@@ -79,6 +86,9 @@ be adopted or offered as a parent.
 {% if history %}
 {% for row in history %}
 - `{{ row.hypothesis_id }}` #{{ row.sequence }} "{{ row.title }}": {{ row.status }}, strategy {{ row.strategy }}{% if row.outcome %}, outcome {{ row.outcome }}{% endif %}{% if row.candidate %}, candidate `{{ rev(row.candidate) }}`{% endif %}{% if row.review_passed is not none %}, review passed: {{ row.review_passed }}{% endif %}{% if row.accuracy_passed is not none %}, accuracy passed: {{ row.accuracy_passed }}{% endif %}{% if row.benchmark_passed is not none %}, benchmark passed: {{ row.benchmark_passed }}{% endif %}{% for m in row.metrics %}; {{ metric(m) }}{% endfor %}{% if row.partial %}; partial {{ partial(row.partial) }}{% endif %}{% if row.summary %}: {{ row.summary }}{% endif %}
+{% if row.failure %}
+  Why it ended: {{ row.failure }}
+{% endif %}
 {% if row.failure_tail %}
   Output of its failed trusted check, last lines:
   {{ row.failure_fence }}
