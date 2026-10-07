@@ -215,11 +215,31 @@ and native commands. `support/repoctl/` provides configurable adapters for
 language and package manifests. The component graph records cross-component
 effects those manifests cannot express. The job prints each selection and its
 reason; an unowned changed path fails selection instead of silently skipping
-checks. To run the selected checks locally, use one command:
+checks. To run the selected check groups configured for local runs, use one
+command. The wrapper runs the repository's Go tool, so install Go 1.25 first:
 
 ```bash
 ./support/repoctl/repoctl test
 ```
+
+This does not run every CI check. Browser end-to-end tests (`tui_e2e`) are
+CI-only by default: Playwright needs Chromium and its system libraries as well
+as the client and Python environments, so making the normal local command
+acquire or require them would make it unexpectedly heavyweight. Run that group
+explicitly when browser coverage is needed. Local port 5173 must be free or
+already serve this checkout's web app: Playwright reuses a local listener, so
+an unrelated listener would run the wrong app.
+
+```bash
+uv sync --dev
+pnpm --dir clients install --frozen-lockfile
+(cd clients && pnpm --filter @vibesys/web exec playwright install --with-deps chromium)
+./support/repoctl/repoctl run-checks --group tui_e2e
+```
+
+The CI-only decision is specific to `tui_e2e`. It does not change the
+selection policy for the other check groups without local-selection keys; each
+has its own prerequisites and needs its own policy decision.
 
 Use `./support/repoctl/repoctl plan` to inspect the selection without running checks.
 The workflow runs named check groups from `.repoctl/checks.toml`. Run

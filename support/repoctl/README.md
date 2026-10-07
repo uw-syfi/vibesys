@@ -7,6 +7,9 @@ components, maps changed paths to their owners, and walks reverse dependency
 edges. The Go program contains no repository-specific paths, jobs, or
 commands; those belong in the policy.
 
+The wrapper invokes the repository's Go toolchain. Install Go 1.25, the
+version declared by `go.mod`, before running it.
+
 From a repository root:
 
 ```sh
@@ -80,6 +83,14 @@ executes checks and reports failures. Language planners live in
 `execution/rust/`. TypeScript expands selected workspace packages; Go and Rust
 native targets run their configured commands within each selected manifest
 root. Python currently runs its configured full suite for a selected job.
+
+`repoctl test` runs only the affected groups marked `include_in_test`; it is
+not a command to run every CI group. In particular, browser end-to-end group
+`tui_e2e` intentionally has no local-selection keys and remains CI-only by
+default. The [contributor guide](../../docs/contributing/development.md#ci-gates)
+documents its explicit `run-checks` command and the required uv,
+client-workspace, and Playwright Chromium setup. This decision applies only to
+`tui_e2e`; other groups without local-selection keys retain their own policies.
 
 To support a new manifest format, add a discovery adapter, register it in
 `discovery_adapters.go`, and configure it in the repository policy. To support a new test
