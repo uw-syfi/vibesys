@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Megakernels"
+  short_description: "Design and tune whole-model CUDA megakernels"
+  default_prompt: "Use $write-megakernel to design or optimize this whole-model CUDA kernel, preserving its correctness and timed-work contract."

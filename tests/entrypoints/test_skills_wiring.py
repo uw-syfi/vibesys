@@ -349,6 +349,8 @@ def test_all_repository_skill_metadata_is_valid() -> None:
     assert metadata["kernel-performance"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-ncu-analysis"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-ncu-analysis"].backends == (ComputeBackend.CUDA,)
+    assert metadata["write-megakernel"].domains == (DomainName.KERNEL_WRITING,)
+    assert metadata["write-megakernel"].backends == (ComputeBackend.CUDA,)
     assert set(metadata) >= NKI_SKILL_NAMES
 
 
@@ -363,10 +365,16 @@ def test_kernel_skills_follow_domain_and_backend(tmp_path: Path) -> None:
         _args(tmp_path, ComputeBackend.TRAINIUM), domain=DomainName.KERNEL_WRITING
     )
 
-    kernel_names = {"kernel-correctness", "kernel-performance", "kernel-ncu-analysis"}
+    kernel_names = {
+        "kernel-correctness",
+        "kernel-performance",
+        "kernel-ncu-analysis",
+        "write-megakernel",
+    }
     assert kernel_names <= _skill_names(kernel_skills)
     assert kernel_names.isdisjoint(_skill_names(serving_skills))
     assert "kernel-ncu-analysis" not in _skill_names(trainium_skills)
+    assert "write-megakernel" not in _skill_names(trainium_skills)
     assert {"kernel-correctness", "kernel-performance"} <= _skill_names(trainium_skills)
 
 
