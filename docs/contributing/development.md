@@ -167,6 +167,19 @@ pnpm build:clients
 pnpm check:ts
 ```
 
+Run only one client build, check, or test command at a time in a checkout. These commands may
+rebuild runtime workspace dependencies, and each build deletes its shared `dist` before writing
+the replacement. `--workspace-concurrency=1` orders packages within one pnpm process; it cannot
+coordinate a second process in the same checkout. Use a separate Git worktree when client commands
+must run concurrently.
+
+An overlap commonly fails with either `Cannot find module '@vibesys/core-state'` or
+`Cannot find module '@vibesys/backend-client'`. A late overlap can instead produce
+`Incomplete test run: ... test files reported no tests`. Stop the overlapping command, run
+`pnpm build:clients`, then rerun the failed command. The build is deliberately not changed to
+preserve the old `dist`: clearing it prevents renamed or deleted source files from surviving as
+stale JavaScript or declarations.
+
 When Python protocol models change, regenerate the files under
 `clients/backend-client/src/generated/` and review the diff.
 See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
