@@ -13,14 +13,14 @@ import posixpath
 import secrets
 import threading
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.cookies import CookieError, SimpleCookie
 from ipaddress import ip_address
 from pathlib import Path
 from string import ascii_lowercase, digits
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from pydantic import TypeAdapter
@@ -150,6 +150,55 @@ _KEEPALIVE_SECONDS = 20.0
 _FRAME_BYTES = 1024 * 1024
 
 
+class StartupSynchronization(Protocol):
+    """Coordinate gateway startup without coupling lifecycle tests to a clock."""
+
+    def wait_for_ready(self, ready: threading.Event) -> bool:
+        """Wait for a successful startup, returning false when it is abandoned."""
+
+    def wait_before_serve(self, stop: threading.Event) -> None:
+        """Run immediately before the event loop begins serving."""
+
+    def wait_before_publication(self, stop: threading.Event, bound_port: int) -> None:
+        """Run after binding, before the listener is published or starts serving."""
+
+
+class _DefaultStartupSynchronization:
+    """Production startup synchronization, including the gateway's wait bound."""
+
+    def wait_for_ready(self, ready: threading.Event) -> bool:
+        """Wait at most the gateway's declared startup bound."""
+        return ready.wait(timeout=10)
+
+    def wait_before_serve(self, stop: threading.Event) -> None:
+        """Begin serving without an additional startup barrier."""
+        del stop
+
+    def wait_before_publication(self, stop: threading.Event, bound_port: int) -> None:
+        """Publish the listener without an additional startup barrier."""
+        del stop, bound_port
+
+
+_DEFAULT_STARTUP_SYNCHRONIZATION = _DefaultStartupSynchronization()
+
+
+@dataclass
+class _GatewayAttempt:
+    """All mutable resources for one independently stoppable gateway attempt."""
+
+    claim: WebInstanceClaim | None
+    stop: threading.Event = field(default_factory=threading.Event)
+    ready: threading.Event = field(default_factory=threading.Event)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    thread: threading.Thread | None = None
+    loop: asyncio.AbstractEventLoop | None = None
+    instance_record: WebInstanceRecord | None = None
+    startup_error: BaseException | None = None
+    bound_port: int | None = None
+    listener_owned: bool = False
+    retired: bool = False
+
+
 @dataclass(frozen=True)
 class WebSocketLimits:
     """The gateway's liveness and flow-control bounds, stated rather than inherited.
@@ -242,6 +291,7 @@ class WebSocketGateway:
         project_root: Path | None = None,
         allowed_origins: Sequence[str] = (),
         limits: WebSocketLimits | None = None,
+        startup: StartupSynchronization | None = None,
     ) -> None:
         """Create a loopback gateway around a shared run API.
 
@@ -266,16 +316,11 @@ class WebSocketGateway:
         # than an allowlist entry that silently never matches.
         self.allowed_origins = frozenset(browser_origin(origin) for origin in allowed_origins)
         self.limits = limits or WebSocketLimits()
+        self._startup = startup or _DEFAULT_STARTUP_SYNCHRONIZATION
         self.subscriptions = subscriptions or SubscriptionTracker()
-        self._claim: WebInstanceClaim | None = None
-        self._instance_record: WebInstanceRecord | None = None
-        self._server: object | None = None
-        self._thread: threading.Thread | None = None
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._stop = threading.Event()
-        self._ready = threading.Event()
-        self._startup_error: BaseException | None = None
-        self._bound_port: int | None = None
+        self._start_lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
+        self._attempt: _GatewayAttempt | None = None
 
     @property
     def token(self) -> str:
@@ -286,23 +331,35 @@ class WebSocketGateway:
     @property
     def url(self) -> str:
         """Return the capability-bearing page URL after startup."""
-        if self._bound_port is None:
+        port = self._current_bound_port()
+        if port is None:
             raise RuntimeError("WebSocket gateway is not running")  # noqa: TRY003  # lint-waiver: LW-101007 [TRY003]; property misuse is a programmer error during gateway lifecycle
-        return f"http://{_LOOPBACK_HOST}:{self._bound_port}/?token={self.token}"
+        return f"http://{_LOOPBACK_HOST}:{port}/?token={self.token}"
 
     @property
     def websocket_url(self) -> str:
         """Return the capability-bearing WebSocket endpoint after startup."""
-        if self._bound_port is None:
+        port = self._current_bound_port()
+        if port is None:
             raise RuntimeError("WebSocket gateway is not running")  # noqa: TRY003  # lint-waiver: LW-101008 [TRY003]; property misuse is a programmer error during gateway lifecycle
-        return f"ws://{_LOOPBACK_HOST}:{self._bound_port}{_WEB_SOCKET_PATH}?token={self.token}"
+        return f"ws://{_LOOPBACK_HOST}:{port}{_WEB_SOCKET_PATH}?token={self.token}"
 
     @property
     def bound_port(self) -> int:
         """Return the actual listening port after startup."""
-        if self._bound_port is None:
+        port = self._current_bound_port()
+        if port is None:
             raise RuntimeError("WebSocket gateway is not running")  # noqa: TRY003  # lint-waiver: LW-101009 [TRY003]; property misuse is a programmer error during gateway lifecycle
-        return self._bound_port
+        return port
+
+    def _current_bound_port(self) -> int | None:
+        """Return the bound port of the current attempt, if it has one."""
+        with self._lifecycle_lock:
+            attempt = self._attempt
+        if attempt is None:
+            return None
+        with attempt.lock:
+            return attempt.bound_port
 
     def rotate_capability(self, *, expected_token: str | None = None) -> str:
         """Replace the launch capability without disturbing browser sessions.
@@ -310,6 +367,22 @@ class WebSocketGateway:
         ``expected_token`` makes an HTTP rotation request compare and replace
         atomically. A stale lifecycle command cannot rotate a newer record.
         """
+        # Keep attempt replacement outside the operation, then follow the
+        # publication lock order (attempt before credential). A rotation can
+        # neither update a retired attempt nor race a retry's publication.
+        with self._lifecycle_lock:
+            attempt = self._attempt
+            if attempt is None:
+                return self._rotate_capability_for_attempt(expected_token, None)
+            with attempt.lock:
+                return self._rotate_capability_for_attempt(expected_token, attempt)
+
+    def _rotate_capability_for_attempt(
+        self,
+        expected_token: str | None,
+        attempt: _GatewayAttempt | None,
+    ) -> str:
+        """Rotate while lifecycle and, when present, attempt ownership are held."""
         with self._credential_lock:
             if expected_token is not None and not _same_secret(expected_token, self._token):
                 raise PermissionError
@@ -317,56 +390,103 @@ class WebSocketGateway:
             new_token = secrets.token_urlsafe(32)
             while _same_secret(new_token, old_token):  # pragma: no cover - cryptographic collision
                 new_token = secrets.token_urlsafe(32)
-            record = self._instance_record
+            record = None if attempt is None or attempt.retired else attempt.instance_record
             replacement = record.with_token(new_token) if record is not None else None
             self._token = new_token
             try:
-                if replacement is not None and self.instance_path is not None:
+                if (
+                    replacement is not None
+                    and self.instance_path is not None
+                    and attempt is not None
+                ):
                     replacement.write(self.instance_path)
+                    attempt.instance_record = replacement
             except OSError:
                 self._token = old_token
                 raise
-            self._instance_record = replacement
             return new_token
 
     def start(self) -> None:
         """Bind loopback and wait until the port is accepting connections."""
-        if self._thread is not None:
-            raise RuntimeError("WebSocket gateway is already running")  # noqa: TRY003  # lint-waiver: LW-101010 [TRY003]; reject a second start before it can race the event loop
-        self._stop.clear()
-        self._ready.clear()
-        self._startup_error = None
-        if self.instance_path is not None:
-            claim = WebInstanceClaim(self.instance_path)
-            if not claim.try_acquire():
-                raise RuntimeError("Another VibeSys web gateway owns this project")  # noqa: TRY003  # lint-waiver: LW-101033 [TRY003]; reject a duplicate project-local web gateway
-            self._claim = claim
-        self._thread = threading.Thread(
-            target=self._run,
-            name="vibesys-server-websocket",
-            daemon=True,
-        )
-        self._thread.start()
-        self._ready.wait(timeout=10)
-        if not self._ready.is_set():
-            raise RuntimeError("Timed out starting WebSocket gateway")  # noqa: TRY003  # lint-waiver: LW-101011 [TRY003]; convert a startup synchronization timeout into a clear lifecycle error
-        if self._startup_error is not None:
-            self._release_instance()
-            raise RuntimeError("Unable to start WebSocket gateway") from self._startup_error  # noqa: TRY003  # lint-waiver: LW-101012 [TRY003]; preserve the gateway startup failure as a lifecycle error
+        # One start operation owns initialization, readiness, and its outcome.
+        # A second caller cannot replace its attempt before it consumes the
+        # result. A timed-out attempt is retired instead of joined: its worker
+        # holds only attempt-local state and cannot affect the retry.
+        with self._start_lock:
+            with self._lifecycle_lock:
+                if self._attempt is not None:
+                    raise RuntimeError("WebSocket gateway is already running")  # noqa: TRY003  # lint-waiver: LW-101010 [TRY003]; reject a second start before it can race the event loop
+                claim: WebInstanceClaim | None = None
+                if self.instance_path is not None:
+                    claim = WebInstanceClaim(self.instance_path)
+                    if not claim.try_acquire():
+                        raise RuntimeError("Another VibeSys web gateway owns this project")  # noqa: TRY003  # lint-waiver: LW-101033 [TRY003]; reject a duplicate project-local web gateway
+                attempt = _GatewayAttempt(claim)
+                attempt.thread = threading.Thread(
+                    target=self._run,
+                    args=(attempt,),
+                    name="vibesys-server-websocket",
+                    daemon=True,
+                )
+                self._attempt = attempt
+                attempt.thread.start()
+            startup_timed_out = not self._startup.wait_for_ready(attempt.ready)
+            startup_error = attempt.startup_error
+            if startup_timed_out:
+                self._retire_attempt(attempt)
+                raise RuntimeError("Timed out starting WebSocket gateway")  # noqa: TRY003  # lint-waiver: LW-101011 [TRY003]; convert a startup synchronization timeout into a clear lifecycle error
+            if startup_error is not None:
+                self._retire_attempt(attempt)
+                raise RuntimeError("Unable to start WebSocket gateway") from startup_error  # noqa: TRY003  # lint-waiver: LW-101012 [TRY003]; preserve the gateway startup failure as a lifecycle error
 
     def close(self) -> None:
         """Stop the gateway and join its event-loop thread."""
-        self._stop.set()
-        loop = self._loop
+        with self._lifecycle_lock:
+            attempt = self._attempt
+        if attempt is None:
+            return
+        self._request_stop(attempt)
+        with attempt.lock:
+            thread = attempt.thread
+        if thread is not None:
+            thread.join()
+        self._retire_attempt(attempt)
+
+    def _request_stop(self, attempt: _GatewayAttempt) -> None:
+        """Ask the current worker to stop without relinquishing its ownership."""
+        attempt.stop.set()
+        with attempt.lock:
+            loop = attempt.loop
         if loop is not None:
-            loop.call_soon_threadsafe(lambda: None)
-        if self._thread is not None:
-            self._thread.join(timeout=5)
-        self._thread = None
-        self._loop = None
-        self._server = None
-        self._bound_port = None
-        self._release_instance()
+            # A startup exception reports readiness before its event loop is
+            # closed. `close()` can race that final close, and waking a closed
+            # loop must not hide the original startup error or skip cleanup.
+            with suppress(RuntimeError):
+                loop.call_soon_threadsafe(lambda: None)
+
+    def _retire_attempt(self, attempt: _GatewayAttempt) -> None:
+        """Release an attempt without waiting for an uncooperative worker.
+
+        The worker receives ``attempt`` rather than reading gateway lifecycle
+        fields. Retirement and listener publication share ``attempt.lock``:
+        it either retires before publication begins, or removes the old record
+        after the published listener closes and before releasing its claim for
+        a retry. A pre-publication worker cannot delay an immediate retry.
+        """
+        self._request_stop(attempt)
+        with attempt.lock:
+            thread = attempt.thread
+            listener_owned = attempt.listener_owned
+        if listener_owned and thread is not None:
+            # Once the worker owns a potentially serving listener, it must
+            # finish the server context before retirement releases the claim.
+            # Before that ownership point it may be uncooperative, so timeout
+            # retirement deliberately doesn't join it.
+            thread.join()
+        self._release_attempt_resources(attempt)
+        with self._lifecycle_lock:
+            if self._attempt is attempt:
+                self._attempt = None
 
     def __enter__(self) -> WebSocketGateway:
         """Start and return the gateway."""
@@ -377,19 +497,27 @@ class WebSocketGateway:
         """Close the gateway after the context exits."""
         self.close()
 
-    def _run(self) -> None:
+    def _run(self, attempt: _GatewayAttempt) -> None:
         loop = asyncio.new_event_loop()
-        self._loop = loop
+        with attempt.lock:
+            attempt.loop = loop
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(self._serve_until_stopped())
+            self._startup.wait_before_serve(attempt.stop)
+            if attempt.stop.is_set():
+                return
+            loop.run_until_complete(self._serve_until_stopped(attempt))
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-101013 [BLE001]; propagate any event-loop startup failure through the owning thread
-            self._startup_error = error
-            self._ready.set()
+            attempt.startup_error = error
+            attempt.ready.set()
         finally:
             loop.close()
+            self._release_attempt_resources(attempt)
+            with self._lifecycle_lock:
+                if self._attempt is attempt:
+                    self._attempt = None
 
-    async def _serve_until_stopped(self) -> None:
+    async def _serve_until_stopped(self, attempt: _GatewayAttempt) -> None:
         try:
             from websockets.asyncio.server import (  # noqa: PLC0415  # lint-waiver: LW-101022 [PLC0415]; defer the optional websocket dependency until gateway startup
                 serve,
@@ -399,6 +527,8 @@ class WebSocketGateway:
                 "The WebSocket gateway requires the websockets package"
             ) from error
 
+        if attempt.stop.is_set():
+            return
         async with serve(
             self._handle_connection,
             _LOOPBACK_HOST,
@@ -420,34 +550,64 @@ class WebSocketGateway:
             max_queue=self.limits.receive_queue,
             max_size=self.limits.receive_frame_bytes,
             server_header="VibeSys-WebSocket",
+            # Bind first without accepting connections. The attempt publishes
+            # and starts this listener only after it has revalidated ownership
+            # under its retirement lock below.
+            start_serving=False,
         ) as server:
-            self._server = server
             sockets = server.sockets
             if not sockets:
                 raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-101015 [TRY003]; fail startup if the websocket library did not bind a socket
                     "WebSocket gateway did not expose a listening socket"
                 )
-            self._bound_port = int(next(iter(sockets)).getsockname()[1])
-            if self.instance_path is not None:
-                self._instance_record = WebInstanceRecord.from_gateway(
-                    pid=os.getpid(),
-                    port=self._bound_port,
-                    token=self.token,
-                    project_root=self.project_root,
-                )
-                self._instance_record.write(self.instance_path)
-            self._ready.set()
-            await asyncio.to_thread(self._stop.wait)
+            bound_port = int(next(iter(sockets)).getsockname()[1])
+            self._startup.wait_before_publication(attempt.stop, bound_port)
+            # Publishing a listener and its discovery record is one ownership
+            # decision. Retirement takes this same lock through record cleanup
+            # and claim release, so a retired attempt can neither serve nor
+            # overwrite a retry's record.
+            with attempt.lock:
+                if attempt.retired or attempt.stop.is_set():
+                    return
+                attempt.bound_port = bound_port
+                attempt.listener_owned = True
+                await server.start_serving()
+                # A readiness timeout may set stop while start_serving yields
+                # to install the event-loop readers. Close before relinquishing
+                # the ownership lock so retirement never observes a serving
+                # listener that it has already retired.
+                if attempt.stop.is_set():
+                    server.close()
+                    return
+                with self._credential_lock:
+                    if self.instance_path is not None:
+                        record = WebInstanceRecord.from_gateway(
+                            pid=os.getpid(),
+                            port=bound_port,
+                            token=self._token,
+                            project_root=self.project_root,
+                        )
+                        record.write(self.instance_path)
+                        attempt.instance_record = record
+                attempt.ready.set()
+            await asyncio.to_thread(attempt.stop.wait)
 
-    def _release_instance(self) -> None:
-        record = self._instance_record
-        if record is not None and self.instance_path is not None:
-            record.remove_if_owner(self.instance_path)
-        self._instance_record = None
-        claim = self._claim
-        self._claim = None
-        if claim is not None:
-            claim.close()
+    def _release_attempt_resources(self, attempt: _GatewayAttempt) -> None:
+        """Release only ``attempt``'s publication and project claim, idempotently."""
+        with attempt.lock:
+            attempt.retired = True
+            attempt.listener_owned = False
+            record = attempt.instance_record
+            attempt.instance_record = None
+            claim = attempt.claim
+            attempt.claim = None
+            # Keep discovery cleanup and claim release in the same critical
+            # section as publication. A retry can acquire the filesystem claim
+            # only after the old attempt can no longer publish or serve.
+            if record is not None and self.instance_path is not None:
+                record.remove_if_owner(self.instance_path)
+            if claim is not None:
+                claim.close()
 
     async def _process_request(  # noqa: C901, PLR0911  # lint-waiver: LW-101058 [C901, PLR0911]; each HTTP route returns its precise status and body at this protocol boundary
         self, _connection: ServerConnection, request: Request
@@ -559,7 +719,7 @@ class WebSocketGateway:
             return _same_secret(candidate, self._token)
 
     def _browser_cookie_name(self) -> str:
-        port = self.port if self._bound_port is None else self._bound_port
+        port = self._current_bound_port() or self.port
         return f"vibesys_gateway_{port}"
 
     def _matches_browser_session(self, request: Request) -> bool:
@@ -616,7 +776,7 @@ class WebSocketGateway:
 
     def _authority(self) -> str:
         """Return this gateway's own `host:port`, falling back before the bind."""
-        port = self.port if self._bound_port is None else self._bound_port
+        port = self._current_bound_port() or self.port
         return _AUTHORITY_TEMPLATE.format(port=port)
 
     def _actual_origin(self) -> str:
