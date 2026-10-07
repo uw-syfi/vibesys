@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import errno
 import json
 import logging
 import secrets
@@ -37,7 +38,11 @@ from server.api.protocol import (
     SteerCommand,
     SubscribeRequest,
 )
-from server.transport.discovery import CAPABILITY_ROTATION_HEADER, WebInstanceRecord
+from server.transport.discovery import (
+    CAPABILITY_ROTATION_HEADER,
+    WebInstanceClaim,
+    WebInstanceRecord,
+)
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import (
@@ -961,6 +966,120 @@ def test_gateway_lifecycle_and_asset_edge_cases(tmp_path: Path) -> None:
     )
     assert missing_root is not None
     assert missing_root.status_code == 404
+
+
+def test_gateway_retries_after_a_failed_bind_without_holding_its_instance_claim(
+    tmp_path: Path,
+) -> None:
+    """A failed startup releases all gateway-owned resources before a retry."""
+    parts = build_server_parts(tmp_path / "logs")
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+
+    with socket.create_server(("127.0.0.1", 0)) as held:
+        port = held.getsockname()[1]
+        gateway = WebSocketGateway(parts.api, port=port, instance_path=instance_path)
+        with pytest.raises(RuntimeError, match="Unable to start WebSocket gateway"):
+            gateway.start()
+        assert WebInstanceClaim.is_held(instance_path) is False
+
+    try:
+        gateway.start()
+        assert gateway.bound_port == port
+        assert WebInstanceClaim.is_held(instance_path) is True
+    finally:
+        gateway.close()
+        parts.close()
+
+    assert WebInstanceClaim.is_held(instance_path) is False
+
+
+def test_gateway_timeout_retires_listener_and_claim_before_immediate_retry(
+    tmp_path: Path,
+) -> None:
+    """A timed-out start cannot publish or serve after an immediate retry."""
+
+    class FakeStartupSynchronization:
+        def __init__(self) -> None:
+            self._first_wait = True
+            self.entered = threading.Event()
+            self.timeout = threading.Event()
+            self.release = threading.Event()
+            self.publication_barrier_released = threading.Event()
+            self.old_port = 0
+
+        def wait_for_ready(self, ready: threading.Event) -> bool:
+            if self._first_wait:
+                self._first_wait = False
+                self.timeout.wait()
+                return False
+            return ready.wait()
+
+        def wait_before_serve(self, stop: threading.Event) -> None:
+            del stop
+
+        def wait_before_publication(self, stop: threading.Event, bound_port: int) -> None:
+            del stop
+            if self.entered.is_set():
+                return
+            self.old_port = bound_port
+            self.entered.set()
+            # The old worker has bound its socket after passing the first
+            # cancellation check. Retirement must make both publication and
+            # serving impossible, not depend on this Fake observing `stop`.
+            self.release.wait()
+            self.publication_barrier_released.set()
+
+    parts = build_server_parts(tmp_path / "logs")
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+    startup = FakeStartupSynchronization()
+    gateway = WebSocketGateway(parts.api, instance_path=instance_path, startup=startup)
+    outcome: list[BaseException] = []
+    completed = threading.Event()
+    retry_record: WebInstanceRecord | None = None
+
+    def start_once() -> None:
+        try:
+            gateway.start()
+        except RuntimeError as error:
+            outcome.append(error)
+        finally:
+            completed.set()
+
+    start_thread = threading.Thread(target=start_once)
+    start_thread.start()
+    try:
+        assert startup.entered.wait(timeout=5)
+        startup.timeout.set()
+        # A deadlock guard, not a verdict derived from elapsed time: the Fake
+        # forced the readiness result after the worker crossed its first stop
+        # check, then keeps it just before listener publication.
+        assert completed.wait(timeout=5)
+        start_thread.join()
+        assert len(outcome) == 1
+        assert isinstance(outcome[0], RuntimeError)
+        assert str(outcome[0]) == "Timed out starting WebSocket gateway"
+        assert WebInstanceClaim.is_held(instance_path) is False
+        gateway.start()
+        assert gateway.bound_port > 0
+        retry_record = WebInstanceRecord.read(instance_path)
+        assert retry_record is not None
+        assert retry_record.port == gateway.bound_port
+        assert WebInstanceRecord.discover(instance_path) == retry_record
+        assert startup.old_port > 0
+        with socket.socket() as retired_listener_probe:
+            assert (
+                retired_listener_probe.connect_ex(("127.0.0.1", startup.old_port))
+                == errno.ECONNREFUSED
+            )
+    finally:
+        startup.timeout.set()
+        startup.release.set()
+        assert startup.publication_barrier_released.wait(timeout=5)
+        start_thread.join()
+        if retry_record is not None:
+            assert WebInstanceRecord.read(instance_path) == retry_record
+        gateway.close()
+        parts.close()
 
 
 def test_gateway_handles_text_protocol_errors_and_subscriptions(tmp_path: Path) -> None:
