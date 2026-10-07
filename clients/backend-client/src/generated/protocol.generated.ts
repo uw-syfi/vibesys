@@ -593,6 +593,7 @@ export type Events1 = RunEvent[];
 export type ThroughSequence = number;
 export type StoreId1 = string;
 export type HistoryAfterSequence = number;
+export type Rebootstrap = boolean;
 export type Type19 = "protocol_error";
 export type RequestId18 = string | null;
 export type ClientId18 = string;
@@ -1557,6 +1558,7 @@ export interface EventBatchMessage {
   active_executions?: ActiveExecutions;
   store_id?: StoreId1;
   history_after_sequence?: HistoryAfterSequence;
+  rebootstrap?: Rebootstrap;
 }
 /**
  * Structured error envelope for protocol failures.

@@ -572,6 +572,11 @@ class EventBatchMessage(ProtocolModel):
     # full history was delivered, which is the default and today's behavior.
     # Carried on every batch of the subscription, live ones included.
     history_after_sequence: int = Field(default=0, ge=0)
+    # True only when this already-open subscription has been bootstrapped again
+    # after its first batch. A newly dialed subscription, including a reconnect
+    # that discovers a different store, leaves this false: its first batch is
+    # distinguished by the dial rather than by an in-loop replay transition.
+    rebootstrap: bool = False
 
 
 class ProtocolErrorMessage(ProtocolModel):

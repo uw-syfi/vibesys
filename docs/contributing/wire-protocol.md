@@ -225,10 +225,13 @@ a continuation:
 - More live output landed in one wait than the `tail` bound was willing to replay
   (`unix_jsonl.py:_stream`).
 
-In both cases the next `event_batch` supersedes the client's fold rather than extending it, and its
-`through_sequence` is not the client's cursor plus one. A client keys continuation on `store_id` and
-the batch, not on sequence contiguity. A transport carries these batches unchanged; the rebootstrap
-decision is server logic, not framing.
+In both cases the next `event_batch` sets `rebootstrap: true`, supersedes the client's fold rather
+than extending it, and its `through_sequence` is not the client's cursor plus one. The marker means
+this is a second bootstrap on an already-open subscription. The first batch of a reconnect remains
+`rebootstrap: false`, even when a changed `store_id` makes that new connection's first batch a fresh
+fold. A client keys continuation on the dial context, the marker, and `store_id`, not sequence
+contiguity. A transport carries these batches unchanged; the rebootstrap decision is server logic,
+not framing.
 
 Rebootstrap is the sole projection transition allowed to adopt a different `run_id`. Within any
 ordinary batch, event identity also guards the batch-level `active_executions`,

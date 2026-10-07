@@ -54,8 +54,10 @@ export interface PersistentEventStreamCallbacks {
   /**
    * Every `ServerMessage` the subscription delivers, tagged with whether it
    * came from a resume (from the caller's cursor) or a bootstrap (a fresh tail).
-   * The flag is bound when the subscription is dialed, so a batch delivered
-   * synchronously, before `subscribe` resolves, is tagged correctly too.
+   * The dial normally decides the flag, including a batch delivered
+   * synchronously before `subscribe` resolves. An in-loop server rebootstrap
+   * explicitly overrides a resumed dial for that batch, because it supersedes
+   * the cursor even though its socket never disconnected.
    */
   onMessage(message: ServerMessage, context: {readonly resumed: boolean}): void;
   /**
@@ -239,7 +241,8 @@ export class PersistentEventStream {
    * One subscribe attempt. Binds the resume flag and the connection identity
    * into the message and disconnect handlers before dialing, so a batch the
    * server delivers inside `subscribe` (before the promise resolves) is tagged
-   * and attributed correctly.
+   * and attributed correctly. A later `event_batch.rebootstrap` is the one
+   * server-declared exception: it is fresh despite this dial having resumed.
    */
   async #dial(
     afterSequence: number,
@@ -263,8 +266,10 @@ export class PersistentEventStream {
 
   #deliver(message: ServerMessage, resumed: boolean, token: number): void {
     if (this.#closed || token !== this.#connectionSeq) return;
-    if (!resumed && message.type === 'event_batch') this.#bootstrapped = true;
-    this.#active().onMessage(message, {resumed});
+    const batchRebootstrap = message.type === 'event_batch' && message.rebootstrap === true;
+    const messageResumed = resumed && !batchRebootstrap;
+    if (!messageResumed && message.type === 'event_batch') this.#bootstrapped = true;
+    this.#active().onMessage(message, {resumed: messageResumed});
   }
 
   /**

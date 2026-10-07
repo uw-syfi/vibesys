@@ -2699,6 +2699,24 @@ describe('stream reconnect', () => {
     expect(controller.state.core.historyAfterSequence).toBe(5);
   });
 
+  it('replaces the floor for a marked rebootstrap inside a resumed stream', async () => {
+    const transport = new ReconnectTransport();
+    const controller = new SocketSessionController(transport, undefined, undefined, [0]);
+    await controller.start();
+    transport.emitBatch([event(6, 'agent_output_chunk', 'six\n')], 5, 'run-store');
+    expect(controller.state.core.historyAfterSequence).toBe(5);
+
+    transport.sever();
+    await settle();
+    // The reconnect itself is a continuation, but the same socket then sends
+    // a tail-overflow bootstrap. Keeping the dial-level `resumed` tag here
+    // would preserve floor 5 and let scrollback address the superseded fold.
+    transport.emitBatch([event(20, 'agent_output_chunk', 'twenty\n')], 19, 'run-store', true);
+
+    expect(controller.state.core.sequence).toBe(20);
+    expect(controller.state.core.historyAfterSequence).toBe(19);
+  });
+
   it('re-bootstraps when the store was swapped while the stream was severed', async () => {
     const transport = new ReconnectTransport();
     const controller = new SocketSessionController(transport, undefined, undefined, [0]);
@@ -3017,12 +3035,18 @@ class ReconnectTransport implements ServerTransport {
     this.#message?.(message);
   }
 
-  emitBatch(events: readonly RunEvent[], historyAfterSequence = 0, storeId?: string): void {
+  emitBatch(
+    events: readonly RunEvent[],
+    historyAfterSequence = 0,
+    storeId?: string,
+    rebootstrap?: boolean,
+  ): void {
     this.#message?.({
       type: 'event_batch',
       events: [...events],
       history_after_sequence: historyAfterSequence,
       ...(storeId === undefined ? {} : {store_id: storeId}),
+      ...(rebootstrap === undefined ? {} : {rebootstrap}),
     });
   }
 

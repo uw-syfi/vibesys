@@ -1276,6 +1276,22 @@ describe('wire payload validation', () => {
     expect(accepted.batches[0]?.history_after_sequence).toBe(-1);
   });
 
+  it('accepts an optional rebootstrap marker and rejects another kind', async () => {
+    const accepted = await deliverFrames([
+      {type: 'event_batch', events: [], rebootstrap: true},
+      {type: 'event_batch', events: [], rebootstrap: false},
+      {type: 'event_batch', events: []},
+    ]);
+    expect(accepted.disconnects).toEqual([]);
+    expect(accepted.batches.map(batch => batch.rebootstrap)).toEqual([true, false, undefined]);
+
+    const rejected = await deliverFrames([
+      {type: 'event_batch', events: [], rebootstrap: 'true'},
+    ]);
+    expect(kindOf(rejected.disconnects[0])).toBe('parse');
+    expect(rejected.disconnects[0]?.message).toContain('rebootstrap must be a boolean when present');
+  });
+
   it('refuses a malformed diagnostic on a protocol error and keeps a valid one', async () => {
     const rejected = await deliverFrames([
       {

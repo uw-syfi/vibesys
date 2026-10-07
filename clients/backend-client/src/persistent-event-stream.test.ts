@@ -160,11 +160,16 @@ class StubTransport implements StreamTransport {
     return Promise.resolve(subscription);
   }
 
-  emitBatch(events: readonly RunEvent[], historyAfterSequence = 0): void {
+  emitBatch(
+    events: readonly RunEvent[],
+    historyAfterSequence = 0,
+    rebootstrap?: boolean,
+  ): void {
     this.#message?.({
       type: 'event_batch',
       events: [...events],
       history_after_sequence: historyAfterSequence,
+      ...(rebootstrap === undefined ? {} : {rebootstrap}),
     });
   }
 
@@ -246,7 +251,7 @@ describe('PersistentEventStream', () => {
     expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
 
     // The resumed stream's batches are tagged resumed.
-    transport.emitBatch([event(3, 'agent_output_chunk', 'three\n')]);
+    transport.emitBatch([event(3, 'agent_output_chunk', 'three\n')], 0, false);
     expect(messages[messages.length - 1]?.resumed).toBe(true);
 
     // A success gives the next outage the full schedule again.
@@ -260,6 +265,33 @@ describe('PersistentEventStream', () => {
       storeId: undefined,
     });
     expect(states[states.length - 1]?.status).toBe('connected');
+  });
+
+  it('treats an in-loop rebootstrap on a resumed dial as a fresh batch', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 0, reconnect: true};
+    const {callbacks, messages, states} = harness(env);
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(6, 'agent_output_chunk', 'six\n')], 5);
+    env.cursor = 6;
+
+    transport.sever();
+    await stream.settle();
+    // The new socket resumed from cursor 6, but its already-open subscription
+    // later overflowed its tail and sent a second bootstrap. This marker is
+    // therefore the one batch that must not inherit the dial's resumed flag.
+    transport.emitBatch([event(20, 'agent_output_chunk', 'twenty\n')], 19, true);
+
+    expect(messages[messages.length - 1]).toMatchObject({resumed: false});
+    expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+
+    // A fresh batch also establishes a bootstrap for the current stream, so a
+    // later terminal close remains quiet rather than reporting an empty fold.
+    env.reconnect = false;
+    transport.sever();
+    await stream.settle();
+    expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
   });
 
   it('names the store the caller last saw on a resume', async () => {

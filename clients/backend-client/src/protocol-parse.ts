@@ -146,6 +146,7 @@ function validateEventBatch(record: Record<string, unknown>): void {
   // there: its comment records why the boundary must not refuse a value the
   // web client currently folds through `?? 0` and never reads back.
   optionalNumber(record, 'history_after_sequence', STREAM);
+  optionalBoolean(record, 'rebootstrap', STREAM);
   validateActiveExecutions(record, STREAM);
 }
 
@@ -357,6 +358,13 @@ function optionalNumber(record: Record<string, unknown>, key: string, path: stri
   const value = record[key];
   if (value !== undefined && typeof value !== 'number') {
     throw fieldError(path, key, 'a number when present');
+  }
+}
+
+function optionalBoolean(record: Record<string, unknown>, key: string, path: string): void {
+  const value = record[key];
+  if (value !== undefined && typeof value !== 'boolean') {
+    throw fieldError(path, key, 'a boolean when present');
   }
 }
 

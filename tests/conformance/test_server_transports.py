@@ -170,6 +170,35 @@ def test_shared_bootstrap_scenarios_run_against_each_transport(
         parts.close()
 
 
+@pytest.mark.parametrize("transport", ["unix", "websocket"])
+def test_tail_overflow_rebootstrap_scenario_marks_only_the_second_bootstrap(
+    tmp_path: Path,
+    socket_dir: Path,
+    transport: str,
+) -> None:
+    """Exercise the corpus's dynamic tail-overflow setup against both servers."""
+    scenario = _scenario("tail-overflow-rebootstrap")
+    assert transport in scenario["transports"]
+    parts = build_server_parts(tmp_path / "logs")
+    try:
+        with _running_connection(transport, parts, socket_dir / "tail-overflow.sock") as connection:
+            steps = scenario["steps"]
+            connection.send(steps[0]["frame"])
+            assert_frame_matches(connection.receive(), steps[1]["expect"])
+            assert_frame_matches(connection.receive(), steps[2]["expect"])
+
+            # Publish one complete over-tail burst while holding the condition
+            # shared with the stream loop. It cannot observe a prefix and send
+            # an ordinary continuation before it sees the overflow.
+            with parts.condition:
+                for index in range(11):
+                    parts.journal.publish_output("stdout", f"overflow-{index}")
+
+            assert_frame_matches(connection.receive(), steps[3]["expect"])
+    finally:
+        parts.close()
+
+
 def _acknowledges_the_command(reply: Mapping[str, Any]) -> None:
     """One response carries the ack for the command it answers."""
     assert reply["ack"]["action"] == "pause"

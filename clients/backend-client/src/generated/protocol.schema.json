@@ -1364,6 +1364,11 @@
           "minimum": 0,
           "title": "History After Sequence",
           "type": "integer"
+        },
+        "rebootstrap": {
+          "default": false,
+          "title": "Rebootstrap",
+          "type": "boolean"
         }
       },
       "required": [
