@@ -345,6 +345,49 @@ def test_paid_attempt_is_not_repeated_after_interrupted_turn(tmp_path: Path) -> 
     assert len(state.search.rounds) == 1
 
 
+def test_interrupted_final_paid_attempt_closes_its_round_and_the_run_continues(
+    tmp_path: Path,
+) -> None:
+    # A host dies during the round's last paid implementer turn. That attempt is paid and
+    # must not be repeated, so resume closes the round as failed (as an uninterrupted run
+    # whose last attempt failed does) and moves on, instead of refusing to run.
+    options = _options(max_rounds=2, max_retries_per_round=1)
+
+    async def scenario() -> tuple[RunStatus, _Script, SingleState | None]:
+        script = _Script(
+            _plan("H-01"),
+            RuntimeError("agent disconnected"),
+            _plan("H-02"),
+            _response(),
+        )
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
+        try:
+            with pytest.raises(RuntimeError, match="agent disconnected"):
+                await PLUGIN.orchestrate(run, options)
+            status = await PLUGIN.orchestrate(run, options)
+            return status, script, await run.state.load(SingleState)
+        finally:
+            await run.close()
+
+    status, script, state = asyncio.run(scenario())
+
+    assert status is RunStatus.SUCCEEDED
+    assert [role for role, _history, _message in script.calls] == [
+        DESIGNER.id,
+        IMPLEMENTER.id,
+        DESIGNER.id,
+        IMPLEMENTER.id,
+    ]
+    assert state is not None
+    assert state.last_paid_attempt is None
+    assert [record.round_number for record in state.search.rounds] == [1, 2]
+
+
 def test_rollback_uses_recorded_parent_and_sessions_close(tmp_path: Path) -> None:
     script = _Script(
         _plan("H-01"),
