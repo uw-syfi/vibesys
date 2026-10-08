@@ -37,7 +37,7 @@ def test_unknown_pareto_key_is_rejected_by_name(
         f'[[objective]]\nname = "throughput"\ndirection = "max"\n[pareto]\n{key} = 0.05\n',
     )
 
-    with pytest.raises(ValueError, match=key):
+    with pytest.raises(ValueError, match=rf"\bpareto\.{key}:"):
         _load_metric_space_toml(root)
 
 
@@ -50,7 +50,7 @@ def test_unknown_objective_key_is_rejected_by_name(
     root = tmp_path_factory.mktemp("bundle")
     _write(root, f'[[objective]]\nname = "latency"\ndirection = "min"\n{key} = "x"\n')
 
-    with pytest.raises(ValueError, match=key):
+    with pytest.raises(ValueError, match=rf"\bobjective\[0\]\.{key}:"):
         _load_metric_space_toml(root)
 
 
@@ -62,7 +62,7 @@ def test_unknown_top_level_table_is_rejected_by_name(
     root = tmp_path_factory.mktemp("bundle")
     _write(root, f'[[{table}]]\nname = "latency"\ndirection = "min"\n')
 
-    with pytest.raises(ValueError, match=table):
+    with pytest.raises(ValueError, match=rf"(^|\s){table}:"):
         _load_metric_space_toml(root)
 
 
@@ -78,3 +78,20 @@ def test_error_names_the_file_and_the_full_key_path(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match=r"objective\[0\]\.weight"):
         _load_metric_space_toml(tmp_path)
+
+
+@given(
+    present=st.sampled_from(["name", "direction"]),
+    index=st.integers(min_value=0, max_value=3),
+)
+def test_objective_missing_a_required_key_is_rejected_by_full_path(
+    tmp_path_factory: pytest.TempPathFactory, present: str, index: int
+) -> None:
+    values = {"name": '"latency"', "direction": '"min"'}
+    missing = "direction" if present == "name" else "name"
+    complete = '[[objective]]\nname = "ok"\ndirection = "max"\n' * index
+    root = tmp_path_factory.mktemp("bundle")
+    _write(root, f"{complete}[[objective]]\n{present} = {values[present]}\n")
+
+    with pytest.raises(ValueError, match=rf"objective\[{index}\]\.{missing}:"):
+        _load_metric_space_toml(root)

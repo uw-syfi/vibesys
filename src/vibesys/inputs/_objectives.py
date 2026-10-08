@@ -71,5 +71,8 @@ def load_objectives(task_root: Path) -> ObjectivesInput:
             f"{_key_path(error['loc']) or '<file>'}: {error['msg']} (got {error['input']!r})"
             for error in exc.errors()
         )
-        message = f"Invalid {path}: {problems}"
+        message = (
+            f"Invalid {path}: {problems}. objectives.toml accepts only [[objective]] "
+            "(name, direction) and [pareto] (relative_noise); remove or correct other keys."
+        )
         raise ValueError(message) from exc
