@@ -28,6 +28,7 @@ from tests.support.session_world import (
     SessionHost,
     dispatch_request,
     ensure_request,
+    inspect_request,
 )
 
 from vs_agent.api import AgentSessionState, DurableSessionStore
@@ -250,6 +251,33 @@ async def test_resume_continues_the_retained_conversation_with_exact_identity() 
         assert event.observation.children_complete
         assert len(w.host.turns) == 2, "a repeat replays instead of dispatching"
         assert_core_accepts([first, again], expect_retry=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["up", "down"])
+async def test_an_inspection_of_a_resumed_turn_reports_on_the_resume_request(
+    transport: str,
+) -> None:
+    # Core inspects a resumed turn (after a restart, or when its acceptance is unknown)
+    # naming the ResumeSessionTurn as the dispatching request, and looks the target up by
+    # that identity. The answer must name the same request, as a dispatched turn's does.
+    async with world() as w:
+        await w.started()
+        resume = resume_request()
+        w.host.faults.down = transport == "down"
+        resumed = await w.execute(resume)
+        w.host.faults.down = False
+        inspected = await w.execute(
+            inspect_request(
+                "req-inspect-resume",
+                resume.turn.invocation_id.root,
+                dispatch=resume.request_id.root,
+            )
+        )
+        target = inspected.observation.target
+        assert target is not None
+        assert target.observation.request_id == resume.request_id
+        assert_core_accepts([resumed, inspected], expect_retry=False)
 
 
 @pytest.mark.asyncio
