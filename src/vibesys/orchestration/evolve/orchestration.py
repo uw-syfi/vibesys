@@ -11,8 +11,10 @@ from vibesys.constants import DomainName
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
+from vibesys.orchestration.attempts import AttemptKey, Implement, next_step
 from vibesys.orchestration.evolve.agents import JUDGE, MUTATOR, PROFILER
 from vibesys.orchestration.evolve.models import (
+    BOOTSTRAP_MEMBER,
     CandidateJudgeContext,
     CandidateProfilerContext,
     EvolveOptions,
@@ -20,6 +22,7 @@ from vibesys.orchestration.evolve.models import (
     JudgeResponse,
     MutatorContext,
     MutatorResponse,
+    PaidBootstrapAttempt,
 )
 from vibesys.orchestration.evolve.population import (
     CandidateOutcome,
@@ -204,8 +207,21 @@ class _EvolveRun:
                 primary.add_note(f"root session cleanup also failed: {error}")
 
     async def _bootstrap(self) -> bool:
-        spent = self.search.bootstrap_attempts(self.state.population)
-        for attempt in range(spent + 1, self.options.bootstrap_max_attempts + 1):
+        while isinstance(
+            step := next_step(
+                marker=self.state.last_paid_bootstrap,
+                key=AttemptKey(0, BOOTSTRAP_MEMBER),
+                max_attempts=self.options.bootstrap_max_attempts,
+            ),
+            Implement,
+        ):
+            attempt = step.attempt
+            self.state = self.state.model_copy(
+                update={
+                    "last_paid_bootstrap": PaidBootstrapAttempt(turn_number=attempt),
+                }
+            )
+            await self._commit(f"evolve: start bootstrap attempt {attempt}")
             wip = self.search.wip_seed(self.state.population)
             if (
                 wip is not None

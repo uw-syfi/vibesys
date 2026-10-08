@@ -389,6 +389,61 @@ def test_interrupted_final_paid_attempt_closes_its_round_and_the_run_continues(
     ]
 
 
+@pytest.mark.parametrize(
+    ("budget", "crash_at"),
+    [(budget, crash) for budget in (1, 2, 3) for crash in range(1, budget + 1)],
+)
+def test_resume_runs_the_same_implementer_attempts_as_an_uninterrupted_run(
+    tmp_path: Path, budget: int, crash_at: int
+) -> None:
+    # Whatever attempt the host dies in, a failing round pays exactly its budget of
+    # attempts across both processes, and the resumed run closes it like an uninterrupted one.
+    def implementer_calls(crash: int | None, root: Path) -> tuple[RunStatus, int, SingleState]:
+        turns = 0
+
+        def respond(
+            role: AgentRole,
+            _history: tuple[str, ...],
+            _message: str,
+            _schema: type[BaseModel] | None,
+        ) -> object:
+            nonlocal turns
+            if role.id == DESIGNER.id:
+                return _plan("H-01")
+            turns += 1
+            if turns == crash:
+                raise RuntimeError("agent disconnected")
+            return _response(verdict=Verdict.FAIL, feedback="still wrong")
+
+        async def scenario() -> tuple[RunStatus, SingleState | None]:
+            run = FakeRun(
+                PLUGIN,
+                project_root=root,
+                responder=respond,
+                supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+            )
+            options = _options(max_rounds=1, max_retries_per_round=budget)
+            try:
+                if crash is not None:
+                    with pytest.raises(RuntimeError, match="agent disconnected"):
+                        await PLUGIN.orchestrate(run, options)
+                status = await PLUGIN.orchestrate(run, options)
+                return status, await run.state.load(SingleState)
+            finally:
+                await run.close()
+
+        status, state = asyncio.run(scenario())
+        assert state is not None
+        return status, turns, state
+
+    base_status, base_turns, _ = implementer_calls(None, tmp_path / "base")
+    status, turns, state = implementer_calls(crash_at, tmp_path / "crashed")
+
+    assert (status, turns) == (base_status, base_turns) == (RunStatus.SUCCEEDED, budget)
+    assert state.last_paid_attempt is None
+    assert [(record.round_number, record.passed) for record in state.search.rounds] == [(1, False)]
+
+
 def test_rollback_uses_recorded_parent_and_sessions_close(tmp_path: Path) -> None:
     script = _Script(
         _plan("H-01"),

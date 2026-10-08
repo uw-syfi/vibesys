@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.hypothesis import (
+    AgentAttribution,
     AttemptDecision,
     AttemptState,
     CandidateDisposition,
@@ -25,7 +26,7 @@ from vibesys.hypothesis import (
 )
 from vibesys.hypothesis import cadence as hypothesis_cadence
 from vibesys.metrics import FrameworkBenchmarkOutcome
-from vibesys.orchestration.attempts import Implement, NextStep, next_step
+from vibesys.orchestration.attempts import AttemptKey, Implement, NextStep, next_step
 from vibesys.orchestration.multi.attribution import run_attribution
 from vibesys.orchestration.multi.files import MultiFiles
 from vibesys.orchestration.multi.models import (
@@ -360,14 +361,9 @@ class _MultiRun:
         return hypothesis
 
     def _next_step(self, selected: _SelectedRound) -> NextStep:
-        marker = self.state.last_paid_attempt
-        paid_here = (
-            marker is not None
-            and marker.round_number == self.round_number
-            and marker.member_id == selected.request.plan.hypothesis_id
-        )
         return next_step(
-            last_paid=marker.turn_number if paid_here else None,
+            marker=self.state.last_paid_attempt,
+            key=AttemptKey(self.round_number, selected.request.plan.hypothesis_id),
             max_attempts=self.options.max_retries_per_round,
         )
 
@@ -621,10 +617,13 @@ class _MultiRun:
                 framework_benchmark_configured=self.run.facts.benchmark_configured,
                 accuracy_configured=self.run.facts.accuracy_configured,
                 candidate_commit=candidate_revision,
-                backend_name=binding.backend if binding else None,
-                driver_name=binding.driver if binding else None,
-                provider=binding.provider if binding else None,
-                model=binding.model if binding else None,
+                implementer=(
+                    AgentAttribution(
+                        binding.backend, binding.driver, binding.provider, binding.model
+                    )
+                    if binding
+                    else None
+                ),
             )
         )
         search_state = self.state.search

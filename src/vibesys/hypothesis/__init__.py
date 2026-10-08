@@ -64,6 +64,7 @@ from vibesys.hypothesis.plan import (
     truncate_hypothesis_title,
 )
 from vibesys.hypothesis.record import (
+    AgentAttribution,
     CandidateEvidence,
     MeasurementEvidence,
     RecordInput,
@@ -101,6 +102,7 @@ __all__ = [
     "ArchivePendingClaim",
     "ArchiveScalarReading",
     "ArchiveTrustedParent",
+    "AgentAttribution",
     "AttemptBudget",
     "AttemptDecision",
     "AttemptState",

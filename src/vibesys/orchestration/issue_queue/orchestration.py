@@ -201,7 +201,10 @@ def _resume_point(run: _IssueQueueRun) -> tuple[int, IssueQueuePhase, int | None
     if issue_id is not None and state.phase in {"implementer", "judge"}:
         issue = run.board.get(issue_id)
         if issue is not None and issue.status in {IssueStatus.OPEN, IssueStatus.IN_PROGRESS}:
-            return state.round_idx, state.phase, issue_id
+            # The board records an attempt before the judge cursor commits, so an attempt
+            # event with no verdict after it is paid work that still awaits its judge.
+            awaiting_judge = bool(issue.history) and issue.history[-1].action == "attempt"
+            return state.round_idx, "judge" if awaiting_judge else state.phase, issue_id
     return state.round_idx, "implementer", None
 
 

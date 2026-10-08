@@ -27,6 +27,16 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class AgentAttribution:
+    """Which runtime produced the round's implementation."""
+
+    backend: str
+    driver: str | None
+    provider: str | None
+    model: str | None
+
+
+@dataclass(frozen=True)
 class RecordInput:
     """Authoritative final-attempt facts for one completed round."""
 
@@ -42,11 +52,8 @@ class RecordInput:
     accuracy_configured: bool
     candidate_commit: str | None
     # None when no implementer session ran in this process (a resumed run closing a round
-    # whose last paid attempt was interrupted): there is nothing to attribute.
-    backend_name: str | None
-    driver_name: str | None
-    provider: str | None
-    model: str | None
+    # whose last paid attempt was interrupted): unknown attribution is never official.
+    implementer: AgentAttribution | None
 
 
 @dataclass(frozen=True)
@@ -225,7 +232,8 @@ def build_round_record(data: RecordInput) -> RoundRecord:
     official = (
         attempt.passed
         and attempt.official_reason is not None
-        and data.backend_name != "stub"
+        and data.implementer is not None
+        and data.implementer.backend != "stub"
         and (data.accuracy_configured or data.framework_benchmark_configured)
     )
     reviewed = data.reviewed
@@ -285,8 +293,8 @@ def build_round_record(data: RecordInput) -> RoundRecord:
         perf_delta_pct=metrics.delta_pct,
         perf_comparison=metrics.comparison,
         perf_provenance=projection.provenance,
-        implementer_driver=data.driver_name,
-        implementer_provider=data.provider,
-        implementer_model=data.model,
+        implementer_driver=data.implementer.driver if data.implementer else None,
+        implementer_provider=data.implementer.provider if data.implementer else None,
+        implementer_model=data.implementer.model if data.implementer else None,
         attempts=attempt.retry,
     )

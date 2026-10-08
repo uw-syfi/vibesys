@@ -10,6 +10,7 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.hypothesis import (
+    AgentAttribution,
     AttemptState,
     Continue,
     Finished,
@@ -24,7 +25,7 @@ from vibesys.hypothesis import (
     build_round_record,
 )
 from vibesys.metrics import FrameworkBenchmarkOutcome
-from vibesys.orchestration.attempts import Implement, NextStep, next_step
+from vibesys.orchestration.attempts import AttemptKey, Implement, NextStep, next_step
 from vibesys.orchestration.profilers import (
     ProfilerKind,
     ProfilerSummary,
@@ -302,15 +303,9 @@ class _SingleRun:
         return hypothesis
 
     def _next_step(self, selected: _SelectedRound) -> NextStep:
-        marker = self.state.last_paid_attempt
-        paid_here = (
-            marker is not None
-            and marker.round_number == self.round_number
-            and marker.role_id == IMPLEMENTER.id
-            and marker.member_id == selected.plan.hypothesis_id
-        )
         return next_step(
-            last_paid=marker.turn_number if paid_here else None,
+            marker=self.state.last_paid_attempt,
+            key=AttemptKey(self.round_number, selected.plan.hypothesis_id),
             max_attempts=self.options.max_retries_per_round,
         )
 
@@ -467,10 +462,13 @@ class _SingleRun:
                 framework_benchmark_configured=self.run.facts.benchmark_configured,
                 accuracy_configured=self.run.facts.accuracy_configured,
                 candidate_commit=candidate_revision,
-                backend_name=binding.backend if binding else None,
-                driver_name=binding.driver if binding else None,
-                provider=binding.provider if binding else None,
-                model=binding.model if binding else None,
+                implementer=(
+                    AgentAttribution(
+                        binding.backend, binding.driver, binding.provider, binding.model
+                    )
+                    if binding
+                    else None
+                ),
             )
         )
         state = self.state.search

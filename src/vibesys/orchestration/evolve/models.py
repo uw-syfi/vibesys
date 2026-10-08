@@ -212,6 +212,20 @@ class EvolveOptions(BaseModel):
         )
 
 
+BOOTSTRAP_MEMBER = "bootstrap"
+"""The attempt-budget member that owns every cold-start attempt of a campaign."""
+
+
+class PaidBootstrapAttempt(BaseModel):
+    """Durable proof that one cold-start attempt was started (generation 0)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    round_number: Literal[0] = 0
+    member_id: Literal["bootstrap"] = BOOTSTRAP_MEMBER
+    turn_number: Annotated[int, Field(gt=0)]
+
+
 class EvolveState(BaseModel):
     """Complete crash-recoverable evolutionary-search aggregate."""
 
@@ -221,13 +235,16 @@ class EvolveState(BaseModel):
     metric_space: MetricSpace = Field(default_factory=MetricSpace)
     generation_start: PopulationState | None = None
     admitted_slots: int = Field(default=0, ge=0)
+    last_paid_bootstrap: PaidBootstrapAttempt | None = None
 
 
 __all__ = [
     "CandidateJudgeContext",
     "CandidateProfilerContext",
     "EvolveOptions",
+    "BOOTSTRAP_MEMBER",
     "EvolveState",
+    "PaidBootstrapAttempt",
     "JudgeResponse",
     "MutatorContext",
     "MutatorResponse",
