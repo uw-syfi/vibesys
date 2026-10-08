@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import settings
+from hypothesis.database import DirectoryBasedExampleDatabase
 
 # `--shard=I/N` splits the suite across CI runners (see tests/support/sharding.py).
 pytest_plugins = ["tests.support.isolated_environment", "tests.support.sharding"]
@@ -35,20 +36,53 @@ def sandbox_tmp_path() -> Iterator[Path]:
 
 
 # Hypothesis's per-example deadline is a wall-clock dependence, so it is off in
-# every profile. `ci` is derandomized so a run's examples are a pure function of
-# the code: a newly found counterexample cannot fail an unrelated PR. `explore`
-# is the randomized, larger run for finding new bugs; select it by hand with
-# `HYPOTHESIS_PROFILE=explore`.
+# every profile. `ci` is deterministic so a run's examples are a pure function of
+# the code and the saved failures: a newly found counterexample cannot fail an
+# unrelated PR by chance. `explore` is the randomized, larger run for finding new
+# bugs; select it by hand with `HYPOTHESIS_PROFILE=explore`. `nightly` is the
+# scheduled run: randomized at the default example count and seeded per run
+# (`--hypothesis-seed`), so each night draws new examples and a failure replays
+# from its seed.
 # Every profile states `derandomize` explicitly: an unset option resolves from
 # whichever profile is loaded, so `explore` would otherwise inherit `ci`'s.
+#
+# `ci` does not use `derandomize=True`: Hypothesis rejects it together with a
+# database, since derandomizing implies `database=None`. It fixes the global
+# seed to 0 instead (`pytest_configure` below), which is equally deterministic
+# and keeps the database. CI restores `.hypothesis/` from the nightly run's
+# cache, read-only on pull requests, so a failure found at nightly strength
+# replays on a PR as its first example. The one departure from a pure PR tier is
+# deliberate: a bug the nightly found keeps failing the PRs that reach it until
+# it is fixed, since it is a bug on `main`.
+_EXAMPLE_DATABASE = DirectoryBasedExampleDatabase(Path(__file__).parent / ".hypothesis" / "examples")
 settings.register_profile("dev", deadline=None, derandomize=False)
-settings.register_profile("ci", deadline=None, derandomize=True, print_blob=True)
 settings.register_profile(
-    "explore", deadline=None, derandomize=False, max_examples=500, print_blob=True
+    "ci", deadline=None, derandomize=False, print_blob=True, database=_EXAMPLE_DATABASE
 )
-settings.load_profile(
-    os.environ.get("HYPOTHESIS_PROFILE") or ("ci" if os.environ.get("CI") else "dev")
+settings.register_profile(
+    "explore",
+    deadline=None,
+    derandomize=False,
+    max_examples=500,
+    print_blob=True,
+    database=_EXAMPLE_DATABASE,
 )
+settings.register_profile(
+    "nightly", deadline=None, derandomize=False, print_blob=True, database=_EXAMPLE_DATABASE
+)
+_PROFILE = os.environ.get("HYPOTHESIS_PROFILE") or ("ci" if os.environ.get("CI") else "dev")
+settings.load_profile(_PROFILE)
+
+#: The `ci` profile's global seed, applied unless `--hypothesis-seed` is given.
+_CI_HYPOTHESIS_SEED = 0
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    """Fix Hypothesis's global seed under the `ci` profile, before its plugin reads it."""
+    if _PROFILE == "ci" and config.getoption("hypothesis_seed") is None:
+        config.option.hypothesis_seed = _CI_HYPOTHESIS_SEED
+
 
 #: xdist scheduling group for tests that cannot run beside one another.
 _SERIAL_GROUP = "serial"

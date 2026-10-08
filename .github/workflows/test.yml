@@ -399,6 +399,16 @@ jobs:
         with:
           go-version-file: support/repoctl/go.mod
 
+      # Read-only: only the nightly run saves this cache, so a pull request
+      # cannot poison it. Lets a failure found at nightly strength replay here
+      # (see the Hypothesis profiles in conftest.py). A miss costs nothing.
+      - name: Restore the Hypothesis example database
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .hypothesis
+          key: hypothesis-${{ github.run_id }}
+          restore-keys: hypothesis-
+
       - name: Run Python tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
         env:
           VIBESYS_TEST_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
