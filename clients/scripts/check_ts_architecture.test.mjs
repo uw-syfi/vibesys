@@ -21,6 +21,13 @@ const CONFIG = join(WORKSPACE_ROOT, '.dependency-cruiser.mjs');
 // the workspace is covered without anyone editing a list here.
 const REPOSITORY_LAYOUT = workspaceLayout(WORKSPACE_ROOT);
 const PACKAGE_DIRECTORIES = REPOSITORY_LAYOUT.packages.map(({directory}) => directory);
+const DEPENDENCY_BUILD_COMMANDS = ['build', 'check', 'test'];
+
+function dependencyBuildHooks(name) {
+  return Object.fromEntries(
+    DEPENDENCY_BUILD_COMMANDS.map(command => [`pre${command}`, `pnpm --filter ${name}^... build`]),
+  );
+}
 
 test('dependency-cruiser rule names are unique', async () => {
   const options = await extractDepcruiseOptions(CONFIG);
@@ -383,21 +390,21 @@ test('manifest policy rejects declared reverse dependencies', async t => {
     'core-state',
     '@vibesys/core-state',
     {'@vibesys/backend-client': 'workspace:*', '@opentui/core': '1.0.0'},
-    {pretest: 'pnpm --filter @vibesys/core-state^... build'},
+    dependencyBuildHooks('@vibesys/core-state'),
   );
   await writeManifest(
     root,
     'tui',
     '@vibesys/tui',
     {'@vibesys/backend-client': 'workspace:*'},
-    {pretest: 'pnpm --filter @vibesys/tui^... build'},
+    dependencyBuildHooks('@vibesys/tui'),
   );
   await writeManifest(
     root,
     'web',
     '@vibesys/web',
     {'@vibesys/backend-client': 'workspace:*', '@vibesys/core-state': 'workspace:*'},
-    {pretest: 'pnpm --filter @vibesys/web^... build'},
+    dependencyBuildHooks('@vibesys/web'),
   );
 
   assert.deepEqual(manifestErrors(root), [
@@ -407,31 +414,30 @@ test('manifest policy rejects declared reverse dependencies', async t => {
   ]);
 });
 
-test('manifest policy names a package whose tests do not build its dependencies', async t => {
-  const root = await workspaceFixture(t, 'vibesys-manifest-pretest-');
-  // `pnpm -r run test` runs these two in order and builds neither, so `core-state`'s suite reads
-  // whatever `backend-client/dist` the last build in the checkout left behind. `@vibesys/web`
-  // declared no `pretest` at all while importing values from `@vibesys/core-state` (#1039).
-  await writeManifest(root, 'backend-client', '@vibesys/backend-client', {});
-  await writeManifest(root, 'core-state', '@vibesys/core-state', {
-    '@vibesys/backend-client': 'workspace:*',
-  });
-  // A correctly wired dependent, so the rule cannot pass by rejecting every package.
-  await writeManifest(
-    root,
-    'tui',
-    '@vibesys/tui',
-    {'@vibesys/backend-client': 'workspace:*', '@vibesys/core-state': 'workspace:*'},
-    {pretest: 'pnpm --filter @vibesys/tui^... build'},
-  );
+for (const command of DEPENDENCY_BUILD_COMMANDS) {
+  test(`manifest policy requires dependency build order for direct ${command}`, async t => {
+    const root = await workspaceFixture(t, `vibesys-manifest-pre${command}-`);
+    // A leaf has nothing to prepare and needs no hook. The dependent has the other two correct
+    // hooks, so each case proves this command independently rather than passing because all three
+    // lifecycle scripts were absent.
+    await writeManifest(root, 'backend-client', '@vibesys/backend-client', {});
+    const scripts = dependencyBuildHooks('@vibesys/core-state');
+    delete scripts[`pre${command}`];
+    await writeManifest(
+      root,
+      'core-state',
+      '@vibesys/core-state',
+      {'@vibesys/backend-client': 'workspace:*'},
+      scripts,
+    );
 
-  // `backend-client` has no workspace dependency to build, so it needs no hook and gets no error.
-  assert.deepEqual(manifestErrors(root), [
-    'core-state/package.json: @vibesys/core-state must declare "pretest": ' +
-      '"pnpm --filter @vibesys/core-state^... build", because `pnpm -r test` runs the packages ' +
-      'in order but builds none of them',
-  ]);
-});
+    assert.deepEqual(manifestErrors(root), [
+      `core-state/package.json: @vibesys/core-state must declare "pre${command}": ` +
+        '"pnpm --filter @vibesys/core-state^... build", because direct ' +
+        `"${command}" must build its runtime workspace dependencies first`,
+    ]);
+  });
+}
 
 test('manifest policy names a package that joins the workspace without one', async t => {
   const root = await workspaceFixture(t, 'vibesys-manifest-policy-');
