@@ -55,6 +55,8 @@ _LOG = logging.getLogger(__name__)
 
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 _DISCONNECT_POLL_SECONDS = 0.1
+WEBSOCKET_CLOSE_TIMEOUT_SECONDS = 10.0
+"""Canonical bound for completing or aborting the WebSocket close handshake."""
 _LOOPBACK_HOST = "127.0.0.1"
 # This gateway's own authority, spelled once. The page origin it accepts and
 # the socket source its policy names are this single `host:port` under two
@@ -245,9 +247,11 @@ class WebSocketLimits:
     same 1 MiB.
 
     Defaults reproduce the values in force before they were named, so the
-    library's own defaults can no longer move them. The field defaults below
-    are the only statement of those numbers in this module; the published
-    liveness table in ``wire-protocol.md`` quotes them, and
+    library's own defaults can no longer move them. The close bound is named
+    once by ``WEBSOCKET_CLOSE_TIMEOUT_SECONDS`` so process lifecycle code can
+    derive a strictly larger operator budget; the other values are stated on
+    their fields below. The published liveness table in ``wire-protocol.md``
+    quotes the defaults, and
     ``test_the_stated_transport_bounds_are_the_values_they_replaced`` asserts
     the whole tuple so an edit here cannot silently falsify the table. The
     default write deadline is one full keepalive reaping window, because a
@@ -264,7 +268,7 @@ class WebSocketLimits:
 
     ping_interval_seconds: float = _KEEPALIVE_SECONDS
     ping_timeout_seconds: float = _KEEPALIVE_SECONDS
-    close_timeout_seconds: float = 10.0
+    close_timeout_seconds: float = WEBSOCKET_CLOSE_TIMEOUT_SECONDS
     write_deadline_seconds: float = 2 * _KEEPALIVE_SECONDS
     send_buffer_bytes: int = 32768
     receive_queue: tuple[int, int] = (32, 8)

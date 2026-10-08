@@ -42,6 +42,9 @@ from server.transport.discovery import (
 )
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
+from server.transport.websocket import (
+    WEBSOCKET_CLOSE_TIMEOUT_SECONDS as WEBSOCKET_CLOSE_TIMEOUT_SECONDS,  # noqa: PLC0414  # lint-waiver: LW-107301 [PLC0414]; expose the transport's canonical close bound through the runtime boundary so launchers can outlast it without restating it
+)
 from server.transport.websocket import WebSocketGateway
 from server.transport.websocket import (
     browser_origin as browser_origin,  # noqa: PLC0414  # lint-waiver: LW-101108 [PLC0414]; re-export the browser-origin parser through the allowed runtime composition boundary, so the launcher validates `--web-origin` against the one definition the gateway enforces

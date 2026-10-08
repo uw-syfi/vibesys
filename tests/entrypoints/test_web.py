@@ -14,7 +14,7 @@ import pytest
 from tests.entrypoints.support import IDLE_DIRECTORY, INSTANCE_PATH, FakeDetachedGateway
 
 from entrypoints import web
-from entrypoints.server import GatewayStopOutcome, GatewayStopResult
+from entrypoints.server import GATEWAY_STOP_TIMEOUT_SECONDS, GatewayStopOutcome, GatewayStopResult
 from entrypoints.web import (
     _DEMO_LOG,
     _browser_url,
@@ -522,8 +522,8 @@ def test_stop_reports_the_processes_that_still_hold_the_directory(
                 4321,
             ),
             "/runtime is still in use. Processes with files open there: 4321. SIGTERM went "
-            "to gateway 4321 10 seconds ago. Do not reuse or remove /runtime. End those "
-            "processes first (`kill -9 4321`).",
+            f"to gateway 4321 {GATEWAY_STOP_TIMEOUT_SECONDS:.0f} seconds ago. Do not reuse "
+            "or remove /runtime. End those processes first (`kill -9 4321`).",
         ),
         (
             GatewayStopResult(

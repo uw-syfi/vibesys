@@ -90,13 +90,15 @@ declare free. Where a host exposes neither witness (no `/proc`, or `flock`
 unavailable or failing), `stop` reports exit 1 rather than treating missing
 evidence as an idle directory.
 
-`stop` waits up to 10 seconds, fixed. That is a teardown budget, not a run
-budget: the gateway closes its transport and its session on SIGTERM, and a
-run's own work is already finished or abandoned by the time anything signals
-it, so nothing about the run mode makes teardown longer. It sends only SIGTERM,
-because that is what runs the ordered teardown; SIGKILL leaves the record
-behind for the next launch to trip over, which is why escalation stays with the
-operator.
+`stop` waits up to 12 seconds, fixed. That is the transport's canonical
+10-second WebSocket close bound plus 2 seconds for process scheduling and for
+the released files to become observable. The wait must strictly outlast the
+close bound because the gateway closes its transport before its session on
+SIGTERM. This is a teardown budget, not a run budget: a run's own work is
+already finished or abandoned by the time anything signals it, so nothing
+about the run mode makes teardown longer. It sends only SIGTERM, because that
+is what runs the ordered teardown; SIGKILL leaves the record behind for the
+next launch to trip over, which is why escalation stays with the operator.
 
 Do not remove `<project>/.vibesys` itself. Only the demo's ignored
 `clients/web/.vibesys-demo` is disposable; a real project's `.vibesys` holds
