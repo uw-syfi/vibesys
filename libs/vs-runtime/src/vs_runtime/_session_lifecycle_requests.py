@@ -69,6 +69,7 @@ from vs_runtime._access_settlement import (
     AccessSettlementError,
     access_unproven,
 )
+from vs_runtime._core_identity import CoreRequestId, core_identity
 from vs_runtime._core_requests import ExecutionContext, ExecutionOutcome, ExecutionResult
 from vs_runtime._observation_factory import (
     ObservationFactory,
@@ -88,7 +89,6 @@ from vs_runtime._receipt_store import (
 from vs_runtime._session_requests import (
     SessionBinding,
     conversation_established,
-    core_identity,
     load_dispatch_record,
     load_session_binding,
     session_binding_key,
@@ -99,7 +99,6 @@ if TYPE_CHECKING:
     from vs_core.api import RequestBase, SessionId, SnapshotAndRetainRun
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
-    from vs_runtime._session_requests import CoreRequestId
     from vs_runtime._workspace_requests import RunInvocationProof
 
 _CONTINUATIONS = "session-continuations"

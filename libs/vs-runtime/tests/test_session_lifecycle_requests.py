@@ -52,6 +52,7 @@ class World:
     """One Project directory and host; ``execute`` is a host (re)start over the same disk."""
 
     def __init__(self, base: Path, gate: TurnGate | None = None) -> None:
+        self.base = base
         (base / "project").mkdir()
         (base / "workspace").mkdir()
         self._project = Project.open(base / "project")
@@ -279,6 +280,42 @@ async def test_an_inspection_of_a_resumed_turn_reports_on_the_resume_request(
         assert target is not None
         assert target.observation.request_id == resume.request_id
         assert_core_accepts([resumed, inspected], expect_retry=False)
+
+
+@pytest.mark.asyncio
+async def test_an_inspection_after_an_upgrade_reads_a_legacy_dispatch_record_as_the_resume() -> (
+    None
+):
+    # Before the fix a resume's dispatch record named the derived "<R>.dispatch" id. A run
+    # in flight across the upgrade must still be inspectable by the id core knows.
+    async with world() as w:
+        await w.started()
+        resume = resume_request()
+        assert resume.request_id is not None
+        await w.execute(resume)
+        legacy = 0
+        for path in w.base.rglob("*"):
+            if path.is_file() and b'"output_schema"' in path.read_bytes():
+                text = path.read_text()
+                if f'"{resume.request_id.root}"' in text:
+                    path.write_text(
+                        text.replace(
+                            f'"{resume.request_id.root}"', f'"{resume.request_id.root}.dispatch"'
+                        )
+                    )
+                    legacy += 1
+        assert legacy == 1, "the dispatch record is on disk exactly once"
+        inspected = await w.execute(
+            inspect_request(
+                "req-inspect-legacy",
+                resume.turn.invocation_id.root,
+                dispatch=resume.request_id.root,
+            )
+        )
+        target = inspected.observation.target
+        assert target is not None
+        assert target.observation.request_id == resume.request_id
+        assert_core_accepts([inspected], expect_retry=False)
 
 
 @pytest.mark.asyncio

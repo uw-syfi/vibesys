@@ -33,6 +33,7 @@ from vs_core.api import (
     RevisionRef,
     Scope,
 )
+from vs_runtime._core_identity import CoreRequestId, core_identity
 from vs_runtime._receipt_store import ReceiptCorruptError
 
 if TYPE_CHECKING:
@@ -68,22 +69,20 @@ class ObservationFacts:
 class ObservationSubject:
     """Whose observation it is: a request, in the scope and episode core knows it under."""
 
-    request_id: RequestId
+    request_id: CoreRequestId
     scope: Scope
     admission_id: DecisionId | None
 
     @classmethod
-    def of(cls, request: RequestBase, *, request_id: RequestId | None = None) -> ObservationSubject:
+    def of(
+        cls, request: RequestBase, *, request_id: CoreRequestId | None = None
+    ) -> ObservationSubject:
         """The request itself, or *request_id* when the request reports on another one.
 
         An inspection of a target observes the target, in the inspecting
         request's scope and episode, and continues the target's own sequence.
         """
-        chosen = request_id or request.request_id
-        if chosen is None:
-            message = "request_id: an observation requires a canonical request identity"
-            raise ValueError(message)
-        return cls(chosen, request.scope, request.admission_id)
+        return cls(request_id or core_identity(request), request.scope, request.admission_id)
 
 
 class ObservationFactory:

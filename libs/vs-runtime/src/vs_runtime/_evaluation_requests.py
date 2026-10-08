@@ -53,6 +53,7 @@ from vs_evaluation.api import (
     PollPhase,
     TrustedEvidence,
 )
+from vs_runtime._core_identity import core_named
 from vs_runtime._core_requests import ExecutionContext, ExecutionResult, settle
 from vs_runtime._evaluation_jobs import (
     JobView,
@@ -267,7 +268,7 @@ class MeasurementRequests:
     async def _view(self, record: JobRecord, context: ExecutionContext) -> tuple[JobView, bool]:
         """Poll the job as the next numbered observation. True when the job ended."""
         subject = ObservationSubject(
-            RequestId(root=record.request_id), record.scope, record.admission_id
+            core_named(RequestId(root=record.request_id)), record.scope, record.admission_id
         )
         polled = self._with_ledgered_evidence(await self._poll(record.handle_id), record, subject)
         self._progress.report(record.handle_id, record.plan.purpose, polled)

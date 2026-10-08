@@ -33,9 +33,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, NewType, Protocol, assert_never
+from typing import TYPE_CHECKING, Protocol, assert_never
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from vs_agent.api import (
     AgentOutputSchemaError,
@@ -84,6 +84,7 @@ from vs_runtime._access_settlement import (
     access_unproven,
 )
 from vs_runtime._agent_sessions import await_session_operation
+from vs_runtime._core_identity import CoreRequestId, ReceiptKey, core_identity, core_named
 from vs_runtime._core_requests import ExecutionContext, ExecutionOutcome, ExecutionResult
 from vs_runtime._observation_factory import (
     ObservationFactory,
@@ -224,26 +225,8 @@ class SessionBinding(BaseModel):
     so no flag has to be written after a turn and no crash can skip the guard."""
 
 
-CoreRequestId = NewType("CoreRequestId", RequestId)
-"""A request identity core sent this executor, as core knows it.
-
-Core looks an inspection's target up by identity, so every id an executor answers with
-about another request must be one core sent. Only :func:`core_identity` and
-:func:`core_named` make one; an executor never builds a ``RequestId`` of its own for it.
-"""
-
-
-def core_identity(request: RequestBase) -> CoreRequestId:
-    """The identity core gave *request*, which it sent for execution."""
-    if request.request_id is None:
-        message = "request_id: execution requires a canonical identity"
-        raise ValueError(message)
-    return CoreRequestId(request.request_id)
-
-
-def core_named(request_id: RequestId) -> CoreRequestId:
-    """An identity core itself named, such as ``InspectTurn.dispatch``."""
-    return CoreRequestId(request_id)
+LEGACY_DERIVED_SUFFIX = ".dispatch"
+"""What a resume's nested step id ended in, before records named the resume request."""
 
 
 class DispatchRecord(BaseModel):
@@ -257,6 +240,21 @@ class DispatchRecord(BaseModel):
     request_id: CoreRequestId
     digest: str
     output_schema: SchemaRef
+
+    @field_validator("request_id", mode="before")
+    @classmethod
+    def _core_request(cls, value: object) -> object:
+        """Read a record written before resumes recorded core's id as the id core knows.
+
+        A resume once recorded its nested step's derived ``<R>.dispatch`` id, which core
+        cannot look up. Only that derived suffix is mapped (to ``R``), so no record
+        read back can name an id core never sent.
+        """
+        stored = value.model_dump() if isinstance(value, RequestId) else value
+        if isinstance(stored, dict) and str(stored.get("root", "")).endswith(LEGACY_DERIVED_SUFFIX):
+            root = str(stored["root"]).removesuffix(LEGACY_DERIVED_SUFFIX)
+            return RequestId.model_validate({**stored, "root": root})
+        return value
 
 
 @dataclass(frozen=True)
@@ -331,8 +329,8 @@ class _Call:
     """One request with the identity core guarantees it carries."""
 
     request: EnsureSession | DispatchTurn
-    request_id: RequestId
-    """The key its receipt and observations are stored under."""
+    receipt_key: ReceiptKey
+    """Where its receipt is stored: a resume's nested step has a key of its own."""
     canonical: CoreRequestId
     """The request core knows as the one executing: what the dispatch record names."""
     context: ExecutionContext
@@ -380,7 +378,7 @@ class RuntimeSessionRequests:
             return await self._inspect(request, context)
         if not isinstance(request, (EnsureSession, DispatchTurn)):
             return self._result(request, context, _rejected(f"{request.kind} is not executed here"))
-        return await self._locked(_Call(request, canonical, canonical, context))
+        return await self._locked(_Call(request, ReceiptKey(canonical.root), canonical, context))
 
     async def dispatch_on_behalf_of(
         self, request: DispatchTurn, behalf: CoreRequestId, context: ExecutionContext
@@ -394,7 +392,9 @@ class RuntimeSessionRequests:
         if request.request_id is None:
             message = "request_id: execution requires a canonical identity"
             raise ValueError(message)
-        return await self._locked(_Call(request, request.request_id, behalf, context))
+        return await self._locked(
+            _Call(request, ReceiptKey(request.request_id.root), behalf, context)
+        )
 
     async def _locked(self, call: _Call) -> ExecutionOutcome:
         request = call.request
@@ -419,7 +419,7 @@ class RuntimeSessionRequests:
             return Settled(result) if result.observation.observation.terminal else Transient(result)
 
         execution = await self._store.run_once(
-            call.request_id.root,
+            call.receipt_key,
             owner=owner_key(request),
             context=context,
             result_type=ExecutionResult,
