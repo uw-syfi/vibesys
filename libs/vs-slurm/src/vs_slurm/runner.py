@@ -1658,8 +1658,21 @@ def _validate_batch_request(request: SlurmBatchRequest) -> tuple[SlurmBatchStage
     return request.stages
 
 
+# ``timeout`` is GNU coreutils; stock macOS lacks it (Homebrew installs it as
+# ``gtimeout``) and the Fake cluster runs this script with the local shell.
+# Fail loudly rather than run a stage without its time limit.
+_TIMEOUT_FUNCTION = (
+    "vs_timeout() { "
+    'if command -v timeout >/dev/null 2>&1; then timeout "$@"; '
+    'elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$@"; '
+    "else echo 'vs-slurm: timeout(1) is not installed' >&2; return 127; fi; }"
+)
+
+
 def _batch_script(stages: Sequence[SlurmBatchStage], *, stop_on_failure: bool) -> str:
     lines = ["set +e", f"mkdir -p {shlex.quote(_BATCH_RESULT_ROOT)}", "batch_failed=0"]
+    if any(stage.timeout_seconds is not None for stage in stages):
+        lines.append(_TIMEOUT_FUNCTION)
     for index, stage in enumerate(stages):
         result_root = PurePosixPath(_BATCH_RESULT_ROOT) / f"{index:04d}"
         stdout_path = result_root / "stdout.txt"
@@ -1668,7 +1681,7 @@ def _batch_script(stages: Sequence[SlurmBatchStage], *, stop_on_failure: bool) -
         elapsed_path = result_root / "elapsed-seconds.txt"
         command = shell_join_with_port(stage.command)
         if stage.timeout_seconds is not None:
-            command = f"timeout --signal=TERM --kill-after=5s {stage.timeout_seconds}s {command}"
+            command = f"vs_timeout --signal=TERM --kill-after=5s {stage.timeout_seconds}s {command}"
         lines.extend(
             [
                 f"mkdir -p {shlex.quote(result_root.as_posix())}",
