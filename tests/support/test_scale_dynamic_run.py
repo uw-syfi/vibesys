@@ -81,10 +81,9 @@ def test_hitting_the_dispatch_cap_fails_the_run_instead_of_ending_it_quietly() -
         run_scale(Scenario(in_flight=2, rounds=1, profile=_EXACT, max_dispatches=5))
 
 
-# Controls land before the first workstream turn starts (the baseline measurement and the
-# planner turn take about 250 s on `_EXACT`). Later stacked PRs widen the window as the
-# run lifecycle learns to handle controls during work.
-_CONTROL_WINDOW_S = 240.0
+# Controls land anywhere in the run (about 600 s on `_EXACT`: baseline, planner, workstreams,
+# adoption), so a stop or pause can meet any request kind in flight.
+_CONTROL_WINDOW_S = 700.0
 _EXAMPLES = 20 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 4
 
 

@@ -35,7 +35,14 @@ def test_turns_that_finish_during_a_pause_are_followed_up_after_the_resume() -> 
     resume = max(span.end for span in implementers) + 300.0 - reference.started_at
 
     run = run_scale(
-        Scenario(in_flight=2, rounds=1, profile=_EXACT, pause_after=pause, resume_after=resume)
+        Scenario(
+            in_flight=2,
+            rounds=1,
+            profile=_EXACT,
+            pause_after=pause,
+            resume_after=resume,
+            max_dispatches=400,
+        )
     )
 
     assert run.paused_at is not None
