@@ -1,7 +1,8 @@
-import {execFileSync, spawnSync} from 'node:child_process';
-import {copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync} from 'node:fs';
+import {execFileSync, spawn, spawnSync} from 'node:child_process';
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {createInterface} from 'node:readline';
 import {fileURLToPath} from 'node:url';
 import {expect, test} from '@playwright/test';
 
@@ -175,4 +176,225 @@ function stopGateway(instancePath: string): number | null {
       stdio: 'pipe',
     },
   ).status;
+}
+
+/** One real live run used by the adverse-connectivity browser matrix. */
+export interface MatrixGateway {
+  readonly url: string;
+  readonly pid: number;
+  readonly port: number;
+  /** Whether the child process still owns the run. */
+  isRunning(): boolean;
+  /** End the live run and let the runtime publish its terminal event. */
+  stop(): Promise<void>;
+  /** Remove the whole gateway process without publishing a terminal event. */
+  crash(): Promise<void>;
+}
+
+export interface MatrixGatewayHarness {
+  /** Start a fresh event store under the same durable run identity. */
+  start(marker: string, port?: number): Promise<MatrixGateway>;
+}
+
+/**
+ * Run a browser scenario over one or more real live gateway processes.
+ *
+ * Every child uses a distinct store below one `same-run` directory, so the
+ * server publishes a stable run id and a fresh store id. Teardown owns every
+ * child and its temporary directory, including a callback that failed midway
+ * through a restart.
+ */
+export async function withMatrixGateways(
+  run: (harness: MatrixGatewayHarness) => Promise<void>,
+): Promise<void> {
+  const runtimeDirectory = mkdtempSync(join(tmpdir(), 'vibesys-web-matrix-'));
+  const children = new Set<MatrixGatewayProcess>();
+  let generation = 0;
+  const harness: MatrixGatewayHarness = {
+    start: async (marker, port = 0) => {
+      generation += 1;
+      const storeDirectory = join(runtimeDirectory, 'same-run', `store-${generation}`);
+      mkdirSync(storeDirectory, {recursive: true});
+      const child = new MatrixGatewayProcess(storeDirectory, marker, port);
+      children.add(child);
+      try {
+        await child.start();
+        return child;
+      } catch (error) {
+        await child.dispose();
+        throw error;
+      }
+    },
+  };
+  try {
+    await run(harness);
+  } finally {
+    const errors: string[] = [];
+    for (const child of children) {
+      try {
+        await child.dispose();
+      } catch (error) {
+        errors.push(String(error));
+      }
+    }
+    try {
+      rmSync(runtimeDirectory, {recursive: true, force: true});
+    } catch (error) {
+      errors.push(`runtime directory cleanup failed: ${String(error)}`);
+    }
+    if (errors.length > 0) {
+      expect.soft(errors, 'matrix gateway teardown failures').toEqual([]);
+      test.info().annotations.push({type: 'teardown', description: errors.join('; ')});
+    }
+  }
+}
+
+interface ChildExit {
+  readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly stderr: string;
+}
+
+const WEB_URL_PREFIX = 'VibeSys web UI: ';
+
+/** Own one child process and the two explicit ways the matrix may end it. */
+class MatrixGatewayProcess implements MatrixGateway {
+  url = '';
+  pid = 0;
+  port = 0;
+
+  readonly #storeDirectory: string;
+  readonly #marker: string;
+  readonly #requestedPort: number;
+  #exit: Promise<ChildExit> | null = null;
+  #running = false;
+
+  constructor(storeDirectory: string, marker: string, port: number) {
+    this.#storeDirectory = storeDirectory;
+    this.#marker = marker;
+    this.#requestedPort = port;
+  }
+
+  async start(): Promise<void> {
+    if (!existsSync(join(webAssets, 'index.html'))) {
+      throw new Error(`No web bundle at ${webAssets}: run \`pnpm --dir clients/web build\``);
+    }
+    const child = spawn(
+      'uv',
+      [
+        'run',
+        'python',
+        '-m',
+        'tests.support.web_matrix_gateway',
+        '--store-directory',
+        this.#storeDirectory,
+        '--web-assets',
+        webAssets,
+        '--marker',
+        this.#marker,
+        '--port',
+        String(this.#requestedPort),
+      ],
+      {
+        cwd: repositoryRoot,
+        detached: true,
+        env: {...process.env, BROWSER: 'true'},
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    if (child.pid === undefined) throw new Error('Matrix gateway child has no process id');
+    this.pid = child.pid;
+    this.#running = true;
+    const stderr: string[] = [];
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', chunk => stderr.push(String(chunk)));
+    this.#exit = new Promise(resolve => {
+      child.once('exit', (code, signal) => {
+        this.#running = false;
+        resolve({code, signal, stderr: stderr.join('')});
+      });
+    });
+    this.url = await this.#readCapabilityUrl(child);
+    this.port = Number(new URL(this.url).port);
+  }
+
+  isRunning(): boolean {
+    if (!this.#running || this.pid === 0) return false;
+    try {
+      process.kill(this.pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async stop(): Promise<void> {
+    if (!this.#running) return;
+    this.#signal('SIGTERM');
+    const result = await this.#exited();
+    if (result.code !== 0) {
+      throw new Error(
+        `Matrix gateway stop exited ${String(result.code)} (${String(result.signal)}): ${result.stderr}`,
+      );
+    }
+  }
+
+  async crash(): Promise<void> {
+    if (!this.#running) return;
+    this.#signal('SIGKILL');
+    const result = await this.#exited();
+    if (result.signal !== 'SIGKILL') {
+      throw new Error(
+        `Matrix gateway crash exited ${String(result.code)} (${String(result.signal)}): ${result.stderr}`,
+      );
+    }
+  }
+
+  async dispose(): Promise<void> {
+    if (this.#running) await this.stop();
+  }
+
+  async #readCapabilityUrl(child: ReturnType<typeof spawn>): Promise<string> {
+    if (child.stdout === null) throw new Error('Matrix gateway child has no stdout');
+    const lines = createInterface({input: child.stdout});
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        lines.close();
+        callback();
+      };
+      lines.on('line', line => {
+        if (!line.startsWith(WEB_URL_PREFIX)) return;
+        finish(() => resolve(line.slice(WEB_URL_PREFIX.length)));
+      });
+      child.once('error', error => finish(() => reject(error)));
+      void this.#exited().then(result => {
+        finish(() => {
+          reject(
+            new Error(
+              `Matrix gateway exited before publishing its URL (${String(result.code)}, ${String(result.signal)}): ${result.stderr}`,
+            ),
+          );
+        });
+      });
+    });
+  }
+
+  #signal(signal: NodeJS.Signals): void {
+    if (this.pid === 0) return;
+    try {
+      // `uv run` and its Python child share the detached process group. Signal
+      // the group so an abrupt test crash cannot orphan the actual gateway.
+      process.kill(-this.pid, signal);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    }
+  }
+
+  #exited(): Promise<ChildExit> {
+    if (this.#exit === null) throw new Error('Matrix gateway process has not started');
+    return this.#exit;
+  }
 }

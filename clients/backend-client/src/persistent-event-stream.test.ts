@@ -31,6 +31,10 @@ class TestEventStream extends PersistentEventStream {
     this.#scheduler.runOne();
     for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
   }
+
+  pendingDelays(): number[] {
+    return this.#scheduler.pendingDelays();
+  }
 }
 
 /**
@@ -61,18 +65,24 @@ function harness(env: Env): {
   callbacks: PersistentEventStreamCallbacks;
   messages: Array<{message: ServerMessage; resumed: boolean}>;
   states: StreamConnectionState[];
+  nextState(): Promise<StreamConnectionState>;
 } {
   const messages: Array<{message: ServerMessage; resumed: boolean}> = [];
   const states: StreamConnectionState[] = [];
+  const stateWaiters: Array<(state: StreamConnectionState) => void> = [];
   return {
     messages,
     states,
+    nextState: () => new Promise(resolve => stateWaiters.push(resolve)),
     callbacks: {
       cursor: () => env.cursor,
       storeId: () => env.storeId ?? '',
       shouldReconnect: () => env.reconnect,
       onMessage: (message, {resumed}) => messages.push({message, resumed}),
-      onConnectionState: state => states.push(state),
+      onConnectionState: state => {
+        states.push(state);
+        stateWaiters.shift()?.(state);
+      },
     },
   };
 }
@@ -98,6 +108,9 @@ class StubTransport implements StreamTransport {
   refuseSubscribes = 0;
   /** Errors upcoming dials fail with, consumed in order before `refuseSubscribes`. */
   readonly scriptedDialFailures: Error[] = [];
+  readonly #subscribeWaiters: Array<
+    (call: {afterSequence: number; tail: number | undefined; storeId: string | undefined}) => void
+  > = [];
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
   #armed: {events: RunEvent[]; historyAfterSequence: number} | null = null;
@@ -126,7 +139,9 @@ class StubTransport implements StreamTransport {
     onDisconnect: (error: Error) => void,
     options?: {tail?: number; storeId?: string},
   ): Promise<EventSubscription> {
-    this.subscribeCalls.push({afterSequence, tail: options?.tail, storeId: options?.storeId});
+    const call = {afterSequence, tail: options?.tail, storeId: options?.storeId};
+    this.subscribeCalls.push(call);
+    this.#subscribeWaiters.shift()?.(call);
     const scripted = this.scriptedDialFailures.shift();
     if (scripted !== undefined) return Promise.reject(scripted);
     if (this.refuseSubscribes > 0) {
@@ -158,6 +173,15 @@ class StubTransport implements StreamTransport {
       });
     }
     return Promise.resolve(subscription);
+  }
+
+  /** Resolve when the stream makes its next subscribe call. */
+  nextSubscribe(): Promise<{
+    afterSequence: number;
+    tail: number | undefined;
+    storeId: string | undefined;
+  }> {
+    return new Promise(resolve => this.#subscribeWaiters.push(resolve));
   }
 
   emitBatch(events: readonly RunEvent[], historyAfterSequence = 0, rebootstrap?: boolean): void {
@@ -605,19 +629,30 @@ describe('PersistentEventStream', () => {
     await stream.close();
   });
 
-  it('retry() does not stack a redial while a reconnect is already pending', async () => {
+  it('retry() replaces a pending timer with one immediate redial and never stacks it', async () => {
     const transport = new StubTransport();
-    const {callbacks} = harness({cursor: 0, reconnect: true});
+    const {callbacks, nextState} = harness({cursor: 0, reconnect: true});
     const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [50]});
     await stream.subscribe(callbacks);
-    transport.scriptedDialFailures.push(new BackendClientError('disconnected', 'down'));
+    transport.deferNextSubscribe();
     transport.sever();
 
-    // A reconnect is scheduled 50ms out. retry() must defer to it, not fire a
-    // second dial now.
+    // The timer represents a background tab whose reconnect callback was
+    // coalesced indefinitely. A wake overrides it instead of depending on it.
+    expect(stream.pendingDelays()).toEqual([50]);
+    const redial = transport.nextSubscribe();
     stream.retry();
+    expect(stream.pendingDelays()).toEqual([]);
+    expect(await redial).toEqual({afterSequence: 0, tail: 1_000, storeId: undefined});
+
+    // Keep that subscribe pending and ask twice more. The in-flight dial owns
+    // the attempt, so overriding the timer never creates parallel sockets.
     stream.retry();
-    expect(transport.subscribeCalls).toHaveLength(1);
+    expect(transport.subscribeCalls).toHaveLength(2);
+    const recovered = nextState();
+    transport.releasePendingSubscribe();
+    await expect(recovered).resolves.toMatchObject({status: 'connected'});
+    expect(transport.subscribeCalls).toHaveLength(2);
     await stream.close();
   });
 

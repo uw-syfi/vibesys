@@ -68,10 +68,10 @@ class FakeLifecycle implements BrowserLifecycle {
 
 /** Deterministic scheduler for the stream's reconnect backoff. */
 class ManualScheduler {
-  readonly #pending: Array<{callback: () => void; cancelled: boolean}> = [];
+  readonly #pending: Array<{callback: () => void; cancelled: boolean; delayMs: number}> = [];
 
-  readonly scheduleTimeout: ScheduleTimeout = callback => {
-    const pending = {callback, cancelled: false};
+  readonly scheduleTimeout: ScheduleTimeout = (callback, delayMs = 0) => {
+    const pending = {callback, cancelled: false, delayMs};
     this.#pending.push(pending);
     return () => {
       pending.cancelled = true;
@@ -82,6 +82,10 @@ class ManualScheduler {
     const pending = this.#pending.shift();
     if (pending === undefined) throw new Error('No reconnect is scheduled');
     if (!pending.cancelled) pending.callback();
+  }
+
+  pendingDelays(): number[] {
+    return this.#pending.filter(pending => !pending.cancelled).map(pending => pending.delayMs);
   }
 }
 
@@ -272,38 +276,99 @@ describe('WebSession', () => {
     ).toBe('wss://127.0.0.1:8765/ws');
   });
 
-  test('wakes a stale session after the browser returns online', async () => {
+  test('wakes after an OS sleep with an exhausted schedule and catches up exactly', async () => {
     const lifecycle = new FakeLifecycle();
-    const {session, transport} = sessionWith(lifecycle);
+    const scheduler = new ManualScheduler();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
 
     await session.start();
     expect(session.getState()).toEqual(healthy());
     expect(session.store.getState().sequence).toBe(1);
     expect(transport.subscriptions[0]).toMatchObject({afterSequence: 0});
 
+    lifecycle.setVisibility('hidden');
     lifecycle.setOnline(false);
     expect(session.getState().status).toBe('stale');
+    transport.dropControlChannel(disconnect('laptop slept'));
+    transport.subscriptions[0]?.onDisconnect(disconnect('laptop slept'));
+    expect(scheduler.pendingDelays()).toEqual([]);
 
-    lifecycle.setVisibility('hidden');
+    // Network returns while the page is still suspended. The lifecycle policy
+    // waits for visibility rather than claiming the hidden page can make
+    // progress, and the empty schedule represents timers exhausted during the
+    // wall-clock gap.
     lifecycle.setOnline(true);
-    await settle();
     expect(transport.subscriptions).toHaveLength(1);
 
+    transport.silentDials = 1;
+    const resumed = transport.nextSubscription();
+    const recovered = waitForSession(session, () => {
+      return (
+        session.getState().status === 'connected' &&
+        session.getState().controls.status === 'connected' &&
+        session.store.getState().sequence === 2
+      );
+    });
     lifecycle.setVisibility('visible');
-    await settle();
-    expect(transport.subscriptions).toHaveLength(2);
-    expect(transport.subscriptions[1]).toMatchObject({
+    expect(transport.reconnectCalls).toBe(1);
+    const subscription = await resumed;
+    expect(subscription).toMatchObject({
       afterSequence: 1,
       options: {storeId: 'store-1'},
     });
+    subscription.onMessage(outputBatch('store-1', 2, 'caught up after sleep\n'));
+    await recovered;
     expect(session.getState()).toEqual(healthy());
     expect(session.store.getState().sequence).toBe(2);
+    expect(session.store.getState().transcript.map(entry => entry.content)).toEqual([
+      'caught up after sleep\n',
+    ]);
 
     await session.close();
     expect(transport.closeCalls).toBe(1);
     expect(lifecycle.listenerCount('online')).toBe(0);
     lifecycle.setOnline(false);
     expect(transport.subscriptions).toHaveLength(2);
+  });
+
+  test('wakes a throttled tab without waiting for its skipped reconnect timer', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new ManualScheduler();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [50],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    await session.start();
+
+    lifecycle.setVisibility('hidden');
+    transport.dropControlChannel(disconnect('backgrounded'));
+    transport.subscriptions[0]?.onDisconnect(disconnect('backgrounded'));
+    expect(scheduler.pendingDelays()).toEqual([50]);
+
+    transport.silentDials = 1;
+    const resumed = transport.nextSubscription();
+    const recovered = waitForSession(session, () => {
+      return session.getState().status === 'connected' && session.store.getState().sequence === 2;
+    });
+    lifecycle.setVisibility('visible');
+    expect(transport.reconnectCalls).toBe(1);
+    const subscription = await resumed;
+
+    expect(scheduler.pendingDelays()).toEqual([]);
+    expect(subscription).toMatchObject({afterSequence: 1, options: {storeId: 'store-1'}});
+    subscription.onMessage(outputBatch('store-1', 2, 'caught up after throttling\n'));
+    await recovered;
+
+    // Firing the retired callback cannot open a second subscription.
+    scheduler.runNext();
+    expect(transport.subscriptions).toHaveLength(2);
+    expect(session.store.getState().transcript.map(entry => entry.content)).toEqual([
+      'caught up after throttling\n',
+    ]);
+    await session.close();
   });
 
   test('re-bootstraps when one store raises its declared history floor', async () => {
@@ -328,6 +393,37 @@ describe('WebSession', () => {
     transport.subscriptions[0]?.onMessage(streamBatch('', 2));
 
     expect(session.store.getState().sequence).toBe(2);
+    await session.close();
+  });
+
+  test('replaces the fold when a store swap reboots mid-subscription', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    await session.start();
+
+    transport.subscriptions[0]?.onMessage(outputBatch('old-store', 50, 'retired output\n'));
+    expect(session.store.getState().sequence).toBe(50);
+    expect(session.store.getState().transcript.map(entry => entry.content)).toEqual([
+      'retired output\n',
+    ]);
+
+    transport.subscriptions[0]?.onMessage(
+      eventBatch([event(2, 'agent_output_chunk', 'replacement output\n')], {
+        store_id: 'new-store',
+        through_sequence: 2,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+
+    expect(session.getState()).toEqual(healthy());
+    expect(session.store.getState()).toMatchObject({
+      sequence: 2,
+      historyAfterSequence: 0,
+    });
+    expect(session.store.getState().transcript.map(entry => entry.content)).toEqual([
+      'replacement output\n',
+    ]);
     await session.close();
   });
 
@@ -563,7 +659,7 @@ describe('WebSession', () => {
     await session.close();
   });
 
-  test('clears a controls banner raised before the run ended', async () => {
+  test('clears a controls banner while a lifecycle refresh finds the run ended', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
 
@@ -571,14 +667,18 @@ describe('WebSession', () => {
     transport.dropControlChannel(disconnect('gateway restarted'));
     // Newer than the batch `start()` already folded, so the fold takes it.
     transport.snapshots.push(snapshotResponse({status: 'completed', sequence: 5}));
+    const refreshed = waitForSession(session, () => {
+      return (
+        session.store.getState().status === 'completed' &&
+        session.getState().controls.status === 'connected'
+      );
+    });
     session.reattach();
-    await settle();
+    await refreshed;
     expect(session.store.getState().status).toBe('completed');
-    expect(session.getState().controls.status).toBe('disconnected');
-
-    // A recovery is reported whatever the run's status, so a banner raised
-    // while the run was live comes down on its own.
-    transport.recoverControlChannel();
+    // The same wake that refreshes the snapshot redials controls first, so the
+    // banner raised while the run was live is already down when the terminal
+    // snapshot lands.
     expect(session.getState().controls).toEqual({status: 'connected'});
 
     await session.close();
@@ -644,6 +744,30 @@ function streamBatch(storeId: string, sequence: number, historyAfterSequence = 0
     through_sequence: sequence,
     store_id: storeId,
     history_after_sequence: historyAfterSequence,
+  });
+}
+
+function outputBatch(storeId: string, sequence: number, content: string): ServerMessage {
+  return eventBatch([event(sequence, 'agent_output_chunk', content)], {
+    through_sequence: sequence,
+    store_id: storeId,
+    history_after_sequence: 0,
+  });
+}
+
+function waitForSession(session: WebSession, predicate: () => boolean): Promise<void> {
+  if (predicate()) return Promise.resolve();
+  return new Promise(resolve => {
+    let unsubscribeSession = (): void => undefined;
+    let unsubscribeStore = (): void => undefined;
+    const observe = (): void => {
+      if (!predicate()) return;
+      unsubscribeSession();
+      unsubscribeStore();
+      resolve();
+    };
+    unsubscribeSession = session.subscribe(observe);
+    unsubscribeStore = session.store.subscribe(observe);
   });
 }
 

@@ -7,7 +7,7 @@ import type {
   ProtocolResponse,
   RequestInput,
 } from './index.js';
-import {REQUEST_POLICIES} from './index.js';
+import {REQUEST_POLICIES, ServerError} from './index.js';
 import {parseProtocolResponse} from './protocol-parse.js';
 import {expect} from './test-support/expect.js';
 import {FakeClock as FakeScheduler} from './testing/fake-clock.test-helper.js';
@@ -258,7 +258,7 @@ describe('WebSocketTransport', () => {
     await transport.close();
   });
 
-  it('rejects a structured subscription refusal without waiting for close', async () => {
+  it('reports stale-bundle protocol skew in band and closes the subscription', async () => {
     const socket = new FakeSocket();
     const transport = transportFor(socket);
     const messages: string[] = [];
@@ -269,9 +269,35 @@ describe('WebSocketTransport', () => {
     );
     await tick();
 
-    socket.respond({type: 'protocol_error', code: 'stream_failed', message: 'not available'});
+    expect(socket.frames()[0]).toMatchObject({
+      protocol_version: 1,
+      type: 'subscribe',
+      after_sequence: 0,
+    });
+    socket.respond({
+      type: 'protocol_error',
+      code: 'unsupported_protocol_version',
+      message: 'This server requires a newer browser bundle',
+      diagnostic: {
+        code: 'unsupported_protocol_version',
+        summary: 'Browser protocol version 1 is no longer supported',
+        scope: 'transport',
+      },
+    });
 
-    await expect(subscription).rejects.toMatchObject({kind: 'rejected', message: 'not available'});
+    const failure = await subscription.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(ServerError);
+    expect(failure).toMatchObject({
+      kind: 'rejected',
+      message: 'This server requires a newer browser bundle',
+      diagnostic: {
+        code: 'unsupported_protocol_version',
+        summary: 'Browser protocol version 1 is no longer supported',
+      },
+    });
     expect(messages).toEqual(['protocol_error']);
     expect(socket.closeCalls).toBe(1);
     await transport.close();
