@@ -14,6 +14,21 @@ jobs:
   full-properties:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # `actions: write` lets the prune step delete superseded caches.
+    permissions:
+      contents: read
+      actions: write
+    env:
+      # Randomized Hypothesis (conftest.py `nightly` profile): every night draws
+      # new examples. A failure is saved to the example database (cached below)
+      # and its @reproduce_failure blob is printed; there is no seed to replay.
+      HYPOTHESIS_PROFILE: nightly
+      # Lifts the reduced example counts that pull requests use (see
+      # tests/vibesys/orchestration/dynamic/loop/test_loop.py).
+      VIBESYS_FULL_PROPERTIES: '1'
+      # The fixed chaos baseline. The rotating window is the chaos-sweep job.
+      # (chaos_regressions.txt seeds are always added.)
+      CHAOS_SEEDS: 0-11
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -29,16 +44,100 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      # VIBESYS_FULL_PROPERTIES=1 lifts the reduced Hypothesis example counts
-      # that pull requests use (see tests/vibesys/orchestration/dynamic/loop/test_loop.py)
-      # and the full chaos seed set (test_chaos.py).
-      - name: Run the full test suite at full property strength
-        env:
-          VIBESYS_FULL_PROPERTIES: '1'
-          CHAOS_SEEDS: 0-11,2018,2022
-        run: uv run python -m pytest -n auto --dist loadgroup --no-cov -q
+      # The example database holds failing examples. Pull requests restore it
+      # read-only (test.yml), so a failure found here replays there. A failing
+      # job does not save a cache, hence the explicit save with `always()`.
+      - name: Restore the Hypothesis example database
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .hypothesis
+          key: hypothesis-${{ github.run_id }}
+          restore-keys: hypothesis-
 
-      # Seeds the pull-request tier never draws (see
-      # tests/vibesys/orchestration/dynamic/loop/test_chaos.py).
-      - name: Sweep the dynamic-loop chaos harness over more seeds
-        run: ./scripts/chaos_dynamic_loop.sh 200 1000 2
+      - name: Run the full test suite at full property strength
+        shell: bash
+        run: |
+          uv run python -m pytest -n auto --dist loadgroup --no-cov -q 2>&1 | tee pytest.log
+
+      - name: Save the Hypothesis example database
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .hypothesis
+          key: hypothesis-${{ github.run_id }}
+
+      - name: Summarize the failure with a repro command
+        if: failure()
+        run: |
+          ./scripts/nightly_failure_summary.sh pytest.log "Nightly full-properties" \
+            "HYPOTHESIS_PROFILE=nightly VIBESYS_FULL_PROPERTIES=1 CHAOS_SEEDS=$CHAOS_SEEDS" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      # Keep one cache entry. Each save is a new key (a cache cannot be
+      # overwritten), so without this the entries pile up until GitHub evicts
+      # them. Runs after the save so a failed prune never loses the database.
+      - name: Prune older Hypothesis example databases
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh cache list --key hypothesis- --sort created_at --order desc --json id --jq '.[1:][].id' \
+            | xargs -r -n1 gh cache delete
+
+  # Seeds the pull-request tier never draws (see
+  # tests/vibesys/orchestration/dynamic/loop/test_chaos.py). Each run sweeps a
+  # window that no earlier run covered: run N starts at BASE + N * WINDOW, and
+  # the window is split into contiguous per-shard ranges so wall time stays
+  # bounded as the window grows. The seeds are above every hand-picked seed.
+  chaos-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # `baseline` is the sweep this workflow always ran (seeds 1000-1199),
+        # kept as a fixed point of comparison beside the rotating window.
+        shard: [baseline, 0, 1, 2, 3]
+    env:
+      CHAOS_BASE: 100000
+      CHAOS_SHARD_SIZE: 100
+      CHAOS_SHARDS: 4
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Compute this shard's seed range
+        run: |
+          if [ "$SHARD" = baseline ]; then
+            first=1000
+            size=200
+          else
+            first=$((CHAOS_BASE + GITHUB_RUN_NUMBER * CHAOS_SHARDS * CHAOS_SHARD_SIZE + SHARD * CHAOS_SHARD_SIZE))
+            size=$CHAOS_SHARD_SIZE
+          fi
+          echo "CHAOS_FIRST=$first" >> "$GITHUB_ENV"
+          echo "CHAOS_COUNT=$size" >> "$GITHUB_ENV"
+          echo "Shard $SHARD sweeps seeds $first-$((first + size - 1))"
+
+      - name: Sweep the dynamic-loop chaos harness over the window
+        shell: bash
+        run: |
+          ./scripts/chaos_dynamic_loop.sh "$CHAOS_COUNT" "$CHAOS_FIRST" 2 2>&1 | tee chaos.log
+
+      - name: Summarize the failure with a repro command
+        if: failure()
+        run: |
+          ./scripts/nightly_failure_summary.sh chaos.log "Nightly chaos sweep (shard $SHARD, seeds $CHAOS_FIRST-$((CHAOS_FIRST + CHAOS_COUNT - 1)))" \
+            "CHAOS_SEEDS=$CHAOS_FIRST" >> "$GITHUB_STEP_SUMMARY"

@@ -189,6 +189,41 @@ The [web UI development guide](web-development.md) covers replay mode, live
 WebSocket smoke runs, detached gateway lifecycle, and SSH access from a local
 laptop to a remote VibeSys host.
 
+### Test tiers
+
+| Tier | Runs | Hypothesis | Chaos seeds |
+| --- | --- | --- | --- |
+| Pull request (`test.yml`) | every PR, kept under about 5 minutes | `ci` profile: fixed per-test seed, reduced counts, replays saved failures | `0-3` plus `chaos_regressions.txt` |
+| Nightly (`nightly.yml`) | daily | `nightly` profile: randomized, full counts | `0-11` baseline, `1000-1199` fixed sweep, and a rotating window |
+| Slow crash sweep | daily | n/a | n/a |
+
+**Chaos seeds.** The rotating window of run N covers seeds from
+`100000 + N * 400`, as four contiguous shards of 100, so no run repeats an
+earlier run's seeds. Widen it by raising `CHAOS_SHARDS` (more parallel jobs).
+Seeds that once failed live in
+`tests/vibesys/orchestration/dynamic/loop/chaos_regressions.txt`; the PR tier
+always runs them. When a nightly seed fails, the job summary prints the line to
+append there once the bug is fixed.
+
+**Hypothesis failures.** Saving and replaying a failure needs a database and a
+per-test database key. `derandomize=True` removes the database, and both
+`--hypothesis-seed` and `hypothesis.seed` remove it too, so none of them is used
+for a profile that must replay. The `ci` profile instead sets each `@given` test's seed slot to the digest
+`derandomize=True` would use (`_make_hypothesis_deterministic_under_ci` in
+`conftest.py`): a PR draws the same examples as before and replays saved
+failures first. Stateful machines build their test at run time, so they stay
+derandomized and do not replay. `tests/quality/test_hypothesis_profiles.py` runs pytest on a planted property to
+check both, so a Hypothesis upgrade that breaks either fails there.
+
+The nightly saves `.hypothesis/` to the Actions cache, even when it fails, and
+deletes superseded entries so one remains. Pull requests restore it read-only.
+So a bug the nightly finds **fails unrelated PRs that reach the same property
+until it is fixed**: it is a bug on `main`, and this is how the PR tier learns of
+it. The same example is in the job summary as an `@reproduce_failure` blob.
+
+A failed nightly job writes the commands to rerun each failed test (environment
+and seed) to its job summary, built by `scripts/nightly_failure_summary.sh`.
+
 ## Extend VibeSys
 
 Use the guide that matches the surface you are adding:

@@ -1,0 +1,4 @@
+# Chaos seeds that once failed. The PR tier always runs them (test_chaos.py).
+# Append the seed from a nightly failure summary once it is fixed, with the issue.
+2018  # completed with zero workstreams before #1228
+2022  # completed with zero workstreams before #1228
