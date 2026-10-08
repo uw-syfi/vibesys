@@ -24,7 +24,8 @@ Mechanisms:
   fresh one. The first resume of a continuation binds it to one successor invocation
   and to the retained provider conversation; another successor, or another
   conversation under the same continuation, is REJECTED. The dispatch is a
-  ``DispatchTurn`` of the same turn under a derived request identity, so it gets the
+  ``DispatchTurn`` of the same turn whose receipt is keyed by a derived identity (its
+  dispatch record names this resume request, the one core knows), so it gets the
   write-ahead journal, replay of a recorded outcome and Unknown-never-repeated of
   ``RuntimeSessionRequests``; its facts are re-observed under the resume request.
 
@@ -87,6 +88,7 @@ from vs_runtime._receipt_store import (
 from vs_runtime._session_requests import (
     SessionBinding,
     conversation_established,
+    core_identity,
     load_dispatch_record,
     load_session_binding,
     session_binding_key,
@@ -97,6 +99,7 @@ if TYPE_CHECKING:
     from vs_core.api import RequestBase, SessionId, SnapshotAndRetainRun
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._session_requests import CoreRequestId
     from vs_runtime._workspace_requests import RunInvocationProof
 
 _CONTINUATIONS = "session-continuations"
@@ -111,6 +114,12 @@ class TurnDispatcher(Protocol):
         self, request: SessionRoleRequest, context: ExecutionContext
     ) -> ExecutionOutcome:
         """Execute, replay or inspect the dispatch under its canonical identity."""
+        ...
+
+    async def dispatch_on_behalf_of(
+        self, request: DispatchTurn, behalf: CoreRequestId, context: ExecutionContext
+    ) -> ExecutionOutcome:
+        """Dispatch the turn of a request core sent as another kind, recording *behalf*."""
         ...
 
 
@@ -471,6 +480,8 @@ class SessionLifecycleRequests:
         superseded = await self._settle_superseded(request)
         if superseded is not None:
             return self._result(request, context, superseded)
+        # The nested step's own id only keys its receipt; the dispatch record, which
+        # inspection answers from, names the resume request core knows.
         dispatch = DispatchTurn(
             request_id=RequestId(root=f"{request_id.root}.dispatch"),
             scope=request.scope,
@@ -482,7 +493,9 @@ class SessionLifecycleRequests:
             turn=turn,
             inputs=request.inputs,
         )
-        outcome = await self._dispatcher.execute(dispatch, context)
+        outcome = await self._dispatcher.dispatch_on_behalf_of(
+            dispatch, core_identity(request), context
+        )
         if not isinstance(outcome, ExecutionResult):
             return self._result(request, context, _unknown(outcome.detail))
         seen = outcome.observation.observation

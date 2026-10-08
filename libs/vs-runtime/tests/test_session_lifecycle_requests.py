@@ -264,6 +264,7 @@ async def test_an_inspection_of_a_resumed_turn_reports_on_the_resume_request(
     async with world() as w:
         await w.started()
         resume = resume_request()
+        assert resume.request_id is not None
         w.host.faults.down = transport == "down"
         resumed = await w.execute(resume)
         w.host.faults.down = False

@@ -6,12 +6,12 @@ import contextlib
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.executor_cases import CASES, inspect_request_of
+from tests.support.executor_cases import CASES, inspect_dispatch_of, inspect_request_of
 from tests.support.executor_context import RevocableLease
 from tests.support.executor_harness import ProcessKilledError
 from tests.support.observation_contract import assert_core_accepts
 
-from vs_core.api import ObservationStatus
+from vs_core.api import DispatchTurn, ObservationStatus, ResumeSessionTurn
 from vs_runtime.api.core import (
     ExecutionResult,
     ReceiptStore,
@@ -187,3 +187,28 @@ async def test_every_sealed_result_is_definitive_at_every_crash_point(
             ):
                 sealed = ExecutionResult.model_validate_json(history.result_json)
                 assert isinstance(settle(sealed), Settled), f"boundary {crash_at}"
+
+
+@pytest.mark.parametrize(
+    ("case", "scenario"),
+    [
+        pytest.param(case, scenario, id=f"{case.name}-{scenario.name}")
+        for case in CASES
+        for scenario in case.scenarios
+        if scenario.kind in (DispatchTurn, ResumeSessionTurn)
+    ],
+)
+async def test_an_inspection_answers_with_the_identity_core_gave_the_dispatching_request(
+    case: ExecutorCase, scenario: Scenario
+) -> None:
+    """Core looks the target up by identity, so an executor never answers with one it made up."""
+    # Killed before any write (never dispatched, answered from the named request) and completed.
+    for crash_at in (0, None):
+        async with case.world() as world:
+            request = await world.prepare(scenario)
+            assert isinstance(request, (DispatchTurn, ResumeSessionTurn))
+            with contextlib.suppress(ProcessKilledError):
+                await world.execute(request, lease=RevocableLease(), crash_at=crash_at)
+            answer = await inspect_dispatch_of(world, request)
+            assert _answer(answer).request_id == request.request_id, f"boundary {crash_at}"
+            assert_core_accepts([answer], expect_retry=False)
