@@ -89,7 +89,7 @@ def test_every_present_accelerator_node_is_bound(tmp_path: Path, present: tuple[
         node.parent.mkdir(parents=True, exist_ok=True)
         node.touch()
 
-    nodes = set(host_sandbox._gpu_device_nodes(dev))  # noqa: SLF001
+    nodes = set(host_sandbox._gpu_device_nodes(dev))  # noqa: SLF001  # lint-waiver: LW-994698 [SLF001]; the host's /dev cannot be populated from a test, so the private helper's device-root seam is the only way to reach this logic.
 
     for relative in present:
         top = dev / relative.split("/", 1)[0]
