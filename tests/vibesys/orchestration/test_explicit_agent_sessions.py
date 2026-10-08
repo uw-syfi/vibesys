@@ -985,7 +985,8 @@ def test_plugin_orchestrates_through_the_live_host(tmp_path: Path) -> None:
                 }
             ),
         )
-        assert status.value == "succeeded"
+        # The host measures nothing in this fixture, so the run keeps no result.
+        assert status.value == "failed"
 
     _run_with_clients(
         tmp_path,
