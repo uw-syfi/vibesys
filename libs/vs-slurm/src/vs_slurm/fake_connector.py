@@ -140,7 +140,7 @@ def _pending_query(state: Path, tokens: list[str]) -> str:
             job_id = names.get(tokens[tokens.index("--name") + 1])
             return f"{job_id}\n" if job_id else ""
         job_state = _job_state(state, tokens[tokens.index("-j") + 1])
-        record = job_state if job_state and job_state != _PENDING else "CANCELLED 0:0"
+        record = job_state or "CANCELLED 0:0"
         return _sacct_record_row(record, tokens)
     if "-n" in tokens:
         job_id = names.get(tokens[tokens.index("-n") + 1])
@@ -400,6 +400,7 @@ class _ScheduledJob:
     states: tuple[SlurmJobStatus, ...]
     pending_reason: str | None
     estimated_start: str | None
+    purged: bool = False
     position: int = 0
 
     @property
@@ -425,6 +426,7 @@ class _SubmitPlan:
     missing_stage_result: bool
     rejected_reason: str | None
     lost_claim_reply: bool
+    purged: bool
 
 
 class _ConnectorOptions(TypedDict, total=False):
@@ -436,6 +438,7 @@ class _ConnectorOptions(TypedDict, total=False):
     rejected_reason: str
     lost_claim_reply: bool
     on_dispatch: Callable[[], None]
+    purged: bool
 
 
 class FakeConnector:
@@ -497,6 +500,7 @@ class FakeConnector:
             options.get("missing_stage_result", False),
             options.get("rejected_reason"),
             options.get("lost_claim_reply", False),
+            options.get("purged", False),
         )
         callback = options.get("on_dispatch")
         if callback is not None:
@@ -555,7 +559,7 @@ class FakeConnector:
             return
         job_id = str(response["stdout"]).split()[-1]
         self._jobs[name] = _ScheduledJob(
-            job_id, plan.states, plan.pending_reason, plan.estimated_start
+            job_id, plan.states, plan.pending_reason, plan.estimated_start, plan.purged
         )
         if plan.missing_exit_status or plan.missing_stage_result:
             start = tokens.index("sbatch")
@@ -588,6 +592,8 @@ class FakeConnector:
             job = next((item for item in self._jobs.values() if item.job_id == job_id), None)
             if job is None:
                 return None
+            if job.purged and not job.active and tokens[0] in {"squeue", "scancel"}:
+                return _purged_reply(tokens[0], job.job_id)
             output = self._job_output(job, tokens)
         return {"version": 1, "returncode": 0, "stdout": output, "stderr": ""}
 
@@ -612,6 +618,20 @@ class FakeConnector:
         output = sacct_row(job.status.value.upper(), "0:0", parsable="-P" in tokens)
         job.advance()
         return output
+
+
+def _purged_reply(program: str, job_id: str) -> dict[str, object]:
+    """What ``squeue -j`` and ``scancel`` print for a job slurmctld no longer holds.
+
+    The controller forgets an ended job ``MinJobAge`` (300 s by default) after it
+    ended; only accounting still knows it. Both programs exit 1.
+    """
+    stderr = (
+        "slurm_load_jobs error: Invalid job id specified\n"
+        if program == "squeue"
+        else f"scancel: error: Kill job error on job id {job_id}: Invalid job id specified\n"
+    )
+    return {"version": 1, "returncode": 1, "stdout": "", "stderr": stderr}
 
 
 def _rsync(state: Path, arguments: list[str]) -> None:

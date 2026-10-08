@@ -65,6 +65,9 @@ class _ScriptOptions(TypedDict, total=False):
     rejected_reason: str
     lost_claim_reply: bool
     on_dispatch: Callable[[], None]
+    # The controller has forgotten the job once it ended (MinJobAge): squeue -j and
+    # scancel fail with "Invalid job id specified"; only accounting still knows it.
+    purged: bool
 
 
 @dataclass
@@ -141,6 +144,7 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
             missing_stage_result=values.get("missing_stage_result", False),
             on_dispatch=values.get("on_dispatch", lambda: None),
             lost_claim_reply=values.get("lost_claim_reply", False),
+            purged=values.get("purged", False),
         )
         rejection = values.get("rejected_reason")
         if rejection is not None:
@@ -321,6 +325,28 @@ def test_cancel_after_completion_preserves_terminal_result(case: _Case) -> None:
     assert isinstance(collected, ClusterCollected)
     assert isinstance(collected.result, SlurmJobResult)
     assert collected.result.exit_code == 0
+
+
+def test_a_job_the_controller_purged_is_read_and_cancelled_from_accounting(case: _Case) -> None:
+    """Mechanism: a failed queue read raised before accounting was consulted, so any
+    operation inspected more than MinJobAge after its job ended stayed Unknown forever."""
+    case.script(
+        "purged",
+        states=(SlurmJobStatus.COMPLETED,),
+        purged=True,
+        result=SlurmJobResult(job_id="5000", exit_code=0, output=""),
+    )
+    assert isinstance(case.cluster.submit(_request(case), operation_id="purged"), ClusterSubmitted)
+
+    observed = case.cluster.inspect("purged")
+    assert isinstance(observed, ClusterObservation), observed
+    assert observed.status is SlurmJobStatus.COMPLETED
+    assert isinstance(case.cluster.cancel("purged"), ClusterCancelRequested)
+    again = case.cluster.inspect("purged")
+    assert isinstance(again, ClusterObservation), again
+    assert again.status is SlurmJobStatus.COMPLETED
+    collected = case.cluster.collect("purged")
+    assert isinstance(collected, ClusterCollected)
 
 
 def test_missing_allocation_exit_status_is_unknown(case: _Case) -> None:

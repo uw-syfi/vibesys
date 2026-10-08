@@ -41,6 +41,7 @@ _ACCOUNTING_ACTIVE = frozenset({"PENDING", "RUNNING", "REQUEUED", "SUSPENDED"})
 DEFAULT_COMMAND_SECONDS = 1.2
 _SBATCH_PREFIX = "Submitted batch job"
 _INVALID_TRACE = "invalid scheduler trace"
+_INVALID_JOB = "Invalid job id specified"
 _UNSUPPORTED_QUERY = "trace replay answers only the queries vibesys issues"
 
 
@@ -48,7 +49,9 @@ class TraceStep(BaseModel):
     """What the scheduler showed from ``at_seconds`` until the next step.
 
     ``queue_state`` is the ``squeue`` state, or None when the job no longer
-    appears in the queue. ``accounting_state`` is the whole ``sacct`` state as
+    appears in the queue. ``queue_failure`` is instead what ``squeue -j`` and
+    ``scancel`` print to stderr, with exit status 1, when the controller no longer
+    holds the job (``queue_state`` is then None). ``accounting_state`` is the whole ``sacct`` state as
     ``sacct -P`` prints it (``CANCELLED by 1000``), or None when accounting has
     no row yet; the connector renders it as the invoked command would.
     """
@@ -60,6 +63,13 @@ class TraceStep(BaseModel):
     accounting_state: str | None
     exit_code: str | None = None
     reason: str | None = None
+    queue_failure: str | None = None
+
+    @model_validator(mode="after")
+    def _failure_has_no_queue_state(self) -> TraceStep:
+        if self.queue_failure is not None and self.queue_state is not None:
+            raise ValueError(_INVALID_TRACE)
+        return self
 
     @property
     def ended(self) -> bool:
@@ -129,6 +139,10 @@ class SchedulerTrace(BaseModel):
                 break
             current = step
         return current
+
+
+class _SchedulerRefused(Exception):  # noqa: N818  # lint-waiver: LW-940102 [N818]; a scheduler reply, not an error condition of this module.
+    """A scheduler program exited 1; the connector reports it with its stderr."""
 
 
 class _Job:
@@ -206,7 +220,18 @@ class TraceConnector:
             if request.get("operation") == "exec"
             else []
         )
-        answer = self._answer(request, tokens)
+        try:
+            answer = self._answer(request, tokens)
+        except _SchedulerRefused as refusal:
+            self._log(request)
+            completed = subprocess.CompletedProcess(
+                argv,
+                0,
+                json.dumps({"version": 1, "returncode": 1, "stdout": "", "stderr": f"{refusal}\n"}),
+                "",
+            )
+            self.clock.advance(self._command_seconds)
+            return completed
         if answer is None:
             completed = self._inner(argv, stdin=stdin, timeout=timeout)
             if "sbatch" in tokens:
@@ -278,6 +303,9 @@ class TraceConnector:
 
     def _scheduler(self, tokens: list[str]) -> str:
         if tokens[0] == "scancel":
+            if self._queue_failure(tokens[1]) is not None:
+                message = f"scancel: error: Kill job error on job id {tokens[1]}: {_INVALID_JOB}"
+                raise _SchedulerRefused(message)
             self._cancel(tokens[1])
             return ""
         return self._squeue(tokens) if tokens[0] == "squeue" else self._sacct(tokens)
@@ -286,6 +314,9 @@ class TraceConnector:
         if "-n" in tokens:
             job = self._named(tokens[tokens.index("-n") + 1])
             return f"{job.job_id}\n" if job and self._step(job).queue_state else ""
+        failure = self._queue_failure(tokens[tokens.index("-j") + 1])
+        if failure is not None:
+            raise _SchedulerRefused(failure)
         job = self._jobs.get(tokens[tokens.index("-j") + 1])
         step = self._step(job) if job is not None else None
         if step is None or step.queue_state is None:
@@ -293,6 +324,10 @@ class TraceConnector:
         if _SQUEUE_FORMAT not in tokens:
             raise ValueError(_UNSUPPORTED_QUERY)
         return f"{step.queue_state}|{step.reason or ''}|N/A\n"
+
+    def _queue_failure(self, job_id: str) -> str | None:
+        job = self._jobs.get(job_id)
+        return self._step(job).queue_failure if job is not None else None
 
     def _sacct(self, tokens: list[str]) -> str:
         if "--name" in tokens:
