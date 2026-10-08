@@ -453,10 +453,13 @@ class ProjectMaterializer:
         ignored_paths = (
             self._source_gitignored_paths(src) if respect_source_gitignore else frozenset()
         )
-        resolved_src = src.resolve()
+        # Children come from ``src.iterdir()`` and ``copytree`` callbacks, which
+        # keep ``src``'s spelling. Resolving only the root breaks the comparison
+        # when ``src`` crosses a symlink, such as a virtualenv's ``lib64``.
+        absolute_src = src.absolute()
 
         def _is_ignored(path: Path) -> bool:
-            relative_parts = path.absolute().relative_to(resolved_src).parts
+            relative_parts = path.absolute().relative_to(absolute_src).parts
             ignored_by_git = any(
                 relative_parts[:index] in ignored_paths
                 for index in range(1, len(relative_parts) + 1)
