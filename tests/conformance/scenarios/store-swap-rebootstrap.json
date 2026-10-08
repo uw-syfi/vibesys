@@ -1,7 +1,7 @@
 {
   "id": "store-swap-rebootstrap",
   "title": "A store swapped under the client forces a rebootstrap",
-  "description": "The client resumes from a cursor in store-a, but a durable log attached while it was gone, so the live batch names store-b. The client re-folds from the new batch rather than extending the retired store's sequences.",
+  "description": "The client resumes from a cursor in store-a, but a durable log attached while it was gone, so the first batch of its new connection names store-b. The client re-folds from that store identity rather than extending the retired store's sequences; it is not an in-loop rebootstrap and therefore is unmarked.",
   "role": "subscribe",
   "transports": [
     "unix",
@@ -30,7 +30,8 @@
       "dir": "s2c",
       "expect": {
         "type": "event_batch",
-        "store_id": "store-b"
+        "store_id": "store-b",
+        "rebootstrap": false
       }
     }
   ]

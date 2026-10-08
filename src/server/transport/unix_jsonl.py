@@ -174,12 +174,15 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             api.subscription_bootstrap(
                 request.after_sequence, request.tail, store_id=request.store_id
             ),
+            rebootstrap=True,
         )
 
     def _write_bootstrap(
         self,
         request: SubscribeRequest,
         bootstrap: SubscriptionBootstrap,
+        *,
+        rebootstrap: bool = False,
     ) -> tuple[int, int, str]:
         """Send one tail-bounded replay batch; return the cursor, floor, and store.
 
@@ -195,6 +198,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 active_executions=bootstrap.active_executions,
                 history_after_sequence=reported_floor,
                 store_id=bootstrap.store_id,
+                rebootstrap=rebootstrap,
             )
         )
         return bootstrap.through_sequence, reported_floor, bootstrap.store_id

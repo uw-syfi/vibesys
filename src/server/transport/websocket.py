@@ -887,7 +887,7 @@ class WebSocketGateway:
                     store_id=request.store_id,
                 )
                 cursor, reported_floor, store_id = await self._write_bootstrap(
-                    websocket, request, bootstrap
+                    websocket, request, bootstrap, rebootstrap=True
                 )
                 continue
             checkpoint = await asyncio.to_thread(
@@ -901,7 +901,7 @@ class WebSocketGateway:
                     store_id=request.store_id,
                 )
                 cursor, reported_floor, store_id = await self._write_bootstrap(
-                    websocket, request, bootstrap
+                    websocket, request, bootstrap, rebootstrap=True
                 )
                 continue
             await self._send_event_batch(
@@ -921,6 +921,8 @@ class WebSocketGateway:
         websocket: ServerConnection,
         request: SubscribeRequest,
         bootstrap: SubscriptionBootstrap,
+        *,
+        rebootstrap: bool = False,
     ) -> tuple[int, int, str]:
         reported_floor = 0 if request.tail is None else bootstrap.floor
         await self._send_event_batch(
@@ -931,6 +933,7 @@ class WebSocketGateway:
                 active_executions=bootstrap.active_executions,
                 history_after_sequence=reported_floor,
                 store_id=bootstrap.store_id,
+                rebootstrap=rebootstrap,
             ),
         )
         return bootstrap.through_sequence, reported_floor, bootstrap.store_id

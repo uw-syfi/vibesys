@@ -51,10 +51,10 @@ that a scenario has executed against a transport.
 
 ### What executes today
 
-The Python suite replays six scenarios, each against every transport it declares:
+The Python suite replays seven scenarios, each against every transport it declares:
 `full-replay-bootstrap`, `tail-bootstrap-spine-prepend`, `heartbeat-probe`,
 `command-ack-roundtrip`, `chat-dedicated-connection`, and
-`dual-transport-independent-subscriptions`.
+`dual-transport-independent-subscriptions`, and `tail-overflow-rebootstrap`.
 
 The remaining scenarios are not executed by any runner yet:
 
@@ -62,7 +62,7 @@ The remaining scenarios are not executed by any runner yet:
 | --- | --- |
 | `capability-probe-tail-rejected` | Needs a server that predates the field. This one supports `tail`, so it answers `subscribed` rather than the rejecting `Response` the scenario asserts. Executing it needs a compatibility fixture (an old server, or a request validator that rejects the field), which is separate work. |
 | `capability-probe-store-id-rejected` | Same, for `store_id`. |
-| `framer-partial-read`, `protocol-error-then-close`, `resume-after-drop`, `store-swap-rebootstrap`, `tail-overflow-rebootstrap` | Each needs setup the step list does not describe: a read boundary inside one message, an injected replay failure, a reconnect, a durable log attaching mid-subscription, a tail overflow. A runner cannot drive them from the steps alone. |
+| `framer-partial-read`, `protocol-error-then-close`, `resume-after-drop`, `store-swap-rebootstrap` | Each needs setup the step list does not describe: a read boundary inside one message, an injected replay failure, a reconnect, or a durable log attaching mid-subscription. A runner cannot drive them from the steps alone. |
 
 A control-path reply is a `Response`, which is deliberately outside the `type`-discriminated
 `ServerMessage` union, so scenarios name it with the pseudo-type `response`. The Python runner

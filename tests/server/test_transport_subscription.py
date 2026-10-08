@@ -395,9 +395,11 @@ def test_late_attach_rebootstraps_at_fresh_tail_with_spine(tmp_path: Path) -> No
         batch = read()
 
     assert bootstrap["history_after_sequence"] == 0
+    assert bootstrap["rebootstrap"] is False
     latest = parts.api.snapshot().sequence
     floor = latest - 40
     assert batch["history_after_sequence"] == floor
+    assert batch["rebootstrap"] is True
     assert batch["through_sequence"] == latest
     pre_floor = [event for event in batch["events"] if event["sequence"] <= floor]
     assert [event["type"] for event in pre_floor] == ["run_started"] + [
@@ -425,6 +427,7 @@ def test_late_attach_rebootstraps_a_run_log_shorter_than_the_tail(tmp_path: Path
     assert latest < tail
     assert batch["store_id"] != bootstrap["store_id"]
     assert batch["history_after_sequence"] == 0
+    assert batch["rebootstrap"] is True
     assert batch["through_sequence"] == latest
     # A whole-log replay, so the client re-folds to exactly what the durable
     # store holds, starting at the ``run_started`` the stale cursor covered.
@@ -456,6 +459,10 @@ def test_resume_across_a_store_swap_rebootstraps(tmp_path: Path) -> None:
     assert subscribed["type"] == "subscribed"
     assert batch["store_id"] != bootstrap["store_id"]
     assert batch["history_after_sequence"] == 0
+    # This is the first batch on a new connection, despite being a fresh
+    # bootstrap after a store-aware resume. Only an in-loop bootstrap on the
+    # already-open subscription carries the marker.
+    assert batch["rebootstrap"] is False
     assert batch["through_sequence"] == latest
     # A whole-log replay from sequence 1, so the resumed client re-folds to what
     # the durable store holds instead of extending its stale cursor.
