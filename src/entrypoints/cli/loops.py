@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import math
 import sys
-import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -33,6 +31,7 @@ from vibesys.api.evolve import resolve_openevolve_options
 from vibesys.api.metrics import MetricSpace, Objective
 from vibesys.api.request import (
     InputBundle,
+    load_objectives,
     with_operator_constraints,
 )
 from vs_issue_tracker.api import IssueTrackerConfig
@@ -138,31 +137,13 @@ def _load_metric_space_toml(input_path: Path) -> MetricSpace:
     variation can opt into a relative margin under ``[pareto]`` without
     imposing one domain's noise level on every optimization workload.
     """
-    path = input_path / "objectives.toml"
-    if not path.exists():
-        return MetricSpace()
-    data = tomllib.loads(path.read_text())
-    objectives = []
-    for entry in data.get("objective") or []:
-        name = entry.get("name")
-        direction = entry.get("direction")
-        if not name or direction not in ("max", "min"):
-            _exception_message_2 = f"Malformed entry in {path}: {entry!r}. Each [[objective]] must set name and direction (max|min)."
-            raise ValueError(_exception_message_2)
-        objectives.append(Objective(name=name, direction=direction))
-    raw_value = (data.get("pareto") or {}).get("relative_noise", 0.0)
-    if isinstance(raw_value, bool):
-        message = f"Malformed pareto.relative_noise in {path}: {raw_value!r}"
-        raise ValueError(message)  # noqa: TRY004  # lint-waiver: LW-010200 [TRY004]; malformed objective files use the CLI's established ValueError diagnostic contract.
-    try:
-        value = float(raw_value)
-    except (TypeError, ValueError) as exc:
-        _exception_message_3 = f"Malformed pareto.relative_noise in {path}: {raw_value!r}"
-        raise ValueError(_exception_message_3) from exc
-    if not math.isfinite(value) or not 0 <= value < 1:
-        _exception_message = f"Malformed pareto.relative_noise in {path}: expected a finite value in [0, 1), got {raw_value!r}"
-        raise ValueError(_exception_message)
-    return MetricSpace(objectives=tuple(objectives), relative_noise=value)
+    file = load_objectives(input_path)
+    return MetricSpace(
+        objectives=tuple(
+            Objective(name=axis.name, direction=axis.direction) for axis in file.objective
+        ),
+        relative_noise=float(file.pareto.relative_noise),
+    )
 
 
 def _resolve_metric_space(args: argparse.Namespace) -> MetricSpace:

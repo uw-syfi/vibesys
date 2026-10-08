@@ -64,3 +64,17 @@ def test_unknown_top_level_table_is_rejected_by_name(
 
     with pytest.raises(ValueError, match=table):
         _load_metric_space_toml(root)
+
+
+def test_error_names_the_file_and_the_full_key_path(tmp_path: Path) -> None:
+    _write(
+        tmp_path, '[[objective]]\nname = "a"\ndirection = "max"\n[pareto]\nrelative_nosie = 0.1\n'
+    )
+
+    with pytest.raises(ValueError, match=r"objectives\.toml.*pareto\.relative_nosie"):
+        _load_metric_space_toml(tmp_path)
+
+    _write(tmp_path, '[[objective]]\nname = "a"\ndirection = "max"\nweight = 2\n')
+
+    with pytest.raises(ValueError, match=r"objective\[0\]\.weight"):
+        _load_metric_space_toml(tmp_path)
