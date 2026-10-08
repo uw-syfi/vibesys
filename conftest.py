@@ -102,6 +102,7 @@ def _make_hypothesis_deterministic_under_ci(request: pytest.FixtureRequest) -> N
     if _PROFILE != "ci":
         return
     test = request.function
+    test = getattr(test, "__func__", test)  # a method: seed the function under it
     inner = getattr(getattr(test, "hypothesis", None), "inner_test", None)
     if inner is not None:
         setattr(test, _SEED_SLOT, int_from_bytes(function_digest(inner)))
