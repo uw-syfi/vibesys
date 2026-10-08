@@ -50,6 +50,10 @@ _RESPONSE_DESCRIPTOR_KEYWORDS = frozenset(
         "type",
     }
 )
+_RUN_EVENT_DESCRIPTOR_KEYWORDS = _RESPONSE_DESCRIPTOR_KEYWORDS | {
+    "discriminator",
+    "oneOf",
+}
 _RESPONSE_DESCRIPTOR_TYPES = frozenset(
     {"array", "boolean", "integer", "null", "number", "object", "string"}
 )
@@ -124,11 +128,40 @@ def response_payload_typescript() -> str:
     browser and Node entry points on one artifact without narrowing the
     backend-client's existing runtime contract.
     """
-    document = json.dumps(response_payload_json_schema(), indent=2)
+    return _schema_typescript("responsePayloadSchema", response_payload_json_schema())
+
+
+def run_event_json_schema() -> dict[str, Any]:
+    """Return the compact generated descriptor for one ``RunEvent``.
+
+    The event model is copied as the root and only definitions reachable from
+    it are retained. Tagged unions stay discriminated so the TypeScript walker
+    can validate a known member deeply while deliberately accepting a newer
+    member whose tag this client has not generated yet.
+    """
+    document = protocol_json_schema()
+    definitions = document["$defs"]
+    event = copy.deepcopy(definitions["RunEvent"])
+    references = _referenced_definitions(definitions, event)
+    descriptor = {
+        "$defs": {key: value for key, value in definitions.items() if key in references},
+        **event,
+    }
+    return require_supported_run_event_schema(descriptor)
+
+
+def run_event_typescript() -> str:
+    """Return the generated browser-compatible event-validation module."""
+    return _schema_typescript("runEventSchema", run_event_json_schema())
+
+
+def _schema_typescript(name: str, schema: dict[str, Any]) -> str:
+    """Embed one generated descriptor without narrowing the Node 20 range."""
+    document = json.dumps(schema, indent=2)
     return (
         "/* Generated from the Python protocol models. Do not edit. */\n\n"
-        f"const responsePayloadSchema: Record<string, unknown> = {document};\n\n"
-        "export default responsePayloadSchema;\n"
+        f"const {name}: Record<string, unknown> = {document};\n\n"
+        f"export default {name};\n"
     )
 
 
@@ -140,36 +173,65 @@ def require_supported_response_payload_schema(document: dict[str, Any]) -> dict[
     forward compatibility, but any newly emitted schema constraint must be
     implemented by the walker before generation can succeed.
     """
+    return _require_supported_client_schema(document, allow_tagged_unions=False)
+
+
+def require_supported_run_event_schema(document: dict[str, Any]) -> dict[str, Any]:
+    """Refuse event-schema constructs the TypeScript walker cannot enforce."""
+    return _require_supported_client_schema(document, allow_tagged_unions=True)
+
+
+def _require_supported_client_schema(
+    document: dict[str, Any], *, allow_tagged_unions: bool
+) -> dict[str, Any]:
+    """Validate one executable descriptor against the TypeScript walker's grammar."""
     definitions = document.get("$defs", {})
     if not isinstance(definitions, dict):
         raise UnsupportedResponsePayloadSchemaError(
             "$", "response payload schema $defs must be an object"
         )
-    _require_supported_response_schema_node(document, "$", definitions)
+    _require_supported_response_schema_node(
+        document, "$", definitions, allow_tagged_unions=allow_tagged_unions
+    )
     return document
 
 
 def _require_supported_response_schema_node(
-    node: object, path: str, definitions: dict[object, object]
+    node: object,
+    path: str,
+    definitions: dict[object, object],
+    *,
+    allow_tagged_unions: bool,
 ) -> None:
     if not isinstance(node, dict):
         raise MalformedResponsePayloadSchemaError(path)
-    _require_supported_response_schema_keywords(node, path)
+    _require_supported_response_schema_keywords(node, path, allow_tagged_unions=allow_tagged_unions)
     if "$defs" in node and path != "$":
         raise UnsupportedResponsePayloadSchemaError(
             path, "nested response payload schema $defs are unsupported"
         )
-    _require_supported_response_schema_values(node, path, definitions)
-    _visit_response_schema_mapping(node, "$defs", path, definitions)
-    _visit_response_schema_mapping(node, "properties", path, definitions)
-    _visit_response_schema_child(node, "items", f"{path}[]", definitions)
-    _visit_response_schema_choices(node, path, definitions)
-
-
-def _require_supported_response_schema_keywords(node: dict[object, object], path: str) -> None:
-    unsupported = sorted(
-        (key for key in node if key not in _RESPONSE_DESCRIPTOR_KEYWORDS), key=repr
+    _require_supported_response_schema_values(
+        node, path, definitions, allow_tagged_unions=allow_tagged_unions
     )
+    _visit_response_schema_mapping(
+        node, "$defs", path, definitions, allow_tagged_unions=allow_tagged_unions
+    )
+    _visit_response_schema_mapping(
+        node, "properties", path, definitions, allow_tagged_unions=allow_tagged_unions
+    )
+    _visit_response_schema_child(
+        node, "items", f"{path}[]", definitions, allow_tagged_unions=allow_tagged_unions
+    )
+    _visit_response_schema_choices(node, path, definitions, allow_tagged_unions=allow_tagged_unions)
+
+
+def _require_supported_response_schema_keywords(
+    node: dict[object, object], path: str, *, allow_tagged_unions: bool
+) -> None:
+    supported = (
+        _RUN_EVENT_DESCRIPTOR_KEYWORDS if allow_tagged_unions else _RESPONSE_DESCRIPTOR_KEYWORDS
+    )
+    unsupported = sorted((key for key in node if key not in supported), key=repr)
     if unsupported:
         raise UnsupportedResponsePayloadSchemaError(
             path, f"unsupported response payload schema keyword {unsupported[0]!r}"
@@ -177,7 +239,11 @@ def _require_supported_response_schema_keywords(node: dict[object, object], path
 
 
 def _require_supported_response_schema_values(
-    node: dict[object, object], path: str, definitions: dict[object, object]
+    node: dict[object, object],
+    path: str,
+    definitions: dict[object, object],
+    *,
+    allow_tagged_unions: bool,
 ) -> None:
     reference = node.get("$ref")
     if "$ref" in node:
@@ -187,7 +253,9 @@ def _require_supported_response_schema_values(
         raise UnsupportedResponsePayloadSchemaError(
             path, f"unsupported response payload schema type {schema_type!r}"
         )
-    _require_supported_response_schema_composition(node, path)
+    _require_supported_response_schema_composition(
+        node, path, definitions, allow_tagged_unions=allow_tagged_unions
+    )
     _require_supported_response_object_keywords(node, path, schema_type)
     _require_supported_response_array_keywords(node, path, schema_type)
     _require_supported_response_number_keywords(node, path, schema_type)
@@ -209,7 +277,20 @@ def _require_supported_response_reference(
         )
 
 
-def _require_supported_response_schema_composition(node: dict[object, object], path: str) -> None:
+def _require_supported_response_schema_composition(
+    node: dict[object, object],
+    path: str,
+    definitions: dict[object, object],
+    *,
+    allow_tagged_unions: bool,
+) -> None:
+    if "oneOf" in node or "discriminator" in node:
+        if not allow_tagged_unions:
+            raise UnsupportedResponsePayloadSchemaError(
+                path, "response payload schema tagged unions are unsupported"
+            )
+        _require_supported_tagged_union(node, path, definitions)
+        return
     applicators = [keyword for keyword in ("$ref", "anyOf", "const") if keyword in node]
     annotation_keywords = {"default", "description", "title"}
     allowed_siblings = {"type"} if applicators == ["const"] else set()
@@ -219,6 +300,95 @@ def _require_supported_response_schema_composition(node: dict[object, object], p
     ):
         raise UnsupportedResponsePayloadSchemaError(
             path, "response payload schema cannot combine an applicator with another shape"
+        )
+
+
+def _require_supported_tagged_union(
+    node: dict[object, object], path: str, definitions: dict[object, object]
+) -> None:
+    annotations = {"default", "description", "title"}
+    if set(node) - annotations - {"oneOf", "discriminator"}:
+        raise UnsupportedResponsePayloadSchemaError(
+            path, "tagged union cannot combine with another shape"
+        )
+    choices = node.get("oneOf")
+    discriminator = node.get("discriminator")
+    if not isinstance(choices, list) or not choices:
+        raise UnsupportedResponsePayloadSchemaError(
+            path, "tagged union oneOf must be a nonempty array"
+        )
+    if not isinstance(discriminator, dict):
+        raise UnsupportedResponsePayloadSchemaError(path, "tagged union needs a discriminator")
+    property_name = discriminator.get("propertyName")
+    mapping = discriminator.get("mapping")
+    if not isinstance(property_name, str) or not property_name or not isinstance(mapping, dict):
+        raise UnsupportedResponsePayloadSchemaError(
+            path, "tagged union discriminator needs a propertyName and mapping"
+        )
+    members = _require_tagged_union_reference_bijection(choices, mapping, path, definitions)
+    for tag, ref in members:
+        _require_tagged_union_mapping_tag(tag, ref, property_name, path, definitions)
+
+
+def _require_tagged_union_reference_bijection(
+    choices: list[object],
+    mapping: dict[object, object],
+    path: str,
+    definitions: dict[object, object],
+) -> list[tuple[str, str]]:
+    """Return a proven one-to-one mapping between union tags and member refs."""
+    members: list[tuple[str, str]] = []
+    for tag, ref in mapping.items():
+        if not isinstance(tag, str) or not isinstance(ref, str):
+            raise UnsupportedResponsePayloadSchemaError(
+                path, "tagged union mapping must map strings to references"
+            )
+        members.append((tag, ref))
+
+    choice_refs = [choice.get("$ref") if isinstance(choice, dict) else None for choice in choices]
+    if any(not isinstance(ref, str) for ref in choice_refs):
+        raise UnsupportedResponsePayloadSchemaError(path, "tagged union members must be references")
+    references = [ref for ref in choice_refs if isinstance(ref, str)]
+    if len(set(references)) != len(references):
+        raise UnsupportedResponsePayloadSchemaError(
+            path, "tagged union members must contain unique references"
+        )
+    mapped_references = [ref for _, ref in members]
+    if len(set(mapped_references)) != len(mapped_references):
+        raise UnsupportedResponsePayloadSchemaError(
+            path, "tagged union mapping must contain unique references"
+        )
+    if len(members) != len(references) or set(mapped_references) != set(references):
+        raise UnsupportedResponsePayloadSchemaError(
+            path, "tagged union mapping must name every member exactly once"
+        )
+    for ref in mapped_references:
+        _require_supported_response_reference(ref, path, definitions)
+    return members
+
+
+def _require_tagged_union_mapping_tag(
+    tag: str,
+    reference: str,
+    property_name: str,
+    path: str,
+    definitions: dict[object, object],
+) -> None:
+    """Require a mapping key to equal its member's literal discriminator."""
+    member = definitions[reference.removeprefix("#/$defs/")]
+    properties = member.get("properties") if isinstance(member, dict) else None
+    property_schema = properties.get(property_name) if isinstance(properties, dict) else None
+    constant = property_schema.get("const") if isinstance(property_schema, dict) else None
+    if not isinstance(constant, str):
+        raise UnsupportedResponsePayloadSchemaError(
+            path,
+            f"tagged union member {reference!r} needs a string const for {property_name!r}",
+        )
+    if tag != constant:
+        raise UnsupportedResponsePayloadSchemaError(
+            path,
+            f"tagged union mapping key {tag!r} does not match "
+            f"{reference}.{property_name} const {constant!r}",
         )
 
 
@@ -329,6 +499,8 @@ def _visit_response_schema_mapping(
     keyword: str,
     path: str,
     definitions: dict[object, object],
+    *,
+    allow_tagged_unions: bool,
 ) -> None:
     children = node.get(keyword)
     if keyword not in node:
@@ -338,7 +510,12 @@ def _visit_response_schema_mapping(
             path, f"response payload schema {keyword} must be an object"
         )
     for name, child in children.items():
-        _require_supported_response_schema_node(child, f"{path}.{keyword}.{name}", definitions)
+        _require_supported_response_schema_node(
+            child,
+            f"{path}.{keyword}.{name}",
+            definitions,
+            allow_tagged_unions=allow_tagged_unions,
+        )
 
 
 def _visit_response_schema_child(
@@ -346,25 +523,39 @@ def _visit_response_schema_child(
     keyword: str,
     path: str,
     definitions: dict[object, object],
+    *,
+    allow_tagged_unions: bool,
 ) -> None:
     child = node.get(keyword)
     if keyword not in node:
         return
-    _require_supported_response_schema_node(child, path, definitions)
+    _require_supported_response_schema_node(
+        child, path, definitions, allow_tagged_unions=allow_tagged_unions
+    )
 
 
 def _visit_response_schema_choices(
-    node: dict[object, object], path: str, definitions: dict[object, object]
+    node: dict[object, object],
+    path: str,
+    definitions: dict[object, object],
+    *,
+    allow_tagged_unions: bool,
 ) -> None:
-    choices = node.get("anyOf")
-    if "anyOf" not in node:
-        return
-    if not isinstance(choices, list) or not choices:
-        raise UnsupportedResponsePayloadSchemaError(
-            path, "response payload schema anyOf must be a nonempty array"
-        )
-    for index, choice in enumerate(choices):
-        _require_supported_response_schema_node(choice, f"{path}.anyOf[{index}]", definitions)
+    for keyword in ("anyOf", "oneOf"):
+        choices = node.get(keyword)
+        if keyword not in node:
+            continue
+        if not isinstance(choices, list) or not choices:
+            raise UnsupportedResponsePayloadSchemaError(
+                path, f"response payload schema {keyword} must be a nonempty array"
+            )
+        for index, choice in enumerate(choices):
+            _require_supported_response_schema_node(
+                choice,
+                f"{path}.{keyword}[{index}]",
+                definitions,
+                allow_tagged_unions=allow_tagged_unions,
+            )
 
 
 def fully_populated_response() -> Response:
@@ -687,11 +878,16 @@ def main() -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(fully_populated_response().model_dump_json() + "\n")
         return
+    elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--run-event-module":
+        output = Path(arguments[1])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(run_event_typescript())
+        return
     else:
         message = (
             "usage: python -m server.api.schema "
             "[--response-payload-schema|--response-payload-module|"
-            "--response-payload-fixture] OUTPUT"
+            "--response-payload-fixture|--run-event-module] OUTPUT"
         )
         raise SystemExit(message)
     output.parent.mkdir(parents=True, exist_ok=True)
