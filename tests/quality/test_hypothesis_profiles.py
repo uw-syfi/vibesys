@@ -55,7 +55,15 @@ class _Project:
             "VIBESYS_HYPOTHESIS_DB": str(self.root / database),
             "DRAW_LOG": str(log),
         }
-        env.pop("PLANT", None)
+        # The child must not inherit the parent's CI shard selection or options.
+        for inherited in (
+            "PLANT",
+            "VIBESYS_TEST_SHARD",
+            "VIBESYS_RECORD_SHARD_DURATIONS",
+            "PYTEST_ADDOPTS",
+            "COVERAGE_FILE",
+        ):
+            env.pop(inherited, None)
         if plant:
             env["PLANT"] = "1"
         subprocess.run(
