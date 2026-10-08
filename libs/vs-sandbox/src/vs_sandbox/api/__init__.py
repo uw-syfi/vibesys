@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     )
     from vs_sandbox.cuda_backend import CudaBackend
     from vs_sandbox.device_lease import DeviceLease
+    from vs_sandbox.docker_cli import DockerCli
     from vs_sandbox.docker_sandbox import AGENT_HOME, DockerSandbox
     from vs_sandbox.execution import Sandbox, SandboxExecutionResult
     from vs_sandbox.gpu_monitor import (
@@ -87,6 +88,7 @@ __all__ = [
     "CudaBackend",
     "Device",
     "DeviceLease",
+    "DockerCli",
     "DockerSandbox",
     "EnvironmentBindMount",
     "GpuContentionMonitor",
@@ -156,6 +158,7 @@ _LAZY_EXPORTS = {
     "RocmBackend": ("rocm_backend", "RocmBackend"),
     "TrainiumBackend": ("trainium_backend", "TrainiumBackend"),
     "AGENT_HOME": ("docker_sandbox", "AGENT_HOME"),
+    "DockerCli": ("docker_cli", "DockerCli"),
     "DockerSandbox": ("docker_sandbox", "DockerSandbox"),
     "Sandbox": ("execution", "Sandbox"),
     "SandboxExecutionResult": ("execution", "SandboxExecutionResult"),
