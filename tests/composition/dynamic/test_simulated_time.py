@@ -147,7 +147,11 @@ def test_a_stop_during_a_turn_is_acted_on_within_the_bound(
     # Core cancels the running turns and ends the run terminal; only a request core cannot
     # cancel (a submission, a poll) in flight makes the loop give up with RunStopped.
     assert run.error is None or isinstance(run.error, RunStopped), run.error
-    assert run.ended_at - run.stopped_at <= STOP_BOUND_S
+    # A job in flight is cancelled through core too, and core confirms the cancellation on its
+    # next poll before the run closes, so the bound adds one poll interval and the
+    # cancellation's completing time.
+    confirm = _POLL_SLACK_S + profile.slurm.completing_s.high
+    assert run.ended_at - run.stopped_at <= STOP_BOUND_S + confirm
     assert run.turns[-1].cancelled
     # Nothing new started after the stop.
     assert all(span.start <= run.stopped_at for span in run.turns)

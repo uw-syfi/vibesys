@@ -75,6 +75,7 @@ from vs_runtime._core_requests import (
     WorkspaceRequests,
     receipt_executor_kinds,
     settle,
+    settles_through_core,
 )
 from vs_runtime._core_run import (
     HEARTBEAT_TASK,
@@ -386,6 +387,7 @@ __all__ = [
     "revision_ref",
     "session_executors",
     "settle",
+    "settles_through_core",
     "start_core",
     "start_core_awaiting_lease",
 ]
