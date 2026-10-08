@@ -8,7 +8,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from . import _session_checkpoints
-from ._continuations import wait_refused_at_turn_end
+from ._continuations import bounded_wait, wait_refused_at_turn_end
+from ._deadlines import bound_to_run, time_remains
 from ._evaluation_history import produce_history
 from ._proofs import (
     Proven,
@@ -446,8 +447,8 @@ def _registered_request(
 def _validate_turn_admission(context: SessionsContext, scope: Scope, turn: TurnSpec) -> None:
     if not scope_active(context, scope):
         raise ContractValidationError("scope", "turn requires current active ownership")
-    if turn.deadline_at <= context.run.now_at or turn.deadline_at > context.run.deadline_at:
-        raise ContractValidationError("turn.deadline_at", "turn deadline outside remaining run")
+    if not time_remains(context.run, turn.deadline_at):
+        raise ContractValidationError("turn.deadline_at", "run has no time left for the turn")
     if turn.charge_class == "paid" and attempt_for(context, scope) is None:
         raise ContractValidationError(
             "turn.charge_class", "run-scoped paid turn lacks ATTEMPT authority"
@@ -575,7 +576,7 @@ def _turn_requested(
             phase=SessionPhase.ACQUIRING,
             invocation=turn.invocation_id,
         )
-        ensure = _ensure(session, context, turn.deadline_at)
+        ensure = _ensure(session, context, bound_to_run(context.run, turn.deadline_at))
         session = session.model_copy(update={"pending_intents": (ensure.request_id,)})
         requests = (ensure,)
     else:
@@ -705,7 +706,7 @@ def _dispatch_reserved(
         request = ResumeSessionTurn(
             request_id=turn_request_id(event.invocation, "dispatch"),
             scope=invocation.scope,
-            deadline_at=invocation.turn.deadline_at,
+            deadline_at=bound_to_run(context.run, invocation.turn.deadline_at),
             admission_id=_episode(context, invocation.scope),
             turn=invocation.turn,
             inputs=inputs,
@@ -716,7 +717,7 @@ def _dispatch_reserved(
         request = DispatchTurn(
             request_id=turn_request_id(event.invocation, "dispatch"),
             scope=invocation.scope,
-            deadline_at=invocation.turn.deadline_at,
+            deadline_at=bound_to_run(context.run, invocation.turn.deadline_at),
             admission_id=_episode(context, invocation.scope),
             turn=invocation.turn,
             inputs=inputs,
@@ -1597,6 +1598,8 @@ def _apply_turn_observation(
     )
 
     observation = event.observation
+    if event.suspension is not None:
+        event = event.model_copy(update={"suspension": bounded_wait(context.run, event.suspension)})
     if event.suspension is not None and (
         observation.status != ObservationStatus.SUCCEEDED
         or wait_refused_at_turn_end(state, context, invocation, event.suspension)

@@ -11,6 +11,7 @@ from pydantic import TypeAdapter
 
 from . import attempts, evaluation, intents, scheduling, sessions, settlement
 from ._continuations import SuspensionRefusal, exhausted, paid_prefix_refusal, wait_refusal_in
+from ._deadlines import bound_to_run, bounded_decision
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
 from ._proofs import (
@@ -1010,6 +1011,11 @@ def operation_owner(state: CoreState, request: ExecuteRegisteredOperation) -> Ar
     return owners[descriptor.lifecycle]
 
 
+def _decision_digest(state: CoreState, decision: Decision) -> str:
+    """Identity of a decision as recorded, so a replay of the raw proposal matches its receipt."""
+    return digest(bounded_decision(state.run, decision))
+
+
 def _decision_replay(state: CoreState, decision: Decision) -> Transition | None:
     previous = next(
         (receipt for receipt in state.run.receipts if receipt.decision_id == decision.decision_id),
@@ -1017,7 +1023,7 @@ def _decision_replay(state: CoreState, decision: Decision) -> Transition | None:
     )
     if previous is None:
         return None
-    if previous.payload_digest == digest(decision):
+    if previous.payload_digest == _decision_digest(state, decision):
         return Transition(state=state)
     return Transition(
         state=state,
@@ -1036,12 +1042,14 @@ def _submitted(
     state: CoreState, event: DecisionSubmitted, dispatch: Dispatch, *, check_revision: bool = True
 ) -> Transition:
     decision = event.decision
-    payload_digest = digest(decision)
+    payload_digest = _decision_digest(state, decision)
     replay = _decision_replay(state, decision)
     if replay is not None:
         return replay
     rejection = validate_decision(state, event, check_revision=check_revision)
     feedback = rejection or Accepted(decision_id=decision.decision_id)
+    if rejection is None:
+        decision = bounded_decision(state.run, decision)
     receipt = DecisionReceipt(
         decision_id=decision.decision_id,
         decision=None if rejection is not None else decision,
@@ -1113,7 +1121,9 @@ def _stale_proposal(state: CoreState, event: ProposalSubmitted) -> Transition:
             decision, RejectionCode.STALE_VIEW, ("expected_revision",), "view revision changed"
         )
         receipt = DecisionReceipt(
-            decision_id=decision.decision_id, payload_digest=digest(decision), feedback=rejection
+            decision_id=decision.decision_id,
+            payload_digest=_decision_digest(state, decision),
+            feedback=rejection,
         )
         state = state.model_copy(
             update={
@@ -1472,7 +1482,7 @@ def _builtin_session_turn(state: CoreState, request: DispatchTurn | ResumeSessio
         or request.request_id not in receipt.request_ids
         or decision.scope != request.scope
         or decision.turn != request.turn
-        or decision.turn.deadline_at != request.deadline_at
+        or bound_to_run(state.run, decision.turn.deadline_at) != request.deadline_at
     ):
         raise ContractError(
             ("decision_id",), "builtin session dispatch requires canonical turn proof"

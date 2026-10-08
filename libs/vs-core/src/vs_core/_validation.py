@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._adoption import fences_root_mutation
+from ._deadlines import has_time_for
 from ._proofs import Proven, accepted_receipt_for, descriptor_matches
 from ._values import canonical_json, deeply_immutable
 from .types.attempts import AttemptPhase
@@ -75,7 +76,15 @@ def validate_decision(
         rejection = _validate_stop_result(state, decision)
         if rejection is not None:
             return rejection
-    return validate_offer(state, decision)
+    return _validate_time_left(state, decision) or validate_offer(state, decision)
+
+
+def _validate_time_left(state: CoreState, decision: Decision) -> Rejected | None:
+    if has_time_for(state.run, decision):
+        return None
+    return _reject(
+        decision, RejectionCode.BUDGET, ("deadline_at",), "run has no time left for the request"
+    )
 
 
 def _validate_stop_result(state: CoreState, decision: Stop) -> Rejected | None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ._deadlines import bound_to_run, time_remains
 from ._evaluation_history import produce_history
 from ._proofs import (
     Mismatch,
@@ -469,9 +470,9 @@ def _allocate(
         if plan.submission_limit > context.run.limits.max_measurement_submissions:
             return _rejected(state, scope)
         budget = SubmissionBudget(scope=scope, identity=identity.value, limit=plan.submission_limit)
-    deadline = min(plan.deadline_at, context.run.deadline_at)
-    if deadline <= context.run.now_at:
+    if not time_remains(context.run, plan.deadline_at):
         return _rejected(state, scope)
+    deadline = bound_to_run(context.run, plan.deadline_at)
     ordinal = len(budget.receipts) + 1
     key = digest(budget.identity)[:24]
     identity_id = RequestId(
