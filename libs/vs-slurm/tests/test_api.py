@@ -179,12 +179,12 @@ class _FakeConnector:
                 return "READY"
             if ready_path in self.ready_content_objects:
                 return "READY"
-            target = tokens[tokens.index("mv") + 4]
+            target = tokens[tokens.index("mv") + 3]
             self.ready_content_objects.add(f"{target}/ready")
             return "PUBLISHED"
         for index, word in enumerate(tokens[:-3]):
-            if word == "mv" and tokens[index + 1 : index + 3] == ["-T", "--"]:
-                self.ready_content_objects.add(f"{tokens[index + 3]}/ready")
+            if word == "mv" and tokens[index + 1] == "--":
+                self.ready_content_objects.add(f"{tokens[index + 2]}/ready")
         if "rmdir" in tokens:
             self.locked_content_objects.discard(tokens[tokens.index("rmdir") + 2])
         return None
@@ -1204,9 +1204,9 @@ def test_content_addressed_staging_reuses_objects_and_keeps_workspaces_fresh(
     assert len(sync_requests) == 2
     commands = [str(request.get("command", "")) for request in connector.requests]
     assert sum("rsync -a --chmod=Du+w,Fu+w --delete" in command for command in commands) >= 4
-    publish_commands = [command for command in commands if "mv -T --" in command]
+    publish_commands = [command for command in commands if "mv -- " in command]
     assert len(publish_commands) == 2
-    assert all(command.index("touch ") < command.index("mv -T --") for command in publish_commands)
+    assert all(command.index("touch ") < command.index("mv -- ") for command in publish_commands)
 
     (workspace / "candidate.py").write_text("version = 2\n", encoding="utf-8")
     third = runner.submit(
@@ -1328,7 +1328,7 @@ def test_failed_content_upload_does_not_publish_a_ready_object(tmp_path: Path) -
         for request in connector.requests
         if request["operation"] == "exec"
     ]
-    assert not any("mv -T --" in command for command in remote_commands)
+    assert not any("mv -- " in command for command in remote_commands)
     assert not connector.ready_content_objects
     assert not connector.locked_content_objects
 

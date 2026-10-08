@@ -258,7 +258,7 @@ def _publish_command(
         f'printf \'owner=%s\\npid=%s\\ncreated=%s\\n\' {staging} "$$" "$(date +%s)" > {owner}; '
         f"if [ -f {ready} ]; then printf 'READY'; exit 0; fi; "
         f"if [ -e {target} ]; then exit 73; fi; "
-        f"touch {temporary_ready} && mv -T -- {temporary} {target} || exit 74; "
+        f"touch {temporary_ready} && mv -- {temporary} {target} || exit 74; "
         "printf 'PUBLISHED'; exit 0; fi; "
         f"owner_pid=$(sed -n 's/^pid=//p' {owner} 2>/dev/null); "
         f"created_at=$(sed -n 's/^created=//p' {owner} 2>/dev/null); "

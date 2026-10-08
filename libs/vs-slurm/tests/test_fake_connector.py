@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -104,6 +105,38 @@ def test_an_executing_cluster_runs_the_staged_job_before_its_first_poll(tmp_path
     assert failed.exit_code != 0
     assert failed.job_id != job.job_id
     assert "staged" in runner.run(request).output
+
+
+def _posix_only_coreutils(directory: Path) -> Path:
+    """Shadow ``mv`` with the BSD/macOS contract: reject GNU-only ``-T`` and long options."""
+    directory.mkdir()
+    shim = directory / "mv"
+    shim.write_text(
+        "#!/bin/sh\n"
+        'for arg in "$@"; do\n'
+        '  case "$arg" in\n'
+        "    --) break ;;\n"
+        '    -T|--*) echo "mv: illegal option -- $arg" >&2; exit 64 ;;\n'
+        "  esac\n"
+        "done\n"
+        'exec /bin/mv "$@"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    return directory
+
+
+def test_an_executing_cluster_stages_with_only_posix_coreutils_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _state, runner, workspace = _executing_runner(tmp_path)
+    shims = _posix_only_coreutils(tmp_path / "posix-bin")
+    monkeypatch.setenv("PATH", f"{shims}{os.pathsep}{os.environ['PATH']}")
+
+    result = runner.run(SlurmJobRequest(workspace=workspace, command=("cat", "input.txt")))
+
+    assert result.exit_code == 0
+    assert "staged" in result.output
 
 
 def test_an_executing_cluster_holds_jobs_until_they_are_cancelled(tmp_path: Path) -> None:
