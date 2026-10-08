@@ -170,8 +170,8 @@ def atomic_write_bytes(
                 offset += written
             stream.flush()
             filesystem.sync_file(stream)
-        filesystem.replace(temporary_path, path)
-        FRAMEWORK_WRITES.wrote(path, contents)
+        with FRAMEWORK_WRITES.publishing(path, contents):
+            filesystem.replace(temporary_path, path)
         filesystem.sync_directory(path.parent)
     finally:
         if temporary_path is not None:

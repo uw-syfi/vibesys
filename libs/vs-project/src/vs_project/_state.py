@@ -525,8 +525,8 @@ class StateNamespace:
             if transition._next_document is None:  # noqa: SLF001  # lint-waiver: LW-008219 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
                 if path.exists() and not path.is_file():
                     raise ProjectStateError.state_path_not_file(path)
-                path.unlink(missing_ok=True)
-                FRAMEWORK_WRITES.removed(path)
+                with FRAMEWORK_WRITES.publishing(path, None):
+                    path.unlink(missing_ok=True)
             else:
                 _atomic_write_bytes(
                     path,
@@ -544,8 +544,8 @@ class StateNamespace:
         if not path.is_file():
             raise ProjectStateError.state_path_not_file(path)
         try:
-            path.unlink()
-            FRAMEWORK_WRITES.removed(path)
+            with FRAMEWORK_WRITES.publishing(path, None):
+                path.unlink()
         except OSError as exc:
             message = f"Could not delete VibeSys state model at {path}: {exc}"
             raise ProjectStateError(message) from exc
