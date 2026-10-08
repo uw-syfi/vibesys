@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from vibesys.constants import DomainName
 from vibesys.domains.base import DomainRole
@@ -43,11 +43,15 @@ from vibesys.orchestration.structured_turn import (
 from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkObjective,
+    CandidateFailed,
+    EvaluationPassed,
+    InfrastructureFailed,
     MetricDirection,
     Run,
     RunCleanupError,
     RunStatus,
     RunStopped,
+    SettlingMeasurement,
     Workspace,
 )
 
@@ -236,6 +240,9 @@ class _EvolveRun:
                     repair_seed=wip is not None,
                 ),
             )
+            if outcome is None:
+                # Measured in infrastructure only: the attempt yields no individual.
+                continue
             if not outcome.passed:
                 revision = self.root.revision
                 if revision == previous:
@@ -357,7 +364,7 @@ class _EvolveRun:
 
     async def _isolated_candidate(
         self, generation: int, slot: int, proposal: Proposal
-    ) -> CandidateOutcome:
+    ) -> CandidateOutcome | None:
         candidate = await self.run.workspaces.create_candidate(proposal.parent.commit)
         sessions = None
         try:
@@ -407,7 +414,8 @@ class _EvolveRun:
         workspace: Workspace,
         sessions: _Sessions,
         task: _CandidateTask,
-    ) -> CandidateOutcome:
+    ) -> CandidateOutcome | None:
+        """Evaluate one candidate; ``None`` when its measurement failed in infrastructure."""
         mutation = await self._mutate(
             sessions.mutator,
             parent=task.parent,
@@ -426,8 +434,23 @@ class _EvolveRun:
             accuracy = await self.run.evaluation.accuracy(workspace)
             feedback = accuracy.feedback
         if feedback is None and self.run.facts.benchmark_configured:
-            benchmark = await self.run.evaluation.benchmark(workspace, objectives=self.objectives)
-            feedback = benchmark.feedback
+            settling = SettlingMeasurement()
+            settled = None
+            while settled is None:
+                benchmark = await self.run.evaluation.benchmark(
+                    workspace, objectives=self.objectives
+                )
+                settled = settling.observe(benchmark)
+            match settled:
+                case EvaluationPassed():
+                    pass
+                case CandidateFailed(feedback=failure):
+                    feedback = failure
+                case InfrastructureFailed():
+                    # The candidate was never measured: it earns no population slot.
+                    return None
+                case _:
+                    assert_never(settled)
         if feedback is not None:
             return CandidateOutcome(
                 passed=False,

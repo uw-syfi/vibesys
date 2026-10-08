@@ -47,6 +47,7 @@ from vs_runtime.api import (
     AccuracyEvaluation,
     AgentEvaluation,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     CandidateWorkspace,
     MetricDirection,
 )
@@ -304,6 +305,7 @@ def _script_direct(run: FakeRun, spec: ScenarioSpec) -> None:
         BenchmarkEvaluation(
             executed=True,
             feedback=benchmark_failure if failed else None,
+            failure_kind=BenchmarkFailureKind.WORKLOAD if failed else None,
             row=None if failed else {"throughput": spec.metric},
             metric_name="throughput" if not failed else None,
             metric_direction=spec.direction,

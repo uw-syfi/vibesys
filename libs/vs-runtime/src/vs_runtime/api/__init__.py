@@ -26,6 +26,15 @@ from vs_runtime._evaluation_failure_text import (
     render_rejected_evidence,
     render_stage_failure,
 )
+from vs_runtime._evaluation_verdict import (
+    CandidateFailed,
+    EvaluationPassed,
+    EvaluationVerdict,
+    InfrastructureFailed,
+    SettlingMeasurement,
+    StageEvaluation,
+    verdict_of,
+)
 from vs_runtime._local_validation import (
     VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
     ValidationRecipe,
@@ -149,6 +158,7 @@ __all__ = [
     "BenchmarkEvaluation",
     "BenchmarkFailureKind",
     "BenchmarkObjective",
+    "CandidateFailed",
     "CandidateProfile",
     "CandidateProfileComponent",
     "CandidateProfileStatus",
@@ -162,6 +172,9 @@ __all__ = [
     "CorePolicy",
     "CoreRunContext",
     "Evaluation",
+    "EvaluationPassed",
+    "EvaluationVerdict",
+    "InfrastructureFailed",
     "InvalidResponse",
     "InvocationConflictError",
     "InvocationOutcome",
@@ -194,6 +207,7 @@ __all__ = [
     "SessionPersistenceError",
     "SessionResumeError",
     "SessionTransportUnavailableError",
+    "SettlingMeasurement",
     "SkillCatalogError",
     "SkillFact",
     "SkillResolution",
@@ -202,6 +216,7 @@ __all__ = [
     "SlotLease",
     "SlotMeter",
     "SlotMeterError",
+    "StageEvaluation",
     "State",
     "StateModelError",
     "StructuredResponseError",
@@ -230,4 +245,5 @@ __all__ = [
     "validate_member_id",
     "validate_trusted_shell_command",
     "validate_workspace_writable_paths",
+    "verdict_of",
 ]
