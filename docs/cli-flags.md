@@ -427,7 +427,7 @@ supported by this CLI.
 | `auto` | Let the runtime/backend pick the default profiler. |
 | `nsys` | NVIDIA Nsight Systems. Requires a CUDA/NVIDIA profiling environment. |
 | `ncu` | NVIDIA Nsight Compute for CUDA kernel-writing tasks. Selected by `auto` when the run environment supports it; use `none` to disable it. |
-| `rocprof` | AMD rocprofv3 / rocprof-compute toolkit. Requires a ROCm profiling environment. |
+| `rocprof` | AMD rocprofv3 / rocprof-compute toolkit. Requires a ROCm profiling environment. Selected by `auto` for ROCm LLM-serving and kernel-writing tasks when the run environment supports it. |
 | `torch` | PyTorch profiler. Used for in-process Python profiling and Modal GPU dispatch. |
 | `neuron` | AWS Neuron profiler for Trainium. |
 | `otel` | OpenTelemetry service, span, datastore, and critical-path latency for microservice benchmarks. Needs an input bundle that provisions instrumentation and a collector; `auto` selects it when the bundle's benchmark command declares both `--telemetry-output` and `--trace-graph-json`, and resolves to `none` otherwise. |

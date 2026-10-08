@@ -38,6 +38,14 @@ def default_profiler_for_backend(backend: ComputeBackend) -> ProfilerKind:
     return _BACKEND_PROFILERS[backend]
 
 
+# Kernel-writing ``auto`` picks a kernel-level profiler; backends without one
+# resolve to none.
+_KERNEL_WRITING_PROFILERS: dict[ComputeBackend, ProfilerKind] = {
+    ComputeBackend.CUDA: ProfilerKind.NCU,
+    ComputeBackend.ROCM: ProfilerKind.ROCPROF,
+}
+
+
 @dataclass(frozen=True)
 class ProfilerDefinition:
     """Behavioral declaration for a runnable profiler.
@@ -126,7 +134,7 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
         # captures), so torch_profiler/ is staged alongside rocprof_profiler/.
         ProfilerDefinition(
             ProfilerKind.ROCPROF,
-            frozenset({DomainName.LLM_SERVING}),
+            frozenset({DomainName.LLM_SERVING, DomainName.KERNEL_WRITING}),
             extra_support_kinds=frozenset({ProfilerKind.TORCH}),
         ),
         ProfilerDefinition(ProfilerKind.OTEL, frozenset({DomainName.MICROSERVICES})),
@@ -248,9 +256,9 @@ def resolve_profiler_kind(
     """Resolve ``--profiler`` into the effective profiler kind.
 
     ``auto`` is domain-aware. Generic workloads pick a native CPU profiler when
-    the host platform has one; CUDA kernel-writing runs pick NCU when the run
-    environment supports it; LLM-serving runs use their backend profiler unless
-    the run environment dictates another safe default.
+    the host platform has one; kernel-writing runs pick NCU on CUDA and rocprof
+    on ROCm when the run environment supports it; LLM-serving runs use their
+    backend profiler unless the run environment dictates another safe default.
     """
     requested_kind = require_profiler_kind(requested, label="requested profiler")
     domain_name = require_domain_name(domain)
@@ -299,10 +307,11 @@ def _resolve_auto_profiler(
         return ProfilerKind.NONE
 
     if domain is DomainName.KERNEL_WRITING:
-        if ProfilerKind.NCU in allowed and (
-            environment_supported is None or ProfilerKind.NCU in environment_supported
+        candidate = _KERNEL_WRITING_PROFILERS.get(backend, ProfilerKind.NONE)
+        if candidate in allowed and (
+            environment_supported is None or candidate in environment_supported
         ):
-            return ProfilerKind.NCU
+            return candidate
         return ProfilerKind.NONE
 
     if allowed == frozenset({ProfilerKind.NONE}):
