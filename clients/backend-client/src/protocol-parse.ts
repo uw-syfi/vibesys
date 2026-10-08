@@ -1,6 +1,7 @@
 import {BackendClientError, ServerError} from './errors.js';
 import responsePayloadSchema from './generated/response-payload.schema.js';
-import type {Diagnostic, ProtocolResponse, ServerMessage} from './protocol.js';
+import runEventSchema from './generated/run-event.schema.js';
+import type {Diagnostic, ProtocolResponse, RunEvent, ServerMessage} from './protocol.js';
 
 const RESPONSE = 'response';
 const STREAM = 'event-stream message';
@@ -29,6 +30,11 @@ export function parseProtocolResponse(line: string): ProtocolResponse {
   if (record['events'] !== undefined) validateEventList(record, 'events', RESPONSE);
   validateSchema(value, responsePayloadSchema as Schema, RESPONSE);
   return value as ProtocolResponse;
+}
+
+/** Validate an event from a non-transport boundary and return its typed value. */
+export function validateRunEvent(value: unknown): RunEvent {
+  return validateRunEventAt(value, 'run event');
 }
 
 type Schema = Record<string, unknown>;
@@ -66,7 +72,7 @@ const RFC3339_LEAP_SECONDS = new Set([
   '2016-12',
 ]);
 
-/** Validate generated response shape, intentionally leaving closed-set membership open. */
+/** Validate generated protocol shape, intentionally leaving closed-set membership open. */
 function validateSchema(value: unknown, schema: Schema, path: string): void {
   const ref = schema['$ref'];
   if (typeof ref === 'string') {
@@ -83,15 +89,22 @@ function validateSchema(value: unknown, schema: Schema, path: string): void {
     validateAnyOf(value, choices, path);
     return;
   }
+  const alternatives = schema['oneOf'];
+  const discriminator = schema['discriminator'];
+  if (Array.isArray(alternatives) && isRecord(discriminator)) {
+    validateTaggedUnion(value, discriminator, path);
+    return;
+  }
   validateTypedSchema(value, schema, path);
 }
 
 function schemaDefinition(name: string): Schema {
-  const definitions = (responsePayloadSchema as {$defs?: Record<string, Schema>}).$defs;
-  const definition = definitions?.[name];
-  if (definition === undefined)
-    throw new BackendClientError('parse', `Invalid protocol schema ref: #/$defs/${name}`);
-  return definition;
+  for (const document of [responsePayloadSchema, runEventSchema]) {
+    const definitions = (document as {$defs?: Record<string, Schema>}).$defs;
+    const definition = definitions?.[name];
+    if (definition !== undefined) return definition;
+  }
+  throw new BackendClientError('parse', `Invalid protocol schema ref: #/$defs/${name}`);
 }
 
 function schemaReference(ref: string): Schema {
@@ -123,6 +136,27 @@ function validateAnyOf(value: unknown, choices: unknown[], path: string): void {
     mismatch ??
     new BackendClientError('parse', `Invalid server ${path}: does not match its protocol shape`)
   );
+}
+
+function validateTaggedUnion(
+  value: unknown,
+  discriminator: Record<string, unknown>,
+  path: string,
+): void {
+  const record = requireRecord(value, path);
+  const property = discriminator['propertyName'];
+  const mapping = discriminator['mapping'];
+  if (typeof property !== 'string' || !isRecord(mapping)) {
+    throw new BackendClientError('parse', `Invalid protocol schema discriminator at ${path}`);
+  }
+  const tag = record[property];
+  if (typeof tag !== 'string') throw fieldError(path, property, 'a string');
+  const reference = mapping[tag];
+  // #869: a newer server may add a union member without changing the protocol
+  // version. Its tag and object shape are still checked, but only a member in
+  // this generated client's mapping has a known schema to validate deeply.
+  if (typeof reference !== 'string') return;
+  validateSchema(value, {$ref: reference}, path);
 }
 
 function validateTypedSchema(value: unknown, schema: Schema, path: string): void {
@@ -289,8 +323,7 @@ function validateObject(value: unknown, schema: Schema, path: string): void {
   // #869: newly added server fields must not make an older client disconnect.
   // Validate known fields only; the generated types retain the known contract.
   for (const [key, child] of Object.entries(properties)) {
-    if (record[key] !== undefined && isRecord(child))
-      validateSchema(record[key], child, `${path}.${key}`);
+    if (key in record && isRecord(child)) validateSchema(record[key], child, `${path}.${key}`);
   }
 }
 
@@ -317,7 +350,7 @@ export function parseServerMessage(line: string): ServerMessage {
       validateSubscribed(record);
       break;
     case 'event':
-      validateRunEvent(record['event'], `${STREAM} event`);
+      validateRunEventAt(record['event'], `${STREAM} event`);
       break;
     case 'event_batch':
       validateEventBatch(record);
@@ -427,11 +460,11 @@ function validateEventList(record: Record<string, unknown>, key: string, path: s
   const items = record[key];
   if (!Array.isArray(items)) throw fieldError(path, key, 'an array');
   for (let index = 0; index < items.length; index += 1) {
-    validateRunEvent(items[index], `${path} ${key}[${index}]`);
+    validateRunEventAt(items[index], `${path} ${key}[${index}]`);
   }
 }
 
-function validateRunEvent(value: unknown, path: string): void {
+function validateRunEventAt(value: unknown, path: string): RunEvent {
   const record = requireRecord(value, path);
   const version = record['protocol_version'];
   if (version !== undefined && version !== 1) throw fieldError(path, 'protocol_version', '1');
@@ -447,24 +480,8 @@ function validateRunEvent(value: unknown, path: string): void {
   nullableString(record, 'execution_id', path);
   nullableString(record, 'chat_thread_id', path);
   validateDiagnostic(record, path);
-  validateEventData(record, path);
-}
-
-/**
- * `RunEvent.data` is a tagged union of thirty payloads, and every one of them
- * is open: the generated variants carry `[k: string]: unknown` because the
- * server models accept extra keys. Validated to the depth the tag makes
- * meaningful, so absent, null, or an object carrying a string `kind`.
- * Descending per variant would put a second copy of thirty server models here,
- * and a weak one, since each variant's index signature admits anything it did
- * not name; the folds already branch on `kind` and ignore a payload whose tag
- * they do not recognize.
- */
-function validateEventData(record: Record<string, unknown>, path: string): void {
-  const data = record['data'];
-  if (data === undefined || data === null) return;
-  if (!isRecord(data)) throw fieldError(path, 'data', 'an object or null when present');
-  requireString(data, 'kind', `${path}.data`);
+  validateSchema(value, runEventSchema as Schema, path);
+  return value as RunEvent;
 }
 
 function validateActiveExecutions(record: Record<string, unknown>, path: string): void {

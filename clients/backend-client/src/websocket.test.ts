@@ -1535,7 +1535,7 @@ function runEvent(sequence: number): Record<string, unknown> {
     execution_id: 'exec-1',
     chat_thread_id: null,
     diagnostic: null,
-    data: {kind: 'agent_output_chunk', channel: 'stdout'},
+    data: {kind: 'agent_output_chunk', channel: 'stdout', content: 'partial output'},
   };
 }
 
