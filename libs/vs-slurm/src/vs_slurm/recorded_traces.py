@@ -13,6 +13,9 @@ from __future__ import annotations
 
 from .trace_replay import IssuedCommand, SchedulerTrace, TraceStep
 
+# The recordings read ``CANCELLED+`` (sacct cuts State to 10 columns); this is the whole
+# value ``sacct -P`` prints, with the canceller's uid sanitized to 0.
+_CANCELLED = "CANCELLED by 0"
 _RECORDING = "recorded with tiny CPU-only sleep jobs polled every 0.5 s"
 
 
@@ -98,13 +101,11 @@ CANCEL_RUNNING = SchedulerTrace(
         TraceStep(
             at_seconds=0.0,
             queue_state="COMPLETING",
-            accounting_state="CANCELLED+",
+            accounting_state=_CANCELLED,
             exit_code="0:0",
             reason="None",
         ),
-        TraceStep(
-            at_seconds=23.7, queue_state=None, accounting_state="CANCELLED+", exit_code="0:0"
-        ),
+        TraceStep(at_seconds=23.7, queue_state=None, accounting_state=_CANCELLED, exit_code="0:0"),
     ),
     issued=(IssuedCommand(at_seconds=0.0, verb="scancel"),),
 )
@@ -120,13 +121,11 @@ CANCEL_RUNNING_SLOW_TEARDOWN = SchedulerTrace(
         TraceStep(
             at_seconds=0.0,
             queue_state="COMPLETING",
-            accounting_state="CANCELLED+",
+            accounting_state=_CANCELLED,
             exit_code="0:0",
             reason="None",
         ),
-        TraceStep(
-            at_seconds=30.9, queue_state=None, accounting_state="CANCELLED+", exit_code="0:0"
-        ),
+        TraceStep(at_seconds=30.9, queue_state=None, accounting_state=_CANCELLED, exit_code="0:0"),
     ),
     issued=(IssuedCommand(at_seconds=0.0, verb="scancel"),),
 )
@@ -135,7 +134,7 @@ CANCEL_PENDING = SchedulerTrace(
     name="cancel-pending",
     provenance=f"{_RECORDING}; scancel of a job held PENDING by a begin time: gone at once",
     steps=(
-        TraceStep(at_seconds=0.0, queue_state=None, accounting_state="CANCELLED+", exit_code="0:0"),
+        TraceStep(at_seconds=0.0, queue_state=None, accounting_state=_CANCELLED, exit_code="0:0"),
     ),
     issued=(IssuedCommand(at_seconds=0.0, verb="scancel"),),
 )

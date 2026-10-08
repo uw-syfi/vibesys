@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING
 
@@ -13,6 +14,8 @@ from pydantic import ValidationError
 from vs_slurm.api import (
     CANCEL_REACTIONS,
     LIFETIMES,
+    ClusterObservation,
+    ClusterUnknown,
     ManualClock,
     SchedulerTrace,
     SlurmBatchRequest,
@@ -21,7 +24,9 @@ from vs_slurm.api import (
     SlurmConfig,
     SlurmConnectorTransport,
     SlurmJobRunner,
+    SlurmJobStatus,
     SlurmPhase,
+    SlurmRawState,
     TraceConnector,
     TraceStep,
     phase_of,
@@ -33,7 +38,7 @@ if TYPE_CHECKING:
 _SUBMIT_BUDGET = 19
 _POLL_BUDGET = 3
 _ALL = {**LIFETIMES, **CANCEL_REACTIONS}
-_KNOWN_STATES = {"PENDING", "RUNNING", "COMPLETING", "COMPLETED", "CANCELLED+"}
+_KNOWN_STATES = {"PENDING", "RUNNING", "COMPLETING", "COMPLETED", "CANCELLED by 0"}
 _SAFE_TEXT = re.compile(r"[A-Za-z0-9+:|._ -]*")
 _PHASE_ORDER = {
     SlurmPhase.PENDING: 0,
@@ -95,7 +100,7 @@ def test_a_lifetime_never_goes_backwards_for_any_polling_schedule(
         step = trace.at(elapsed)
         raw = step.queue_state or step.accounting_state
         assert raw is not None
-        seen.append(_PHASE_ORDER[phase_of(raw.split("+")[0])])
+        seen.append(_PHASE_ORDER[phase_of(raw.split()[0])])
     assert seen == sorted(seen)
 
 
@@ -219,3 +224,133 @@ def test_replayed_submit_and_poll_stay_within_the_command_budget(
         before = len(connector.commands())
         cluster.inspect("op")
         assert len(connector.commands()) - before <= _POLL_BUDGET
+
+
+# Every state the squeue and sacct manuals document, with the phase and public status a
+# job whose only evidence is that state (exit code 0:0) must read as. A literal list, so
+# a state added to SlurmRawState without a decision here fails the exhaustiveness test.
+_P, _R, _C, _E = (
+    SlurmPhase.PENDING,
+    SlurmPhase.RUNNING,
+    SlurmPhase.COMPLETING,
+    SlurmPhase.ENDED,
+)
+_JS = SlurmJobStatus
+_DOCUMENTED_STATES = {
+    "BOOT_FAIL": (_E, _JS.FAILED),
+    "CANCELLED": (_E, _JS.CANCELLED),
+    "CANCELLED by 0": (_E, _JS.CANCELLED),
+    "COMPLETED": (_E, _JS.COMPLETED),
+    "COMPLETING": (_C, _JS.RUNNING),
+    "CONFIGURING": (_P, _JS.PENDING),
+    "DEADLINE": (_E, _JS.FAILED),
+    "FAILED": (_E, _JS.FAILED),
+    "NODE_FAIL": (_E, _JS.FAILED),
+    "OUT_OF_MEMORY": (_E, _JS.FAILED),
+    "PENDING": (_P, _JS.PENDING),
+    "PREEMPTED": (_E, _JS.CANCELLED),
+    "REQUEUE_FED": (_P, _JS.PENDING),
+    "REQUEUE_HOLD": (_P, _JS.PENDING),
+    "REQUEUED": (_P, _JS.PENDING),
+    "RESIZING": (_R, _JS.RUNNING),
+    "RESV_DEL_HOLD": (_P, _JS.PENDING),
+    "REVOKED": (_E, _JS.CANCELLED),
+    "RUNNING": (_R, _JS.RUNNING),
+    "SIGNALING": (_R, _JS.RUNNING),
+    "SPECIAL_EXIT": (_E, _JS.FAILED),
+    "STAGE_OUT": (_R, _JS.RUNNING),
+    "STOPPED": (_R, _JS.RUNNING),
+    "SUSPENDED": (_R, _JS.RUNNING),
+    "TIMEOUT": (_E, _JS.FAILED),
+}
+
+
+def _inspect_single_state(
+    tmp_path: Path, step: TraceStep
+) -> tuple[ClusterObservation | ClusterUnknown, TraceConnector]:
+    trace = SchedulerTrace(
+        name="single",
+        provenance="synthetic: the scheduler shows one state from the start",
+        steps=(step,),
+    )
+    runner, connector, _clock = _runner(tmp_path, trace, CANCEL_REACTIONS["cancel-running"])
+    cluster = SlurmCluster(runner, state_root=tmp_path / "ids")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request = SlurmBatchRequest(
+        workspace=workspace, stages=(SlurmBatchStage(name="work", command=("true",)),)
+    )
+    cluster.submit(request, operation_id="op")
+    observed = cluster.inspect("op")
+    assert isinstance(observed, ClusterObservation | ClusterUnknown), observed
+    return observed, connector
+
+
+def _read_single_state(tmp_path: Path, step: TraceStep) -> ClusterObservation:
+    observed, _connector = _inspect_single_state(tmp_path, step)
+    assert isinstance(observed, ClusterObservation), observed
+    return observed
+
+
+def test_the_state_mapping_covers_exactly_the_documented_states() -> None:
+    """Mechanism: ad hoc name sets silently sent an unlisted state to UNKNOWN."""
+    assert {state.split()[0] for state in _DOCUMENTED_STATES} == {s.value for s in SlurmRawState}
+    for state, (phase, _status) in _DOCUMENTED_STATES.items():
+        assert phase_of(state.split()[0]) is phase
+
+
+@pytest.mark.parametrize(("state", "expected"), _DOCUMENTED_STATES.items())
+def test_every_documented_state_in_accounting_reads_as_its_phase_and_status(
+    tmp_path: Path, state: str, expected: tuple[SlurmPhase, SlurmJobStatus]
+) -> None:
+    """Mechanism: sacct cut OUT_OF_MEMORY to OUT_OF_ME+, and DEADLINE, BOOT_FAIL and
+    SPECIAL_EXIT were unlisted, so those jobs read UNKNOWN forever and never collected."""
+    step = TraceStep(at_seconds=0.0, queue_state=None, accounting_state=state, exit_code="0:0")
+
+    observed = _read_single_state(tmp_path, step)
+
+    assert (observed.phase, observed.status) == expected
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [(state, phase) for state, phase in _DOCUMENTED_STATES.items() if " " not in state],
+)
+def test_every_documented_state_in_the_queue_reads_as_its_phase_and_status(
+    tmp_path: Path, state: str, expected: tuple[SlurmPhase, SlurmJobStatus]
+) -> None:
+    """squeue prints whole long names, so REQUEUE_HOLD, RESIZING, SIGNALING and STOPPED
+    must map as well as the states the runner first knew."""
+    step = TraceStep(at_seconds=0.0, queue_state=state, accounting_state=None, exit_code="0:0")
+
+    observed = _read_single_state(tmp_path, step)
+
+    assert (observed.phase, observed.status) == expected
+
+
+def test_an_undocumented_state_reads_as_unknown(tmp_path: Path) -> None:
+    step = TraceStep(at_seconds=0.0, queue_state=None, accounting_state="FUTURE_STATE")
+
+    observed, _connector = _inspect_single_state(tmp_path, step)
+
+    assert isinstance(observed, ClusterUnknown), observed
+
+
+def test_a_connector_prints_sacct_states_as_the_real_command_does(tmp_path: Path) -> None:
+    """The Fake must not be kinder than sacct: without -P a long State is cut with ``+``."""
+    step = TraceStep(
+        at_seconds=0.0, queue_state="RUNNING", accounting_state="RUNNING", exit_code="0:125"
+    )
+    observed, connector = _inspect_single_state(tmp_path, step)
+    assert isinstance(observed, ClusterObservation)
+    ended = step.model_copy(update={"accounting_state": "OUT_OF_MEMORY"})
+    connector.lifetime = SchedulerTrace(name="oom", provenance="synthetic", steps=(ended,))
+    replies = {}
+    for flag in ("", "-P "):
+        command = f"sacct -n {flag}-X -j {observed.job_id} --format=State,ExitCode"
+        reply = connector(
+            ["c"], stdin=json.dumps({"operation": "exec", "command": command}), timeout=1
+        )
+        replies[flag] = json.loads(reply.stdout)["stdout"]
+
+    assert replies == {"": "OUT_OF_ME+    0:125\n", "-P ": "OUT_OF_MEMORY|0:125\n"}

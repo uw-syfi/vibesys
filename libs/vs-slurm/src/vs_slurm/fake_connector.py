@@ -69,6 +69,7 @@ RUN_FILE = "run"
 HOLD_FILE = "hold"
 _JOBS_DIRECTORY = "jobs"
 _PENDING = "PENDING"
+_SACCT_STATE_WIDTH = 10
 _FIRST_EXECUTING_JOB = 5000
 _MKDIR_BASE_POSITION = 2
 _METADATA_FAILED = "Fake cluster metadata command failed"
@@ -77,6 +78,25 @@ _STDIN_REQUIRED = "connector stdin must contain one request"
 _LOST_REPLY = "submit reply lost after scheduler acceptance"
 _LOST_CLAIM_REPLY = "claim reply lost before intent publication"
 _UNKNOWN_FAULT = "unknown scripted connector fault"
+
+
+def sacct_row(state: str, exit_code: str, *, parsable: bool) -> str:
+    """One ``sacct -n --format=State,ExitCode`` row as real Slurm prints it.
+
+    With ``-P`` the values are whole and ``|``-delimited. Without it State is a
+    10-column field whose longer values are cut and marked with ``+``
+    (``OUT_OF_MEMORY`` prints as ``OUT_OF_ME+``, ``CANCELLED by 1000`` as
+    ``CANCELLED+``) and ExitCode is right-aligned in 8 columns.
+    """
+    if parsable:
+        return f"{state}|{exit_code}\n"
+    cut = state if len(state) <= _SACCT_STATE_WIDTH else state[: _SACCT_STATE_WIDTH - 1] + "+"
+    return f"{cut:<{_SACCT_STATE_WIDTH}} {exit_code:>8}\n"
+
+
+def _sacct_record_row(record: str, tokens: list[str]) -> str:
+    state, _, exit_code = record.partition(" ")
+    return sacct_row(state, exit_code or "0:0", parsable="-P" in tokens)
 
 
 def executing_cluster(state: Path) -> Path:
@@ -120,7 +140,8 @@ def _pending_query(state: Path, tokens: list[str]) -> str:
             job_id = names.get(tokens[tokens.index("--name") + 1])
             return f"{job_id}\n" if job_id else ""
         job_state = _job_state(state, tokens[tokens.index("-j") + 1])
-        return f"{job_state}\n" if job_state and job_state != _PENDING else "CANCELLED 0:0\n"
+        record = job_state if job_state and job_state != _PENDING else "CANCELLED 0:0"
+        return _sacct_record_row(record, tokens)
     if "-n" in tokens:
         job_id = names.get(tokens[tokens.index("-n") + 1])
         return (
@@ -588,7 +609,7 @@ class FakeConnector:
             return output + "\n"
         if active:
             return ""
-        output = f"{job.status.value.upper()} 0:0\n"
+        output = sacct_row(job.status.value.upper(), "0:0", parsable="-P" in tokens)
         job.advance()
         return output
 

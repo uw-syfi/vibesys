@@ -31,6 +31,9 @@ from vs_slurm.api import (
     runtime_content_identity,
 )
 
+# test-isolation: the public Fake connector's sacct renderer keeps this stub's rows realistic.
+from vs_slurm.fake_connector import sacct_row
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -163,7 +166,7 @@ class _FakeConnector:
             return "RUNNING\n"
         if command.startswith("sacct"):
             state = "FAILED" if self.job_exit_code else "COMPLETED"
-            return f"{state} {self.job_exit_code}:0\n"
+            return sacct_row(state, f"{self.job_exit_code}:0", parsable="-P" in tokens)
         return ""
 
     def _content_cache_response(self, tokens: list[str]) -> str | None:
@@ -360,7 +363,7 @@ class _FakeSshProcess:
             if "sbatch" in remote_command:
                 stdout = "Submitted batch job 4567\n"
             elif remote_command.startswith("sacct"):
-                stdout = "COMPLETED 0:0\n"
+                stdout = sacct_row("COMPLETED", "0:0", parsable="-P" in remote_command.split())
             elif "for attempt in" in remote_command:
                 stdout = "PUBLISHED"
             elif "printf 'READY'" in remote_command:

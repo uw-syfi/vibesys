@@ -14,9 +14,8 @@ import uuid
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal, Protocol, assert_never
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
@@ -35,6 +34,12 @@ from .remote_operations import (
     RemoteOperations,
     operation_job_name,
 )
+from .scheduler_states import (
+    SlurmJobStatus,
+    SlurmPhase,
+    classify,
+    parse_accounting_row,
+)
 from .staging import _ContentStageError, _stage_tree, _TreeStageRequest
 
 if TYPE_CHECKING:
@@ -42,9 +47,6 @@ if TYPE_CHECKING:
     from threading import Event
 
 _JOB_ID = re.compile(r"Submitted batch job ([0-9]+)")
-_TERMINAL_STATES = frozenset(
-    {"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "PREEMPTED"}
-)
 _ACCOUNTING_FIELD_COUNT = 2
 # The allocation's own exit status when its server never answered the readiness probe
 # (it exited or hung while starting), so no stage ran. The job script writes it.
@@ -156,36 +158,9 @@ class SlurmBatchRequest:
     cancel_event: Event | None = None
 
 
-class SlurmJobStatus(StrEnum):
-    """Scheduler state visible through the public job lifecycle API."""
-
-    UNKNOWN = "unknown"
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
 _PUBLIC_TERMINAL_STATES = frozenset(
     {SlurmJobStatus.COMPLETED, SlurmJobStatus.FAILED, SlurmJobStatus.CANCELLED}
 )
-
-
-class SlurmPhase(StrEnum):
-    """Where a scheduler state sits on a job's path, in order within one attempt.
-
-    The public status folds COMPLETING into RUNNING; this finer order keeps it, so
-    a reader can tell a job that is tearing down from one that is computing.
-    Within one attempt the phases only advance. A requeue starts a new attempt,
-    which restarts the order at PENDING.
-    """
-
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETING = "completing"
-    ENDED = "ended"
-    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -1179,7 +1154,7 @@ class SlurmJobRunner:
                 return queued
         try:
             accounting = self._transport.exec(
-                f"sacct -n -X -j {job_id} --format=State,ExitCode"
+                f"sacct -n -P -X -j {job_id} --format=State,ExitCode"
             ).stdout
         except SlurmError:
             # Accounting only refines what the queue said (a COMPLETING job may have
@@ -1188,7 +1163,7 @@ class SlurmJobRunner:
             if queued is None:
                 raise
             return queued
-        parsed = _accounting_state(accounting)
+        parsed = parse_accounting_row(accounting)
         if parsed is not None:
             ended = _reading(parsed[0], exit_code=parsed[1])
             # Slurm keeps a finished or cancelled job in COMPLETING for 20 to 40 s
@@ -1850,48 +1825,11 @@ def _distinct_tail(path: Path) -> str:
     return "\n".join(reversed(kept))
 
 
-def _accounting_state(output: str) -> tuple[str, str] | None:
-    for line in output.splitlines():
-        fields = line.strip().split()
-        if len(fields) >= _ACCOUNTING_FIELD_COUNT:
-            return fields[0].split("+")[0], fields[1]
-    return None
-
-
-def phase_of(raw_state: str) -> SlurmPhase:
-    """Map one raw Slurm job state to its phase. Total: unknown states are UNKNOWN."""
-    if raw_state in {"PENDING", "CONFIGURING", "REQUEUED", "RESV_DEL_HOLD"}:
-        return SlurmPhase.PENDING
-    if raw_state in {"RUNNING", "SUSPENDED", "STAGE_OUT"}:
-        return SlurmPhase.RUNNING
-    if raw_state == "COMPLETING":
-        return SlurmPhase.COMPLETING
-    if raw_state in _TERMINAL_STATES:
-        return SlurmPhase.ENDED
-    return SlurmPhase.UNKNOWN
-
-
 def _reading(
     raw_state: str, *, exit_code: str | None = None, **evidence: str | None
 ) -> SchedulerReading:
     """The single raw-state to public-status and phase mapping every read path uses."""
-    phase = phase_of(raw_state)
-    match phase:
-        case SlurmPhase.PENDING:
-            status = SlurmJobStatus.PENDING
-        case SlurmPhase.RUNNING | SlurmPhase.COMPLETING:
-            status = SlurmJobStatus.RUNNING
-        case SlurmPhase.UNKNOWN:
-            status = SlurmJobStatus.UNKNOWN
-        case SlurmPhase.ENDED if raw_state == "COMPLETED":
-            ok = exit_code is None or exit_code.startswith("0:")
-            status = SlurmJobStatus.COMPLETED if ok else SlurmJobStatus.FAILED
-        case SlurmPhase.ENDED if raw_state in {"CANCELLED", "PREEMPTED"}:
-            status = SlurmJobStatus.CANCELLED
-        case SlurmPhase.ENDED:
-            status = SlurmJobStatus.FAILED
-        case _:
-            assert_never(phase)
+    phase, status = classify(raw_state, exit_code)
     return SchedulerReading(
         status=status,
         phase=phase,

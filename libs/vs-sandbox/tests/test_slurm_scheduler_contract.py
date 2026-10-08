@@ -405,7 +405,7 @@ def _stuck_teardown() -> SchedulerTrace:
             TraceStep(
                 at_seconds=_FOREVER,
                 queue_state=None,
-                accounting_state="CANCELLED+",
+                accounting_state="CANCELLED by 0",
                 exit_code="0:0",
             ),
         ),

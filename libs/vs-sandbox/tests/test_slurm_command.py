@@ -289,7 +289,7 @@ def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
     assert gate.returncode == 128 + signal.SIGTERM, stderr
     commands = recorded_commands(state)
     assert commands.count(f"scancel {job_id}") == 1
-    assert commands[-1] == f"sacct -n -X -j {job_id} --format=State,ExitCode"
+    assert commands[-1] == f"sacct -n -P -X -j {job_id} --format=State,ExitCode"
 
 
 def test_an_in_process_sigterm_cancels_the_job_and_reports_it(
@@ -341,7 +341,7 @@ def test_an_in_process_sigterm_cancels_the_job_and_reports_it(
     assert job_id.isdigit()
     commands = recorded_commands(state)
     assert commands.count(f"scancel {job_id}") == 1
-    assert commands[-1] == f"sacct -n -X -j {job_id} --format=State,ExitCode"
+    assert commands[-1] == f"sacct -n -P -X -j {job_id} --format=State,ExitCode"
     assert f"Slurm evaluator cancelled: Slurm job {job_id} was cancelled" in capsys.readouterr().err
 
 
