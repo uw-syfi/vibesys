@@ -489,6 +489,27 @@ adapter path, and a response schema with no scripted artifact raises rather
 than being fabricated. The mock is not offered through the client protocol:
 driver choice stays an implementation detail.
 
+## Sandboxing
+
+Vocabulary, ownership, configuration flow, and the support matrix are in
+[Sandboxing and confinement](sandboxing.md). This section covers the agentshim
+driver only.
+
+The agentshim driver applies VibeSys confinement as an executor transform:
+`confine_to_sandbox` rewrites every command's argv through the confinement's
+`wrap`, unconditionally, the single chokepoint through which the provider CLI
+is launched on the host or in a container alike. The provider CLIs run with
+approvals and their own sandboxes off, so this is the only boundary.
+
+Provider state comes from `ProviderProfile.state_dirs` and is granted whole,
+because a CLI writes session history and caches there and needs them back on
+resume. Codex is the exception: a Codex checkout may itself live under
+`$CODEX_HOME/worktrees`, so only named leaves are granted (`auth.json`
+read-write, `sessions`). `sessions` is not optional: a rollout that does
+not outlive its turn makes `codex exec resume` report no rollout for the
+thread, and a confined run then loses the conversation continuity it was told
+it had.
+
 ## Omnigent constraints
 
 - Only the `claude` and `codex` providers are supported. Omnigent 0.10.0 has no
@@ -514,24 +535,12 @@ driver choice stays an implementation detail.
   are accepted only for top-level dot paths such as `.git` and `.vibesys`.
   Those paths are protected by the agent contract, not sandbox enforcement.
 
-## Sandboxing
+### Omnigent confinement
 
-The agentshim driver applies its `vs_sandbox` sandbox as an executor
-transform: `confine_to_sandbox` rewrites every command's argv through
-`sandbox.wrap`, unconditionally, the single chokepoint through which the
-provider CLI is launched on the host or in a container alike. The
-Omnigent driver builds an `OSEnvSpec` that grants workspace write access and
-narrow read access to the active Rust toolchain. It selects bubblewrap on Linux
-or Seatbelt on macOS and never permits an unconfined fallback.
-
-Provider state comes from `ProviderProfile.state_dirs` and is granted whole,
-because a CLI writes session history and caches there and needs them back on
-resume. Codex is the exception: a Codex checkout may itself live under
-`$CODEX_HOME/worktrees`, so only named leaves are granted (`auth.json`
-read-write, `sessions`). `sessions` is not optional: a rollout that does
-not outlive its turn makes `codex exec resume` report no rollout for the
-thread, and a confined run then loses the conversation continuity it was told
-it had.
+Omnigent does not use `confine_to_sandbox`. The driver builds an `OSEnvSpec`
+that grants workspace write access and narrow read access to the active Rust
+toolchain. It selects bubblewrap on Linux or Seatbelt on macOS and never
+permits an unconfined fallback.
 
 VibeSys exposes only the Rust sysroot's `bin`, `lib`, and optional `libexec`
 trees. Each executor gets an ephemeral writable Cargo home, removed when the
@@ -555,7 +564,7 @@ missing, the driver raises `OmnigentDriverError` instead of running unconfined.
 GitHub's Linux runners do not provide `bwrap`, so real OS-environment tests skip
 there unless `VIBESYS_REQUIRE_SANDBOX_TESTS` is enabled.
 
-Automated tests cover provider wiring, sandbox construction, tool dispatch,
+Automated Omnigent tests cover provider wiring, sandbox construction, tool dispatch,
 event handling, and teardown. Credentialed live CLI validation is outside the
 repository test suite.
 
