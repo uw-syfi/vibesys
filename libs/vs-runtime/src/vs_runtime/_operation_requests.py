@@ -32,6 +32,7 @@ from vs_core.api import (
     SetupFailureKind,
     TargetObservation,
 )
+from vs_runtime._core_identity import CoreRequestId, core_named
 from vs_runtime._core_requests import ExecutionContext, ExecutionResult
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 from vs_runtime._operation_catalog import (
@@ -103,7 +104,7 @@ class RegisteredOperationRequests:
         detail: str,
         *,
         own_effect: bool = True,
-        subject: RequestId | None = None,
+        subject: CoreRequestId | None = None,
         resource_id: ResourceId | None = None,
     ) -> Observation:
         """Observation of *subject* (default: the request itself), in the request's episode.
@@ -380,7 +381,7 @@ class RegisteredOperationRequests:
         )
         return TargetObservation(
             observation=self._observe(
-                request, context, sealed.status, sealed.detail, subject=target_id
+                request, context, sealed.status, sealed.detail, subject=core_named(target_id)
             ),
             setup_failure=_setup_failure(sealed.status),
             operation_schema=entry.schema if outcome is not None else None,
@@ -425,7 +426,7 @@ class RegisteredOperationRequests:
                 ObservationStatus.UNKNOWN,
                 detail,
                 own_effect=False,
-                subject=request.target,
+                subject=core_named(request.target),
             )
         )
 

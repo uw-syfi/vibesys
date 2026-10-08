@@ -162,6 +162,21 @@ async def inspect_request_of(world: CaseWorld, target: RequestBase) -> Execution
     return await inspector.execute(request, context_for(request))
 
 
+async def inspect_dispatch_of(
+    world: CaseWorld, dispatching: DispatchTurn | ResumeSessionTurn
+) -> ExecutionResult:
+    """What core learns by inspecting the turn *dispatching* sent, naming it as the dispatcher."""
+    return await world.execute(
+        inspect_request(
+            "req-inspect-dispatch",
+            dispatching.turn.invocation_id.root,
+            dispatch=cast("RequestId", dispatching.request_id).root,
+        ),
+        lease=RevocableLease(),
+        crash_at=None,
+    )
+
+
 # operations
 
 

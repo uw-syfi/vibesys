@@ -35,7 +35,7 @@ import asyncio
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, assert_never
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from vs_agent.api import (
     AgentOutputSchemaError,
@@ -84,6 +84,7 @@ from vs_runtime._access_settlement import (
     access_unproven,
 )
 from vs_runtime._agent_sessions import await_session_operation
+from vs_runtime._core_identity import CoreRequestId, ReceiptKey, core_identity, core_named
 from vs_runtime._core_requests import ExecutionContext, ExecutionOutcome, ExecutionResult
 from vs_runtime._observation_factory import (
     ObservationFactory,
@@ -224,13 +225,36 @@ class SessionBinding(BaseModel):
     so no flag has to be written after a turn and no crash can skip the guard."""
 
 
+LEGACY_DERIVED_SUFFIX = ".dispatch"
+"""What a resume's nested step id ended in, before records named the resume request."""
+
+
 class DispatchRecord(BaseModel):
-    """Written before the provider is called: which request dispatches an invocation."""
+    """Written before the provider is called: which request dispatches an invocation.
+
+    The request is the one core knows as the dispatcher: a resumed turn is dispatched on
+    behalf of its ``ResumeSessionTurn``, so that request's identity is what is recorded.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    request_id: RequestId
+    request_id: CoreRequestId
     digest: str
     output_schema: SchemaRef
+
+    @field_validator("request_id", mode="before")
+    @classmethod
+    def _core_request(cls, value: object) -> object:
+        """Read a record written before resumes recorded core's id as the id core knows.
+
+        A resume once recorded its nested step's derived ``<R>.dispatch`` id, which core
+        cannot look up. Only that derived suffix is mapped (to ``R``), so no record
+        read back can name an id core never sent.
+        """
+        stored = value.model_dump() if isinstance(value, RequestId) else value
+        if isinstance(stored, dict) and str(stored.get("root", "")).endswith(LEGACY_DERIVED_SUFFIX):
+            root = str(stored["root"]).removesuffix(LEGACY_DERIVED_SUFFIX)
+            return RequestId.model_validate({**stored, "root": root})
+        return value
 
 
 @dataclass(frozen=True)
@@ -305,7 +329,10 @@ class _Call:
     """One request with the identity core guarantees it carries."""
 
     request: EnsureSession | DispatchTurn
-    request_id: RequestId
+    receipt_key: ReceiptKey
+    """Where its receipt is stored: a resume's nested step has a key of its own."""
+    canonical: CoreRequestId
+    """The request core knows as the one executing: what the dispatch record names."""
     context: ExecutionContext
 
 
@@ -346,14 +373,31 @@ class RuntimeSessionRequests:
         self, request: SessionRoleRequest, context: ExecutionContext
     ) -> ExecutionOutcome:
         """Execute, replay or inspect one request under its canonical identity."""
-        if request.request_id is None:
-            message = "request_id: execution requires a canonical identity"
-            raise ValueError(message)
+        canonical = core_identity(request)
         if isinstance(request, InspectTurn):
             return await self._inspect(request, context)
         if not isinstance(request, (EnsureSession, DispatchTurn)):
             return self._result(request, context, _rejected(f"{request.kind} is not executed here"))
-        call = _Call(request, request.request_id, context)
+        return await self._locked(_Call(request, ReceiptKey(canonical.root), canonical, context))
+
+    async def dispatch_on_behalf_of(
+        self, request: DispatchTurn, behalf: CoreRequestId, context: ExecutionContext
+    ) -> ExecutionOutcome:
+        """Dispatch a turn core asked for through another request, such as a resume.
+
+        *request* is this executor's own step: its identity keys the receipt and the
+        observations. The dispatch record names *behalf*, the request core knows, so an
+        inspection of the turn answers with an identity core can look up.
+        """
+        if request.request_id is None:
+            message = "request_id: execution requires a canonical identity"
+            raise ValueError(message)
+        return await self._locked(
+            _Call(request, ReceiptKey(request.request_id.root), behalf, context)
+        )
+
+    async def _locked(self, call: _Call) -> ExecutionOutcome:
+        request = call.request
         lock_key = f"{owner_key(request)}/{self._session_id(request).root}"
         async with self._locks.setdefault(lock_key, asyncio.Lock()):
             return await self._run(call)
@@ -375,7 +419,7 @@ class RuntimeSessionRequests:
             return Settled(result) if result.observation.observation.terminal else Transient(result)
 
         execution = await self._store.run_once(
-            call.request_id.root,
+            call.receipt_key,
             owner=owner_key(request),
             context=context,
             result_type=ExecutionResult,
@@ -468,7 +512,7 @@ class RuntimeSessionRequests:
 
     async def _perform(self, call: _Call) -> _Facts:
         if isinstance(call.request, EnsureSession):
-            return await self._ensure(call.request, call.request_id)
+            return await self._ensure(call.request, call.canonical)
         return await self._dispatch(call.request, call)
 
     @staticmethod
@@ -749,7 +793,7 @@ class RuntimeSessionRequests:
         """Record the dispatch before any provider call; facts when the request ends here."""
         turn = request.turn
         link = DispatchRecord(
-            request_id=call.request_id,
+            request_id=call.canonical,
             digest=call.context.payload_digest,
             output_schema=turn.output_schema,
         )
@@ -910,7 +954,7 @@ class RuntimeSessionRequests:
             observed_at=context.now_at,
         )
         seen = self._observations.observe(
-            ObservationSubject.of(request, request_id=request.dispatch),
+            ObservationSubject.of(request, request_id=core_named(request.dispatch)),
             ObservationFacts(
                 status=ObservationStatus.REJECTED,
                 terminal=True,
@@ -930,7 +974,7 @@ class RuntimeSessionRequests:
         request: InspectTurn,
         context: ExecutionContext,
         target: _Facts,
-        target_request: RequestId | None,
+        target_request: CoreRequestId | None,
     ) -> ExecutionResult:
         """The query's own success, carrying the target's observation on its own sequence."""
         own = self._observations.observe(

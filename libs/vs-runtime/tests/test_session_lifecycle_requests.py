@@ -28,6 +28,7 @@ from tests.support.session_world import (
     SessionHost,
     dispatch_request,
     ensure_request,
+    inspect_request,
 )
 
 from vs_agent.api import AgentSessionState, DurableSessionStore
@@ -51,6 +52,7 @@ class World:
     """One Project directory and host; ``execute`` is a host (re)start over the same disk."""
 
     def __init__(self, base: Path, gate: TurnGate | None = None) -> None:
+        self.base = base
         (base / "project").mkdir()
         (base / "workspace").mkdir()
         self._project = Project.open(base / "project")
@@ -250,6 +252,70 @@ async def test_resume_continues_the_retained_conversation_with_exact_identity() 
         assert event.observation.children_complete
         assert len(w.host.turns) == 2, "a repeat replays instead of dispatching"
         assert_core_accepts([first, again], expect_retry=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["up", "down"])
+async def test_an_inspection_of_a_resumed_turn_reports_on_the_resume_request(
+    transport: str,
+) -> None:
+    # Core inspects a resumed turn (after a restart, or when its acceptance is unknown)
+    # naming the ResumeSessionTurn as the dispatching request, and looks the target up by
+    # that identity. The answer must name the same request, as a dispatched turn's does.
+    async with world() as w:
+        await w.started()
+        resume = resume_request()
+        assert resume.request_id is not None
+        w.host.faults.down = transport == "down"
+        resumed = await w.execute(resume)
+        w.host.faults.down = False
+        inspected = await w.execute(
+            inspect_request(
+                "req-inspect-resume",
+                resume.turn.invocation_id.root,
+                dispatch=resume.request_id.root,
+            )
+        )
+        target = inspected.observation.target
+        assert target is not None
+        assert target.observation.request_id == resume.request_id
+        assert_core_accepts([resumed, inspected], expect_retry=False)
+
+
+@pytest.mark.asyncio
+async def test_an_inspection_after_an_upgrade_reads_a_legacy_dispatch_record_as_the_resume() -> (
+    None
+):
+    # Before the fix a resume's dispatch record named the derived "<R>.dispatch" id. A run
+    # in flight across the upgrade must still be inspectable by the id core knows.
+    async with world() as w:
+        await w.started()
+        resume = resume_request()
+        assert resume.request_id is not None
+        await w.execute(resume)
+        legacy = 0
+        for path in w.base.rglob("*"):
+            if path.is_file() and b'"output_schema"' in path.read_bytes():
+                text = path.read_text()
+                if f'"{resume.request_id.root}"' in text:
+                    path.write_text(
+                        text.replace(
+                            f'"{resume.request_id.root}"', f'"{resume.request_id.root}.dispatch"'
+                        )
+                    )
+                    legacy += 1
+        assert legacy == 1, "the dispatch record is on disk exactly once"
+        inspected = await w.execute(
+            inspect_request(
+                "req-inspect-legacy",
+                resume.turn.invocation_id.root,
+                dispatch=resume.request_id.root,
+            )
+        )
+        target = inspected.observation.target
+        assert target is not None
+        assert target.observation.request_id == resume.request_id
+        assert_core_accepts([inspected], expect_retry=False)
 
 
 @pytest.mark.asyncio

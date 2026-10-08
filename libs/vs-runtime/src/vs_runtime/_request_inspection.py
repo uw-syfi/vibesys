@@ -31,6 +31,7 @@ from vs_core.api import (
     RequestObserved,
     TargetObservation,
 )
+from vs_runtime._core_identity import core_named
 from vs_runtime._core_requests import HAND_ROLLED_ROLES, ExecutionResult
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 from vs_runtime._receipt_store import (
@@ -202,7 +203,7 @@ class RecordedRequestInspector:
         reissue: ReissueProof | None = None,
     ) -> TargetObservation:
         observation = self._observations.observe(
-            ObservationSubject.of(request, request_id=request.target),
+            ObservationSubject.of(request, request_id=core_named(request.target)),
             facts,
             observed_at=context.now_at,
         )
