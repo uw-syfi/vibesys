@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -23,7 +24,12 @@ from tests.entrypoints.support import (
     IDLE_DIRECTORY,
     INSTANCE_PATH,
     POLL_SECONDS,
+    PORT,
+    PORT_FREE,
+    PORT_GATEWAY,
+    PORT_LISTENER,
     FakeDetachedGateway,
+    FakePortGateway,
     gateway_record,
 )
 from tests.support.thread_signals import non_main_thread_ids, requires_tgkill, send_to_thread
@@ -32,6 +38,8 @@ import entrypoints.server as server_entrypoint
 import server.runtime as runtime_module
 from entrypoints.server import (
     GATEWAY_STOP_TIMEOUT_SECONDS,
+    GatewayPortStopOutcome,
+    GatewayPortStopResult,
     GatewayStopOutcome,
     GatewayStopResult,
     _control_socket_from_argv,
@@ -47,7 +55,9 @@ from entrypoints.server import (
     _web_requested,
     main,
     stop_detached_gateway,
+    stop_web_gateway_on_port,
 )
+from server.runtime import WebPortObservation, WebPortState
 from server.transport.discovery import WebInstanceClaim, WebInstanceHold, WebInstanceRecord
 from server.transport.websocket import WebSocketLimits
 from vs_sim.api.testing import HANG_GUARD_S, stop_process
@@ -262,17 +272,55 @@ def test_second_web_launch_reuses_live_instance(
 def test_detached_startup_surfaces_early_child_failure(tmp_path: Path) -> None:
     process = RecordingDetachedProcess(status=7)
     effects = RecordingDetachedEffects(process, times=[0.0, 0.0])
-    instance_path = tmp_path / "web-gateway.json"
+    arguments = ["--web", "--detach"]
+    instance_path = (tmp_path / ".vibesys" / "web-gateway.json").resolve()
 
-    with pytest.raises(RuntimeError, match=r"(?s)exited with status 7.*Address already in use"):
-        _spawn_detached(["--web", "--detach"], instance_path, effects)
+    with pytest.raises(
+        RuntimeError, match=r"(?s)Address already in use.*exited with status 7"
+    ) as failure:
+        _spawn_detached(arguments, instance_path, effects)
 
-    assert effects.command[-2:] == ["--web", "--detach"]
+    assert str(failure.value).splitlines()[0] == "Address already in use"
+    assert effects.command[3:5] == ["--web", "--detach"]
+    # Even when the parent derived the default, the detached process gets one
+    # explicit resolved identity that record-free port discovery can verify.
+    assert effects.command[-2:] == ["--web-instance", str(instance_path.resolve())]
     assert effects.environment["VIBESYS_DETACHED_CHILD"] == "1"
-    log_path = tmp_path / "web-gateway.json.log"
+    log_path = WebInstanceHold.log_path(instance_path)
     assert log_path.read_text() == "Address already in use\n"
     assert stat.S_IMODE(log_path.stat().st_mode) == 0o600
     assert process.terminated is False
+
+
+def test_server_main_prints_the_bind_authority_and_reason_on_its_first_line(
+    tmp_path: Path,
+) -> None:
+    source = Path("clients/tui/dev/fixtures/framework-events.jsonl")
+    replay = tmp_path / "run-events.jsonl"
+    replay.write_bytes(source.read_bytes())
+    instance = tmp_path / "web-gateway.json"
+
+    with socket.create_server(("127.0.0.1", 0)) as held:
+        port = held.getsockname()[1]
+        stderr = StringIO()
+        with redirect_stderr(stderr), pytest.raises(SystemExit) as exit_status:
+            main(
+                [
+                    "--web",
+                    "--web-port",
+                    str(port),
+                    "--web-instance",
+                    str(instance),
+                    "--web-reopen",
+                    str(replay),
+                ]
+            )
+
+    assert exit_status.value.code == 1
+    first_line = stderr.getvalue().splitlines()[0]
+    assert first_line.startswith(f"WebSocket gateway could not bind 127.0.0.1:{port}:")
+    assert "address already in use" in first_line.lower()
+    assert f"vibesys web stop --port {port}" in stderr.getvalue()
 
 
 def test_detached_startup_refuses_to_clobber_a_gateway_that_still_holds_the_log(
@@ -339,7 +387,7 @@ def test_detached_startup_terminates_a_child_that_never_becomes_ready(tmp_path: 
     process = RecordingDetachedProcess(status=None)
     effects = RecordingDetachedEffects(process, times=[0.0, 0.0, 11.0])
 
-    with pytest.raises(RuntimeError, match=r"(?s)did not become ready.*Address already in use"):
+    with pytest.raises(RuntimeError, match=r"(?s)Address already in use.*did not become ready"):
         _spawn_detached(["--web", "--detach"], tmp_path / "web-gateway.json", effects)
 
     assert process.terminated is True
@@ -571,6 +619,94 @@ def test_stop_detached_gateway_reports_a_gateway_it_is_not_allowed_to_signal() -
     # did, claimed a teardown that was never asked for.
     assert result.outcome is GatewayStopOutcome.STILL_HOLDING
     assert result.pid is None
+    assert gateway.signals == []
+
+
+def test_port_stop_signals_the_verified_identity_and_waits_for_the_port() -> None:
+    gateway = FakePortGateway((PORT_GATEWAY, PORT_GATEWAY, PORT_FREE))
+
+    result = stop_web_gateway_on_port(PORT, gateway)
+
+    assert result == GatewayPortStopResult(
+        GatewayPortStopOutcome.STOPPED,
+        PORT_FREE,
+        GATEWAY_PID,
+    )
+    assert gateway.signals == [PORT_LISTENER]
+    assert gateway.sleeps == [0.05]
+
+
+@pytest.mark.parametrize("state", [WebPortState.OTHER, WebPortState.UNKNOWN])
+def test_port_stop_refuses_every_listener_that_is_not_a_verified_gateway(
+    state: WebPortState,
+) -> None:
+    observation = WebPortObservation(
+        state,
+        "127.0.0.1",
+        PORT,
+        holder_pids=(9999,),
+    )
+    gateway = FakePortGateway((observation,))
+
+    result = stop_web_gateway_on_port(PORT, gateway)
+
+    assert result == GatewayPortStopResult(GatewayPortStopOutcome.REFUSED, observation)
+    assert gateway.signals == []
+    assert gateway.sleeps == []
+
+
+def test_port_stop_never_signals_a_replacement_listener() -> None:
+    replacement = WebPortObservation(
+        WebPortState.OTHER,
+        "127.0.0.1",
+        PORT,
+        holder_pids=(9999,),
+    )
+    gateway = FakePortGateway((PORT_GATEWAY, replacement))
+
+    result = stop_web_gateway_on_port(PORT, gateway)
+
+    assert result == GatewayPortStopResult(
+        GatewayPortStopOutcome.REFUSED,
+        replacement,
+        GATEWAY_PID,
+    )
+    assert gateway.signals == [PORT_LISTENER]
+
+
+def test_port_stop_spends_its_budget_without_escalating_to_sigkill() -> None:
+    gateway = FakePortGateway((PORT_GATEWAY,))
+
+    result = stop_web_gateway_on_port(PORT, gateway)
+
+    assert result.outcome is GatewayPortStopOutcome.STILL_HOLDING
+    assert result.pid == GATEWAY_PID
+    assert gateway.signals == [PORT_LISTENER]
+    assert gateway.monotonic() == GATEWAY_STOP_TIMEOUT_SECONDS
+    assert gateway.sleeps == [0.05] * BUDGET_POLLS
+
+
+def test_port_stop_refuses_when_safe_identity_signalling_is_unavailable() -> None:
+    gateway = FakePortGateway(
+        (PORT_GATEWAY,),
+        signal_error=NotImplementedError("pidfd unavailable"),
+    )
+
+    result = stop_web_gateway_on_port(PORT, gateway)
+
+    assert result == GatewayPortStopResult(GatewayPortStopOutcome.REFUSED, PORT_GATEWAY)
+    assert gateway.signals == []
+
+
+def test_port_stop_reports_success_when_the_listener_exits_before_signalling() -> None:
+    gateway = FakePortGateway(
+        (PORT_GATEWAY, PORT_FREE),
+        signal_error=ProcessLookupError(GATEWAY_PID),
+    )
+
+    result = stop_web_gateway_on_port(PORT, gateway)
+
+    assert result == GatewayPortStopResult(GatewayPortStopOutcome.STOPPED, PORT_FREE)
     assert gateway.signals == []
 
 

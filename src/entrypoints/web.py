@@ -11,22 +11,32 @@ import time
 from http import HTTPStatus
 from http.client import HTTPConnection
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from entrypoints.server import (
     GATEWAY_STOP_TIMEOUT_SECONDS,
+    GatewayPortStopOutcome,
+    GatewayPortStopResult,
     GatewayStopOutcome,
     GatewayStopResult,
     stop_detached_gateway,
+    stop_web_gateway_on_port,
 )
-from server.runtime import CAPABILITY_ROTATION_HEADER, WebInstanceHold, WebInstanceRecord
+from server.runtime import (
+    CAPABILITY_ROTATION_HEADER,
+    WebInstanceHold,
+    WebInstanceRecord,
+    WebPortInspector,
+    WebPortObservation,
+    WebPortState,
+)
 from vs_project.api import Project
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from entrypoints.server import WebGatewayStopEffects
+    from entrypoints.server import WebGatewayPortEffects, WebGatewayStopEffects
 
 _LIVE_PORT = 8765
 _DEV_PORT = 5173
@@ -92,10 +102,14 @@ def _parser() -> argparse.ArgumentParser:
     stop = commands.add_parser(
         "stop", help="stop a detached gateway and wait for it to release its instance files"
     )
-    stop.add_argument("--instance", type=Path, required=True)
+    stop_target = stop.add_mutually_exclusive_group(required=True)
+    stop_target.add_argument("--instance", type=Path)
+    stop_target.add_argument("--port", type=_port)
 
     status = commands.add_parser("status", help="show a detached gateway status")
-    status.add_argument("--instance", type=Path, required=True)
+    status_target = status.add_mutually_exclusive_group(required=True)
+    status_target.add_argument("--instance", type=Path)
+    status_target.add_argument("--port", type=_port)
 
     rotate = commands.add_parser("rotate", help="replace a gateway's browser launch capability")
     rotate.add_argument("--instance", type=Path, required=True)
@@ -173,11 +187,46 @@ def _wait_for_record(path: Path) -> WebInstanceRecord:
     raise SystemExit(f"vibesys web: gateway did not publish {path}")  # noqa: TRY003  # lint-waiver: LW-101078 [TRY003]; report the bounded detached-startup timeout
 
 
-def _run_live(args: argparse.Namespace, root: Path) -> int:
-    if args.demo and (args.task is not None or args.run_args):
-        raise SystemExit("vibesys web live: --demo does not accept run arguments")  # noqa: TRY003  # lint-waiver: LW-101103 [TRY003]; keep the deterministic replay demo separate from operator-owned runs
-    if not args.demo and args.project is None:
-        raise SystemExit("vibesys web live: pass --project or use --demo")  # noqa: TRY003  # lint-waiver: LW-101080 [TRY003]; require an explicit project for non-demo live mode
+class WebLiveEffects(Protocol):
+    """The build, process, and discovery effects of a live web launch."""
+
+    def build(self, root: Path) -> None:
+        """Build the browser bundle, raising on failure."""
+        ...
+
+    def launch(self, command: list[str], root: Path, environment: dict[str, str]) -> int:
+        """Run the server launcher and return its process status."""
+        ...
+
+    def wait_for_record(self, instance: Path) -> WebInstanceRecord:
+        """Return the record published by a successful launch."""
+        ...
+
+
+class _DefaultWebLiveEffects:
+    def build(self, root: Path) -> None:
+        subprocess.run(  # noqa: S603  # lint-waiver: LW-101081 [S603]; run the repository's fixed web bundle build command
+            [_pnpm(), "build"],
+            cwd=root / "clients" / "web",
+            check=True,
+        )
+
+    def launch(self, command: list[str], root: Path, environment: dict[str, str]) -> int:
+        return subprocess.run(command, cwd=root, env=environment, check=False).returncode  # noqa: S603  # lint-waiver: LW-101082 [S603]; launch the existing server entrypoint with validated CLI arguments
+
+    def wait_for_record(self, instance: Path) -> WebInstanceRecord:
+        return _wait_for_record(instance)
+
+
+_LIVE_EFFECTS = _DefaultWebLiveEffects()
+
+
+def _run_live(
+    args: argparse.Namespace,
+    root: Path,
+    effects: WebLiveEffects = _LIVE_EFFECTS,
+) -> int:
+    _validate_live_arguments(args)
     if args.demo:
         replay_source = (root / _DEMO_LOG).resolve()
         if not replay_source.is_file():
@@ -196,11 +245,7 @@ def _run_live(args: argparse.Namespace, root: Path) -> int:
         default_instance = Project.open(project).configuration_path() / "web-gateway.json"
     instance = (args.instance or default_instance).expanduser().resolve()
     if not args.no_build:
-        subprocess.run(  # noqa: S603  # lint-waiver: LW-101081 [S603]; run the repository's fixed web bundle build command
-            [_pnpm(), "build"],
-            cwd=root / "clients" / "web",
-            check=True,
-        )
+        effects.build(root)
     environment = os.environ.copy()
     if not args.open:
         environment["BROWSER"] = "true"
@@ -213,8 +258,10 @@ def _run_live(args: argparse.Namespace, root: Path) -> int:
         run_args=args.run_args,
         browser_origins=args.browser_origin,
     )
-    subprocess.run(command, cwd=root, env=environment, check=True)  # noqa: S603  # lint-waiver: LW-101082 [S603]; launch the existing server entrypoint with validated CLI arguments
-    record = _wait_for_record(instance)
+    launch_status = effects.launch(command, root, environment)
+    if launch_status != 0:
+        return launch_status
+    record = effects.wait_for_record(instance)
     print(f"VibeSys web UI ready: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101083 [T201]; expose the capability URL to the operator
     print(f"Instance record: {instance}", flush=True)  # noqa: T201  # lint-waiver: LW-101084 [T201]; expose the lifecycle record path to the operator
     if args.ssh_target is not None:
@@ -227,6 +274,14 @@ def _run_live(args: argparse.Namespace, root: Path) -> int:
     if args.browser_origin:
         print(f"Browser harness URL: {_browser_url(args.browser_origin[0], record.url)}")  # noqa: T201  # lint-waiver: LW-101087 [T201]; expose the local browser harness URL to the operator
     return 0
+
+
+def _validate_live_arguments(args: argparse.Namespace) -> None:
+    """Reject combinations that cannot identify one live source."""
+    if args.demo and (args.task is not None or args.run_args):
+        raise SystemExit("vibesys web live: --demo does not accept run arguments")  # noqa: TRY003  # lint-waiver: LW-101103 [TRY003]; keep the deterministic replay demo separate from operator-owned runs
+    if not args.demo and args.project is None:
+        raise SystemExit("vibesys web live: pass --project or use --demo")  # noqa: TRY003  # lint-waiver: LW-101080 [TRY003]; require an explicit project for non-demo live mode
 
 
 def _local_url(remote_url: str, local_port: int) -> tuple[str, int]:
@@ -274,7 +329,23 @@ def _run_tunnel(args: argparse.Namespace) -> int:
     ).returncode
 
 
-def _run_status(args: argparse.Namespace) -> int:
+class WebPortStatusInspector(Protocol):
+    """The read-only port observation needed by the status command."""
+
+    def inspect(self, port: int) -> WebPortObservation:
+        """Return a fail-closed observation of ``port``."""
+        ...
+
+
+def _run_status(
+    args: argparse.Namespace,
+    inspector: WebPortStatusInspector | None = None,
+) -> int:
+    port = getattr(args, "port", None)
+    if port is not None:
+        observation = (inspector or WebPortInspector()).inspect(port)
+        print(_port_status_message(observation), flush=True)  # noqa: T201  # lint-waiver: LW-102906 [T201]; port status is the requested operator-facing result
+        return 0 if observation.state is WebPortState.VIBESYS_GATEWAY else 1
     record = WebInstanceRecord.discover(args.instance, cleanup_stale=False)
     if record is None:
         print("No VibeSys web gateway is running.", flush=True)  # noqa: T201  # lint-waiver: LW-101096 [T201]; report lifecycle status to the operator
@@ -282,6 +353,23 @@ def _run_status(args: argparse.Namespace) -> int:
     print(f"VibeSys web UI: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101097 [T201]; expose the live capability URL in status output
     print(f"PID: {record.pid}", flush=True)  # noqa: T201  # lint-waiver: LW-101098 [T201]; expose the gateway process identity in status output
     return 0
+
+
+def _port_status_message(observation: WebPortObservation) -> str:
+    authority = f"{observation.host}:{observation.port}"
+    gateway = observation.gateway
+    if observation.state is WebPortState.FREE:
+        return f"No process is listening on {authority}."
+    if observation.state is WebPortState.VIBESYS_GATEWAY and gateway is not None:
+        return (
+            f"VibeSys web gateway on {authority}. PID: {gateway.pid}. "
+            f"Instance: {gateway.instance_path}."
+        )
+    pids = ", ".join(str(pid) for pid in observation.holder_pids)
+    owners = f" Same-user listener PIDs: {pids}." if pids else ""
+    if observation.state is WebPortState.OTHER:
+        return f"A non-VibeSys process is listening on {authority}.{owners}"
+    return f"Cannot safely identify the listener on {authority}.{owners}"
 
 
 def _run_rotate(args: argparse.Namespace) -> int:
@@ -362,10 +450,51 @@ def _still_in_use_message(instance: Path, result: GatewayStopResult) -> str:
     )
 
 
-def _run_stop(args: argparse.Namespace, effects: WebGatewayStopEffects | None = None) -> int:
-    result = stop_detached_gateway(args.instance, effects)
+def _run_stop(
+    args: argparse.Namespace,
+    effects: WebGatewayStopEffects | WebGatewayPortEffects | None = None,
+) -> int:
+    port = getattr(args, "port", None)
+    if port is not None:
+        result = stop_web_gateway_on_port(
+            port,
+            cast("WebGatewayPortEffects | None", effects),
+        )
+        print(_port_stop_message(result), flush=True)  # noqa: T201  # lint-waiver: LW-102907 [T201]; report the safe port-keyed stop outcome to the operator
+        return (
+            0
+            if result.outcome
+            in {GatewayPortStopOutcome.NOT_RUNNING, GatewayPortStopOutcome.STOPPED}
+            else 1
+        )
+    result = stop_detached_gateway(
+        args.instance,
+        cast("WebGatewayStopEffects | None", effects),
+    )
     print(_stop_message(args.instance, result), flush=True)  # noqa: T201  # lint-waiver: LW-101099 [T201]; report the gateway lifecycle outcome to the operator
     return 1 if result.outcome is GatewayStopOutcome.STILL_HOLDING else 0
+
+
+def _port_stop_message(result: GatewayPortStopResult) -> str:
+    observation = result.observation
+    authority = f"{observation.host}:{observation.port}"
+    if result.outcome is GatewayPortStopOutcome.NOT_RUNNING:
+        return f"No process is listening on {authority}."
+    if result.outcome is GatewayPortStopOutcome.STOPPED:
+        if result.pid is None:
+            return f"The listener on {authority} exited before it could be signalled."
+        return f"Stopped VibeSys web gateway {result.pid} on {authority}."
+    if result.outcome is GatewayPortStopOutcome.STILL_HOLDING:
+        return (
+            f"VibeSys web gateway {result.pid} is still listening on {authority} after "
+            f"{GATEWAY_STOP_TIMEOUT_SECONDS:.0f} seconds."
+        )
+    if result.pid is not None:
+        return (
+            f"Gateway {result.pid} stopped or changed identity, but {authority} is still held. "
+            "The replacement was not signalled."
+        )
+    return f"Refused to signal the listener on {authority}. {_port_status_message(observation)}"
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -21,9 +21,14 @@ from entrypoints import cli
 from launch import default_runs
 from server.runtime import (
     WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
+    WebGatewayListener,
     WebInstanceClaim,
     WebInstanceHold,
     WebInstanceRecord,
+    WebPortInspector,
+    WebPortObservation,
+    WebPortState,
+    WebSocketBindError,
     browser_origin,
 )
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
@@ -345,6 +350,12 @@ class _DetachedGatewayEffects:
     def terminate(self, pid: int) -> None:
         os.kill(pid, signal.SIGTERM)
 
+    def inspect_port(self, port: int) -> WebPortObservation:
+        return WebPortInspector().inspect(port)
+
+    def terminate_listener(self, listener: WebGatewayListener) -> None:
+        WebPortInspector().terminate(listener)
+
     def monotonic(self) -> float:
         return time.monotonic()
 
@@ -377,8 +388,9 @@ def _spawn_detached(
             )
         os.fchmod(descriptor, 0o600)
         output.truncate(0)
+        child_arguments = _detached_child_arguments(arguments, instance_path)
         process = effects.spawn(
-            [sys.executable, "-m", "entrypoints.server", *arguments],
+            [sys.executable, "-m", "entrypoints.server", *child_arguments],
             environment,
             output,
         )
@@ -407,6 +419,25 @@ def _spawn_detached(
                 output,
             )
         )
+
+
+def _detached_child_arguments(arguments: list[str], instance_path: Path) -> list[str]:
+    """Give the child one explicit, resolved instance identity for port recovery."""
+    normalized: list[str] = []
+    resolved_instance = str(instance_path.expanduser().resolve())
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--web-instance":
+            index += 2
+            continue
+        if argument.startswith("--web-instance="):
+            index += 1
+            continue
+        normalized.append(argument)
+        index += 1
+    normalized.extend(("--web-instance", resolved_instance))
+    return normalized
 
 
 def _instance_in_use(instance_path: Path, hold: WebInstanceHold) -> str:
@@ -575,13 +606,97 @@ def _terminated(effects: WebGatewayStopEffects, pid: int) -> bool:
     return True
 
 
+class GatewayPortStopOutcome(StrEnum):
+    """What a port-keyed stop safely established."""
+
+    NOT_RUNNING = "not_running"
+    STOPPED = "stopped"
+    REFUSED = "refused"
+    STILL_HOLDING = "still_holding"
+
+
+@dataclass(frozen=True)
+class GatewayPortStopResult:
+    """The final port observation and the verified gateway signalled, if any."""
+
+    outcome: GatewayPortStopOutcome
+    observation: WebPortObservation
+    pid: int | None = None
+
+
+class WebGatewayPortEffects(Protocol):
+    """The discovery, signalling, and clock effects of a port-keyed stop."""
+
+    def inspect_port(self, port: int) -> WebPortObservation:
+        """Return a fresh, fail-closed observation of ``port``."""
+        ...
+
+    def terminate_listener(self, listener: WebGatewayListener) -> None:
+        """Signal ``listener`` only if its complete identity still matches."""
+        ...
+
+    def monotonic(self) -> float:
+        """Return the clock used to bound shutdown."""
+        ...
+
+    def sleep(self, seconds: float) -> None:
+        """Wait before the next observation."""
+        ...
+
+
+def stop_web_gateway_on_port(
+    port: int,
+    effects: WebGatewayPortEffects | None = None,
+) -> GatewayPortStopResult:
+    """Stop only a listener proven to be the same-user VibeSys gateway."""
+    effects = _DETACHED_EFFECTS if effects is None else effects
+    observation = effects.inspect_port(port)
+    if observation.state is WebPortState.FREE:
+        return GatewayPortStopResult(GatewayPortStopOutcome.NOT_RUNNING, observation)
+    listener = observation.gateway
+    if observation.state is not WebPortState.VIBESYS_GATEWAY or listener is None:
+        return GatewayPortStopResult(GatewayPortStopOutcome.REFUSED, observation)
+    try:
+        effects.terminate_listener(listener)
+    except (NotImplementedError, OSError):
+        observation = effects.inspect_port(port)
+        outcome = (
+            GatewayPortStopOutcome.STOPPED
+            if observation.state is WebPortState.FREE
+            else GatewayPortStopOutcome.REFUSED
+        )
+        return GatewayPortStopResult(outcome, observation)
+    deadline = effects.monotonic() + GATEWAY_STOP_TIMEOUT_SECONDS
+    while True:
+        observation = effects.inspect_port(port)
+        if observation.state is WebPortState.FREE:
+            return GatewayPortStopResult(
+                GatewayPortStopOutcome.STOPPED,
+                observation,
+                listener.pid,
+            )
+        if observation.gateway != listener:
+            return GatewayPortStopResult(
+                GatewayPortStopOutcome.REFUSED,
+                observation,
+                listener.pid,
+            )
+        if effects.monotonic() >= deadline:
+            return GatewayPortStopResult(
+                GatewayPortStopOutcome.STILL_HOLDING,
+                observation,
+                listener.pid,
+            )
+        effects.sleep(_DETACHED_POLL_SECONDS)
+
+
 def _detached_failure(summary: str, log_path: Path, output: BinaryIO) -> str:
     output.flush()
     length = output.seek(0, os.SEEK_END)
     output.seek(max(0, length - _DETACHED_LOG_TAIL_BYTES))
     tail = output.read().decode("utf-8", errors="replace").strip()
     message = f"{summary}. Startup log: {log_path}"
-    return f"{message}\n{tail}" if tail else message
+    return f"{tail}\n{message}" if tail else message
 
 
 def _discover_web_instance(path: Path) -> WebInstanceRecord | None:
@@ -613,6 +728,14 @@ def main(argv: list[str] | None = None) -> None:
         _serve(sys.argv[1:] if argv is None else argv)
     except ConfigurationError as exc:
         cli.render_configuration_error(exc)
+    except WebSocketBindError as exc:
+        sys.stderr.write(f"{exc}\n")
+        sys.stderr.write(
+            "Inspect or stop that listener with "
+            f"`vibesys web status --port {exc.port}` or "
+            f"`vibesys web stop --port {exc.port}`.\n"
+        )
+        raise SystemExit(1) from None
 
 
 def _serve(arguments: list[str]) -> None:  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR0912, PLR0915]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches

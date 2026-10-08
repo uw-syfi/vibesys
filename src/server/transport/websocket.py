@@ -46,7 +46,7 @@ from vs_sim.api import SystemClock
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
-    from websockets.asyncio.server import ServerConnection
+    from websockets.asyncio.server import Server, ServerConnection
     from websockets.http11 import Request
     from websockets.http11 import Response as HttpResponse
 
@@ -155,6 +155,17 @@ _KEEPALIVE_SECONDS = 20.0
 _FRAME_BYTES = 1024 * 1024
 
 
+class WebSocketBindError(RuntimeError):
+    """An operator-actionable failure to bind the loopback gateway."""
+
+    def __init__(self, host: str, port: int, reason: OSError) -> None:
+        """Name the requested authority and retain the operating-system reason."""
+        self.host = host
+        self.port = port
+        self.reason = reason
+        super().__init__(f"WebSocket gateway could not bind {host}:{port}: {reason}")
+
+
 class StartupSynchronization(Protocol):
     """Coordinate gateway startup without coupling lifecycle tests to a clock."""
 
@@ -163,6 +174,9 @@ class StartupSynchronization(Protocol):
 
     def wait_before_serve(self, stop: threading.Event) -> None:
         """Run immediately before the event loop begins serving."""
+
+    def wait_before_listener_start(self, stop: threading.Event, bound_port: int) -> None:
+        """Run after bind and before the socket begins listening."""
 
     def wait_before_publication(self, stop: threading.Event, bound_port: int) -> None:
         """Run after listener start, before the attempt becomes externally usable."""
@@ -178,6 +192,10 @@ class _DefaultStartupSynchronization:
     def wait_before_serve(self, stop: threading.Event) -> None:
         """Begin serving without an additional startup barrier."""
         del stop
+
+    def wait_before_listener_start(self, stop: threading.Event, bound_port: int) -> None:
+        """Begin listening immediately after bind."""
+        del stop, bound_port
 
     def wait_before_publication(self, stop: threading.Event, bound_port: int) -> None:
         """Publish the listener without an additional startup barrier."""
@@ -449,6 +467,8 @@ class WebSocketGateway:
                 raise RuntimeError("Timed out starting WebSocket gateway")  # noqa: TRY003  # lint-waiver: LW-101011 [TRY003]; convert a startup synchronization timeout into a clear lifecycle error
             if startup_error is not None:
                 self._retire_attempt(attempt)
+                if isinstance(startup_error, WebSocketBindError):
+                    raise startup_error
                 raise RuntimeError("Unable to start WebSocket gateway") from startup_error  # noqa: TRY003  # lint-waiver: LW-101012 [TRY003]; preserve the gateway startup failure as a lifecycle error
 
     def close(self) -> None:
@@ -542,81 +562,98 @@ class WebSocketGateway:
 
         if attempt.stop.is_set():
             return
-        async with serve(
-            partial(self._handle_attempt_connection, attempt),
-            _LOOPBACK_HOST,
-            self.port,
-            process_request=partial(self._process_attempt_request, attempt),
-            compression=None,
-            # Every bound below is stated, never inherited: see
-            # ``WebSocketLimits``. ``write_limit`` is the send-side high-water
-            # mark that makes an unread frame stall the producer, the analogue
-            # of ``unix_jsonl.py``'s blocking ``wfile.write``; ``max_queue``
-            # bounds the opposite direction, frames arriving from the peer, as
-            # does ``max_size``: it is the cap on what this gateway will
-            # *receive*, and says nothing about what a peer will accept from
-            # it. The send side is bounded by ``_event_batch_chunks`` instead.
-            ping_interval=self.limits.ping_interval_seconds,
-            ping_timeout=self.limits.ping_timeout_seconds,
-            close_timeout=self.limits.close_timeout_seconds,
-            write_limit=self.limits.send_buffer_bytes,
-            max_queue=self.limits.receive_queue,
-            max_size=self.limits.receive_frame_bytes,
-            server_header="VibeSys-WebSocket",
-            # Bind first without accepting connections. The attempt publishes
-            # and starts this listener only after it has revalidated ownership
-            # under its retirement lock below.
-            start_serving=False,
-        ) as server:
-            sockets = server.sockets
-            if not sockets:
-                raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-101015 [TRY003]; fail startup if the websocket library did not bind a socket
-                    "WebSocket gateway did not expose a listening socket"
-                )
-            bound_port = int(next(iter(sockets)).getsockname()[1])
-            with attempt.lock:
-                if attempt.retired or attempt.stop.is_set():
-                    return
-                attempt.startup_server = server.server
+        bound = False
+        try:
+            async with serve(
+                partial(self._handle_attempt_connection, attempt),
+                _LOOPBACK_HOST,
+                self.port,
+                process_request=partial(self._process_attempt_request, attempt),
+                compression=None,
+                # Every bound below is stated, never inherited: see
+                # ``WebSocketLimits``. ``write_limit`` is the send-side high-water
+                # mark that makes an unread frame stall the producer, the analogue
+                # of ``unix_jsonl.py``'s blocking ``wfile.write``; ``max_queue``
+                # bounds the opposite direction, frames arriving from the peer, as
+                # does ``max_size``: it is the cap on what this gateway will
+                # *receive*, and says nothing about what a peer will accept from
+                # it. The send side is bounded by ``_event_batch_chunks`` instead.
+                ping_interval=self.limits.ping_interval_seconds,
+                ping_timeout=self.limits.ping_timeout_seconds,
+                close_timeout=self.limits.close_timeout_seconds,
+                write_limit=self.limits.send_buffer_bytes,
+                max_queue=self.limits.receive_queue,
+                max_size=self.limits.receive_frame_bytes,
+                server_header="VibeSys-WebSocket",
+                # Bind first without accepting connections. The attempt publishes
+                # and starts this listener only after it has revalidated ownership
+                # under its retirement lock below.
+                start_serving=False,
+            ) as server:
+                bound = True
+                await self._publish_and_wait(attempt, server)
+        except OSError as error:
+            # Entering the context performs the bind. Later filesystem or
+            # publication failures retain their original meaning.
+            if not bound:
+                raise WebSocketBindError(_LOOPBACK_HOST, self.port, error) from error
+            raise
 
-            record: WebInstanceRecord | None = None
-            staged_path: Path | None = None
-            if self.instance_path is not None:
-                with self._credential_lock:
-                    record = WebInstanceRecord.from_gateway(
-                        pid=os.getpid(),
-                        port=bound_port,
-                        token=self._token,
-                        project_root=self.project_root,
-                        clock=self._clock,
-                    )
-                staged_path = self.instance_path.with_name(
-                    f".{self.instance_path.name}.{os.getpid()}.{secrets.token_hex(6)}.startup"
-                )
-                with attempt.lock:
-                    if attempt.retired or attempt.stop.is_set():
-                        return
-                    attempt.staged_instance_path = staged_path
-                # Prepare the complete record at an attempt-private path. Slow
-                # filesystem work cannot hold retirement's state lock, and the
-                # retired worker can never replace the canonical retry record.
-                record.write(staged_path)
-
-            with attempt.lock:
-                if attempt.retired or attempt.stop.is_set():
-                    return
-
-            # Starting the listener and the synchronization seam may yield or
-            # block. The listener rejects every request until publication is
-            # committed, and retirement can close its sockets without waiting
-            # behind either operation.
-            await server.start_serving()
-            self._startup.wait_before_publication(attempt.stop, bound_port)
-
-            if not self._publish_attempt(attempt, record, staged_path, bound_port):
-                server.close()
+    async def _publish_and_wait(self, attempt: _GatewayAttempt, server: Server) -> None:
+        """Publish one already-bound websockets server, then await its stop."""
+        sockets = server.sockets
+        if not sockets:
+            raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-101015 [TRY003]; fail startup if the websocket library did not bind a socket
+                "WebSocket gateway did not expose a listening socket"
+            )
+        bound_port = int(next(iter(sockets)).getsockname()[1])
+        with attempt.lock:
+            if attempt.retired or attempt.stop.is_set():
                 return
-            await asyncio.to_thread(attempt.stop.wait)
+            attempt.startup_server = server.server
+
+        record: WebInstanceRecord | None = None
+        staged_path: Path | None = None
+        if self.instance_path is not None:
+            with self._credential_lock:
+                record = WebInstanceRecord.from_gateway(
+                    pid=os.getpid(),
+                    port=bound_port,
+                    token=self._token,
+                    project_root=self.project_root,
+                    clock=self._clock,
+                )
+            staged_path = self.instance_path.with_name(
+                f".{self.instance_path.name}.{os.getpid()}.{secrets.token_hex(6)}.startup"
+            )
+            with attempt.lock:
+                if attempt.retired or attempt.stop.is_set():
+                    return
+                attempt.staged_instance_path = staged_path
+            # Prepare the complete record at an attempt-private path. Slow
+            # filesystem work cannot hold retirement's state lock, and the
+            # retired worker can never replace the canonical retry record.
+            record.write(staged_path)
+
+        with attempt.lock:
+            if attempt.retired or attempt.stop.is_set():
+                return
+
+        # Starting the listener and the synchronization seam may yield or
+        # block. The listener rejects every request until publication is
+        # committed, and retirement can close its sockets without waiting
+        # behind either operation.
+        self._startup.wait_before_listener_start(attempt.stop, bound_port)
+        try:
+            await server.start_serving()
+        except OSError as error:
+            raise WebSocketBindError(_LOOPBACK_HOST, bound_port, error) from error
+        self._startup.wait_before_publication(attempt.stop, bound_port)
+
+        if not self._publish_attempt(attempt, record, staged_path, bound_port):
+            server.close()
+            return
+        await asyncio.to_thread(attempt.stop.wait)
 
     def _publish_attempt(
         self,

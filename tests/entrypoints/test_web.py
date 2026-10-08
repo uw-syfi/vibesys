@@ -11,12 +11,22 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from tests.entrypoints.support import IDLE_DIRECTORY, INSTANCE_PATH, FakeDetachedGateway
+from tests.entrypoints.support import (
+    IDLE_DIRECTORY,
+    INSTANCE_PATH,
+    PORT,
+    PORT_FREE,
+    PORT_GATEWAY,
+    PORT_LISTENER,
+    FakeDetachedGateway,
+    FakePortGateway,
+)
 
 from entrypoints import web
 from entrypoints.server import GATEWAY_STOP_TIMEOUT_SECONDS, GatewayStopOutcome, GatewayStopResult
 from entrypoints.web import (
     _DEMO_LOG,
+    WebLiveEffects,
     _browser_url,
     _live_command,
     _local_url,
@@ -32,7 +42,7 @@ from entrypoints.web import (
     _stop_message,
     _wait_for_record,
 )
-from server.runtime import WebInstanceHold
+from server.runtime import WebInstanceHold, WebPortObservation, WebPortState
 from vs_sim.api.testing import HANG_GUARD_S
 
 
@@ -117,7 +127,14 @@ def test_parser_builds_each_browser_workflow() -> None:
 
     assert _parser().parse_args(["status", "--instance", "record.json"]).command == "status"
     assert _parser().parse_args(["stop", "--instance", "record.json"]).command == "stop"
+    assert _parser().parse_args(["status", "--port", "8765"]).port == 8765
+    assert _parser().parse_args(["stop", "--port", "8765"]).port == 8765
     assert _parser().parse_args(["rotate", "--instance", "record.json"]).command == "rotate"
+
+    with pytest.raises(SystemExit):
+        _parser().parse_args(["status"])
+    with pytest.raises(SystemExit):
+        _parser().parse_args(["stop", "--instance", "record.json", "--port", "8765"])
 
 
 def test_tool_lookup_reports_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -309,6 +326,49 @@ def test_run_live_demo_rejects_operator_run_arguments(tmp_path: Path) -> None:
         _run_live(args, tmp_path)
 
 
+class FailedLiveEffects(WebLiveEffects):
+    """A launcher whose server reports a diagnostic and exits nonzero."""
+
+    def __init__(self) -> None:
+        self.waited = False
+
+    def build(self, root: Path) -> None:
+        del root
+        raise AssertionError
+
+    def launch(self, command: list[str], root: Path, environment: dict[str, str]) -> int:
+        assert command
+        assert root
+        assert environment["BROWSER"] == "true"
+        return 7
+
+    def wait_for_record(self, instance: Path) -> web.WebInstanceRecord:
+        self.waited = True
+        del instance
+        raise AssertionError
+
+
+def test_run_live_returns_the_gateway_failure_without_waiting_for_a_record(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    effects = FailedLiveEffects()
+    args = argparse.Namespace(
+        project=project,
+        task=None,
+        port=8765,
+        instance=tmp_path / "record.json",
+        ssh_target=None,
+        browser_origin=[],
+        demo=False,
+        no_build=True,
+        open=False,
+        run_args=(),
+    )
+
+    assert _run_live(args, tmp_path, effects) == 7
+    assert effects.waited is False
+
+
 def test_local_url_preserves_capability_token_and_port() -> None:
     local, remote_port = _local_url(
         "http://127.0.0.1:8765/?token=secret-token",
@@ -407,6 +467,39 @@ def test_status_reports_gateway_lifecycle(
     assert "VibeSys web UI:" in capsys.readouterr().out
 
 
+def test_port_status_identifies_a_gateway_without_reading_its_record(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    gateway = FakePortGateway((PORT_GATEWAY,))
+
+    assert _run_status(argparse.Namespace(instance=None, port=PORT), gateway) == 0
+
+    output = capsys.readouterr().out
+    assert "VibeSys web gateway on 127.0.0.1:8765" in output
+    assert f"PID: {PORT_LISTENER.pid}" in output
+    assert f"Instance: {PORT_LISTENER.instance_path}" in output
+
+
+@pytest.mark.parametrize("state", [WebPortState.OTHER, WebPortState.UNKNOWN])
+def test_port_status_names_but_does_not_accept_an_unverified_listener(
+    state: WebPortState,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    observation = WebPortObservation(
+        state,
+        "127.0.0.1",
+        PORT,
+        holder_pids=(9999,),
+    )
+    gateway = FakePortGateway((observation,))
+
+    assert _run_status(argparse.Namespace(instance=None, port=PORT), gateway) == 1
+
+    output = capsys.readouterr().out
+    assert "127.0.0.1:8765" in output
+    assert "9999" in output
+
+
 def test_stop_succeeds_only_after_the_gateway_releases_its_instance_files(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -499,6 +592,52 @@ def test_stop_reports_the_processes_that_still_hold_the_directory(
     assert f"{INSTANCE_PATH.parent} is still in use" in output
     assert "Processes with files open there: 11, 12." in output
     assert "kill -9 11, 12" in output
+
+
+def test_port_stop_reports_the_verified_gateway_it_stopped(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    gateway = FakePortGateway((PORT_GATEWAY, PORT_FREE))
+
+    assert _run_stop(argparse.Namespace(instance=None, port=PORT), gateway) == 0
+
+    assert gateway.signals == [PORT_LISTENER]
+    assert (
+        capsys.readouterr().out
+        == f"Stopped VibeSys web gateway {PORT_LISTENER.pid} on 127.0.0.1:8765.\n"
+    )
+
+
+def test_port_stop_does_not_render_a_none_pid_when_the_listener_already_exited(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    gateway = FakePortGateway(
+        (PORT_GATEWAY, PORT_FREE),
+        signal_error=ProcessLookupError(PORT_LISTENER.pid),
+    )
+
+    assert _run_stop(argparse.Namespace(instance=None, port=PORT), gateway) == 0
+
+    output = capsys.readouterr().out
+    assert output == "The listener on 127.0.0.1:8765 exited before it could be signalled.\n"
+    assert "None" not in output
+
+
+def test_port_stop_refuses_an_unverified_listener(capsys: pytest.CaptureFixture[str]) -> None:
+    observation = WebPortObservation(
+        WebPortState.OTHER,
+        "127.0.0.1",
+        PORT,
+        holder_pids=(9999,),
+    )
+    gateway = FakePortGateway((observation,))
+
+    assert _run_stop(argparse.Namespace(instance=None, port=PORT), gateway) == 1
+
+    assert gateway.signals == []
+    output = capsys.readouterr().out
+    assert "Refused to signal" in output
+    assert "9999" in output
 
 
 @pytest.mark.parametrize(
