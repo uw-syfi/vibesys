@@ -18,7 +18,13 @@ from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from entrypoints import cli
 from launch import default_runs
-from server.runtime import WebInstanceClaim, WebInstanceHold, WebInstanceRecord, browser_origin
+from server.runtime import (
+    WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
+    WebInstanceClaim,
+    WebInstanceHold,
+    WebInstanceRecord,
+    browser_origin,
+)
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
 from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
@@ -28,8 +34,9 @@ from vs_project.api import Project
 _WEB_PORT_MAX = 65_535
 _DETACHED_START_TIMEOUT_SECONDS = 10.0
 _DETACHED_STOP_TIMEOUT_SECONDS = 2.0
-GATEWAY_STOP_TIMEOUT_SECONDS = 10.0
-"""How long `stop_detached_gateway` waits for a gateway to release its files."""
+_GATEWAY_STOP_GRACE_SECONDS = 2.0
+GATEWAY_STOP_TIMEOUT_SECONDS = WEBSOCKET_CLOSE_TIMEOUT_SECONDS + _GATEWAY_STOP_GRACE_SECONDS
+"""Transport close bound plus grace to observe the released instance files."""
 _DETACHED_POLL_SECONDS = 0.05
 _DETACHED_LOG_TAIL_BYTES = 4_096
 
