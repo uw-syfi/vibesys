@@ -1,7 +1,8 @@
 """Chaos sweep of the dynamic loop: generated agents under seeded fault plans.
 
-The PR tier runs a fixed set of seeds. ``CHAOS_SEEDS=A-B`` (or a comma list)
-runs other seeds; ``scripts/chaos_dynamic_loop.sh N`` sweeps N seeds in
+The PR tier runs a fixed set of seeds plus every seed in
+``chaos_regressions.txt`` (a seed that once failed; the nightly summary prints
+the line to append). ``CHAOS_SEEDS=A-B`` (or a comma list) adds other seeds; ``scripts/chaos_dynamic_loop.sh N`` sweeps N seeds in
 parallel. A failure prints its seed, the injected faults, the violations, and
 a one-line repro.
 """
@@ -9,31 +10,34 @@ a one-line repro.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 from tests.vibesys.orchestration.dynamic.loop._chaos import run_chaos
 
 from vibesys.api import RunStatus
 
-if TYPE_CHECKING:
-    from pathlib import Path
+# Each seed runs a whole loop (10 to 20 s on a CI runner), so a pull request runs
+# four generic seeds beside the regression seeds. The nightly workflow runs 0-11
+# and sweeps many more.
+_PR_SEEDS = "0-3"
 
-# Seeds 2018 and 2022 completed with zero workstreams before #1228. Each seed runs
-# a whole loop (10 to 20 s on a CI runner), so a pull request runs four generic
-# seeds beside those two. The nightly workflow runs 0-11 and sweeps many more.
-_PR_SEEDS = "0-3,2018,2022"
+_REGRESSIONS = Path(__file__).with_name("chaos_regressions.txt")
+
+
+def _regression_seeds() -> list[int]:
+    """Return the seeds checked in as past failures: one per line, ``#`` comments."""
+    lines = (line.partition("#")[0].strip() for line in _REGRESSIONS.read_text().splitlines())
+    return [int(line) for line in lines if line]
 
 
 def _seeds() -> list[object]:
     spec = os.environ.get("CHAOS_SEEDS", _PR_SEEDS)
-    seeds: list[object] = []
+    seeds = set(_regression_seeds())
     for part in spec.split(","):
         low, _, high = part.partition("-")
-        seeds.extend(
-            pytest.param(seed, id=f"seed_{seed}") for seed in range(int(low), int(high or low) + 1)
-        )
-    return seeds
+        seeds.update(range(int(low), int(high or low) + 1))
+    return [pytest.param(seed, id=f"seed_{seed}") for seed in sorted(seeds)]
 
 
 @pytest.mark.parametrize("seed", _seeds())

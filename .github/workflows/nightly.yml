@@ -14,15 +14,21 @@ jobs:
   full-properties:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # `actions: write` lets the prune step delete superseded caches.
+    permissions:
+      contents: read
+      actions: write
     env:
-      # Randomized Hypothesis (conftest.py `nightly` profile), seeded by the run
-      # number: every night draws new examples, and the seed replays them.
+      # Randomized Hypothesis (conftest.py `nightly` profile): every night draws
+      # new examples. A failure is saved to the example database (cached below)
+      # and its @reproduce_failure blob is printed; there is no seed to replay.
       HYPOTHESIS_PROFILE: nightly
       # Lifts the reduced example counts that pull requests use (see
       # tests/vibesys/orchestration/dynamic/loop/test_loop.py).
       VIBESYS_FULL_PROPERTIES: '1'
       # The fixed chaos baseline. The rotating window is the chaos-sweep job.
-      CHAOS_SEEDS: 0-11,2018,2022
+      # (chaos_regressions.txt seeds are always added.)
+      CHAOS_SEEDS: 0-11
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -51,8 +57,7 @@ jobs:
       - name: Run the full test suite at full property strength
         shell: bash
         run: |
-          uv run python -m pytest -n auto --dist loadgroup --no-cov -q \
-            --hypothesis-seed="$GITHUB_RUN_NUMBER" 2>&1 | tee pytest.log
+          uv run python -m pytest -n auto --dist loadgroup --no-cov -q 2>&1 | tee pytest.log
 
       - name: Save the Hypothesis example database
         if: always()
@@ -66,7 +71,18 @@ jobs:
         run: |
           ./scripts/nightly_failure_summary.sh pytest.log "Nightly full-properties" \
             "HYPOTHESIS_PROFILE=nightly VIBESYS_FULL_PROPERTIES=1 CHAOS_SEEDS=$CHAOS_SEEDS" \
-            "PYTEST_ADDOPTS=--hypothesis-seed=$GITHUB_RUN_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+            >> "$GITHUB_STEP_SUMMARY"
+
+      # Keep one cache entry. Each save is a new key (a cache cannot be
+      # overwritten), so without this the entries pile up until GitHub evicts
+      # them. Runs after the save so a failed prune never loses the database.
+      - name: Prune older Hypothesis example databases
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh cache list --key hypothesis- --sort created_at --order desc --json id --jq '.[1:][].id' \
+            | xargs -r -n1 gh cache delete
 
   # Seeds the pull-request tier never draws (see
   # tests/vibesys/orchestration/dynamic/loop/test_chaos.py). Each run sweeps a
@@ -79,11 +95,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        # `baseline` is the sweep this workflow always ran (seeds 1000-1199),
+        # kept as a fixed point of comparison beside the rotating window.
+        shard: [baseline, 0, 1, 2, 3]
     env:
       CHAOS_BASE: 100000
       CHAOS_SHARD_SIZE: 100
       CHAOS_SHARDS: 4
+      SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -101,17 +120,24 @@ jobs:
 
       - name: Compute this shard's seed range
         run: |
-          first=$((CHAOS_BASE + GITHUB_RUN_NUMBER * CHAOS_SHARDS * CHAOS_SHARD_SIZE + ${{ matrix.shard }} * CHAOS_SHARD_SIZE))
+          if [ "$SHARD" = baseline ]; then
+            first=1000
+            size=200
+          else
+            first=$((CHAOS_BASE + GITHUB_RUN_NUMBER * CHAOS_SHARDS * CHAOS_SHARD_SIZE + SHARD * CHAOS_SHARD_SIZE))
+            size=$CHAOS_SHARD_SIZE
+          fi
           echo "CHAOS_FIRST=$first" >> "$GITHUB_ENV"
-          echo "Shard ${{ matrix.shard }} sweeps seeds $first-$((first + CHAOS_SHARD_SIZE - 1))"
+          echo "CHAOS_COUNT=$size" >> "$GITHUB_ENV"
+          echo "Shard $SHARD sweeps seeds $first-$((first + size - 1))"
 
       - name: Sweep the dynamic-loop chaos harness over the window
         shell: bash
         run: |
-          ./scripts/chaos_dynamic_loop.sh "$CHAOS_SHARD_SIZE" "$CHAOS_FIRST" 2 2>&1 | tee chaos.log
+          ./scripts/chaos_dynamic_loop.sh "$CHAOS_COUNT" "$CHAOS_FIRST" 2 2>&1 | tee chaos.log
 
       - name: Summarize the failure with a repro command
         if: failure()
         run: |
-          ./scripts/nightly_failure_summary.sh chaos.log "Nightly chaos sweep (shard ${{ matrix.shard }}, seeds $CHAOS_FIRST-$((CHAOS_FIRST + CHAOS_SHARD_SIZE - 1)))" \
+          ./scripts/nightly_failure_summary.sh chaos.log "Nightly chaos sweep (shard $SHARD, seeds $CHAOS_FIRST-$((CHAOS_FIRST + CHAOS_COUNT - 1)))" \
             "CHAOS_SEEDS=$CHAOS_FIRST" >> "$GITHUB_STEP_SUMMARY"

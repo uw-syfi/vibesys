@@ -180,26 +180,35 @@ laptop to a remote VibeSys host.
 
 | Tier | Runs | Hypothesis | Chaos seeds |
 | --- | --- | --- | --- |
-| Pull request (`test.yml`) | every PR, kept under about 5 minutes | `ci` profile: global seed 0, reduced counts, replays saved failures | `0-3,2018,2022` |
-| Nightly (`nightly.yml`) | daily | `nightly` profile: randomized, seeded by run number, full counts | baseline `0-11,2018,2022`, plus a rotating window |
+| Pull request (`test.yml`) | every PR, kept under about 5 minutes | `ci` profile: fixed per-test seed, reduced counts, replays saved failures | `0-3` plus `chaos_regressions.txt` |
+| Nightly (`nightly.yml`) | daily | `nightly` profile: randomized, full counts | `0-11` baseline, `1000-1199` fixed sweep, and a rotating window |
 | Slow crash sweep | daily | n/a | n/a |
 
-The nightly chaos sweep covers seeds `100000 + run_number * 400` onward, split
-over four shards of 100, so each run explores seeds no earlier run drew. Widen
-the window by raising `CHAOS_SHARDS` (more parallel jobs), not the shard size.
+**Chaos seeds.** The rotating window of run N covers seeds from
+`100000 + N * 400`, as four contiguous shards of 100, so no run repeats an
+earlier run's seeds. Widen it by raising `CHAOS_SHARDS` (more parallel jobs).
+Seeds that once failed live in
+`tests/vibesys/orchestration/dynamic/loop/chaos_regressions.txt`; the PR tier
+always runs them. When a nightly seed fails, the job summary prints the line to
+append there once the bug is fixed.
 
-Failing Hypothesis examples persist in `.hypothesis/examples`. The nightly job
-saves that directory to the Actions cache even when it fails; pull requests
-restore it read-only. Hypothesis rejects `derandomize=True` together with a database, so the `ci`
-profile in `conftest.py` is deterministic by fixing the global seed to 0
-instead. A PR draws the same examples every run, but replays any saved failure
-first. The cost is deliberate: a bug the nightly found keeps failing the PRs
-that reach it until it is fixed.
+**Hypothesis failures.** Saving and replaying a failure needs a database and a
+per-test database key. `derandomize=True` removes the database, and both
+`--hypothesis-seed` and `hypothesis.seed` remove it too, so none of them is used
+for a profile that must replay. The `ci` profile instead sets each test's seed
+slot directly (`_seed_hypothesis_tests` in `conftest.py`): a PR draws the same
+examples every run and replays saved failures first.
+`tests/quality/test_hypothesis_profiles.py` runs pytest on a planted property to
+check both, so a Hypothesis upgrade that breaks either fails there.
 
-A failed nightly job writes the exact commands to rerun each failed test (seed
-and environment) to its job summary, built by
-`scripts/nightly_failure_summary.sh`. To replay a Hypothesis failure locally,
-use that command, or the `@reproduce_failure` blob in the log.
+The nightly saves `.hypothesis/` to the Actions cache, even when it fails, and
+deletes superseded entries so one remains. Pull requests restore it read-only.
+So a bug the nightly finds **fails unrelated PRs that reach the same property
+until it is fixed**: it is a bug on `main`, and this is how the PR tier learns of
+it. The same example is in the job summary as an `@reproduce_failure` blob.
+
+A failed nightly job writes the commands to rerun each failed test (environment
+and seed) to its job summary, built by `scripts/nightly_failure_summary.sh`.
 
 ## Extend VibeSys
 

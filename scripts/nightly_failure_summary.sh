@@ -16,6 +16,7 @@ echo "## ${title} failed"
 echo
 echo "Commit: \`${GITHUB_SHA:-unknown}\` (run ${GITHUB_RUN_NUMBER:-?}). Check it out first."
 echo
+chaos_seeds=()
 failed="$(grep -E '^FAILED ' "$log" | awk '{print $2}' | sort -u || true)"
 if [ -z "$failed" ]; then
   echo "No failed test was reported (crash or timeout). Rerun the whole job:"
@@ -32,7 +33,27 @@ while IFS= read -r node; do
   extra=""
   if [[ "$node" =~ \[seed_([0-9]+)\] ]]; then
     extra=" CHAOS_SEEDS=${BASH_REMATCH[1]}"
+    chaos_seeds+=("${BASH_REMATCH[1]}")
   fi
   echo "${env_line}${extra} uv run python -m pytest '${node}' --no-cov -p no:randomly"
 done <<<"$failed"
 echo '```'
+
+if [ "${#chaos_seeds[@]}" -gt 0 ]; then
+  echo
+  echo "Once fixed, append to \`tests/vibesys/orchestration/dynamic/loop/chaos_regressions.txt\` so the PR tier keeps running them:"
+  echo
+  echo '```'
+  for seed in "${chaos_seeds[@]}"; do
+    echo "${seed}  # <issue or fix>"
+  done
+  echo '```'
+fi
+if grep -q '@reproduce_failure' "$log"; then
+  echo
+  echo "Hypothesis blobs (add the decorator to the test to replay; the nightly cache also holds the example):"
+  echo
+  echo '```'
+  grep -E '@reproduce_failure' "$log" | sort -u
+  echo '```'
+fi

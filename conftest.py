@@ -40,21 +40,27 @@ def sandbox_tmp_path() -> Iterator[Path]:
 # the code and the saved failures: a newly found counterexample cannot fail an
 # unrelated PR by chance. `explore` is the randomized, larger run for finding new
 # bugs; select it by hand with `HYPOTHESIS_PROFILE=explore`. `nightly` is the
-# scheduled run: randomized at the default example count and seeded per run
-# (`--hypothesis-seed`), so each night draws new examples and a failure replays
-# from its seed.
+# scheduled run: randomized at the default example count, so each night draws new
+# examples. Its failures are saved to the example database and their
+# `@reproduce_failure` blobs are printed.
 # Every profile states `derandomize` explicitly: an unset option resolves from
 # whichever profile is loaded, so `explore` would otherwise inherit `ci`'s.
 #
-# `ci` does not use `derandomize=True`: Hypothesis rejects it together with a
-# database, since derandomizing implies `database=None`. It fixes the global
-# seed to 0 instead (`pytest_configure` below), which is equally deterministic
-# and keeps the database. CI restores `.hypothesis/` from the nightly run's
-# cache, read-only on pull requests, so a failure found at nightly strength
-# replays on a PR as its first example. The one departure from a pure PR tier is
-# deliberate: a bug the nightly found keeps failing the PRs that reach it until
-# it is fixed, since it is a bug on `main`.
-_EXAMPLE_DATABASE = DirectoryBasedExampleDatabase(Path(__file__).parent / ".hypothesis" / "examples")
+# Saving and replaying failures needs a database AND a per-test database key.
+# Two obvious ways to make `ci` deterministic each remove one of them:
+# `derandomize=True` implies `database=None`, and a forced global seed
+# (`--hypothesis-seed`) sets the key to None, so nothing is saved or replayed.
+# `hypothesis.seed` per test also sets `database=None`. So `ci` sets each test's seed slot directly (see
+# `_seed_hypothesis_tests`), which keeps the key and the database. CI restores
+# `.hypothesis/` from the nightly run's cache, read-only on pull requests, so a
+# failure found at nightly strength replays on a PR as its first example. The
+# one departure from a pure PR tier is deliberate: a bug the nightly found keeps
+# failing the PRs that reach it until it is fixed, since it is a bug on `main`.
+# `VIBESYS_HYPOTHESIS_DB` relocates the database (tests/quality use it).
+_EXAMPLE_DATABASE = DirectoryBasedExampleDatabase(
+    os.environ.get("VIBESYS_HYPOTHESIS_DB")
+    or Path(__file__).parent / ".hypothesis" / "examples"
+)
 settings.register_profile("dev", deadline=None, derandomize=False)
 settings.register_profile(
     "ci", deadline=None, derandomize=False, print_blob=True, database=_EXAMPLE_DATABASE
@@ -73,15 +79,24 @@ settings.register_profile(
 _PROFILE = os.environ.get("HYPOTHESIS_PROFILE") or ("ci" if os.environ.get("CI") else "dev")
 settings.load_profile(_PROFILE)
 
-#: The `ci` profile's global seed, applied unless `--hypothesis-seed` is given.
+#: The `ci` profile's per-test seed.
 _CI_HYPOTHESIS_SEED = 0
 
+#: Hypothesis's per-test seed slot, the one `hypothesis.seed` sets. That decorator
+#: also sets `database=None`, which is what the `ci` profile must avoid, so the
+#: slot is set directly. It is private API; tests/quality/test_hypothesis_profiles.py
+#: fails if a Hypothesis upgrade stops it seeding or stops the database replaying.
+_SEED_SLOT = "_hypothesis_internal_use_seed"
 
-@pytest.hookimpl(tryfirst=True)
-def pytest_configure(config: pytest.Config) -> None:
-    """Fix Hypothesis's global seed under the `ci` profile, before its plugin reads it."""
-    if _PROFILE == "ci" and config.getoption("hypothesis_seed") is None:
-        config.option.hypothesis_seed = _CI_HYPOTHESIS_SEED
+
+def _seed_hypothesis_tests(items: Iterable[pytest.Item]) -> None:
+    """Seed every Hypothesis test under the `ci` profile, keeping its database key."""
+    if _PROFILE != "ci":
+        return
+    for item in items:
+        test = getattr(item, "obj", None)
+        if getattr(test, "is_hypothesis_test", False) and getattr(test, _SEED_SLOT, None) is None:
+            setattr(test, _SEED_SLOT, _CI_HYPOTHESIS_SEED)
 
 
 #: xdist scheduling group for tests that cannot run beside one another.
@@ -132,6 +147,7 @@ def pytest_collection_modifyitems(items: Iterable[pytest.Item]) -> None:
     loadgroup``: without ``tryfirst`` both items landed on different workers
     despite carrying the same group; with it, both landed on the same worker.
     """
+    _seed_hypothesis_tests(items)
     for item in items:
         if item.get_closest_marker(_SERIAL_GROUP) is not None:
             item.add_marker(pytest.mark.xdist_group(_SERIAL_GROUP))
