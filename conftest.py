@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import os
 import tempfile
+import zlib
 from pathlib import Path
+from random import Random
 from typing import TYPE_CHECKING
 
+import hypothesis.core as hypothesis_core
 import pytest
 from hypothesis import settings
 from hypothesis.database import DirectoryBasedExampleDatabase
@@ -50,8 +53,8 @@ def sandbox_tmp_path() -> Iterator[Path]:
 # Two obvious ways to make `ci` deterministic each remove one of them:
 # `derandomize=True` implies `database=None`, and a forced global seed
 # (`--hypothesis-seed`) sets the key to None, so nothing is saved or replayed.
-# `hypothesis.seed` per test also sets `database=None`. So `ci` sets each test's seed slot directly (see
-# `_seed_hypothesis_tests`), which keeps the key and the database. CI restores
+# `hypothesis.seed` per test also sets `database=None`. So `ci` reseeds Hypothesis's
+# own seed stream per test (`_seed_hypothesis_draws`), which keeps both. CI restores
 # `.hypothesis/` from the nightly run's cache, read-only on pull requests, so a
 # failure found at nightly strength replays on a PR as its first example. The
 # one departure from a pure PR tier is deliberate: a bug the nightly found keeps
@@ -79,25 +82,21 @@ settings.register_profile(
 _PROFILE = os.environ.get("HYPOTHESIS_PROFILE") or ("ci" if os.environ.get("CI") else "dev")
 settings.load_profile(_PROFILE)
 
-#: The `ci` profile's per-test seed.
-_CI_HYPOTHESIS_SEED = 0
+@pytest.fixture(autouse=True)
+def _seed_hypothesis_draws(request: pytest.FixtureRequest) -> None:
+    """Under the `ci` profile, restart Hypothesis's seed stream from the test's node id.
 
-#: Hypothesis's per-test seed slot, the one `hypothesis.seed` sets. That decorator
-#: also sets `database=None`, which is what the `ci` profile must avoid, so the
-#: slot is set directly. It is private API; tests/quality/test_hypothesis_profiles.py
-#: fails if a Hypothesis upgrade stops it seeding or stops the database replaying.
-_SEED_SLOT = "_hypothesis_internal_use_seed"
-
-
-def _seed_hypothesis_tests(items: Iterable[pytest.Item]) -> None:
-    """Seed every Hypothesis test under the `ci` profile, keeping its database key."""
-    if _PROFILE != "ci":
-        return
-    for item in items:
-        test = getattr(item, "obj", None)
-        test = getattr(test, "__func__", test)  # a test method: seed the function
-        if getattr(test, "is_hypothesis_test", False) and getattr(test, _SEED_SLOT, None) is None:
-            setattr(test, _SEED_SLOT, _CI_HYPOTHESIS_SEED)
+    Hypothesis derives each test's seed from a thread-local generator (private API
+    `hypothesis.core.threadlocal`). Reseeding it per test fixes the examples and
+    leaves the database key alone, and unlike a per-function seed it also covers
+    stateful machines, which build their test at run time.
+    tests/quality/test_hypothesis_profiles.py fails if a Hypothesis upgrade breaks
+    that determinism or the database round trip.
+    """
+    if _PROFILE == "ci":
+        hypothesis_core.threadlocal._hypothesis_global_random = Random(
+            zlib.crc32(request.node.nodeid.encode())
+        )
 
 
 #: xdist scheduling group for tests that cannot run beside one another.
@@ -148,7 +147,6 @@ def pytest_collection_modifyitems(items: Iterable[pytest.Item]) -> None:
     loadgroup``: without ``tryfirst`` both items landed on different workers
     despite carrying the same group; with it, both landed on the same worker.
     """
-    _seed_hypothesis_tests(items)
     for item in items:
         if item.get_closest_marker(_SERIAL_GROUP) is not None:
             item.add_marker(pytest.mark.xdist_group(_SERIAL_GROUP))

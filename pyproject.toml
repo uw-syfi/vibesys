@@ -259,6 +259,10 @@ convention = "google"
 runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.OutcomeValue", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
 
 [tool.ruff.lint.per-file-ignores]
+# The root conftest.py pins Hypothesis's seed stream per test under the `ci`
+# profile: a seeded (non-cryptographic) generator, installed through
+# `hypothesis.core.threadlocal`, the only hook that keeps the example database.
+"conftest.py" = ["S311", "SLF001"]
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "libs/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "sdk/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
