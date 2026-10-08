@@ -197,7 +197,7 @@ def test_a_conclusive_observation_ends_polling(interval: float, polls_before_end
     through_ledger=st.booleans(),
     polled=st.integers(min_value=0, max_value=4),
 )
-def test_only_the_next_issued_sequence_or_a_replay_changes_a_job(
+def test_only_a_newer_sequence_changes_a_job(
     *,
     interval: float,
     sequence: int,
@@ -215,31 +215,11 @@ def test_only_the_next_issued_sequence_or_a_replay_changes_a_job(
     incoming = observation(world.submit, sequence, observed_at=held.observed_at + 1, **reply)
     state = committed(world.state, incoming) if through_ledger else world.state
     result = core.step(state, core.JobObserved(resource_id=JOB, observation=incoming))
-    if sequence == held.sequence + 1:
+    if sequence > held.sequence:
         return
     assert result.state.evaluation == state.evaluation
     assert result.requests == ()
     assert result.events == ()
-
-
-def test_a_never_issued_terminal_observation_emits_no_result() -> None:
-    world = World(limits(10.0, 0.0))
-    world.tick(10.0)
-    world.answer()
-    skipped = observation(
-        world.submit,
-        99,
-        observed_at=world.clock + 1,
-        status=core.ObservationStatus.SUCCEEDED,
-        terminal=True,
-        released=True,
-    )
-    result = core.step(
-        committed(world.state, skipped), core.JobObserved(resource_id=JOB, observation=skipped)
-    )
-    assert result.events == ()
-    assert result.requests == ()
-    assert not result.state.evaluation.jobs[0].terminal
 
 
 @given(interval=intervals, shortfall=st.integers(min_value=1, max_value=8))

@@ -13,6 +13,7 @@ from vs_core.api import (
     IntentPhase,
     Observation,
     ObservationStatus,
+    ObservePacing,
     Producer,
     RecoveryBarrier,
     RecoveryCheck,
@@ -35,6 +36,7 @@ from .test_intent_recovery import (
     recovering_state,
     turn_intent,
 )
+from .test_measurements import submitted
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Intent
@@ -173,3 +175,15 @@ def test_a_pending_recovery_check_with_its_inspection_in_flight_is_not_an_orphan
 
 def test_a_fresh_run_has_no_waits() -> None:
     assert waits(initial_state()) == ()
+
+
+def test_an_observed_job_is_not_kept_alive_by_its_own_submission_intent() -> None:
+    state, _ = submitted()
+    job = state.evaluation.jobs[0]
+    assert job.observation is not None
+    assert [w for w in orphan_waits(state) if w.subject == job.resource_id.root] == []
+    unpaced = job.model_copy(update={"pacing": ObservePacing()})
+    stalled = state.model_copy(
+        update={"evaluation": state.evaluation.model_copy(update={"jobs": (unpaced,)})}
+    )
+    assert [w.subject for w in orphan_waits(stalled)] == [job.resource_id.root]

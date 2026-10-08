@@ -1,15 +1,18 @@
 """The only way runtime code builds a core ``Observation``.
 
 Core accepts a later observation of a request only if it carries a higher
-``sequence`` than every earlier one, or is identical to the latest. An executor
+``sequence`` than every earlier one (not necessarily the next one), or is identical to the latest. An executor
 that always emits sequence 0 therefore cannot report "Unknown" and later
 "Succeeded" for one request: core rejects the second observation.
 
 The factory keeps one durable row per request: the last observation it issued.
 Reporting the same facts again returns that row unchanged (a replay, byte for
 byte, including the time). Reporting different facts issues the next sequence
-and stores it before returning, so a crash between issue and delivery replays
-the same observation, never a gap or a reused number. Identity (event id,
+and stores it before returning, so a number is never reused. A crash between
+issue and delivery (a request begun whose result was never sealed) can leave a
+skipped number: the re-run issues the next one. Core takes any observation newer
+than the one it holds, so a skipped number loses nothing: an observation is a
+sample of the request's state, and the newer sample supersedes it. Identity (event id,
 request, scope, admission) is derived from the request and never supplied by
 the caller.
 

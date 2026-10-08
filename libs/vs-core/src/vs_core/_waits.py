@@ -183,6 +183,27 @@ def _producer(related: Sequence[Intent], outbox: frozenset[RequestId]) -> Produc
     return None
 
 
+def _job_producer(
+    submission: RequestId | None,
+    *,
+    answered: bool,
+    related: Sequence[Intent],
+    outbox: frozenset[RequestId],
+) -> Producer | None:
+    """The producer of a job's next observation.
+
+    A submission's own intent stays open until the job ends, so once the submission has
+    been answered it no longer produces anything: only a poll in flight, a timer or an
+    outbox event does.
+    """
+    live = [row for row in related if not (answered and row.request_id == submission)]
+    if any(intent_waits(row.phase) for row in live):
+        return Producer.PENDING_REQUEST
+    if any(row.request_id in outbox for row in related):
+        return Producer.OUTBOX_EVENT
+    return None
+
+
 def _session_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
     found = []
     for session in core.sessions.sessions:
@@ -232,7 +253,13 @@ def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
             Wait(
                 waiter=WaitKind.OWNED_JOB,
                 subject=job.resource_id.root,
-                producer=producer or _producer(related, outbox),
+                producer=producer
+                or _job_producer(
+                    job.submission_id,
+                    answered=job.observation is not None,
+                    related=related,
+                    outbox=outbox,
+                ),
             )
         )
     for registered in core.evaluation.registered_jobs:
@@ -249,7 +276,13 @@ def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
             Wait(
                 waiter=WaitKind.OWNED_JOB,
                 subject=registered.request_id.root,
-                producer=producer or _producer(related, outbox),
+                producer=producer
+                or _job_producer(
+                    registered.request_id,
+                    answered=registered.observation is not None,
+                    related=related,
+                    outbox=outbox,
+                ),
             )
         )
     return found
