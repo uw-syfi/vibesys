@@ -104,6 +104,14 @@ class PopulationSearch:
         """Whether the population has no passing parent yet."""
         return not vibesys_selector.passed_individuals(state.individuals)
 
+    def bootstrap_attempts(self, state: PopulationState) -> int:
+        """How many cold-start attempts the population has already admitted.
+
+        Derived from durable state so a resumed campaign spends the same
+        ``bootstrap_max_attempts`` budget as an uninterrupted one.
+        """
+        return sum(1 for individual in state.individuals if individual.generation == 0)
+
     def propose(self, state: PopulationState) -> tuple[Proposal | None, PopulationState]:
         """Select a parent and inspirations; ``None`` when nothing has passed."""
         if self.config.selector == "openevolve":

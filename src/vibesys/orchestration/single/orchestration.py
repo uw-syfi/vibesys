@@ -24,6 +24,7 @@ from vibesys.hypothesis import (
     build_round_record,
 )
 from vibesys.metrics import FrameworkBenchmarkOutcome
+from vibesys.orchestration.attempts import Implement, NextStep, next_step
 from vibesys.orchestration.profilers import (
     ProfilerKind,
     ProfilerSummary,
@@ -300,26 +301,22 @@ class _SingleRun:
         )
         return hypothesis
 
-    def _first_attempt(self, selected: _SelectedRound) -> int:
+    def _next_step(self, selected: _SelectedRound) -> NextStep:
         marker = self.state.last_paid_attempt
-        if (
+        paid_here = (
             marker is not None
             and marker.round_number == self.round_number
             and marker.role_id == IMPLEMENTER.id
             and marker.member_id == selected.plan.hypothesis_id
-        ):
-            return marker.turn_number + 1
-        return 1
+        )
+        return next_step(
+            last_paid=marker.turn_number if paid_here else None,
+            max_attempts=self.options.max_retries_per_round,
+        )
 
     async def _run_attempts(self, selected: _SelectedRound) -> None:
-        first = self._first_attempt(selected)
-        if first > self.options.max_retries_per_round:
-            message = (
-                f"round {self.round_number} exhausted its "
-                f"{self.options.max_retries_per_round} paid attempts"
-            )
-            raise RuntimeError(message)
-        for retry in range(first, self.options.max_retries_per_round + 1):
+        while isinstance(step := self._next_step(selected), Implement):
+            retry = step.attempt
             selected.attempt.retry = retry
             selected.attempt.official_reason = None
             await self._mark_paid(
@@ -470,10 +467,10 @@ class _SingleRun:
                 framework_benchmark_configured=self.run.facts.benchmark_configured,
                 accuracy_configured=self.run.facts.accuracy_configured,
                 candidate_commit=candidate_revision,
-                backend_name=binding.backend,
-                driver_name=binding.driver,
-                provider=binding.provider,
-                model=binding.model,
+                backend_name=binding.backend if binding else None,
+                driver_name=binding.driver if binding else None,
+                provider=binding.provider if binding else None,
+                model=binding.model if binding else None,
             )
         )
         state = self.state.search

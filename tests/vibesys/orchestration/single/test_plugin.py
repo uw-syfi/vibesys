@@ -357,7 +357,6 @@ def test_interrupted_final_paid_attempt_closes_its_round_and_the_run_continues(
         script = _Script(
             _plan("H-01"),
             RuntimeError("agent disconnected"),
-            _plan("H-02"),
             _response(),
         )
         run = FakeRun(
@@ -380,12 +379,14 @@ def test_interrupted_final_paid_attempt_closes_its_round_and_the_run_continues(
     assert [role for role, _history, _message in script.calls] == [
         DESIGNER.id,
         IMPLEMENTER.id,
-        DESIGNER.id,
         IMPLEMENTER.id,
     ]
     assert state is not None
     assert state.last_paid_attempt is None
-    assert [record.round_number for record in state.search.rounds] == [1, 2]
+    assert [(record.round_number, record.passed) for record in state.search.rounds] == [
+        (1, False),
+        (2, True),
+    ]
 
 
 def test_rollback_uses_recorded_parent_and_sessions_close(tmp_path: Path) -> None:

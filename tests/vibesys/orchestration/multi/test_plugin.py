@@ -525,8 +525,6 @@ def test_interrupted_final_paid_attempt_closes_its_round_and_the_run_continues(
             _pre_round(),
             _plan("H-01"),
             RuntimeError("agent disconnected"),
-            _pre_round(),
-            _plan("H-02"),
             _implementation(),
             _judge(),
         )
@@ -551,14 +549,15 @@ def test_interrupted_final_paid_attempt_closes_its_round_and_the_run_continues(
         DESIGNER.id,
         DESIGNER.id,
         IMPLEMENTER.id,
-        DESIGNER.id,
-        DESIGNER.id,
         IMPLEMENTER.id,
         JUDGE.id,
     ]
     assert state is not None
     assert state.last_paid_attempt is None
-    assert [record.round_number for record in state.search.rounds] == [1, 2]
+    assert [(record.round_number, record.passed) for record in state.search.rounds] == [
+        (1, False),
+        (2, True),
+    ]
 
 
 def test_failed_implementer_turn_feeds_a_durable_framework_reason_to_the_retry(

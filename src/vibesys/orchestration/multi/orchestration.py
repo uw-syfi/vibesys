@@ -25,6 +25,7 @@ from vibesys.hypothesis import (
 )
 from vibesys.hypothesis import cadence as hypothesis_cadence
 from vibesys.metrics import FrameworkBenchmarkOutcome
+from vibesys.orchestration.attempts import Implement, NextStep, next_step
 from vibesys.orchestration.multi.attribution import run_attribution
 from vibesys.orchestration.multi.files import MultiFiles
 from vibesys.orchestration.multi.models import (
@@ -358,15 +359,17 @@ class _MultiRun:
         )
         return hypothesis
 
-    def _first_attempt(self, selected: _SelectedRound) -> int:
+    def _next_step(self, selected: _SelectedRound) -> NextStep:
         marker = self.state.last_paid_attempt
-        if (
+        paid_here = (
             marker is not None
             and marker.round_number == self.round_number
             and marker.member_id == selected.request.plan.hypothesis_id
-        ):
-            return marker.turn_number + 1
-        return 1
+        )
+        return next_step(
+            last_paid=marker.turn_number if paid_here else None,
+            max_attempts=self.options.max_retries_per_round,
+        )
 
     async def _mark_paid(self, selected: _SelectedRound, retry: int) -> None:
         self.state = self.state.model_copy(
@@ -384,14 +387,8 @@ class _MultiRun:
         )
 
     async def _run_attempts(self, selected: _SelectedRound) -> None:
-        first = self._first_attempt(selected)
-        if first > self.options.max_retries_per_round:
-            message = (
-                f"round {self.round_number} exhausted its "
-                f"{self.options.max_retries_per_round} paid attempts"
-            )
-            raise RuntimeError(message)
-        for retry in range(first, self.options.max_retries_per_round + 1):
+        while isinstance(step := self._next_step(selected), Implement):
+            retry = step.attempt
             attempt = selected.attempt
             attempt.retry = retry
             attempt.official_reason = None
@@ -624,10 +621,10 @@ class _MultiRun:
                 framework_benchmark_configured=self.run.facts.benchmark_configured,
                 accuracy_configured=self.run.facts.accuracy_configured,
                 candidate_commit=candidate_revision,
-                backend_name=binding.backend,
-                driver_name=binding.driver,
-                provider=binding.provider,
-                model=binding.model,
+                backend_name=binding.backend if binding else None,
+                driver_name=binding.driver if binding else None,
+                provider=binding.provider if binding else None,
+                model=binding.model if binding else None,
             )
         )
         search_state = self.state.search

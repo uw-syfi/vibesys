@@ -204,7 +204,8 @@ class _EvolveRun:
                 primary.add_note(f"root session cleanup also failed: {error}")
 
     async def _bootstrap(self) -> bool:
-        for attempt in range(1, self.options.bootstrap_max_attempts + 1):
+        spent = self.search.bootstrap_attempts(self.state.population)
+        for attempt in range(spent + 1, self.options.bootstrap_max_attempts + 1):
             wip = self.search.wip_seed(self.state.population)
             if (
                 wip is not None

@@ -519,6 +519,44 @@ def test_bootstrap_repairs_the_retained_wip_seed(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_bootstrap_budget_survives_an_interrupted_resume(tmp_path: Path) -> None:
+    # bootstrap_max_attempts bounds a campaign's cold-start attempts across restarts: a
+    # host that dies mid-bootstrap does not hand the resumed run a fresh budget.
+    implementer_turns = 0
+
+    def responder(
+        role: AgentRole,
+        history: tuple[str, ...],
+        message: str,
+        response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal implementer_turns
+        if role.id == "implementer":
+            implementer_turns += 1
+            if implementer_turns == 2:
+                raise _ParallelBatchInterruptedError
+        if role.id == "judge":
+            return {"analysis": "unsound", "feedback": "still broken", "verdict": "fail"}
+        return _passing_responder(role, history, message, response)
+
+    async def scenario() -> tuple[RunStatus, EvolveState | None]:
+        run = FakeRun(PLUGIN, project_root=tmp_path, responder=responder)
+        try:
+            options = _options(bootstrap_max_attempts=2)
+            with pytest.raises(_ParallelBatchInterruptedError):
+                await PLUGIN.orchestrate(run, options)
+            status = await PLUGIN.orchestrate(run, options)
+            return status, await run.state.load(EvolveState)
+        finally:
+            await run.close()
+
+    status, state = asyncio.run(scenario())
+
+    assert status is RunStatus.FAILED
+    assert state is not None
+    assert [item.generation for item in state.population.individuals] == [0, 0]
+
+
 def test_pareto_metrics_keep_both_non_dominated_candidates(tmp_path: Path) -> None:
     space = MetricSpace(
         objectives=(

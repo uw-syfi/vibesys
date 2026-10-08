@@ -41,7 +41,9 @@ class RecordInput:
     framework_benchmark_configured: bool
     accuracy_configured: bool
     candidate_commit: str | None
-    backend_name: str
+    # None when no implementer session ran in this process (a resumed run closing a round
+    # whose last paid attempt was interrupted): there is nothing to attribute.
+    backend_name: str | None
     driver_name: str | None
     provider: str | None
     model: str | None
