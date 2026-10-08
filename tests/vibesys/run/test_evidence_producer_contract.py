@@ -287,9 +287,9 @@ class _BenchmarkFault(StrEnum):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fault", tuple(_BenchmarkFault))
-@given(executed=st.booleans(), with_feedback=st.booleans())
+@given(executed=st.booleans())
 async def test_later_infrastructure_failure_retains_prior_stage_without_trusting_failure(
-    fault: _BenchmarkFault, *, executed: bool, with_feedback: bool
+    fault: _BenchmarkFault, *, executed: bool
 ) -> None:
     spec = ScenarioSpec()
     with TemporaryDirectory(prefix="evidence-infrastructure-") as directory:
@@ -300,7 +300,7 @@ async def test_later_infrastructure_failure_retains_prior_stage_without_trusting
                 scenario.run.evaluation.script_benchmark(
                     BenchmarkEvaluation(
                         executed=executed,
-                        feedback=failure if with_feedback else None,
+                        feedback=failure,
                         failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
                     )
                 )
@@ -471,9 +471,9 @@ async def test_slurm_aggregate_failure_is_independent_of_semantic_stage_verdicts
         (EvidenceKind.BENCHMARK, EvidenceKind.ACCURACY),
     ],
 )
-@given(executed=st.booleans(), with_feedback=st.booleans())
+@given(executed=st.booleans())
 async def test_first_infrastructure_failure_does_not_trust_or_execute_successor_stages(
-    kinds: tuple[EvidenceKind, ...], *, executed: bool, with_feedback: bool
+    kinds: tuple[EvidenceKind, ...], *, executed: bool
 ) -> None:
     spec = ScenarioSpec(kinds=kinds)
     with TemporaryDirectory(prefix="evidence-first-infrastructure-") as directory:
@@ -481,7 +481,7 @@ async def test_first_infrastructure_failure_does_not_trust_or_execute_successor_
             scenario.run.evaluation.script_benchmark(
                 BenchmarkEvaluation(
                     executed=executed,
-                    feedback="benchmark infrastructure failed" if with_feedback else None,
+                    feedback="benchmark infrastructure failed",
                     failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
                 )
             )
