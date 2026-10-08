@@ -14,12 +14,12 @@ from vs_runtime.api.infrastructure import (
     open_run_environment_resources,
 )
 from vs_sandbox.api import ProjectPathPolicy
-from vs_sandbox.api.testing import FakeComputeBackend, FakeSandbox
+from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_sandbox.api import Sandbox
+    from vs_sandbox.api import CommandRunner
 
 
 @dataclass
@@ -53,7 +53,7 @@ class _Backend(FakeComputeBackend):
 
 @dataclass
 class _Session:
-    sandbox: Sandbox
+    sandbox: CommandRunner
     view: RunEnvironmentView
     events: list[str]
     close_error: BaseException | None = None
@@ -88,7 +88,7 @@ def _request(tmp_path: Path, backend: _Backend) -> RunEnvironmentRequest:
 
 def _session(events: list[str]) -> _Session:
     return _Session(
-        FakeSandbox(),
+        FakeCommandRunner(),
         RunEnvironmentView(paths=AgentPaths()),
         events,
     )

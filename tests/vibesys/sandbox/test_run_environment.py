@@ -72,7 +72,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_runtime.api.infrastructure import RunEnvironment
-    from vs_sandbox.api import ContentionMonitor, Sandbox
+    from vs_sandbox.api import CommandRunner, ContentionMonitor
 
 
 # A committed two-file overlay, not a submodule: the contract under test is
@@ -150,7 +150,7 @@ class FakeBackend:
         self.sandbox = MagicMock()
         self.calls: list[tuple[SandboxKind, dict[str, Any]]] = []
 
-    def make_sandbox(self, kind: SandboxKind, **kwargs: object) -> Sandbox:
+    def make_sandbox(self, kind: SandboxKind, **kwargs: object) -> CommandRunner:
         self.calls.append((kind, kwargs))
         if kind is SandboxKind.DOCKER:
             # A real DockerSandbox derives agent_path from (host_workspace,
@@ -1526,7 +1526,7 @@ def test_modal_environment_uses_local_docker_for_editing(
 
     session = _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
-    # The sandbox is local Docker, not a Modal Sandbox.
+    # The sandbox is local Docker, not a Modal sandbox.
     assert backend.calls[0][0] is SandboxKind.DOCKER
     assert backend.calls[0][1]["attach_accelerator"] is False
     # The container starts from the same kind of agent image the plain

@@ -16,9 +16,9 @@ from vs_runtime.api.infrastructure import (
     prepare_docker_evaluator_resources,
 )
 from vs_sandbox.api import (
+    CommandResult,
     HostResource,
     HostResourceAccess,
-    SandboxExecutionResult,
     SandboxKind,
 )
 from vs_sandbox.api.evaluator_tools import (
@@ -32,7 +32,7 @@ from vs_sandbox.api.evaluator_tools import (
 from vs_sandbox.api.testing import (
     DEFAULT_RESULT,
     FakeComputeBackend,
-    FakeLifecycleSandbox,
+    FakeLifecycleRunner,
 )
 
 if TYPE_CHECKING:
@@ -152,7 +152,7 @@ def test_missing_cache_uses_target_image_ephemeral_builder_then_verifies(
     log_dir = tmp_path / "logs"
     requirements = _requirements(tmp_path)
     backend = FakeComputeBackend()
-    sandbox = FakeLifecycleSandbox()
+    sandbox = FakeLifecycleRunner()
     backend.script_sandbox(SandboxKind.DOCKER, str(_builder_workspace(log_dir)), sandbox)
 
     with pytest.raises(EvaluatorToolError, match="did not publish every declared tool"):
@@ -195,8 +195,8 @@ def test_builder_ownership_failure_is_bounded_and_still_stops(tmp_path: Path) ->
     log_dir = tmp_path / "logs"
     requirements = _requirements(tmp_path)
     backend = FakeComputeBackend()
-    sandbox = FakeLifecycleSandbox(
-        default_result=SandboxExecutionResult(output="denied\n" + "x" * 800, exit_code=1)
+    sandbox = FakeLifecycleRunner(
+        default_result=CommandResult(output="denied\n" + "x" * 800, exit_code=1)
     )
     sandbox.script(
         evaluator_tools_install_command(requirements.tools, SANDBOX_EVALUATOR_TOOLS_ROOT),
@@ -226,7 +226,7 @@ def test_builder_start_failure_still_attempts_cleanup(tmp_path: Path) -> None:
     log_dir = tmp_path / "logs"
     requirements = _requirements(tmp_path)
     backend = FakeComputeBackend()
-    sandbox = FakeLifecycleSandbox(start_error=RuntimeError("container failed to start"))
+    sandbox = FakeLifecycleRunner(start_error=RuntimeError("container failed to start"))
     backend.script_sandbox(SandboxKind.DOCKER, str(_builder_workspace(log_dir)), sandbox)
 
     with pytest.raises(RuntimeError, match="container failed to start"):

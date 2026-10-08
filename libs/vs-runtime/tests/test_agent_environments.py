@@ -22,15 +22,15 @@ from vs_sandbox.api import (
     HostResourceAccess,
     ProjectPathPolicy,
 )
-from vs_sandbox.api.testing import FakeComputeBackend, FakeSandbox
+from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 
 if TYPE_CHECKING:
-    from vs_sandbox.api import Sandbox
+    from vs_sandbox.api import CommandRunner
 
 
 @dataclass
 class _Session:
-    sandbox: Sandbox
+    sandbox: CommandRunner
     view: RunEnvironmentView
     close_count: int = 0
 
@@ -50,7 +50,7 @@ class _Session:
         self.close_count += 1
 
 
-class _PathSandbox(FakeSandbox):
+class _PathRunner(FakeCommandRunner):
     """Agent sandbox fake with deterministic host-path projection."""
 
     def agent_path(self, host_path: Path | str) -> str:
@@ -74,7 +74,7 @@ def _request(tmp_path: Path) -> RunEnvironmentRequest:
 
 def _session(*, sandboxed: bool) -> _Session:
     return _Session(
-        _PathSandbox(),
+        _PathRunner(),
         RunEnvironmentView(
             paths=AgentPaths(),
             cli_sandboxed=sandboxed,

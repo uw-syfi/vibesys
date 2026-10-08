@@ -27,10 +27,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_sandbox.docker_sandbox import DockerSandbox as DockerSandboxType
-    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
-    from vs_sandbox.local_shell import LocalShellSandbox
+    from vs_sandbox.local_shell import LocalShellRunner
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
 _DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
@@ -64,7 +64,7 @@ class CudaBackend:
         # (kind, sandbox) tuples — kind is recorded at registration time so
         # ``reselect_device`` dispatches on the requested kind rather than on
         # the concrete sandbox class.
-        self._sandboxes: list[tuple[SandboxKind, Sandbox]] = []
+        self._sandboxes: list[tuple[SandboxKind, CommandRunner]] = []
 
     # -- ComputeBackendImpl protocol ---------------------------------------------
 
@@ -83,7 +83,7 @@ class CudaBackend:
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
-    ) -> Sandbox:
+    ) -> CommandRunner:
         """Construct a sandbox configured for CUDA execution."""
         sandbox_api = import_module("vs_sandbox.api")
         docker_sandbox_class = sandbox_api.DockerSandbox
@@ -177,7 +177,7 @@ class CudaBackend:
                 sb.restart_with_gpus(self._docker_gpu_spec())
             elif kind is SandboxKind.LOCAL:
                 sandbox_api = import_module("vs_sandbox.api")
-                local_sandbox_type = cast("type[LocalShellSandbox]", sandbox_api.LocalShellSandbox)
+                local_sandbox_type = cast("type[LocalShellRunner]", sandbox_api.LocalShellRunner)
                 if not isinstance(sb, local_sandbox_type):
                     raise AssertionError
                 sb.env["CUDA_VISIBLE_DEVICES"] = str(new_gpu.index)

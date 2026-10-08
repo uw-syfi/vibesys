@@ -94,7 +94,7 @@ if TYPE_CHECKING:
     from vs_evaluation.api import EvaluationSettlements
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
     from vs_runtime._run_control import RunControlTransition
-    from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
+    from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
 
 
 class FakeAgentExecutionEnvironment:
@@ -114,7 +114,7 @@ class FakeAgentExecutionEnvironment:
         self.skill_selection = NULL_SKILL_SELECTION
         self.project_path_policy = project_path_policy
         self.host_resources = host_resources
-        self.backends: dict[str, Sandbox] | None = None
+        self.backends: dict[str, CommandRunner] | None = None
         self.use_docker = use_docker
         self.closed = False
         self._close_log = close_log

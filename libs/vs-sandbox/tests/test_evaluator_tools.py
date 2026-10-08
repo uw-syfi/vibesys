@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_sandbox.api import BeforeReadyContext, SandboxExecutionResult, SandboxLifecycle
+from vs_sandbox.api import BeforeReadyContext, CommandResult, SandboxLifecycle
 from vs_sandbox.api.evaluator_tools import (
     CargoGitToolSpec,
     EvaluatorToolError,
@@ -24,7 +24,7 @@ from vs_sandbox.api.evaluator_tools import (
     tool_spec_digest,
     tool_token,
 )
-from vs_sandbox.api.testing import FakeSandbox
+from vs_sandbox.api.testing import FakeCommandRunner
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -185,7 +185,7 @@ def test_lifecycle_hooks_snapshot_tools_and_execute_target_command(tmp_path: Pat
     install_parent = tmp_path / "tools"
     hooks = EvaluatorToolLifecycleHooks(tools, install_parent)
     tools.clear()
-    sandbox = FakeSandbox()
+    sandbox = FakeCommandRunner()
 
     lifecycle = SandboxLifecycle([hooks])
     lifecycle.before_ready(sandbox)
@@ -206,8 +206,8 @@ def test_lifecycle_hooks_reject_target_install_failure(
     tmp_path: Path,
     exit_code: int | None,
 ) -> None:
-    sandbox = FakeSandbox(
-        default_result=SandboxExecutionResult(
+    sandbox = FakeCommandRunner(
+        default_result=CommandResult(
             exit_code=exit_code,
             output=(
                 "permission denied\n"

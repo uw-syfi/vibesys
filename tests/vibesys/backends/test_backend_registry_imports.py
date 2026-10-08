@@ -16,7 +16,7 @@ from tests.support import run_test_command
 
 from vs_sandbox.api import (
     ComputeBackend,
-    LocalShellSandbox,
+    LocalShellRunner,
     SandboxKind,
     create_compute_backend,
 )
@@ -60,7 +60,7 @@ def test_local_sandbox_construction_builds_a_local_shell_sandbox(tmp_path: Path)
         extra_env={},
     )
 
-    assert isinstance(sandbox, LocalShellSandbox)
+    assert isinstance(sandbox, LocalShellRunner)
 
 
 def test_backend_registry_still_resolves_every_default(tmp_path: Path) -> None:

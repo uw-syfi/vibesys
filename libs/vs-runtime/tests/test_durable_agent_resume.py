@@ -74,10 +74,10 @@ from vs_runtime.api.testing import (
     FakeWorkspaceAgentSessions,
 )
 from vs_sandbox.api import (
+    CommandResult,
     HostResource,
     HostResourceAccess,
     ProjectPathPolicy,
-    SandboxExecutionResult,
 )
 
 if TYPE_CHECKING:
@@ -156,9 +156,9 @@ class WorkspaceResource:
     def trusted_input_changes(self) -> list[str]:
         return []
 
-    def execute(self, command: str, timeout_seconds: int | None) -> SandboxExecutionResult:
+    def execute(self, command: str, timeout_seconds: int | None) -> CommandResult:
         del command, timeout_seconds
-        return SandboxExecutionResult("", 0)
+        return CommandResult("", 0)
 
     def agent_scope(self) -> AgentExecutionScope:
         def environment(_: AgentExecutionConfiguration) -> FakeAgentExecutionEnvironment:

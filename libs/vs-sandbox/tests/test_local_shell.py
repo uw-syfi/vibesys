@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_sandbox.api import LocalShellSandbox, Sandbox, SandboxExecutionResult
+from vs_sandbox.api import CommandResult, CommandRunner, LocalShellRunner
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
 def test_result_defaults_describe_a_successful_untruncated_run() -> None:
-    result = SandboxExecutionResult(output="x")
+    result = CommandResult(output="x")
 
     assert result.exit_code is None
     assert not result.truncated
@@ -22,18 +22,18 @@ def test_result_defaults_describe_a_successful_untruncated_run() -> None:
 
 
 def test_local_shell_satisfies_the_sandbox_protocol(tmp_path: Path) -> None:
-    sandbox: Sandbox = LocalShellSandbox(tmp_path)
+    sandbox: CommandRunner = LocalShellRunner(tmp_path)
 
     assert sandbox.id.startswith("local-")
     assert sandbox.execute("true").exit_code == 0
 
 
 def test_ids_are_unique_per_instance(tmp_path: Path) -> None:
-    assert LocalShellSandbox(tmp_path).id != LocalShellSandbox(tmp_path).id
+    assert LocalShellRunner(tmp_path).id != LocalShellRunner(tmp_path).id
 
 
 def test_commands_run_in_the_root_dir(tmp_path: Path) -> None:
-    result = LocalShellSandbox(tmp_path).execute("pwd")
+    result = LocalShellRunner(tmp_path).execute("pwd")
 
     assert result.exit_code == 0
     assert result.stdout.strip() == str(tmp_path.resolve())
@@ -45,8 +45,8 @@ def test_environment_is_isolated_unless_inherited(
 ) -> None:
     monkeypatch.setenv("VS_LOCAL_SHELL_PROBE", "from-parent")
 
-    isolated = LocalShellSandbox(tmp_path, env={"PATH": "/usr/bin:/bin", "ONLY": "1"})
-    inherited = LocalShellSandbox(tmp_path, env={"ONLY": "2"}, inherit_env=True)
+    isolated = LocalShellRunner(tmp_path, env={"PATH": "/usr/bin:/bin", "ONLY": "1"})
+    inherited = LocalShellRunner(tmp_path, env={"ONLY": "2"}, inherit_env=True)
 
     assert isolated.execute('echo "${VS_LOCAL_SHELL_PROBE:-unset}:$ONLY"').stdout.strip() == (
         "unset:1"
@@ -57,7 +57,7 @@ def test_environment_is_isolated_unless_inherited(
 
 
 def test_env_edits_apply_to_later_commands(tmp_path: Path) -> None:
-    sandbox = LocalShellSandbox(tmp_path, inherit_env=True)
+    sandbox = LocalShellRunner(tmp_path, inherit_env=True)
     sandbox.env["VS_DEVICE"] = "3"
 
     assert sandbox.execute("echo $VS_DEVICE").stdout.strip() == "3"
@@ -65,13 +65,13 @@ def test_env_edits_apply_to_later_commands(tmp_path: Path) -> None:
 
 def test_non_positive_timeouts_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="timeout must be positive"):
-        LocalShellSandbox(tmp_path, timeout=0)
+        LocalShellRunner(tmp_path, timeout=0)
     with pytest.raises(ValueError, match="timeout must be positive"):
-        LocalShellSandbox(tmp_path).execute("true", timeout=-1)
+        LocalShellRunner(tmp_path).execute("true", timeout=-1)
 
 
 def test_launch_failure_is_reported_not_raised(tmp_path: Path) -> None:
-    result = LocalShellSandbox(tmp_path / "missing").execute("true")
+    result = LocalShellRunner(tmp_path / "missing").execute("true")
 
     assert result.exit_code == 1
     assert result.stdout == ""

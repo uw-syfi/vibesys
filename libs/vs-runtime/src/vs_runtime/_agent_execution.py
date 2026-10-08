@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime._run_environment import RunEnvironmentRequest, RunEnvironmentSession
-    from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
+    from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
@@ -91,7 +91,7 @@ class AgentExecutionEnvironment(Protocol):
     def host_resources(self) -> tuple[HostResource, ...]: ...
 
     @property
-    def backends(self) -> dict[str, Sandbox] | None: ...
+    def backends(self) -> dict[str, CommandRunner] | None: ...
 
     @property
     def use_docker(self) -> bool: ...
@@ -123,7 +123,7 @@ class ScopedAgentEnvironment:
     skill_selection: SkillSelection
     project_path_policy: ProjectPathPolicy
     host_resources: tuple[HostResource, ...]
-    backends: dict[str, Sandbox] | None
+    backends: dict[str, CommandRunner] | None
     use_docker: bool
     owns_session: bool
     _closed: bool = False

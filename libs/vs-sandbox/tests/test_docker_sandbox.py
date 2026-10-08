@@ -10,7 +10,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vs_sandbox.api import BeforeReadyContext, Sandbox, SandboxLifecycleError, SandboxLifecycleHooks
+from vs_sandbox.api import (
+    BeforeReadyContext,
+    CommandRunner,
+    SandboxLifecycleError,
+    SandboxLifecycleHooks,
+)
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sandbox.docker_sandbox import (
     AGENT_HOME,
@@ -23,7 +28,7 @@ from vs_sandbox.host_resources import HostResource, HostResourceAccess
 
 
 class _RecordingHooks(SandboxLifecycleHooks):
-    def __init__(self, invocations: list[Sandbox]) -> None:
+    def __init__(self, invocations: list[CommandRunner]) -> None:
         self._invocations = invocations
 
     def before_ready(self, context: BeforeReadyContext) -> None:
@@ -253,7 +258,7 @@ class TestStart:
         self, mock_run: MagicMock, tmp_path: Path
     ) -> None:
 
-        invocations: list[Sandbox] = []
+        invocations: list[CommandRunner] = []
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
@@ -447,7 +452,7 @@ class TestLifecycleHooks:
             stdout="abc123container\n",
             stderr="",
         )
-        invocations: list[Sandbox] = []
+        invocations: list[CommandRunner] = []
 
         s = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
@@ -466,7 +471,7 @@ class TestLifecycleHooks:
             stdout="abc123container\n",
             stderr="",
         )
-        invocations: list[Sandbox] = []
+        invocations: list[CommandRunner] = []
 
         s = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),

@@ -15,7 +15,7 @@ from vs_sandbox.api import (
     HostResource,
     HostResourceAccess,
     LocalBackend,
-    LocalShellSandbox,
+    LocalShellRunner,
     SandboxKind,
     SandboxLifecycleHooks,
     create_compute_backend,
@@ -70,7 +70,7 @@ class TestCpuSandbox:
             log_path=None,
             extra_env={"FOO": "bar"},
         )
-        assert isinstance(sb, LocalShellSandbox)
+        assert isinstance(sb, LocalShellRunner)
 
     def test_local_runs_lifecycle_hooks_before_returning(self, tmp_path: Path) -> None:
         impl = _make_backend(tmp_path)

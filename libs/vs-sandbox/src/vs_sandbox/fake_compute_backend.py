@@ -2,7 +2,7 @@
 
 No GPU probing, no container runtime, no subprocess: every sandbox
 ``make_sandbox`` returns is an in-memory
-:class:`~vs_sandbox.api.testing.FakeSandbox`, one per ``(kind, id)`` pair so
+:class:`~vs_sandbox.api.testing.FakeCommandRunner`, one per ``(kind, id)`` pair so
 a caller that opens more than one sandbox kind gets independent scripts.
 ``make_monitor``/``reselect_device`` are no-ops, matching a backend with no
 contention monitor.
@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from vs_sandbox.accelerator_discovery import AcceleratorInventory
 from vs_sandbox.compute_backends import ComputeBackend
-from vs_sandbox.fake_sandbox import FakeSandbox
+from vs_sandbox.fake_command_runner import FakeCommandRunner
 from vs_sandbox.lifecycle import SandboxLifecycle
 
 if TYPE_CHECKING:
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.compute_backends import ContentionMonitor, SandboxKind
-    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
@@ -51,7 +51,7 @@ class FakeAcceleratorDiscovery:
 
 
 @dataclass(frozen=True, slots=True)
-class FakeSandboxCreation:
+class FakeRunnerCreation:
     """One sandbox construction observed by :class:`FakeComputeBackend`."""
 
     kind: SandboxKind
@@ -82,14 +82,14 @@ class FakeComputeBackend:
     ) -> None:
         """Accept the same construction shape as a real backend factory."""
         del log_dir, log, image
-        self.sandboxes: dict[str, FakeSandbox] = {}
-        self.creations: list[FakeSandboxCreation] = []
+        self.sandboxes: dict[str, FakeCommandRunner] = {}
+        self.creations: list[FakeRunnerCreation] = []
 
     def script_sandbox(
         self,
         kind: SandboxKind,
         host_workspace: str,
-        sandbox: FakeSandbox,
+        sandbox: FakeCommandRunner,
     ) -> None:
         """Use *sandbox* for the exact kind/workspace construction key."""
         self.sandboxes[f"{kind.value}:{host_workspace}"] = sandbox
@@ -109,10 +109,10 @@ class FakeComputeBackend:
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
-    ) -> Sandbox:
-        """Return a fresh :class:`FakeSandbox` keyed by *kind* and *host_workspace*."""
+    ) -> CommandRunner:
+        """Return a fresh :class:`FakeCommandRunner` keyed by *kind* and *host_workspace*."""
         self.creations.append(
-            FakeSandboxCreation(
+            FakeRunnerCreation(
                 kind=kind,
                 host_workspace=host_workspace,
                 log_path=log_path,
@@ -130,7 +130,7 @@ class FakeComputeBackend:
         key = f"{kind.value}:{host_workspace}"
         sandbox = self.sandboxes.get(key)
         if sandbox is None:
-            sandbox = FakeSandbox()
+            sandbox = FakeCommandRunner()
             self.sandboxes[key] = sandbox
         SandboxLifecycle(lifecycle_hooks).before_ready(sandbox)
         return sandbox

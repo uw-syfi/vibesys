@@ -33,7 +33,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import FakeAgentExecutionEnvironment
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
-from vs_sandbox.api.testing import FakeComputeBackend, FakeSandbox
+from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 
 if TYPE_CHECKING:
     from typing import TextIO
@@ -41,12 +41,12 @@ if TYPE_CHECKING:
     from vs_project.api import OrchestrationRunManifest
     from vs_runtime.api import OrchestrationResumeDecision
     from vs_runtime.api.infrastructure import RunEnvironmentSession
-    from vs_sandbox.api import Sandbox
+    from vs_sandbox.api import CommandRunner
 
 
 @dataclass
 class _Session:
-    sandbox: Sandbox
+    sandbox: CommandRunner
     view: RunEnvironmentView
     closed: bool = False
 
@@ -110,7 +110,7 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
 
     def open_session(_request: RunEnvironmentRequest) -> RunEnvironmentSession:
         session = _Session(
-            FakeSandbox(),
+            FakeCommandRunner(),
             RunEnvironmentView(paths=AgentPaths(), supports_parallel_candidate_evaluation=True),
         )
         opened_sessions.append(session)
@@ -178,7 +178,7 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
             run_id="workspace-resource-test",
             framework_root=tmp_path,
         ),
-        lambda _request: _Session(FakeSandbox(), RunEnvironmentView(paths=AgentPaths())),
+        lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
     )
     opened = FakeAgentExecutionEnvironment(project_path_policy=ProjectPathPolicy())
     configurations: list[AgentExecutionConfiguration] = []

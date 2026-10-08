@@ -26,12 +26,12 @@ from vs_sandbox.api.testing import FakeComputeBackend
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_sandbox.api import Sandbox
+    from vs_sandbox.api import CommandRunner
 
 
 class _RecordingHooks(SandboxLifecycleHooks):
     def __init__(self) -> None:
-        self.sandbox: Sandbox | None = None
+        self.sandbox: CommandRunner | None = None
 
     def before_ready(self, context: BeforeReadyContext) -> None:
         self.sandbox = context.sandbox

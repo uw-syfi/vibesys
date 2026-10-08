@@ -26,7 +26,7 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 if TYPE_CHECKING:
-    from vs_sandbox.api import Sandbox
+    from vs_sandbox.api import CommandRunner
 
 
 @dataclass
@@ -63,7 +63,7 @@ class _Environment:
     skill_selection: SkillSelection = NULL_SKILL_SELECTION
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
     host_resources: tuple[HostResource, ...] = ()
-    backends: dict[str, Sandbox] | None = None
+    backends: dict[str, CommandRunner] | None = None
     use_docker: bool = False
 
     def close(self) -> None:
