@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from enum import StrEnum
+from typing import TYPE_CHECKING, assert_never
 
 from ._adoption import fences_root_mutation
 from ._proofs import Proven, accepted_receipt_for, descriptor_matches
@@ -39,10 +40,83 @@ if TYPE_CHECKING:
     from .types.kernel import CoreState, DecisionSubmitted
 
 
+class DecisionGate(StrEnum):
+    """Whether core takes the strategy's decisions now, later, only to wind down, or never.
+
+    ``OPEN``: every decision is judged on its merits. ``HELD``: the run is paused or blocked;
+    nothing but a stop or withdrawal is taken now, and the rest can be proposed again once the
+    run resumes. ``DRAINING``: the run is closing; only a stop or withdrawal is taken, and
+    the rest never will be. ``CLOSED``: the run is terminal.
+    """
+
+    OPEN = "open"
+    HELD = "held"
+    DRAINING = "draining"
+    CLOSED = "closed"
+
+
+def decision_gate(state: CoreState) -> DecisionGate:
+    """The one fact about whether the run takes decisions; admission and the loop both read it."""
+    status = state.run.status
+    if status is RunStatus.TERMINAL:
+        return DecisionGate.CLOSED
+    if status is RunStatus.CLOSING or state.run.result is not None:
+        return DecisionGate.DRAINING
+    if status in (RunStatus.PAUSED, RunStatus.BLOCKED):
+        return DecisionGate.HELD
+    return DecisionGate.OPEN
+
+
+class RejectionOutlook(StrEnum):
+    """Whether a refused decision can be proposed again."""
+
+    NOT_NOW = "not_now"
+    NEVER = "never"
+
+
+def rejection_outlook(code: RejectionCode) -> RejectionOutlook:
+    """``NOT_NOW`` when the same decision may succeed later, else ``NEVER``.
+
+    A not-now rejection leaves no receipt, so its decision identity can be proposed again.
+    """
+    match code:
+        case RejectionCode.STALE_VIEW | RejectionCode.HELD:
+            return RejectionOutlook.NOT_NOW
+        case (
+            RejectionCode.IDENTITY_CONFLICT
+            | RejectionCode.UNKNOWN_KIND
+            | RejectionCode.UNKNOWN_SCHEMA
+            | RejectionCode.UNDECLARED_OPERATION
+            | RejectionCode.CAPABILITY
+            | RejectionCode.OWNERSHIP
+            | RejectionCode.GENERATION
+            | RejectionCode.CLOSED_SCOPE
+            | RejectionCode.BUDGET
+            | RejectionCode.DEPENDENCY
+            | RejectionCode.EVIDENCE
+            | RejectionCode.ALREADY_SETTLED
+            | RejectionCode.NOT_IMPLEMENTED_IN_KERNEL
+        ):
+            return RejectionOutlook.NEVER
+        case _:
+            assert_never(code)
+
+
 def _reject(
     decision: Decision, code: RejectionCode, path: tuple[str | int, ...], detail: str
 ) -> Rejected:
     return Rejected(decision_id=decision.decision_id, code=code, path=path, detail=detail)
+
+
+def _gate_rejection(state: CoreState, decision: Decision) -> Rejected | None:
+    gate = decision_gate(state)
+    if gate is DecisionGate.OPEN or (
+        isinstance(decision, Stop | Withdraw) and gate is not DecisionGate.CLOSED
+    ):
+        return None
+    if gate is DecisionGate.HELD:
+        return _reject(decision, RejectionCode.HELD, ("scope",), f"run is {state.run.status.value}")
+    return _reject(decision, RejectionCode.CLOSED_SCOPE, ("scope",), "run not accepting decisions")
 
 
 def validate_decision(
@@ -53,12 +127,9 @@ def validate_decision(
         return _reject(
             decision, RejectionCode.STALE_VIEW, ("expected_revision",), "view revision changed"
         )
-    if (state.run.status != RunStatus.RUNNING or state.run.result is not None) and not (
-        isinstance(decision, Stop | Withdraw) and state.run.status != RunStatus.TERMINAL
-    ):
-        return _reject(
-            decision, RejectionCode.CLOSED_SCOPE, ("scope",), "run not accepting decisions"
-        )
+    rejection = _gate_rejection(state, decision)
+    if rejection is not None:
+        return rejection
     rejection = validate_scope(state, decision) or _validate_root_fence(state, decision)
     if rejection is not None:
         return rejection

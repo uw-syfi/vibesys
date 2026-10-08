@@ -32,12 +32,15 @@ from vs_core.api import (
     AdoptionResult,
     ObservationStatus,
     ProposeWinner,
+    Rejected,
+    RejectionOutlook,
     RetainedCandidate,
     RevisionRef,
     RunResultProposal,
     Selection,
     Stop,
     TrustedBaseline,
+    rejection_outlook,
 )
 
 
@@ -47,6 +50,10 @@ class RunEnding(StrEnum):
     ADOPTED = "adopted"
     NO_IMPROVEMENT = "no improvement"
     NO_TRUSTED_RESULT = "no trusted result"
+
+
+# The one winner proposal of a run: its identity names it in core's feedback.
+PROPOSAL = decision_id("propose", "run")
 
 
 def _reason(ending: RunEnding, detail: str) -> str:
@@ -122,7 +129,7 @@ def _propose(draft: Draft) -> None:
     winner = choose_winner(state, draft.config, draft.view.facts.baseline)
     draft.emit(
         ProposeWinner(
-            decision_id=decision_id("propose", "run"),
+            decision_id=PROPOSAL,
             scope=run_scope(draft.view),
             selection=selection_of(winner),
         )
@@ -172,3 +179,18 @@ def on_adoption(state: DynamicStrategyState, event: AdoptionResult) -> DynamicSt
     if event.observation.status is ObservationStatus.SUCCEEDED:
         return state.model_copy(update={"phase": RunPhase.STOPPING})
     return state.model_copy(update={"phase": RunPhase.STOPPING, "winner": None})
+
+
+def on_rejected(state: DynamicStrategyState, event: Rejected) -> DynamicStrategyState:
+    """The winner proposal was refused: propose it again if that was for now, else stop without it.
+
+    Core refuses it for now while the run is held, and for good once the run is draining or
+    the proposal can never be adopted. Either way the strategy leaves the adopting phase.
+    """
+    if state.phase is not RunPhase.ADOPTING or event.decision_id != PROPOSAL:
+        return state
+    match rejection_outlook(event.code):
+        case RejectionOutlook.NOT_NOW:
+            return state.model_copy(update={"phase": RunPhase.SELECTING, "winner": None})
+        case RejectionOutlook.NEVER:
+            return state.model_copy(update={"phase": RunPhase.STOPPING, "winner": None})

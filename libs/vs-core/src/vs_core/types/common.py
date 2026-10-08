@@ -333,6 +333,7 @@ class RejectionCode(StrEnum):
     OWNERSHIP = "ownership"
     GENERATION = "generation"
     CLOSED_SCOPE = "closed-scope"
+    HELD = "held"
     BUDGET = "budget"
     DEPENDENCY = "dependency"
     EVIDENCE = "evidence"

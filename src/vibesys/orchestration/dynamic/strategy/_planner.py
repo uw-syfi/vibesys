@@ -472,3 +472,13 @@ def on_rendered(state: DynamicStrategyState, outcome: RenderedArtifacts) -> Dyna
 def on_rejected(state: DynamicStrategyState, detail: str) -> DynamicStrategyState:
     """A refused planner decision ends the call like an invalid plan with nothing to wait for."""
     return _nothing_valid(state, state.planner, detail, None)
+
+
+def on_held(state: DynamicStrategyState) -> DynamicStrategyState:
+    """A planner decision refused for now returns to the step before it, to be proposed again."""
+    planner = state.planner
+    if planner.turn is not None and planner.awaiting == turn_id(SUBJECT, planner.turn):
+        retry = planner.model_copy(update={"step": Step.RENDERED, "awaiting": None})
+    else:
+        retry = planner.model_copy(update={"step": Step.NEEDED, "awaiting": None})
+    return state.model_copy(update={"planner": retry})

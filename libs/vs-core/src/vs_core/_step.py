@@ -28,7 +28,7 @@ from ._proofs import (
 )
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
-from ._validation import validate_decision
+from ._validation import RejectionOutlook, rejection_outlook, validate_decision
 from ._values import digest
 from .types.attempts import (
     AttemptAdmitted,
@@ -1052,6 +1052,9 @@ def _submitted(
         update={"run": state.run.model_copy(update={"receipts": (*state.run.receipts, receipt)})}
     )
     if rejection is not None:
+        if rejection_outlook(rejection.code) is RejectionOutlook.NOT_NOW:
+            # No receipt: the same decision identity can be proposed again.
+            return Transition(state=state, events=(rejection,))
         return Transition(state=updated, events=(rejection,))
     if isinstance(decision, Stop):
         updated = updated.model_copy(

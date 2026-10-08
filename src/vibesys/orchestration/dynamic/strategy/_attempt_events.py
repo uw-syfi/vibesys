@@ -24,7 +24,7 @@ from vibesys.orchestration.dynamic.strategy import _review_evidence as review_ev
 from vibesys.orchestration.dynamic.strategy._attempts import measured_revision, role_of, subject_of
 from vibesys.orchestration.dynamic.strategy._baseline import stages
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
-from vibesys.orchestration.dynamic.strategy._draft import invocation_for
+from vibesys.orchestration.dynamic.strategy._draft import invocation_for, turn_id
 from vibesys.orchestration.dynamic.strategy._evidence import (
     accept_readings,
     ledger_refs,
@@ -75,6 +75,7 @@ from vs_core.api import (
     ObservationStatus,
     OperationResult,
     Rejected,
+    RejectionOutlook,
     ResumeAuthorized,
     RevisionRef,
     RunView,
@@ -82,6 +83,7 @@ from vs_core.api import (
     TurnResult,
     TurnSuspended,
     may_resubmit,
+    rejection_outlook,
 )
 
 _IMPLEMENTER_REPLY = TypeAdapter(ImplementerReply)
@@ -138,11 +140,39 @@ def fail(state: DynamicStrategyState, index: int, reason: str) -> DynamicStrateg
 
 
 def on_rejected(state: DynamicStrategyState, event: Rejected) -> DynamicStrategyState:
-    """A decision core refused fails the workstream awaiting it."""
+    """A decision core refused: ask again later if it was not now, else fail the workstream."""
     index = _awaiting(state, event.decision_id.root)
     if index is None:
         return state
-    return fail(state, index, f"decision rejected: {event.code.value}: {event.detail}")
+    match rejection_outlook(event.code):
+        case RejectionOutlook.NOT_NOW:
+            return _put(state, index, again(state.attempts[index]))
+        case RejectionOutlook.NEVER:
+            return fail(state, index, f"decision rejected: {event.code.value}: {event.detail}")
+
+
+def again(record: AttemptRecord) -> AttemptRecord:
+    """The workstream as it stood before the decision it awaits, so decide proposes it again.
+
+    A turn request follows its render, so a refused request returns to the rendered prompt
+    (and gives back the paid turn it counted); any other decision returns to its phase's start.
+    """
+    role = role_of(record.phase)
+    if (
+        role is not None
+        and record.turn is not None
+        and record.step is Step.AWAITING
+        and record.awaiting == turn_id(subject_of(record, role), record.turn)
+    ):
+        refund = 1 if record.turn.charge == "paid" else 0
+        return record.model_copy(
+            update={
+                "step": Step.RENDERED,
+                "awaiting": None,
+                "turns_spent": record.turns_spent - refund,
+            }
+        )
+    return record.model_copy(update={"step": Step.NEEDED, "awaiting": None})
 
 
 def on_ready(state: DynamicStrategyState, event: AttemptReady) -> DynamicStrategyState:

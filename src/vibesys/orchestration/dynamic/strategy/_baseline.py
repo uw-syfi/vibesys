@@ -157,3 +157,17 @@ def on_rejected(state: DynamicStrategyState, detail: str) -> DynamicStrategyStat
         update={"stage": BaselineStage.UNMEASURABLE, "awaiting": None, "failure": detail}
     )
     return state.model_copy(update={"baseline": baseline})
+
+
+def on_held(state: DynamicStrategyState) -> DynamicStrategyState:
+    """A baseline decision refused for now returns to the stage before it, to be proposed again."""
+    baseline = state.baseline
+    if baseline.stage is BaselineStage.INTERPRETING:
+        update = {"stage": BaselineStage.INTERPRET, "awaiting": None}
+    else:
+        update = {
+            "stage": BaselineStage.NEEDED,
+            "awaiting": None,
+            "attempts": max(baseline.attempts - 1, 0),
+        }
+    return state.model_copy(update={"baseline": baseline.model_copy(update=update)})

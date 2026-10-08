@@ -66,10 +66,15 @@ from vibesys.orchestration.dynamic.strategy._schemas import (
 )
 from vibesys.orchestration.dynamic.strategy._state import (
     STATE_SCHEMA,
+    BaselineStage,
+    BaselineState,
     DynamicStrategyState,
     HypothesisRecord,
+    PlannerState,
     Role,
     RoundRecord,
+    RunPhase,
+    Step,
     Winner,
 )
 from vibesys.orchestration.dynamic.strategy._strategy import DynamicStrategy
@@ -85,6 +90,8 @@ __all__ = [
     "STATE_SCHEMA",
     "VERIFY_KIND",
     "AcceptedReading",
+    "BaselineStage",
+    "BaselineState",
     "DynamicConfig",
     "DynamicStrategy",
     "DynamicStrategyState",
@@ -104,6 +111,7 @@ __all__ = [
     "PlanViolation",
     "PlannerCorrectionPrompt",
     "PlannerPrompt",
+    "PlannerState",
     "ProfilePrompt",
     "PromptContext",
     "PromptTemplate",
@@ -117,6 +125,8 @@ __all__ = [
     "ReviewPrompt",
     "Role",
     "RoundRecord",
+    "RunPhase",
+    "Step",
     "VerifyParentRevision",
     "WaitUnrecordedPrompt",
     "Winner",
