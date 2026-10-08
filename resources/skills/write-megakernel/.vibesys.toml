@@ -1,0 +1,4 @@
+[[rule]]
+path = "."
+backends = ["cuda"]
+domains = ["kernel-writing"]
