@@ -307,19 +307,19 @@ class HostSandbox(WorkspaceSandbox):
         return cmd
 
 
-def _gpu_device_nodes() -> list[Path]:
+def _gpu_device_nodes(dev: Path = Path("/dev")) -> list[Path]:
     """Accelerator character devices to pass through.
 
     ``--dev`` mounts a minimal devtmpfs that omits every accelerator node, so
     anything the agent must reach to exercise its own code has to be bound back
-    explicitly. That covers NVIDIA GPUs, DRI render nodes, and AWS Neuron
-    devices for the Trainium backend's local (non-Docker) path.
+    explicitly. That covers NVIDIA GPUs, the AMD ROCm compute driver (``kfd``)
+    with its DRI render nodes, and AWS Neuron devices for the Trainium
+    backend's local (non-Docker) path.
     """
-    dev = Path("/dev")
     if not dev.exists():
         return []
     nodes: list[Path] = []
-    for pattern in ("nvidia*", "nvidia-uvm*", "nvidia-caps", "neuron*"):
+    for pattern in ("nvidia*", "nvidia-uvm*", "nvidia-caps", "neuron*", "kfd"):
         nodes.extend(sorted(dev.glob(pattern)))
     # ``/dev/dri`` (render nodes) for non-NVIDIA / integrated GPUs.
     dri = dev / "dri"

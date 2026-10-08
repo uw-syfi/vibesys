@@ -32,7 +32,7 @@ class TestAcceleratorDeviceNodes:
     which fails as a confusing driver error rather than a policy error.
     """
 
-    @pytest.mark.parametrize("pattern", ["neuron*", "nvidia*"])
+    @pytest.mark.parametrize("pattern", ["neuron*", "nvidia*", "kfd"])
     @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="host backend is Linux-only")
     def test_host_accelerator_devices_are_passed_through(
         self,
@@ -68,3 +68,29 @@ class TestAcceleratorDeviceNodes:
             if argument == "--dev-bind-try"
         ]
         assert all(node.exists() for node in nodes)
+
+
+# test-isolation: the host's /dev cannot be populated from a test, so the
+# device-root seam of the private discovery helper is exercised directly.
+@pytest.mark.parametrize(
+    "present",
+    [
+        ("kfd",),
+        ("kfd", "dri/renderD128"),
+        ("nvidia0", "nvidiactl", "nvidia-uvm"),
+        ("neuron0",),
+        ("kfd", "nvidia0", "neuron0", "dri/renderD128"),
+    ],
+)
+def test_every_present_accelerator_node_is_bound(tmp_path: Path, present: tuple[str, ...]) -> None:
+    dev = tmp_path / "dev"
+    for relative in present:
+        node = dev / relative
+        node.parent.mkdir(parents=True, exist_ok=True)
+        node.touch()
+
+    nodes = set(host_sandbox._gpu_device_nodes(dev))  # noqa: SLF001
+
+    for relative in present:
+        top = dev / relative.split("/", 1)[0]
+        assert top in nodes, f"{relative} is not passed through"
