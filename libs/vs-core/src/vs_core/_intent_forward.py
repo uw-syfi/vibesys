@@ -91,12 +91,19 @@ def intents_own(descriptor: OperationDescriptor) -> bool:
     )
 
 
-def reply_owed(observation: Observation, facts: Facts) -> bool:
-    """Whether a plain turn's observation proves a success whose reply only its owner event carries."""
+def success_without_reply(observation: Observation) -> bool:
+    """Whether a turn observation proves a success whose reply only its owner event carries."""
     return (
         observation.terminal
         and observation.accepted
         and observation.status == ObservationStatus.SUCCEEDED
+    )
+
+
+def reply_owed(observation: Observation, facts: Facts) -> bool:
+    """Whether a plain turn's observation proves a success whose reply only its owner event carries."""
+    return (
+        success_without_reply(observation)
         and facts.suspension is None
         and facts.outcome_json is None
     )

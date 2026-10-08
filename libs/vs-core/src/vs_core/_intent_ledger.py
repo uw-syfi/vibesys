@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._intent_forward import declaration, intents_own, owner_signals
+from ._intent_forward import declaration, intents_own, owner_signals, success_without_reply
 from ._outcomes import prove_outcome
 from ._proofs import (
     Mismatch,
@@ -246,9 +246,11 @@ def _observed(
     if target.reissue is not None and _reissuable(original, target.reissue):
         return _finish(change, _reissue(change.state, original))
     change = _finish(change, _apply(change.state, context, original, target))
-    if isinstance(root.request, InspectTurn):
+    if isinstance(root.request, InspectTurn) and not success_without_reply(target.observation):
         # An inspection that learned nothing new still ends: Sessions must hear that the
         # inspection of this turn completed, or an unresolved turn would wait for no one.
+        # A finished turn is not restated: the reply is one fact that only the inspection's
+        # owner event carries, and ending the turn here first would drop it.
         restated = TurnObserved(invocation=root.request.invocation, observation=target.observation)
         return _finish(change, AreaChange(state=change.state, signals=(restated,)))
     return change
