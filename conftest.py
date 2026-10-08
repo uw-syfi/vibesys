@@ -9,15 +9,14 @@ from __future__ import annotations
 
 import os
 import tempfile
-import zlib
 from pathlib import Path
-from random import Random
 from typing import TYPE_CHECKING
 
-import hypothesis.core as hypothesis_core
 import pytest
 from hypothesis import settings
 from hypothesis.database import DirectoryBasedExampleDatabase
+from hypothesis.internal.compat import int_from_bytes
+from hypothesis.internal.reflection import function_digest
 
 # `--shard=I/N` splits the suite across CI runners (see tests/support/sharding.py).
 pytest_plugins = ["tests.support.isolated_environment", "tests.support.sharding"]
@@ -53,8 +52,9 @@ def sandbox_tmp_path() -> Iterator[Path]:
 # Two obvious ways to make `ci` deterministic each remove one of them:
 # `derandomize=True` implies `database=None`, and a forced global seed
 # (`--hypothesis-seed`) sets the key to None, so nothing is saved or replayed.
-# `hypothesis.seed` per test also sets `database=None`. So `ci` reseeds Hypothesis's
-# own seed stream per test (`_seed_hypothesis_draws`), which keeps both. CI restores
+# `hypothesis.seed` per test also sets `database=None`. So `ci` seeds each
+# test as `derandomize=True` would, through its seed slot (see
+# `_make_hypothesis_deterministic_under_ci`), which keeps both. CI restores
 # `.hypothesis/` from the nightly run's cache, read-only on pull requests, so a
 # failure found at nightly strength replays on a PR as its first example. The
 # one departure from a pure PR tier is deliberate: a bug the nightly found keeps
@@ -82,21 +82,32 @@ settings.register_profile(
 _PROFILE = os.environ.get("HYPOTHESIS_PROFILE") or ("ci" if os.environ.get("CI") else "dev")
 settings.load_profile(_PROFILE)
 
-@pytest.fixture(autouse=True)
-def _seed_hypothesis_draws(request: pytest.FixtureRequest) -> None:
-    """Under the `ci` profile, restart Hypothesis's seed stream from the test's node id.
+#: Hypothesis's per-test seed slot, the one `hypothesis.seed` sets. That decorator
+#: also sets `database=None`, so the `ci` profile sets the slot directly.
+_SEED_SLOT = "_hypothesis_internal_use_seed"
 
-    Hypothesis derives each test's seed from a thread-local generator (private API
-    `hypothesis.core.threadlocal`). Reseeding it per test fixes the examples and
-    leaves the database key alone, and unlike a per-function seed it also covers
-    stateful machines, which build their test at run time.
-    tests/quality/test_hypothesis_profiles.py fails if a Hypothesis upgrade breaks
-    that determinism or the database round trip.
+
+@pytest.fixture(autouse=True)
+def _make_hypothesis_deterministic_under_ci(request: pytest.FixtureRequest) -> None:
+    """Under the `ci` profile, draw the examples `derandomize=True` would, keeping the database.
+
+    `derandomize=True` seeds a test's generator from the digest of its function.
+    Setting the same seed slot gives a `@given` test those exact examples and keeps
+    its database key. A stateful machine builds its test at run time, so its seed
+    cannot be set ahead; it stays derandomized (and database-less) through its own
+    `settings`. Both use Hypothesis internals (`function_digest`, `int_from_bytes`,
+    the seed slot); tests/quality/test_hypothesis_profiles.py fails if an upgrade
+    breaks determinism or the database round trip.
     """
-    if _PROFILE == "ci":
-        hypothesis_core.threadlocal._hypothesis_global_random = Random(
-            zlib.crc32(request.node.nodeid.encode())
-        )
+    if _PROFILE != "ci":
+        return
+    test = request.function
+    inner = getattr(getattr(test, "hypothesis", None), "inner_test", None)
+    if inner is not None:
+        setattr(test, _SEED_SLOT, int_from_bytes(function_digest(inner)))
+    machine_settings = getattr(request.instance, "settings", None)
+    if isinstance(machine_settings, settings):
+        request.instance.settings = settings(machine_settings, derandomize=True, database=None)
 
 
 #: xdist scheduling group for tests that cannot run beside one another.

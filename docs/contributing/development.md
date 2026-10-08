@@ -195,11 +195,11 @@ append there once the bug is fixed.
 **Hypothesis failures.** Saving and replaying a failure needs a database and a
 per-test database key. `derandomize=True` removes the database, and both
 `--hypothesis-seed` and `hypothesis.seed` remove it too, so none of them is used
-for a profile that must replay. The `ci` profile instead reseeds Hypothesis's
-own seed stream per test from its node id (`_seed_hypothesis_draws` in
-`conftest.py`, stateful machines included): a PR draws the same
-examples every run and replays saved failures first.
-`tests/quality/test_hypothesis_profiles.py` runs pytest on a planted property to
+for a profile that must replay. The `ci` profile instead sets each `@given` test's seed slot to the digest
+`derandomize=True` would use (`_make_hypothesis_deterministic_under_ci` in
+`conftest.py`): a PR draws the same examples as before and replays saved
+failures first. Stateful machines build their test at run time, so they stay
+derandomized and do not replay. `tests/quality/test_hypothesis_profiles.py` runs pytest on a planted property to
 check both, so a Hypothesis upgrade that breaks either fails there.
 
 The nightly saves `.hypothesis/` to the Actions cache, even when it fails, and
