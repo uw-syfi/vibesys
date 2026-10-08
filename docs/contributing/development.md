@@ -141,6 +141,14 @@ Haiku by default; `VIBESYS_SMOKE_PROVIDER=codex` selects Codex). The input is a
 small CPU task under `tests/e2e/dynamic_smoke/bundle`. A second scenario sends
 Ctrl-C mid-run.
 
+The pytest harness replaces `HOME` and the default state directories with
+temporary test directories. A coding-agent login stored in your ordinary
+home is therefore not automatically available to this smoke run. A successful
+`codex login status` outside pytest does not establish authentication inside
+the test. Account for the isolated environment when setting up test
+authentication. For onboarding, start with a normal local task launch as
+described in [Running VibeSys](../running-vibesys.md).
+
 It checks loop invariants from the run's own records
 (`tests/support/loop_invariants.py`): a typed terminal status and no empty
 completion, every offered capability served or withdrawn after `unsupported`,

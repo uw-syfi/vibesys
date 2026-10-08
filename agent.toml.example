@@ -1,6 +1,7 @@
 [model]
-name = "gpt-5.4"
-# Choose a model supported by the selected CLI provider.
+name = "gpt-6.1-sol"
+# Choose a model available to your account and installed CLI provider.
+# Verify it with a direct CLI request before launching VibeSys; see README.md.
 
 # [thinking]
 # level = "medium"          # minimal, low, medium, high (Gemini 3+ models)

@@ -85,6 +85,22 @@ Install and authenticate a supported coding-agent CLI. For Codex CLI, run
 `codex login`; see the [CLI reference](docs/cli-flags.md) for other supported
 agents.
 
+Before starting VibeSys, check that the CLI on your `PATH` can use the model
+you plan to configure. For Codex, run these commands from a Git repository:
+
+```bash
+codex --version
+codex login status
+codex exec --ephemeral --sandbox read-only --model gpt-6.1-sol \
+  "Reply with OK. Do not use tools."
+```
+
+Use the same model in this check and in `agent.toml`. A successful login does
+not guarantee model access: availability depends on the account and CLI
+version. If Codex rejects the model, update the CLI or choose an available
+model before launching VibeSys. See the official [Codex CLI guide](https://learn.chatgpt.com/docs/cli)
+and [model documentation](https://learn.chatgpt.com/docs/models).
+
 From the root of the project you want to optimize, add a named task under
 `.vibesys/tasks/`:
 
@@ -99,7 +115,7 @@ For example:
 
 ```toml
 [model]
-name = "gpt-5.4"
+name = "gpt-6.1-sol"
 
 [agent]
 backend = "cli"
