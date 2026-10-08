@@ -22,7 +22,7 @@ from vibesys.orchestration.evolve.models import (
     JudgeResponse,
     MutatorContext,
     MutatorResponse,
-    PaidBootstrapAttempt,
+    RecordedBootstrapAttempt,
 )
 from vibesys.orchestration.evolve.population import (
     CandidateOutcome,
@@ -209,19 +209,13 @@ class _EvolveRun:
     async def _bootstrap(self) -> bool:
         while isinstance(
             step := next_step(
-                marker=self.state.last_paid_bootstrap,
+                marker=self.state.last_recorded_bootstrap,
                 key=AttemptKey(0, BOOTSTRAP_MEMBER),
                 max_attempts=self.options.bootstrap_max_attempts,
             ),
             Implement,
         ):
             attempt = step.attempt
-            self.state = self.state.model_copy(
-                update={
-                    "last_paid_bootstrap": PaidBootstrapAttempt(turn_number=attempt),
-                }
-            )
-            await self._commit(f"evolve: start bootstrap attempt {attempt}")
             wip = self.search.wip_seed(self.state.population)
             if (
                 wip is not None
@@ -248,7 +242,12 @@ class _EvolveRun:
                     revision = None
                 outcome = outcome.model_copy(update={"commit": revision})
             individual, population = self.search.admit(self.state.population, outcome)
-            self.state = self.state.model_copy(update={"population": population})
+            self.state = self.state.model_copy(
+                update={
+                    "population": population,
+                    "last_recorded_bootstrap": RecordedBootstrapAttempt(turn_number=attempt),
+                }
+            )
             if individual.commit is not None:
                 await self.root.retain(
                     individual.commit,

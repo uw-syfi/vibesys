@@ -440,7 +440,6 @@ def test_crash_after_admit_before_state_commit_replays_only_uncommitted_slot(
             None,
             None,
             None,
-            None,
             _StateCommitInterruptedError("commit interrupted"),
         )
 
@@ -521,8 +520,9 @@ def test_bootstrap_repairs_the_retained_wip_seed(tmp_path: Path) -> None:
 
 
 def test_bootstrap_budget_survives_an_interrupted_resume(tmp_path: Path) -> None:
-    # bootstrap_max_attempts bounds a campaign's paid cold-start attempts across restarts: a
-    # host that dies during the last one neither repeats it nor gets a fresh budget.
+    # bootstrap_max_attempts bounds a campaign's recorded cold-start attempts across
+    # restarts: a host that dies mid-bootstrap does not hand the resumed run a fresh budget.
+    # The interrupted attempt left nothing durable, so it is re-run within the budget.
     implementer_turns = 0
 
     def responder(
@@ -555,8 +555,8 @@ def test_bootstrap_budget_survives_an_interrupted_resume(tmp_path: Path) -> None
 
     assert status is RunStatus.FAILED
     assert state is not None
-    assert implementer_turns == 2
-    assert [item.generation for item in state.population.individuals] == [0]
+    assert implementer_turns == 3
+    assert [item.generation for item in state.population.individuals] == [0, 0]
 
 
 def test_pareto_metrics_keep_both_non_dominated_candidates(tmp_path: Path) -> None:
