@@ -27,6 +27,7 @@ from vibesys.orchestration.dynamic.models import DurableStateCommitError
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     CandidateProfile,
     CandidateProfileStatus,
     MetricDirection,
@@ -159,7 +160,9 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
         )
         run.evaluation.script_benchmark(
             INPUT_BASELINE,
-            BenchmarkEvaluation(executed=True, feedback=feedback),
+            BenchmarkEvaluation(
+                executed=True, feedback=feedback, failure_kind=BenchmarkFailureKind.WORKLOAD
+            ),
             BenchmarkEvaluation(
                 executed=True,
                 metric_name="throughput",

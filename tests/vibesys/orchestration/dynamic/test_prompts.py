@@ -32,6 +32,7 @@ from vs_evaluation.api.tools import evaluation_tool_names
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     MetricDirection,
     RunFacts,
     RunStatus,
@@ -351,7 +352,10 @@ def test_portfolio_history_omits_large_evaluation_feedback(tmp_path: Path) -> No
             },
         )
         run.evaluation.script_benchmark(
-            INPUT_BASELINE, BenchmarkEvaluation(executed=True, feedback=diagnostic)
+            INPUT_BASELINE,
+            BenchmarkEvaluation(
+                executed=True, feedback=diagnostic, failure_kind=BenchmarkFailureKind.WORKLOAD
+            ),
         )
         await PLUGIN.orchestrate(run, dynamic_options(max_rounds=2, max_in_flight=1))
         return run

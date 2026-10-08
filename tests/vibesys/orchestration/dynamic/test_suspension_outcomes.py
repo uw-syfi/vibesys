@@ -35,6 +35,7 @@ from vs_runtime.api import (
     AccuracyEvaluation,
     AgentToolBindingContext,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     RuntimeContractError,
 )
 from vs_runtime.api.testing import FakeRun
@@ -48,7 +49,11 @@ async def _produce(root: Path, *, semantic_failure: bool) -> StoredEvaluation:
     candidate = await producer_run.workspaces.create_candidate(revision, member_id="held")
     producer_run.evaluation.script_accuracy(AccuracyEvaluation(executed=True))
     producer_run.evaluation.script_benchmark(
-        BenchmarkEvaluation(executed=True, feedback=_FAILURE if semantic_failure else None)
+        BenchmarkEvaluation(
+            executed=True,
+            feedback=_FAILURE if semantic_failure else None,
+            failure_kind=BenchmarkFailureKind.WORKLOAD if semantic_failure else None,
+        )
     )
     digest = ContentDigest.sha256(b"immutable capture")
     backend = SemanticEvaluationBackend(
