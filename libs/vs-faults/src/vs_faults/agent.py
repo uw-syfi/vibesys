@@ -1,20 +1,31 @@
 """Faults at the agent-turn boundary: a wrapper over any agent client.
 
-:class:`FaultyAgentClient` implements ``AgentClientProtocol`` by delegating to
-an inner client and, on the turns its plan schedules, replacing the turn's
-outcome with the failure a real agent CLI produces. It knows no roles: wrong
-and invalid replies are generated from the schema the turn declares.
+:class:`FaultyAgentClient` implements ``AgentClientProtocol`` and
+``AgentTurnExecutor`` by delegating to an inner client and, on the turns its
+plan schedules, replacing the turn's outcome with the failure a real agent CLI
+produces. It knows no roles: wrong and invalid replies are generated from the
+schema the turn declares. Both turn paths (``invoke`` and the durable
+``run``) share one fault decision, so a plan faults a turn the same way
+whichever path the runtime dispatches it through.
 """
 
 from __future__ import annotations
 
+import json
 import threading
 from collections import Counter
+from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
-from vs_agent.api import AgentOutputSchemaError, AgentTurnTimeoutError, describe_validation_error
+from vs_agent.api import (
+    AgentClientProtocol,
+    AgentOutputSchemaError,
+    AgentTurnExecutor,
+    AgentTurnTimeoutError,
+    describe_validation_error,
+)
 from vs_faults.plan import AgentFault, Boundary, FaultPlan
 from vs_faults.replies import ReplyGenerator, prompt_vocabulary
 
@@ -24,9 +35,12 @@ if TYPE_CHECKING:
 
     from vs_agent.api import (
         AgentCapabilities,
-        AgentClientProtocol,
+        AgentObserver,
         AgentProgress,
         AgentSessionKey,
+        AgentSessionSpec,
+        AgentTurnRequest,
+        AgentTurnResult,
         ToolServerDescriptor,
     )
     from vs_agent.api.testing import FakeInvocation
@@ -47,6 +61,16 @@ def _validate(payload: object, response_cls: type[T]) -> T:
         return response_cls.model_validate(payload)
     except ValidationError as error:
         raise AgentOutputSchemaError(describe_validation_error(error)) from error
+
+
+class DurableAgentClient(AgentClientProtocol, AgentTurnExecutor, Protocol):
+    """Every interface the runtime dispatches an agent turn through.
+
+    ``invoke`` serves unkeyed turns; ``run`` and the session controls serve the
+    durable journal. A wrapper over a client that lacks one of them would fault
+    only the turns that take the other path, so :class:`FaultyAgentClient`
+    accepts only a client that has both.
+    """
 
 
 class GeneratedReplies(Protocol):
@@ -89,14 +113,14 @@ def generated_replies(plan: FaultPlan) -> GeneratedReplies:
 
 
 class FaultyAgentClient:
-    """An ``AgentClientProtocol`` that injects its plan's agent-turn faults.
+    """A ``DurableAgentClient`` that injects its plan's agent-turn faults.
 
     With no agent-turn rules it is a pass-through. Turns are counted per role
     (``kind``); a rule fires on its ``at``-th turn of its role, or of any role
     when it names none. ``injected`` records each fault that fired.
     """
 
-    def __init__(self, inner: AgentClientProtocol, plan: FaultPlan) -> None:
+    def __init__(self, inner: DurableAgentClient, plan: FaultPlan) -> None:
         """Wrap ``inner``; ``plan`` decides which turns fail and how."""
         self._inner = inner
         self._plan = plan
@@ -139,6 +163,14 @@ class FaultyAgentClient:
     def set_log_file(self, stream: TextIO | None) -> None:
         """Forward the log stream."""
         self._inner.set_log_file(stream)
+
+    def cancel_session(self, key: AgentSessionKey) -> None:
+        """Forward the keyed conversation's cancellation."""
+        self._inner.cancel_session(key)
+
+    def release_session(self, key: AgentSessionKey) -> None:
+        """Forward the keyed conversation's release."""
+        self._inner.release_session(key)
 
     def cancel(self) -> None:
         """Forward cancellation."""
@@ -256,3 +288,46 @@ class FaultyAgentClient:
             message = f"agent CLI exited with code 1 during turn {ordinal} of {kind}"
             raise AgentCrashError(message)
         return text
+
+    def run(
+        self,
+        *,
+        session_spec: AgentSessionSpec,
+        turn: AgentTurnRequest,
+        session_key: AgentSessionKey | None = None,
+        observer: AgentObserver | None = None,
+    ) -> AgentTurnResult:
+        """Run one durable turn, or fail it as the plan schedules.
+
+        A raw turn returns text the caller parses, so an output fault corrupts
+        the text after the agent did its work, as a real CLI's bad reply does.
+        A text turn declares no schema: only transport faults apply.
+        """
+        kind = session_spec.role
+        fault, ordinal = self._fault(kind)
+        result = self._inner.run(
+            session_spec=session_spec, turn=turn, session_key=session_key, observer=observer
+        )
+        if fault is None:
+            return result
+        if fault is AgentFault.TIMEOUT:
+            raise AgentTurnTimeoutError(TURN_BUDGET_S)
+        if fault is AgentFault.CRASH:
+            message = f"agent CLI exited with code 1 during turn {ordinal} of {kind}"
+            raise AgentCrashError(message)
+        schema = turn.output_schema
+        if schema is None:
+            return result
+        vocabulary = prompt_vocabulary(turn.message)
+        if fault is AgentFault.MALFORMED:
+            return replace(result, text=_NO_JSON)
+        if fault is AgentFault.SCHEMA_INVALID:
+            invalid = ReplyGenerator(self._plan.rng("fault", kind, ordinal), vocabulary)
+            return replace(result, text=json.dumps(invalid.invalid(schema)))
+        if fault is AgentFault.WRONG_VALUES:
+            bold = ReplyGenerator(self._plan.rng("bold", kind, ordinal), vocabulary, bold=True)
+            reply = bold.valid(schema)
+            return replace(result, text=_NO_JSON if reply is None else reply.model_dump_json())
+        # EXTRA_KEYS: the reply is right and carries a key the schema forbids.
+        payload = json.loads(result.text)
+        return replace(result, text=json.dumps({**payload, "notes": "extra"}))

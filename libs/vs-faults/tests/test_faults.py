@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from vs_agent.api import (
+    AgentClientProtocol,
     AgentExecutionPolicy,
     AgentOutputSchemaError,
     AgentSessionSpec,
@@ -121,18 +123,44 @@ def _raw_turn(client: FaultyAgentClient | FakeAgentClient, prompt: str = "Use `H
     return _Reply.model_validate_json(result.text)
 
 
+# Static: mypy rejects the wrapper the day a Protocol the runtime dispatches
+# through gains a member it lacks.
+def _as_protocols(client: FaultyAgentClient) -> tuple[AgentClientProtocol, AgentTurnExecutor]:
+    return client, client
+
+
+def _public_members(protocol: type) -> dict[str, object]:
+    return {
+        name: member
+        for name, member in vars(protocol).items()
+        if not name.startswith("_") and (callable(member) or isinstance(member, property))
+    }
+
+
+@pytest.mark.parametrize("protocol", [AgentClientProtocol, AgentTurnExecutor])
+def test_the_wrapper_matches_every_member_of_the_interfaces_the_runtime_dispatches_through(
+    protocol: type,
+) -> None:
+    """Same members, same parameters: a future interface change cannot leave the wrapper behind."""
+    for name, member in _public_members(protocol).items():
+        mine = getattr(FaultyAgentClient, name, None)
+        assert mine is not None, f"FaultyAgentClient lacks {protocol.__name__}.{name}"
+        if isinstance(member, property):
+            assert isinstance(mine, property), name
+            continue
+        expected = inspect.signature(getattr(protocol, name)).parameters
+        assert list(inspect.signature(mine).parameters) == list(expected), name
+        assert {p.name: p.kind for p in inspect.signature(mine).parameters.values()} == {
+            p.name: p.kind for p in expected.values()
+        }, name
+
+
 def test_a_wrapped_turn_executor_stays_a_turn_executor() -> None:
-    """The runtime refuses a durable turn on a client that is not an AgentTurnExecutor.
-
-    The wrapper must implement every interface its inner client does, or a chaos
-    run ends at its first durable turn and no fault below it is ever exercised.
-    """
-    inner = FakeAgentClient().set_response(_KIND, _ANSWER)
-    assert isinstance(inner, AgentTurnExecutor)
-
-    client = FaultyAgentClient(inner, FaultPlan(seed=1))
+    """The runtime refuses a durable turn on a client that is not an AgentTurnExecutor."""
+    client = FaultyAgentClient(FakeAgentClient().set_response(_KIND, _ANSWER), FaultPlan(seed=1))
 
     assert isinstance(client, AgentTurnExecutor)
+    assert _as_protocols(client) == (client, client)
     assert [_raw_turn(client) for _ in range(3)] == [_ANSWER] * 3
 
 
