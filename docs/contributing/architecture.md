@@ -135,6 +135,7 @@ graph TD
     vs_runtime --> vs_prompts
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_slurm
+    vs_sandbox --> vs_async_ops
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_project
     vs_sandbox --> vs_slurm

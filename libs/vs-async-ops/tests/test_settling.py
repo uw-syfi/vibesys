@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_async_ops.api import drain, finish
+from vs_async_ops.api import drain, finish, run_to_end
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -113,3 +113,18 @@ async def test_a_task_that_was_itself_cancelled_raises_cancelled_error() -> None
     work.task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await caller
+
+
+@given(cancellations=st.integers(min_value=1, max_value=6))
+def test_run_to_end_returns_the_result_however_often_the_caller_is_cancelled(
+    cancellations: int,
+) -> None:
+    async def scenario() -> None:
+        work = _Work()
+        caller = asyncio.ensure_future(run_to_end(work.task))
+        await _cancel_repeatedly(caller, cancellations)
+        assert not caller.done()
+        work.release.set()
+        assert await caller == "done"
+
+    asyncio.run(scenario())

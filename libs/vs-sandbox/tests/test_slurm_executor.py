@@ -1704,9 +1704,9 @@ async def test_a_cancelled_cancel_does_not_abandon_a_submission_in_flight(tmp_pa
     """Chaos seed 11: the stop's cleanup is itself cancelled while sbatch is in flight.
 
     The second cancellation must not reach the acceptance task. The submission's
-    outcome (here: the scheduler refuses it, because its cancel intent arrived
-    first) is the proof cleanup needs; abandoning it leaves the evaluation with no
-    terminal state and cleanup spinning on a job that never existed.
+    outcome (a job to cancel by identity, or a definite refusal) is the proof
+    cleanup needs; abandoning it leaves the evaluation reading RUNNING and, on a
+    real cluster, a job nobody cancels.
     """
     config = _config()
     runner = _GatedStagingCluster(config)
@@ -1738,10 +1738,62 @@ async def test_a_cancelled_cancel_does_not_abandon_a_submission_in_flight(tmp_pa
 
         observed = await executor.inspect("eval-cancel-in-flight")
         assert observed is not None
-        # No job exists (the scheduler refused it), so the evaluation must not read as running.
-        assert runner.submissions == 0
+        # Either no job exists or it was cancelled: no job is left running.
+        assert runner.job_status is not SlurmJobStatus.RUNNING
         assert observed.state in {EvaluationState.CANCELED, EvaluationState.FAILED}
         # The caller's cancellation is not swallowed: the cancelled cleanup ends cancelled.
         assert canceller.cancelled()
     finally:
         runner.release_staging.set()
+
+
+async def _cancelled_cancel_leaves_no_live_evaluation(gaps: list[int]) -> None:
+    """Cancel the cancelling caller once per gap (event-loop turns between), with sbatch in flight."""
+    with TemporaryDirectory() as raw:
+        root = Path(raw)
+        config = _config()
+        runner = _GatedStagingCluster(config)
+        executor = SlurmEvaluationExecutor(
+            config,
+            workspace=_workspace(root),
+            setup_script=None,
+            service=None,
+            support_trees={},
+            handle_root=root / "handles",
+            cluster=runner,
+            cancel_confirmation_seconds=3 * config.poll_interval_seconds,
+        )
+        try:
+            await executor.submit(_request(), handle_id="eval-repeated-cancel")
+            await asyncio.to_thread(runner.staging_started.wait)
+            canceller = asyncio.create_task(executor.cancel("eval-repeated-cancel"))
+            await asyncio.sleep(0)  # cancel() has started
+            for gap in gaps:
+                for _ in range(gap):
+                    await asyncio.sleep(0)
+                canceller.cancel()
+            runner.release_staging.set()
+            await asyncio.gather(canceller, return_exceptions=True)
+            executions = [
+                task for task in asyncio.all_tasks() if task.get_name().startswith("vibesys-slurm-")
+            ]
+            await asyncio.gather(*executions, return_exceptions=True)
+            observed = await executor.inspect("eval-repeated-cancel")
+            assert observed is not None
+            assert observed.state in {EvaluationState.CANCELED, EvaluationState.FAILED}
+            assert runner.job_status is not SlurmJobStatus.RUNNING
+            assert canceller.cancelled()
+        finally:
+            runner.release_staging.set()
+            await executor.close()
+
+
+@example(gaps=[0])
+@example(gaps=[2, 0, 3])
+@settings(max_examples=25, deadline=None)
+@given(gaps=st.lists(st.integers(0, 6), min_size=1, max_size=4))
+def test_repeated_cancellation_of_cancel_at_any_point_leaves_no_live_evaluation(
+    gaps: list[int],
+) -> None:
+    """However often and whenever cancel()'s caller is cancelled, the submission outcome lands."""
+    asyncio.run(_cancelled_cancel_leaves_no_live_evaluation(gaps))
