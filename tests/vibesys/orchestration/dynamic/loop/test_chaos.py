@@ -12,9 +12,10 @@ import os
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.vibesys.orchestration.dynamic.loop._chaos import run_chaos
+from tests.vibesys.orchestration.dynamic.loop._chaos import plan_for, run_chaos
 
 from vibesys.api import RunStatus
+from vs_runtime.api import RuntimeContractError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -53,3 +54,12 @@ def test_no_evaluation_is_submitted_after_a_stop_during_a_profile(tmp_path: Path
     assert chaos.run.status is RunStatus.STOPPED
     assert chaos.run.error is None
     assert chaos.violations == [], chaos.report()
+
+
+def test_a_run_without_faults_never_ends_on_an_unresolved_dispatch(tmp_path: Path) -> None:
+    """With no fault scheduled, the fault wrapper is the identity, so no turn's fate is unknown."""
+    chaos = run_chaos(tmp_path, 7000, plan_for(7000, faults=0))
+
+    assert chaos.run is not None
+    assert chaos.injected == []
+    assert not isinstance(chaos.run.error, RuntimeContractError), chaos.report()
