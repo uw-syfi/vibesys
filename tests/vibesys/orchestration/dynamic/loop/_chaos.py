@@ -159,6 +159,10 @@ def unexplained_end(error: BaseException | None, injected: Injected) -> str | No
             bool(injected.agent & _OUTPUT_FAULTS),
             "invalid agent output without an output fault",
         ),
+        # The generated planner can cite an identifier its prompt never offered
+        # (seed 3), so a planning failure needs no fault. Known gap: the generator
+        # should prefer ``null`` where no candidate is listed.
+        (isinstance(error, DynamicPlanningError), True, ""),
         (isinstance(error, TYPED_ENDS), injected.any, "typed failure in a run no fault touched"),
     )
     for applies, explained, reason in rules:

@@ -12,9 +12,16 @@ import os
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.vibesys.orchestration.dynamic.loop._chaos import plan_for, run_chaos
+from tests.vibesys.orchestration.dynamic.loop._chaos import (
+    Injected,
+    plan_for,
+    run_chaos,
+    unexplained_end,
+)
 
 from vibesys.api import RunStatus
+from vs_agent.api import AgentOutputSchemaError
+from vs_faults.api import AgentCrashError, AgentFault
 from vs_runtime.api import RuntimeContractError
 
 if TYPE_CHECKING:
@@ -56,10 +63,46 @@ def test_no_evaluation_is_submitted_after_a_stop_during_a_profile(tmp_path: Path
     assert chaos.violations == [], chaos.report()
 
 
-def test_a_run_without_faults_never_ends_on_an_unresolved_dispatch(tmp_path: Path) -> None:
+def test_a_run_without_faults_ends_without_an_error(tmp_path: Path) -> None:
     """With no fault scheduled, the fault wrapper is the identity, so no turn's fate is unknown."""
     chaos = run_chaos(tmp_path, 7000, plan_for(7000, faults=0))
 
     assert chaos.run is not None
     assert chaos.injected == []
-    assert not isinstance(chaos.run.error, RuntimeContractError), chaos.report()
+    assert chaos.run.error is None, chaos.report()
+    assert chaos.violations == [], chaos.report()
+
+
+_UNRESOLVED = RuntimeContractError("H-01: unresolved provider dispatch requires reconciliation")
+
+
+@pytest.mark.parametrize(
+    ("error", "injected"),
+    [
+        (_UNRESOLVED, Injected()),
+        (_UNRESOLVED, Injected(agent=frozenset({AgentFault.MALFORMED}))),
+        (AgentCrashError("x"), Injected(agent=frozenset({AgentFault.TIMEOUT}))),
+        (AgentOutputSchemaError("x"), Injected(agent=frozenset({AgentFault.CRASH}))),
+        (AgentOutputSchemaError("x"), Injected(other=3)),
+    ],
+)
+def test_an_ending_no_injected_fault_explains_is_a_violation(
+    error: BaseException, injected: Injected
+) -> None:
+    assert unexplained_end(error, injected) is not None
+
+
+@pytest.mark.parametrize(
+    ("error", "injected"),
+    [
+        (None, Injected()),
+        (_UNRESOLVED, Injected(agent=frozenset({AgentFault.CRASH}))),
+        (_UNRESOLVED, Injected(agent=frozenset({AgentFault.TIMEOUT}))),
+        (AgentCrashError("x"), Injected(agent=frozenset({AgentFault.CRASH}))),
+        (AgentOutputSchemaError("x"), Injected(agent=frozenset({AgentFault.SCHEMA_INVALID}))),
+    ],
+)
+def test_an_ending_an_injected_fault_explains_is_accepted(
+    error: BaseException | None, injected: Injected
+) -> None:
+    assert unexplained_end(error, injected) is None
