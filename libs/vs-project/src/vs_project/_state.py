@@ -1428,6 +1428,10 @@ def _validate_namespace(namespace: str) -> str:
     return namespace
 
 
+# POSIX NAME_MAX: the longest file name every supported filesystem accepts.
+_MAX_STATE_NAME_BYTES = 255
+
+
 def _validate_state_relative_path(raw_path: str | PurePosixPath) -> PurePosixPath:
     if isinstance(raw_path, str):
         value = raw_path
@@ -1440,6 +1444,11 @@ def _validate_state_relative_path(raw_path: str | PurePosixPath) -> PurePosixPat
         path.is_absolute()
         or path == PurePosixPath(".")
         or any(part in {"", ".", ".."} for part in path.parts)
+        or "\0" in value
+        or any(
+            len(part.encode("utf-8", "surrogatepass")) > _MAX_STATE_NAME_BYTES
+            for part in path.parts
+        )
     ):
         raise ProjectStateError.invalid_state_file_path(raw_path, portable=False)
     return path

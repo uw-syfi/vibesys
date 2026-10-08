@@ -64,6 +64,7 @@ from vs_project._state_io import (
     AtomicWriteStream,
     LocalAtomicWriteEffects,
     atomic_write_bytes,
+    decode_state_document,
 )
 from vs_project._state_models import FakeStateModels, validate_state_namespace
 from vs_project._state_store import FakeStateStore, LocalStateStore
@@ -83,7 +84,7 @@ from vs_project.api.state_store import (
     StoreRecord,
     Unknown,
 )
-from vs_project.errors import ProjectError
+from vs_project.errors import ProjectError, StateDocumentDamagedError
 from vs_project.project import Project
 
 __all__ = [
@@ -132,6 +133,7 @@ __all__ = [
     "RunLogger",
     "RunResourceRequest",
     "SocketPathTooLongError",
+    "StateDocumentDamagedError",
     "StateFile",
     "StateModelNotFoundError",
     "StateModels",
@@ -151,6 +153,7 @@ __all__ = [
     "Unknown",
     "UnsafeProjectPathError",
     "atomic_write_bytes",
+    "decode_state_document",
     "generate_run_id",
     "is_project_state_path",
     "run_git",

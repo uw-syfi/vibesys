@@ -405,3 +405,24 @@ class StateModelNotFoundError(ProjectStateError):
     def missing(cls, path: Path) -> Self:
         """Describe a missing required operational-state model."""
         return cls(f"VibeSys state model does not exist: {path}")
+
+
+class StateDocumentDamagedError(ProjectStateError):
+    """A persisted document exists but cannot be decoded as its model.
+
+    Messages name the document and the failing fields, never the document's
+    contents, so a damaged file cannot leak through an error.
+    """
+
+    @classmethod
+    def invalid(cls, source: Path | str, details: str) -> Self:
+        """Describe a document that fails its schema, with stable field details."""
+        return cls(f"Invalid VibeSys state model at {source}: {details}")
+
+    @classmethod
+    def unsupported_version(cls, source: Path | str, found: int, expected: int) -> Self:
+        """Describe a document written by another release of the format."""
+        return cls(
+            f"Invalid VibeSys state model at {source}: document version {found}, "
+            f"this release reads version {expected}"
+        )
