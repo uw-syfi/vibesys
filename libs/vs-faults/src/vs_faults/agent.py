@@ -315,19 +315,32 @@ class FaultyAgentClient:
         if fault is AgentFault.CRASH:
             message = f"agent CLI exited with code 1 during turn {ordinal} of {kind}"
             raise AgentCrashError(message)
-        schema = turn.output_schema
-        if schema is None:
+        if turn.output_schema is None:
             return result
+        return replace(
+            result, text=self._corrupted(fault, ordinal, session_spec.role, turn, result.text)
+        )
+
+    def _corrupted(
+        self, fault: AgentFault, ordinal: int, kind: str, turn: AgentTurnRequest, text: str
+    ) -> str:
+        """Return the reply text a structured turn gives under an output ``fault``."""
+        schema = cast("type[BaseModel]", turn.output_schema)
         vocabulary = prompt_vocabulary(turn.message)
-        if fault is AgentFault.MALFORMED:
-            return replace(result, text=_NO_JSON)
         if fault is AgentFault.SCHEMA_INVALID:
             invalid = ReplyGenerator(self._plan.rng("fault", kind, ordinal), vocabulary)
-            return replace(result, text=json.dumps(invalid.invalid(schema)))
+            return json.dumps(invalid.invalid(schema))
         if fault is AgentFault.WRONG_VALUES:
             bold = ReplyGenerator(self._plan.rng("bold", kind, ordinal), vocabulary, bold=True)
             reply = bold.valid(schema)
-            return replace(result, text=_NO_JSON if reply is None else reply.model_dump_json())
-        # EXTRA_KEYS: the reply is right and carries a key the schema forbids.
-        payload = json.loads(result.text)
-        return replace(result, text=json.dumps({**payload, "notes": "extra"}))
+            return _NO_JSON if reply is None else reply.model_dump_json()
+        if fault is AgentFault.EXTRA_KEYS:
+            # The reply is right and carries a key the schema forbids. Text that
+            # is not one JSON object (prose around it, say) has no place for a
+            # key: the reply is unusable, as a malformed one is.
+            try:
+                body = json.loads(text)
+            except json.JSONDecodeError:
+                body = None
+            return json.dumps({**body, "notes": "extra"}) if isinstance(body, dict) else _NO_JSON
+        return _NO_JSON

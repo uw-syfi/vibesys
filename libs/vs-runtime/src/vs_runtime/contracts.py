@@ -55,6 +55,10 @@ class RuntimeContractError(RuntimeError):
     """Base class for typed runtime operation failures."""
 
 
+class UnresolvedDispatchError(RuntimeContractError):
+    """A provider turn was dispatched and its outcome is unknown; it needs reconciliation."""
+
+
 class SessionTransportUnavailableError(RuntimeContractError):
     """Durable session operations require an explicitly bound agent interface."""
 

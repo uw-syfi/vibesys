@@ -6,7 +6,12 @@ branches; tests and scripts compose these wrappers at the seams a run already
 injects (the agent client factory, the connector command, the tool dispatch).
 """
 
-from vs_faults.agent import AgentCrashError, FaultyAgentClient, generated_replies
+from vs_faults.agent import (
+    AgentCrashError,
+    DurableAgentClient,
+    FaultyAgentClient,
+    generated_replies,
+)
 from vs_faults.connector import (
     classify,
     connector_command,
@@ -36,6 +41,7 @@ __all__ = [
     "ClusterFault",
     "ClusterOperation",
     "Crossing",
+    "DurableAgentClient",
     "FaultGate",
     "FaultPlan",
     "FaultRule",

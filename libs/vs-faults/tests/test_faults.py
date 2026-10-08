@@ -148,11 +148,18 @@ def test_the_wrapper_matches_every_member_of_the_interfaces_the_runtime_dispatch
         if isinstance(member, property):
             assert isinstance(mine, property), name
             continue
-        expected = inspect.signature(getattr(protocol, name)).parameters
-        assert list(inspect.signature(mine).parameters) == list(expected), name
-        assert {p.name: p.kind for p in inspect.signature(mine).parameters.values()} == {
-            p.name: p.kind for p in expected.values()
-        }, name
+        expected = inspect.signature(getattr(protocol, name))
+        actual = inspect.signature(mine)
+        # Annotations are source text (postponed evaluation), so a spelling
+        # difference fails loudly rather than slipping through.
+        assert _shape(actual) == _shape(expected), name
+
+
+def _shape(signature: inspect.Signature) -> tuple[object, ...]:
+    return (
+        tuple((p.name, p.kind, p.default, p.annotation) for p in signature.parameters.values()),
+        signature.return_annotation,
+    )
 
 
 def test_a_wrapped_turn_executor_stays_a_turn_executor() -> None:
@@ -355,3 +362,15 @@ def test_a_killed_job_is_never_run_and_reports_how_it_died(tmp_path: Path) -> No
     state = str(call(f"sacct -n -P -j {job} -o State,ExitCode")["stdout"]).split()[0]
     assert state in {"OUT_OF_MEMORY", "PREEMPTED", "NODE_FAIL", "FAILED"}
     assert not (tmp_path / "c" / "requests.jsonl").exists()
+
+
+class _Target(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target: str | None = Field(description="An existing id, or null.")
+
+
+@given(seed=st.integers(0, 2**32))
+def test_a_careful_agent_answers_null_rather_than_invent_a_reference(seed: int) -> None:
+    reply = ReplyGenerator(FaultPlan(seed=seed).rng("t"), ("H1",)).valid(_Target)
+
+    assert reply == _Target(target=None)

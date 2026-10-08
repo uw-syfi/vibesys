@@ -9,9 +9,12 @@ a one-line repro.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+import tempfile
+from pathlib import Path
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.loop._chaos import (
     Injected,
     plan_for,
@@ -19,13 +22,11 @@ from tests.vibesys.orchestration.dynamic.loop._chaos import (
     unexplained_end,
 )
 
-from vibesys.api import RunStatus
+from vibesys.api import RunStatus, RunStopped
+from vibesys.orchestration.dynamic import DynamicPlanningError
 from vs_agent.api import AgentOutputSchemaError
 from vs_faults.api import AgentCrashError, AgentFault
-from vs_runtime.api import RuntimeContractError
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from vs_runtime.api import RunCleanupError, RuntimeContractError, UnresolvedDispatchError
 
 # Seeds 2018 and 2022 completed with zero workstreams before #1228. Each seed runs
 # a whole loop (10 to 20 s on a CI runner), so a pull request runs four generic
@@ -63,9 +64,12 @@ def test_no_evaluation_is_submitted_after_a_stop_during_a_profile(tmp_path: Path
     assert chaos.violations == [], chaos.report()
 
 
-def test_a_run_without_faults_ends_without_an_error(tmp_path: Path) -> None:
+@settings(max_examples=3, deadline=None, suppress_health_check=list(HealthCheck))
+@given(seed=st.integers(7000, 7003))
+def test_a_run_without_faults_ends_without_an_error(seed: int) -> None:
     """With no fault scheduled, the fault wrapper is the identity, so no turn's fate is unknown."""
-    chaos = run_chaos(tmp_path, 7000, plan_for(7000, faults=0))
+    with tempfile.TemporaryDirectory() as base:
+        chaos = run_chaos(Path(base), seed, plan_for(seed, faults=0))
 
     assert chaos.run is not None
     assert chaos.injected == []
@@ -73,7 +77,8 @@ def test_a_run_without_faults_ends_without_an_error(tmp_path: Path) -> None:
     assert chaos.violations == [], chaos.report()
 
 
-_UNRESOLVED = RuntimeContractError("H-01: unresolved provider dispatch requires reconciliation")
+_UNRESOLVED = UnresolvedDispatchError("H-01: unresolved provider dispatch requires reconciliation")
+_TRANSPORT = Injected(agent=frozenset({AgentFault.CRASH}))
 
 
 @pytest.mark.parametrize(
@@ -82,8 +87,13 @@ _UNRESOLVED = RuntimeContractError("H-01: unresolved provider dispatch requires 
         (_UNRESOLVED, Injected()),
         (_UNRESOLVED, Injected(agent=frozenset({AgentFault.MALFORMED}))),
         (AgentCrashError("x"), Injected(agent=frozenset({AgentFault.TIMEOUT}))),
-        (AgentOutputSchemaError("x"), Injected(agent=frozenset({AgentFault.CRASH}))),
-        (AgentOutputSchemaError("x"), Injected(other=3)),
+        (AgentOutputSchemaError("x"), _TRANSPORT),
+        (DynamicPlanningError(None), Injected()),
+        (DynamicPlanningError(None), _TRANSPORT),
+        (RunStopped("x"), Injected()),
+        # The bug this suite once missed: a refused durable client is no fault's doing.
+        (RuntimeContractError("durable client must implement AgentTurnExecutor"), _TRANSPORT),
+        (RunCleanupError("cleanup", ()), _TRANSPORT),
     ],
 )
 def test_an_ending_no_injected_fault_explains_is_a_violation(
@@ -96,10 +106,12 @@ def test_an_ending_no_injected_fault_explains_is_a_violation(
     ("error", "injected"),
     [
         (None, Injected()),
-        (_UNRESOLVED, Injected(agent=frozenset({AgentFault.CRASH}))),
+        (_UNRESOLVED, _TRANSPORT),
         (_UNRESOLVED, Injected(agent=frozenset({AgentFault.TIMEOUT}))),
-        (AgentCrashError("x"), Injected(agent=frozenset({AgentFault.CRASH}))),
+        (AgentCrashError("x"), _TRANSPORT),
         (AgentOutputSchemaError("x"), Injected(agent=frozenset({AgentFault.SCHEMA_INVALID}))),
+        (DynamicPlanningError(None), Injected(agent=frozenset({AgentFault.WRONG_VALUES}))),
+        (RunStopped("x"), Injected(stop_delivered=True)),
     ],
 )
 def test_an_ending_an_injected_fault_explains_is_accepted(

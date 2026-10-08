@@ -51,7 +51,7 @@ from vs_faults.api import (
     injected_faults,
     prompt_vocabulary,
 )
-from vs_runtime.api import RuntimeContractError
+from vs_runtime.api import UnresolvedDispatchError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -85,7 +85,6 @@ _OUTPUT_FAULTS = frozenset(
 )
 #: Transport faults: the turn's fate is unknown, so its dispatch is unresolved.
 _TRANSPORT_FAULTS = frozenset({AgentFault.CRASH, AgentFault.TIMEOUT})
-_UNRESOLVED = "unresolved provider dispatch"
 #: A deadlock guard: a chaos run finishes in seconds; raising it never turns a hang into a pass.
 RUN_GUARD_S = 600.0
 _MAX_TOOL_CALLS = 6
@@ -120,64 +119,35 @@ class Injected:
     """The faults a run actually suffered, which decide the endings it may have."""
 
     agent: frozenset[AgentFault] = frozenset()
-    #: Tool-call and cluster faults injected (their kinds do not narrow the endings).
-    other: int = 0
-    stopped: bool = False
+    #: The user's stop reached the session during the run (not merely scheduled).
+    stop_delivered: bool = False
 
-    @property
-    def any(self) -> bool:
-        """Return whether anything was injected."""
-        return bool(self.agent) or self.other > 0
+
+#: Each ending a run may have, with the agent faults that can cause it. The map
+#: is closed: an error type outside it (any other ``RuntimeContractError``
+#: included) is a violation whatever was injected. A transport fault leaves a
+#: turn's fate unknown; an output fault makes a reply wrong, which schema and
+#: planning errors report.
+_EXPLAINED_BY: dict[type[BaseException], frozenset[AgentFault]] = {
+    UnresolvedDispatchError: _TRANSPORT_FAULTS,
+    AgentCrashError: frozenset({AgentFault.CRASH}),
+    AgentOutputSchemaError: _OUTPUT_FAULTS,
+    DynamicPlanningError: _OUTPUT_FAULTS,
+}
 
 
 def unexplained_end(error: BaseException | None, injected: Injected) -> str | None:
-    """Return why ``error`` is no ending ``injected`` can explain (``None``: it is explained).
-
-    A run no fault touched ends cleanly (or stopped, if a stop was requested).
-    Each typed failure needs a fault that can cause it: a crashed agent, a
-    reply the schema rejects, or an unresolved dispatch (a turn whose fate a
-    transport fault left unknown).
-    """
+    """Return why ``error`` is no ending ``injected`` can explain (``None``: it is explained)."""
     if error is None:
         return None
-    unresolved = isinstance(error, RuntimeContractError) and _UNRESOLVED in str(error)
-    # The first rule that applies to the ending decides: (applies, explained, reason).
-    rules = (
-        (isinstance(error, RunStopped), injected.stopped, "stopped without a stop request"),
-        (
-            unresolved,
-            bool(injected.agent & _TRANSPORT_FAULTS),
-            "unresolved dispatch without a crash or timeout fault",
-        ),
-        (
-            isinstance(error, AgentCrashError),
-            AgentFault.CRASH in injected.agent,
-            "agent crash without a crash fault",
-        ),
-        (
-            isinstance(error, AgentOutputSchemaError),
-            bool(injected.agent & _OUTPUT_FAULTS),
-            "invalid agent output without an output fault",
-        ),
-        # The generated planner can cite an identifier its prompt never offered
-        # (seed 3), so a planning failure needs no fault. Known gap: the generator
-        # should prefer ``null`` where no candidate is listed.
-        (isinstance(error, DynamicPlanningError), True, ""),
-        (isinstance(error, TYPED_ENDS), injected.any, "typed failure in a run no fault touched"),
-    )
-    for applies, explained, reason in rules:
-        if applies:
-            return None if explained else reason
-    return "not a typed ending"
-
-
-TYPED_ENDS = (
-    RunStopped,
-    DynamicPlanningError,
-    RuntimeContractError,
-    AgentCrashError,
-    AgentOutputSchemaError,
-)
+    if isinstance(error, RunStopped):
+        return None if injected.stop_delivered else "stopped without a delivered stop"
+    for error_type, causes in _EXPLAINED_BY.items():
+        if isinstance(error, error_type):
+            if injected.agent & causes:
+                return None
+            return f"{error_type.__name__} without a fault that can cause it"
+    return "an ending no fault is declared to cause"
 
 
 def repro(seed: int) -> str:
@@ -195,12 +165,24 @@ class ChaosAgents:
     plan: FaultPlan
     #: Request a stop when the ``stop_at``-th agent turn starts (``None``: never).
     stop_at: int | None = None
+    stop_delivered: bool = False
     session: Any = None
     tool_errors: list[str] = field(default_factory=list)
     faulty: FaultyAgentClient | None = None
-    dispatches: list[FaultyToolDispatch] = field(default_factory=list)
+    #: One dispatch for the whole run, so a tool rule counts calls across turns and
+    #: fires once; each call is delivered to the tools of the turn making it.
+    dispatch: FaultyToolDispatch = field(init=False)
+    _turn: threading.local = field(default_factory=threading.local, init=False)
     _counts: Counter[str] = field(default_factory=Counter)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def __post_init__(self) -> None:
+        """Build the run's single tool dispatch."""
+        self.dispatch = FaultyToolDispatch(self._route, self.plan)
+
+    def _route(self, name: str, arguments: Mapping[str, object]) -> dict[str, object]:
+        """Deliver one call to the tools of the turn (thread) that made it."""
+        return _deliver(self._turn.tools)(name, arguments)
 
     def client(
         self,
@@ -241,14 +223,15 @@ class ChaosAgents:
             # The user's Ctrl-C reaches a run as this request (the engine's
             # signal handler calls it); the turn itself continues.
             self.session.stop()
+            self.stop_delivered = True
         rng = self.plan.rng("act", invocation.kind, ordinal)
         candidate = invocation.workspace / "queue.py"
         editing = invocation.kind == IMPLEMENTER.id and candidate.is_file()
         if editing:
             _edit(candidate, rng.randint(-1, 9), rng.choice((None, 3, 12)))
         tools = _evaluation_tools(invocation)
-        dispatch = FaultyToolDispatch(_deliver(tools), self.plan)
-        self.dispatches.append(dispatch)
+        self._turn.tools = tools
+        dispatch = self.dispatch
         vocabulary = list(prompt_vocabulary(invocation.user_prompt))
         if _EVIDENCE_TOOL in tools and rng.random() < _READS_EVIDENCE:
             # A correct agent reads the trusted evidence it may cite (every
@@ -442,6 +425,7 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     thread.start()
     thread.join(RUN_GUARD_S)
     injected = [str(item) for item in (agents.faulty.injected if agents.faulty else [])]
+    injected += [f"tool {item}" for item in agents.dispatch.injected]
     injected += [json.dumps(item) for item in injected_faults(faults_dir / "cluster")]
     violations: list[Violation | tuple[str, str]] = [
         (ChaosInvariant.TOOL_HANDLER_CRASH, error) for error in agents.tool_errors
@@ -453,15 +437,11 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     if not finished:
         return ChaosRun(seed, plan, None, violations, injected, agents.stop_at)
     run = finished[0]
-    cluster_faults = len(injected_faults(faults_dir / "cluster"))
     suffered = Injected(
         agent=frozenset(item[2] for item in (agents.faulty.injected if agents.faulty else [])),
-        other=cluster_faults + sum(len(item.injected) for item in agents.dispatches),
-        stopped=agents.stop_at is not None,
+        stop_delivered=agents.stop_delivered,
     )
-    if run.error is not None and not isinstance(run.error, TYPED_ENDS):
-        violations.append((ChaosInvariant.UNTYPED_END, repr(run.error)))
-    elif (reason := unexplained_end(run.error, suffered)) is not None:
+    if (reason := unexplained_end(run.error, suffered)) is not None:
         violations.append((ChaosInvariant.UNEXPLAINED_END, f"{reason}: {run.error!r}"))
     # A profile that failed because the plan faulted its agent or its job, or
     # because the run stopped, is a typed failure, not an unservable capability.
