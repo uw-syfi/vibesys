@@ -22,6 +22,7 @@ from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     RunFacts,
     RunStatus,
 )
@@ -274,7 +275,11 @@ def test_official_accuracy_failure_retries_with_feedback(tmp_path: Path) -> None
 
     def configure(run: FakeRun) -> None:
         run.evaluation.script_accuracy(
-            AccuracyEvaluation(executed=True, feedback="accuracy regressed"),
+            AccuracyEvaluation(
+                executed=True,
+                feedback="accuracy regressed",
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
+            ),
             AccuracyEvaluation(executed=True),
         )
         run.evaluation.script_benchmark(

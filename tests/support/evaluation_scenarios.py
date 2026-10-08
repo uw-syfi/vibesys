@@ -302,6 +302,9 @@ def _script_direct(run: FakeRun, spec: ScenarioSpec) -> None:
         AccuracyEvaluation(
             executed=True,
             feedback=accuracy_failure if failed and not spec.benchmark_failure else None,
+            failure_kind=(
+                BenchmarkFailureKind.WORKLOAD if failed and not spec.benchmark_failure else None
+            ),
         )
     )
     run.evaluation.script_benchmark(

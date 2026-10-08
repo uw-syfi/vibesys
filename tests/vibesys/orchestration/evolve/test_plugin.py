@@ -20,6 +20,7 @@ from vibesys.orchestration.evolve.population import (
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentRole,
+    BenchmarkFailureKind,
     RunCleanupError,
     RunFacts,
     RunStatus,
@@ -308,6 +309,7 @@ def test_trusted_accuracy_rejects_candidate_after_judge_passes(tmp_path: Path) -
             AccuracyEvaluation(
                 executed=True,
                 feedback="trusted accuracy rejected the candidate",
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         )
 

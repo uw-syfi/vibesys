@@ -189,7 +189,9 @@ def test_evaluation_failure_feedback_drives_a_correction_attempt(
         )
         if gate == "accuracy":
             run.evaluation.script_accuracy(
-                AccuracyEvaluation(executed=True, feedback=feedback),
+                AccuracyEvaluation(
+                    executed=True, feedback=feedback, failure_kind=BenchmarkFailureKind.WORKLOAD
+                ),
                 AccuracyEvaluation(executed=True),
             )
         else:

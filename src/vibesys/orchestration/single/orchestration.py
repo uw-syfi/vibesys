@@ -390,11 +390,23 @@ class _SingleRun:
         )
         receipt = self.state.accuracy_receipt
         reuse = receipt if receipt is not None and receipt.revision == revision else None
-        accuracy = await self.run.evaluation.accuracy(self.workspace, reuse=reuse)
+        accuracy_settling = SettlingMeasurement()
+        accuracy_verdict = None
+        while accuracy_verdict is None:
+            accuracy = await self.run.evaluation.accuracy(self.workspace, reuse=reuse)
+            accuracy_verdict = accuracy_settling.observe(accuracy)
         self.state = self.state.model_copy(update={"accuracy_receipt": accuracy.receipt}, deep=True)
-        if not accuracy.passed:
-            await self._evaluation_failed(selected, accuracy.feedback or "accuracy failed")
-            return AttemptDecision.RETRY
+        match accuracy_verdict:
+            case EvaluationPassed():
+                pass
+            case CandidateFailed():
+                await self._evaluation_failed(selected, accuracy.feedback or "accuracy failed")
+                return AttemptDecision.RETRY
+            case InfrastructureFailed(feedback=feedback):
+                self._note_unmeasured(selected, feedback)
+                return AttemptDecision.FINISH
+            case _:
+                assert_never(accuracy_verdict)
         settling = SettlingMeasurement()
         verdict = None
         while verdict is None:

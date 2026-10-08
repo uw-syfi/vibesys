@@ -558,7 +558,11 @@ def test_failed_accuracy_cannot_restore_a_headline_measurement_from_round_histor
                 AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
-        run.evaluation.script_accuracy(AccuracyEvaluation(executed=True, feedback="Incorrect."))
+        run.evaluation.script_accuracy(
+            AccuracyEvaluation(
+                executed=True, feedback="Incorrect.", failure_kind=BenchmarkFailureKind.WORKLOAD
+            )
+        )
         run.evaluation.script_benchmark(
             *(
                 BenchmarkEvaluation(

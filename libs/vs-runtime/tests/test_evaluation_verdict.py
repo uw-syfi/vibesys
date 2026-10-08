@@ -10,6 +10,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vs_runtime.api import (
+    AccuracyEvaluation,
     BenchmarkEvaluation,
     BenchmarkFailureKind,
     CandidateFailed,
@@ -120,3 +121,15 @@ def test_measuring_is_bounded_and_ends_in_a_verdict_a_policy_can_act_on(
     assert len(evaluation.benchmark_calls) <= limit
     if isinstance(verdict, InfrastructureFailed):
         assert verdict.kind is _INFRA
+
+
+@given(kind=st.none() | st.sampled_from(BenchmarkFailureKind), note=st.none() | st.text(min_size=1))
+def test_an_accuracy_outcome_names_a_failure_kind_exactly_when_it_failed(
+    kind: BenchmarkFailureKind | None, note: str | None
+) -> None:
+    if (kind is None) == (note is None):
+        outcome = AccuracyEvaluation(executed=True, feedback=note, failure_kind=kind)
+        assert isinstance(verdict_of(outcome), EvaluationPassed) == (note is None)
+    else:
+        with pytest.raises(ValidationError, match="failure kind"):
+            AccuracyEvaluation(executed=True, feedback=note, failure_kind=kind)
