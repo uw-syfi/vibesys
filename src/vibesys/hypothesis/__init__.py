@@ -94,6 +94,7 @@ from vibesys.hypothesis.state import (
 
 __all__ = [
     "HYPOTHESIS_TITLE_MAX_LEN",
+    "AgentAttribution",
     "ArchiveAxis",
     "ArchiveConflict",
     "ArchiveDominator",
@@ -102,7 +103,6 @@ __all__ = [
     "ArchivePendingClaim",
     "ArchiveScalarReading",
     "ArchiveTrustedParent",
-    "AgentAttribution",
     "AttemptBudget",
     "AttemptDecision",
     "AttemptState",

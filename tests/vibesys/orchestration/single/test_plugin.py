@@ -42,6 +42,9 @@ _FAKE_AGENT_CAPABILITIES = frozenset(
 )
 
 
+_DISCONNECTED = "agent disconnected"
+
+
 def _options(**changes: object) -> BaseModel:
     return PLUGIN.options.model_validate(
         {
@@ -412,7 +415,7 @@ def test_resume_runs_the_same_implementer_attempts_as_an_uninterrupted_run(
                 return _plan("H-01")
             turns += 1
             if turns == crash:
-                raise RuntimeError("agent disconnected")
+                raise RuntimeError(_DISCONNECTED)
             return _response(verdict=Verdict.FAIL, feedback="still wrong")
 
         async def scenario() -> tuple[RunStatus, SingleState | None]:

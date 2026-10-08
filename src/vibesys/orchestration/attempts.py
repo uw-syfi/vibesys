@@ -10,13 +10,19 @@ class PaidMarker(Protocol):
     """Durable proof that an attempt started: the newest one a state recorded."""
 
     @property
-    def round_number(self) -> int: ...
+    def round_number(self) -> int:
+        """Round the attempt belongs to."""
+        ...
 
     @property
-    def member_id(self) -> str: ...
+    def member_id(self) -> str:
+        """Hypothesis or work item that owns the attempt."""
+        ...
 
     @property
-    def turn_number(self) -> int: ...
+    def turn_number(self) -> int:
+        """1-based number of the newest started attempt."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
