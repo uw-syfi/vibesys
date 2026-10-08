@@ -72,7 +72,6 @@ if TYPE_CHECKING:
     from vs_sandbox.local_shell import LocalShellSandbox
     from vs_sandbox.modal_model_setup import ensure_model_volume
     from vs_sandbox.rocm_backend import RocmBackend
-    from vs_sandbox.slurm_executor import join_observation
     from vs_sandbox.trainium_backend import TrainiumBackend
 
 __all__ = [
@@ -121,7 +120,6 @@ __all__ = [
     "deduplicate_host_resources",
     "ensure_model_volume",
     "host_resource_for_mount",
-    "join_observation",
     "linked_worktree_git_paths",
     "parse_gpu_process_output",
     "pick_gpu",
@@ -182,7 +180,6 @@ _LAZY_EXPORTS = {
     "SandboxLifecycleHooks": ("lifecycle", "SandboxLifecycleHooks"),
     "start_sandbox": ("lifecycle", "start_sandbox"),
     "stop_sandbox": ("lifecycle", "stop_sandbox"),
-    "join_observation": ("slurm_executor", "join_observation"),
     "linked_worktree_git_paths": ("linked_worktree", "linked_worktree_git_paths"),
     "LocalShellSandbox": ("local_shell", "LocalShellSandbox"),
     "ensure_model_volume": ("modal_model_setup", "ensure_model_volume"),
