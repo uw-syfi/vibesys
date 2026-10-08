@@ -92,6 +92,11 @@ def _scenarios(draw: st.DrawFn) -> Scenario:
     stop = draw(st.none() | st.floats(min_value=1.0, max_value=_CONTROL_WINDOW_S))
     pause = draw(st.none() | st.floats(min_value=1.0, max_value=_CONTROL_WINDOW_S))
     resume = None if pause is None else pause + draw(st.floats(min_value=1.0, max_value=200.0))
+    # A pause or resume that reaches a run already draining raises `ContractError` out of the
+    # loop (known gap, see the PR description), so a deadline is drawn only without a pause.
+    deadline = None
+    if pause is None:
+        deadline = draw(st.none() | st.floats(min_value=1.0, max_value=_CONTROL_WINDOW_S))
     return Scenario(
         in_flight=draw(st.integers(min_value=1, max_value=2)),
         rounds=1,
@@ -99,12 +104,15 @@ def _scenarios(draw: st.DrawFn) -> Scenario:
         stop_after=stop,
         pause_after=pause,
         resume_after=resume,
+        deadline_at=100000.0 if deadline is None else 1.0 + deadline,
     )
 
 
 @settings(max_examples=_EXAMPLES, deadline=None, derandomize=True)
 @given(_scenarios())
-def test_a_run_with_early_controls_ends_live_and_consistent(scenario: Scenario) -> None:
+def test_a_run_with_controls_anywhere_ends_live_and_keeps_its_verified_work(
+    scenario: Scenario,
+) -> None:
     """Liveness (bounded requests, no spin, nothing open, no orphan wait) is checked by
     ``run_scale`` itself; here the run must also end in a state the controls explain.
     """
@@ -113,6 +121,10 @@ def test_a_run_with_early_controls_ends_live_and_consistent(scenario: Scenario) 
     if run.error is None:
         assert run.core.run.status is RunStatus.TERMINAL
         assert run.core.run.result is not None
+        # A run that ends, however it ends, keeps the verified work it settled.
+        if any(item.eligible for item in run.core.settlement.settlements):
+            assert run.core.settlement.adoption is not None
+            assert run.core.settlement.adoption.verified
     else:
         assert isinstance(run.error, RunStopped), run.error
         assert scenario.stop_after is not None

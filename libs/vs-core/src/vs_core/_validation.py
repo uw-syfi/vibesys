@@ -29,6 +29,7 @@ from .types.strategy import (
     Measure,
     Operation,
     Park,
+    ProposeWinner,
     Rejected,
     RequestTurn,
     StartAttempt,
@@ -108,11 +109,21 @@ def _reject(
     return Rejected(decision_id=decision.decision_id, code=code, path=path, detail=detail)
 
 
+# What a closed-to-ordinary-decisions gate still takes (an open gate takes them all). A held
+# run takes a stop or withdrawal. A drain also takes the adoption of a candidate the run
+# already verified: ending a run does not discard the work it settled, and the host reports
+# a drained run that adopted one as a success.
+_ADMITTED: dict[DecisionGate, tuple[type, ...]] = {
+    DecisionGate.OPEN: (),
+    DecisionGate.HELD: (Stop, Withdraw),
+    DecisionGate.DRAINING: (Stop, Withdraw, ProposeWinner),
+    DecisionGate.CLOSED: (),
+}
+
+
 def _gate_rejection(state: CoreState, decision: Decision) -> Rejected | None:
     gate = decision_gate(state)
-    if gate is DecisionGate.OPEN or (
-        isinstance(decision, Stop | Withdraw) and gate is not DecisionGate.CLOSED
-    ):
+    if gate is DecisionGate.OPEN or isinstance(decision, _ADMITTED[gate]):
         return None
     if gate is DecisionGate.HELD:
         return _reject(decision, RejectionCode.HELD, ("scope",), f"run is {state.run.status.value}")

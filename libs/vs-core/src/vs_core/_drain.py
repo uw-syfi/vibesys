@@ -1,10 +1,11 @@
 """What a request is for when a run drains: work core cannot end, or cleanup core issues.
 
 A stop moves the run to ``closing`` and core ends what it can: it cancels turns and jobs,
-inspects and closes sessions, closes attempt scopes and discards workspaces. Each of those
+inspects and closes sessions, closes attempt scopes and discards workspaces, and it adopts and
+verifies the candidate the strategy proposes in the drain (see ``decision_gate``). Each of those
 requests is core's own drain, so the shell may wait for it. Any other running request starts
-external work (a turn, a submission, a poll, a snapshot, an adoption): core has no
-cancellation for it, so a stop that finds one running cannot finish through core alone.
+external work (a turn, a submission, a poll, a snapshot): core has no cancellation for it, so
+a stop that finds one running cannot finish through core alone.
 
 The classification is a closed match over the request union, so a new request kind fails the
 type check until someone says which side of the drain it is on.
@@ -69,6 +70,8 @@ def drain_role(request: Request) -> DrainRole:
             | CloseAttemptScope()
             | DiscardWorkspace()
             | BlockIntent()
+            | AdoptRevision()
+            | VerifyAdoption()
         ):
             return DrainRole.CLEANUP
         case (
@@ -82,8 +85,6 @@ def drain_role(request: Request) -> DrainRole:
             | ResumeSessionTurn()
             | SubmitMeasurement()
             | ObserveOwnedJob()
-            | AdoptRevision()
-            | VerifyAdoption()
             | ExecuteRegisteredOperation()
         ):
             return DrainRole.WORK

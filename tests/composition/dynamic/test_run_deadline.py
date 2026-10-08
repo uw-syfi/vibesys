@@ -57,3 +57,22 @@ def test_a_deadline_after_verified_candidates_adopts_the_best_one() -> None:
     )
     assert adoption.verified
     assert isinstance(adoption.selection, RetainedCandidate)
+
+
+def test_an_operator_stop_after_verified_candidates_adopts_the_best_one() -> None:
+    """The same drain rule holds for a stop: it ends the run, it does not discard the work."""
+    reference = run_scale(Scenario(in_flight=2, rounds=2, profile=_EXACT, config=_BUDGETS))
+    second_round = [s for s in reference.turns if s.role == "implementer"][2:]
+    stop = (second_round[0].start + second_round[0].end) / 2 - reference.started_at
+
+    run = run_scale(
+        Scenario(in_flight=2, rounds=2, profile=_EXACT, config=_BUDGETS, stop_after=stop)
+    )
+
+    assert run.stopped_at is not None
+    assert run.error is None, run.error
+    assert run.core.run.status is RunStatus.TERMINAL
+    adoption = run.core.settlement.adoption
+    assert adoption is not None
+    assert adoption.verified
+    assert isinstance(adoption.selection, RetainedCandidate)
