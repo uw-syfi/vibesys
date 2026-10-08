@@ -1285,11 +1285,11 @@ describe('wire payload validation', () => {
     expect(accepted.disconnects).toEqual([]);
     expect(accepted.batches.map(batch => batch.rebootstrap)).toEqual([true, false, undefined]);
 
-    const rejected = await deliverFrames([
-      {type: 'event_batch', events: [], rebootstrap: 'true'},
-    ]);
+    const rejected = await deliverFrames([{type: 'event_batch', events: [], rebootstrap: 'true'}]);
     expect(kindOf(rejected.disconnects[0])).toBe('parse');
-    expect(rejected.disconnects[0]?.message).toContain('rebootstrap must be a boolean when present');
+    expect(rejected.disconnects[0]?.message).toContain(
+      'rebootstrap must be a boolean when present',
+    );
   });
 
   it('refuses a malformed diagnostic on a protocol error and keeps a valid one', async () => {

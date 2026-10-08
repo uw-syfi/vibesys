@@ -160,11 +160,7 @@ class StubTransport implements StreamTransport {
     return Promise.resolve(subscription);
   }
 
-  emitBatch(
-    events: readonly RunEvent[],
-    historyAfterSequence = 0,
-    rebootstrap?: boolean,
-  ): void {
+  emitBatch(events: readonly RunEvent[], historyAfterSequence = 0, rebootstrap?: boolean): void {
     this.#message?.({
       type: 'event_batch',
       events: [...events],
