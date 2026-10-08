@@ -24,12 +24,11 @@ from functools import cache
 
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from tests.support.scale_dynamic_run import ScaleRun, run_timed
 from tests.support.timed_dynamic_run import (
     IMPLEMENTERS,
     OBSERVE_INTERVAL_S,
-    TimedRun,
     TimingProfile,
-    run_timed,
 )
 
 from vs_core.api import RunStatus
@@ -84,12 +83,12 @@ PROFILES = st.sampled_from([TimingProfile(), EXACT, LONG_TURN, _SHORT, _SLOW])
 
 
 @cache
-def _finished(profile: TimingProfile) -> TimedRun:
+def _finished(profile: TimingProfile) -> ScaleRun:
     """The run with no stop: a pure function of the profile, so cached across properties."""
     return run_timed(profile)
 
 
-def _ended_normally(run: TimedRun) -> None:
+def _ended_normally(run: ScaleRun) -> None:
     assert run.error is None, run.error
     assert run.outcome is not None
     assert run.outcome.status is RunStatus.TERMINAL
@@ -122,7 +121,7 @@ def test_every_lease_renewal_is_accepted(profile: TimingProfile) -> None:
     assert len(renewals) >= len(run.turns)
 
 
-def _turn_windows(run: TimedRun) -> list[tuple[float, float]]:
+def _turn_windows(run: ScaleRun) -> list[tuple[float, float]]:
     return [(span.start, span.end) for span in run.turns if span.end - span.start > 1.0]
 
 

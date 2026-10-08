@@ -406,7 +406,7 @@ def drive_shell[S: StrategyState](
         new_run(strategy, harness),
         bindings=CoreRuntimeBindings(
             registry=harness.registry,
-            executors=_executors(
+            executors=request_executors(
                 ScriptedExecutors(
                     script, lambda: shell.record.envelope.core, harness.registry, schemas, journal
                 )
@@ -434,7 +434,7 @@ def drive_shell[S: StrategyState](
     return Run(core=shell.record.envelope.core, decisions=decisions, journal=journal, halted=halted)
 
 
-def _executors(executor: ScriptedExecutors) -> RequestExecutors:
+def request_executors(executor: ScriptedExecutors) -> RequestExecutors:
     return RequestExecutors(
         workspaces=executor,  # type: ignore[arg-type]  # one scripted object serves every role
         sessions=executor,  # type: ignore[arg-type]  # the same scripted object serves this role

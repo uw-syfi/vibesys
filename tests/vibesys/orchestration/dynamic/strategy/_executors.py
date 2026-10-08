@@ -73,7 +73,7 @@ _KINDS = {
 }
 
 
-def _lease(session_id: SessionId) -> ResourceId:
+def lease_for(session_id: SessionId) -> ResourceId:
     """The lease an executor holds for a session: the same name from ensure through close."""
     return ResourceId(root=f"lease:{session_id.root}")
 
@@ -130,7 +130,7 @@ class Executors:
             case EnsureWorkspace() | EnsureSession():
                 answer = self._ensure(request)
             case CloseSession():
-                answer = Succeeded(resource_id=_lease(request.session_id))
+                answer = Succeeded(resource_id=lease_for(request.session_id))
             case SnapshotAndRetain():
                 answer = self._retain(request)
             case RetainRevision():
@@ -186,7 +186,7 @@ class Executors:
                 ),
                 revision=request.plan.base,
             )
-        return Succeeded(resource_id=_lease(request.spec.session_id))
+        return Succeeded(resource_id=lease_for(request.spec.session_id))
 
     def _evaluate_from_turn(self, request: DispatchTurn) -> None:
         """The implementer measures the revision core will retain for its attempt."""
@@ -235,7 +235,7 @@ class Executors:
             return reply
         if role == "implementer" and self.agent_evaluation:
             self._evaluate_from_turn(request)
-        lease = _lease(request.turn.session.session_id)
+        lease = lease_for(request.turn.session.session_id)
         return Succeeded(output_json=reply, resource_id=lease)
 
     # -- evaluator --------------------------------------------------------

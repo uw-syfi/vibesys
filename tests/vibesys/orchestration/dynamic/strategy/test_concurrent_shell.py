@@ -29,7 +29,7 @@ from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, LIMITS, con
 from tests.vibesys.orchestration.dynamic.strategy._shell import (
     LEASE,
     ScriptedExecutors,
-    _executors,
+    request_executors,
 )
 
 from vibesys.orchestration.dynamic.core_policy.api import reply_schemas, requirements_for
@@ -349,7 +349,7 @@ def _build(
             registry=harness.registry,
             transitions=_RecordingTransitions(ledger),
             commits=process.commits or IgnoreCommits(),
-            executors=_executors(
+            executors=request_executors(
                 _DelayedExecutors(
                     executors,
                     lambda: shell.record.envelope.core,
