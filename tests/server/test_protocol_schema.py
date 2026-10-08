@@ -11,12 +11,28 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
-from server.api.protocol import ProtocolRequest, ServerMessage
-from server.api.schema import protocol_json_schema, require_tagged_union_discriminants
+from server.api.protocol import ProtocolRequest, Response, ServerMessage
+from server.api.schema import (
+    fully_populated_response,
+    protocol_json_schema,
+    require_supported_response_payload_schema,
+    require_tagged_union_discriminants,
+    response_payload_json_schema,
+    response_payload_typescript,
+)
 from server.events import EventData
 from vibesys.api import RunFailedData, RunFailure, ToolResultPayload
 
 SCHEMA_PATH = Path("clients/backend-client/src/generated/protocol.schema.json")
+RESPONSE_PAYLOAD_SCHEMA_PATH = Path(
+    "clients/backend-client/src/generated/response-payload.schema.json"
+)
+RESPONSE_PAYLOAD_MODULE_PATH = Path(
+    "clients/backend-client/src/generated/response-payload.schema.ts"
+)
+RESPONSE_PAYLOAD_FIXTURE_PATH = Path(
+    "clients/backend-client/src/generated/response-payload.fixture.json"
+)
 
 # The public alias of every tagged union the protocol publishes. A member model
 # is only reachable through one of these, which is why the exported schema may
@@ -54,6 +70,73 @@ def _definition(document: dict[str, Any], ref: str) -> dict[str, Any]:
 
 def test_committed_protocol_schema_matches_python_contract() -> None:
     assert _committed_schema() == protocol_json_schema()
+
+
+def test_committed_response_payload_schema_matches_python_contract() -> None:
+    assert json.loads(RESPONSE_PAYLOAD_SCHEMA_PATH.read_text()) == response_payload_json_schema()
+
+
+def test_committed_response_payload_module_matches_python_contract() -> None:
+    assert RESPONSE_PAYLOAD_MODULE_PATH.read_text() == response_payload_typescript()
+
+
+def test_committed_response_payload_fixture_is_a_real_server_model_dump() -> None:
+    response = fully_populated_response()
+    assert isinstance(response, Response)
+    assert RESPONSE_PAYLOAD_FIXTURE_PATH.read_text() == response.model_dump_json() + "\n"
+
+
+@pytest.mark.parametrize(
+    "keyword",
+    [
+        "allOf",
+        "exclusiveMinimum",
+        "maxItems",
+        "maxLength",
+        "maximum",
+        "minItems",
+        "minLength",
+        "multipleOf",
+        "not",
+        "oneOf",
+        "pattern",
+        "uniqueItems",
+    ],
+)
+def test_response_payload_descriptor_refuses_unimplemented_validation_keywords(
+    keyword: str,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=rf"\$: unsupported response payload schema keyword '{keyword}'",
+    ):
+        require_supported_response_payload_schema({"type": "string", keyword: 1})
+
+
+@pytest.mark.parametrize(
+    ("schema", "reason"),
+    [
+        ({"type": "string", "minimum": 0}, "minimum requires a numeric type"),
+        ({"type": "integer", "minimum": True}, "minimum must be a finite number"),
+        ({"type": "integer", "format": "date-time"}, "unsupported.*format"),
+        ({"type": "integer", "const": "one"}, "const does not match its type"),
+        ({"type": "object", "additionalProperties": {}}, "additionalProperties must be boolean"),
+        ({"type": "object", "required": ["value", "value"]}, "unique strings"),
+        ({"anyOf": []}, "anyOf must be a nonempty array"),
+        ({"type": "array", "const": []}, "const must be a scalar"),
+        ({"type": "object", "const": {}}, "const must be a scalar"),
+        ({"const": ["value"]}, "const must be a scalar"),
+        (
+            {"type": "integer", "const": 1, "minimum": 2},
+            "cannot combine an applicator with another shape",
+        ),
+    ],
+)
+def test_response_payload_descriptor_refuses_unenforceable_keyword_values(
+    schema: dict[str, Any], reason: str
+) -> None:
+    with pytest.raises(ValueError, match=reason):
+        require_supported_response_payload_schema(schema)
 
 
 def test_committed_schema_requires_every_tagged_union_discriminant() -> None:

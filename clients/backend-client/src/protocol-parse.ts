@@ -1,4 +1,5 @@
 import {BackendClientError, ServerError} from './errors.js';
+import responsePayloadSchema from './generated/response-payload.schema.js';
 import type {Diagnostic, ProtocolResponse, ServerMessage} from './protocol.js';
 
 const RESPONSE = 'response';
@@ -7,16 +8,9 @@ const STREAM = 'event-stream message';
 /**
  * Parse and validate a response independently of the transport framing.
  *
- * The envelope and the two payloads that leave this package as protocol values
- * are checked: every event in `events`, which the folds apply exactly as a
- * streamed batch's events are applied, and `diagnostic`, which `responseError`
- * hands to callers inside a `ServerError`. The remaining payload fields a
- * response can carry (`snapshot`, `experiments`, `design`, `chat`,
- * `chat_options`, `tui_defaults`, `performance`, `ack`, ...) are fifteen
- * further nested models that no event-stream frame reaches, so the assertion
- * below is earned for the envelope, the events, and the diagnostic, and is
- * still an assumption for the rest. Closing that is the response half of this
- * boundary and wants its own change rather than a partial descent here.
+ * A compact generated descriptor validates every response payload before the
+ * assertion. The hand-written checks retain their specific diagnostics for the
+ * envelope, event batch, and diagnostic that have public error-taxonomy behavior.
  */
 export function parseProtocolResponse(line: string): ProtocolResponse {
   const value = parseJson(line, RESPONSE);
@@ -33,7 +27,278 @@ export function parseProtocolResponse(line: string): ProtocolResponse {
   nullableString(record, 'error', RESPONSE);
   validateDiagnostic(record, RESPONSE);
   if (record['events'] !== undefined) validateEventList(record, 'events', RESPONSE);
+  validateSchema(value, responsePayloadSchema as Schema, RESPONSE);
   return value as ProtocolResponse;
+}
+
+type Schema = Record<string, unknown>;
+const RFC3339_DATE_TIME =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|([+-])(\d{2}):(\d{2}))$/;
+// RFC 3339 admits :60 only at an announced UTC leap second. These are every
+// insertion month through the most recent leap second in December 2016.
+const RFC3339_LEAP_SECONDS = new Set([
+  '1972-06',
+  '1972-12',
+  '1973-12',
+  '1974-12',
+  '1975-12',
+  '1976-12',
+  '1977-12',
+  '1978-12',
+  '1979-12',
+  '1981-06',
+  '1982-06',
+  '1983-06',
+  '1985-06',
+  '1987-12',
+  '1989-12',
+  '1990-12',
+  '1992-06',
+  '1993-06',
+  '1994-06',
+  '1995-12',
+  '1997-06',
+  '1998-12',
+  '2005-12',
+  '2008-12',
+  '2012-06',
+  '2015-06',
+  '2016-12',
+]);
+
+/** Validate generated response shape, intentionally leaving closed-set membership open. */
+function validateSchema(value: unknown, schema: Schema, path: string): void {
+  const ref = schema['$ref'];
+  if (typeof ref === 'string') {
+    validateSchema(value, schemaReference(ref), path);
+    return;
+  }
+  const constant = schema['const'];
+  if (constant !== undefined) {
+    validateConstant(value, constant, path);
+    return;
+  }
+  const choices = schema['anyOf'];
+  if (Array.isArray(choices)) {
+    validateAnyOf(value, choices, path);
+    return;
+  }
+  validateTypedSchema(value, schema, path);
+}
+
+function schemaDefinition(name: string): Schema {
+  const definitions = (responsePayloadSchema as {$defs?: Record<string, Schema>}).$defs;
+  const definition = definitions?.[name];
+  if (definition === undefined)
+    throw new BackendClientError('parse', `Invalid protocol schema ref: #/$defs/${name}`);
+  return definition;
+}
+
+function schemaReference(ref: string): Schema {
+  const name = ref.startsWith('#/$defs/') ? ref.slice('#/$defs/'.length) : ref;
+  return schemaDefinition(name);
+}
+
+function validateConstant(value: unknown, constant: unknown, path: string): void {
+  // String literals are closed-set members, which stay forward compatible.
+  // Numeric literals are protocol-version boundaries and must agree exactly.
+  if (typeof constant === 'string' && typeof value === 'string') return;
+  if (value === constant) return;
+  throw new BackendClientError('parse', `Invalid server ${path}: must be a ${typeof constant}`);
+}
+
+function validateAnyOf(value: unknown, choices: unknown[], path: string): void {
+  let mismatch: BackendClientError | undefined;
+  for (const choice of choices) {
+    if (!isRecord(choice)) continue;
+    try {
+      validateSchema(value, choice, path);
+      return;
+    } catch (error) {
+      if (!(error instanceof BackendClientError)) throw error;
+      mismatch ??= error;
+    }
+  }
+  throw (
+    mismatch ??
+    new BackendClientError('parse', `Invalid server ${path}: does not match its protocol shape`)
+  );
+}
+
+function validateTypedSchema(value: unknown, schema: Schema, path: string): void {
+  const type = schema['type'];
+  switch (type) {
+    case 'array':
+      validateArray(value, schema, path);
+      return;
+    case 'object':
+      validateObject(value, schema, path);
+      return;
+    case 'null':
+      validatePrimitive(value === null, type, path);
+      return;
+    case 'string':
+      validateString(value, schema, path);
+      return;
+    case 'number':
+      validateNumber(value, schema, path, false);
+      return;
+    case 'integer':
+      validateNumber(value, schema, path, true);
+      return;
+    case 'boolean':
+      validatePrimitive(typeof value === 'boolean', type, path);
+  }
+}
+
+function validateString(value: unknown, schema: Schema, path: string): void {
+  if (typeof value !== 'string') {
+    validatePrimitive(false, 'string', path);
+    return;
+  }
+  if (schema['format'] !== 'date-time') return;
+  if (!isRfc3339DateTime(value)) {
+    throw new BackendClientError('parse', `Invalid server ${path}: must be a date-time`);
+  }
+}
+
+function isRfc3339DateTime(value: string): boolean {
+  const parts = RFC3339_DATE_TIME.exec(value);
+  if (parts === null) return false;
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+    offsetSign,
+    offsetHourText,
+    offsetMinuteText,
+  ] = parts;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const offsetHour = offsetHourText === undefined ? 0 : Number(offsetHourText);
+  const offsetMinute = offsetMinuteText === undefined ? 0 : Number(offsetMinuteText);
+  return (
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= daysInMonth(year, month) &&
+    hour <= 23 &&
+    minute <= 59 &&
+    offsetHour <= 23 &&
+    offsetMinute <= 59 &&
+    (second <= 59 ||
+      (second === 60 &&
+        isAnnouncedLeapSecond({
+          year,
+          month,
+          day,
+          hour,
+          minute,
+          offsetSign,
+          offsetHour,
+          offsetMinute,
+        })))
+  );
+}
+
+interface DateTimeParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  offsetSign: string | undefined;
+  offsetHour: number;
+  offsetMinute: number;
+}
+
+function isAnnouncedLeapSecond({
+  year,
+  month,
+  day,
+  hour,
+  minute,
+  offsetSign,
+  offsetHour,
+  offsetMinute,
+}: DateTimeParts): boolean {
+  const direction = offsetSign === '-' ? -1 : 1;
+  const offsetMilliseconds = direction * (offsetHour * 60 + offsetMinute) * 60_000;
+  // Date.UTC treats years 0 through 99 as 1900 through 1999. Set the full year
+  // explicitly so an ancient date cannot borrow a modern leap-second entry.
+  const utc = new Date(0);
+  utc.setUTCFullYear(year, month - 1, day);
+  utc.setUTCHours(hour, minute, 59, 0);
+  utc.setTime(utc.getTime() - offsetMilliseconds);
+  const utcMonth = `${utc.getUTCFullYear()}-${String(utc.getUTCMonth() + 1).padStart(2, '0')}`;
+  return (
+    utc.getUTCDate() === daysInMonth(utc.getUTCFullYear(), utc.getUTCMonth() + 1) &&
+    utc.getUTCHours() === 23 &&
+    utc.getUTCMinutes() === 59 &&
+    RFC3339_LEAP_SECONDS.has(utcMonth)
+  );
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function validateNumber(value: unknown, schema: Schema, path: string, integer: boolean): void {
+  const type = integer ? 'integer' : 'number';
+  if (typeof value !== 'number' || (integer && !Number.isInteger(value))) {
+    validatePrimitive(false, type, path);
+    return;
+  }
+  const minimum = schema['minimum'];
+  if (typeof minimum === 'number' && value < minimum) {
+    throw new BackendClientError('parse', `Invalid server ${path}: must be at least ${minimum}`);
+  }
+}
+
+function validatePrimitive(valid: boolean, type: string, path: string): void {
+  if (valid) return;
+  throw new BackendClientError('parse', `Invalid server ${path}: must be a ${type}`);
+}
+
+function validateArray(value: unknown, schema: Schema, path: string): void {
+  if (!Array.isArray(value))
+    throw new BackendClientError('parse', `Invalid server ${path}: must be an array`);
+  const items = schema['items'];
+  if (!isRecord(items)) return;
+  for (const [index, item] of value.entries()) validateSchema(item, items, `${path}[${index}]`);
+}
+
+function validateObject(value: unknown, schema: Schema, path: string): void {
+  const record = requireRecord(value, path);
+  validateRequired(record, schema['required'], path);
+  const properties = schema['properties'];
+  if (!isRecord(properties)) return;
+  // #869: newly added server fields must not make an older client disconnect.
+  // Validate known fields only; the generated types retain the known contract.
+  for (const [key, child] of Object.entries(properties)) {
+    if (record[key] !== undefined && isRecord(child))
+      validateSchema(record[key], child, `${path}.${key}`);
+  }
+}
+
+function validateRequired(record: Record<string, unknown>, required: unknown, path: string): void {
+  if (!Array.isArray(required)) return;
+  for (const key of required) {
+    if (typeof key === 'string' && !(key in record)) throw fieldError(path, key, 'present');
+  }
 }
 
 /**
