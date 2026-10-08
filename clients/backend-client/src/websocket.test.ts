@@ -1251,6 +1251,7 @@ describe('wire payload validation', () => {
       '2024-01-01T00:00:00+24:00',
       '2024-01-01T00:00:00+00:60',
       '2026-01-01T00:00:60Z',
+      '0072-06-30T23:59:60Z',
     ]) {
       const response = JSON.parse(responsePayloadFixture()) as {
         snapshot: {active_executions: Array<{started_at: string}>};
