@@ -95,6 +95,7 @@ def _seed_hypothesis_tests(items: Iterable[pytest.Item]) -> None:
         return
     for item in items:
         test = getattr(item, "obj", None)
+        test = getattr(test, "__func__", test)  # a test method: seed the function
         if getattr(test, "is_hypothesis_test", False) and getattr(test, _SEED_SLOT, None) is None:
             setattr(test, _SEED_SLOT, _CI_HYPOTHESIS_SEED)
 
