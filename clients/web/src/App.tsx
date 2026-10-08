@@ -1,10 +1,12 @@
 import {activeRunFocus, phaseText} from '@vibesys/core-state';
 import {type FormEvent, type JSX, useEffect, useState, useSyncExternalStore} from 'react';
-import {CampaignDashboard} from './CampaignDashboard.js';
 import {connectionBanners} from './banners.js';
+import {CampaignDashboard} from './CampaignDashboard.js';
 import {useCampaignHistory} from './campaign-history.js';
 import type {CampaignRecord} from './campaign-record.js';
+import type {CampaignStream} from './campaign-stream.js';
 import {bootstrapGateway, GatewaySessionStore, targetFromCapability} from './gateway-session.js';
+import {useLiveCampaign} from './live-campaign.js';
 import {DEFAULT_REPLAY_FIXTURE_URL, loadReplayFixture} from './replay.js';
 import {loadReplayScenario} from './replay-scenario.js';
 import type {WebSession} from './session.js';
@@ -226,6 +228,53 @@ export function createDemoApp(initialGatewayError: string | null = null): JSX.El
 
 export function createLiveApp(session: WebSession): JSX.Element {
   return <App store={session.store} session={session} />;
+}
+
+/**
+ * The replay-as-live route: the same campaign dashboard driven by a frame
+ * stream instead of a loaded fixture. See `docs/design/live-campaign-streaming.md`.
+ */
+function LiveCampaignView({stream}: {readonly stream: CampaignStream}): JSX.Element {
+  const {scenario, campaign, streamError} = useLiveCampaign(stream);
+  if (scenario === null)
+    return (
+      <>
+        {streamError !== null && <StreamErrorBanner error={streamError} />}
+        <main className="campaign-loading">
+          <span className="loading-mark" aria-hidden="true">
+            V
+          </span>
+          <p>
+            {streamError === null
+              ? 'Waiting for the live campaign stream…'
+              : 'The live campaign stream could not be read.'}
+          </p>
+        </main>
+      </>
+    );
+  return (
+    <>
+      {streamError !== null && <StreamErrorBanner error={streamError} />}
+      <CampaignDashboard scenario={scenario} campaign={campaign} />
+    </>
+  );
+}
+
+function StreamErrorBanner({error}: {readonly error: Error}): JSX.Element {
+  return (
+    <div
+      className="stale-banner campaign-alert"
+      role="alert"
+      aria-label="Live stream status"
+      data-testid="campaign-stream-banner"
+    >
+      <span>Live campaign stream error: {error.message}</span>
+    </div>
+  );
+}
+
+export function createLiveCampaignApp(stream: CampaignStream): JSX.Element {
+  return <LiveCampaignView stream={stream} />;
 }
 
 function GatewayConnect({initialError}: {readonly initialError: string | null}): JSX.Element {
