@@ -95,6 +95,7 @@ from vs_evaluation.api import (
 from vs_runtime.api import (
     AgentConversationOpenError,
     AgentEvaluationStatus,
+    AgentOutputSchemaError,
     Completed,
     InvocationConflictError,
     RuntimeContractError,
@@ -915,10 +916,10 @@ class EvaluationSuspension:
             message = "evaluation resume acceptance requires reconciliation"
             raise EvaluationSuspensionUnresolvedError(message)
         try:
-            reply = response.model_validate_json(outcome.result.text)
-        except ValueError as error:
+            reply = outcome.parse(response)
+        except AgentOutputSchemaError as error:
             await self.apply(BlockIntent(operation_id=request.operation_id))
-            raise EvaluationSuspensionUnresolvedError(str(error)) from error
+            raise EvaluationSuspensionUnresolvedError(error.detail) from error
         return (
             await self._validate_resumed_reply(session, reply, response, request.operation_id)
         ).root

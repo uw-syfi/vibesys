@@ -76,3 +76,30 @@ def test_the_error_names_the_fields_of_the_reply_not_of_a_brace_in_the_prose() -
 def test_prose_without_a_complete_object_is_reported_as_no_json_object() -> None:
     with pytest.raises(AgentOutputSchemaError, match="no JSON object"):
         parse_typed_response("see {the set} and { unclosed", Reply)
+
+
+class Defaulted(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    summary: str = ""
+    next_step: str = ""
+
+
+@given(summary=st.text(min_size=1, max_size=20), after=st.sampled_from(["{}", "\n{}\n", "{ }"]))
+def test_a_trailing_empty_object_does_not_displace_a_reply_whose_fields_all_default(
+    summary: str, after: str
+) -> None:
+    reply = Defaulted(summary=summary)
+
+    assert parse_typed_response(reply.model_dump_json() + after, Defaulted) == reply
+
+
+def test_an_empty_object_is_a_valid_reply_when_nothing_else_is() -> None:
+    assert parse_typed_response("Nothing to add: {}", Defaulted) == Defaulted()
+
+
+def test_many_unclosed_braces_cost_bounded_time_and_say_there_is_no_object() -> None:
+    # Quadratic scanning of this text takes minutes; the decode budget makes it instant.
+    text = '{"a":' * 200_000
+
+    with pytest.raises(AgentOutputSchemaError, match="no JSON object"):
+        parse_typed_response(text, Reply)

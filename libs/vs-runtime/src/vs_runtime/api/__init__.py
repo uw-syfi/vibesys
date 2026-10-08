@@ -1,6 +1,7 @@
 """Public contracts for the reusable VibeSys runtime."""
 
 from vs_agent.api import (
+    AgentOutputSchemaError,
     AgentSpawnError,
     Completed,
     InvalidResponse,
@@ -132,6 +133,7 @@ __all__ = [
     "AgentEvaluationStageOutcome",
     "AgentEvaluationStatus",
     "AgentId",
+    "AgentOutputSchemaError",
     "AgentRole",
     "AgentRoleId",
     "AgentSession",

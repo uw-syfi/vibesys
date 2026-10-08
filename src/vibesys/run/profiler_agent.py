@@ -21,7 +21,13 @@ from vs_evaluation.api import (
     ProfilerAgentResult,
     evaluation_principal,
 )
-from vs_runtime.api import AgentCapability, Completed, RunCleanupError, RuntimeContractError
+from vs_runtime.api import (
+    AgentCapability,
+    AgentOutputSchemaError,
+    Completed,
+    RunCleanupError,
+    RuntimeContractError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -181,15 +187,17 @@ class RuntimeProfilerTurnProvision:
                 if not isinstance(resumed, Completed):
                     message = "profiler continuation acceptance requires reconciliation"
                     raise RuntimeContractError(message)
-                parsed = _ProfilerReply.model_validate_json(resumed.result.text)
                 try:
+                    parsed = resumed.parse(_ProfilerReply)
                     await validate(parsed)
-                except EvaluationAgentAccessError as error:
+                except (AgentOutputSchemaError, EvaluationAgentAccessError) as error:
                     parsed = await validated_turn(
                         conversation.session,
                         render_template(
                             "shared/structured_correction_prompt.j2",
-                            error=str(error),
+                            error=error.detail
+                            if isinstance(error, AgentOutputSchemaError)
+                            else str(error),
                             schema=_ProfilerReply.__name__,
                         ),
                         _ProfilerReply,
