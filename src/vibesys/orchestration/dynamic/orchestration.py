@@ -14,6 +14,8 @@ from vibesys.hypothesis import (
     HypothesisSearch,
     HypothesisStrategy,
     OrchestratorPlan,
+    RunEnding,
+    ending_of,
     normalize_hypothesis_title,
 )
 from vibesys.hypothesis import transitions as hypothesis_transitions
@@ -80,6 +82,7 @@ from vibesys.run.dynamic_suspension import (
     prepare_parent_offer,
     validate_parent_materialization,
 )
+from vibesys.run.endings import conclude
 from vs_runtime.api import (
     CandidateProfileStatus,
     ProfileField,
@@ -401,10 +404,10 @@ class _DynamicRun:
         try:
             await self.search_loop().run(self.recoverable())
             self._raise_blocked()
-            await self._select_and_adopt()
+            ending = await self._select_and_adopt()
         finally:
             await self.input_gate.stop()
-        return RunStatus.SUCCEEDED
+        return conclude(self.run, ending)
 
     def search_loop(self) -> AgentLoop[PlannedWorkstream]:
         """Return the planner-mode search over this run, with the run as its workers.
@@ -1143,17 +1146,30 @@ class _DynamicRun:
             self.run, self.workstreams.reconcile_parents, self.rounds.buildable, offer
         )
 
-    async def _select_and_adopt(self) -> None:
+    async def _select_and_adopt(self) -> RunEnding:
+        """Adopt the winner, if any, and return how the run ends.
+
+        With no winner the input is kept, which is a result only when the input
+        itself was measured and trusted (or no benchmark is configured to ask).
+        """
         await self.input_gate.measured()
         winner = self.rounds.winner()
         if winner is None or winner.candidate_revision is None:
             self.run.observations.note("dynamic search produced no trusted candidate")
-            return
+            baseline = self.state.baseline
+            return ending_of(
+                adopted=False,
+                trusted_reading=(
+                    not self.run.facts.benchmark_configured
+                    or (baseline is not None and baseline.benchmark_passed is True)
+                ),
+            )
         self.state.winner_revision = winner.candidate_revision
         self.state.adoption_pending = True
         await self._commit(label="dynamic: winner selected")
         await self._finish_adoption()
         self.run.observations.note(f"adopted dynamic winner {winner.hypothesis_id}")
+        return ending_of(adopted=True, trusted_reading=True)
 
     async def _finish_adoption(self) -> None:
         revision = self.state.winner_revision

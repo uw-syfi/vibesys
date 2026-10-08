@@ -1247,13 +1247,6 @@
   },
   {
     "path": "src/vibesys/orchestration/dynamic/orchestration.py",
-    "symbol": "_DynamicRun.execute",
-    "rule": "effect-path",
-    "subject": "vs_runtime.api.RunStatus.SUCCEEDED",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/orchestration.py",
     "symbol": "_DynamicRun.give_up",
     "rule": "async-def",
     "subject": "give_up",
@@ -4656,13 +4649,6 @@
   },
   {
     "path": "src/vibesys/orchestration/multi/orchestration.py",
-    "symbol": "_MultiRun.execute",
-    "rule": "effect-path",
-    "subject": "vs_runtime.api.RunStatus.SUCCEEDED",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/multi/orchestration.py",
     "symbol": "_MultiRun.initialize",
     "rule": "async-def",
     "subject": "initialize",
@@ -5639,13 +5625,6 @@
     "symbol": "_SingleRun.execute",
     "rule": "await",
     "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='initialize', ctx=Load()), args=[], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/single/orchestration.py",
-    "symbol": "_SingleRun.execute",
-    "rule": "effect-path",
-    "subject": "vs_runtime.api.RunStatus.SUCCEEDED",
     "occurrence": 1
   },
   {

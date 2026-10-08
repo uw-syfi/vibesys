@@ -334,7 +334,8 @@ def test_public_policy_trajectory_matches_golden(
             else _plain_options(rounds=rounds, official_every=official_every)
         )
         try:
-            assert await plugin.orchestrate(run, options) is RunStatus.SUCCEEDED
+            expected = RunStatus.SUCCEEDED if scenario == "gate" else RunStatus.FAILED
+            assert await plugin.orchestrate(run, options) is expected
             state_model = plugin.state
             assert state_model is not None
             state = await run.state.load(state_model)

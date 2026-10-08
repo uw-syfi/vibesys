@@ -1,5 +1,5 @@
 {
-  "status": "succeeded",
+  "status": "failed",
   "rounds": [
     {
       "hypothesis_id": "H-01",

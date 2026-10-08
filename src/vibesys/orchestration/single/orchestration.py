@@ -23,6 +23,7 @@ from vibesys.hypothesis import (
     PerformanceProjection,
     RecordInput,
     build_round_record,
+    derive_ending,
 )
 from vibesys.metrics import FrameworkBenchmarkOutcome
 from vibesys.orchestration.attempts import AttemptKey, Implement, NextStep, next_step
@@ -54,6 +55,7 @@ from vibesys.profile_focus import (
     ProfileFocusConfig,
     ProfileFocusState,
 )
+from vibesys.run.endings import conclude
 from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,
@@ -161,7 +163,7 @@ class _SingleRun:
                 await self._run_attempts(selected)
                 await self._close_round(selected)
             await self._finish()
-            return RunStatus.SUCCEEDED
+            return conclude(self.run, derive_ending(self.records, self.state.search.metrics))
         finally:
             await self.worker.close()
 
