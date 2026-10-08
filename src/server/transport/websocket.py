@@ -14,6 +14,7 @@ import secrets
 import threading
 from contextlib import suppress
 from dataclasses import dataclass, field
+from functools import partial
 from http import HTTPStatus
 from http.cookies import CookieError, SimpleCookie
 from ipaddress import ip_address
@@ -160,7 +161,7 @@ class StartupSynchronization(Protocol):
         """Run immediately before the event loop begins serving."""
 
     def wait_before_publication(self, stop: threading.Event, bound_port: int) -> None:
-        """Run after binding, before the listener is published or starts serving."""
+        """Run after listener start, before the attempt becomes externally usable."""
 
 
 class _DefaultStartupSynchronization:
@@ -197,6 +198,9 @@ class _GatewayAttempt:
     bound_port: int | None = None
     listener_owned: bool = False
     retired: bool = False
+    startup_server: asyncio.Server | None = None
+    staged_instance_path: Path | None = None
+    published: threading.Event = field(default_factory=threading.Event)
 
 
 @dataclass(frozen=True)
@@ -468,10 +472,11 @@ class WebSocketGateway:
         """Release an attempt without waiting for an uncooperative worker.
 
         The worker receives ``attempt`` rather than reading gateway lifecycle
-        fields. Retirement and listener publication share ``attempt.lock``:
-        it either retires before publication begins, or removes the old record
-        after the published listener closes and before releasing its claim for
-        a retry. A pre-publication worker cannot delay an immediate retry.
+        fields. Retirement marks the attempt and detaches its private resources
+        under ``attempt.lock``, then closes them without keeping that lock. The
+        worker stages publication outside the lock and commits it only after a
+        final retirement check, so a stalled pre-publication worker cannot
+        delay an immediate retry or overwrite that retry's record.
         """
         self._request_stop(attempt)
         with attempt.lock:
@@ -530,10 +535,10 @@ class WebSocketGateway:
         if attempt.stop.is_set():
             return
         async with serve(
-            self._handle_connection,
+            partial(self._handle_attempt_connection, attempt),
             _LOOPBACK_HOST,
             self.port,
-            process_request=self._process_request,
+            process_request=partial(self._process_attempt_request, attempt),
             compression=None,
             # Every bound below is stated, never inherited: see
             # ``WebSocketLimits``. ``write_limit`` is the send-side high-water
@@ -561,53 +566,135 @@ class WebSocketGateway:
                     "WebSocket gateway did not expose a listening socket"
                 )
             bound_port = int(next(iter(sockets)).getsockname()[1])
-            self._startup.wait_before_publication(attempt.stop, bound_port)
-            # Publishing a listener and its discovery record is one ownership
-            # decision. Retirement takes this same lock through record cleanup
-            # and claim release, so a retired attempt can neither serve nor
-            # overwrite a retry's record.
             with attempt.lock:
                 if attempt.retired or attempt.stop.is_set():
                     return
-                attempt.bound_port = bound_port
-                attempt.listener_owned = True
-                await server.start_serving()
-                # A readiness timeout may set stop while start_serving yields
-                # to install the event-loop readers. Close before relinquishing
-                # the ownership lock so retirement never observes a serving
-                # listener that it has already retired.
-                if attempt.stop.is_set():
-                    server.close()
-                    return
+                attempt.startup_server = server.server
+
+            record: WebInstanceRecord | None = None
+            staged_path: Path | None = None
+            if self.instance_path is not None:
                 with self._credential_lock:
-                    if self.instance_path is not None:
-                        record = WebInstanceRecord.from_gateway(
-                            pid=os.getpid(),
-                            port=bound_port,
-                            token=self._token,
-                            project_root=self.project_root,
-                        )
-                        record.write(self.instance_path)
-                        attempt.instance_record = record
-                attempt.ready.set()
+                    record = WebInstanceRecord.from_gateway(
+                        pid=os.getpid(),
+                        port=bound_port,
+                        token=self._token,
+                        project_root=self.project_root,
+                    )
+                staged_path = self.instance_path.with_name(
+                    f".{self.instance_path.name}.{os.getpid()}.{secrets.token_hex(6)}.startup"
+                )
+                with attempt.lock:
+                    if attempt.retired or attempt.stop.is_set():
+                        return
+                    attempt.staged_instance_path = staged_path
+                # Prepare the complete record at an attempt-private path. Slow
+                # filesystem work cannot hold retirement's state lock, and the
+                # retired worker can never replace the canonical retry record.
+                record.write(staged_path)
+
+            with attempt.lock:
+                if attempt.retired or attempt.stop.is_set():
+                    return
+
+            # Starting the listener and the synchronization seam may yield or
+            # block. The listener rejects every request until publication is
+            # committed, and retirement can close its sockets without waiting
+            # behind either operation.
+            await server.start_serving()
+            self._startup.wait_before_publication(attempt.stop, bound_port)
+
+            if not self._publish_attempt(attempt, record, staged_path, bound_port):
+                server.close()
+                return
             await asyncio.to_thread(attempt.stop.wait)
+
+    def _publish_attempt(
+        self,
+        attempt: _GatewayAttempt,
+        record: WebInstanceRecord | None,
+        staged_path: Path | None,
+        bound_port: int,
+    ) -> bool:
+        """Commit a prepared listener and record if its attempt remains current."""
+        while True:
+            with attempt.lock:
+                if attempt.retired or attempt.stop.is_set():
+                    return False
+                with self._credential_lock:
+                    current_token = self._token
+                    if record is None or _same_secret(record.token, current_token):
+                        if staged_path is not None and self.instance_path is not None:
+                            staged_path.replace(self.instance_path)
+                            attempt.staged_instance_path = None
+                        attempt.instance_record = record
+                        attempt.bound_port = bound_port
+                        attempt.listener_owned = True
+                        attempt.published.set()
+                        attempt.ready.set()
+                        return True
+
+            # Capability rotation may run while the record is staged. Prepare
+            # another complete private file without holding lifecycle locks,
+            # then retry the atomic token check and canonical replace above.
+            if staged_path is None:
+                return False
+            record = WebInstanceRecord.from_gateway(
+                pid=os.getpid(),
+                port=bound_port,
+                token=current_token,
+                project_root=self.project_root,
+            )
+            record.write(staged_path)
+
+    async def _handle_attempt_connection(
+        self, attempt: _GatewayAttempt, connection: ServerConnection
+    ) -> None:
+        """Reject a connection until its attempt has committed publication."""
+        if not attempt.published.is_set():
+            await connection.close(code=1013, reason="Gateway startup is incomplete")
+            return
+        await self._handle_connection(connection)
+
+    async def _process_attempt_request(
+        self,
+        attempt: _GatewayAttempt,
+        connection: ServerConnection,
+        request: Request,
+    ) -> HttpResponse | None:
+        """Keep a pre-publication or retired listener from serving routes."""
+        if not attempt.published.is_set():
+            return self._response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "WebSocket gateway is still starting\n",
+                "text/plain",
+            )
+        return await self._process_request(connection, request)
 
     def _release_attempt_resources(self, attempt: _GatewayAttempt) -> None:
         """Release only ``attempt``'s publication and project claim, idempotently."""
         with attempt.lock:
             attempt.retired = True
             attempt.listener_owned = False
+            server = attempt.startup_server
+            attempt.startup_server = None
+            staged_path = attempt.staged_instance_path
             record = attempt.instance_record
             attempt.instance_record = None
             claim = attempt.claim
             attempt.claim = None
-            # Keep discovery cleanup and claim release in the same critical
-            # section as publication. A retry can acquire the filesystem claim
-            # only after the old attempt can no longer publish or serve.
-            if record is not None and self.instance_path is not None:
-                record.remove_if_owner(self.instance_path)
-            if claim is not None:
-                claim.close()
+        # A pre-publication listener may be blocked on the startup seam with
+        # its event loop unable to run. `Server.close()` synchronously closes
+        # its listening sockets, so it cannot accept while a retry starts.
+        if server is not None:
+            server.close()
+        if staged_path is not None:
+            with suppress(OSError):
+                staged_path.unlink(missing_ok=True)
+        if record is not None and self.instance_path is not None:
+            record.remove_if_owner(self.instance_path)
+        if claim is not None:
+            claim.close()
 
     async def _process_request(  # noqa: C901, PLR0911  # lint-waiver: LW-101058 [C901, PLR0911]; each HTTP route returns its precise status and body at this protocol boundary
         self, _connection: ServerConnection, request: Request
