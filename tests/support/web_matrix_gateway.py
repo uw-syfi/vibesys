@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import signal
+import sys
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -12,6 +14,7 @@ from launch import default_runs
 from server.runtime import ServerRuntime
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import FrameType
 
 
@@ -22,6 +25,15 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--marker", required=True)
     parser.add_argument("--port", type=int, required=True)
     return parser.parse_args()
+
+
+def wait_for_owner_close(read_owner: Callable[[], bytes], request_stop: Callable[[], None]) -> None:
+    """Request shutdown when the owning worker closes its inherited pipe."""
+    try:
+        while read_owner():
+            pass
+    finally:
+        request_stop()
 
 
 def main() -> int:
@@ -44,6 +56,13 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
+    owner_fd = sys.stdin.fileno()
+    threading.Thread(
+        target=wait_for_owner_close,
+        args=(lambda: os.read(owner_fd, 4096), lambda: request_stop(0, None)),
+        daemon=True,
+        name="web-matrix-owner",
+    ).start()
 
     def live_run() -> None:
         runtime.journal.publish_output("stdout", f"{arguments.marker}\n", source="web-matrix")

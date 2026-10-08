@@ -179,7 +179,7 @@ function stopGateway(instancePath: string): number | null {
 }
 
 /** One real live run used by the adverse-connectivity browser matrix. */
-export interface MatrixGateway {
+interface MatrixGateway {
   readonly url: string;
   readonly pid: number;
   readonly port: number;
@@ -191,61 +191,150 @@ export interface MatrixGateway {
   crash(): Promise<void>;
 }
 
-export interface MatrixGatewayHarness {
+interface MatrixGatewayHarness {
   /** Start a fresh event store under the same durable run identity. */
   start(marker: string, port?: number): Promise<MatrixGateway>;
 }
 
 /**
- * Run a browser scenario over one or more real live gateway processes.
- *
- * Every child uses a distinct store below one `same-run` directory, so the
- * server publishes a stable run id and a fresh store id. Teardown owns every
- * child and its temporary directory, including a callback that failed midway
- * through a restart.
+ * Resource contract used by the matrix process owner. A real resource is one
+ * detached uv/Python process group; tests use an in-memory implementation to
+ * drive every worker-exit path without creating a process.
  */
-export async function withMatrixGateways(
-  run: (harness: MatrixGatewayHarness) => Promise<void>,
-): Promise<void> {
-  const runtimeDirectory = mkdtempSync(join(tmpdir(), 'vibesys-web-matrix-'));
-  const children = new Set<MatrixGatewayProcess>();
-  let generation = 0;
-  const harness: MatrixGatewayHarness = {
-    start: async (marker, port = 0) => {
-      generation += 1;
-      const storeDirectory = join(runtimeDirectory, 'same-run', `store-${generation}`);
-      mkdirSync(storeDirectory, {recursive: true});
-      const child = new MatrixGatewayProcess(storeDirectory, marker, port);
-      children.add(child);
-      try {
-        await child.start();
-        return child;
-      } catch (error) {
-        await child.dispose();
-        throw error;
-      }
-    },
-  };
-  try {
-    await run(harness);
-  } finally {
+export interface MatrixGatewayResource {
+  /** Gracefully stop the resource and resolve only after its child exits. */
+  dispose(): Promise<void>;
+  /** Synchronously terminate its whole process group during worker exit. */
+  terminateForWorkerExit(): void;
+  /** Whether the owner has observed the child exit or it never started. */
+  terminationConfirmed(): boolean;
+}
+
+export interface MatrixGatewayCleanup {
+  readonly errors: readonly string[];
+  readonly runtimeDirectoryRemoved: boolean;
+  readonly terminationConfirmed: boolean;
+}
+
+/**
+ * Owns all process groups and the runtime directory for one browser test.
+ *
+ * `dispose` is the ordinary asynchronous path. `terminateForWorkerExit` is the
+ * synchronous last resort used by the worker's process-exit hook. It never
+ * removes the directory: without observing each child exit, cleanup must
+ * retain files that a reparented process may still hold.
+ */
+export class MatrixGatewayOwner {
+  readonly #resources = new Set<MatrixGatewayResource>();
+  readonly #removeRuntimeDirectory: () => void;
+
+  constructor(removeRuntimeDirectory: () => void) {
+    this.#removeRuntimeDirectory = removeRuntimeDirectory;
+  }
+
+  track<Resource extends MatrixGatewayResource>(resource: Resource): Resource {
+    this.#resources.add(resource);
+    return resource;
+  }
+
+  async dispose(): Promise<MatrixGatewayCleanup> {
     const errors: string[] = [];
-    for (const child of children) {
+    for (const resource of this.#resources) {
       try {
-        await child.dispose();
+        await resource.dispose();
       } catch (error) {
         errors.push(String(error));
       }
     }
+    if ([...this.#resources].some(resource => !resource.terminationConfirmed())) {
+      this.terminateForWorkerExit();
+      errors.push('runtime directory retained because child termination was not confirmed');
+      return {errors, runtimeDirectoryRemoved: false, terminationConfirmed: false};
+    }
     try {
-      rmSync(runtimeDirectory, {recursive: true, force: true});
+      this.#removeRuntimeDirectory();
+      return {errors, runtimeDirectoryRemoved: true, terminationConfirmed: true};
     } catch (error) {
       errors.push(`runtime directory cleanup failed: ${String(error)}`);
+      return {errors, runtimeDirectoryRemoved: false, terminationConfirmed: true};
     }
-    if (errors.length > 0) {
-      expect.soft(errors, 'matrix gateway teardown failures').toEqual([]);
-      test.info().annotations.push({type: 'teardown', description: errors.join('; ')});
+  }
+
+  terminateForWorkerExit(): void {
+    for (const resource of this.#resources) {
+      try {
+        resource.terminateForWorkerExit();
+      } catch {
+        // Process exit cannot wait or report. Continue so one failed signal
+        // never prevents the remaining process groups from being terminated.
+      }
     }
+  }
+}
+
+/** One worker-wide registry covers process exit outside Playwright teardown. */
+const activeMatrixHarnesses = new Set<OwnedMatrixGatewayHarness>();
+process.once('exit', () => {
+  for (const harness of activeMatrixHarnesses) harness.terminateForWorkerExit();
+});
+
+interface MatrixFixtures {
+  readonly matrixGateways: MatrixGatewayHarness;
+}
+
+/**
+ * Playwright test whose fixture owns every matrix child beyond the test body.
+ * A timed-out assertion still enters fixture teardown; if the worker itself
+ * exits first, the worker hook and each child's stdin lease take over.
+ */
+export const matrixTest = test.extend<MatrixFixtures>({
+  matrixGateways: async ({browserName: _browserName}, use, testInfo) => {
+    const harness = new OwnedMatrixGatewayHarness();
+    activeMatrixHarnesses.add(harness);
+    try {
+      await use(harness);
+    } finally {
+      const cleanup = await harness.dispose();
+      if (cleanup.terminationConfirmed) activeMatrixHarnesses.delete(harness);
+      if (cleanup.errors.length > 0) {
+        expect.soft(cleanup.errors, 'matrix gateway teardown failures').toEqual([]);
+        testInfo.annotations.push({type: 'teardown', description: cleanup.errors.join('; ')});
+      }
+    }
+  },
+});
+
+/**
+ * Every child uses a distinct store below one `same-run` directory, so the
+ * server publishes a stable run id and a fresh store id.
+ */
+class OwnedMatrixGatewayHarness implements MatrixGatewayHarness {
+  readonly #runtimeDirectory = mkdtempSync(join(tmpdir(), 'vibesys-web-matrix-'));
+  readonly #owner = new MatrixGatewayOwner(() =>
+    rmSync(this.#runtimeDirectory, {recursive: true, force: true}),
+  );
+  #generation = 0;
+
+  async start(marker: string, port = 0): Promise<MatrixGateway> {
+    this.#generation += 1;
+    const storeDirectory = join(this.#runtimeDirectory, 'same-run', `store-${this.#generation}`);
+    mkdirSync(storeDirectory, {recursive: true});
+    const child = this.#owner.track(new MatrixGatewayProcess(storeDirectory, marker, port));
+    try {
+      await child.start();
+      return child;
+    } catch (error) {
+      await child.dispose();
+      throw error;
+    }
+  }
+
+  dispose(): Promise<MatrixGatewayCleanup> {
+    return this.#owner.dispose();
+  }
+
+  terminateForWorkerExit(): void {
+    this.#owner.terminateForWorkerExit();
   }
 }
 
@@ -258,7 +347,7 @@ interface ChildExit {
 const WEB_URL_PREFIX = 'VibeSys web UI: ';
 
 /** Own one child process and the two explicit ways the matrix may end it. */
-class MatrixGatewayProcess implements MatrixGateway {
+class MatrixGatewayProcess implements MatrixGateway, MatrixGatewayResource {
   url = '';
   pid = 0;
   port = 0;
@@ -267,6 +356,9 @@ class MatrixGatewayProcess implements MatrixGateway {
   readonly #marker: string;
   readonly #requestedPort: number;
   #exit: Promise<ChildExit> | null = null;
+  #exitResult: ChildExit | null = null;
+  #closeOwnerLease: (() => void) | null = null;
+  #started = false;
   #running = false;
 
   constructor(storeDirectory: string, marker: string, port: number) {
@@ -299,21 +391,32 @@ class MatrixGatewayProcess implements MatrixGateway {
         cwd: repositoryRoot,
         detached: true,
         env: {...process.env, BROWSER: 'true'},
-        stdio: ['ignore', 'pipe', 'pipe'],
+        // The open stdin pipe is a worker-liveness lease. If Playwright kills
+        // this worker, even with SIGKILL, the Python child observes EOF and
+        // shuts its runtime down instead of remaining reparented to PID 1.
+        stdio: ['pipe', 'pipe', 'pipe'],
       },
     );
-    if (child.pid === undefined) throw new Error('Matrix gateway child has no process id');
-    this.pid = child.pid;
+    this.#started = true;
     this.#running = true;
     const stderr: string[] = [];
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', chunk => stderr.push(String(chunk)));
+    child.on('error', error => stderr.push(String(error)));
+    child.stdin?.on('error', error => stderr.push(String(error)));
+    this.#closeOwnerLease = () => child.stdin?.end();
     this.#exit = new Promise(resolve => {
-      child.once('exit', (code, signal) => {
+      child.once('close', (code, signal) => {
         this.#running = false;
-        resolve({code, signal, stderr: stderr.join('')});
+        this.#exitResult = {code, signal, stderr: stderr.join('')};
+        resolve(this.#exitResult);
       });
     });
+    if (child.pid === undefined) {
+      const result = await this.#exited();
+      throw new Error(`Matrix gateway failed to spawn: ${result.stderr}`);
+    }
+    this.pid = child.pid;
     this.url = await this.#readCapabilityUrl(child);
     this.port = Number(new URL(this.url).port);
   }
@@ -330,7 +433,8 @@ class MatrixGatewayProcess implements MatrixGateway {
 
   async stop(): Promise<void> {
     if (!this.#running) return;
-    this.#signal('SIGTERM');
+    this.#closeOwnerLease?.();
+    this.#closeOwnerLease = null;
     const result = await this.#exited();
     if (result.code !== 0) {
       throw new Error(
@@ -352,6 +456,19 @@ class MatrixGatewayProcess implements MatrixGateway {
 
   async dispose(): Promise<void> {
     if (this.#running) await this.stop();
+  }
+
+  terminationConfirmed(): boolean {
+    return !this.#started || this.#exitResult !== null;
+  }
+
+  terminateForWorkerExit(): void {
+    if (!this.#running) return;
+    try {
+      this.#signal('SIGKILL');
+    } catch {
+      // The worker-exit path is synchronous and must continue to every child.
+    }
   }
 
   async #readCapabilityUrl(child: ReturnType<typeof spawn>): Promise<string> {
