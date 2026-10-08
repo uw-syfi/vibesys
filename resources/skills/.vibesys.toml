@@ -18,3 +18,8 @@ domains = ["kernel-writing"]
 path = "kernel-ncu-analysis"
 backends = ["cuda"]
 domains = ["kernel-writing"]
+
+[[rule]]
+path = "kernel-rocprof-analysis"
+backends = ["rocm"]
+domains = ["kernel-writing"]

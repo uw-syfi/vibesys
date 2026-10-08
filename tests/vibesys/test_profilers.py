@@ -94,15 +94,12 @@ def test_ncu_is_default_for_cuda_kernel_writing_and_can_be_disabled() -> None:
 )
 def test_ncu_is_unavailable_on_non_cuda_backends(backend: ComputeBackend) -> None:
     assert ProfilerKind.NCU not in allowed_profiler_kinds(DomainName.KERNEL_WRITING, backend)
-    assert (
-        resolve_profiler_kind(
-            ProfilerKind.AUTO,
-            domain=DomainName.KERNEL_WRITING,
-            backend=backend,
-            environment_default_profiler_kind=ProfilerKind.NSYS,
-        )
-        is ProfilerKind.NONE
-    )
+    assert resolve_profiler_kind(
+        ProfilerKind.AUTO,
+        domain=DomainName.KERNEL_WRITING,
+        backend=backend,
+        environment_default_profiler_kind=ProfilerKind.NSYS,
+    ) is (ProfilerKind.ROCPROF if backend is ComputeBackend.ROCM else ProfilerKind.NONE)
     with pytest.raises(ValueError, match="Profiler 'ncu' is not supported"):
         resolve_profiler_kind(
             ProfilerKind.NCU,
@@ -110,6 +107,44 @@ def test_ncu_is_unavailable_on_non_cuda_backends(backend: ComputeBackend) -> Non
             backend=backend,
             environment_default_profiler_kind=ProfilerKind.NSYS,
         )
+
+
+def test_rocprof_is_default_for_rocm_kernel_writing_and_can_be_disabled() -> None:
+    assert ProfilerKind.ROCPROF in allowed_profiler_kinds(
+        DomainName.KERNEL_WRITING, ComputeBackend.ROCM
+    )
+    for requested, expected in (
+        (ProfilerKind.AUTO, ProfilerKind.ROCPROF),
+        (ProfilerKind.ROCPROF, ProfilerKind.ROCPROF),
+        (ProfilerKind.NONE, ProfilerKind.NONE),
+    ):
+        assert (
+            resolve_profiler_kind(
+                requested,
+                domain=DomainName.KERNEL_WRITING,
+                backend=ComputeBackend.ROCM,
+                environment_default_profiler_kind=ProfilerKind.ROCPROF,
+            )
+            is expected
+        )
+
+
+@pytest.mark.parametrize(
+    ("backend", "kernel_profiler"),
+    [(ComputeBackend.CUDA, ProfilerKind.NCU), (ComputeBackend.ROCM, ProfilerKind.ROCPROF)],
+)
+@given(supported=st.frozensets(st.sampled_from(tuple(ProfilerKind))))
+def test_kernel_writing_auto_follows_environment_support(
+    backend: ComputeBackend, kernel_profiler: ProfilerKind, supported: frozenset[ProfilerKind]
+) -> None:
+    resolved = resolve_profiler_kind(
+        ProfilerKind.AUTO,
+        domain=DomainName.KERNEL_WRITING,
+        backend=backend,
+        environment_default_profiler_kind=ProfilerKind.NONE,
+        environment_supported_profiler_kinds=supported,
+    )
+    assert resolved is (kernel_profiler if kernel_profiler in supported else ProfilerKind.NONE)
 
 
 def test_ncu_is_unavailable_for_other_domains_and_serving_keeps_nsys_default() -> None:
@@ -164,7 +199,10 @@ def _expected_resolved(
     if domain is DomainName.MICROSERVICES:
         return ProfilerKind.NONE
     if domain is DomainName.KERNEL_WRITING:
-        return ProfilerKind.NCU if backend is ComputeBackend.CUDA else ProfilerKind.NONE
+        return {
+            ComputeBackend.CUDA: ProfilerKind.NCU,
+            ComputeBackend.ROCM: ProfilerKind.ROCPROF,
+        }.get(backend, ProfilerKind.NONE)
     if allowed == frozenset({ProfilerKind.NONE}):
         return ProfilerKind.NONE
     candidate = {
@@ -387,7 +425,7 @@ def test_headroom_profiler_domains_and_preflight() -> None:
 def test_rocprof_profiler_domains_and_preflight() -> None:
     definition = PROFILER_DEFINITIONS[ProfilerKind.ROCPROF]
 
-    assert definition.domains == frozenset({DomainName.LLM_SERVING})
+    assert definition.domains == frozenset({DomainName.LLM_SERVING, DomainName.KERNEL_WRITING})
     assert not definition.requires_domain_torch_support
     assert ProfilerKind.ROCPROF in allowed_profiler_kinds(
         DomainName.LLM_SERVING, ComputeBackend.CUDA
