@@ -13,7 +13,14 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from vs_agent.api import AgentOutputSchemaError, AgentTurnTimeoutError
+from vs_agent.api import (
+    AgentExecutionPolicy,
+    AgentOutputSchemaError,
+    AgentSessionSpec,
+    AgentTurnExecutor,
+    AgentTurnRequest,
+    AgentTurnTimeoutError,
+)
 from vs_agent.api.testing import FakeAgentClient
 from vs_faults.api import (
     AgentCrashError,
@@ -101,6 +108,56 @@ def test_an_agent_fault_fires_on_its_turn_only(fault: AgentFault) -> None:
     # Transport faults strike after the agent worked; output faults replace its answer.
     worked = fault in {AgentFault.CRASH, AgentFault.TIMEOUT, AgentFault.EXTRA_KEYS}
     assert len(inner.calls) == (3 if worked else 2)
+
+
+def _raw_turn(client: FaultyAgentClient | FakeAgentClient, prompt: str = "Use `H1`.") -> _Reply:
+    """One durable-journal turn: the path the runtime takes for every turn with an invocation id."""
+    result = client.run(
+        session_spec=AgentSessionSpec(
+            role=_KIND, provider="fake", workspace=Path(), policy=AgentExecutionPolicy()
+        ),
+        turn=AgentTurnRequest(message=prompt, output_schema=_Reply, invocation_id="i"),
+    )
+    return _Reply.model_validate_json(result.text)
+
+
+def test_a_wrapped_turn_executor_stays_a_turn_executor() -> None:
+    """The runtime refuses a durable turn on a client that is not an AgentTurnExecutor.
+
+    The wrapper must implement every interface its inner client does, or a chaos
+    run ends at its first durable turn and no fault below it is ever exercised.
+    """
+    inner = FakeAgentClient().set_response(_KIND, _ANSWER)
+    assert isinstance(inner, AgentTurnExecutor)
+
+    client = FaultyAgentClient(inner, FaultPlan(seed=1))
+
+    assert isinstance(client, AgentTurnExecutor)
+    assert [_raw_turn(client) for _ in range(3)] == [_ANSWER] * 3
+
+
+@pytest.mark.parametrize("fault", list(AgentFault))
+def test_an_agent_fault_fires_on_a_durable_turn_too(fault: AgentFault) -> None:
+    rule = FaultRule(boundary=Boundary.AGENT_TURN, target=_KIND, at=2, fault=fault)
+    inner = FakeAgentClient().set_response(_KIND, _ANSWER)
+    client = FaultyAgentClient(inner, FaultPlan(seed=7, rules=(rule,)))
+
+    assert _raw_turn(client) == _ANSWER
+    # A raw turn returns text; the caller parses it, so output faults surface as parse errors.
+    expected = {
+        AgentFault.CRASH: AgentCrashError,
+        AgentFault.TIMEOUT: AgentTurnTimeoutError,
+        AgentFault.MALFORMED: ValidationError,
+        AgentFault.SCHEMA_INVALID: ValidationError,
+        AgentFault.EXTRA_KEYS: ValidationError,
+    }.get(fault)
+    if expected is None:
+        assert isinstance(_raw_turn(client), _Reply)
+    else:
+        with pytest.raises(expected):
+            _raw_turn(client)
+    assert _raw_turn(client) == _ANSWER
+    assert client.injected == [(_KIND, 2, fault)]
 
 
 @given(seed=st.integers(0, 2**32), bold=st.booleans())
