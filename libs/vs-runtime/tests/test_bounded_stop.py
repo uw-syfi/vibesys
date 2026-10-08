@@ -357,3 +357,27 @@ async def test_a_block_that_ends_during_on_stop_does_not_abort_the_stop_cleanup(
     await task
 
     assert outcome == ["finished"]
+
+
+@pytest.mark.asyncio
+async def test_a_stop_cleanup_that_fails_after_the_block_ended_is_still_raised() -> None:
+    channel = create_run_control_channel(FakeRunControlEventSink())
+    cleanup_started = asyncio.Event()
+    block_ended = asyncio.Event()
+
+    async def on_stop() -> None:
+        cleanup_started.set()
+        await block_ended.wait()
+        message = "cancel failed"
+        raise RuntimeError(message)
+
+    async def run() -> None:
+        async with bounded_stop(channel, grace_s=_GRACE_S, on_stop=on_stop, timer=FakeStopTimer()):
+            await cleanup_started.wait()
+            block_ended.set()
+
+    task = asyncio.create_task(run())
+    await asyncio.sleep(0)
+    channel.request_stop()
+    with pytest.raises(RuntimeError, match="cancel failed"):
+        await task

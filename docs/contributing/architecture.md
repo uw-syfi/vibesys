@@ -124,6 +124,7 @@ graph TD
     vs_faults --> vs_agent
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
+    vs_runtime --> vs_async_ops
     vs_runtime --> vs_core
     vs_runtime --> vs_evaluation
     vs_runtime --> vs_evaluator_protocol

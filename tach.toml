@@ -408,7 +408,7 @@ depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "v
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations"]
+depends_on = ["vs_async_ops.api", "vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations"]
 
 [[modules]]
 path = "vs_runtime._fake_agent_invocations"
@@ -443,7 +443,7 @@ depends_on = []
 [[modules]]
 path = "vs_async_ops.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_async_ops.coordinator", "vs_async_ops.models", "vs_async_ops.ports"]
+depends_on = ["vs_async_ops.coordinator", "vs_async_ops.models", "vs_async_ops.ports", "vs_async_ops.settling"]
 
 [[modules]]
 path = "vs_async_ops.api.testing"
@@ -464,6 +464,11 @@ depends_on = []
 path = "vs_async_ops.ports"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_async_ops.models"]
+
+[[modules]]
+path = "vs_async_ops.settling"
+layer = "prompts_and_lower_libs"
+depends_on = []
 
 [[modules]]
 path = "vs_async_ops.testing"
