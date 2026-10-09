@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.loops.torch_inject_fixtures import INJECT_DIR
 
@@ -135,6 +135,11 @@ class _Harness:
 
 @settings(max_examples=200, deadline=None)
 @given(ops=st.lists(st.sampled_from(_OPS), max_size=25))
+# A stop that lands before ready cancels the queued start, so a later explicit
+# window starts (pinned from the real-signal test, which orders its signals).
+@example(ops=["start", "stop", "ready", "start", "stop"])
+# The opposite order: the queued start has fired, so the explicit start is a no-op.
+@example(ops=["start", "ready", "start", "stop"])
 def test_capture_matches_reference_model(inject_module: types.ModuleType, ops: list[str]) -> None:
     """Any interleaving of ready/start/stop behaves like the reference model.
 
