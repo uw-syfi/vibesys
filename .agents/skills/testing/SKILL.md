@@ -53,7 +53,8 @@ a per-language reference; read the one for the language you are editing:
    scheduling order, or shared state. Inject clocks and simulate timeouts; do
    not wait for them. Never add retries. Zero tolerance: on seeing any flake,
    yours or not, root-cause it, redesign the test to remove the source, and
-   leave it better than you found it. See
+   leave it better than you found it. Ship the fix as its own PR, then rebase
+   your current PR on top of it. See
    [references/flakiness.md](references/flakiness.md).
 6. **Bug fixes.** Add a regression test at the lowest layer that reproduces the
    symptom, through the public API, that fails at the merge base. Then add a

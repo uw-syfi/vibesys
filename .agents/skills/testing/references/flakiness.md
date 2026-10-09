@@ -35,8 +35,12 @@ the per-language reference.
 ## Zero tolerance: every flake gets fixed
 
 Seeing a flake, even in a test you did not write or in a CI rerun that "passed
-the second time", obliges you to fix it in the same change or a linked one.
-Rerunning the job is not a fix. Root-cause it, then redesign the test so the
+the second time", obliges you to fix it. Rerunning the job is not a fix.
+
+Put the fix in its own PR, not in the change you were working on, so it lands
+fast and unblocks everyone. Then rebase your current PR on top of it (or, if
+the fix has already merged, on the updated main). Do not carry the fix inside
+an unrelated PR, and do not wait on your PR to ship it. Root-cause it, then redesign the test so the
 source of nondeterminism is gone, not merely less likely. Leave the test and
 its neighbors better than you found them: sweep for the same pattern elsewhere
 and cover it with a property test where practical.
