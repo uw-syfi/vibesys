@@ -264,7 +264,7 @@ export type Text2 = string;
  * Lifecycle and command states reported in events.
  */
 export type EventStatus =
-  "active" | "answered" | "pending" | "consumed" | "completed" | "failed" | "cancelled" | "interrupted";
+  "active" | "answered" | "pending" | "consumed" | "delivered" | "completed" | "failed" | "cancelled" | "interrupted";
 export type RoundLabel2 = string | null;
 export type AgentKind2 = string | null;
 export type InvocationId = string | null;

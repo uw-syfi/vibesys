@@ -94,6 +94,7 @@ class EventStatus(StrEnum):
     ANSWERED = "answered"
     PENDING = "pending"
     CONSUMED = "consumed"
+    DELIVERED = "delivered"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"

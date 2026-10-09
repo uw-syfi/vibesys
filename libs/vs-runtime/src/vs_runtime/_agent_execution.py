@@ -26,6 +26,8 @@ from vs_agent.api import (
     MCPServerSpec,
     SessionConfigurationError,
     SessionResumeError,
+    SteerableAgentClient,
+    SteerOutcome,
     Unknown,
     build_agent_client,
     parse_typed_response,
@@ -270,6 +272,28 @@ def _status(error: BaseException | None) -> AgentExecutionStatus:
     return AgentExecutionStatus.FAILED
 
 
+@dataclass(frozen=True, slots=True)
+class _TurnSteerTarget:
+    """A turn in flight, offered to the run's steering queue while it runs.
+
+    Delivery is the client's optional ``SteerableAgentClient`` capability. A
+    client without it, or a driver that cannot take a message mid-turn, declines,
+    and the message stays queued for the next invocation boundary: today's
+    behavior, so mid-turn delivery is never worse than none.
+    """
+
+    client: AgentClientProtocol
+    agent_kind: str
+    round_label: str
+    execution_id: str | None
+
+    def offer_steer(self, text: str, on_rejected: Callable[[], None]) -> bool:
+        client = self.client
+        if not isinstance(client, SteerableAgentClient):
+            return False
+        return client.steer(text, on_rejected=on_rejected) is SteerOutcome.DELIVERED
+
+
 class RuntimeAgentExecution:
     """One environment and client confined to a single worker thread."""
 
@@ -506,6 +530,9 @@ class RuntimeAgentExecution:
         )
         result: str | ResponseT | None = None
         error: BaseException | None = None
+        detach_steering = self._control.attach_steer_target(
+            _TurnSteerTarget(self._client, agent_id, label, execution_id)
+        )
         try:
             environment = (
                 {} if self._environment.use_docker else dict(self._scope.environment_variables())
@@ -559,6 +586,7 @@ class RuntimeAgentExecution:
         else:
             return result
         finally:
+            detach_steering()
             self._lifecycle(
                 AgentExecutionFinished(
                     agent_id=agent_id,

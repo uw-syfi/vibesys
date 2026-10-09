@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+from collections import deque
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -46,6 +47,7 @@ from vs_agent.contracts import (
     MCPServerSpec,
     ProviderReadiness,
     SessionDisposition,
+    SteerOutcome,
 )
 from vs_agent.docker_executor import CodexRolloutWatchdogExecutor
 from vs_agent.events import CommandResultPayload
@@ -346,7 +348,12 @@ def _translate(  # one arm per event type
             kind=AgentEventKind.USAGE,
             usage=_usage_from(event.usage, cost_usd=event.cost_usd),
         )
-    return _translate_skill(event) or _translate_rate_limit(event) or _translate_plumbing(event)
+    return (
+        _translate_skill(event)
+        or _translate_rate_limit(event)
+        or _translate_steer(event)
+        or _translate_plumbing(event)
+    )
 
 
 def _translate_skill(event: agentshim.AgentEvent) -> AgentEvent | None:
@@ -383,6 +390,20 @@ def _translate_rate_limit(event: agentshim.AgentEvent) -> AgentEvent | None:
     )
 
 
+def _translate_steer(event: agentshim.AgentEvent) -> AgentEvent | None:
+    """Report what became of an operator message sent into the running turn."""
+    if isinstance(event, agentshim.SteerDelivered):
+        return _diagnostic("[steer] the provider accepted an operator message mid-turn")
+    if isinstance(event, agentshim.SteerConsumed):
+        return _diagnostic("[steer] the model took the operator message into the running turn")
+    if isinstance(event, agentshim.SteerRejected):
+        return _diagnostic(
+            f"[steer] the provider refused the operator message ({event.reason}); "
+            "it is delivered at the next turn boundary instead"
+        )
+    return None
+
+
 def _translate_plumbing(event: agentshim.AgentEvent) -> AgentEvent | None:
     """Translate the events that describe the provider, not the agent."""
     if isinstance(event, agentshim.SessionStarted):
@@ -400,16 +421,70 @@ def _translate_plumbing(event: agentshim.AgentEvent) -> AgentEvent | None:
     return None
 
 
+class _SteerLedger:
+    """The steers this session offered whose fate the provider has not yet reported.
+
+    A provider that accepts a message may still refuse it a moment later
+    (``SteerRejected``). The ledger remembers each accepted text with the
+    caller's fallback, so a refusal reaches the caller exactly once and a text
+    the model consumed is forgotten. Thread-safe: ``steer`` runs on a
+    caller's thread, the library's events on the turn's.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._waiting: dict[str, deque[Callable[[], None]]] = {}
+
+    def expect(self, text: str, on_rejected: Callable[[], None]) -> None:
+        with self._lock:
+            self._waiting.setdefault(text, deque()).append(on_rejected)
+
+    def forget(self, text: str, on_rejected: Callable[[], None]) -> None:
+        with self._lock:
+            callbacks = self._waiting.get(text)
+            if callbacks is not None and on_rejected in callbacks:
+                callbacks.remove(on_rejected)
+                if not callbacks:
+                    del self._waiting[text]
+
+    def consumed(self, text: str) -> None:
+        self._pop(text)
+
+    def rejected(self, text: str) -> None:
+        callback = self._pop(text)
+        if callback is not None:
+            callback()
+
+    def clear(self) -> None:
+        with self._lock:
+            self._waiting.clear()
+
+    def _pop(self, text: str) -> Callable[[], None] | None:
+        with self._lock:
+            callbacks = self._waiting.get(text)
+            if not callbacks:
+                return None
+            callback = callbacks.popleft()
+            if not callbacks:
+                del self._waiting[text]
+            return callback
+
+
 class _AgentShimEventHandler:
     """Route the library's typed events to the turn's observer."""
 
-    def __init__(self) -> None:
+    def __init__(self, steers: _SteerLedger) -> None:
         self.observer: AgentObserver | None = None
         #: Whether the turn in flight asked for a response schema.
         self.structured = False
+        self._steers = steers
 
     def on_event(self, event: agentshim.AgentEvent) -> None:
         """Translate and forward one library event, if anyone is listening."""
+        if isinstance(event, agentshim.SteerConsumed):
+            self._steers.consumed(event.text)
+        elif isinstance(event, agentshim.SteerRejected):
+            self._steers.rejected(event.text)
         observer = self.observer
         if observer is None:
             return
@@ -434,6 +509,7 @@ class AgentShimSession:
         profile: agentshim.ProviderProfile,
         timeout: int | None,
         event_handler: _AgentShimEventHandler,
+        steers: _SteerLedger,
         sandbox: _ConfinableSandbox | None,
         log: Callable[[str], None],
     ) -> None:
@@ -443,6 +519,7 @@ class AgentShimSession:
         self._profile = profile
         self._timeout = timeout
         self._event_handler = event_handler
+        self._steers = steers
         self._sandbox = sandbox
         self._log = log
         self._mcp_servers = tuple(
@@ -479,6 +556,7 @@ class AgentShimSession:
         finally:
             self._event_handler.observer = None
             self._event_handler.structured = False
+            self._steers.clear()
 
         result = turn.result
         if result.interrupted:
@@ -503,6 +581,27 @@ class AgentShimSession:
             ),
             skills=_skill_use(result.skills),
         )
+
+    def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
+        """Offer *text* to the running turn, on a transport that can take it.
+
+        A one-shot provider process reads no input after launch, so its
+        profile says it cannot steer and the library is not asked. A refusal
+        the provider reports after accepting the message calls *on_rejected*
+        (see :class:`~vs_agent.contracts.SteerableSession`).
+        """
+        if not self._profile.supports_steer:
+            return SteerOutcome.UNSUPPORTED
+        self._steers.expect(text, on_rejected)
+        try:
+            self._session.steer(text)
+        except agentshim.NoRunningTurnError:
+            self._steers.forget(text, on_rejected)
+            return SteerOutcome.NO_RUNNING_TURN
+        except agentshim.ProviderCapabilityError:
+            self._steers.forget(text, on_rejected)
+            return SteerOutcome.UNSUPPORTED
+        return SteerOutcome.DELIVERED
 
     def _log_continuity(self, continuity: agentshim.Continuity) -> None:
         """Tell the operator when the library dropped the conversation behind a turn.
@@ -763,6 +862,7 @@ class AgentShimDriver:
         agent_homes: Path | None = None,
         env_passthrough: Sequence[str] = (),
         launcher_env: Callable[[], Mapping[str, str]] = agentshim.interactive_env,
+        transport: agentshim.TransportKind = agentshim.TransportKind.ONE_SHOT,
     ) -> None:
         """Configure one provider; ``executor_factory`` replaces the base executor.
 
@@ -787,6 +887,12 @@ class AgentShimDriver:
         each session runs before its first turn. It defaults to the execution
         mode's budget: a container check crosses a ``docker exec`` and is given
         four times as long as a host one.
+
+        ``transport`` picks how the provider CLI is reached. The one-shot
+        default runs a process per turn and cannot take a message mid-turn;
+        ``TransportKind.STREAM`` keeps a long-lived process per conversation,
+        on providers that have one, and is what makes
+        :meth:`AgentShimSession.steer` deliver.
 
         ``transient_retry_delays`` are the waits before each retry of a turn
         that failed on a transient provider error; see
@@ -817,6 +923,7 @@ class AgentShimDriver:
         self._dropped_names_logged = False
         self._dropped_names_lock = threading.Lock()
         self._launcher_env = launcher_env
+        self._transport = transport
         self._sessions: WeakSet[AgentShimSession] = WeakSet()
         self._closed = False
 
@@ -919,7 +1026,8 @@ class AgentShimDriver:
         launch = self._launch_for(spec)
         sandbox = launch.sandbox
         config_scope = launch.config_scope
-        event_handler = _AgentShimEventHandler()
+        steers = _SteerLedger()
+        event_handler = _AgentShimEventHandler(steers)
         agent = agentshim.Agent(
             spec.provider,
             model=spec.model,
@@ -931,6 +1039,7 @@ class AgentShimDriver:
             env=launch.env,
             log=self._log,
             check_timeout=self._check_timeout,
+            transport=self._transport,
         )
         skill_scope = _skill_scope(agent.profile)
         if skill_scope is not agentshim.SkillScope.PROJECT:
@@ -960,6 +1069,7 @@ class AgentShimDriver:
             profile=agent.profile,
             timeout=self._timeout,
             event_handler=event_handler,
+            steers=steers,
             sandbox=sandbox,
             log=self._log,
         )

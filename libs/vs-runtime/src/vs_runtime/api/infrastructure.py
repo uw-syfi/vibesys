@@ -158,6 +158,7 @@ from vs_runtime._run_control import (
     RunControlTransitionKind,
     RunStopped,
     RuntimeRunControlChannel,
+    SteerTarget,
 )
 from vs_runtime._run_environment import (
     AgentPaths,
@@ -558,6 +559,7 @@ __all__ = [
     "SlurmEnvironmentFacts",
     "SlurmGpuEnvironmentFacts",
     "StageFailureText",
+    "SteerTarget",
     "StopGraceError",
     "StopTimer",
     "TerminalSignal",

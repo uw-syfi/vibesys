@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSessions
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import StateSlot
+    from vs_runtime.api.infrastructure import RunControlChannel
 
 
 class _WorkspaceResource:
@@ -310,6 +311,7 @@ def _runtime(
     *,
     root_resource: _WorkspaceResource | None = None,
     candidate_resources: tuple[_WorkspaceResource, ...] = (),
+    control: RunControlChannel | None = None,
 ) -> WorkspaceRuntime:
     candidates = deque(candidate_resources)
     selected_root = root_resource or _WorkspaceResource()
@@ -334,7 +336,7 @@ def _runtime(
             reasoning_effort="high",
         ),
         session_store=lambda: None,
-        control=create_run_control_channel(FakeRunControlEventSink()),
+        control=control or create_run_control_channel(FakeRunControlEventSink()),
         lifecycle_events=effects.lifecycle,
         agent_events=NULL_AGENT_EVENT_SINK,
         route_message=lambda message, steering: message + "".join(steering),
