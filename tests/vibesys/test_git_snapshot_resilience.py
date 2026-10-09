@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
 
-from vs_project.api import GitTracker, NullGitTrackerEvents, Project
+from vs_project.api import (
+    CliGitRepository,
+    GitFaultSink,
+    GitTracker,
+    NullGitTrackerEvents,
+    Project,
+    StagingError,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 
@@ -68,6 +75,22 @@ def test_unreadable_scan_skips_excluded_runtime_trees(
     assert all(".venv" not in path for path in checked)
 
 
+class _RepositoryRefusingFirstStage(CliGitRepository):
+    """Report an unreadable file the host scan missed, on the first staging attempt only."""
+
+    def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
+        super().__init__(root, faults=faults)
+        self.refused_first_stage = False
+
+    def stage_all(self, pathspecs: Sequence[str], *, force: bool = False) -> None:
+        if not self.refused_first_stage and not force:
+            self.refused_first_stage = True
+            raise StagingError(
+                ["git", "add", "-A"], 128, "permission denied", ["system_profile.json"]
+            )
+        super().stage_all(pathspecs, force=force)
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can read mode-000 files")
 def test_snapshot_excludes_unreadable_project_file(
     tmp_path: Path,
@@ -77,7 +100,9 @@ def test_snapshot_excludes_unreadable_project_file(
     project.mkdir()
     code = project / "code.py"
     code.write_text("VALUE = 1\n")
-    tracker = _tracker(project)
+    events = NullGitTrackerEvents()
+    repository = _RepositoryRefusingFirstStage(project, faults=events)
+    tracker = GitTracker(project, run_id="test-run", events=events, repository=repository)
     tracker.init(existing=False)
 
     code.write_text("VALUE = 2\n")
@@ -85,34 +110,11 @@ def test_snapshot_excludes_unreadable_project_file(
     unreadable.write_text("{}")
     unreadable.chmod(0o000)
     real_access = os.access
-    real_run = tracker.run
-
-    def report_permission_failure_once(
-        command: list[str],
-        *,
-        check: bool = True,
-        timeout: float | None = None,
-    ) -> subprocess.CompletedProcess[bytes]:
-        if command[:3] == ["git", "add", "-A"] and not failed_add[0]:
-            failed_add[0] = True
-            return subprocess.CompletedProcess(
-                command,
-                128,
-                stdout=b"",
-                stderr=(
-                    b'error: open("system_profile.json"): Permission denied\n'
-                    b"fatal: adding files failed\n"
-                ),
-            )
-        return real_run(command, check=check, timeout=timeout)
-
-    failed_add = [False]
 
     def report_readable(path: Path, mode: int) -> bool:
         return True if path == unreadable else real_access(path, mode)
 
     monkeypatch.setattr(os, "access", report_readable)
-    monkeypatch.setattr(tracker, "run", report_permission_failure_once)
     try:
         tracker.snapshot("skip unreadable file")
         committed = run_test_command(
@@ -123,7 +125,7 @@ def test_snapshot_excludes_unreadable_project_file(
             check=True,
         ).stdout.splitlines()
         assert committed == ["code.py"]
-        assert failed_add[0]
+        assert repository.refused_first_stage
         assert (
             "/system_profile.json"
             in (project / ".git" / "info" / "exclude").read_text().splitlines()

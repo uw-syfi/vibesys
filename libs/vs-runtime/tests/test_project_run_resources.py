@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 from dataclasses import replace
-from subprocess import CalledProcessError
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from tests.support.run_execution import run_execution_record
 
 from vs_project.api import (
+    GitError,
     NullGitTrackerEvents,
     OrchestrationDescriptor,
     Project,
@@ -273,7 +273,7 @@ def test_candidate_construction_failure_removes_partial_worktree(tmp_path: Path)
             _RUN_ID, "candidate-1"
         )
 
-        with pytest.raises(CalledProcessError):
+        with pytest.raises(GitError):
             resources.open_candidate("candidate-1", "not-a-revision")
 
         assert not candidate_path.exists()

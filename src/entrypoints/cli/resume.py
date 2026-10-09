@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -18,6 +17,7 @@ from vibesys.api import ComputeBackend, ProfilerKind
 from vibesys.api.profilers import coerce_profiler_kind
 from vibesys.api.request import migrate_recorded_run_environment
 from vs_project.api import (
+    GitError,
     GitTracker,
     NullGitTrackerEvents,
     OrchestrationRunManifest,
@@ -282,7 +282,7 @@ def _switch_project_resume_branch(project_root: Path, run_id: str) -> None:
     tracker = GitTracker(project_root, events=NullGitTrackerEvents(), run_id=run_id)
     try:
         tracker.init(existing=True)
-    except (subprocess.SubprocessError, ValueError) as exc:
+    except (GitError, ValueError) as exc:
         _configuration_error(
             f"Cannot resume project run {run_id!r}: {exc}",
             code="resume_not_found",
