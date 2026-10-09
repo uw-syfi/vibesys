@@ -1,6 +1,7 @@
 """Published pure lifecycle API. Area implementations land in wave 1."""
 
 from vs_core._continuations import SuspensionRefusal
+from vs_core._drain import DrainRole, drain_role
 from vs_core._migration import v2_to_v3_migration
 from vs_core._projection import (
     attempt_view,
@@ -557,6 +558,7 @@ __all__ = [
     "DispatchAuthorized",
     "DispatchTurn",
     "Disposition",
+    "DrainRole",
     "EnsureSession",
     "EnsureWorkspace",
     "EnvelopeMigration",
@@ -834,6 +836,7 @@ __all__ = [
     "advance_session",
     "attempt_view",
     "dependency_status",
+    "drain_role",
     "evidence_view",
     "initial_state",
     "may_resubmit",
