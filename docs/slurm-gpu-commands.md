@@ -84,3 +84,6 @@ when the configuration is not at the default path.
   submit host: the benchmark gate writes its result under `/tmp`. Multi-node
   clusters without a shared `/tmp` are not supported yet.
 - Gates run on a single node.
+- A gate's `timeout_seconds` in the task manifest includes the time its job
+  waits in the Slurm queue. On a busy cluster, raise it to cover the expected
+  wait; `gate_time_minutes` still bounds how long the job holds GPUs.
