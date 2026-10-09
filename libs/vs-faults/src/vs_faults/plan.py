@@ -28,6 +28,8 @@ class Boundary(StrEnum):
     CLUSTER = "cluster"
     EXECUTOR_REQUEST = "executor_request"  # a request the host's shell hands to an executor
     DURABLE_WRITE = "durable_write"  # one atomic write of the host's durable run record
+    PROCESS_OUTPUT = "process_output"  # one stdout line of a long-lived agent process
+    CONVERSATION_TURN = "conversation_turn"  # one turn of a provider conversation
 
 
 class AgentFault(StrEnum):
@@ -80,12 +82,43 @@ class HostFault(StrEnum):
     CRASH_AFTER = "crash_after"  # the call completes and takes effect, then the host process dies
 
 
-_FAULT_TYPES: dict[Boundary, type[AgentFault | ToolFault | ClusterFault | HostFault]] = {
+class ProcessFault(StrEnum):
+    """What a faulted line of a long-lived agent process's output does instead of arriving.
+
+    The ordinal counts stdout lines across every process one executor
+    spawned, so a rule names a position in the protocol exchange without
+    knowing the protocol.
+    """
+
+    DIE = "die"  # the process is killed before this line is delivered
+    HANG = "hang"  # this line and every later one never arrive; the process stays up
+    MALFORMED = "malformed"  # this line arrives corrupted, as output that is not a message
+    CONTAINER_REPLACED = (
+        "container_replaced"  # every live process dies at once; conversations are lost
+    )
+
+
+class ConversationFault(StrEnum):
+    """What a faulted turn of a provider conversation does instead of answering."""
+
+    TRANSIENT = "transient"  # the provider reports an overload or rate limit
+    FAILED = "failed"  # the turn fails with an unclassified provider error
+    RESUME_REFUSED = "resume_refused"  # the provider no longer has the conversation
+    TIMEOUT = "timeout"  # the turn outlives its budget
+    EXITED = "exited"  # the provider process exits mid-turn
+    MALFORMED = "malformed"  # the turn ends with text that is not the reply it should be
+
+
+type Fault = AgentFault | ToolFault | ClusterFault | HostFault | ProcessFault | ConversationFault
+
+_FAULT_TYPES: dict[Boundary, type[Fault]] = {
     Boundary.AGENT_TURN: AgentFault,
     Boundary.TOOL_CALL: ToolFault,
     Boundary.CLUSTER: ClusterFault,
     Boundary.EXECUTOR_REQUEST: HostFault,
     Boundary.DURABLE_WRITE: HostFault,
+    Boundary.PROCESS_OUTPUT: ProcessFault,
+    Boundary.CONVERSATION_TURN: ConversationFault,
 }
 
 
@@ -97,7 +130,7 @@ class FaultRule(BaseModel):
     boundary: Boundary
     target: str | None = None
     at: int = Field(ge=1)
-    fault: AgentFault | ToolFault | ClusterFault | HostFault
+    fault: Fault
 
     @model_validator(mode="before")
     @classmethod
@@ -115,6 +148,8 @@ _FAULTS: dict[Boundary, tuple[StrEnum, ...]] = {
     Boundary.CLUSTER: tuple(ClusterFault),
     Boundary.EXECUTOR_REQUEST: tuple(HostFault),
     Boundary.DURABLE_WRITE: tuple(HostFault),
+    Boundary.PROCESS_OUTPUT: tuple(ProcessFault),
+    Boundary.CONVERSATION_TURN: tuple(ConversationFault),
 }
 _CLUSTER_FAULTS: dict[ClusterFault, tuple[ClusterOperation, ...]] = {
     ClusterFault.SSH_DOWN: tuple(ClusterOperation),
@@ -186,7 +221,7 @@ class FaultPlan(BaseModel):
             boundary = rng.choice(boundaries)
             if boundary is Boundary.CLUSTER:
                 cluster_fault = rng.choice(tuple(ClusterFault))
-                fault: AgentFault | ToolFault | ClusterFault | HostFault = cluster_fault
+                fault: Fault = cluster_fault
                 target: str | None = rng.choice(_CLUSTER_FAULTS[cluster_fault]).value
             else:
                 fault = rng.choice(_FAULTS[boundary])
