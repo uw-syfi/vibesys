@@ -78,10 +78,16 @@ class Simulation:
 
 
 async def simulate(
-    root: Path, plan: FaultPlan, strategy: SkeletonStrategy | None = None
+    root: Path,
+    plan: FaultPlan,
+    strategy: SkeletonStrategy | None = None,
+    gate: FaultGate | None = None,
 ) -> Simulation:
-    """Run to a terminal state through every crash ``plan`` schedules, restarting each time."""
-    gate = FaultGate(plan)
+    """Run to a terminal state through every crash ``plan`` schedules, restarting each time.
+
+    ``gate`` replaces the plan's own gate, for a crash kind the plan cannot express yet.
+    """
+    gate = gate or FaultGate(plan)
     cluster = CountingCluster()
     with open_skeleton_world(root, strategy or SkeletonStrategy(), cluster) as world:
         world.gate = gate

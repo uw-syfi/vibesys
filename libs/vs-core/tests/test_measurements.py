@@ -220,13 +220,33 @@ def test_duplicate_reordered_observations_and_reload_never_regress(order: list[i
         result = transition(
             state, core.JobObserved(resource_id=core.ResourceId(root="job"), observation=observed)
         )
-        # Only the direct successor of the held observation is one the executor can have
-        # issued next; a gap, a replay and an older one change nothing.
-        if sequence == latest.sequence + 1:
+        # An observation is a sample of the job, so a newer one supersedes the held one
+        # whatever numbers were skipped; a replay and an older one change nothing.
+        if sequence > latest.sequence:
             latest = observed
         assert result.state.evaluation.jobs[0].observation == latest
         assert len(result.state.evaluation.submission_budgets[0].receipts) == 1
         state = roundtrip(result.state)
+
+
+def test_an_observation_older_than_the_held_one_changes_nothing_even_when_a_number_was_skipped() -> (
+    None
+):
+    state, request = submitted()
+    skipped_to = observation(request, 3)
+    state = committed(state, skipped_to)
+    held = transition(
+        state, core.JobObserved(resource_id=core.ResourceId(root="job"), observation=skipped_to)
+    ).state
+    assert held.evaluation.jobs[0].observation == skipped_to
+    older = observation(request, 2)
+    result = transition(
+        committed(held, skipped_to),
+        core.JobObserved(resource_id=core.ResourceId(root="job"), observation=older),
+    )
+    assert result.state.evaluation == held.evaluation
+    assert result.requests == ()
+    assert result.events == ()
 
 
 @given(
@@ -494,7 +514,6 @@ def test_progress_optional_fields_preserve_missing_values_and_stage_registry(
             "foreign-resource",
             "wrong-kind",
             "uncommitted",
-            "never-issued",
             "conflicts-with-ledger",
         )
     ),
@@ -508,10 +527,6 @@ def test_unknown_foreign_wrong_kind_and_uncommitted_sources_are_inert(
         observed = observed.model_copy(update={"request_id": core.RequestId(root="unknown")})
     elif mismatch == "foreign-resource":
         observed = observed.model_copy(update={"resource_id": core.ResourceId(root="foreign")})
-        state = committed(state, observed)
-    elif mismatch == "never-issued":
-        # The job holds sequence 1, so sequence 2 is the next one the executor can issue.
-        observed = observation(request, sequence + 2)
         state = committed(state, observed)
     elif mismatch == "uncommitted":
         # The ledger holds no observation of the submission, so nothing vouches for the job.

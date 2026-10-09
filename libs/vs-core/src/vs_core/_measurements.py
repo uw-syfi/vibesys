@@ -947,8 +947,6 @@ def _observed_owner(
         return binding
     if _resource_taken(state, event.observation, source.request_id):
         return Mismatch(ProofField.RESOURCE_ID)
-    if isinstance(event, JobObserved) and not _issued_successor(job, source, event.observation):
-        return Mismatch(ProofField.SEQUENCE)
     return _incoming_job(job, source, event)
 
 
@@ -1018,24 +1016,6 @@ def _builtin_source(
         return origin
     budget = submission_budget_for(request, state.submission_budgets, context.run.receipts)
     return Proven(job) if isinstance(budget, Proven) else budget
-
-
-def _issued_successor(
-    job: OwnedJob | RegisteredOwnedJob, source: Intent, observation: Observation
-) -> bool:
-    """Whether a job observation can be one the executor issued next.
-
-    Only the submission's own observation goes through the intent ledger. The job's
-    first view is that one or, when the job's own copy of it was lost (a restart between
-    the submit and its job observation), its direct successor. After that, each poll gets
-    the next sequence, so a later observation is the held one again or its direct
-    successor; a gap means an observation nobody issued or one that was lost, and changes
-    nothing.
-    """
-    held = job.observation if job.observation is not None else source.observation
-    if held is None:
-        return False
-    return observation == held or observation.sequence == held.sequence + 1
 
 
 def _incoming_job(
