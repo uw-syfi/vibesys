@@ -40,12 +40,27 @@ class ProcessStop(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ProcessOutcome:
-    """Captured streams and exit status of one finished or stopped command."""
+    """Captured streams and exit status of one finished or stopped command.
+
+    ``returncode`` is the shell-convention status: ``128 + N`` for a process
+    killed by signal ``N``, never a negative number. The streams hold
+    everything the command wrote before it exited or was stopped.
+    """
 
     stdout: str
     stderr: str
     returncode: int
     stopped: ProcessStop | None = None
+
+
+def shell_exit_status(returncode: int) -> int:
+    """Return the shell-convention status of a ``subprocess`` return code.
+
+    ``subprocess`` reports a signalled child as ``-N``; a shell (and ``docker
+    exec``) reports ``128 + N``. One convention keeps ``kill -9`` the same
+    status (137) in every sandbox kind.
+    """
+    return 128 - returncode if returncode < 0 else returncode
 
 
 def start_process_group(
@@ -64,6 +79,7 @@ def start_process_group(
         argv,
         env=dict(env) if env is not None else None,
         cwd=cwd,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -77,39 +93,63 @@ def wait_stoppable(
     timeout: float | None,
     cancel: threading.Event | None,
     grace_seconds: float = DEFAULT_TERMINATION_GRACE_SECONDS,
-    before_stop: Callable[[], None] | None = None,
+    signal_remote: Callable[[signal.Signals], None] | None = None,
 ) -> ProcessOutcome:
     """Wait for a process group leader until it exits, times out, or is cancelled.
 
-    On a stop, *before_stop* runs first (a backend whose command lives
-    outside this process group, such as a container exec, stops it there),
-    then the group receives ``SIGTERM`` and, after *grace_seconds*,
-    ``SIGKILL``. The outcome names the stop reason.
+    On a stop, *signal_remote* receives ``SIGTERM`` first (a backend whose
+    command lives outside this process group, such as a container exec,
+    signals it there), then the group receives ``SIGTERM`` and, after
+    *grace_seconds*, *signal_remote* and the group receive ``SIGKILL``. The
+    outcome keeps the output written so far and names the stop reason. If the
+    waiting thread is interrupted (``KeyboardInterrupt``), the command is
+    killed before the interruption propagates, so nothing outlives the call.
     """
     deadline = None if timeout is None else time.monotonic() + timeout
-    while True:
-        remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
-        wait = remaining if cancel is None else _min_wait(remaining)
-        try:
-            stdout, stderr = process.communicate(timeout=wait)
-        except subprocess.TimeoutExpired:
-            if cancel is not None and cancel.is_set():
-                stop = ProcessStop.CANCELLED
-            elif deadline is not None and time.monotonic() >= deadline:
-                stop = ProcessStop.TIMEOUT
-            else:
-                continue
-            break
-        return ProcessOutcome(stdout, stderr, process.returncode)
-    if before_stop is not None:
-        before_stop()
+    try:
+        while True:
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            wait = remaining if cancel is None else _min_wait(remaining)
+            try:
+                stdout, stderr = process.communicate(timeout=wait)
+            except subprocess.TimeoutExpired:
+                if cancel is not None and cancel.is_set():
+                    stop = ProcessStop.CANCELLED
+                elif deadline is not None and time.monotonic() >= deadline:
+                    stop = ProcessStop.TIMEOUT
+                else:
+                    continue
+                break
+            return ProcessOutcome(stdout, stderr, shell_exit_status(process.returncode))
+        return _stop(process, stop, grace_seconds, signal_remote)
+    except BaseException:
+        _kill(process, signal_remote)
+        raise
+
+
+def _stop(
+    process: subprocess.Popen[str],
+    stop: ProcessStop,
+    grace_seconds: float,
+    signal_remote: Callable[[signal.Signals], None] | None,
+) -> ProcessOutcome:
+    if signal_remote is not None:
+        signal_remote(signal.SIGTERM)
     _signal_group(process, signal.SIGTERM)
     try:
         stdout, stderr = process.communicate(timeout=grace_seconds)
     except subprocess.TimeoutExpired:
-        _signal_group(process, signal.SIGKILL)
+        _kill(process, signal_remote)
         stdout, stderr = process.communicate()
-    return ProcessOutcome(stdout, stderr, process.returncode, stop)
+    return ProcessOutcome(stdout, stderr, shell_exit_status(process.returncode), stop)
+
+
+def _kill(
+    process: subprocess.Popen[str], signal_remote: Callable[[signal.Signals], None] | None
+) -> None:
+    if signal_remote is not None:
+        signal_remote(signal.SIGKILL)
+    _signal_group(process, signal.SIGKILL)
 
 
 def _min_wait(remaining: float | None) -> float:

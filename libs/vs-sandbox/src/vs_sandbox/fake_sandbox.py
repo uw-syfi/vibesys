@@ -1,12 +1,16 @@
 """In-memory :class:`~vs_sandbox.execution.Sandbox` test double.
 
-Mirrors :class:`~vs_sandbox.local_shell.LocalShellSandbox`'s observable
-contract (an ``id`` property, an ``execute`` method returning
-:class:`~vs_sandbox.execution.SandboxExecutionResult`) without a subprocess:
-no shell is ever spawned. A caller scripts specific commands with
-:meth:`FakeSandbox.script`; anything unscripted falls back to a configurable
-default result (a clean success by default), and every call is recorded for
-direct assertions.
+Mirrors the observable contract of the real sandboxes (an ``id`` property, an
+``execute`` method returning :class:`~vs_sandbox.execution.SandboxExecutionResult`)
+without a subprocess: no shell is ever spawned. A caller scripts specific
+commands with :meth:`FakeSandbox.script` (a canned result), or with
+:meth:`FakeSandbox.script_process` and :meth:`FakeSandbox.script_hang`, which
+describe what the command's process did and let the fake build the result
+through the same mapping the real sandboxes use
+(:func:`~vs_sandbox.command_execution.result_of`), so truncation, timeout and
+cancellation results cannot drift from production. Anything unscripted falls
+back to a configurable default result (a clean success by default), and every
+call is recorded for direct assertions.
 """
 
 from __future__ import annotations
@@ -16,7 +20,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vs_sandbox.command_execution import rejected_result, result_of, validate_timeout
 from vs_sandbox.execution import SandboxExecutionResult
+from vs_sandbox.process_execution import ProcessOutcome, ProcessStop
 
 if TYPE_CHECKING:
     import threading
@@ -24,15 +30,10 @@ if TYPE_CHECKING:
 #: Result an unscripted command receives when no other default was set.
 DEFAULT_RESULT = SandboxExecutionResult(output="", exit_code=0, stdout="", stderr="")
 
-#: Result an empty/invalid command receives, matching ``LocalShellSandbox``.
-_INVALID_COMMAND_RESULT = SandboxExecutionResult(
-    output="Error: Command must be a non-empty string.", exit_code=1
-)
-
-#: Result a command receives when its cancel event is already set.
-CANCELLED_RESULT = SandboxExecutionResult(
-    output="Error: Command was cancelled.", exit_code=-15, cancelled=True
-)
+_DEFAULT_TIMEOUT_SECONDS = 120
+_DEFAULT_MAX_OUTPUT_CHARS = 100_000
+#: Status of a command stopped by ``SIGTERM`` (128 + 15).
+_SIGTERM_STATUS = 143
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,14 +45,25 @@ class FakeExecution:
     cancellable: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class _Hang:
+    """A command that wrote *stdout*/*stderr* and then blocks until stopped."""
+
+    stdout: str
+    stderr: str
+
+
 @dataclass(slots=True)
 class FakeSandbox:
     """Configurable in-memory double for :class:`~vs_sandbox.execution.Sandbox`."""
 
     _id: str = field(default_factory=lambda: f"fake-{uuid.uuid4().hex[:8]}")
     default_result: SandboxExecutionResult = field(default_factory=lambda: DEFAULT_RESULT)
+    max_output_chars: int = _DEFAULT_MAX_OUTPUT_CHARS
     calls: list[FakeExecution] = field(default_factory=list)
-    _scripted: dict[str, SandboxExecutionResult] = field(default_factory=dict)
+    _scripted: dict[str, SandboxExecutionResult | ProcessOutcome | _Hang] = field(
+        default_factory=dict
+    )
 
     @property
     def id(self) -> str:
@@ -66,6 +78,25 @@ class FakeSandbox:
         """Return *result* the next time (and every time) *command* is executed."""
         self._scripted[command] = result
 
+    def script_process(
+        self, command: str, *, stdout: str = "", stderr: str = "", returncode: int = 0
+    ) -> None:
+        """Make *command* write *stdout*/*stderr* and exit with *returncode*.
+
+        The result goes through the same mapping as a real process's, so it is
+        bounded by :attr:`max_output_chars` and truncation is reported.
+        """
+        self._scripted[command] = ProcessOutcome(stdout, stderr, returncode)
+
+    def script_hang(self, command: str, *, stdout: str = "", stderr: str = "") -> None:
+        """Make *command* write *stdout*/*stderr* and then run until stopped.
+
+        A call with a *cancel* event returns when the event is set, as a
+        cancelled result; a call without one is stopped by its timeout at
+        once (the fake has no clock), as a timeout result.
+        """
+        self._scripted[command] = _Hang(stdout, stderr)
+
     def execute(
         self,
         command: str,
@@ -75,19 +106,33 @@ class FakeSandbox:
     ) -> SandboxExecutionResult:
         """Return the scripted result for *command*, or the default result.
 
-        Matches :meth:`LocalShellSandbox.execute`'s handling of an empty or
-        non-string command: it never reaches the script table. A fake command
-        finishes instantly, so *cancel* is honored when it is already set: the
-        call returns :data:`CANCELLED_RESULT`.
+        Applies the same validation as the real sandboxes: an empty or
+        non-string command never reaches the script table, and a non-positive
+        timeout raises ``ValueError``. A fake command finishes instantly, so
+        *cancel* is honored when it is already set.
         """
         if not command or not isinstance(command, str):
-            return _INVALID_COMMAND_RESULT
+            return rejected_result(
+                "Error: Command must be a non-empty string.", 1, self.max_output_chars
+            )
+        effective_timeout = validate_timeout(timeout, _DEFAULT_TIMEOUT_SECONDS)
         self.calls.append(
             FakeExecution(command=command, timeout=timeout, cancellable=cancel is not None)
         )
+        scripted = self._scripted.get(command, self.default_result)
         if cancel is not None and cancel.is_set():
-            return CANCELLED_RESULT
-        return self._scripted.get(command, self.default_result)
+            outcome = ProcessOutcome("", "", _SIGTERM_STATUS, ProcessStop.CANCELLED)
+        elif isinstance(scripted, _Hang):
+            stop = ProcessStop.TIMEOUT
+            if cancel is not None:
+                cancel.wait()
+                stop = ProcessStop.CANCELLED
+            outcome = ProcessOutcome(scripted.stdout, scripted.stderr, _SIGTERM_STATUS, stop)
+        elif isinstance(scripted, ProcessOutcome):
+            outcome = scripted
+        else:
+            return scripted
+        return result_of(outcome, effective_timeout, self.max_output_chars)
 
 
 @dataclass(slots=True)
