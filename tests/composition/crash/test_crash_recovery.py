@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 from tests.support.crash_harness import (
-    crash_plan,
+    converges_after_one,
     crash_points,
     name,
-    run,
+    representatives,
     straight_run,
 )
 
@@ -33,19 +33,16 @@ def test_every_boundary_has_crash_points() -> None:
     assert boundaries == {Boundary.EXECUTOR_REQUEST, Boundary.DURABLE_WRITE}
 
 
-@pytest.mark.parametrize(
-    "crossing",
-    [c for c in crash_points() if c.boundary == Boundary.EXECUTOR_REQUEST],
-    ids=name,
-)
+def _requests() -> list[Crossing]:
+    return [c for c in crash_points() if c.boundary == Boundary.EXECUTOR_REQUEST]
+
+
+@pytest.mark.parametrize("crossing", representatives().requests, ids=name)
+def test_a_crash_after_the_first_request_of_each_kind_converges(crossing: Crossing) -> None:
+    converges_after_one(crossing)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("crossing", _requests(), ids=name)
 def test_a_crash_after_each_boundary_converges(crossing: Crossing) -> None:
-    plan = crash_plan(crossing)
-    summary = run(plan).summary
-    straight = straight_run().summary
-    replay = f"replay with {plan.model_dump_json()}"
-    assert summary.stalled is None, f"{summary.stalled}; {replay}"
-    assert summary.crashes == 1, replay
-    assert summary.outcome == straight.outcome, replay
-    assert summary.adopted_tree == straight.adopted_tree, replay
-    assert summary.sbatch_calls == straight.sbatch_calls, replay
-    assert summary.agent_dispatches == straight.agent_dispatches, replay
+    converges_after_one(crossing)
