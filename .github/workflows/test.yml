@@ -696,13 +696,15 @@ jobs:
               raise SystemExit(f"Required test jobs did not succeed: {failed}")
           PY
 
-  # Reports the run's wall time against CI_WALL_TIME_WARN_SECONDS and
+  # Reports the run's execution time against CI_WALL_TIME_WARN_SECONDS and
   # CI_WALL_TIME_ERROR_SECONDS (issue #474). Over the warn threshold it
   # annotates the run; over the error threshold the job fails, so a slow run is
   # visibly red instead of a green run nobody inspects. It is not a required
   # check (Required PR CI does not need it), so a slow run is still mergeable.
-  # The summary reports queue time separately from execution time because
-  # runner queueing can push a run over for reasons no workflow change can fix.
+  # Execution is the critical path's elapsed time minus its runner queue time
+  # (scripts/ci_wall_time.py), because contention for the shared runner pool
+  # can push a run over for reasons no workflow change can fix. Elapsed and
+  # queue time stay in the summary and the annotation.
   #
   # `typecheck` is deliberately absent from `needs`; Required PR CI owns that
   # dependency. It still appears in the table because this step reads every job
@@ -727,7 +729,9 @@ jobs:
       contents: read
 
     steps:
-      - name: Report wall time against the budget
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Report execution time against the budget
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -736,76 +740,9 @@ jobs:
           ERROR_SECONDS: ${{ env.CI_WALL_TIME_ERROR_SECONDS }}
         run: |
           set -euo pipefail
-          gh api "repos/$REPO/actions/runs/$RUN_ID" --jq '.created_at' > run_created.txt
           # This job is still running, so its own row has an empty
-          # completed_at and drops out of the wall-time math below.
+          # completed_at and drops out of the math in the script.
           gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --paginate \
-            --jq '.jobs[] | [.name, (.conclusion // ""), (.started_at // ""), (.completed_at // "")] | @tsv' \
-            > jobs.tsv
-          python3 - <<'PY'
-          import os
-          from datetime import datetime
-          from pathlib import Path
-
-          def moment(value: str) -> datetime | None:
-              return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
-
-          warn_after = int(os.environ["WARN_SECONDS"])
-          error_after = int(os.environ["ERROR_SECONDS"])
-          created = moment(Path("run_created.txt").read_text().strip())
-          assert created is not None
-
-          rows = []
-          for line in Path("jobs.tsv").read_text().splitlines():
-              name, conclusion, started, completed = line.split("\t")
-              # Skipped jobs report a completed_at that precedes their
-              # started_at, and they cost the run nothing.
-              start, end = moment(started), moment(completed)
-              if start is None or end is None or conclusion == "skipped":
-                  continue
-              rows.append((
-                  name,
-                  conclusion,
-                  (start - created).total_seconds(),
-                  (end - start).total_seconds(),
-                  (end - created).total_seconds(),
-              ))
-
-          if not rows:
-              print("Every job in this run was skipped; nothing to measure.")
-              raise SystemExit(0)
-
-          rows.sort(key=lambda row: row[4], reverse=True)
-          wall = rows[0][4]
-          slowest, _, slowest_queue, slowest_run, _ = rows[0]
-
-          lines = [
-              f"## CI wall time: {wall:.0f}s (warn {warn_after}s, error {error_after}s)",
-              "",
-              "Measured from the run's `created_at` to the last job's `completed_at`,"
-              " which is what a reviewer waiting on the run experiences.",
-              "",
-              "| job | result | queued (s) | ran (s) | finished at (s) |",
-              "| --- | --- | ---: | ---: | ---: |",
-          ]
-          for name, conclusion, queued, ran, finished in rows:
-              lines.append(
-                  f"| {name} | {conclusion or 'n/a'} | {queued:.0f} | {ran:.0f} | {finished:.0f} |"
-              )
-          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text("\n".join(lines) + "\n")
-
-          long_pole = f"Long pole: {slowest} ({slowest_queue:.0f}s queued, {slowest_run:.0f}s running)."
-          if wall > error_after:
-              print(
-                  f"::error title=CI over wall-time limit::Run took {wall:.0f}s, over the"
-                  f" {error_after}s limit. {long_pole}"
-              )
-              raise SystemExit(1)
-          if wall > warn_after:
-              print(
-                  f"::warning title=CI over wall-time budget::Run took {wall:.0f}s, over the"
-                  f" {warn_after}s warning threshold. {long_pole}"
-              )
-          else:
-              print(f"Run took {wall:.0f}s, within the {warn_after}s warning threshold.")
-          PY
+            --jq '.jobs[]' > jobs.ndjson
+          python3 scripts/ci_wall_time.py jobs.ndjson \
+            --warn "$WARN_SECONDS" --error "$ERROR_SECONDS"
