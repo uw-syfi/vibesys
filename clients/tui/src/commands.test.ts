@@ -453,8 +453,8 @@ describe('fuzzyMatchCommands', () => {
   });
 
   it('matches a description the same way it matches a name', () => {
-    // "/steer"'s description is "Guide the next agent invocation: /steer
-    // <message>"; this query is "guide" with the "i" skipped.
+    // "/steer"'s description starts "Guide the running agent now"; this query
+    // is "guide" with the "i" skipped.
     expect(names(fuzzyMatchCommands('gude', {surface: 'command'}))).toContain('/steer');
   });
 

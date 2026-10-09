@@ -38,7 +38,7 @@ it, so it has no slash name of its own.
 | `/pause` | Pause after the current agent call. Takes effect once the current call finishes. | |
 | `/resume` | Resume a paused run. Works from the command bar and the chat. | |
 | `/stop` | Stop the run after the current agent call. Takes effect once the current call finishes. The journal records the stop and the run reads `stopped`, not failed; it can be reopened or resumed later. Signals remain the escalation path for a backend that stopped responding. | |
-| `/steer <message>` | Guide the next agent invocation: `/steer <message>`. Queues an instruction that is appended to the next agent invocation's prompt. | |
+| `/steer <message>` | Guide the running agent now if its provider supports it, else the next turn: `/steer <message>`. The instruction is delivered into the running turn when the provider accepts messages mid-turn, and otherwise appended to the next agent invocation's prompt. | |
 | `/open-round` | Open the selected hypothesis, or `/open-round --N` for round N. With no argument, opens the rounds behind the selected hypothesis. | |
 | `/open-round --N` | Open round N, inside whichever hypothesis owns it. | |
 | `/perf` | Plot performance by round in the right pane. Uses the recorded performance metric. | |
