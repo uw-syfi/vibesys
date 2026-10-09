@@ -1,5 +1,5 @@
 # Architecture ratchet: freezes the Python module graph as of today.
-# `uv run tach check` fails if any module gains a dependency not listed here.
+# `uv run python scripts/check_tach.py` fails if any module gains a dependency not listed here.
 # To add an edge on purpose, edit `depends_on` in the same PR so a reviewer sees
 # it. The goal is to only ever remove edges. `tach sync` regenerates
 # `depends_on` from the code; review its diff before committing.
