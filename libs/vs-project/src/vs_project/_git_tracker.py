@@ -858,7 +858,15 @@ class GitTracker:
 
         Excludes unreadable paths up front, then retries on any residual
         permission failure (a file may appear between the scan and the add).
+
+        Framework state is never staged here: it is unstaged right after, and
+        the framework's own writers (state-store temp files that are created
+        and renamed) race with git's directory scan, so ``git add`` would fail
+        with "unable to stat" on a file that vanished. Excluding the subtree
+        removes the race instead of retrying it; framework metadata is staged
+        only through the explicit snapshot plans.
         """
+        candidate_scope = [".", f":(exclude){self._state_integration.metadata_pathspec}"]
         self._exclude_paths(self._collect_unreadable())
         has_head = self.current_sha() is not None
         if has_head:
@@ -867,7 +875,7 @@ class GitTracker:
             self._git.unstage(["."])
         for _ in range(3):
             try:
-                self._git.stage_all(["."])
+                self._git.stage_all(candidate_scope)
             except StagingError as error:
                 if not error.unreadable:
                     raise  # failure unrelated to unreadable files: surface it
@@ -877,7 +885,7 @@ class GitTracker:
                 return
         # Final attempt: report and raise with full diagnostics if it still fails.
         try:
-            self._git.stage_all(["."])
+            self._git.stage_all(candidate_scope)
         except StagingError as error:
             self._events.warning(
                 f"git command failed: {' '.join(error.command)}",
