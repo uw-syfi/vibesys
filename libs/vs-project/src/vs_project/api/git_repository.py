@@ -212,8 +212,7 @@ class GitRepository(Protocol):
     def head(self) -> str | None:
         """The commit ``HEAD`` resolves to, or ``None`` when unborn or unreadable.
 
-        Never cached; must not require starting a process in the plain
-        layout, it is called many times per run (portable).
+        Never cached: it reflects writes made by any process (portable).
         """
         ...
 
