@@ -15,6 +15,7 @@ import {
   type CoreState,
   DEFAULT_CHAT_THREAD_ID,
   type ExecutionTodos,
+  hasRunEnded,
   initialCoreState,
   latestDiagnosticChange,
   phasesForRound,
@@ -32,6 +33,7 @@ import {
 import {agentRuntimeLabel} from './agent-runtime-label.js';
 import * as diagnosticProjection from './diagnostic-projection.js';
 import type {NoteRecord} from './notes-store.js';
+import * as quotaProjection from './quota-projection.js';
 import {DEFAULT_THEME_NAME, type ThemeName} from './theme.js';
 
 export interface SessionState {
@@ -930,7 +932,41 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
   if (diagnostic !== null && diagnosticProjection.isNewDiagnostic(state.core, diagnostic)) {
     next = reportProjectedDiagnostic(next, diagnostic);
   }
-  return next;
+  return projectQuota(state.core, next);
+}
+
+/**
+ * Show a new quota pause as a banner naming the operator's choices, and retire
+ * the banner when the stop settles (resumed, abandoned or switched). Only a
+ * change of the quota fact counts as news, so a fold that leaves it alone never
+ * reopens a dismissed banner.
+ */
+function projectQuota(previous: CoreState, state: SessionState): SessionState {
+  const quota = state.core.quota;
+  if (quota === previous.quota) return state;
+  const pause = quota.pause;
+  if (pause === null) {
+    return state.errorBanner?.diagnosticId === quotaProjection.QUOTA_BANNER_ID
+      ? {...state, errorBanner: null}
+      : state;
+  }
+  if (hasRunEnded(state.core)) return state;
+  return {
+    ...state,
+    errorBanner: {
+      title: quotaProjection.QUOTA_BANNER_TITLE,
+      message: quotaProjection.quotaSummary(pause),
+      detail: quotaProjection.quotaDetail(pause),
+      hint: quotaProjection.quotaChoices(pause),
+      diagnosticId: quotaProjection.QUOTA_BANNER_ID,
+      severity: 'recoverable',
+      scope: 'run',
+      agentKind: null,
+      roundLabel: null,
+      invocationId: null,
+      count: 1,
+    },
+  };
 }
 
 /**
@@ -1027,7 +1063,7 @@ function applyReducedCore(state: SessionState, core: CoreState): SessionState {
     const mismatch = diagnosticProjection.newRunIdentityMismatch(state.core, core);
     if (mismatch !== null) next = reportProjectedDiagnostic(next, mismatch);
   }
-  return next;
+  return projectQuota(state.core, next);
 }
 
 /**

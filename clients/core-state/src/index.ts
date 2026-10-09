@@ -14,6 +14,8 @@ export {
   hasRunEnded,
   initialCoreState,
   latestDiagnosticChange,
+  type QuotaPause,
+  type QuotaState,
   type RunLifetimeBoundary,
   reconcileActiveExecutions,
   recordsBenchmark,
