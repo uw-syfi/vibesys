@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import json
 import os
 import signal
@@ -27,6 +28,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vs_sandbox.signal_relay import relay_signals
 from vs_sandbox.slurm_gpu import GpuCommand, SlurmGpuLauncher, load_slurm_gpu_config
 from vs_sandbox.slurm_gpu_broker import SOCKET_ENV, TOKEN_ENV
 
@@ -88,6 +90,12 @@ class Stop:
         return None if self.signum is None else 128 + self.signum
 
 
+def _shutdown(client: socket.socket) -> None:
+    """Close both directions; a second stop signal finds it already closed."""
+    with contextlib.suppress(OSError):
+        client.shutdown(socket.SHUT_RDWR)
+
+
 def run_brokered(
     command: Sequence[str],
     *,
@@ -108,7 +116,7 @@ def run_brokered(
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.connect(os.environ[SOCKET_ENV])
         # The broker cancels the job when the connection closes.
-        stop.on_stop = lambda: client.shutdown(socket.SHUT_RDWR)
+        stop.on_stop = lambda: _shutdown(client)
         client.sendall(json.dumps(request, separators=(",", ":")).encode() + b"\n")
         with client.makefile("rb") as frames:
             for line in frames:
@@ -157,15 +165,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         _error("missing command after --")
         return _USAGE_ERROR
     stop = Stop()
-    previous = {signum: signal.signal(signum, stop.handle) for signum in _STOP_SIGNALS}
     try:
-        return _run(args, command, stop)
+        with relay_signals(_STOP_SIGNALS, lambda number: stop.handle(number, None)):
+            return _run(args, command, stop)
     except ValueError as error:
         _error(str(error))
         return _USAGE_ERROR
-    finally:
-        for signum, handler in previous.items():
-            signal.signal(signum, handler)
 
 
 def _run(args: argparse.Namespace, command: Sequence[str], stop: Stop) -> int:
