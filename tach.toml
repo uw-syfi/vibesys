@@ -408,7 +408,7 @@ depends_on = ["vibesys", "vs_prompts"]
 [[modules]]
 path = "vs_sandbox"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "vs_sandbox.slurm_wiring"]
+depends_on = ["vs_async_ops.api", "vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "vs_sandbox.slurm_wiring"]
 
 [[modules]]
 path = "vs_runtime"

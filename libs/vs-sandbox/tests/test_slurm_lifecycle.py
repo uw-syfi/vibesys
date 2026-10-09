@@ -234,12 +234,30 @@ def test_published_lifecycle_never_decreases_for_any_scheduler_timeline(
     )
 
 
+_NOT_YET_RUNNING = frozenset({EvaluationState.QUEUED, EvaluationState.STARTING})
+
+
+async def _until_recorded_running(coordinator: EvaluationCoordinator, handle_id: str) -> None:
+    """Return once the executor holds the accepted job's identity.
+
+    The Fake's ``accepted`` event fires inside ``submit``, before the executor has
+    recorded the job, so a stop sent on it races the executor's own bookkeeping
+    (one scancel or two). The executor publishes RUNNING after recording (a failure ends the wait too); this
+    yields the event loop, not the clock, until it has.
+    """
+    while True:
+        record = await coordinator.inspect_snapshot(handle_id)
+        if record is not None and record.state not in _NOT_YET_RUNNING:
+            return
+        await asyncio.sleep(0)
+
+
 async def _stopped_while_active(schedule: _Schedule) -> None:
     with tempfile.TemporaryDirectory() as raw:
         cluster = _ScheduledCluster(schedule)
         executor, coordinator = _stack(Path(raw), cluster)
         handle = await coordinator.submit(_request())
-        await asyncio.to_thread(cluster.accepted.wait)
+        await _until_recorded_running(coordinator, handle.id)
         record = await coordinator.cancel(handle.id)
         assert record.state is EvaluationState.CANCELED
         assert cluster.scancels == 1
@@ -271,7 +289,7 @@ async def test_a_stop_beyond_the_confirmation_bound_leaves_the_evaluation_cancel
     cluster = _ScheduledCluster(_Schedule(queue_wait_s=0, run_s=math.inf, completing_s=10**9))
     executor, coordinator = _stack(tmp_path, cluster)
     handle = await coordinator.submit(_request())
-    await asyncio.to_thread(cluster.accepted.wait)
+    await _until_recorded_running(coordinator, handle.id)
     record = await coordinator.cancel(handle.id)
     assert record.state is EvaluationState.CANCELING
     assert record.cancel_requested

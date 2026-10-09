@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vs_async_ops.api import drain, finish, run_to_end
 from vs_evaluation.api import (
     AvailabilitySnapshot,
     AvailabilityState,
@@ -539,7 +540,16 @@ class SlurmEvaluationExecutor:
         await self._lifecycle.wait_for_change(handle_id, timeout_s)
 
     async def cancel(self, handle_id: str) -> None:
-        """Cancel an accepted batch, including after process restart."""
+        """Cancel an accepted batch, including after process restart.
+
+        The cancel runs as its own task, so a cancellation of the caller, however
+        often repeated, cannot abandon it half done (an sbatch not yet reconciled,
+        an scancel not yet sent): the caller's cancellation propagates once the
+        cancel has ended.
+        """
+        await finish(asyncio.ensure_future(self._cancel(handle_id)))
+
+    async def _cancel(self, handle_id: str) -> None:
         validate_cluster_operation_id(handle_id)
         observed = self._lifecycle.observation(handle_id)
         if observed is not None and is_finished(observed.state):
@@ -561,8 +571,7 @@ class SlurmEvaluationExecutor:
             # Drain acceptance before canceling by operation identity. A
             # conflicting payload can prove this executor owns no allocation.
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            await drain(task)
             observation = self._lifecycle.observation(handle_id)
             if observation is not None and observation.state is EvaluationState.FAILED:
                 return
@@ -618,7 +627,7 @@ class SlurmEvaluationExecutor:
             durable = self._read_evaluation(handle_id)
             if durable is not None and not durable.dispatch_started:
                 self._end_before_dispatch(handle_id, durable.request)
-            elif await self._cancel_running_best_effort(handle_id):
+            elif await run_to_end(self._cancel_running_best_effort(handle_id)):
                 self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
             raise
         except (SlurmSubmissionRejectedError, ExecutorRejectedError) as exc:
@@ -649,18 +658,21 @@ class SlurmEvaluationExecutor:
             self._accept(handle_id, request, stages, reconcile=reconcile)
         )
         try:
-            await asyncio.shield(acceptance)
+            await finish(acceptance)
         except asyncio.CancelledError:
-            try:
-                await acceptance
-            except (SlurmSubmissionRejectedError, ExecutorRejectedError):
+            # The submission ran to its end (``finish`` waited for it); its outcome
+            # is the proof cleanup needs.
+            outcome = None if acceptance.cancelled() else acceptance.exception()
+            if isinstance(outcome, (SlurmSubmissionRejectedError, ExecutorRejectedError)):
                 # Cancellation racing staging cannot erase proof that no job
                 # was submitted. Let the lifecycle boundary publish failure.
-                raise
-            except Exception:  # noqa: BLE001  # lint-waiver: LW-930077 [BLE001]; enumerating runner exceptions would let an extension bypass cleanup; suppressing Exception would also erase definite rejection, so this boundary preserves that proof and drains other failures before reconciliation.
-                _LOG.exception("Slurm submission failed while cancellation was pending")
+                raise outcome from None
+            if outcome is not None:
+                _LOG.error(
+                    "Slurm submission failed while cancellation was pending", exc_info=outcome
+                )
             with contextlib.suppress(Exception):
-                await self._cancel_running(handle_id)
+                await run_to_end(self._cancel_running(handle_id))
             raise
 
     async def _accept(
@@ -754,12 +766,7 @@ class SlurmEvaluationExecutor:
             raise _SlurmExecutionError.not_accepted()
         handle = await self._wait_for_batch(handle_id, handle, request, durable)
         collection = asyncio.create_task(asyncio.to_thread(self._cluster.collect, handle))
-        try:
-            collected = await asyncio.shield(collection)
-        except asyncio.CancelledError:
-            with contextlib.suppress(Exception):
-                await collection
-            raise
+        collected = await finish(collection)
         self._publish(handle_id, self._collected_observation(handle_id, request, handle, collected))
 
     @staticmethod
@@ -968,9 +975,11 @@ class SlurmEvaluationExecutor:
         try:
             return await asyncio.shield(inspection)
         except asyncio.CancelledError:
-            await self._cancel_running_best_effort(handle_id)
+            # Send scancel before waiting for the inspection: a hung inspection
+            # may only end once the job is cancelled. Both run to their end.
+            await run_to_end(self._cancel_running_best_effort(handle_id))
             with contextlib.suppress(Exception):
-                await inspection
+                await run_to_end(inspection)
             raise
 
     @staticmethod
@@ -1171,14 +1180,7 @@ async def _finish_in_thread[**P, R](
     the executor reported itself closed. This waits for the call to end, then
     re-raises the cancellation.
     """
-    work = asyncio.ensure_future(asyncio.to_thread(function, *args, **kwargs))
-    try:
-        return await asyncio.shield(work)
-    except asyncio.CancelledError:
-        while not work.done():
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await asyncio.shield(work)
-        raise
+    return await finish(asyncio.ensure_future(asyncio.to_thread(function, *args, **kwargs)))
 
 
 def _stage_command(name: str, command: str | None) -> tuple[str, ...]:

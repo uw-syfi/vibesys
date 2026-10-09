@@ -55,4 +55,18 @@ async def finish[T](task: asyncio.Future[T]) -> T:
         raise
 
 
-__all__ = ["drain", "finish"]
+async def run_to_end[T](work: Awaitable[T]) -> T:
+    """Run *work* to its end however often the caller is cancelled; return its result.
+
+    For cleanup inside a cancellation handler that re-raises the cancellation
+    itself: further cancellations of the caller are absorbed, and the work's own
+    failure propagates. Anywhere else use :func:`finish`, which re-raises the
+    caller's cancellation.
+    """
+    task = asyncio.ensure_future(work)
+    with contextlib.suppress(asyncio.CancelledError):
+        await drain(task)
+    return task.result()
+
+
+__all__ = ["drain", "finish", "run_to_end"]
