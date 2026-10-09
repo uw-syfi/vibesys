@@ -58,14 +58,12 @@ from .runner import (
     SlurmJobRequest,
     SlurmJobResult,
     SlurmJobRunner,
-    SlurmJobStatus,
     SlurmJobWaitResult,
-    SlurmPhase,
     SlurmProcess,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
-    phase_of,
 )
+from .scheduler_states import SlurmJobStatus, SlurmPhase, SlurmRawState, phase_of
 from .staging import tree_content_identity
 from .trace_replay import (
     DEFAULT_COMMAND_SECONDS,
@@ -128,6 +126,7 @@ __all__ = [
     "SlurmJobWaitResult",
     "SlurmPhase",
     "SlurmProcess",
+    "SlurmRawState",
     "SlurmService",
     "SlurmSshTransport",
     "SlurmSubmissionRejectedError",

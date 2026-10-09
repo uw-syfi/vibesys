@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from .fake_connector import REQUESTS_FILE, FakeConnector
+from .fake_connector import REQUESTS_FILE, FakeConnector, sacct_row
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -48,8 +48,9 @@ class TraceStep(BaseModel):
     """What the scheduler showed from ``at_seconds`` until the next step.
 
     ``queue_state`` is the ``squeue`` state, or None when the job no longer
-    appears in the queue. ``accounting_state`` is the ``sacct`` state, or None
-    when accounting has no row yet.
+    appears in the queue. ``accounting_state`` is the whole ``sacct`` state as
+    ``sacct -P`` prints it (``CANCELLED by 1000``), or None when accounting has
+    no row yet; the connector renders it as the invoked command would.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -301,7 +302,7 @@ class TraceConnector:
         step = self._step(job) if job is not None else None
         if step is None or step.accounting_state is None:
             return ""
-        return f"{step.accounting_state} {step.exit_code or '0:0'}\n"
+        return sacct_row(step.accounting_state, step.exit_code or "0:0", parsable="-P" in tokens)
 
     def _named(self, name: str) -> _Job | None:
         return next((job for job in self._jobs.values() if job.name == name), None)
