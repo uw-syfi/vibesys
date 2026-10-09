@@ -23,7 +23,7 @@ class RunEnvironmentSelectionError(ValueError):
     @classmethod
     def slurm_requires_selection(cls) -> RunEnvironmentSelectionError:
         """Describe a config path paired with another environment."""
-        return cls("--slurm-config requires --run-environment slurm")
+        return cls("--slurm-config requires --run-environment slurm or slurm-gpu")
 
     @classmethod
     def slurm_conflict(cls) -> RunEnvironmentSelectionError:
@@ -50,7 +50,7 @@ def _task_docker_conflicts(
     conflicts: list[str] = []
     if requested == "local" and "run_environment" in explicit:
         conflicts.append("--run-environment local")
-    elif requested in {"modal", "skypilot", "slurm"}:
+    elif requested in {"modal", "skypilot", "slurm", "slurm-gpu"}:
         conflicts.append(
             f"--run-environment {requested}"
             if selected
@@ -79,7 +79,7 @@ def run_environment_spec_from_args(
         getattr(args, "skypilot", False),
     )
     slurm_config = getattr(args, "slurm_config", None)
-    if selected is not None and selected != "slurm" and slurm_config is not None:
+    if selected not in {None, "slurm", "slurm-gpu"} and slurm_config is not None:
         raise RunEnvironmentSelectionError.slurm_requires_selection()
     if slurm_config is not None and any(compatibility_selections):
         raise RunEnvironmentSelectionError.slurm_conflict()
@@ -112,6 +112,16 @@ def run_environment_spec_from_args(
     ):
         task_image = build_task_image(dockerfile_path)
 
+    if requested_environment == "slurm-gpu":
+        return RunEnvironmentSpec(
+            name="slurm-gpu",
+            options={
+                "config_path": str(
+                    slurm_config or Path("~/.config/vibesys/slurm-gpu.toml").expanduser()
+                )
+            },
+            resources=bundle.manifest.resources if bundle is not None else None,
+        )
     if requested_environment == "slurm":
         return RunEnvironmentSpec(
             name="slurm",

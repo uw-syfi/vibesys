@@ -352,9 +352,13 @@ class RuntimeWorkspaceResource:
             log_directory=self._environment.request.log_dir,
             open_environment=self._open_agent_environment,
             current_log_file=self._current_log_file,
-            environment_variables=self._environment.device.gpu_env,
+            environment_variables=self._agent_environment_variables,
             agent_homes_directory=self._environment.request.agent_homes_dir,
         )
+
+    def _agent_environment_variables(self) -> dict[str, str]:
+        """The device pin, overridden by the variables the environment gives every agent."""
+        return {**self._environment.device.gpu_env(), **dict(self._environment.view.agent_env)}
 
     def _open_agent_environment(
         self, configuration: AgentExecutionConfiguration

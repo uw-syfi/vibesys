@@ -43,16 +43,14 @@ from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from vs_agent.api import (
     CONTAINER_RUNTIME_TOOLCHAIN,
-    DOCKER_PROVIDER_ENV,
     AgentBackend,
     auth_bind_mounts,
     auth_copy_paths,
-    auth_env_passthrough,
-    auth_env_vars,
-    auth_paths,
 )
 from vs_project.api import RunEnvironmentRecord, RunResourceRequest
 from vs_runtime import _boot_trace as boot_trace
+from vs_runtime._brokered_session import BrokeredRunEnvironmentSession
+from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_and_auth_files
 from vs_runtime._container_runtime_policy import (
     DOCKER_IN_DOCKER_NOTICE,
     attaches_accelerator,
@@ -60,6 +58,7 @@ from vs_runtime._container_runtime_policy import (
 )
 from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
 from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._slurm_gpu_commands import gate_gpus, start_slurm_gpu_commands
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_TOOLS_ROOT,
@@ -112,8 +111,10 @@ from vs_sandbox.api.slurm import (
     SlurmCapturePlan,
     SlurmEvaluationPlan,
     SlurmExecutionPolicy,
+    SlurmGpuConfig,
     SlurmProcessBroker,
     configured_capture_lifecycle,
+    load_slurm_gpu_config,
     load_slurm_policy,
     trusted_profile_command,
     write_slurm_capture_plan,
@@ -127,13 +128,14 @@ from vs_sandbox.api.symlink_mounts import (
 )
 from vs_slurm.api import SlurmConfig, SlurmSshTransport, load_slurm_config
 
-_RunEnvironmentName = Literal["local", "docker", "modal", "skypilot", "slurm"]
+_RunEnvironmentName = Literal["local", "docker", "modal", "skypilot", "slurm", "slurm-gpu"]
 _RECORDED_ENVIRONMENT_NAMES: tuple[_RunEnvironmentName, ...] = (
     "local",
     "docker",
     "modal",
     "skypilot",
     "slurm",
+    "slurm-gpu",
 )
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 """The runtime resource declaration's ``agent_path`` for the effective objective.
@@ -202,6 +204,9 @@ class RunEnvironmentView:
     framework_setup_timeout_seconds: int = 0
     profiler_mcp_env: tuple[tuple[str, str], ...] = ()
     profiler_mcp_resources: tuple[HostResource, ...] = ()
+    # Variables and host resources every agent session of the run receives.
+    agent_env: tuple[tuple[str, str], ...] = ()
+    agent_host_resources: tuple[HostResource, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -252,10 +257,21 @@ class ModalEnvironmentFacts:
     runtime_container_path: str = "/opt/vibesys-runtime/environment.md"
 
 
+@dataclass(frozen=True)
+class SlurmGpuEnvironmentFacts:
+    """Presentation facts for a host agent whose GPU processes run as Slurm jobs."""
+
+    launcher: str
+    max_gpus: int
+    max_time_minutes: int
+    gate_gpus: int
+
+
 RunEnvironmentPresentationFacts = (
     LocalEnvironmentFacts
     | DockerEnvironmentFacts
     | SlurmEnvironmentFacts
+    | SlurmGpuEnvironmentFacts
     | SkyPilotEnvironmentFacts
     | ModalEnvironmentFacts
 )
@@ -341,46 +357,6 @@ class RunEnvironmentSession(Protocol):
     def close(self) -> None:
         """Stop resources owned by this run session."""
         ...
-
-
-@dataclass(slots=True)
-class _BrokeredRunEnvironmentSession:
-    """Own a local agent session and its host-side Slurm transport broker."""
-
-    delegate: RunEnvironmentSession
-    broker: SlurmProcessBroker
-    _closed: bool = False
-
-    @property
-    def sandbox(self) -> CommandRunner:
-        return self.delegate.sandbox
-
-    @sandbox.setter
-    def sandbox(self, value: CommandRunner) -> None:
-        self.delegate.sandbox = value
-
-    @property
-    def view(self) -> RunEnvironmentView:
-        return self.delegate.view
-
-    @view.setter
-    def view(self, value: RunEnvironmentView) -> None:
-        self.delegate.view = value
-
-    def __enter__(self) -> _BrokeredRunEnvironmentSession:
-        return self
-
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-        self.close()
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            self.broker.close()
-        finally:
-            self.delegate.close()
 
 
 class RunEnvironmentResources:
@@ -813,7 +789,67 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 *broker_resources,
             ),
         )
-        return _BrokeredRunEnvironmentSession(delegate, broker) if broker is not None else delegate
+        return BrokeredRunEnvironmentSession(delegate, broker) if broker is not None else delegate
+
+
+class SlurmGpuEnvironment(_NoopWorkspaceRecovery):
+    """Keep the agent on the submit host and run every GPU process as a Slurm job."""
+
+    isolated = False
+    materialize_local_model_weights = True
+    default_profiler_id = "nsys"
+    supported_profiler_ids: frozenset[str] | None = None
+    backend_image: str | None = None
+    requires_local_profiler_preflight = True
+
+    def __init__(self, config_path: Path, resources: RunResourceRequest | None = None) -> None:
+        self.config_path = config_path.expanduser()
+        self.resources = resources
+
+    def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
+        """Validate the operator limits before opening the local editor sandbox."""
+        config = load_slurm_gpu_config(self.config_path)
+        gpus = gate_gpus(config, self.resources)
+        facts = SlurmGpuEnvironmentFacts(
+            str(request.log_dir / "slurm-gpu" / "vibesys-gpu"),
+            config.max_gpus,
+            config.max_time_minutes,
+            gpus,
+        )
+        return _PreparedRunEnvironment(facts, partial(self._open, request, config, gpus))
+
+    def _open(
+        self,
+        request: RunEnvironmentRequest,
+        config: SlurmGpuConfig,
+        gpus: int,
+        presentation: RunEnvironmentPresentation,
+    ) -> RunEnvironmentSession:
+        delegate = LocalEnvironment().prepare(request).open(presentation)
+        commands = start_slurm_gpu_commands(
+            config,
+            self.config_path,
+            state_dir=request.log_dir / "slurm-gpu",
+            workspace=request.workspace,
+            worktree_roots=request.run_owned_roots,
+            project_path_policy=request.project_path_policy,
+            gpus=gpus,
+        )
+        paths = delegate.view.paths
+        delegate.view = replace(
+            delegate.view,
+            paths=replace(
+                paths,
+                accuracy_command=commands.gate_command(paths.accuracy_command),
+                benchmark_command=commands.gate_command(paths.benchmark_command),
+            ),
+            prompt_notes=presentation.prompt_notes,
+            env_kind="slurm-gpu",
+            host_device_reselect=False,
+            agent_env=commands.agent_env,
+            agent_host_resources=commands.agent_host_resources,
+        )
+        return BrokeredRunEnvironmentSession(delegate, commands.broker)
 
 
 @dataclass(frozen=True)
@@ -1550,6 +1586,8 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
         return SkyPilotEnvironment.from_options(spec.options, spec.resources)
     if spec.name == "slurm":
         return SlurmEnvironment.from_options(spec.options)
+    if spec.name == "slurm-gpu":
+        return SlurmGpuEnvironment(Path(str(spec.options["config_path"])), spec.resources)
     message = f"unknown run environment: {spec.name!r}"
     raise ValueError(message)
 
@@ -1892,68 +1930,15 @@ def _reference_container_path(request: RunEnvironmentRequest) -> str:
 
 
 def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, str]] | None:
-    """Return ``(provider, container env)`` when a CLI provider needs a container.
-
-    Every containerized environment (Docker, Modal, SkyPilot) now starts from
-    a prebuilt agent image and installs nothing at container start, so this
-    is the whole of what a CLI provider needs from the run request: the
-    auth-presence check and the auth env passthrough. What used to be the
-    shell-command half of this (:func:`vs_agent.cli_docker
-    .docker_init_commands`, run through ``extra_init_commands``) is gone; see
-    :func:`_cli_provider_env_and_auth_files` for the staged-file counterpart
-    Modal and SkyPilot pass through ``auth_files`` instead, matching the
-    plain Docker path.
-
-    Returns ``None`` when the run is not a containerized CLI agent (a
-    different agent backend, or no CLI provider selected).
-
-    Raises:
-        ValueError: if *request.cli_provider* has neither a staged auth file
-            nor a usable auth environment variable on this host.
-    """
-    effective_agent = request.agent_backend or AgentBackend.CLI
-    if effective_agent != "cli" or not request.cli_provider:
-        return None
-    provider = request.cli_provider
-    auth_env = auth_env_passthrough(provider)
-    staged_auth = [spec for spec in auth_paths(provider) if spec.host_path.exists()]
-    if not staged_auth and not auth_env:
-        checked_files = (
-            ", ".join(str(spec.host_path) for spec in auth_paths(provider)) or "<none registered>"
-        )
-        checked_env = ", ".join(auth_env_vars(provider)) or "<none registered>"
-        message = (
-            f"no {provider!r} CLI authentication is available for the container: "
-            f"none of the host files exist ({checked_files}) and none of the "
-            f"environment variables are set ({checked_env}). Authenticate the "
-            f"{provider} CLI on this host, or export one of those variables, "
-            "before running in an isolated environment."
-        )
-        raise ValueError(message)
-    env = dict(DOCKER_PROVIDER_ENV.get(provider, {}))
-    # Container processes inherit only what ``docker run -e`` sets; the editor
-    # container has no other view of the host environment.
-    env.update(auth_env)
-    return provider, env
+    """Return ``(provider, container env)`` when a CLI provider needs a container."""
+    return cli_container_env(request.agent_backend, request.cli_provider)
 
 
 def _cli_provider_env_and_auth_files(
     request: RunEnvironmentRequest,
 ) -> tuple[dict[str, str], list[tuple[str, str]]]:
-    """Return the container env and staged auth copies for a CLI provider, if any.
-
-    The shared counterpart to :meth:`DockerEnvironment.open`'s own inline
-    version of this: every environment that starts a container from the
-    prebuilt agent image copies auth the same way (via
-    :func:`vs_agent.cli_docker.auth_copy_paths`, handed to the sandbox
-    as ``auth_files`` so it copies them in at start), rather than running
-    shell commands built from a provider's install recipe.
-    """
-    resolved_cli = _cli_container_env(request)
-    if resolved_cli is None:
-        return {}, []
-    provider, cli_provider_env = resolved_cli
-    return cli_provider_env, auth_copy_paths(provider)
+    """Return the container env and staged auth copies for a CLI provider, if any."""
+    return cli_provider_env_and_auth_files(request.agent_backend, request.cli_provider)
 
 
 def _ensure_pushed_for_remote_backend(

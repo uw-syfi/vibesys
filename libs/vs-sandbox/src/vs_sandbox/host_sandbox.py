@@ -77,6 +77,9 @@ if TYPE_CHECKING:
 
     from vs_sandbox.host_resources import HostResource
 DISABLE_ENV = "VIBESYS_AGENT_SANDBOX"
+#: Set to ``none`` in the environment a sandbox is built with to withhold the
+#: host's accelerator device nodes, as when GPU work runs only in Slurm jobs.
+GPU_DEVICES_ENV = "VIBESYS_AGENT_SANDBOX_GPUS"
 
 _DISABLED_VALUES = frozenset({"0", "false", "off", "no"})
 
@@ -759,7 +762,9 @@ def _build_linux(
                 read_paths=tuple(read_paths),
                 write_paths=tuple(write_paths),
                 project_path_policy=options.project_path_policy,
-                gpu_device_nodes=tuple(_gpu_device_nodes()),
+                gpu_device_nodes=(
+                    () if options.env.get(GPU_DEVICES_ENV) == "none" else tuple(_gpu_device_nodes())
+                ),
                 build_env=options.env,
             )
         reason = (

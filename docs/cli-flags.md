@@ -396,6 +396,7 @@ starts with an actionable error.
 | `--docker` | Docker container. | Re-mounts read-only project paths read-only and overlays hidden paths with empty masks. Backend controls GPU/device passthrough. |
 | `--modal` | Local Docker editor container; GPU-bound work dispatches through the candidate's own `modal run`. | Mutually exclusive with `--docker`. Same overlays as `--docker`. |
 | `--run-environment skypilot` | Local CPU editor with SkyPilot evaluators. | Requires portable task resources and an operator-owned cluster profile. Same overlays as `--docker`. See [Remote Slurm execution](remote-slurm-execution.md). |
+| `--run-environment slurm-gpu` | Agent on the Slurm submit host; GPU commands run as `srun` jobs. | The agent sandbox has no GPUs and uses `vibesys-gpu --gpus N --time MIN -- CMD`. `--slurm-config` names the operator limits. See [GPU commands through Slurm](slurm-gpu-commands.md). |
 
 A repository-native task may provide
 `.vibesys/tasks/<task>/Dockerfile`. Its presence (or `docker_in_docker = true`,

@@ -25,6 +25,20 @@ from vs_sandbox.slurm_executor import (
     SlurmStagePayload,
     SlurmTargetLifecycle,
 )
+from vs_sandbox.slurm_gpu import (
+    GpuCommand,
+    GpuJobRequest,
+    SlurmGpuConfig,
+    SlurmGpuConfigError,
+    SlurmGpuLauncher,
+    SlurmGpuRequestError,
+    choose_partition,
+    load_slurm_gpu_config,
+)
+from vs_sandbox.slurm_gpu_broker import SOCKET_ENV as GPU_BROKER_SOCKET_ENV
+from vs_sandbox.slurm_gpu_broker import TOKEN_ENV as GPU_BROKER_TOKEN_ENV
+from vs_sandbox.slurm_gpu_broker import SlurmGpuBroker
+from vs_sandbox.slurm_gpu_client import run_brokered as run_brokered_gpu_command
 from vs_sandbox.slurm_policy import (
     SlurmExecutionPolicy,
     SlurmPolicyError,
@@ -40,7 +54,11 @@ from vs_sandbox.slurm_profile import (
 )
 
 __all__ = [
+    "GPU_BROKER_SOCKET_ENV",
+    "GPU_BROKER_TOKEN_ENV",
     "PROFILE_OUTPUT_ROOT",
+    "GpuCommand",
+    "GpuJobRequest",
     "ProfileCaptureDescriptor",
     "SharedSlurmAdmission",
     "SlurmCapturePlan",
@@ -50,18 +68,26 @@ __all__ = [
     "SlurmEvaluationPlan",
     "SlurmExecutionMetadata",
     "SlurmExecutionPolicy",
+    "SlurmGpuBroker",
+    "SlurmGpuConfig",
+    "SlurmGpuConfigError",
+    "SlurmGpuLauncher",
+    "SlurmGpuRequestError",
     "SlurmOutcomeUnknownError",
     "SlurmPolicyError",
     "SlurmProcessBroker",
     "SlurmProcessBrokerError",
     "SlurmStagePayload",
     "SlurmTargetLifecycle",
+    "choose_partition",
     "configured_capture_lifecycle",
+    "load_slurm_gpu_config",
     "load_slurm_policy",
     "profile_capture_descriptor",
     "read_slurm_capture_plan",
     "read_slurm_evaluation_plan",
     "require_profile_fields",
+    "run_brokered_gpu_command",
     "run_brokered_process",
     "trusted_profile_command",
     "write_slurm_capture_plan",

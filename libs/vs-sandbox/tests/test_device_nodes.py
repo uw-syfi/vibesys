@@ -68,3 +68,24 @@ class TestAcceleratorDeviceNodes:
             if argument == "--dev-bind-try"
         ]
         assert all(node.exists() for node in nodes)
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="host backend is Linux-only")
+    def test_gpu_devices_none_withholds_every_accelerator_node(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        # test-isolation: the host may lack bwrap and GPUs; pin both to reach the GPU branch.
+        monkeypatch.setattr(
+            host_sandbox.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/bwrap"
+        )
+        # test-isolation: the host may lack bwrap and GPUs; pin both to reach the GPU branch.
+        monkeypatch.setattr(host_sandbox, "_bwrap_confines", lambda _bwrap: True)
+        # test-isolation: the host may lack bwrap and GPUs; pin both to reach the GPU branch.
+        monkeypatch.setattr(host_sandbox, "_gpu_device_nodes", lambda: [Path("/dev/nvidia0")])
+        sandbox = sandbox_api.build_host_sandbox(
+            tmp_path, env={sandbox_api.SANDBOX_GPU_DEVICES_ENV: "none"}
+        )
+
+        assert isinstance(sandbox, HostSandbox)
+        assert "--dev-bind-try" not in sandbox.wrap(["true"])
