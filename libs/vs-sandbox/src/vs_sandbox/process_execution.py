@@ -133,14 +133,21 @@ def _stop(
     grace_seconds: float,
     signal_remote: Callable[[signal.Signals], None] | None,
 ) -> ProcessOutcome:
+    stop_signal = signal.SIGTERM
     if signal_remote is not None:
-        signal_remote(signal.SIGTERM)
-    _signal_group(process, signal.SIGTERM)
+        signal_remote(stop_signal)
+    _signal_group(process, stop_signal)
     try:
         stdout, stderr = process.communicate(timeout=grace_seconds)
     except subprocess.TimeoutExpired:
         _kill(process, signal_remote)
         stdout, stderr = process.communicate()
+    else:
+        # The local client is gone. A command whose remote process started after the
+        # first request found nothing to signal (its client was killed before it
+        # existed there) is reachable only now, and nothing else would stop it.
+        if signal_remote is not None:
+            signal_remote(stop_signal)
     return ProcessOutcome(stdout, stderr, shell_exit_status(process.returncode), stop)
 
 

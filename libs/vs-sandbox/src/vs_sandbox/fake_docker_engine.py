@@ -31,16 +31,28 @@ if TYPE_CHECKING:
 # ``docker exec`` client does; only a signal request through the daemon
 # reaches the program.
 _EXEC_CLIENT = r"""
-import json, os, subprocess, sys, threading
+import json, os, signal, subprocess, sys, threading
 spec = json.loads(sys.argv[1])
+STOPS = {signal.SIGTERM, signal.SIGINT, signal.SIGHUP}
+
+def register():
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, STOPS)
+    # Runs in the new session before the program starts, so the program is findable
+    # by a signal request from the moment it exists, as in the daemon.
+    tmp = spec["pidfile"] + ".tmp"
+    with open(tmp, "w") as handle:
+        handle.write(str(os.getpid()))
+    os.replace(tmp, spec["pidfile"])
+
+# Starting the program is atomic with respect to a stop: the daemon never half-creates
+# an exec, so a stop aimed at this client waits until the program exists and is findable.
+signal.pthread_sigmask(signal.SIG_BLOCK, STOPS)
 child = subprocess.Popen(
     spec["argv"], cwd=spec["cwd"], env=spec["env"], stdin=subprocess.DEVNULL,
     stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+    preexec_fn=register,
 )
-tmp = spec["pidfile"] + ".tmp"
-with open(tmp, "w") as handle:
-    handle.write(str(child.pid))
-os.replace(tmp, spec["pidfile"])
+signal.pthread_sigmask(signal.SIG_UNBLOCK, STOPS)
 
 def pump(source, sink):
     for chunk in iter(lambda: source.read1(65536), b""):
@@ -165,6 +177,15 @@ class FakeDockerEngine:
         self._nested_daemons_start = nested_daemons_start
         self._containers: dict[str, _Container] = {}
         self.calls: list[tuple[str, ...]] = []
+        self._signal_requests_finding_nothing = 0
+
+    def signal_requests_find_nothing(self, count: int) -> None:
+        """Fault: the next *count* signal requests reach no process.
+
+        This is what a request sees when the program has not started yet in the
+        daemon when the request is handled.
+        """
+        self._signal_requests_finding_nothing = count
 
     def run(
         self, argv: Sequence[str], *, timeout_seconds: float
@@ -283,7 +304,10 @@ class FakeDockerEngine:
             return subprocess.CompletedProcess(arguments, 0, f"{uid}\n{gid}\n", "")
         if request.program[:3] == ("sh", "-c", SIGNAL_EXEC_SCRIPT):
             marker, number = request.program[4], request.program[5]
-            self._signal_marker(marker.partition("=")[2], signal.Signals(int(number)))
+            if self._signal_requests_finding_nothing > 0:
+                self._signal_requests_finding_nothing -= 1
+            else:
+                self._signal_marker(marker.partition("=")[2], signal.Signals(int(number)))
             return subprocess.CompletedProcess(arguments, 0, "", "")
         completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-731012 [S603]; the fake daemon runs the exec argv a sandbox assembled, without a shell.
             request.program,
