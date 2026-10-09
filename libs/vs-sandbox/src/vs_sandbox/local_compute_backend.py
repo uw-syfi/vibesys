@@ -85,6 +85,7 @@ class LocalBackend:
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
         docker_in_docker: bool = False,
+        same_path_workspace: bool = False,
         run_id: str | None = None,
     ) -> CommandRunner:
         """Create a local or supported Docker sandbox for this backend."""
@@ -129,6 +130,7 @@ class LocalBackend:
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
                 docker_in_docker=docker_in_docker,
+                same_path_workspace=same_path_workspace,
                 run_id=run_id,
             )
         if kind is SandboxKind.DOCKER:

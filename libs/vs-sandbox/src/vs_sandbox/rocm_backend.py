@@ -132,6 +132,7 @@ class RocmBackend:
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
         docker_in_docker: bool = False,
+        same_path_workspace: bool = False,
         run_id: str | None = None,
     ) -> CommandRunner:
         """Create a local or ROCm-enabled Docker sandbox."""
@@ -171,6 +172,7 @@ class RocmBackend:
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
                 docker_in_docker=docker_in_docker,
+                same_path_workspace=same_path_workspace,
                 run_id=run_id,
             )
 

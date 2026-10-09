@@ -262,6 +262,7 @@ class DockerSandbox(WorkspaceSandbox):
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
         docker: DockerCli | None = None,
         docker_in_docker: bool = False,
+        same_path_workspace: bool = False,
         run_id: str | None = None,
     ) -> None:
         """Initialize Docker sandbox configuration.
@@ -337,6 +338,11 @@ class DockerSandbox(WorkspaceSandbox):
                 Sysbox; nothing falls back to the host socket. Sysbox cannot
                 forward accelerators, so combining it with *gpus* or
                 *devices* is rejected here.
+            same_path_workspace: Mount the workspace at its own host path, as
+                a docker-in-docker sandbox does, without the Sysbox runtime.
+                For an agent that talks to a host-owned broker over a shared
+                filesystem: a working directory it sends is then valid on the
+                host.
             run_id: Id of the run this container belongs to, recorded as the
                 :data:`RUN_ID_LABEL` label. ``None`` leaves the container
                 unlabelled.
@@ -352,7 +358,7 @@ class DockerSandbox(WorkspaceSandbox):
         self._run_id = run_id
         #: Where the workspace is mounted in the container.
         self._container_root = workspace_container_root(
-            host_workspace, docker_in_docker=docker_in_docker
+            host_workspace, same_path=docker_in_docker or same_path_workspace
         )
         self._image = image
         self._gpus = gpus

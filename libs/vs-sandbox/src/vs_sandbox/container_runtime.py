@@ -60,14 +60,18 @@ NESTED_DAEMON_READY_SCRIPT = (
 )
 
 
-def workspace_container_root(host_workspace: str, *, docker_in_docker: bool) -> str:
+def workspace_container_root(host_workspace: str, *, same_path: bool) -> str:
     """Return where a Docker sandbox mounts the workspace.
 
-    The host path itself for a docker-in-docker sandbox, so the agent and the
-    daemon agree on every bind source; ``/workspace`` otherwise. Every
-    container path derived from the workspace goes through this one answer.
+    The host path itself when *same_path* is set, and ``/workspace`` otherwise.
+    Two kinds of sandbox need the same path. A docker-in-docker sandbox needs
+    it so the agent and the nested daemon agree on every bind source. A
+    sandbox whose agent talks to a host-owned broker over a shared filesystem
+    (Slurm) needs it so a working directory the agent sends is valid on the
+    host. Every container path derived from the workspace goes through this
+    one answer.
     """
-    return str(Path(host_workspace)) if docker_in_docker else DEFAULT_CONTAINER_ROOT
+    return str(Path(host_workspace)) if same_path else DEFAULT_CONTAINER_ROOT
 
 
 class ContainerRuntimeUnavailableError(RuntimeError):

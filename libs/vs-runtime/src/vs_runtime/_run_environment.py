@@ -1800,9 +1800,7 @@ def _container_mount_plan(
 
 def _workspace_root(request: RunEnvironmentRequest) -> str:
     """Return where the request's Docker sandbox mounts the workspace."""
-    return workspace_container_root(
-        str(request.workspace), docker_in_docker=request.docker_in_docker
-    )
+    return workspace_container_root(str(request.workspace), same_path=request.docker_in_docker)
 
 
 def _reference_container_path(request: RunEnvironmentRequest) -> str:
