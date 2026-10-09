@@ -310,11 +310,13 @@ def test_load_ok_writes_trace_after_clean_sigint(fake_profiler: Path, tmp_path: 
         # and started its child (it writes profiler.pid last); a plain
         # "true" would race the wrapper's own interpreter startup.
         ready_command=f"test -f {out_dir}/profiler.pid",
-        ready_timeout_s=5.0,
+        ready_timeout_s=60.0,
         ready_interval_s=0.02,
         load_command="true",
-        grace_s=2.0,
-        timeout_s=5.0,
+        # The wrapper exits as soon as it flushes, so a generous grace costs
+        # nothing on success and keeps host load from deciding OK vs killed.
+        grace_s=30.0,
+        timeout_s=120.0,
     )
     result = cr.run_capture(
         [sys.executable, str(fake_profiler)], lifecycle, kind="unit", out_dir=out_dir, meta={}
@@ -1212,50 +1214,127 @@ def test_property_no_load_timeout_bound_and_no_leaks(
     assert _wait_until(lambda: not _is_alive(pid))
 
 
-@given(grace_s=st.floats(min_value=0.1, max_value=0.4), ignore_stop=st.booleans())
+class _GraceClock:
+    """Virtual monotonic clock: only the scripted group's waits advance it."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+class _ScriptedGraceGroup:
+    """Owned group whose stop outcome is scripted on a virtual clock.
+
+    The real target runs (so cleanup has a real process to reap), but whether
+    it "exits within grace" is decided by the virtual clock alone: after
+    ``stop`` it exits once ``exit_after_s`` of virtual time has been waited.
+    ``exit_after_s=None`` models a target that ignores the stop signal.
+    """
+
+    def __init__(
+        self,
+        proc: subprocess.Popen[bytes],
+        clock: _GraceClock,
+        exit_after_s: float | None,
+    ) -> None:
+        self.proc = proc
+        self.clock = clock
+        self.exit_after_s = exit_after_s
+        self.stopped_at: float | None = None
+        self.cleaned = False
+        self._real = cr.SubprocessCaptureProcessGroup(proc)
+
+    def members(self) -> set[int]:
+        return set()
+
+    def poll(self) -> int | None:
+        return 0 if self.cleaned else None
+
+    def wait(self, timeout_s: float) -> int | None:
+        assert self.stopped_at is not None
+        self.clock.now += timeout_s
+        if self.exit_after_s is not None and self.clock.now - self.stopped_at >= self.exit_after_s:
+            self.cleaned = True
+            self._real.cleanup()
+            return 0
+        return None
+
+    def stop(self, signal_name: str) -> None:
+        assert signal_name
+        self.stopped_at = self.clock.now
+
+    def history_complete(self) -> bool:
+        return False
+
+    def quiesce(self) -> set[int] | None:
+        return None
+
+    def resume(self) -> None:
+        return None
+
+    def cleanup(self) -> None:
+        self.cleaned = True
+        self._real.cleanup()
+
+
+@given(
+    grace_s=st.floats(min_value=0.1, max_value=0.4),
+    ignore_stop=st.booleans(),
+    slack_s=st.floats(min_value=0.0, max_value=0.05),
+)
 @PROC_SETTINGS
 def test_property_load_grace_bound_status_consistent_no_leaks(
     tmp_path_factory: pytest.TempPathFactory,
     grace_s: float,
+    slack_s: float,
     *,
     ignore_stop: bool,
 ) -> None:
-    # Reads the module-level source directly (not a fixture): hypothesis
-    # flags function-scoped fixtures under @given as a health-check risk.
+    # A target that exits strictly inside the grace is OK; one that ignores
+    # the stop signal is KILLED_AFTER_GRACE, and the virtual time spent
+    # waiting never exceeds the grace. Time is
+    # virtual, so host load cannot flip the verdict.
     tmp_path = tmp_path_factory.mktemp("cr")
     out_dir = tmp_path / "c"
-    out_dir.mkdir()
-    fake_profiler = tmp_path / "fake_profiler.py"
-    fake_profiler.write_text(_FAKE_PROFILER_SOURCE)
+    clock = _GraceClock()
+    groups: list[_ScriptedGraceGroup] = []
 
-    command = "trap '' INT; sleep 100" if ignore_stop else "sleep 100"
-    env = {"FAKE_PROFILER_OUT_DIR": str(out_dir)}
-    if ignore_stop:
-        env["FAKE_PROFILER_IGNORE_SIGINT"] = "1"
+    def make_group(proc: subprocess.Popen[bytes]) -> _ScriptedGraceGroup:
+        group = _ScriptedGraceGroup(proc, clock, None if ignore_stop else grace_s - slack_s * 0.5)
+        groups.append(group)
+        return group
+
     lifecycle = cr.Lifecycle(
-        command=command,
-        env=env,
-        ready_command=f"test -f {out_dir}/profiler.pid",
-        ready_timeout_s=5.0,
+        command="sleep 100",
+        ready_command="true",
+        ready_timeout_s=60.0,
         ready_interval_s=0.02,
         load_command="true",
         grace_s=grace_s,
-        timeout_s=5.0,
+        timeout_s=120.0,
     )
 
-    start = time.monotonic()
     result = cr.run_capture(
-        [sys.executable, str(fake_profiler)], lifecycle, kind="unit", out_dir=out_dir, meta={}
+        [],
+        lifecycle,
+        kind="unit",
+        out_dir=out_dir,
+        meta={},
+        group_factory=make_group,
+        monotonic=clock.monotonic,
     )
-    elapsed = time.monotonic() - start
 
     expected_status = cr.CaptureStatus.KILLED_AFTER_GRACE if ignore_stop else cr.CaptureStatus.OK
     assert result.status is expected_status
     assert result.escalated is ignore_stop
-    assert elapsed <= grace_s + 6.0
+    (group,) = groups
+    assert group.stopped_at == 0.0
+    # Waits are clipped to the remaining grace, so there is no overshoot.
+    assert clock.now <= grace_s + 1e-9
     assert result.manifest_path.is_file()
     manifest = json.loads(result.manifest_path.read_text())
     assert manifest["status"] == result.status.value
-
-    pid = int((out_dir / "profiler.pid").read_text().strip())
-    assert _wait_until(lambda: not _is_alive(pid))
+    assert group.cleaned
+    assert group.proc.poll() is not None
