@@ -909,6 +909,13 @@ async def _assert_rejected(url: str, origin: str) -> None:
     assert failure.value.response.status_code == 403
 
 
+def _unused_port() -> int:
+    """Return a loopback port nothing is bound to, so concurrent test processes do not collide."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
 def test_gateway_lifecycle_and_asset_edge_cases(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
     assets = tmp_path / "web"
@@ -916,14 +923,15 @@ def test_gateway_lifecycle_and_asset_edge_cases(tmp_path: Path) -> None:
     (assets / "assets").mkdir()
     (assets / "assets" / "app.js").write_text("console.log('ok')")
 
-    gateway = WebSocketGateway(parts.api, assets_dir=assets, port=4312)
+    port = _unused_port()
+    gateway = WebSocketGateway(parts.api, assets_dir=assets, port=port)
     with pytest.raises(RuntimeError, match="not running"):
         _ = gateway.url
     with pytest.raises(RuntimeError, match="not running"):
         _ = gateway.websocket_url
     with pytest.raises(RuntimeError, match="not running"):
         _ = gateway.bound_port
-    assert gateway._actual_origin() == "http://127.0.0.1:4312"  # noqa: SLF001  # lint-waiver: LW-101023 [SLF001]; exercise the gateway's pre-bind origin calculation
+    assert gateway._actual_origin() == f"http://127.0.0.1:{port}"  # noqa: SLF001  # lint-waiver: LW-101023 [SLF001]; exercise the gateway's pre-bind origin calculation
 
     with gateway:
         with pytest.raises(RuntimeError, match="already running"):
