@@ -7,6 +7,7 @@ from vs_runtime._fake_core_execution import (
     FakePublicationDelivery,
     FakeRequestExecution,
 )
+from vs_runtime._run_environment import HostEnvironment
 from vs_runtime._runs import FakeRunHandle, FakeRuns
 from vs_runtime.fakes import (
     FakeAccuracyCall,
@@ -42,6 +43,16 @@ from vs_runtime.fakes import (
     FakeWorkspaces,
     ObservationCall,
 )
+
+
+def unconfined_host_environment() -> HostEnvironment:
+    """Return a host environment whose confinement check always passes.
+
+    For tests of what a run does with an agent on the host, on machines that may
+    lack the host sandbox. Production code never builds this.
+    """
+    return HostEnvironment(build_sandbox=lambda *_args, **_kwargs: None)
+
 
 __all__ = [
     "ExecutedRequest",
@@ -84,4 +95,5 @@ __all__ = [
     "FakeWorkspaces",
     "ObservationCall",
     "TurnResponder",
+    "unconfined_host_environment",
 ]

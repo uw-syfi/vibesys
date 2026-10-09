@@ -12,7 +12,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
 from tests.support.docker_environment import fake_docker_environment
-from tests.support.slurm_environment import slurm_environment
+from tests.support.host_environment import unconfined_host_spec
 
 from launch import built_in_orchestrations, open_run_store
 from vibesys.composition import resolve_agent_specs
@@ -394,7 +394,7 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
     with _create_context(
         project,
         evaluator_package_root=package.root,
-        run_environment=slurm_environment(tmp_path),
+        run_environment=unconfined_host_spec(),
     ) as ctx:
         tools_root = ctx.project_resources.project.state.machine_cache_directory("evaluator-tools")
         resources = {resource.path: resource.access for resource in ctx.agent_host_resources}
@@ -434,7 +434,7 @@ def test_evaluator_tools_built_for_one_project_are_reused_by_another(tmp_path: P
     with _create_context(
         project,
         evaluator_package_root=package.root,
-        run_environment=slurm_environment(tmp_path),
+        run_environment=unconfined_host_spec(),
     ) as ctx:
         resources = {resource.path: resource.access for resource in ctx.agent_host_resources}
 

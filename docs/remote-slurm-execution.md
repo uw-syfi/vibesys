@@ -5,7 +5,31 @@ evaluators on a Slurm cluster through SkyPilot. The integration is site-neutral:
 task manifests declare portable capacity, an operator profile supplies runtime
 policy, and SkyPilot/SSH configuration supplies site access.
 
-## Configuration ownership
+## Direct Slurm (`--run-environment slurm`)
+
+`--run-environment slurm --slurm-config PATH` runs trusted accuracy and
+benchmark gates, and ROCprof captures, on a Slurm cluster the submit host reaches
+directly (for example over SSH), without SkyPilot. The editor is the same local
+Docker container as in every other environment, with the workspace mounted at
+its host path.
+
+The container cannot hold the cluster's tools or credentials, so the host owns a
+broker and the container reaches it over a bind-mounted Unix socket with a
+per-run token. The agent runs a gate as `vibesys-gate --gate accuracy` or
+`vibesys-gate --gate benchmark`; the broker runs the planned gate with the
+cluster wrapper (`vs_sandbox.slurm_command`), which stages the workspace, runs
+the job, and copies the result back. The agent names only the gate and, for a
+benchmark, a result path; it cannot supply a command. Interrupting the client or
+dropping the connection cancels the job.
+
+The ROCprof server runs in the container and reaches the cluster through a
+second host broker. It imports the Slurm adapter from the framework's `libs`
+directory, mounted read-only at its host path, so the agent image needs only a
+`python3` (3.11 or newer) with `pydantic`, which its MCP library already
+requires. The GPU-side variant for a single-node cluster is described in
+[GPU commands through Slurm](slurm-gpu-commands.md).
+
+## SkyPilot configuration ownership
 
 - `vibesys.input.toml` owns portable requirements such as node count, accelerator
   count, and `cuda` or `rocm`.

@@ -180,8 +180,7 @@ from vs_runtime._run_environment import (
     DockerEnvironment,
     DockerEnvironmentConfig,
     DockerEnvironmentFacts,
-    LocalEnvironment,
-    LocalEnvironmentFacts,
+    HostEnvironmentFacts,
     ModalEnvironmentFacts,
     RunEnvironment,
     RunEnvironmentPresentation,
@@ -192,7 +191,6 @@ from vs_runtime._run_environment import (
     RunEnvironmentView,
     SkyPilotEnvironment,
     SkyPilotEnvironmentFacts,
-    SlurmEnvironment,
     SlurmEnvironmentFacts,
     SlurmGpuEnvironmentFacts,
     open_run_environment_resources,
@@ -233,6 +231,7 @@ from vs_runtime._skills import (
     offered_skill_facts,
     resolve_skill_resources,
 )
+from vs_runtime._slurm_environment import SlurmEnvironment
 from vs_runtime._slurm_gpu_environment import SlurmGpuEnvironment
 from vs_runtime._state import CommittedStateObserver, create_state
 from vs_runtime._trusted_evaluation import (
@@ -502,6 +501,7 @@ __all__ = [
     "GiveUp",
     "Hold",
     "HostEnvironment",
+    "HostEnvironmentFacts",
     "InputDependency",
     "InputProjectError",
     "InputProjectMaterialization",
@@ -510,8 +510,6 @@ __all__ = [
     "LinuxProfilerDiagnostic",
     "LinuxProfilerEffects",
     "LinuxProfilerTool",
-    "LocalEnvironment",
-    "LocalEnvironmentFacts",
     "LocalValidationEvents",
     "LocalValidationRecipeError",
     "LocalValidationRecipeErrorKind",

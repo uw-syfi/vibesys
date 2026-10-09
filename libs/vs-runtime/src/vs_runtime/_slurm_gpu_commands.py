@@ -15,20 +15,17 @@ the client reads.
 from __future__ import annotations
 
 import os
-import secrets
 import shlex
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vs_agent.api import declare_command_host_resources
-from vs_runtime._run_environment import EditorExtras
-from vs_sandbox.api import HostResource, HostResourceAccess
+from vs_runtime._host_command_bridge import (
+    bridge_editor_extras,
+    new_broker_socket_path,
+    write_client_launcher,
+)
 from vs_sandbox.api.slurm import (
-    COMMAND_BROKER_SOCKET_ENV,
-    COMMAND_BROKER_TOKEN_ENV,
-    HOST_COMMAND_CLIENT,
     GateKind,
     Gates,
     GpuCommands,
@@ -42,15 +39,15 @@ from vs_sandbox.api.slurm import (
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+    from pathlib import Path
 
     from vs_project.api import RunResourceRequest
+    from vs_runtime._run_environment import EditorExtras
     from vs_sandbox.api import ProjectPathPolicy
     from vs_sandbox.api.slurm import JobConfinement
 
 #: The variable naming the agent's GPU launcher, for prompts and scripts.
 GPU_COMMAND_ENV = "VIBESYS_GPU"
-
-_SHEBANG = "#!/usr/bin/env python3\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,16 +107,13 @@ def start_slurm_gpu_commands(  # noqa: PLR0913  # lint-waiver: LW-610007 [PLR091
     # a job must not start a run whose agent can only use GPUs through jobs.
     confinement.wrap(workspace, [])
 
-    state_dir.mkdir(parents=True, exist_ok=True)
-    launcher = state_dir / "vibesys-gpu"
-    launcher.write_text(_SHEBANG + HOST_COMMAND_CLIENT.read_text())
-    launcher.chmod(0o755)
+    launcher = write_client_launcher(state_dir, "vibesys-gpu")
 
     slurm = SlurmGpuLauncher(config)
     gate_request = config.request(gpus, config.gate_time_minutes)
     commands = {kind: tuple(shlex.split(command)) for kind, command in planned.items() if command}
     broker = HostCommandBroker(
-        Path(tempfile.gettempdir()) / f"vsg-{secrets.token_hex(8)}.sock",
+        new_broker_socket_path(),
         roots=RunRoots((workspace,), tuple(worktree_roots)),
         gpu=GpuCommands(config, confinement, host_env, launcher=slurm),
         gates=Gates(
@@ -131,18 +125,9 @@ def start_slurm_gpu_commands(  # noqa: PLR0913  # lint-waiver: LW-610007 [PLR091
     return SlurmGpuCommands(
         broker=broker,
         launcher=launcher,
-        editor=EditorExtras(
-            resources=(
-                HostResource(broker.socket_path, HostResourceAccess.READ_WRITE, "GPU job broker"),
-                HostResource(state_dir, HostResourceAccess.READ_ONLY, "GPU job launcher"),
-            ),
-            env={
-                COMMAND_BROKER_SOCKET_ENV: str(broker.socket_path),
-                COMMAND_BROKER_TOKEN_ENV: broker.token,
-                GPU_COMMAND_ENV: str(launcher),
-                "CUDA_VISIBLE_DEVICES": "",
-            },
-            same_path_workspace=True,
-            attach_accelerator=False,
+        editor=bridge_editor_extras(
+            broker,
+            launcher,
+            env={GPU_COMMAND_ENV: str(launcher), "CUDA_VISIBLE_DEVICES": ""},
         ),
     )

@@ -77,7 +77,8 @@ belongs to the candidate application.
 
 All outer loops use this model. The agent always runs in a local Docker
 container. Modal, SkyPilot, and Slurm change where evaluation runs, not the task
-layout. Task commands always start in the repository root. `.vibesys` is mounted read-only
+layout. The Slurm environments reach the cluster through a host-owned broker
+that the container connects to over a mounted socket. Task commands always start in the repository root. `.vibesys` is mounted read-only
 for coding agents. Machine-local state is outside their workspace.
 
 Modal tasks may set a project-relative deployment file. Omit this block to use

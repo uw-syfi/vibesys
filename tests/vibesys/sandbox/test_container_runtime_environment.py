@@ -20,13 +20,13 @@ from vs_runtime.api.infrastructure import (
     DockerEnvironment,
     DockerEnvironmentConfig,
     DockerInDockerUnsupportedError,
-    LocalEnvironment,
     RunEnvironmentRequest,
     RunEnvironmentSpec,
     SkyPilotEnvironment,
     TrustedEvaluatorRequirements,
     build_run_environment,
 )
+from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api import (
     ContainerRuntimeUnavailableError,
     DockerSandbox,
@@ -202,7 +202,7 @@ def test_other_environments_reject_docker_in_docker_naming_the_key(
     environment = (
         SkyPilotEnvironment.from_options({"profile": "p", "profiles_file": "x"})
         if name == "skypilot"
-        else LocalEnvironment()
+        else unconfined_host_environment()
         if name == "local"
         else build_run_environment(RunEnvironmentSpec("modal", {"gpu": "A10G"}))
     )

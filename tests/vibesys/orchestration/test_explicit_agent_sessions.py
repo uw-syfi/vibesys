@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
-from tests.support.slurm_environment import slurm_environment
+from tests.support.host_environment import unconfined_host_spec
 from tests.support.world_git import IN_MEMORY_GIT
 from tests.vibesys.orchestration.plugin import capability_plugin
 
@@ -38,7 +38,7 @@ from vs_agent.api import AgentCapabilities, AgentSessionKey, SessionScope
 from vs_agent.api import (
     AgentTurnTimeoutError as DriverAgentTurnTimeoutError,
 )
-from vs_agent.api.testing import FakeAgentClient, FakeInvocation
+from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner, FakeInvocation
 from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
@@ -251,7 +251,7 @@ def test_product_composition_declares_its_runtime_to_confined_agents(tmp_path: P
         body,
         declaration=(role,),
         configuration=_RunConfiguration(
-            client_factory=create_client, run_environment=slurm_environment(tmp_path)
+            client_factory=create_client, run_environment=unconfined_host_spec()
         ),
     )
 
@@ -283,7 +283,7 @@ def test_confined_agents_can_import_every_first_party_package(tmp_path: Path) ->
         body,
         declaration=(role,),
         configuration=_RunConfiguration(
-            client_factory=create_client, run_environment=slurm_environment(tmp_path)
+            client_factory=create_client, run_environment=unconfined_host_spec()
         ),
     )
 
@@ -350,7 +350,10 @@ remote_python = "/remote/venv/bin/python"
             domain="llm-serving",
             agent_backend="cli",
             tool_bindings=AGENT_TOOL_BINDINGS,
-            run_environment=RunEnvironmentSpec("slurm", {"config_path": str(config_path)}),
+            run_environment=RunEnvironmentSpec(
+                "slurm",
+                {"config_path": str(config_path), "build_runner": FakeDockerBuildRunner()},
+            ),
         ),
     )
 

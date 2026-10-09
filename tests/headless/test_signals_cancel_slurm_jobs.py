@@ -84,8 +84,15 @@ def _write_input(base: Path, transport: str) -> tuple[Path, Path, Path]:
     ],
 )
 def test_a_signal_that_ends_the_run_cancels_its_slurm_job(
-    tmp_path: Path, signals: tuple[signal.Signals, ...], transport: str, *, closed_stdout: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signals: tuple[signal.Signals, ...],
+    transport: str,
+    *,
+    closed_stdout: bool,
 ) -> None:
+    # The run's agent container needs the credential its CLI would start with.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-anthropic-key")
     cluster, config, project = _write_input(tmp_path, transport)
     reader, writer = os.pipe()
     # lint-waiver: LW-731104 [S603]; the run must be its own process to be signalled.

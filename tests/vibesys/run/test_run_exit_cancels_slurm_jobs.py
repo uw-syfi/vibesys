@@ -19,6 +19,7 @@ from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
+from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
@@ -80,14 +81,18 @@ def _request(project_root: Path, config_path: Path) -> RunRequest:
         cli_provider="claude",
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
-        run_environment=RunEnvironmentSpec("slurm", {"config_path": str(config_path)}),
+        run_environment=RunEnvironmentSpec(
+            "slurm", {"config_path": str(config_path), "build_runner": FakeDockerBuildRunner()}
+        ),
     )
 
 
 @pytest.mark.parametrize("transport", ["connector", "ssh"])
 def test_an_orchestration_failure_cancels_a_pending_benchmark_job(
-    tmp_path: Path, transport: str
+    tmp_path: Path, transport: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The agent container needs the credential its CLI would start with.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-anthropic-key")
     state = executing_cluster(tmp_path / "cluster")
     (state / HOLD_FILE).touch()
     os.mkfifo(state / SUBMITTED_FILE)

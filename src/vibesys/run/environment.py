@@ -8,7 +8,7 @@ from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import (
     DockerEnvironmentFacts,
-    LocalEnvironmentFacts,
+    HostEnvironmentFacts,
     ModalEnvironmentFacts,
     RunEnvironment,
     RunEnvironmentPresentation,
@@ -33,7 +33,7 @@ def open_run_environment(
     )
     prepared = environment.prepare(request)
     facts = prepared.presentation_facts
-    if isinstance(facts, LocalEnvironmentFacts):
+    if isinstance(facts, HostEnvironmentFacts):
         presentation = RunEnvironmentPresentation(prompt_notes="")
     elif isinstance(facts, DockerEnvironmentFacts):
         presentation = RunEnvironmentPresentation(

@@ -15,24 +15,22 @@ from typing import TYPE_CHECKING, Literal
 from vs_project.api import RunEnvironmentRecord, RunResourceRequest
 from vs_runtime._run_environment import (
     DockerEnvironment,
-    LocalEnvironment,
+    HostEnvironment,
     ModalEnvironment,
     RunEnvironment,
-    RunEnvironmentRequest,
     RunEnvironmentSpec,
     SkyPilotEnvironment,
-    SlurmEnvironment,
-    _PreparedRunEnvironment,
 )
+from vs_runtime._slurm_environment import SlurmEnvironment
 from vs_runtime._slurm_gpu_environment import SlurmGpuEnvironment
-from vs_sandbox.api import backend_is_host_only, build_host_sandbox
+from vs_sandbox.api import backend_is_host_only
 from vs_sandbox.api.slurm import configured_capture_lifecycle, load_slurm_policy
 from vs_slurm.api import load_slurm_config
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_sandbox.api import ComputeBackend, WorkspaceSandbox
+    from vs_sandbox.api import ComputeBackend
 
 _RunEnvironmentName = Literal["docker", "host", "modal", "skypilot", "slurm", "slurm-gpu"]
 _RECORDED_ENVIRONMENT_NAMES: tuple[_RunEnvironmentName, ...] = (
@@ -43,29 +41,6 @@ _RECORDED_ENVIRONMENT_NAMES: tuple[_RunEnvironmentName, ...] = (
     "slurm",
     "slurm-gpu",
 )
-
-
-class HostEnvironment(LocalEnvironment):
-    """Run the agent on the host, refusing to start unless it is confined.
-
-    Selected for backends whose accelerator no container can reach (Metal on
-    macOS).  Confinement is the host sandbox with enforcement required, so an
-    unavailable sandbox raises ``SandboxUnavailableError`` and never degrades to
-    an unconfined agent.  The agent driver requires enforcement again when it
-    launches, because this environment is not containerized.
-    """
-
-    def __init__(
-        self,
-        build_sandbox: Callable[..., WorkspaceSandbox | None] = build_host_sandbox,
-    ) -> None:
-        """Take the host-sandbox builder, a seam for substituting the platform's."""
-        self._build_sandbox = build_sandbox
-
-    def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
-        """Fail with ``SandboxUnavailableError`` when host confinement is unavailable."""
-        self._build_sandbox(request.workspace, env={}, require_enforcement=True)
-        return super().prepare(request)
 
 
 def resolve_run_environment_spec(
@@ -135,7 +110,7 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
     if spec.name == "docker":
         return DockerEnvironment.from_options(spec.options)
     if spec.name == "host":
-        return HostEnvironment()
+        return HostEnvironment.from_options(spec.options)
     if spec.name == "modal":
         return ModalEnvironment.from_options(spec.options)
     if spec.name == "skypilot":

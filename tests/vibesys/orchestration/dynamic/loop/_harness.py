@@ -39,7 +39,8 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from tests.support.world_git import IN_MEMORY_GIT
+from tests.support.docker_environment import host_container_backend
+from tests.support.slurm_environment import with_fake_image_build
 
 from launch.testing import FakeStopTimer, create_session
 from vibesys.api import (
@@ -66,10 +67,9 @@ from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_evaluation.api import EvaluationAgentRole
 from vs_evaluation.api.tools import build_evaluation_tools
-from vs_project.api import GitRepositoryFactory, Project
+from vs_project.api import GitRepositoryFactory, Project, run_git
 from vs_runtime.api import OrchestrationPlugin
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
-from vs_sandbox.api import create_compute_backend
 from vs_slurm.fake_connector import (
     HOLD_FILE,
     SUBMITTED_FILE,
@@ -793,11 +793,12 @@ def run_loop(  # noqa: PLR0913
     on_session: Callable[[object], None] | None = None,
     stop_timer: FakeStopTimer | None = None,
     client_factory: Callable[..., AgentClientProtocol] | None = None,
-    git_repository: GitRepositoryFactory | None = IN_MEMORY_GIT.repository,
+    git_repository: GitRepositoryFactory | None = None,
 ) -> LoopRun:
     """Run the dynamic plugin to its end through the product session.
 
-    Git is in memory unless ``git_repository`` is ``None``, which runs the Git CLI.
+    Git is the product's own unless ``git_repository`` says otherwise: the agent's
+    container mounts the repository's ``.git`` read-only, so it must exist on disk.
     """
     bundle = load_input_bundle(loop_input.root)
     request = RunRequest(
@@ -839,9 +840,14 @@ def run_request(  # noqa: PLR0913
     on_session: Callable[[object], None] | None = None,
     stop_timer: FakeStopTimer | None = None,
     client_factory: Callable[..., AgentClientProtocol] | None = None,
-    git_repository: GitRepositoryFactory | None = IN_MEMORY_GIT.repository,
+    git_repository: GitRepositoryFactory | None = None,
 ) -> LoopRun:
-    """Execute an already-built request through the same production composition."""
+    """Execute an already-built request through the same production composition.
+
+    A Slurm request gets an in-memory agent image build: the agent runs in a
+    container, and the build is its only external process.
+    """
+    request = with_fake_image_build(request)
     events: list[CoreEvent] = []
 
     def sink(event: CoreEvent) -> None:
@@ -863,7 +869,7 @@ def run_request(  # noqa: PLR0913
             sink=sink,
             registry=_legacy_registry(),
             agent_client_factory=client_factory or scripted_client,
-            backend_factory=create_compute_backend,
+            backend_factory=host_container_backend,
             stop_timer=stop_timer or FakeStopTimer(),
             git_repository=git_repository,
         )
@@ -928,6 +934,10 @@ def commit_as_schema_v4(loop_input: LoopInput, run_id: str) -> None:
         if item["implementation"] is not None:
             item["implementation"]["validation_recipe_artifact"] = None
     path.write_text(json.dumps(data), encoding="utf-8")
-    repository = IN_MEMORY_GIT.repository(loop_input.root)
-    repository.stage_all([path.relative_to(loop_input.root).as_posix()], force=True)
-    repository.commit("dynamic: state written by schema version 4")
+    identity = ["-c", "user.name=vibesys-test", "-c", "user.email=test@example.invalid"]
+    relative = path.relative_to(loop_input.root).as_posix()
+    run_git(["add", "-f", "--", relative], cwd=loop_input.root)
+    run_git(
+        [*identity, "commit", "-m", "dynamic: state written by schema version 4"],
+        cwd=loop_input.root,
+    )

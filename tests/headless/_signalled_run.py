@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tests.support.docker_environment import host_container_backend
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from entrypoints.run import supervise
@@ -25,10 +26,10 @@ from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.contracts import RunRequest
+from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import OrchestrationPlugin, RunStatus
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
-from vs_sandbox.api import create_compute_backend
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -71,13 +72,15 @@ def main(project_root: Path, slurm_config: Path) -> None:
         cli_provider="claude",
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
-        run_environment=RunEnvironmentSpec("slurm", {"config_path": str(slurm_config)}),
+        run_environment=RunEnvironmentSpec(
+            "slurm", {"config_path": str(slurm_config), "build_runner": FakeDockerBuildRunner()}
+        ),
     )
     runs = default_runs(
         LaunchSettings(
             registry=registry,
             agent_client_factory=_no_agents,
-            backend_factory=create_compute_backend,
+            backend_factory=host_container_backend,
         )
     )
 

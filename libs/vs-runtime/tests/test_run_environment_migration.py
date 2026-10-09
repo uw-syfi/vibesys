@@ -20,7 +20,7 @@ _RESOURCES = st.one_of(
 )
 _RECORDS = st.builds(
     RunEnvironmentRecord,
-    name=st.sampled_from(("local", "docker", "modal", "skypilot", "slurm")),
+    name=st.sampled_from(("local", "docker", "host", "modal", "skypilot", "slurm", "slurm-gpu")),
     image=_TEXT,
     gpu=_TEXT,
     model_volume=_TEXT,

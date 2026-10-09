@@ -9,7 +9,8 @@ import pytest
 from vibesys.run.environment import open_run_environment
 from vibesys.run.project_policy import build_project_path_policy
 from vs_project.api import Project
-from vs_runtime.api.infrastructure import LocalEnvironment, RunEnvironmentRequest
+from vs_runtime.api.infrastructure import RunEnvironmentRequest
+from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
@@ -42,7 +43,7 @@ def test_run_environment_prepares_hidden_state_before_opening(
         project_path_policy=policy,
     )
 
-    with open_run_environment(LocalEnvironment(), request):
+    with open_run_environment(unconfined_host_environment(), request):
         policy.resolve(workspace)
         assert Project.open(workspace).state.candidate_worktrees_directory("run").is_dir()
         assert build_project_path_policy(canonical, evaluator_source=None) == policy

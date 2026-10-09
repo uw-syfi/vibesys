@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+import pytest
 from tests.vibesys.orchestration.dynamic.loop._harness import (
     PASS,
     LoopInput,
@@ -26,6 +27,9 @@ from vs_project.api import Project
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+pytestmark = pytest.mark.usefixtures("container_cli_credentials")
 
 
 def test_dynamic_workstream_and_framework_baseline_verify_committed_objective(

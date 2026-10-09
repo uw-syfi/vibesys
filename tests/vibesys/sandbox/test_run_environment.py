@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from vibesys.inputs import (
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.environment import open_run_environment
 from vs_agent.api.images import ImagePushError
+from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
 from vs_runtime._run_environment import (
     _cli_container_env,
@@ -30,7 +32,6 @@ from vs_runtime._run_environment import (
 )
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageRequirement,
-    LocalEnvironment,
     ResolvedEvaluatorPackage,
     RunEnvironment,
     RunEnvironmentPresentation,
@@ -48,6 +49,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.infrastructure import (
     resolve_evaluator_package as _resolve_evaluator_package,
 )
+from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api import (
     EnvironmentBindMount,
     HostResource,
@@ -89,6 +91,13 @@ def resolve_evaluator_package(
 ) -> ResolvedEvaluatorPackage:
     """Resolve a bundled package through the lower package API for these integration tests."""
     return _resolve_evaluator_package(_EVALUATOR_PACKAGES_ROOT, requirement)
+
+
+def _slurm_spec(config_path: Path) -> RunEnvironmentSpec:
+    """Select the Slurm environment with an in-memory agent image build."""
+    return RunEnvironmentSpec(
+        "slurm", {"config_path": str(config_path), "build_runner": FakeDockerBuildRunner()}
+    )
 
 
 def _open(environment: RunEnvironment, request: RunEnvironmentRequest) -> RunEnvironmentSession:
@@ -407,7 +416,9 @@ def test_run_environment_record_captures_operator_selected_options() -> None:
     ) == RunEnvironmentRecord(name="slurm", config_path="/operator/slurm.toml")
 
 
-def test_slurm_environment_keeps_editor_local_and_routes_trusted_tools(tmp_path: Path) -> None:
+def test_slurm_environment_edits_in_docker_and_routes_trusted_tools_through_the_host(
+    tmp_path: Path,
+) -> None:
     config_path = tmp_path / "slurm.toml"
     config_path.write_text(
         """[slurm]
@@ -426,15 +437,14 @@ remote_python = "/remote/venv/bin/python"
     )
     profiler = tmp_path / "rocprof_profiler"
     profiler.mkdir()
-    environment = build_run_environment(
-        RunEnvironmentSpec("slurm", {"config_path": str(config_path)})
-    )
+    environment = build_run_environment(_slurm_spec(config_path))
 
+    backend = FakeBackend()
     session = _open(
         environment,
         _request(
             tmp_path,
-            FakeBackend(),
+            backend,
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             profiler_support_path=str(profiler),
@@ -444,8 +454,15 @@ remote_python = "/remote/venv/bin/python"
 
     assert session.view.env_kind == "slurm"
     assert session.view.profile_execution == "remote"
-    assert "vs_sandbox.slurm_command" in (session.view.paths.accuracy_command or "")
-    assert "vs_sandbox.slurm_command" in (session.view.paths.benchmark_command or "")
+    # The agent runs in a GPU-less Docker container with the workspace at its host path.
+    (kind, options), *_ = backend.calls
+    assert kind is SandboxKind.DOCKER
+    assert options["same_path_workspace"] is True
+    assert options["attach_accelerator"] is False
+    # The gates are requests to the host broker, not host commands run in the container.
+    assert (session.view.paths.accuracy_command or "").endswith("vibesys-gate --gate accuracy")
+    assert (session.view.paths.benchmark_command or "").endswith("vibesys-gate --gate benchmark")
+    assert "vs_sandbox" not in (session.view.paths.accuracy_command or "")
     profiler_env = dict(session.view.profiler_mcp_env)
     assert profiler_env["VIBESYS_SLURM_CONFIG"] == str(config_path)
     assert profiler_env["VIBESYS_SLURM_EVALUATOR_PLAN"] == str(
@@ -453,6 +470,13 @@ remote_python = "/remote/venv/bin/python"
     )
     assert Path(profiler_env["VIBESYS_SLURM_BROKER_SOCKET"]).is_socket()
     assert profiler_env["VIBESYS_SLURM_BROKER_TOKEN"]
+    # The profiler server imports the Slurm adapter from the read-only libs mount.
+    libs = tmp_path / "framework" / "libs"
+    assert str(libs / "vs-slurm" / "src") in profiler_env["PYTHONPATH"].split(os.pathsep)
+    assert (
+        HostResource(libs, HostResourceAccess.READ_ONLY, "Slurm adapter libraries")
+        in session.view.profiler_mcp_resources
+    )
     evaluation = read_slurm_evaluation_plan(tmp_path / "logs/slurm-evaluation-plan.json")
     capture = read_slurm_capture_plan(tmp_path / "logs/slurm-capture-plan.json")
     cluster_state_root = tmp_path / "logs/slurm-cluster"
@@ -501,9 +525,7 @@ startup_timeout_seconds = 600
     )
     profiler = tmp_path / "rocprof_profiler"
     profiler.mkdir()
-    environment = build_run_environment(
-        RunEnvironmentSpec("slurm", {"config_path": str(config_path)})
-    )
+    environment = build_run_environment(_slurm_spec(config_path))
 
     session = _open(
         environment,
@@ -561,7 +583,7 @@ rsync_command = ["/bin/true"]
     outside = tmp_path / "outside"
     outside.mkdir()
     session = _open(
-        build_run_environment(RunEnvironmentSpec("slurm", {"config_path": str(config_path)})),
+        build_run_environment(_slurm_spec(config_path)),
         _request(tmp_path, FakeBackend(), run_owned_roots=(worktrees,)),
     )
     profiler_env = dict(session.view.profiler_mcp_env)
@@ -615,9 +637,7 @@ startup_timeout_seconds = 600
     workspace = tmp_path / "workspace"
     (workspace / "reference").mkdir(parents=True)
     (workspace / "benchmark").mkdir()
-    environment = build_run_environment(
-        RunEnvironmentSpec("slurm", {"config_path": str(config_path)})
-    )
+    environment = build_run_environment(_slurm_spec(config_path))
 
     session = _open(
         environment,
@@ -675,7 +695,7 @@ def _modal_runtime_document(tmp_path: Path) -> str:
 
 def test_local_environment_opens_local_sandbox_with_host_paths(tmp_path: Path) -> None:
     backend = FakeBackend()
-    env = LocalEnvironment()
+    env = unconfined_host_environment()
 
     session = _open(
         env,
@@ -699,7 +719,7 @@ def test_local_environment_materializes_effective_objective_outside_workspace(
     tmp_path: Path,
 ) -> None:
     backend = FakeBackend()
-    env = LocalEnvironment()
+    env = unconfined_host_environment()
     effective = "Optimize the service.\n\n## Operator constraints\n\n- BF16 only\n"
 
     session = _open(env, _request(tmp_path, backend, objective=effective))
@@ -799,7 +819,7 @@ def test_local_environment_prepares_and_translates_evaluator_tool(
 ) -> None:
     backend = FakeBackend()
     backend.sandbox.execute.return_value = MagicMock(exit_code=0, output="", truncated=False)
-    env = LocalEnvironment()
+    env = unconfined_host_environment()
     package = resolve_evaluator_package(
         EvaluatorPackageRequirement(
             name="vibesys-evaluator-request-factory",
@@ -859,7 +879,7 @@ def test_local_environment_rejects_evaluator_tools_root_inside_workspace(
     tmp_path: Path,
 ) -> None:
     backend = FakeBackend()
-    env = LocalEnvironment()
+    env = unconfined_host_environment()
     package = resolve_evaluator_package(
         EvaluatorPackageRequirement(
             name="vibesys-evaluator-request-factory",
@@ -1005,7 +1025,7 @@ def test_environment_quotes_project_root_after_token_expansion(tmp_path: Path) -
     backend = FakeBackend()
     workspace = tmp_path / "candidate's; touch injected"
     workspace.mkdir()
-    env = LocalEnvironment()
+    env = unconfined_host_environment()
 
     request = _request(
         tmp_path,
@@ -1028,7 +1048,7 @@ def test_environment_quotes_project_root_after_token_expansion(tmp_path: Path) -
 
 def test_local_environment_resolves_python_token_to_running_interpreter(tmp_path: Path) -> None:
     backend = FakeBackend()
-    env = LocalEnvironment()
+    env = unconfined_host_environment()
 
     session = _open(
         env,
@@ -1077,7 +1097,7 @@ def test_environment_quotes_nested_shell_paths(tmp_path: Path) -> None:
     workspace.mkdir()
     vibesys_project = Project.open(NESTED_SHELL_PROJECT)
     bundle = load_project_task(vibesys_project, vibesys_project.select_task("nested-shell"))
-    env = LocalEnvironment()
+    env = unconfined_host_environment()
 
     session = _open(
         env,
@@ -1116,7 +1136,7 @@ def test_environment_rejects_semantic_tokens_in_nested_shell_source(
     nested: str,
 ) -> None:
     backend = FakeBackend()
-    env = LocalEnvironment()
+    env = unconfined_host_environment()
 
     with pytest.raises(ValueError, match="positional arguments"):
         _open(
@@ -1143,7 +1163,7 @@ def test_environment_rejects_semantic_tokens_in_top_level_executable_source(
     command: list[str],
 ) -> None:
     backend = FakeBackend()
-    env = LocalEnvironment()
+    env = unconfined_host_environment()
 
     with pytest.raises(ValueError, match="positional arguments"):
         _open(
@@ -1206,7 +1226,7 @@ def test_local_environment_objective_defaults_to_the_bare_workspace_relative_nam
 ) -> None:
     """The host answer for an unset objective is identity: no lookup, no rewrite."""
     backend = FakeBackend()
-    env = LocalEnvironment()
+    env = unconfined_host_environment()
 
     session = _open(env, _request(tmp_path, backend))
 
@@ -2266,7 +2286,7 @@ remote_artifact_root = "/remote/vibesys"
 @pytest.mark.parametrize(
     "env",
     [
-        pytest.param(LocalEnvironment(), id="local"),
+        pytest.param(unconfined_host_environment(), id="host"),
         pytest.param(build_run_environment(RunEnvironmentSpec("modal")), id="modal"),
     ],
 )

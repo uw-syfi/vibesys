@@ -32,7 +32,7 @@ from vs_agent.api import NULL_AGENT_EVENT_SINK
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_runtime.api import OrchestrationPlugin, Run
 from vs_runtime.api import RunStatus as PluginRunStatus
-from vs_runtime.api.infrastructure import LocalEnvironmentFacts, RunEnvironmentPresentation
+from vs_runtime.api.infrastructure import HostEnvironmentFacts, RunEnvironmentPresentation
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
 
 if TYPE_CHECKING:
@@ -106,7 +106,7 @@ class _EnvironmentResources:
 class _PreparedEnvironment:
     """Prepared local environment with product presentation supplied explicitly."""
 
-    presentation_facts = LocalEnvironmentFacts()
+    presentation_facts = HostEnvironmentFacts()
 
     def __init__(self, environment: _Environment, request: _EnvironmentRequest) -> None:
         self._environment = environment
