@@ -22,8 +22,10 @@ from tests.support.sharding import (
     is_heavy,
     merge_durations,
     order_test_indices,
+    parse_durations,
     parse_shard,
     projected_shard_seconds,
+    read_durations,
     record_durations,
     shard_loads,
 )
@@ -233,3 +235,43 @@ def test_a_second_pytest_run_of_a_shard_adds_to_the_record_of_the_first(
     for name in set(first) | set(second):
         expected = second[name] if name in second else first[name]
         assert record[name] == pytest.approx(expected, abs=0.01)
+
+
+@given(durations=_DURATIONS)
+def test_a_written_record_reads_back_unchanged(
+    durations: dict[str, float], tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    path = tmp_path_factory.mktemp("record") / "durations.json"
+    path.write_text(json.dumps(durations))
+
+    assert read_durations(path) == durations
+
+
+@pytest.mark.parametrize(
+    ("text", "culprit"),
+    [
+        ("", "not valid JSON"),
+        ("[1, 2]", "JSON object"),
+        ('{"tests/a.py": "3"}', "tests/a.py"),
+        ('{"tests/a.py": -1}', "tests/a.py"),
+        ('{"tests/a.py": true}', "tests/a.py"),
+        ('{"tests/a.py": NaN}', "tests/a.py"),
+        ('{"tests/a.py": null}', "tests/a.py"),
+    ],
+)
+def test_a_malformed_record_is_rejected_naming_its_source_and_key(text: str, culprit: str) -> None:
+    with pytest.raises(ValueError, match="cache-record") as raised:
+        parse_durations(text, "cache-record")
+
+    assert culprit in str(raised.value)
+
+
+@given(first=_WHOLE_DURATIONS, second=_WHOLE_DURATIONS, files=_FILES, count=_COUNTS)
+def test_a_refreshed_record_still_partitions_the_suite(
+    first: dict[str, float], second: dict[str, float], files: list[str], count: int
+) -> None:
+    """Shards that read a newer record than the checked-in one still cover every file once."""
+    for record in (first, second):
+        assignment = assign_shards(files, parse_durations(json.dumps(record), "record"), count)
+        assert set(assignment) == set(files)
+        assert all(1 <= shard <= count for shard in assignment.values())

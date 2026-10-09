@@ -20,8 +20,10 @@ so the shards partition the suite: each test runs in exactly one shard.
 
 Every CI shard records its measured seconds (``--record-shard-durations=PATH``,
 or ``$VIBESYS_RECORD_SHARD_DURATIONS``) and uploads them as a
-``shard-durations-I`` artifact; ``scripts/refresh_shard_durations.py`` merges a
-run's artifacts into ``shard_durations.json``. Each shard also warns when it
+``shard-durations-I`` artifact; a run on main merges them into a cache entry that
+later runs read through ``$VIBESYS_SHARD_DURATIONS`` (``.github/workflows/test.yml``),
+and ``scripts/refresh_shard_durations.py`` can still merge a run's artifacts into the
+checked-in ``shard_durations.json``, the cold-start record used when that cache is empty. Each shard also warns when it
 overran ``SHARD_BUDGET_SECONDS`` or ran files the record underestimates. A
 stale record only unbalances the shards; it never drops or duplicates a test.
 """
@@ -30,6 +32,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import math
 import os
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -44,6 +47,9 @@ if TYPE_CHECKING:
     from xdist.workermanage import WorkerController
 
 DEFAULT_DURATIONS = Path(__file__).with_name("shard_durations.json")
+#: Names a durations file that replaces ``DEFAULT_DURATIONS``. CI sets it to the
+#: record the latest run on main wrote; unset, the checked-in record is the cold start.
+DURATIONS_ENV = "VIBESYS_SHARD_DURATIONS"
 
 #: Recorded seconds above which a file's tests are spread over the shards.
 HEAVY_SECONDS = 90.0
@@ -54,6 +60,46 @@ WORKERS_PER_SHARD = 2
 SHARD_BUDGET_SECONDS = 400.0
 #: Granularity used to project the even spread of heavy files.
 _PROJECTION_UNITS = 200
+
+
+def _is_seconds(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, int | float)
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
+def parse_durations(text: str, source: str) -> dict[str, float]:
+    """Parse a durations record: a JSON object of test file to finite, non-negative seconds.
+
+    Every shard must read the same record or the shards stop partitioning the
+    suite, so a malformed record is an error naming ``source`` and the offending
+    key, never a silent fallback.
+    """
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as error:
+        message = f"{source}: not valid JSON ({error})"
+        raise ValueError(message) from error
+    problem = (
+        None
+        if isinstance(raw, dict)
+        else f"{source}: expected a JSON object of test file to seconds"
+    )
+    for name, seconds in raw.items() if isinstance(raw, dict) else ():
+        if not _is_seconds(seconds):
+            problem = f"{source}: {name!r} must map to finite non-negative seconds, got {seconds!r}"
+            break
+    if problem is not None:
+        raise ValueError(problem)
+    return {name: float(seconds) for name, seconds in raw.items()}
+
+
+def read_durations(path: Path) -> dict[str, float]:
+    """Read and validate the durations record at ``path``."""
+    return parse_durations(path.read_text(encoding="utf-8"), str(path))
 
 
 def parse_shard(spec: str) -> tuple[int, int]:
@@ -213,8 +259,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
     group.addoption(
         "--shard-durations",
-        default=str(DEFAULT_DURATIONS),
-        help="JSON map of test file to seconds used to balance shards",
+        default=os.environ.get(DURATIONS_ENV, str(DEFAULT_DURATIONS)),
+        help=(
+            "JSON map of test file to seconds used to balance shards "
+            f"(default: ${DURATIONS_ENV}, else the checked-in {DEFAULT_DURATIONS.name})"
+        ),
     )
     group.addoption(
         "--record-shard-durations",
@@ -243,9 +292,7 @@ class _Plan:
     """
 
     def __init__(self, config: pytest.Config) -> None:
-        self.durations: dict[str, float] = json.loads(
-            Path(config.getoption("--shard-durations")).read_text()
-        )
+        self.durations = read_durations(Path(config.getoption("--shard-durations")))
         self.files = discover_test_files(
             config.rootpath, config.getini("testpaths"), config.getini("python_files")
         )
@@ -279,7 +326,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     order = getattr(config, "workerinput", {}).get("duration_order", False)
     if spec is None and not order:
         return
-    durations = json.loads(Path(config.getoption("--shard-durations")).read_text())
+    durations = read_durations(Path(config.getoption("--shard-durations")))
     if spec is not None:
         plan = _plan(config)
         index, count = plan.index, plan.count
@@ -334,7 +381,7 @@ def pytest_terminal_summary(terminalreporter: TerminalReporter, config: pytest.C
     spec = config.getoption("--shard")
     if spec is None or hasattr(config, "workerinput"):
         return
-    durations = json.loads(Path(config.getoption("--shard-durations")).read_text())
+    durations = read_durations(Path(config.getoption("--shard-durations")))
     seconds, stale = drift_report(_measured, durations)
     index, count = parse_shard(spec)
     terminalreporter.write_line(
