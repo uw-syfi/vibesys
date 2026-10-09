@@ -64,6 +64,7 @@ from vibesys.hypothesis.plan import (
     truncate_hypothesis_title,
 )
 from vibesys.hypothesis.record import (
+    AgentAttribution,
     CandidateEvidence,
     MeasurementEvidence,
     RecordInput,
@@ -93,6 +94,7 @@ from vibesys.hypothesis.state import (
 
 __all__ = [
     "HYPOTHESIS_TITLE_MAX_LEN",
+    "AgentAttribution",
     "ArchiveAxis",
     "ArchiveConflict",
     "ArchiveDominator",

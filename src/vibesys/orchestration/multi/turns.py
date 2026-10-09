@@ -545,13 +545,14 @@ class MultiAgentTurns:
         self.files.note_judge(request.round_number, state.retry, response)
         return response
 
-    def binding(self, hypothesis_id: str) -> AgentBinding:
-        """Return runtime attribution for a hypothesis whose work started."""
-        try:
-            return self._workers[hypothesis_id].binding
-        except KeyError as error:
-            message = f"hypothesis {hypothesis_id!r} has no implementer session"
-            raise ValueError(message) from error
+    def binding(self, hypothesis_id: str) -> AgentBinding | None:
+        """Return runtime attribution, or ``None`` if no implementer session was opened.
+
+        A resumed run that closes a round whose last paid attempt was interrupted has no
+        session in this process, so it has nothing to attribute.
+        """
+        session = self._workers.get(hypothesis_id)
+        return session.binding if session is not None else None
 
     async def close(self) -> None:
         """Release every named implementer conversation once."""

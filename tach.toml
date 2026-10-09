@@ -227,12 +227,12 @@ depends_on = ["vibesys.hypothesis", "vs_runtime", "vibesys.run.contracts"]
 [[modules]]
 path = "vibesys.orchestration.single"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys", "vibesys.inputs", "vs_prompts", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.domains", "vibesys.hypothesis.readmodel", "vibesys.prompts", "vibesys.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.attempts", "vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys", "vibesys.inputs", "vs_prompts", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.domains", "vibesys.hypothesis.readmodel", "vibesys.prompts", "vibesys.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.multi"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.domains", "vibesys.orchestration.agent_options", "vibesys.profile_focus", "vibesys.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.inputs", "vibesys.prompts", "vibesys", "vibesys.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.attempts", "vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.domains", "vibesys.orchestration.agent_options", "vibesys.profile_focus", "vibesys.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.inputs", "vibesys.prompts", "vibesys", "vibesys.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic.control"
@@ -252,7 +252,7 @@ depends_on = ["vibesys.dynamic_core", "vibesys.orchestration.dynamic.parents", "
 [[modules]]
 path = "vibesys.orchestration.evolve"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn",  "vibesys.domains", "vibesys.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.attempts", "vibesys.orchestration.structured_turn",  "vibesys.domains", "vibesys.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.issue_queue"
@@ -307,6 +307,11 @@ depends_on = ["vibesys.prompts", "vibesys.orchestration.structured_turn", "vibes
 path = "vibesys.orchestration.skill_selection"
 layer = "orchestration_host"
 depends_on = ["vibesys", "vs_agent"]
+
+[[modules]]
+path = "vibesys.orchestration.attempts"
+layer = "roles_search"
+depends_on = []
 
 [[modules]]
 path = "vibesys.orchestration.review"
@@ -789,7 +794,7 @@ path = "vibesys.plugin_catalog"
 depends_on = ["vibesys.plugin_registration", "vs_runtime", "vs_project"]
 
 [[interfaces]]
-expose = ["ArchiveAxis", "ArchiveConflict", "ArchiveDominator", "ArchiveLatestRound", "ArchiveMetric", "ArchivePendingClaim", "ArchiveScalarReading", "ArchiveTrustedParent", "AttemptBudget", "AttemptDecision", "AttemptState", "CandidateDisposition", "CandidateEvidence", "CandidateReply", "CarryOver", "ClosedRound", "Continue", "ExhaustionNotice", "Finished", "HYPOTHESIS_TITLE_MAX_LEN", "Hypothesis", "HypothesisConfig", "HypothesisMeasurement", "HypothesisOutcome", "HypothesisResolution", "HypothesisReview", "HypothesisSearch", "HypothesisState", "HypothesisStrategy", "HypothesisStrategyUpdate", "ImplementerReply", "InvalidPlanError", "JudgeOutcome", "JudgeReviewed", "JudgeSkipReason", "JudgeSkipped", "JudgeVerdict", "MeasurementEvidence", "NewHypothesis", "NextRoundDecision", "OfficialCandidateNotRetained", "OmittedPendingClaims", "OrchestratorPlan", "ParetoArchiveView", "PerfDeltaReason", "PerfProvenance", "PerformanceProjection", "PlanningContext", "RecordInput", "RegressionNotice", "RetainedTerminalCheckpoint", "RollbackTarget", "RoundHistory", "RoundRecord", "SingleAgentReply", "SkillResourceSelection", "StartedHypothesis", "TerminalWorkspaceEdits", "WorkspaceCheckpoint", "attempt_was_reviewed", "attempts", "attempts\\..*", "build_round_record", "cadence", "cadence\\..*", "derive_hypothesis_title", "normalize_hypothesis_title", "notices", "notices\\..*", "parse_round_record", "plan", "plan\\..*", "recorded_judge_verdict", "serialize_round_record", "state", "state\\..*", "transitions", "transitions\\..*", "truncate_hypothesis_title"]
+expose = ["AgentAttribution", "ArchiveAxis", "ArchiveConflict", "ArchiveDominator", "ArchiveLatestRound", "ArchiveMetric", "ArchivePendingClaim", "ArchiveScalarReading", "ArchiveTrustedParent", "AttemptBudget", "AttemptDecision", "AttemptState", "CandidateDisposition", "CandidateEvidence", "CandidateReply", "CarryOver", "ClosedRound", "Continue", "ExhaustionNotice", "Finished", "HYPOTHESIS_TITLE_MAX_LEN", "Hypothesis", "HypothesisConfig", "HypothesisMeasurement", "HypothesisOutcome", "HypothesisResolution", "HypothesisReview", "HypothesisSearch", "HypothesisState", "HypothesisStrategy", "HypothesisStrategyUpdate", "ImplementerReply", "InvalidPlanError", "JudgeOutcome", "JudgeReviewed", "JudgeSkipReason", "JudgeSkipped", "JudgeVerdict", "MeasurementEvidence", "NewHypothesis", "NextRoundDecision", "OfficialCandidateNotRetained", "OmittedPendingClaims", "OrchestratorPlan", "ParetoArchiveView", "PerfDeltaReason", "PerfProvenance", "PerformanceProjection", "PlanningContext", "RecordInput", "RegressionNotice", "RetainedTerminalCheckpoint", "RollbackTarget", "RoundHistory", "RoundRecord", "SingleAgentReply", "SkillResourceSelection", "StartedHypothesis", "TerminalWorkspaceEdits", "WorkspaceCheckpoint", "attempt_was_reviewed", "attempts", "attempts\\..*", "build_round_record", "cadence", "cadence\\..*", "derive_hypothesis_title", "normalize_hypothesis_title", "notices", "notices\\..*", "parse_round_record", "plan", "plan\\..*", "recorded_judge_verdict", "serialize_round_record", "state", "state\\..*", "transitions", "transitions\\..*", "truncate_hypothesis_title"]
 from = ["vibesys.hypothesis"]
 
 [[interfaces]]
