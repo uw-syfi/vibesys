@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, assert_never
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vs_evaluation.api import (
     AvailabilitySnapshot,
@@ -75,6 +75,9 @@ if TYPE_CHECKING:
 
 _UNRESOLVED_JOB_ID = "0"  # the placeholder id of a submission whose acceptance is unresolved
 _LOG = logging.getLogger(__name__)
+
+
+_ENDED_BEFORE_DISPATCH = ExecutorObservation(state=EvaluationState.CANCELED)
 
 
 @dataclass(frozen=True)
@@ -250,7 +253,19 @@ class SharedSlurmAdmission:
                     self._condition.notify_all()
 
 
+class _DurableEnd(StrEnum):
+    """How an evaluation ended without ever reaching the scheduler."""
+
+    CANCELLED_BEFORE_DISPATCH = "cancelled_before_dispatch"
+
+
 class _DurableSlurmEvaluation(BaseModel):
+    """The saved record: the only lifecycle state that survives a restart.
+
+    Every read path (poll, inspect, recovery, cancel) decides from this record, so a
+    fact that must outlive the process is written here before it is published.
+    """
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     handle: SlurmBatchHandle | None
@@ -260,6 +275,16 @@ class _DurableSlurmEvaluation(BaseModel):
     # evidence is conservative: never authorize a replay from its absence.
     dispatch_started: bool = True
     submission_rejection: str | None = None
+    # Set once the evaluation was cancelled while it waited for local admission.
+    # Such a record is final: nothing may dispatch it.
+    ended: _DurableEnd | None = None
+
+    @model_validator(mode="after")
+    def _ended_before_dispatch_has_no_job(self) -> _DurableSlurmEvaluation:
+        if self.ended is not None and (self.handle is not None or self.dispatch_started):
+            message = "an evaluation ended before dispatch cannot have a job or a dispatch"
+            raise ValueError(message)
+        return self
 
 
 class SlurmEvaluationExecutor:
@@ -358,8 +383,7 @@ class SlurmEvaluationExecutor:
         try:
             durable = self._read_evaluation(handle_id)
             self._validate_durable_request(handle_id, request, durable)
-            if durable is not None and durable.submission_rejection is not None:
-                self._publish_rejection(handle_id, durable.submission_rejection)
+            if durable is not None and self._publish_durable_end(handle_id, durable) is not None:
                 return
             if durable is None:
                 self._write_evaluation(handle_id, None, request, dispatch_started=False)
@@ -385,10 +409,9 @@ class SlurmEvaluationExecutor:
         durable = self._read_evaluation(handle_id)
         if durable is None:
             return None
-        if durable.submission_rejection is not None:
-            return ExecutorObservation(
-                state=EvaluationState.FAILED, failure=durable.submission_rejection
-            )
+        ended = self._publish_durable_end(handle_id, durable)
+        if ended is not None:
+            return ended
         target = durable.handle if durable.handle is not None else handle_id
         inspected = await asyncio.to_thread(self._cluster.inspect, target)
         if not isinstance(inspected, ClusterObservation):
@@ -421,6 +444,8 @@ class SlurmEvaluationExecutor:
                     state=EvaluationState.FAILED, failure=durable.submission_rejection
                 ),
             )
+        if durable.ended is not None:
+            return ExecutorPoll(phase=PollPhase.ENDED, terminal=_ENDED_BEFORE_DISPATCH)
         if durable.handle is None and not durable.dispatch_started:
             return ExecutorPoll(phase=PollPhase.QUEUED, detail="awaiting local admission")
         return await self._poll_cluster(handle_id, durable)
@@ -490,8 +515,9 @@ class SlurmEvaluationExecutor:
         durable = self._read_evaluation(handle_id)
         if durable is None:
             return None
-        if durable.submission_rejection is not None:
-            return self._publish_rejection(handle_id, durable.submission_rejection)
+        ended = self._publish_durable_end(handle_id, durable)
+        if ended is not None:
+            return ended
         if durable.handle is not None:
             self._handles[handle_id] = durable.handle
         published = self._publish(
@@ -519,8 +545,7 @@ class SlurmEvaluationExecutor:
         if observed is not None and is_finished(observed.state):
             return
         durable = self._read_evaluation(handle_id)
-        if durable is not None and durable.submission_rejection is not None:
-            self._publish_rejection(handle_id, durable.submission_rejection)
+        if durable is not None and self._publish_durable_end(handle_id, durable) is not None:
             return
         outcome: _CancelOutcome = _CancelConfirmed()
         task = self._tasks.get(handle_id)
@@ -591,9 +616,9 @@ class SlurmEvaluationExecutor:
                 await self._execute(handle_id, request)
         except asyncio.CancelledError:
             durable = self._read_evaluation(handle_id)
-            if (
-                durable is not None and not durable.dispatch_started
-            ) or await self._cancel_running_best_effort(handle_id):
+            if durable is not None and not durable.dispatch_started:
+                self._end_before_dispatch(handle_id, durable.request)
+            elif await self._cancel_running_best_effort(handle_id):
                 self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
             raise
         except (SlurmSubmissionRejectedError, ExecutorRejectedError) as exc:
@@ -1008,6 +1033,7 @@ class SlurmEvaluationExecutor:
                     # The durable preparation proves this executor never dispatched.
                     # The cluster retained cancellation intent and has no accepted job
                     # identity, so there is no allocation termination to confirm.
+                    self._end_before_dispatch(handle_id, durable.request)
                     return _CancelConfirmed()
                 job_id = job_id or cancelled.job_id
                 if job_id is not None:
@@ -1054,6 +1080,33 @@ class SlurmEvaluationExecutor:
 
     def _publish(self, handle_id: str, observation: ExecutorObservation) -> ExecutorObservation:
         return self._lifecycle.publish(handle_id, observation)
+
+    def _end_before_dispatch(self, handle_id: str, request: EvaluationRequest) -> None:
+        """End an evaluation that never reached the scheduler: save the end, then publish it.
+
+        The record is written first, so a poll, a restart, or a second cancel can only
+        ever see the end once it is durable, and nothing can dispatch the evaluation.
+        """
+        record = _DurableSlurmEvaluation(
+            handle=None,
+            request=request,
+            dispatch_started=False,
+            ended=_DurableEnd.CANCELLED_BEFORE_DISPATCH,
+        )
+        atomic_write_bytes(
+            self._handle_root / f"{handle_id}.json", (record.model_dump_json() + "\n").encode()
+        )
+        self._publish(handle_id, _ENDED_BEFORE_DISPATCH)
+
+    def _publish_durable_end(
+        self, handle_id: str, durable: _DurableSlurmEvaluation
+    ) -> ExecutorObservation | None:
+        """Publish the end the saved record states, or None when the record holds none."""
+        if durable.submission_rejection is not None:
+            return self._publish_rejection(handle_id, durable.submission_rejection)
+        if durable.ended is not None:
+            return self._publish(handle_id, _ENDED_BEFORE_DISPATCH)
+        return None
 
     def _record_rejection(self, handle_id: str, request: EvaluationRequest, reason: str) -> None:
         record = _DurableSlurmEvaluation(handle=None, request=request, submission_rejection=reason)
