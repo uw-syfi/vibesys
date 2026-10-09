@@ -63,7 +63,7 @@ A long-lived process lets a turn receive a message while it runs
 model's context between turns without a resume.
 
 The container process is started by agentshim through
-`vs_agent.docker_confinement.DockerSandboxConfinement`, an
+`vs_agent.docker_confinement.DockerContainerConfinement`, an
 `agentshim.Confinement` over the run's `DockerSandbox`:
 
 - `docker exec -i` with the environment passed by name, so a credential never

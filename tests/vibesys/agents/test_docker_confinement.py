@@ -10,7 +10,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
-from vs_agent.docker_confinement import DockerSandboxConfinement
+from vs_agent.docker_confinement import DockerContainerConfinement
 
 if TYPE_CHECKING:
     from vs_sandbox.api import DockerSandbox
@@ -22,8 +22,8 @@ ENV_NAMES = st.text(alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ_", min_size=1, max_size
 )
 
 
-def _confinement(sandbox: FakeDockerSandbox, runner: FakeExecutor) -> DockerSandboxConfinement:
-    return DockerSandboxConfinement(cast("DockerSandbox", sandbox), runner=runner)
+def _confinement(sandbox: FakeDockerSandbox, runner: FakeExecutor) -> DockerContainerConfinement:
+    return DockerContainerConfinement(cast("DockerSandbox", sandbox), runner=runner)
 
 
 @given(first=CONTAINER_IDS, second=CONTAINER_IDS, argv=st.lists(st.text(min_size=1), min_size=1))

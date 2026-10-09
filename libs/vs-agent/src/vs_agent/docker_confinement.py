@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from vs_sandbox.api import DockerSandbox
 
 
-class DockerSandboxConfinement:
+class DockerContainerConfinement:
     """Run agent processes with ``docker exec`` in a sandbox's container.
 
     The sandbox must already be started: its environment (``HOME`` and the

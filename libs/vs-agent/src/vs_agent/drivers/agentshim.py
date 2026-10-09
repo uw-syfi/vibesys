@@ -49,7 +49,7 @@ from vs_agent.contracts import (
     SessionDisposition,
     SteerOutcome,
 )
-from vs_agent.docker_confinement import DockerSandboxConfinement
+from vs_agent.docker_confinement import DockerContainerConfinement
 from vs_agent.docker_executor import CodexRolloutWatchdogExecutor
 from vs_agent.events import CommandResultPayload
 from vs_agent.host_resource_declarations import (
@@ -1034,7 +1034,7 @@ class AgentShimDriver:
             # it for `reap` and map the working directory, MCP commands and
             # schema directory the way the container sees them. A rollout
             # watchdog guards one-shot `codex exec` runs; no such run exists.
-            confinement = DockerSandboxConfinement(
+            confinement = DockerContainerConfinement(
                 self._docker_sandbox_for(spec), runner=self._executor_factory()
             )
             return _Launch(
