@@ -40,7 +40,9 @@ import os
 import subprocess
 import sys
 import textwrap
+import threading
 from pathlib import Path
+from typing import IO
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INJECT_DIR = REPO_ROOT / "resources" / "profilers" / "torch" / "inject"
@@ -260,3 +262,53 @@ def parse_call_log(path: Path) -> list[tuple[float, str]]:
         ts_str, _, name = line.partition("\t")
         events.append((float(ts_str), name))
     return events
+
+
+class StderrTail:
+    """Reads a child's stderr on a thread so a test can block until a line appears.
+
+    ``kill()`` returns once a signal is queued, not once the child's Python
+    handler has run, and the handler's effect is not otherwise observable
+    until a later handshake file appears. The injection logs one line as each
+    handler does its work, so waiting for that line is how a test orders a
+    second signal, or the end of a held import, after the first handler ran.
+    Once a tail owns the pipe, read the rest of the output through
+    :meth:`text`, not ``communicate()``.
+    """
+
+    def __init__(self, stream: IO[str]) -> None:
+        self._lines: list[str] = []
+        self._changed = threading.Condition()
+        self._closed = False
+        self._thread = threading.Thread(
+            target=self._pump, args=(stream,), name="stderr-tail", daemon=True
+        )
+        self._thread.start()
+
+    def _pump(self, stream: IO[str]) -> None:
+        for line in stream:
+            with self._changed:
+                self._lines.append(line)
+                self._changed.notify_all()
+        with self._changed:
+            self._closed = True
+            self._changed.notify_all()
+
+    def wait_for_line(self, fragment: str, *, guard_s: float) -> None:
+        """Block until a line containing *fragment* was written; fail if the child closed first.
+
+        *guard_s* only bounds a deadlock: the wait ends as soon as the line is
+        there, so raising it can never turn a pass into a failure.
+        """
+        with self._changed:
+            self._changed.wait_for(
+                lambda: self._closed or any(fragment in line for line in self._lines),
+                timeout=guard_s,
+            )
+            seen = "".join(self._lines)
+        assert fragment in seen, f"no stderr line containing {fragment!r}:\n{seen}"
+
+    def text(self) -> str:
+        """Everything the child wrote; call after the child exited."""
+        self._thread.join()
+        return "".join(self._lines)

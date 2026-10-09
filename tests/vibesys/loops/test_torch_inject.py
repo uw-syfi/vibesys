@@ -32,6 +32,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.loops.torch_inject_fixtures import (
+    StderrTail,
     base_env,
     parse_call_log,
     run_python,
@@ -313,6 +314,11 @@ def test_sigusr2_toggles_stop_early_without_killing_process(tmp_path: Path) -> N
 # it waits for appears (see sitecustomize.py's "Handshake" section).
 _HANDSHAKE_TIMEOUT_S = 30.0
 
+# Lines the injection logs as a signal handler does its work (see ``_log`` in
+# sitecustomize.py, which exists to make handler timing observable).
+_START_QUEUED_LINE = "start queued until torch is imported"
+_STOP_HANDLER_LINE = "SIGUSR2/SIGINT/atexit handler entered"
+
 # Never set: ``wait(interval)`` is only the pause between polls of another process's files.
 _POLL_PAUSE = threading.Event()
 
@@ -374,6 +380,19 @@ def _finish(proc: subprocess.Popen[str]) -> tuple[str, str]:
             proc.communicate()
 
 
+def _finish_tailed(proc: subprocess.Popen[str]) -> None:
+    """End a target whose stderr a :class:`StderrTail` reads: release it, then reap it."""
+    try:
+        if proc.stdin is not None and not proc.stdin.closed:
+            proc.stdin.write("\n")
+            proc.stdin.close()
+        proc.wait(timeout=_HANDSHAKE_TIMEOUT_S)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
 def test_signal_mode_repeated_windows_produce_two_traces(tmp_path: Path) -> None:
     """Regression test: a second SIGUSR1 must start a second window, not be a no-op.
 
@@ -433,22 +452,34 @@ def test_start_signal_during_torch_import_is_queued_not_dropped(tmp_path: Path) 
 
 
 def test_stop_before_ready_cancels_the_queued_start(tmp_path: Path) -> None:
-    """A SIGUSR2 while a start is still queued cancels it: no window opens later."""
+    """A SIGUSR2 while a start is still queued cancels it: no window opens later.
+
+    Each signal is sent only after the previous handler ran, and the import is
+    released only after both ran. ``kill()`` returns when the signal is queued,
+    not when its handler has run, and Python runs the handlers of signals that
+    are pending together in signal-number order. Releasing the import on a
+    timing guess let the watcher mark the capture ready first, so the queued
+    start fired and swallowed the later explicit window's start.
+    """
     gate = tmp_path / "import_gate"
     proc, control_dir, call_log = _signal_mode_target(tmp_path, FAKE_TORCH_IMPORT_GATE=str(gate))
+    assert proc.stderr is not None
+    log = StderrTail(proc.stderr)
     try:
         _wait_for_file(control_dir / "armed", proc=proc)
         _wait_for_event(call_log, "torch.imported", timeout=_HANDSHAKE_TIMEOUT_S)
         os.kill(proc.pid, signal.SIGUSR1)
+        log.wait_for_line(_START_QUEUED_LINE, guard_s=_HANDSHAKE_TIMEOUT_S)
         os.kill(proc.pid, signal.SIGUSR2)
+        log.wait_for_line(_STOP_HANDLER_LINE, guard_s=_HANDSHAKE_TIMEOUT_S)
         gate.write_text("")
         _wait_for_file(control_dir / "ready", proc=proc)
         # A later, explicit window still works: the queue was cleared, not wedged.
         _run_window(proc, control_dir, tmp_path / "w1")
     finally:
-        _stdout, stderr = _finish(proc)
+        _finish_tailed(proc)
 
-    assert proc.returncode == 0, stderr
+    assert proc.returncode == 0, log.text()
     events = [name for _ts, name in parse_call_log(call_log)]
     assert events.count("profile.start") == 1
 
