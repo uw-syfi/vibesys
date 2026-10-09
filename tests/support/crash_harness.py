@@ -2,18 +2,28 @@
 
 import asyncio
 import tempfile
+from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
-from tests.support.skeleton_faults import COMMIT, RECEIPT_BEGUN, RECEIPT_PREFIX
-from tests.support.skeleton_sim import Simulation, simulate
+from tests.support.skeleton_faults import COMMIT, RECEIPT_BEGUN, RECEIPT_PREFIX, RECEIPT_SEALED
+from tests.support.skeleton_sim import Simulation, Summary, simulate
 
 from vs_faults.api import Boundary, Crossing, FaultPlan, FaultRule, HostFault
 
+_RUNS: dict[str, Simulation] = {}
+
 
 def run(plan: FaultPlan) -> Simulation:
-    with tempfile.TemporaryDirectory() as tmp:
-        return asyncio.run(simulate(Path(tmp), plan))
+    """The finished run under ``plan``, simulated once per process (runs are deterministic).
+
+    A double-crash test reuses the single-crash run of its first crash this way.
+    """
+    key = plan.model_dump_json()
+    if key not in _RUNS:
+        with tempfile.TemporaryDirectory() as tmp:
+            _RUNS[key] = asyncio.run(simulate(Path(tmp), plan))
+    return _RUNS[key]
 
 
 @cache
@@ -69,6 +79,55 @@ def after_crash(calls: list[Crossing], crash: Crossing) -> tuple[Crossing, ...]:
     return tuple(rest[skipped:])
 
 
+@dataclass(frozen=True)
+class Representatives:
+    """One crash point per recovery path of the straight run (the fast tier of the sweeps).
+
+    Recovery depends on which request kind was in flight and on how far it got, not on which
+    of the 12 repeated lifecycle steps it was: so the first call of every request kind is
+    crashed at its request (effect ran, observation lost), its ``begun`` marker (effect not
+    run) and its sealed write (effect ran, seal lost). The commits between requests all advance
+    one core state machine whatever the kind, so those are sampled: the authorization, the
+    middle of the gap and the commit two after the seal for every third kind, plus the run's
+    first commit and its last commits. Together they reach every recovery branch that crashing
+    at all 163 crossings reaches (measured by branch arcs of src and libs). The exhaustive sweeps of every crossing are marked ``slow``.
+    """
+
+    requests: tuple[Crossing, ...]
+    begun: tuple[Crossing, ...]
+    sealed: tuple[Crossing, ...]
+    commits: tuple[Crossing, ...]
+
+
+@cache
+def representatives() -> Representatives:
+    """Pick the representatives from the straight run (see :class:`Representatives`)."""
+    crossings = all_crossings()
+    firsts: dict[str, int] = {}
+    for index, crossing in enumerate(crossings):
+        if crossing.boundary == Boundary.EXECUTOR_REQUEST:
+            firsts.setdefault(crossing.target, index)
+    at = list(firsts.values())
+    commits: list[Crossing] = [crossings[0]]
+    for index in at[::3]:
+        previous = max(
+            (i for i in range(index) if crossings[i].target == RECEIPT_SEALED), default=-1
+        )
+        commits += [
+            crossings[index - 1],
+            crossings[(previous + index) // 2 + 1],
+            crossings[index + 4],
+        ]
+    last = len(crossings) - 1
+    commits += [crossings[last - 3], crossings[last]]
+    return Representatives(
+        requests=tuple(crossings[i] for i in at),
+        begun=tuple(crossings[i + 1] for i in at),
+        sealed=tuple(crossings[i + 2] for i in at),
+        commits=tuple(dict.fromkeys(commits)),
+    )
+
+
 def name(crossing: Crossing) -> str:
     return f"{crossing.boundary.value}:{crossing.target}#{crossing.ordinal}"
 
@@ -97,15 +156,24 @@ def following(first: Crossing, depth: int) -> tuple[Crossing, ...]:
     return after_crash(run(crash_plan(first)).gate.calls, first)[:depth]
 
 
-def converges_after(first: Crossing, second: Crossing) -> None:
-    """Crash at ``first``, then at ``second`` in the recovery run: the run ends as the straight run."""
-    plan = FaultPlan(seed=second.ordinal, rules=(rule(first), rule(second)))
-    summary = run(plan).summary
+def assert_converges(summary: Summary, replay: str, *, crashes: int) -> None:
+    """The run ended as the straight run does after ``crashes`` host deaths."""
     straight = straight_run().summary
-    replay = f"replay with {plan.model_dump_json()}"
     assert summary.stalled is None, f"{summary.stalled}; {replay}"
-    assert summary.crashes == 2, replay
+    assert summary.crashes == crashes, replay
     assert summary.outcome == straight.outcome, replay
     assert summary.adopted_tree == straight.adopted_tree, replay
     assert summary.sbatch_calls == straight.sbatch_calls, replay
     assert summary.agent_dispatches == straight.agent_dispatches, replay
+
+
+def converges_after_one(crossing: Crossing) -> None:
+    """Crash once at ``crossing``: the run ends as the straight run."""
+    plan = crash_plan(crossing)
+    assert_converges(run(plan).summary, f"replay with {plan.model_dump_json()}", crashes=1)
+
+
+def converges_after(first: Crossing, second: Crossing) -> None:
+    """Crash at ``first``, then at ``second`` in the recovery run: the run ends as the straight run."""
+    plan = FaultPlan(seed=second.ordinal, rules=(rule(first), rule(second)))
+    assert_converges(run(plan).summary, f"replay with {plan.model_dump_json()}", crashes=2)

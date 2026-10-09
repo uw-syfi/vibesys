@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 from functools import cache
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.crash_harness import (
     after_crash,
+    converges_after,
     crash_plan,
     crash_points,
     name,
-    rule,
     run,
-    straight_run,
 )
 
-from vs_faults.api import Boundary, Crossing, FaultPlan
+from vs_faults.api import Boundary, Crossing
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # A second crash while the restarted host is still recovering. The first crash is sampled
 # (the first call of each request kind: the effect ran and its observation was lost). The
@@ -51,23 +54,29 @@ def _sampled(window: tuple[Crossing, ...]) -> tuple[Crossing, ...]:
     return tuple(c for i, c in enumerate(window) if i % 3 == 0 or i == len(window) - 1)
 
 
-def _double_crashes() -> list[object]:
+def _ends(window: tuple[Crossing, ...]) -> tuple[Crossing, ...]:
+    """The CI sample: the first, middle and last crossing of a window."""
+    return tuple(dict.fromkeys(window[i] for i in (0, len(window) // 2, -1))) if window else ()
+
+
+def _double_crashes(
+    firsts: tuple[Crossing, ...], pick: Callable[[tuple[Crossing, ...]], tuple[Crossing, ...]]
+) -> list[object]:
     return [
         pytest.param(first, second, id=f"{name(first)}+{name(second)}")
-        for first in _first_of_each_kind()
-        for second in _sampled(_recovery_window(first))
+        for first in firsts
+        for second in pick(_recovery_window(first))
     ]
 
 
-@pytest.mark.parametrize(("first", "second"), _double_crashes())
+@pytest.mark.parametrize(("first", "second"), _double_crashes(_first_of_each_kind()[::3], _ends))
 def test_a_crash_during_recovery_still_converges(first: Crossing, second: Crossing) -> None:
-    plan = FaultPlan(seed=second.ordinal, rules=(rule(first), rule(second)))
-    summary = run(plan).summary
-    straight = straight_run().summary
-    replay = f"replay with {plan.model_dump_json()}"
-    assert summary.stalled is None, f"{summary.stalled}; {replay}"
-    assert summary.crashes == 2, replay
-    assert summary.outcome == straight.outcome, replay
-    assert summary.adopted_tree == straight.adopted_tree, replay
-    assert summary.sbatch_calls == straight.sbatch_calls, replay
-    assert summary.agent_dispatches == straight.agent_dispatches, replay
+    converges_after(first, second)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(("first", "second"), _double_crashes(_first_of_each_kind(), _sampled))
+def test_a_crash_during_recovery_of_each_kind_still_converges(
+    first: Crossing, second: Crossing
+) -> None:
+    converges_after(first, second)

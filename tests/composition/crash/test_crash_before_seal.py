@@ -16,7 +16,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.crash_harness import all_crossings, rule, straight_run
+from tests.support.crash_harness import (
+    all_crossings,
+    assert_converges,
+    name,
+    representatives,
+    rule,
+)
 from tests.support.skeleton_faults import RECEIPT_SEALED
 from tests.support.skeleton_sim import Simulation, simulate
 
@@ -61,14 +67,16 @@ def _run(seal: Crossing) -> Simulation:
         return asyncio.run(simulate(Path(tmp), plan, gate=LostSealGate(plan)))
 
 
+def _check(seal: Crossing) -> None:
+    assert_converges(_run(seal).summary, f"lost seal at {seal}", crashes=1)
+
+
+@pytest.mark.parametrize("seal", [pytest.param(c, id=name(c)) for c in representatives().sealed])
+def test_a_crash_before_the_first_seal_of_each_kind_converges(seal: Crossing) -> None:
+    _check(seal)
+
+
+@pytest.mark.slow
 @pytest.mark.parametrize("seal", _sealed_writes())
 def test_a_crash_before_a_result_is_sealed_converges(seal: Crossing) -> None:
-    summary = _run(seal).summary
-    straight = straight_run().summary
-    replay = f"lost seal at {seal}"
-    assert summary.stalled is None, f"{summary.stalled}; {replay}"
-    assert summary.crashes == 1, replay
-    assert summary.outcome == straight.outcome, replay
-    assert summary.adopted_tree == straight.adopted_tree, replay
-    assert summary.sbatch_calls == straight.sbatch_calls, replay
-    assert summary.agent_dispatches == straight.agent_dispatches, replay
+    _check(seal)
