@@ -50,7 +50,7 @@ from vs_agent.host_resource_declarations import (
     declare_agent_host_resources,
     prepare_provider_state,
 )
-from vs_agent.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS, is_codex
+from vs_agent.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS
 from vs_agent.session_environment import (
     dropped_launcher_names,
     session_environment,
@@ -101,18 +101,15 @@ of seconds to attach, and a false negative here ends the run (see
 the host one.
 """
 
-_MAX_CODEX_SESSION_TURNS = 2
-_MAX_CODEX_SESSION_INPUT_TOKENS = 10_000_000
-_MAX_CODEX_SESSION_DURATION_MS = 600_000
-
 TRANSIENT_RETRY_DELAYS_S: tuple[float, ...] = (30.0, 60.0, 120.0, 240.0, 480.0)
 """Waits in seconds before each retry of a turn that failed on a transient provider error.
 
 agentshim classifies the failure (``agentshim.FailureKind.TRANSIENT``: an
-overload, a rate limit, or a server error). The provider CLI has already
-retried inside the turn before it exits, so by then the outage has lasted
-minutes; these waits add about fifteen more before the error reaches the run,
-which otherwise ends on the first one.
+overload, a rate limit, or a server error) and its ``Session`` waits these
+delays (``agentshim.RetryPolicy``). The provider CLI has already retried inside
+the turn before it exits, so by then the outage has lasted minutes; these waits
+add about fifteen more before the error reaches the run, which otherwise ends
+on the first one.
 """
 
 
@@ -402,19 +399,23 @@ class _AgentShimEventHandler:
 
 
 class AgentShimSession:
-    """One configured AgentShim conversation."""
+    """One configured AgentShim conversation.
+
+    Recovery policy (transient waits, a refused resume, a thread grown too
+    large) belongs to :class:`agentshim.Session`; this class translates between
+    its turns and the :class:`~vs_agent.contracts.AgentSession` contract.
+    """
 
     def __init__(  # noqa: PLR0913  # lint-waiver: LW-010138 [PLR0913]; Preserve AgentShimSession.__init__'s named-argument contract because callers pass these independent settings directly.
         self,
         *,
-        session: agentshim.AgentSession,
+        session: agentshim.Session,
         spec: AgentSessionSpec,
         profile: agentshim.ProviderProfile,
         timeout: int | None,
         event_handler: _AgentShimEventHandler,
         sandbox: _ConfinableSandbox | None,
         log: Callable[[str], None],
-        transient_retry_delays: Sequence[float] = TRANSIENT_RETRY_DELAYS_S,
     ) -> None:
         """Bind one library session to the VibeSys policy that drives it."""
         self._session = session
@@ -428,14 +429,7 @@ class AgentShimSession:
             _as_mcp_server(server, sandbox, pin_interpreter=not spec.policy.containerized)
             for server in spec.mcp_servers
         )
-        self._turn_count = 0
-        # Set when the provider conversation was dropped and restarted while
-        # serving the current turn, so the turn's result can report it.
-        self._restarted = False
         self._closed = False
-        self._transient_retry_delays = tuple(transient_retry_delays)
-        # Set by cancel() so a turn waiting out a transient error stops waiting.
-        self._cancelled = threading.Event()
 
     def run_turn(
         self,
@@ -448,41 +442,34 @@ class AgentShimSession:
             raise RuntimeError(message)
 
         expected = request.expected_provider_session_id
-        if expected is not None and self._session.session_id != expected:
-            raise SessionResumeError(expected, "session has not adopted the expected conversation")
-
         self._event_handler.observer = observer
         self._event_handler.structured = request.output_schema is not None
-        self._restarted = False
-        self._cancelled.clear()
         try:
-            if request.expected_provider_session_id is not None:
-                try:
-                    result = self._turn(self._build_request(request))
-                except agentshim.AgentShimError as error:
-                    raise SessionResumeError(
-                        request.expected_provider_session_id, str(error)
-                    ) from error
-            elif request.require_provider_checkpoint:
-                # Journaled initial turns need their history for subsequent
-                # continuations. A refused resume cannot replay accepted work
-                # in a fresh conversation, even before an identity is bound.
-                result = self._turn_through_transient_errors(self._build_request(request))
+            if expected is None:
+                turn = self._run(request, expect_conversation=None)
             else:
-                result = self._turn_with_restart(self._build_request(request))
-            self._turn_count += 1
+                try:
+                    turn = self._run(request, expect_conversation=expected)
+                except agentshim.ContinuityError as error:
+                    raise SessionResumeError(
+                        expected, "session has not adopted the expected conversation"
+                    ) from error
+                except agentshim.AgentShimError as error:
+                    raise SessionResumeError(expected, str(error)) from error
         finally:
             self._event_handler.observer = None
             self._event_handler.structured = False
 
-        # Read the conversation ID before the thread-budget check, which may
-        # drop it: the caller still deserves to know which conversation ran.
-        provider_session_id = result.session_id
-        restarted = self._restarted or (
-            request.expected_provider_session_id is None
-            and not request.require_provider_checkpoint
-            and self._renew_codex_thread_if_needed(result)
-        )
+        result = turn.result
+        if result.interrupted:
+            # The conversation survives an interrupt, but the caller asked for
+            # an answer and there is none: a stopped turn raises.
+            message = "turn interrupted"
+            raise agentshim.TurnCancelledError(message)
+        # RESET and REPLACED both say the conversation the caller was
+        # continuing is gone (renewed, or restarted after a refused resume).
+        restarted = turn.continuity is not agentshim.Continuity.CONTINUED
+        self._log_continuity(turn.continuity)
         return AgentTurnResult(
             text=_result_text(result),
             usage=_usage_from(
@@ -490,12 +477,26 @@ class AgentShimSession:
                 cost_usd=result.cost_usd,
                 duration_ms=result.duration_ms,
             ),
-            provider_session_id=provider_session_id,
+            provider_session_id=result.session_id,
             disposition=(
                 SessionDisposition.RESET_REQUIRED if restarted else SessionDisposition.REUSABLE
             ),
             skills=_skill_use(result.skills),
         )
+
+    def _log_continuity(self, continuity: agentshim.Continuity) -> None:
+        """Tell the operator when the library dropped the conversation behind a turn.
+
+        The library decides these restarts silently, so this is the only record
+        that history was lost.
+        """
+        name = self._profile.name
+        if continuity is agentshim.Continuity.RESET:
+            self._log(f"renewing {name} thread; durable workspace state remains authoritative.")
+        elif continuity is agentshim.Continuity.REPLACED:
+            self._log(
+                f"{name} session is no longer available; this turn ran in a fresh conversation."
+            )
 
     def cancel(self) -> None:
         """Stop an in-flight turn by terminating the provider process.
@@ -503,12 +504,11 @@ class AgentShimSession:
         A turn waiting out a transient provider error stops waiting and raises
         that error instead of retrying.
         """
-        self._cancelled.set()
-        self._session.cancel()
+        self._session.interrupt()
 
     def close(self) -> None:
         """Release this logical session, stopping any turn it still owns."""
-        self.cancel()
+        self._session.close()
         self._closed = True
         self._event_handler.observer = None
 
@@ -519,11 +519,39 @@ class AgentShimSession:
         newer than any checkpoint the caller holds. Beyond that the library
         decides, adopting the ID only when the provider has a resume flag and
         no turn is in flight. A stale or deleted transcript is handled later,
-        by the restart fallback around the turn.
+        by the library's fresh-conversation retry around the turn.
         """
-        if self._session.session_id is not None:
-            return False
         return self._session.adopt(session_id)
+
+    def _run(self, request: AgentTurnRequest, *, expect_conversation: str | None) -> agentshim.Turn:
+        """Prepare and run one turn, translating library failures to the driver contract.
+
+        A provider that gave up matching the output schema
+        (``agentshim.FailureKind.SCHEMA``) raises ``AgentOutputSchemaError``
+        with its validation errors. The library has already decided whether to
+        retry by then, and keeps the conversation the correction turn continues.
+        """
+        held = self._session.conversation_id
+        ticket = self._session.prepare_turn(
+            self._build_request(request),
+            expect_conversation=expect_conversation,
+            pin=request.require_provider_checkpoint,
+        )
+        try:
+            return self._session.run(ticket)
+        except (OSError, ImportError, agentshim.CliNotFoundError) as exc:
+            raise AgentSpawnError(self._profile.name, str(exc)) from exc
+        except agentshim.CliTimeoutError as exc:
+            raise AgentTurnTimeoutError(exc.timeout) from exc
+        except agentshim.TurnFailedError as exc:
+            if exc.kind is agentshim.FailureKind.SCHEMA:
+                raise AgentOutputSchemaError(exc.detail) from exc
+            if held is not None and self._session.conversation_id is None:
+                self._log(
+                    f"the resumed {self._profile.name} turn failed; dropped the conversation "
+                    "so the next turn starts fresh."
+                )
+            raise
 
     def _build_request(self, request: AgentTurnRequest) -> agentshim.TurnRequest:
         """Translate one VibeSys turn into the library's request."""
@@ -590,131 +618,6 @@ class AgentShimSession:
             "",
         )
 
-    def _turn_with_restart(self, request: agentshim.TurnRequest) -> agentshim.TurnResult:
-        """Run one turn, retrying once from a fresh conversation if a resume failed.
-
-        Only a resumed turn is retried, and only once: with the conversation
-        dropped, the retry takes the fresh-session branch, so a second failure
-        is a real agent failure and propagates. The retry loses the earlier
-        conversation, which ``self._restarted`` reports to the caller.
-
-        A resumed turn that fails for a reason the provider could not classify
-        drops the conversation too, without a retry: see
-        :meth:`_drop_conversation_after_failed_resume`. A classified failure
-        (an outage, a usage limit, a login problem) says nothing about the
-        conversation, so it keeps it.
-        """
-        resumed = self._session.session_id is not None
-        try:
-            return self._turn_through_transient_errors(request)
-        except agentshim.SessionResumeError:
-            self._log(
-                f"{self._profile.name} session is no longer available; "
-                "retrying this turn with a fresh conversation."
-            )
-            self._session.forget()
-            self._turn_count = 0
-            self._restarted = True
-            return self._turn_through_transient_errors(request)
-        except agentshim.CliExitError as error:
-            if error.kind is agentshim.FailureKind.OTHER:
-                self._drop_conversation_after_failed_resume(resumed=resumed)
-            raise
-
-    def _turn_through_transient_errors(
-        self, request: agentshim.TurnRequest
-    ) -> agentshim.TurnResult:
-        """Run one turn, waiting out provider overloads, rate limits, and server errors.
-
-        The retry continues whatever conversation the failed attempt left: the
-        library adopts a session the provider named before failing, and a
-        resumed turn keeps the session it resumed, so the retry resumes it
-        instead of starting over. Any other failure, a cancel during a wait, or
-        a transient error that outlasts every delay propagates unchanged.
-        """
-        for attempt, delay in enumerate(self._transient_retry_delays, start=1):
-            try:
-                return self._turn(request)
-            except agentshim.CliExitError as error:
-                if error.kind is not agentshim.FailureKind.TRANSIENT:
-                    raise
-                self._log(
-                    f"{self._profile.name} reported a transient provider error "
-                    f"(attempt {attempt}): {error.detail or error}; "
-                    f"retrying this turn in {delay:g}s."
-                )
-                if self._cancelled.wait(delay):
-                    raise
-        return self._turn(request)
-
-    def _drop_conversation_after_failed_resume(self, *, resumed: bool) -> None:
-        """Forget the conversation a failed resumed turn was continuing.
-
-        A raise carries no ``AgentTurnResult``, so this turn cannot report
-        ``RESET_REQUIRED``; forgetting is the only way the session can say the
-        conversation is not to be offered again. It matters because a provider
-        whose CLI gives a resume failure no distinguishing message raises a
-        plain ``CliExitError`` instead of ``SessionResumeError``, and retrying
-        the same dead conversation forever is worse than losing it: the next
-        turn starts fresh and the run continues.
-
-        The cost is that a genuine agent failure on a resumed turn also drops
-        the conversation. That is the deliberate trade: an unusable
-        conversation wedges every later turn, while a dropped one costs the
-        history of one round.
-        """
-        if not (resumed and self._profile.supports_resume):
-            return
-        self._log(
-            f"the resumed {self._profile.name} turn failed; dropping the conversation "
-            "so the next turn starts fresh."
-        )
-        self._session.forget()
-        self._turn_count = 0
-
-    def _turn(self, request: agentshim.TurnRequest) -> agentshim.TurnResult:
-        """Run one turn, translating library failures to the driver contract.
-
-        A provider that gave up matching the output schema
-        (``agentshim.FailureKind.SCHEMA``) raises ``AgentOutputSchemaError``
-        with its validation errors. It is not a ``CliExitError`` by then, so
-        the restart and transient-retry handlers let it through and the
-        session keeps the conversation the correction turn continues.
-        """
-        try:
-            return self._session.turn(request)
-        except (OSError, ImportError, agentshim.CliNotFoundError) as exc:
-            raise AgentSpawnError(self._profile.name, str(exc)) from exc
-        except agentshim.CliTimeoutError as exc:
-            raise AgentTurnTimeoutError(exc.timeout) from exc
-        except agentshim.CliExitError as exc:
-            if exc.kind is agentshim.FailureKind.SCHEMA:
-                raise AgentOutputSchemaError(exc.detail) from exc
-            raise
-
-    def _renew_codex_thread_if_needed(self, result: agentshim.TurnResult) -> bool:
-        """Retire an over-budget Codex thread, reporting whether it was dropped.
-
-        Evaluated after a turn rather than before one, so the decision reads the
-        usage of the turn that just finished and the caller learns about the
-        restart from that turn's result instead of discovering it on the next.
-        """
-        if not is_codex(self._profile.name):
-            return False
-        reason = (
-            f"{_MAX_CODEX_SESSION_TURNS} successful turns"
-            if self._turn_count >= _MAX_CODEX_SESSION_TURNS
-            else _heavy_codex_turn_reason(result)
-        )
-        if reason is None:
-            return False
-        self._log(
-            f"renewing Codex thread after {reason}; durable workspace state remains authoritative."
-        )
-        self._session.forget()
-        self._turn_count = 0
-        return True
-
 
 def _skill_use(summary: agentshim.SkillSummary) -> AgentSkillUse:
     """Carry the library's skill summary over, keeping unknown distinct from zero."""
@@ -735,15 +638,6 @@ def _result_text(result: agentshim.TurnResult) -> str:
     if result.structured_output is not None:
         return json.dumps(result.structured_output)
     return result.text
-
-
-def _heavy_codex_turn_reason(result: agentshim.TurnResult) -> str | None:
-    reasons: list[str] = []
-    if result.usage.tokens.input_tokens >= _MAX_CODEX_SESSION_INPUT_TOKENS:
-        reasons.append(f"{result.usage.tokens.input_tokens} input tokens")
-    if result.duration_ms >= _MAX_CODEX_SESSION_DURATION_MS:
-        reasons.append(f"{result.duration_ms} ms duration")
-    return " and ".join(reasons) or None
 
 
 def _skill_scope(profile: agentshim.ProviderProfile) -> agentshim.SkillScope:
@@ -950,14 +844,17 @@ class AgentShimDriver:
             )
 
         env = sandbox.env if sandbox is not None else host_env
-        agent = agentshim.CliAgent(
-            provider,
+        agent = agentshim.Agent(
+            spec.provider,
             model=spec.model,
             executor=executor,
+            permissions=agentshim.NativePermissions.bypass(),
+            approvals=agentshim.ApprovalPolicy.DENY,
+            retry=agentshim.RetryPolicy(delays=self._transient_retry_delays),
+            event_handlers=[event_handler],
             env=env,
-            event_handler=event_handler,
-            check_timeout=self._check_timeout,
             log=self._log,
+            check_timeout=self._check_timeout,
         )
         skill_scope = _skill_scope(agent.profile)
         if skill_scope is not agentshim.SkillScope.PROJECT:
@@ -977,9 +874,8 @@ class AgentShimDriver:
                 "this session loads their settings, hooks and global instructions"
             )
         session = AgentShimSession(
-            session=agent.start_session(
-                cwd=str(spec.workspace),
-                timeout=self._timeout,
+            session=agent.session(
+                str(spec.workspace),
                 skill_scope=skill_scope,
                 mcp_scope=mcp_scope,
                 config_scope=config_scope,
@@ -990,7 +886,6 @@ class AgentShimDriver:
             event_handler=event_handler,
             sandbox=sandbox,
             log=self._log,
-            transient_retry_delays=self._transient_retry_delays,
         )
         self._sessions.add(session)
         return session

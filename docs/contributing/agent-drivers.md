@@ -101,8 +101,9 @@ conversation lifecycle internally and exposes no attach point, so
 A driver that drops and restarts the conversation a session names must return
 `SessionDisposition.RESET_REQUIRED` on that turn's `AgentTurnResult`. The client
 then evicts the live session and clears the checkpoint, so nothing later claims
-continuity with history that no longer exists. The AgentShim session reports a
-reset for both of its restarts:
+continuity with history that no longer exists. The AgentShim session maps agentshim's
+`Turn.continuity` (`RESET` and `REPLACED`) to a reset; `agentshim.Session` owns both
+restarts:
 
 - retiring an over-budget Codex thread (turn count or heavy-turn usage),
   evaluated after the turn so the decision reads the usage it just produced;
@@ -112,7 +113,11 @@ reset for both of its restarts:
   `claude --resume`). Only a resumed turn is retried, and only once, so a
   second failure is a real agent failure and propagates.
 
-A turn that merely raises is not a restart. Timeouts and cancellations say
+The library restarts silently, so the AgentShim session logs each one (a renewed
+thread, a replaced conversation, a dropped conversation) for the operator.
+
+A turn that merely raises is not a restart. Timeouts and cancellations (a cancelled turn raises
+`agentshim.TurnCancelledError` and keeps its conversation) say
 nothing about whether the conversation is still resumable, so the client keeps
 the checkpoint and only a driver-reported reset (or a refused adoption) clears
 it.
@@ -128,8 +133,8 @@ replayable from the journal without repeating accepted work.
 ### A failed resumed turn drops the conversation
 
 A resumed turn that raises a `CliExitError` whose `kind` is
-`FailureKind.OTHER` still loses the conversation it was continuing: the AgentShim session calls
-`forget()` before re-raising, so the next turn on that session starts fresh.
+`FailureKind.OTHER` still loses the conversation it was continuing: the `agentshim.Session` forgets
+the conversation before re-raising, so the next turn on that session starts fresh.
 A raise carries no `AgentTurnResult`, so the turn cannot report
 `RESET_REQUIRED`, and forgetting is the only way the session can refuse to
 offer a conversation again.
@@ -288,7 +293,7 @@ command's own runtime needs, not for running agent CLIs.
 `--docker` runs the provider CLI inside the role's editor container, through
 the same path a host session runs. `create_session` looks up or builds a
 `vs_sandbox.WorkspaceSandbox`, wraps a plain `agentshim.HostCommandExecutor()`
-through `confine_to_sandbox`, and hands `CliAgent` the sandbox's own
+through `confine_to_sandbox`, and hands `agentshim.Agent` the sandbox's own
 environment; nothing in it branches on which backend it has. A container
 session's sandbox is not built by the driver: it is the run environment's
 already-started `vs_sandbox.DockerSandbox`, looked up by role from the
@@ -301,7 +306,7 @@ everything else to a container.
   container serves every turn regardless of working directory, so the caller
   supplies it per call; a host sandbox's `wrap(argv)` fixes its own workspace
   and ignores the argument). The session's own `cwd`, passed to
-  `agent.start_session`, is always the real host workspace path, for a host
+  `agent.session`, is always the real host workspace path, for a host
   and a container session alike. `DockerSandbox.wrap` maps that host path to
   the container's bind mount and emits `docker exec -i -w <container path>
   ... <argv>`.
@@ -338,7 +343,7 @@ everything else to a container.
 
 ### A failed health check is a typed agent fault
 
-`CliAgent` runs `<binary> --help` when a session is constructed. The driver
+`agentshim.Agent` runs `<binary> --help` when a session is constructed. The driver
 translates failed checks, missing binaries and process execution errors into
 `AgentSpawnError`, including the provider and the original cause. This aborts
 the attempted turn before agent work starts. The fault is retryable: a caller's

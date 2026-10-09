@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     import pytest
-    from agentshim import CommandExecutor, CommandStreamSink
+    from agentshim import CommandExecutor, CommandStreamSink, Process, SpawnRequest
 
 THREAD_ID = "019fc654-87f2-7702-8bf2-05b6f4f006dc"
 
@@ -91,6 +91,11 @@ class _StalledExecutor:
 
     def check_binary(self, path: str, env: Mapping[str, str], *, timeout: float) -> None:
         del path, env, timeout
+
+    def spawn(self, request: SpawnRequest) -> Process:
+        del request
+        message = "the stalled executor only runs one-shot commands"
+        raise NotImplementedError(message)
 
     def run(self, request: CommandRequest, sink: CommandStreamSink) -> CommandResult:
         del request

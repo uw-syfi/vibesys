@@ -30,7 +30,14 @@ from agentshim import CommandResult
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from agentshim import CommandExecutor, CommandHandle, CommandRequest, CommandStreamSink
+    from agentshim import (
+        CommandExecutor,
+        CommandHandle,
+        CommandRequest,
+        CommandStreamSink,
+        Process,
+        SpawnRequest,
+    )
 
 _DOCKER_QUERY_TIMEOUT_S = 5
 
@@ -249,6 +256,14 @@ class CodexRolloutWatchdogExecutor:
     def check_binary(self, path: str, env: Mapping[str, str], *, timeout: float) -> None:
         """Delegate the health check to the wrapped executor."""
         self._inner.check_binary(path, env, timeout=timeout)
+
+    def spawn(self, request: SpawnRequest) -> Process:
+        """Delegate a long-lived process to the wrapped executor, unwatched.
+
+        The watchdog guards one-shot ``codex exec --json`` runs, which reach the
+        executor through :meth:`run`; the session tier does not use ``spawn`` yet.
+        """
+        return self._inner.spawn(request)
 
     def run(self, request: CommandRequest, sink: CommandStreamSink) -> CommandResult:
         """Run *request*, watching it when it is a Codex JSON invocation."""
