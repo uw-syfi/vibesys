@@ -174,6 +174,20 @@ def test_api_control_commands_ack_and_reach_controller(tmp_path: Path) -> None:
     assert "prioritize latency" in _enter_boundary(parts, "implementer", "round 1", "Work")
 
 
+def test_a_resume_command_can_ask_for_the_fallback_and_a_plain_one_cannot(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+
+    parts.api.execute(ResumeCommand())
+    assert parts.control.consume_fallback_request() is False
+
+    ack = parts.api.execute(ResumeCommand(fallback=True)).ack
+
+    assert ack is not None
+    assert (ack.action, ack.status) == ("resume", "consumed")
+    assert parts.control.consume_fallback_request() is True
+    assert parts.control.consume_fallback_request() is False  # taken once
+
+
 def test_finish_is_idempotent_and_interrupts_controlled_executions(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.start_execution("implementer", "round 1", "work")

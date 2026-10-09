@@ -426,9 +426,7 @@ class RuntimeAgentExecution:
             resources.callback(client.close)
             if isinstance(client, CapacityGated):
                 timer = capacity.timer or ControlCapacityTimer(control, time.time)
-                client.set_capacity_gate(
-                    PolicyCapacityGate(control, agent_events, capacity.policy, timer)
-                )
+                client.set_capacity_gate(PolicyCapacityGate(control, agent_events, capacity, timer))
             return cls(
                 configuration,
                 scope,

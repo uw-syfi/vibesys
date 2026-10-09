@@ -246,7 +246,10 @@ class RunApi:
             ack = CommandAck(action="pause", status="pending")
         elif isinstance(request, ResumeCommand):
             if control is not None:
-                control.resume()
+                if request.fallback:
+                    control.resume_with_fallback()
+                else:
+                    control.resume()
             ack = CommandAck(action="resume", status="consumed")
         elif isinstance(request, StopCommand):
             if control is not None:

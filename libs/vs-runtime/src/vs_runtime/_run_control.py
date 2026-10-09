@@ -106,6 +106,18 @@ class RunControlChannel(Protocol):
         """Cancel a pause or stop request and release a parked run."""
         ...
 
+    def resume_with_fallback(self) -> None:
+        """Resume like :meth:`resume`, asking a run parked on a provider capacity limit to switch.
+
+        The request stays pending until a parked turn takes it with
+        :meth:`consume_fallback_request`. A run with no fallback configured ignores it.
+        """
+        ...
+
+    def consume_fallback_request(self) -> bool:
+        """Take the pending fallback request: True once per request."""
+        ...
+
     def request_stop(self) -> None:
         """Request an unwind at the next cooperative boundary."""
         ...
@@ -174,6 +186,7 @@ class RuntimeRunControlChannel:
         self._steer_targets: list[SteerTarget] = []
         self._paused = False
         self._stop_requested = False
+        self._fallback_requested = False
         self._stop_listeners: list[Callable[[], object]] = []
 
     def queue_steer(self, text: str) -> None:
@@ -231,11 +244,25 @@ class RuntimeRunControlChannel:
 
     def resume(self) -> None:
         """Cancel a pending pause or stop and release a parked run."""
+        self._release(fallback=False)
+
+    def _release(self, *, fallback: bool) -> None:
         with self._lock:
             self._paused = False
             self._stop_requested = False
+            self._fallback_requested = fallback
             self._lock.notify_all()
         self._emit(RunControlTransitionKind.RESUMED)
+
+    def resume_with_fallback(self) -> None:
+        """Resume the run and leave a fallback request for the parked turn to take."""
+        self._release(fallback=True)
+
+    def consume_fallback_request(self) -> bool:
+        """Take the pending fallback request: True once per request."""
+        with self._lock:
+            requested, self._fallback_requested = self._fallback_requested, False
+        return requested
 
     def request_stop(self) -> None:
         """Request that the run unwind at its next cooperative boundary."""

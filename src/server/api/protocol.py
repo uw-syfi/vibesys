@@ -59,6 +59,9 @@ class ResumeCommand(Request):
     """Request resuming a paused run."""
 
     type: Literal["command.resume"] = "command.resume"
+    # A run paused on a provider capacity limit may switch to its configured
+    # fallback provider as it resumes. Ignored when the run has no fallback.
+    fallback: bool = False
 
 
 class SteerCommand(Request):

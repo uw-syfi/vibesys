@@ -78,6 +78,7 @@ from vs_runtime._failure_classification import (
     job_failure,
     signal_of,
 )
+from vs_runtime._fallback import FallbackTarget, ProviderFallback
 from vs_runtime._input_project import InputDependency, materialize_input_project
 from vs_runtime._linux_cpu_profiler import (
     Capability as LinuxProfilerCapability,
@@ -160,6 +161,7 @@ from vs_runtime._quota_policy import (
     QuotaAction,
     QuotaDecision,
     QuotaPolicy,
+    Switch,
     WaitFor,
     decide_quota,
 )
@@ -491,6 +493,7 @@ __all__ = [
     "EvaluatorPackageNotFoundError",
     "EvaluatorPackageRequirement",
     "EventCodec",
+    "FallbackTarget",
     "FrameworkValidationResult",
     "FreshProjectError",
     "FreshProjectErrorKind",
@@ -545,6 +548,7 @@ __all__ = [
     "ProjectStateDeclaration",
     "ProjectTreeCopy",
     "ProtocolBenchmarkContract",
+    "ProviderFallback",
     "QuotaAction",
     "QuotaDecision",
     "QuotaPolicy",
@@ -587,6 +591,7 @@ __all__ = [
     "SteerTarget",
     "StopGraceError",
     "StopTimer",
+    "Switch",
     "TerminalSignal",
     "TrustedAccuracyResult",
     "TrustedBenchmarkContract",

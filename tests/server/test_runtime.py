@@ -75,6 +75,9 @@ class _SessionControlStub:
     def resume(self) -> None:
         self._control.resume()
 
+    def resume_with_fallback(self) -> None:
+        self._control.resume_with_fallback()
+
     def stop(self) -> None:
         self._control.request_stop()
 

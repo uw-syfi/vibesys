@@ -24,7 +24,14 @@ from tests.support.runtime_agent_sessions import (
     _RuntimeEffects,
 )
 
-from vs_agent.api import AgentQuotaError, NullAgentEventSink, QuotaCondition
+from vs_agent.api import (
+    AgentQuotaError,
+    Attribution,
+    NullAgentEventSink,
+    ProviderSwitch,
+    QuotaCondition,
+    QuotaPlan,
+)
 from vs_runtime.api import AgentRole
 from vs_runtime.api.infrastructure import (
     CapacityHandling,
@@ -53,25 +60,24 @@ class _RecordingSink(NullAgentEventSink):
     """An event sink that remembers the quota events it was given."""
 
     def __init__(self) -> None:
-        self.paused: list[tuple[AgentQuotaError, float | None, str | None]] = []
+        self.paused: list[tuple[AgentQuotaError, QuotaPlan, str | None]] = []
         self.resumed: list[tuple[str, str]] = []
         self.abandoned: list[tuple[AgentQuotaError, str]] = []
+        self.switched: list[tuple[ProviderSwitch, str | None]] = []
 
-    def quota_paused(
-        self,
-        error: AgentQuotaError,
-        *,
-        resumes_at: float | None = None,
-        agent_kind: str | None = None,
-        **_context: object,
-    ) -> None:
-        self.paused.append((error, resumes_at, agent_kind))
+    def quota_paused(self, error: AgentQuotaError, plan: QuotaPlan, where: Attribution) -> None:
+        self.paused.append((error, plan, where.agent_kind))
 
-    def quota_resumed(self, provider: str, *, reason: str = "operator", **_context: object) -> None:
+    def quota_resumed(self, provider: str, reason: str, where: Attribution) -> None:
+        del where
         self.resumed.append((provider, reason))
 
-    def quota_abandoned(self, error: AgentQuotaError, *, reason: str, **_context: object) -> None:
+    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
+        del where
         self.abandoned.append((error, reason))
+
+    def provider_switched(self, switch: ProviderSwitch, where: Attribution) -> None:
+        self.switched.append((switch, where.agent_kind))
 
 
 @dataclass
@@ -158,11 +164,11 @@ def test_a_quota_stop_pauses_the_run_and_the_turn_finishes_on_resume() -> None:
         RunControlTransitionKind.PAUSED,
         RunControlTransitionKind.RESUMED,
     ]
-    [(error, resumes_at, agent_kind)] = run.sink.paused
-    assert (error.provider, error.resets_at, resumes_at, agent_kind) == (
+    [(error, plan, agent_kind)] = run.sink.paused
+    assert (error.provider, error.resets_at, plan, agent_kind) == (
         "claude",
         1_900_000_000.0,
-        None,
+        QuotaPlan(),
         "worker",
     )
     assert run.sink.resumed == [("claude", "operator")]
@@ -215,7 +221,7 @@ def test_the_wait_policy_resumes_by_itself_when_the_reported_reset_arrives() -> 
         RunControlTransitionKind.PAUSED,
         RunControlTransitionKind.RESUMED,
     ]
-    assert [resumes_at for _, resumes_at, _ in run.sink.paused] == [START + 605]
+    assert [plan.resumes_at for _, plan, _ in run.sink.paused] == [START + 605]
     assert run.sink.resumed == [("claude", "wait_elapsed")]
 
 

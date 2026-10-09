@@ -10,6 +10,7 @@ from vibesys.events import (
     CommandResultPayload,
     CoreEventType,
     JsonResultPayload,
+    ProviderSwitchedData,
     QuotaAbandonedData,
     QuotaPausedData,
     QuotaResumedData,
@@ -21,7 +22,15 @@ from vibesys.events import (
     UsageUpdateData,
 )
 from vibesys.run import CoreAgentEventSink, EventJournal
-from vs_agent.api import AgentEventSink, AgentQuotaError, AgentRateLimit, QuotaCondition
+from vs_agent.api import (
+    AgentEventSink,
+    AgentQuotaError,
+    AgentRateLimit,
+    Attribution,
+    ProviderSwitch,
+    QuotaCondition,
+    QuotaPlan,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -171,29 +180,26 @@ def test_a_rate_limit_report_is_recorded_with_its_resolved_exhaustion(tmp_path: 
     )
 
 
-def test_a_quota_pause_and_its_resume_are_recorded_with_the_provider_diagnostic(
+def test_a_quota_pause_and_its_resolutions_are_recorded_with_the_provider_diagnostic(
     tmp_path: Path,
 ) -> None:
     journal, sink = _attached_sink(tmp_path, "run-1")
+    where = Attribution("implementer", "round-2", "invocation-7")
 
     error = AgentQuotaError("claude", QuotaCondition.RATE_LIMITED, "429 too many", 1.5e9)
-    sink.quota_paused(
-        error,
-        resumes_at=1.6e9,
-        agent_kind="implementer",
-        round_label="round-2",
-        invocation_id="invocation-7",
+    sink.quota_paused(error, QuotaPlan("fallback", 1.6e9, "codex", "gpt-5"), where)
+    sink.quota_resumed("claude", "wait_elapsed", where)
+    sink.quota_abandoned(error, "policy", Attribution("implementer"))
+    sink.provider_switched(
+        ProviderSwitch("claude", "codex", "gpt-5", "operator", "the operator resumed"), where
     )
-    sink.quota_resumed(
-        "claude", reason="wait_elapsed", agent_kind="implementer", invocation_id="invocation-7"
-    )
-    sink.quota_abandoned(error, reason="policy", agent_kind="implementer")
 
-    paused, resumed, abandoned = journal.read()
-    assert [e.type for e in (paused, resumed, abandoned)] == [
+    paused, resumed, abandoned, switched = journal.read()
+    assert [e.type for e in (paused, resumed, abandoned, switched)] == [
         CoreEventType.QUOTA_PAUSED,
         CoreEventType.QUOTA_RESUMED,
         CoreEventType.QUOTA_ABANDONED,
+        CoreEventType.PROVIDER_SWITCHED,
     ]
     assert paused.execution_id == "invocation-7"
     assert paused.data == QuotaPausedData(
@@ -202,8 +208,18 @@ def test_a_quota_pause_and_its_resume_are_recorded_with_the_provider_diagnostic(
         detail="429 too many",
         resets_at=1.5e9,
         resumes_at=1.6e9,
+        policy="fallback",
+        fallback_provider="codex",
+        fallback_model="gpt-5",
     )
     assert resumed.data == QuotaResumedData(provider="claude", reason="wait_elapsed")
     assert abandoned.data == QuotaAbandonedData(
         provider="claude", condition="rate_limited", detail="429 too many", reason="policy"
+    )
+    assert switched.data == ProviderSwitchedData(
+        from_provider="claude",
+        to_provider="codex",
+        to_model="gpt-5",
+        reason="operator",
+        detail="the operator resumed",
     )

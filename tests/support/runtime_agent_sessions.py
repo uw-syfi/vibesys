@@ -300,6 +300,7 @@ class _RuntimeEffects:
     invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None
     agent_events: AgentEventSink = NULL_AGENT_EVENT_SINK
     capacity: CapacityHandling = field(default_factory=CapacityHandling)
+    spec: AgentSpec = field(default_factory=lambda: AgentSpec(backend=AgentBackend.STUB))
 
 
 @dataclass(frozen=True, slots=True)
@@ -340,7 +341,7 @@ def _runtime(
         workspace_resources=_WorkspaceResources(selected_root, create_candidate),
         resolve_configuration=lambda selected_role: AgentExecutionConfiguration(
             agent_id=selected_role.id,
-            spec=AgentSpec(backend=AgentBackend.STUB),
+            spec=effects.spec,
             reasoning_effort="high",
         ),
         session_store=lambda: None,

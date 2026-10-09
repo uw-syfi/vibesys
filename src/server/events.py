@@ -83,6 +83,7 @@ class EventType(StrEnum):
     QUOTA_PAUSED = "quota_paused"
     QUOTA_RESUMED = "quota_resumed"
     QUOTA_ABANDONED = "quota_abandoned"
+    PROVIDER_SWITCHED = "provider_switched"
     GATE_STARTED = "gate_started"
     GATE_FINISHED = "gate_finished"
     WORKSPACE_SNAPSHOT = "workspace_snapshot"
@@ -376,7 +377,8 @@ class QuotaPausedData(EventPayload):
     diagnostic and ``resets_at`` the epoch second the provider said capacity
     returns, when it said. The run stays paused until it resumes; ``resumes_at`` is the
     epoch second the run's quota policy resumes it by itself, ``None`` when only the
-    operator can.
+    operator can. ``policy`` is the unattended quota policy; the fallback fields name the
+    provider and model an operator may resume with, ``None`` when none is configured.
     """
 
     kind: Literal["quota_paused"] = "quota_paused"
@@ -385,6 +387,9 @@ class QuotaPausedData(EventPayload):
     detail: str
     resets_at: float | None = None
     resumes_at: float | None = None
+    policy: Literal["pause", "wait", "fail", "fallback"] = "pause"
+    fallback_provider: str | None = None
+    fallback_model: str | None = None
 
 
 class QuotaResumedData(EventPayload):
@@ -393,6 +398,22 @@ class QuotaResumedData(EventPayload):
     kind: Literal["quota_resumed"] = "quota_resumed"
     provider: str
     reason: Literal["operator", "wait_elapsed"] = "operator"
+
+
+class ProviderSwitchedData(EventPayload):
+    """The run replaced a provider by its fallback.
+
+    Sessions opened from now on run on ``to_provider`` and ``to_model`` as fresh
+    conversations; a session already open does not move. Every later event
+    carries the provider and model it actually ran on.
+    """
+
+    kind: Literal["provider_switched"] = "provider_switched"
+    from_provider: str
+    to_provider: str
+    to_model: str
+    reason: Literal["policy", "operator"]
+    detail: str
 
 
 class QuotaAbandonedData(EventPayload):
@@ -558,6 +579,7 @@ EventData = Annotated[
     | QuotaPausedData
     | QuotaResumedData
     | QuotaAbandonedData
+    | ProviderSwitchedData
     | GateStartedData
     | GateFinishedData
     | WorkspaceSnapshotData

@@ -671,6 +671,7 @@ const runEventSchema: Record<string, unknown> = {
         "quota_paused",
         "quota_resumed",
         "quota_abandoned",
+        "provider_switched",
         "gate_started",
         "gate_finished",
         "workspace_snapshot",
@@ -1143,6 +1144,51 @@ const runEventSchema: Record<string, unknown> = {
       "title": "PhaseData",
       "type": "object"
     },
+    "ProviderSwitchedData": {
+      "description": "The run replaced a provider by its fallback.\n\nSessions opened from now on run on ``to_provider`` and ``to_model`` as fresh\nconversations; a session already open does not move. Every later event\ncarries the provider and model it actually ran on.",
+      "properties": {
+        "kind": {
+          "const": "provider_switched",
+          "default": "provider_switched",
+          "title": "Kind",
+          "type": "string"
+        },
+        "from_provider": {
+          "title": "From Provider",
+          "type": "string"
+        },
+        "to_provider": {
+          "title": "To Provider",
+          "type": "string"
+        },
+        "to_model": {
+          "title": "To Model",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "policy",
+            "operator"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "from_provider",
+        "to_provider",
+        "to_model",
+        "reason",
+        "detail"
+      ],
+      "title": "ProviderSwitchedData",
+      "type": "object"
+    },
     "QuotaAbandonedData": {
       "description": "The quota policy ended a turn with the quota error instead of pausing or waiting longer.",
       "properties": {
@@ -1184,7 +1230,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "QuotaPausedData": {
-      "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or\n``rate_limited`` (sustained rate limiting); ``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes; ``resumes_at`` is the\nepoch second the run's quota policy resumes it by itself, ``None`` when only the\noperator can.",
+      "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or\n``rate_limited`` (sustained rate limiting); ``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes; ``resumes_at`` is the\nepoch second the run's quota policy resumes it by itself, ``None`` when only the\noperator can. ``policy`` is the unattended quota policy; the fallback fields name the\nprovider and model an operator may resume with, ``None`` when none is configured.",
       "properties": {
         "kind": {
           "const": "quota_paused",
@@ -1231,6 +1277,41 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Resumes At"
+        },
+        "policy": {
+          "default": "pause",
+          "enum": [
+            "pause",
+            "wait",
+            "fail",
+            "fallback"
+          ],
+          "title": "Policy",
+          "type": "string"
+        },
+        "fallback_provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Provider"
+        },
+        "fallback_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Model"
         }
       },
       "required": [
@@ -2155,6 +2236,7 @@ const runEventSchema: Record<string, unknown> = {
               "judge_result": "#/$defs/JudgeResultData",
               "output": "#/$defs/OutputData",
               "phase": "#/$defs/PhaseData",
+              "provider_switched": "#/$defs/ProviderSwitchedData",
               "quota_abandoned": "#/$defs/QuotaAbandonedData",
               "quota_paused": "#/$defs/QuotaPausedData",
               "quota_resumed": "#/$defs/QuotaResumedData",
@@ -2262,6 +2344,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/QuotaAbandonedData"
+            },
+            {
+              "$ref": "#/$defs/ProviderSwitchedData"
             },
             {
               "$ref": "#/$defs/GateStartedData"
