@@ -61,7 +61,6 @@ from vs_runtime._container_runtime_policy import (
 )
 from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
 from vs_runtime._objective_document import materialize_objective_document
-from vs_runtime._slurm_gpu_commands import gate_gpus, start_slurm_gpu_commands
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_TOOLS_ROOT,
@@ -114,9 +113,7 @@ from vs_sandbox.api.slurm import (
     SlurmCapturePlan,
     SlurmEvaluationPlan,
     SlurmExecutionPolicy,
-    SlurmGpuConfig,
     SlurmProcessBroker,
-    load_slurm_gpu_config,
     load_slurm_policy,
     trusted_profile_command,
     write_slurm_capture_plan,
@@ -201,9 +198,6 @@ class RunEnvironmentView:
     framework_setup_timeout_seconds: int = 0
     profiler_mcp_env: tuple[tuple[str, str], ...] = ()
     profiler_mcp_resources: tuple[HostResource, ...] = ()
-    # Variables and host resources every agent session of the run receives.
-    agent_env: tuple[tuple[str, str], ...] = ()
-    agent_host_resources: tuple[HostResource, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -256,7 +250,7 @@ class ModalEnvironmentFacts:
 
 @dataclass(frozen=True)
 class SlurmGpuEnvironmentFacts:
-    """Presentation facts for a host agent whose GPU processes run as Slurm jobs."""
+    """Presentation facts for an agent whose GPU processes run as Slurm jobs."""
 
     launcher: str
     max_gpus: int
@@ -547,39 +541,8 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
         """Create a host-local sandbox and its agent path view."""
         del presentation
         objective_document = _materialize_effective_objective(request)
-        requirements = request.evaluator_requirements
-        tools = requirements.tools
-        lifecycle_hooks: list[SandboxLifecycleHooks] = []
-        if tools:
-            lifecycle_hooks.append(
-                EvaluatorToolLifecycleHooks(
-                    tools,
-                    required_evaluator_tools_root(requirements, request.workspace),
-                )
-            )
-        sandbox = request.backend.make_sandbox(
-            SandboxKind.LOCAL,
-            host_workspace=str(request.workspace),
-            log_path=None,
-            bind_mounts=[],
-            extra_env={},
-            extra_init_commands=[],
-            lifecycle_hooks=lifecycle_hooks,
-        )
-        evaluation = _prepare_evaluation_plan(
-            request,
-            requirements,
-            TrustedEvaluationCommandPaths(
-                source_project_root=request.workspace,
-                runtime_project_root=str(request.workspace),
-                python_executable=sys.executable,
-                runtime_package_root=(
-                    str(requirements.package_root)
-                    if requirements.package_root is not None
-                    else None
-                ),
-            ),
-        )
+        sandbox = _make_host_sandbox(request)
+        evaluation = _host_evaluation_plan(request)
         return SandboxSession.borrowed(
             sandbox=sandbox,
             view=RunEnvironmentView(
@@ -595,6 +558,55 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
                 ),
             ),
         )
+
+
+def _make_host_sandbox(request: RunEnvironmentRequest, *, ephemeral: bool = False) -> CommandRunner:
+    """Create the host command runner, installing the task's evaluator tools on the host.
+
+    Building the runner runs its lifecycle hooks, so an *ephemeral* runner
+    that is never used still leaves the tools installed.
+    """
+    requirements = request.evaluator_requirements
+    hooks: list[SandboxLifecycleHooks] = []
+    if requirements.tools:
+        hooks.append(
+            EvaluatorToolLifecycleHooks(
+                requirements.tools,
+                required_evaluator_tools_root(requirements, request.workspace),
+            )
+        )
+    return request.backend.make_sandbox(
+        SandboxKind.LOCAL,
+        host_workspace=str(request.workspace),
+        log_path=None,
+        bind_mounts=[],
+        extra_env={},
+        extra_init_commands=[],
+        lifecycle_hooks=hooks,
+        ephemeral=ephemeral,
+    )
+
+
+def _host_evaluation_plan(request: RunEnvironmentRequest) -> TrustedEvaluationPlan:
+    """Bind the task's authored commands to the host that runs them.
+
+    The commands name host paths and the running interpreter: they execute on
+    the host (or on a cluster node that shares its filesystem), not in the
+    agent's container.
+    """
+    requirements = request.evaluator_requirements
+    return _prepare_evaluation_plan(
+        request,
+        requirements,
+        TrustedEvaluationCommandPaths(
+            source_project_root=request.workspace,
+            runtime_project_root=str(request.workspace),
+            python_executable=sys.executable,
+            runtime_package_root=(
+                str(requirements.package_root) if requirements.package_root is not None else None
+            ),
+        ),
+    )
 
 
 def _slurm_service_command(policy: SlurmExecutionPolicy) -> tuple[str, ...]:
@@ -801,66 +813,6 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         return BrokeredRunEnvironmentSession(delegate, broker) if broker is not None else delegate
 
 
-class SlurmGpuEnvironment(_NoopWorkspaceRecovery):
-    """Keep the agent on the submit host and run every GPU process as a Slurm job."""
-
-    isolated = False
-    materialize_local_model_weights = True
-    default_profiler_id = "nsys"
-    supported_profiler_ids: frozenset[str] | None = None
-    backend_image: str | None = None
-    requires_local_profiler_preflight = True
-
-    def __init__(self, config_path: Path, resources: RunResourceRequest | None = None) -> None:
-        self.config_path = config_path.expanduser()
-        self.resources = resources
-
-    def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
-        """Validate the operator limits before opening the local editor sandbox."""
-        config = load_slurm_gpu_config(self.config_path)
-        gpus = gate_gpus(config, self.resources)
-        facts = SlurmGpuEnvironmentFacts(
-            str(request.log_dir / "slurm-gpu" / "vibesys-gpu"),
-            config.max_gpus,
-            config.max_time_minutes,
-            gpus,
-        )
-        return _PreparedRunEnvironment(facts, partial(self._open, request, config, gpus))
-
-    def _open(
-        self,
-        request: RunEnvironmentRequest,
-        config: SlurmGpuConfig,
-        gpus: int,
-        presentation: RunEnvironmentPresentation,
-    ) -> RunEnvironmentSession:
-        delegate = LocalEnvironment().prepare(request).open(presentation)
-        commands = start_slurm_gpu_commands(
-            config,
-            self.config_path,
-            state_dir=request.log_dir / "slurm-gpu",
-            workspace=request.workspace,
-            worktree_roots=request.run_owned_roots,
-            project_path_policy=request.project_path_policy,
-            gpus=gpus,
-        )
-        paths = delegate.view.paths
-        delegate.view = replace(
-            delegate.view,
-            paths=replace(
-                paths,
-                accuracy_command=commands.gate_command(paths.accuracy_command),
-                benchmark_command=commands.gate_command(paths.benchmark_command),
-            ),
-            prompt_notes=presentation.prompt_notes,
-            env_kind="slurm-gpu",
-            host_device_reselect=False,
-            agent_env=commands.agent_env,
-            agent_host_resources=commands.agent_host_resources,
-        )
-        return BrokeredRunEnvironmentSession(delegate, commands.broker)
-
-
 @dataclass(frozen=True)
 class DockerEnvironmentConfig:
     """Optional image override and Docker CLI seam for the Docker run environment.
@@ -874,6 +826,23 @@ class DockerEnvironmentConfig:
     image: str | None = None
     docker: DockerCli | None = None
     build_runner: DockerBuildRunner | None = None
+
+
+@dataclass(frozen=True)
+class EditorExtras:
+    """What an environment adds to the Docker editor container it opens.
+
+    *resources* are extra mounts (a host broker's socket, say) and *env* extra
+    container variables. *same_path_workspace* mounts the workspace at its host
+    path, for an agent that shares paths with a host-owned broker.
+    *attach_accelerator* is ``False`` for an editor that holds no GPU while a
+    remote scheduler runs the GPU work.
+    """
+
+    resources: tuple[HostResource, ...] = ()
+    env: Mapping[str, str] = field(default_factory=dict)
+    same_path_workspace: bool = False
+    attach_accelerator: bool = True
 
 
 class DockerEnvironment:
@@ -915,6 +884,34 @@ class DockerEnvironment:
         self, request: RunEnvironmentRequest, presentation: RunEnvironmentPresentation
     ) -> RunEnvironmentSession:
         """Start the Docker sandbox and resolve candidate-facing paths."""
+        sandbox = self.build_editor(request)
+        return SandboxSession.start(
+            sandbox=sandbox,
+            view=RunEnvironmentView(
+                paths=_isolated_paths(
+                    request,
+                    cast("_AgentPathSandbox", sandbox),
+                    evaluator_tools_root=SANDBOX_EVALUATOR_TOOLS_ROOT,
+                ),
+                prompt_notes=presentation.prompt_notes,
+                isolated=True,
+                cli_sandboxed=True,
+                env_kind="docker",
+            ),
+        )
+
+    def build_editor(
+        self,
+        request: RunEnvironmentRequest,
+        extras: EditorExtras | None = None,
+    ) -> CommandRunner:
+        """Build, without starting, the Docker sandbox the agent edits in.
+
+        Every environment whose agent runs in Docker opens its editor here, so
+        the image, the CLI credentials, and the mounts come from one place.
+        *extras* is what an environment adds to the plain Docker editor.
+        """
+        extras = extras or EditorExtras()
         image_helpers = import_module("vs_agent.api.images")
         requirements = request.evaluator_requirements
         log: Callable[[str], None] = request.log or (lambda _: None)
@@ -933,8 +930,11 @@ class DockerEnvironment:
             toolchains=toolchains,
             command_runner=self.config.build_runner,
         )
-        workspace_root = _workspace_root(request)
-        resources, docker_symlinks = _container_mount_plan(request)
+        workspace_root = _workspace_root(request, same_path=extras.same_path_workspace)
+        resources, docker_symlinks = _container_mount_plan(
+            request, same_path=extras.same_path_workspace
+        )
+        resources += list(extras.resources)
         resources += list(
             prepare_docker_evaluator_resources(
                 requirements,
@@ -962,6 +962,7 @@ class DockerEnvironment:
         cli_provider_env.setdefault("CARGO_HOME", f"{workspace_root}/.cache/cargo")
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
+        cli_provider_env.update(extras.env)
         resources = deduplicate_host_resources(resources)
         lifecycle_hooks = symlink_lifecycle_hooks(docker_symlinks)
 
@@ -976,24 +977,13 @@ class DockerEnvironment:
             lifecycle_hooks=lifecycle_hooks,
             container_image=container_image,
             docker_in_docker=request.docker_in_docker,
-            attach_accelerator=attaches_accelerator(docker_in_docker=request.docker_in_docker),
+            same_path_workspace=extras.same_path_workspace,
+            attach_accelerator=extras.attach_accelerator
+            and attaches_accelerator(docker_in_docker=request.docker_in_docker),
             run_id=request.run_id,
         )
         log(f"[docker] starting container with image {container_image}")
-        return SandboxSession.start(
-            sandbox=sandbox,
-            view=RunEnvironmentView(
-                paths=_isolated_paths(
-                    request,
-                    cast("_AgentPathSandbox", sandbox),
-                    evaluator_tools_root=SANDBOX_EVALUATOR_TOOLS_ROOT,
-                ),
-                prompt_notes=presentation.prompt_notes,
-                isolated=True,
-                cli_sandboxed=True,
-                env_kind="docker",
-            ),
-        )
+        return sandbox
 
     def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
         """End the agents and containers a previous host process left for *run_id*."""
@@ -1687,6 +1677,7 @@ def _container_mount_plan(
     request: RunEnvironmentRequest,
     *,
     include_cli_provider_mounts: bool = True,
+    same_path: bool = False,
 ) -> tuple[list[HostResource], list[tuple[str, str]]]:
     """Build the host resources + setup symlinks for a sandbox.
 
@@ -1705,7 +1696,7 @@ def _container_mount_plan(
     bind_mounts: list[tuple[str, str, bool]] = []
     symlinks: list[tuple[str, str]] = []
     ref_dir = request.ref_dir
-    root = _workspace_root(request)
+    root = _workspace_root(request, same_path=same_path)
 
     mount_scope = SymlinkMountScope(
         workspace_root=root,
@@ -1713,7 +1704,7 @@ def _container_mount_plan(
     )
 
     if ref_dir is not None:
-        reference_container_path = _reference_container_path(request)
+        reference_container_path = _reference_container_path(request, same_path=same_path)
         collect_symlink_mounts(
             ref_dir,
             reference_container_path,
@@ -1798,12 +1789,14 @@ def _container_mount_plan(
     return resources, symlinks
 
 
-def _workspace_root(request: RunEnvironmentRequest) -> str:
+def _workspace_root(request: RunEnvironmentRequest, *, same_path: bool = False) -> str:
     """Return where the request's Docker sandbox mounts the workspace."""
-    return workspace_container_root(str(request.workspace), same_path=request.docker_in_docker)
+    return workspace_container_root(
+        str(request.workspace), same_path=request.docker_in_docker or same_path
+    )
 
 
-def _reference_container_path(request: RunEnvironmentRequest) -> str:
+def _reference_container_path(request: RunEnvironmentRequest, *, same_path: bool = False) -> str:
     """Return the reference path inside an isolated workspace.
 
     Normal project references retain their repository-relative location. An
@@ -1811,7 +1804,7 @@ def _reference_container_path(request: RunEnvironmentRequest) -> str:
     the workspace root while its external symlink targets are mounted
     separately.
     """
-    root = _workspace_root(request)
+    root = _workspace_root(request, same_path=same_path)
     if request.ref_dir is None:
         return f"{root}/reference"
     try:

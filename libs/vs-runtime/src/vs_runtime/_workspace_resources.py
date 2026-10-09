@@ -342,8 +342,8 @@ class RuntimeWorkspaceResource:
         )
 
     def _agent_environment_variables(self) -> dict[str, str]:
-        """The device pin, overridden by the variables the environment gives every agent."""
-        return {**self._environment.device.gpu_env(), **dict(self._environment.view.agent_env)}
+        """The device pin the run selected for its agents."""
+        return dict(self._environment.device.gpu_env())
 
     def _open_agent_environment(
         self, configuration: AgentExecutionConfiguration

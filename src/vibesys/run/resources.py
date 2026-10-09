@@ -605,7 +605,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         )
         if not session.view.cli_sandboxed:
             agent_host_resources = (*agent_host_resources, *_vibesys_runtime_host_resources())
-        agent_host_resources = (*agent_host_resources, *session.view.agent_host_resources)
         result = _PreparedRun(
             backend=backend,
             agent_specs=agent_specs,

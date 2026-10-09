@@ -2,27 +2,18 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import re
-import signal
-import socket
-import subprocess
 import sys
 import threading
-from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.thread_signals import non_main_thread_ids, requires_tgkill, send_to_thread
 
 from vs_sandbox.api.slurm import (
-    GPU_BROKER_SOCKET_ENV,
-    GPU_BROKER_TOKEN_ENV,
     GpuCommand,
     GpuJobRequest,
-    SlurmGpuBroker,
     SlurmGpuConfig,
     SlurmGpuConfigError,
     SlurmGpuLauncher,
@@ -30,13 +21,9 @@ from vs_sandbox.api.slurm import (
     choose_partition,
     load_slurm_gpu_config,
 )
-from vs_sandbox.api.slurm import run_brokered_gpu_command as run_brokered
-
-# test-isolation: main is the CLI entry point and is intentionally absent from the library API.
-from vs_sandbox.slurm_gpu_client import main as client_main
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping
+    from collections.abc import Mapping
     from pathlib import Path
 
 # Recorded `slurm-windows --json` output: 1-4 GPUs start now on main for up
@@ -227,245 +214,3 @@ class TestLauncher:
         ]
         assert len(scancel_lines) == 1
         assert "--me" in scancel_lines[0]
-
-
-class _RecordingLauncher:
-    """Fake launcher: records the confined command and waits for cancellation."""
-
-    def __init__(self, *, block: bool = False) -> None:
-        self.commands: list[GpuCommand] = []
-        self.requests: list[GpuJobRequest] = []
-        self.cancelled = threading.Event()
-        self._block = block
-
-    def run(
-        self,
-        request: GpuJobRequest,
-        command: GpuCommand,
-        *,
-        write: Callable[[bytes], None],
-        cancel: threading.Event,
-    ) -> int:
-        self.requests.append(request)
-        self.commands.append(command)
-        write(b"started\n")
-        if self._block and cancel.wait(10):
-            self.cancelled.set()
-        return 5
-
-
-@pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    root = tmp_path / "workspace"
-    (root / "sub").mkdir(parents=True)
-    return root
-
-
-@contextmanager
-def _serving(
-    tmp_path: Path, workspace: Path, launcher: _RecordingLauncher
-) -> Iterator[SlurmGpuBroker]:
-    broker = SlurmGpuBroker(
-        _config(tmp_path),
-        tmp_path / "gpu.sock",
-        workspaces=(workspace,),
-        worktree_roots=(tmp_path / "worktrees",),
-        wrap=lambda root, argv: ["confine", str(root), *argv],
-        launcher=launcher,
-    )
-    broker.start()
-    try:
-        yield broker
-    finally:
-        broker.close()
-
-
-class TestBroker:
-    def test_confines_the_command_and_relays_output_and_status(
-        self,
-        tmp_path: Path,
-        workspace: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsysbinary: pytest.CaptureFixture[bytes],
-    ) -> None:
-        launcher = _RecordingLauncher()
-        monkeypatch.chdir(workspace / "sub")
-        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
-        monkeypatch.setenv("KEEP_ME", "1")
-        with _serving(tmp_path, workspace, launcher) as broker:
-            _point_at(monkeypatch, broker)
-            status = run_brokered(["nvidia-smi"], gpus=4, time_minutes=9)
-
-        command = launcher.commands[0]
-        assert status == 5
-        assert capsysbinary.readouterr().out == b"started\n"
-        assert launcher.requests == [GpuJobRequest(gpus=4, time_minutes=9)]
-        assert command.argv[:2] == ("confine", str(workspace.resolve()))
-        assert command.argv[-2:] == (str((workspace / "sub").resolve()), "nvidia-smi")
-        assert command.env["KEEP_ME"] == "1"
-        assert "CUDA_VISIBLE_DEVICES" not in command.env
-
-    def test_a_candidate_worktree_is_confined_to_itself(
-        self, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        candidate = tmp_path / "worktrees" / "candidate-1"
-        (candidate / "src").mkdir(parents=True)
-        launcher = _RecordingLauncher()
-        monkeypatch.chdir(candidate / "src")
-        with _serving(tmp_path, workspace, launcher) as broker:
-            _point_at(monkeypatch, broker)
-            run_brokered(["true"], gpus=1, time_minutes=1)
-
-        assert launcher.commands[0].argv[1] == str(candidate.resolve())
-
-    @pytest.mark.parametrize(
-        ("overrides", "message"),
-        [
-            ({"token": "wrong"}, "invalid GPU broker capability"),
-            ({"cwd": "/"}, "inside the run's workspace"),
-            ({"gpus": 9}, "operator limit of 8"),
-        ],
-    )
-    def test_rejects_requests_outside_the_capability(
-        self,
-        tmp_path: Path,
-        workspace: Path,
-        overrides: Mapping[str, object],
-        message: str,
-    ) -> None:
-        launcher = _RecordingLauncher()
-        with _serving(tmp_path, workspace, launcher) as broker:
-            reply = _raw_request(
-                broker,
-                {
-                    "token": broker.token,
-                    "argv": ["true"],
-                    "cwd": str(workspace),
-                    "gpus": 1,
-                    "time_minutes": 1,
-                    "env": {},
-                    **overrides,
-                },
-            )
-
-        assert message in str(reply["error"])
-        assert launcher.commands == []
-
-    def test_closing_the_connection_cancels_the_job(self, tmp_path: Path, workspace: Path) -> None:
-        launcher = _RecordingLauncher(block=True)
-        with _serving(tmp_path, workspace, launcher) as broker:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.connect(str(broker.socket_path))
-                client.sendall(_frame(broker, workspace))
-                with client.makefile("rb") as frames:
-                    first = json.loads(frames.readline())
-            cancelled = launcher.cancelled.wait(10)
-
-        assert base64.b64decode(first["output"]) == b"started\n"
-        assert cancelled
-
-
-def _point_at(monkeypatch: pytest.MonkeyPatch, broker: SlurmGpuBroker) -> None:
-    monkeypatch.setenv(GPU_BROKER_SOCKET_ENV, str(broker.socket_path))
-    monkeypatch.setenv(GPU_BROKER_TOKEN_ENV, broker.token)
-
-
-def _frame(broker: SlurmGpuBroker, workspace: Path) -> bytes:
-    request = {
-        "token": broker.token,
-        "argv": ["true"],
-        "cwd": str(workspace),
-        "gpus": 1,
-        "time_minutes": 1,
-        "env": {},
-    }
-    return json.dumps(request).encode() + b"\n"
-
-
-def _raw_request(broker: SlurmGpuBroker, request: Mapping[str, object]) -> dict[str, object]:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.connect(str(broker.socket_path))
-        client.sendall(json.dumps(request).encode() + b"\n")
-        with client.makefile("rb") as frames:
-            return json.loads(frames.readline())
-
-
-class TestClient:
-    def test_without_a_broker_or_config_it_refuses(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        monkeypatch.delenv(GPU_BROKER_SOCKET_ENV, raising=False)
-        monkeypatch.delenv(GPU_BROKER_TOKEN_ENV, raising=False)
-        assert client_main(["--", "nvidia-smi"]) == 2
-        assert "no GPU broker" in capsys.readouterr().err
-
-    def test_on_the_host_it_runs_srun_directly(
-        self,
-        tmp_path: Path,
-        slurm_log: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsysbinary: pytest.CaptureFixture[bytes],
-    ) -> None:
-        fake = tmp_path / "fake_slurm.py"
-        fake.write_text(FAKE_SLURM)
-        config = tmp_path / "slurm-gpu.toml"
-        config.write_text(
-            '[slurm_gpu]\npartitions = ["main"]\nmax_gpus = 8\nmax_time_minutes = 60\n'
-            f'srun_command = ["{sys.executable}", "{fake}"]\n'
-        )
-        monkeypatch.delenv(GPU_BROKER_SOCKET_ENV, raising=False)
-        monkeypatch.chdir(tmp_path)
-        status = client_main(
-            ["--config", str(config), "--gpus", "8", "--time", "40", "--", "sh", "-c", "exit 7"]
-        )
-
-        assert status == 7
-        assert "--gres=gpu:8" in slurm_log.read_text()
-        assert b"partition=main" in capsysbinary.readouterr().out
-
-
-@requires_tgkill
-@pytest.mark.parametrize("number", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP])
-def test_a_stop_signal_taken_by_the_cancel_watcher_thread_still_cancels_the_job(
-    tmp_path: Path, slurm_log: Path, number: signal.Signals
-) -> None:
-    # The kernel may deliver a process signal to any thread while CPython runs
-    # handlers on the main thread only, which is blocked reading srun's output.
-    # Aim the signal at the watcher thread to force that interleaving.
-    fake = tmp_path / "fake_slurm.py"
-    fake.write_text(FAKE_SLURM)
-    config = tmp_path / "slurm-gpu.toml"
-    config.write_text(
-        '[slurm_gpu]\npartitions = ["main"]\nmax_gpus = 8\nmax_time_minutes = 60\n'
-        f'srun_command = ["{sys.executable}", "{fake}"]\n'
-        f'scancel_command = ["{sys.executable}", "{fake}"]\n'
-    )
-    env: dict[str, str] = {**os.environ, "FAKE_SLURM_LOG": str(slurm_log)}
-    env.pop(GPU_BROKER_SOCKET_ENV, None)
-    argv: list[str] = [sys.executable, "-m", "vs_sandbox.slurm_gpu_client", "--config", str(config)]
-    client = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-731950 [S603]; the test runs the real client CLI with a fixed argv.
-        # > A real signal needs a real child process.
-        [*argv, "--", "sh", "-c", "echo job-running; exec sleep 600"],
-        cwd=tmp_path,
-        env=env,
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        assert client.stdout is not None
-        # The job's first output reaches the client only after its cancel
-        # watcher started, so the thread exists and the main thread is reading.
-        while "job-running" not in (line := client.stdout.readline()):
-            assert line, "the client ended before the job produced output"
-        watchers = non_main_thread_ids(client.pid)
-        assert watchers, "the client has no watcher thread"
-        for thread_id in watchers:
-            send_to_thread(client.pid, thread_id, number)
-        # A deadlock guard only: a client that never sees the signal waits for the job.
-        client.wait(timeout=60)
-    finally:
-        client.kill()
-        client.communicate()
-
-    assert client.returncode == 128 + number
-    assert any("--name=" in line and "--me" in line for line in slurm_log.read_text().splitlines())

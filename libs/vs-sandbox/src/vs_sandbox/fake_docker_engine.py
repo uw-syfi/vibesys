@@ -101,6 +101,17 @@ class _Container:
     running: bool = True
     nested_daemon_started: bool = False
     markers: list[str] = field(default_factory=list)
+    env: dict[str, str] = field(default_factory=dict)
+
+
+def _run_env(arguments: tuple[str, ...]) -> dict[str, str]:
+    """Return the ``-e KEY=VALUE`` variables of a ``docker run``, which every exec inherits."""
+    return {
+        key: value
+        for index, argument in enumerate(arguments[:-1])
+        if argument == "-e"
+        for key, _, value in [arguments[index + 1].partition("=")]
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,7 +158,8 @@ class FakeDockerEngine:
     * ``docker run -d`` registers a container; ``stop`` and ``rm`` end it, and
       every later ``exec`` fails the way the daemon does (exit 1, the daemon
       error on stderr).
-    * ``docker exec`` runs its program locally, with the ``-e`` variables as
+    * ``docker exec`` runs its program locally, with the container's own
+      ``docker run -e`` variables and the exec's ``-e`` variables as
       environment and ``-w`` (a container path) resolved through the mounts.
       Its exit status is the program's, a signalled program reporting
       ``128 + N``.
@@ -269,7 +281,7 @@ class FakeDockerEngine:
         spec = {
             "argv": list(program),
             "cwd": str(self._host_path(container, request.workdir)),
-            "env": {**os.environ, **request.env},
+            "env": {**os.environ, **(container.env if container else {}), **request.env},
             "pidfile": str(pidfile),
         }
         return start_process_group(
@@ -298,6 +310,7 @@ class FakeDockerEngine:
         workdir = "/"
         runtime: str | None = None
         name = ""
+        env = _run_env(arguments)
         for index, argument in enumerate(arguments):
             if argument == "--name":
                 name = arguments[index + 1]
@@ -317,7 +330,7 @@ class FakeDockerEngine:
             )
             return subprocess.CompletedProcess(arguments, _RUN_ERROR_EXIT, "", stderr)
         identifier = f"fake{len(self._containers):04d}{uuid.uuid4().hex[:8]}"
-        self._containers[identifier] = _Container(mounts, workdir, name, labels, runtime)
+        self._containers[identifier] = _Container(mounts, workdir, name, labels, runtime, env=env)
         if self._runs_lost_after_creating:
             if self._runs_lost_after_creating.pop(0):
                 raise subprocess.TimeoutExpired(arguments, 0)
@@ -389,7 +402,7 @@ class FakeDockerEngine:
         completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-731012 [S603]; the fake daemon runs the exec argv a sandbox assembled, without a shell.
             request.program,
             cwd=self._host_path(container, request.workdir),
-            env={**os.environ, **request.env},
+            env={**os.environ, **container.env, **request.env},
             capture_output=True,
             text=True,
             check=False,

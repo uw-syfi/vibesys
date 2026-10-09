@@ -52,10 +52,6 @@ from vs_sandbox.slurm_gpu import (
     choose_partition,
     load_slurm_gpu_config,
 )
-from vs_sandbox.slurm_gpu_broker import SOCKET_ENV as GPU_BROKER_SOCKET_ENV
-from vs_sandbox.slurm_gpu_broker import TOKEN_ENV as GPU_BROKER_TOKEN_ENV
-from vs_sandbox.slurm_gpu_broker import SlurmGpuBroker
-from vs_sandbox.slurm_gpu_client import run_brokered as run_brokered_gpu_command
 from vs_sandbox.slurm_policy import (
     SlurmExecutionPolicy,
     SlurmPolicyError,
@@ -76,8 +72,6 @@ HOST_COMMAND_CLIENT = Path(host_command_client.__file__).resolve()
 __all__ = [
     "COMMAND_BROKER_SOCKET_ENV",
     "COMMAND_BROKER_TOKEN_ENV",
-    "GPU_BROKER_SOCKET_ENV",
-    "GPU_BROKER_TOKEN_ENV",
     "HOST_COMMAND_CLIENT",
     "PROFILE_OUTPUT_ROOT",
     "BenchmarkOutputKind",
@@ -102,7 +96,6 @@ __all__ = [
     "SlurmEvaluationPlan",
     "SlurmExecutionMetadata",
     "SlurmExecutionPolicy",
-    "SlurmGpuBroker",
     "SlurmGpuConfig",
     "SlurmGpuConfigError",
     "SlurmGpuLauncher",
@@ -123,7 +116,6 @@ __all__ = [
     "read_slurm_capture_plan",
     "read_slurm_evaluation_plan",
     "require_profile_fields",
-    "run_brokered_gpu_command",
     "run_brokered_process",
     "trusted_profile_command",
     "write_slurm_capture_plan",
