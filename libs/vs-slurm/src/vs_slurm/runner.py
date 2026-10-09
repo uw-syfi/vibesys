@@ -1122,10 +1122,10 @@ class SlurmJobRunner:
     def find_operation(self, operation_id: str) -> str | None:
         """Inspect active jobs then accounting by stable scheduler name."""
         name = shlex.quote(operation_job_name(self._config, _safe_component(operation_id)))
-        active = self._transport.exec(f"squeue -h -n {name} -o %i").stdout
-        historical = self._transport.exec(
+        active = self._read_scheduler(f"squeue -h -n {name} -o %i")
+        historical = self._read_scheduler(
             f"sacct -n -X --name {name} --starttime=1970-01-01 --format=JobIDRaw"
-        ).stdout
+        )
         ids = {
             line.strip()
             for line in (active + "\n" + historical).splitlines()
@@ -1162,9 +1162,7 @@ class SlurmJobRunner:
             if queued.phase is not SlurmPhase.COMPLETING:
                 return queued
         try:
-            accounting = self._transport.exec(
-                f"sacct -n -P -X -j {job_id} --format=State,ExitCode"
-            ).stdout
+            accounting = self._read_scheduler(f"sacct -n -P -X -j {job_id} --format=State,ExitCode")
         except SlurmError:
             # Accounting only refines what the queue said (a COMPLETING job may have
             # ended). Without it the queue reading stands; with no queue reading
@@ -1187,8 +1185,16 @@ class SlurmJobRunner:
         return queued if queued is not None else _reading("UNKNOWN")
 
     def _queue_state(self, job_id: str) -> str:
-        """The queue's line for the job; one lost read is retried, a second one raises."""
-        command = f"squeue -h -j {job_id} -o '%T|%r|%S'"
+        """The queue's line for the job."""
+        return self._read_scheduler(f"squeue -h -j {job_id} -o '%T|%r|%S'")
+
+    def _read_scheduler(self, command: str) -> str:
+        """Stdout of a read-only scheduler query; one lost read is retried, a second raises.
+
+        ``squeue`` and ``sacct`` change nothing, so repeating one is safe. Every such
+        read goes through here, so no scheduler source is the single point where one
+        dropped connection turns a known job into an unknown one.
+        """
         try:
             return self._transport.exec(command).stdout.strip()
         except SlurmError:

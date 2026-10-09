@@ -1255,6 +1255,37 @@ TestClusterContractMachine.settings = settings(
 )
 
 
+def test_resubmitting_a_cancelled_accepted_job_answers_the_same_on_a_cold_cache() -> None:
+    """Falsifying sequence the machine found at a high example budget.
+
+    The job's state is unreadable. A cancel is recorded in one local cache, then the
+    cluster is reopened over another cache that never saw it. The acceptance is on
+    record in both, so both answer ``Submitted`` and agree with FakeCluster.
+    """
+    machine = ClusterContractMachine()
+    try:
+        machine.begin(
+            scenario=_ClusterScenario(
+                active=None,
+                terminal=SlurmJobStatus.UNKNOWN,
+                lost_reply=False,
+                fault="none",
+                batch=False,
+                reason=None,
+                early_cancel=False,
+                active_observations=1,
+            )
+        )
+        machine.poll_handle_with_fresh_cache()
+        machine.cancel()
+        machine.reopen()
+        machine.submit()
+        machine.cancel()
+        machine.submit()
+    finally:
+        machine.teardown()
+
+
 @pytest.mark.parametrize("status", list(SlurmJobStatus))
 def test_complete_stage_evidence_does_not_override_aggregate_scheduler_state(
     case: _Case, status: SlurmJobStatus
