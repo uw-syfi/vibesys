@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
+from ._deadlines import bound_to_run, time_remains
 from ._evaluation_history import attempt_settled, produce_history
 from ._registry import ContractError
 from ._session_scope import dispatching_request
@@ -67,7 +68,7 @@ if TYPE_CHECKING:
     )
     from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryCursor
     from .types.intents import ChildLease, Intent, Request
-    from .types.kernel import SessionsContext, Signal, StrategyEvent
+    from .types.kernel import RunState, SessionsContext, Signal, StrategyEvent
     from .types.sessions import Invocation, SessionsState
 
 
@@ -95,7 +96,7 @@ class SuspensionRefusal(StrEnum):
     JOB_NOT_OWNED = "job_not_owned"
     """A job the suspension waits on is not one of the scope's owned jobs."""
     DEADLINE_EXCEEDED = "deadline_exceeded"
-    """The suspension's deadline is later than the run's."""
+    """The run has no time left for the suspension. A later deadline is bounded, not refused."""
 
     @property
     def detail(self) -> str:
@@ -109,7 +110,7 @@ _REFUSAL_DETAIL = {
     SuspensionRefusal.NOT_RESUMABLE: "attempt is exhausted, so its resume cannot be authorized",
     SuspensionRefusal.PREFIX_MISMATCH: "attempt resume requires exact paid-cycle history prefix",
     SuspensionRefusal.JOB_NOT_OWNED: "dependency requires exactly one job owned by the scope",
-    SuspensionRefusal.DEADLINE_EXCEEDED: "exceeds run deadline",
+    SuspensionRefusal.DEADLINE_EXCEEDED: "run has no time left",
 }
 
 
@@ -227,9 +228,17 @@ def commit_refusal_in(
         matching = tuple(row for row in owned if row.resource_id == identity)
         if len(matching) != 1 or matching[0].scope != invocation.scope:
             return SuspensionRefusal.JOB_NOT_OWNED
-    if wait.deadline_at > context.run.deadline_at:
+    if not time_remains(context.run, wait.deadline_at):
         return SuspensionRefusal.DEADLINE_EXCEEDED
     return None
+
+
+def bounded_wait(run: RunState, wait: Continuation) -> Continuation:
+    """``wait`` with its deadline bounded to the run, the form every gate and row sees."""
+    deadline = bound_to_run(run, wait.deadline_at)
+    return (
+        wait if deadline == wait.deadline_at else wait.model_copy(update={"deadline_at": deadline})
+    )
 
 
 def wait_refusal_in(
@@ -631,8 +640,6 @@ def _validate_new(
         raise ContractError(("continuation", "invocation"), "requires current active ownership")
     if any(job.scope != invocation.scope for job in _jobs(state, continuation)):
         raise ContractError(("continuation", "jobs"), "dependency belongs to a different scope")
-    if continuation.deadline_at > context.run.deadline_at:
-        raise ContractError(("continuation", "deadline_at"), "exceeds run deadline")
     if refusal := commit_refusal_in(context, state, invocation, continuation):
         raise ContractError(("continuation", "invocation"), refusal.detail)
     if any(
@@ -931,7 +938,7 @@ def _publication_history(
 def _suspend(
     state: EvaluationState, context: EvaluationContext, event: TurnSuspended
 ) -> AreaChange[EvaluationState]:
-    continuation = event.continuation
+    continuation = bounded_wait(context.run, event.continuation)
     previous = next(
         (row for row in state.continuations if row.continuation_id == continuation.continuation_id),
         None,
