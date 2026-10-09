@@ -1,6 +1,6 @@
 """Bind pure profiler policy to product configuration and host preflight."""
 
-from vibesys.composition import agent_spec_from_config, resolve_agent_driver
+from vibesys.composition import agent_spec_from_config
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
@@ -81,7 +81,6 @@ def resolve_run_profiler(
             model=config.model.name,
         )
         if not agent_driver_supports_tool_servers(agent_spec):
-            driver_name = resolve_agent_driver(config)
             definition = profiler_definition(resolved)
             raise ConfigurationError(
                 ConfigurationDiagnostic(
@@ -89,8 +88,9 @@ def resolve_run_profiler(
                     stage="agent_capability_validation",
                     message=(
                         f"Profiler {resolved.value!r} requires agent tool server "
-                        f"{definition.mcp_name!r}, but agent driver {driver_name.value!r} does not "
-                        "support agent tool servers. Select agent.driver='agentshim' or "
+                        f"{definition.mcp_name!r}, but agent backend "
+                        f"{agent_spec.backend.value!r} does not support agent tool "
+                        "servers. Select the 'cli' agent backend or "
                         "disable profiling with --profiler none."
                     ),
                 )

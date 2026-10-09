@@ -290,7 +290,7 @@ def _factory_closed_error() -> RuntimeError:
 
 def _agent_driver(value: str) -> AgentDriver:
     """Validate a wire-supplied driver against the public closed set."""
-    if value not in ("agentshim", "omnigent"):
+    if value != "agentshim":
         message = f"auxiliary agent driver is unavailable: {value!r}"
         raise ValueError(message)
     return value

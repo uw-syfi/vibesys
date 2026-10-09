@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.composition import resolve_agent_driver, resolve_agent_specs
+from vibesys.composition import resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.inputs import (
     InputBundle,
@@ -74,7 +74,6 @@ __all__ = [
     "load_project_task",
     "make_run_environment_spec",
     "repository_name_from_experiment",
-    "resolve_agent_driver",
     "resolve_skill_source_dirs",
     "run_environment_record",
     "supported_profilers",

@@ -203,9 +203,8 @@ Use the guide that matches the surface you are adding:
 - [Update CLI flags and combinations](../cli-flags.md) when changing the user
   facing command contract.
 
-The experimental Omnigent adapter is a developer-facing alternative to the
-standard CLI adapter. It currently supports Claude and Codex on the host path
-only; see the [agent driver guide](agent-drivers.md) before enabling it.
+See the [agent driver guide](agent-drivers.md) before changing how agents are
+launched.
 
 Keep target-specific APIs, ABIs, ownership rules, and service protocols in the
 task's `CANDIDATE_CONTRACT.md` or design documentation rather than in the

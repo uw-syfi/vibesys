@@ -932,7 +932,7 @@ def test_direct_run_rejects_unmaterialized_workspace_source(tmp_path: Path) -> N
         _create_context(project, evaluator=evaluator, workspace_sources=(source,))
 
 
-def test_omnigent_accepts_active_profiler_configuration(tmp_path: Path) -> None:
+def test_cli_backend_accepts_active_profiler_configuration(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     manifest = project / "vibesys.input.toml"
@@ -942,7 +942,6 @@ def test_omnigent_accepts_active_profiler_configuration(tmp_path: Path) -> None:
     configuration = _options().model_copy(
         update={
             "agent_backend": "cli",
-            "agent_driver": "omnigent",
             "cli_provider": "codex",
             "profiler": "otel",
         }
@@ -955,7 +954,7 @@ def test_omnigent_accepts_active_profiler_configuration(tmp_path: Path) -> None:
         config=Config.model_validate(
             {
                 "model": {"name": "gpt-test"},
-                "agent": {"backend": "cli", "driver": "omnigent", "cli_provider": "codex"},
+                "agent": {"backend": "cli", "cli_provider": "codex"},
             }
         ),
         profiler_kind=ProfilerKind.OTEL,

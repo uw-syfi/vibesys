@@ -104,7 +104,6 @@ def auxiliary_agent_drivers() -> tuple[AuxiliaryAgentDriver, ...]:
             driver="agentshim",
             providers=("claude", "codex", "gemini", "opencode"),
         ),
-        AuxiliaryAgentDriver(driver="omnigent", providers=("claude", "codex")),
     )
 
 

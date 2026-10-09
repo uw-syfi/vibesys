@@ -47,7 +47,7 @@ def test_public_names_all_resolve() -> None:
 
 
 def test_importing_api_does_not_load_agent_backends() -> None:
-    """``import vs_agent.api`` must not pull in agentshim/omnigent.
+    """``import vs_agent.api`` must not pull in agentshim.
 
     Checked in a fresh interpreter because other tests in this session may have
     already imported those backends, polluting this process's ``sys.modules``.
@@ -55,8 +55,7 @@ def test_importing_api_does_not_load_agent_backends() -> None:
     code = (
         "import sys, vs_agent.api\n"
         "leaked = sorted(m for m in sys.modules "
-        "if m == 'agentshim' or m == 'omnigent' "
-        "or m.startswith(('agentshim.', 'omnigent.')))\n"
+        "if m == 'agentshim' or m.startswith('agentshim.'))\n"
         "assert not leaked, leaked\n"
         "print('clean')\n"
     )

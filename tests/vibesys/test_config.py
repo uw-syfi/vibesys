@@ -253,13 +253,11 @@ class TestLoadConfigAgentSection:
 name = "claude-sonnet-4-6"
 
 [agent]
-driver = "omnigent"
 backend = "cli"
 cli_provider = "claude"
 cli_timeout = 1800
 """)
         config = load_config(cfg_file)
-        assert config.agent.driver == "omnigent"
         assert config.agent.cli_timeout == 1800
         assert config.agent.backend == "cli"
         assert config.agent.cli_provider == "claude"
@@ -268,22 +266,25 @@ cli_timeout = 1800
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
         config = load_config(cfg_file)
-        assert config.agent.driver is None
         assert config.agent.backend is None
         assert config.agent.cli_provider is None
         assert config.agent.cli_timeout is None
 
-    def test_unknown_agent_driver_is_rejected(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("driver", ["omnigent", "agentshim", "unknown"])
+    def test_removed_agent_driver_key_is_rejected_naming_the_key(
+        self, tmp_path: Path, driver: str
+    ) -> None:
+        """AgentShim is the only driver, so any value of the old key is an error."""
         cfg_file = tmp_path / "agent.toml"
-        cfg_file.write_text("""\
+        cfg_file.write_text(f"""\
 [model]
 name = "claude-sonnet-4-6"
 
 [agent]
-driver = "unknown"
+driver = "{driver}"
 """)
 
-        with pytest.raises(ValueError, match="driver"):
+        with pytest.raises(ValueError, match=r"agent\.driver: this key was removed"):
             load_config(cfg_file)
 
     @pytest.mark.parametrize("cli_timeout", [0, -1])

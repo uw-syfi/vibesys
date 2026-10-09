@@ -20,7 +20,7 @@ from vibesys.api.request import validate_run_request as _validate_run_request
 from vibesys.api.store import open_run_store as _open_run_store
 from vibesys.api.wiring import SessionImplementations
 from vibesys.api.wiring import create_session as _create_session
-from vs_agent.api import AgentInvocationState, agent_catalog, build_agent_client
+from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState, build_agent_client
 from vs_project.api import generate_run_id
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.wiring import InProcessRuns
@@ -104,9 +104,10 @@ def create_session(
                 else selected.invocation_store_factory
             ),
             agent_tool_bindings=AGENT_TOOL_BINDINGS,
-            agent_drivers=tuple(
-                AuxiliaryAgentDriver(driver=info.driver.value, providers=info.providers)
-                for info in agent_catalog().values()
+            agent_drivers=(
+                AuxiliaryAgentDriver(
+                    driver="agentshim", providers=tuple(sorted(SHIPPED_PROVIDERS))
+                ),
             ),
         ),
     )

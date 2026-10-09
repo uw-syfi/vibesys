@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from vibesys.api.store import RunRecord
 
-AgentDriver = Literal["agentshim", "omnigent"]
+AgentDriver = Literal["agentshim"]
 
 
 class AuxiliaryAgentDriver(BaseModel):

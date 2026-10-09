@@ -29,10 +29,6 @@ dependencies = [
     "pyyaml>=6",
     "python-dotenv>=1.0.1",
     "openevolve==0.3.1",
-    # Agent driver selected with `[agent].driver = "omnigent"`. A fast-moving
-    # alpha, pinned exactly; carried in the base dependencies so every install
-    # can run omnigent-configured projects without an extra.
-    "omnigent==0.10.0",
 ]
 
 [project.urls]

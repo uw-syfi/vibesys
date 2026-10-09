@@ -107,7 +107,10 @@ class RunExecutionRecord(_CommittedManifest):
 
     model: PortableText
     agent_backend: PortableText
-    agent_driver: PortableText | None = None
+    #: Read-only legacy field: runs created while a second agent driver existed
+    #: recorded it. New runs omit it. Only the surviving driver is accepted, so
+    #: a manifest naming a removed driver fails validation naming this key.
+    agent_driver: Literal["agentshim"] | None = None
     cli_provider: PortableText | None = None
     cli_timeout: Annotated[int, Field(gt=0)] | None = None
     compute_backend: PortableText

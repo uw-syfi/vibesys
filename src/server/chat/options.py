@@ -56,9 +56,7 @@ _OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
 # the escape hatch for anything not named here.
 #
 # The codex and claude slugs mirror the release-curated alias catalogs those
-# CLIs ship (``omnigent.model_fallbacks``). They are duplicated rather than
-# imported because ``omnigent`` is an optional extra and this query has to
-# answer without it installed. Gemini ships no curated list here, so its group
+# CLIs ship. Gemini ships no curated list here, so its group
 # offers the free-text entry alone rather than guessed slugs.
 _SUGGESTED_MODELS: dict[str, tuple[str, ...]] = {
     "codex": ("gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.5"),

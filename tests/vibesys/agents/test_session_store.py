@@ -460,7 +460,7 @@ def test_checkpoint_from_a_different_spec_is_refused_and_dropped(tmp_path: Path)
 def test_a_refused_adoption_drops_the_checkpoint(tmp_path: Path) -> None:
     store = _store(tmp_path)
     _checkpoint(store, "thread-1")
-    # A driver whose provider cannot resume (omnigent today) reports False.
+    # A driver whose provider cannot resume reports False.
     session = _FakeSession(results=[AgentTurnResult("fresh")], adopts=False)
     client = AgentClient(_FakeDriver([session]), session_store=store)
 

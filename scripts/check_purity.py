@@ -422,7 +422,7 @@ PURE_REQUEST_APIS = (
     "vs_sandbox.api.requests",
     "vs_slurm.api.requests",
 )
-IMPLEMENTATIONS = frozenset({"docker", "modal", "slurm", "claude-code", "omnigent"})
+IMPLEMENTATIONS = frozenset({"docker", "modal", "slurm", "claude-code"})
 BUILTINS = frozenset(vars(builtins)) - PURE_BUILTINS
 LEGACY_SCOPE = (
     "src/vibesys/orchestration",
