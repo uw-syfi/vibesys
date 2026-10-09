@@ -55,6 +55,8 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
+from . import fake_shell
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
@@ -317,9 +319,12 @@ def _executing_exec(state: Path, command: str) -> tuple[int, str, str]:
             record.write_text("CANCELLED 0:0", encoding="utf-8")
         (state / CANCELLED_FILE).touch()
         return 0, "", ""
+    interpreted = fake_shell.run(command)
+    if interpreted is not None:
+        return interpreted
     # lint-waiver: LW-140002 [S603]; the executing cluster's remote shell is
-    # > the local one, so production staging programs run unchanged; parsing
-    # > them instead would fake their semantics.
+    # > the local one, so production staging programs run unchanged; only the
+    # > small filesystem vocabulary that ``fake_shell`` interprets skips ``bash``.
     completed = subprocess.run(  # noqa: S603
         ("/bin/bash", "-c", command), check=False, capture_output=True, text=True
     )

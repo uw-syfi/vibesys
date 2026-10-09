@@ -55,6 +55,16 @@ class FakeRunClock:
     limit: float | None = None
     _crash_armed: bool = False
     _aftermath: Callable[[], None] | None = None
+    _time_waiters: list[asyncio.Future[None]] = field(default_factory=list, repr=False)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        """Wake the heartbeat whenever logical time is set, by ``sleep`` or by a scenario."""
+        super().__setattr__(name, value)
+        if name == "at" and "_time_waiters" in self.__dict__:  # not during construction
+            waiters, self._time_waiters = self._time_waiters, []
+            for waiter in waiters:
+                if not waiter.done():
+                    waiter.set_result(None)
 
     def crash_on_next_clock_call(self, *, aftermath: Callable[[], None] | None = None) -> None:
         """Kill the simulated host at the loop's next clock read or wait, after what it committed.
@@ -87,7 +97,8 @@ class FakeRunClock:
     async def sleep(self, seconds: float) -> None:
         """Let background work finish, then advance logical time instead of waiting.
 
-        The lease heartbeat waits for logical time that others advance: it only yields.
+        The lease heartbeat waits for logical time that others advance: it parks until ``at``
+        changes instead of spinning the event loop while a worker thread runs.
 
         Waiting is bounded to ``SETTLE_TURNS`` event-loop turns. A task that is waiting on
         time itself (another sleeper, or a controller that awaits one) cannot finish until
@@ -97,7 +108,9 @@ class FakeRunClock:
         """
         current = asyncio.current_task()
         if current is not None and current.get_name() == HEARTBEAT_TASK:
-            await asyncio.sleep(0)
+            waiter = asyncio.get_running_loop().create_future()
+            self._time_waiters.append(waiter)
+            await waiter
             return
         if current is not None and current.get_name() == WAIT_TASK:
             # The loop sleeps beside running requests and a real sleep would end when one
