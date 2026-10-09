@@ -29,6 +29,7 @@ from vs_evaluation.api import (
     EvaluationFailed,
     EvaluationRequest,
     EvidenceKind,
+    ProfileField,
     StoredEvaluation,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
@@ -122,6 +123,7 @@ class ScenarioSpec:
     unit: str | None = None
     partial: PartialMeasurement | None = None
     trusted_plan: TrustedEvaluationPlan | None = None
+    required_profile_fields: tuple[ProfileField, ...] = ()
 
 
 def capture_projection(spec: ScenarioSpec, producer: Producer = Producer.DIRECT) -> AgentEvaluation:
@@ -252,6 +254,7 @@ class EvaluationScenario:
             self.spec.kinds,
             scope_id=self.spec.scope_id if self.spec.same_handle else "other",
             own=self._schedule_fault,
+            required_profile_fields=self.spec.required_profile_fields,
         )
         await _finish(self.backend, submitted.handle_id)
         return submitted
@@ -473,7 +476,11 @@ async def build_scenario(
         _script_direct(run, spec)
         pending = run.evaluation.gate("benchmark", 0) if spec.pending_benchmark else None
         submission = await backend.submit_revision_evidence(
-            revision, spec.kinds, scope_id=spec.scope_id, own=own
+            revision,
+            spec.kinds,
+            scope_id=spec.scope_id,
+            own=own,
+            required_profile_fields=spec.required_profile_fields,
         )
         if pending is None:
             await _finish(backend, submission.handle_id)

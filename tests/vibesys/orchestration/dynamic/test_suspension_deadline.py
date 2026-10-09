@@ -593,6 +593,7 @@ async def _drive(
     dependency = continuation.dependencies[0]
     identity = dependency.model_dump(exclude={"candidate_revision"})
     if mode == "cancel":
+        assert continuation.deadline_at_s is not None
         await shell.apply(
             EvaluationObserved(
                 continuation_id=continuation.continuation_id,

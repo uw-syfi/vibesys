@@ -468,6 +468,7 @@ class _ProductHostFactory:
                         label="profiler-agent-dispatch",
                     ),
                     resolve_evidence=backend.resolve_profile_evidence,
+                    prepare_request=backend.prepare_profiler_request,
                     events=self._profiler_lifecycle_event,
                 ),
             )

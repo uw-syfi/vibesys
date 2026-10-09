@@ -45,3 +45,9 @@ Implement and run the cheapest checks that cover the changed behavior. Use `cont
 only for a concrete next step in the same mechanism. Use `nominated` only when the
 candidate is ready for independent review and framework gates. Return only schema-valid
 JSON.
+
+After dispatch_profiler returns an operation_id, suspend this turn by returning
+`{"kind":"waiting_for_profiler","handles":["<operation_id>"]}`.
+The host resumes this session once after success or failure with the complete
+profiler result. profiler_status is a nonblocking observation; do not poll it.
+Only profiler operations owned by this implementer may be named.

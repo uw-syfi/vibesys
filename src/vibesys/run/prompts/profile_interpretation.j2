@@ -1,0 +1,11 @@
+Interpret existing framework profile evidence for this question. This is an interpretation-only request.
+Do not collect another raw profile or submit another evaluation for facts this capture already supplies.
+Existing evaluation handle: `{{ capture.handle_id }}` ({{ capture.state.value }}).
+Trusted evidence IDs: {% for evidence_id in capture.evidence_ids %}`{{ evidence_id }}`{% if not loop.last %}, {% endif %}{% endfor %}.
+Existing capture result:
+{{ capture.model_dump_json() }}
+
+If another measurement is necessary, request it only for facts absent from this capture,
+and supply `additional_capture_reason` with `kind="missing_facts"`, this `source_handle`,
+and a nonempty list of the `missing_facts`. Interpret the existing evidence first.
+Question: {{ request }}

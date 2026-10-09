@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentSessionCheckpoint, AgentSessionKey, InvocationOutcome
     from vs_core.api import Limits, OperationRegistration, RevisionRef, SchemaRef, Strategy
     from vs_core.api import RunFacts as CoreRunFacts
-    from vs_evaluation.api import EvaluationSettlements
+    from vs_evaluation.api import EvaluationSettlements, ProfilerOperation
     from vs_project.api import OrchestrationDescriptor, StateModels
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._agent_evaluation import AgentEvaluationPolicy
@@ -988,14 +988,26 @@ class CandidateProfile(BaseModel):
     revision: str = Field(min_length=1)
     status: CandidateProfileStatus
     operation_id: str | None = Field(default=None, min_length=1)
+    # Framework-owned provenance. None means unknown (including older saved
+    # outcomes), which must retain the scheduling charge. A report's lack of
+    # citations does not prove that no capture ran.
+    capture_started: bool | None = None
     diagnosis: str | None = None
     missing_fields: tuple[ProfileField, ...] = ()
     components: tuple[CandidateProfileComponent, ...] = ()
     evidence_ids: tuple[str, ...] = ()
     failure: str | None = Field(default=None, min_length=1)
 
+    @property
+    def unsupported_before_capture(self) -> bool:
+        """Prove unsupported was decided before capture from framework provenance."""
+        return self.status is CandidateProfileStatus.UNSUPPORTED and self.capture_started is False
+
     @model_validator(mode="after")
     def _failure_iff_failed(self) -> CandidateProfile:
+        if self.capture_started is False and self.evidence_ids:
+            message = "profile evidence requires a capture to have started"
+            raise ValueError(message)
         if self.missing_fields and self.status is not CandidateProfileStatus.UNSUPPORTED:
             message = "missing profile fields require unsupported status"
             raise ValueError(message)
@@ -1086,6 +1098,30 @@ class Evaluation(Protocol):
         self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
     ) -> None:
         """Reject foreign, inactive, or non-evaluation handles with EvaluationAgentAccessError."""
+        ...
+
+    async def profiler_operation(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> ProfilerOperation:
+        """Read an owned profiler operation from durable host state."""
+        ...
+
+    async def wait_profiler(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> ProfilerOperation:
+        """Suspend until terminal completion; cancellation preserves the operation."""
+        ...
+
+    async def cancel_profiler(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> None:
+        """Cancel an owned profiler operation idempotently."""
+        ...
+
+    async def validate_profiler_wait(
+        self, handles: tuple[str, ...], *, principal_id: str, scope_id: str | None
+    ) -> None:
+        """Reject unknown operations and other principals' operations."""
         ...
 
     async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:

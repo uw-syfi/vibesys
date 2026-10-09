@@ -18,7 +18,7 @@ for the original submitted candidate, not a measurement of later workspace edits
 - Handle: `{{ result.handle_id }}`
   {{ "Observation" if result.status == "timed_out" else "Terminal" }} status: {{ result.status }}
   Submitted candidate revision: `{{ result.candidate_revision }}`
-  Evaluator identity: `{{ result.evaluator_revision }}`
+  {{ "Profiler request identity" if result.dependency_kind == "profiler" else "Evaluator identity" }}: `{{ result.evaluator_revision }}`
   Evidence IDs: {{ result.evidence_ids | tojson }}
   Artifact references: {{ result.artifact_refs | tojson }}
   Trusted {% if result.status == "timed_out" %}timeout observation{% else %}terminal result{% endif %}:
@@ -47,3 +47,11 @@ is needed, submit it and immediately end this turn with only
 First call `validate_evaluation_wait` with all handles. A rejected handle is a
 tool error: correct it and continue the turn. Profiler operation IDs and
 another principal’s evaluations do not authorize waiting.
+{% if role == 'implementer' %}
+
+After dispatch_profiler returns an operation_id, suspend this turn by returning
+`{"kind":"waiting_for_profiler","handles":["<operation_id>"]}`.
+The host resumes this session once after success or failure with the complete
+profiler result. profiler_status is a nonblocking observation; do not poll it.
+Only profiler operations owned by this implementer may be named.
+{% endif %}

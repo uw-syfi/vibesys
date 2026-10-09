@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         EvaluationSettlementObservation,
         EvaluationSettlements,
         OwnedEvaluationDependencies,
+        ProfilerOperation,
         StoredEvaluation,
         TrustedEvidence,
     )
@@ -229,6 +230,34 @@ class _StopGatedEvaluation:
         self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
     ) -> None:
         await self._inner.validate_wait(handles, scope_id=scope_id, principal_id=principal_id)
+
+    async def profiler_operation(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> ProfilerOperation:
+        return await self._inner.profiler_operation(
+            operation_id, principal_id=principal_id, scope_id=scope_id
+        )
+
+    async def wait_profiler(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> ProfilerOperation:
+        return await self.until_stop(
+            self._inner.wait_profiler(operation_id, principal_id=principal_id, scope_id=scope_id)
+        )
+
+    async def cancel_profiler(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> None:
+        await self._inner.cancel_profiler(
+            operation_id, principal_id=principal_id, scope_id=scope_id
+        )
+
+    async def validate_profiler_wait(
+        self, handles: tuple[str, ...], *, principal_id: str, scope_id: str | None
+    ) -> None:
+        await self._inner.validate_profiler_wait(
+            handles, principal_id=principal_id, scope_id=scope_id
+        )
 
     async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
         return await self._inner.submitted_generation(handle_id, scope_id=scope_id)

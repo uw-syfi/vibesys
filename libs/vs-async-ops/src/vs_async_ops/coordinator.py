@@ -235,6 +235,17 @@ class OperationCoordinator:
                 raise OperationObservationTimeoutError(operation_id) from None
             return OperationTimedOut(record=record)
 
+    async def wait_result(self, operation_id: str) -> OperationHandle:
+        """Observe terminal completion without observational polling or replay."""
+        await self.start()
+        while True:
+            event = self._changed.setdefault(operation_id, asyncio.Event())
+            event.clear()
+            record = await self.status(operation_id)
+            if record.state.terminal:
+                return record
+            await event.wait()
+
     async def cancel(self, operation_id: str) -> OperationHandle:
         """Request cancellation and durably make the operation terminal."""
         await self.start()

@@ -16,7 +16,12 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
-from vs_evaluation.api import AccessErrorCode, EvaluationAgentAccessError, TrustedEvidence
+from vs_evaluation.api import (
+    AccessErrorCode,
+    EvaluationAgentAccessError,
+    ProfilerOperation,
+    TrustedEvidence,
+)
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -370,6 +375,30 @@ class _EvaluationAdapter:
         del handles, scope_id, principal_id
         message = "agent evaluation tools are unavailable"
         raise RuntimeContractError(message)
+
+    async def profiler_operation(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> ProfilerOperation:
+        del operation_id, principal_id, scope_id
+        raise EvaluationAgentAccessError(AccessErrorCode.PROFILER_DENIED)
+
+    async def wait_profiler(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> ProfilerOperation:
+        return await self.profiler_operation(
+            operation_id, principal_id=principal_id, scope_id=scope_id
+        )
+
+    async def cancel_profiler(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> None:
+        await self.profiler_operation(operation_id, principal_id=principal_id, scope_id=scope_id)
+
+    async def validate_profiler_wait(
+        self, handles: tuple[str, ...], *, principal_id: str, scope_id: str | None
+    ) -> None:
+        del handles, principal_id, scope_id
+        raise EvaluationAgentAccessError(AccessErrorCode.PROFILER_DENIED)
 
     async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
         """No agent submission exists without the evaluation tool."""

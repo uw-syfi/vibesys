@@ -36,6 +36,7 @@ from vs_evaluation.models import (
     EvaluationState,
     EvaluationStepResult,
     ExecutorObservation,
+    ProfileField,
     ResourceRequirements,
     ReuseStatus,
     StoredEvaluation,
@@ -271,6 +272,7 @@ class FakeEvaluationExecutor:
     cost_class: CostClass = CostClass.UNKNOWN
     fresh_for_s: float = 60.0
     supported_evidence_kinds: tuple[str, ...] = ()
+    supported_profile_fields: tuple[ProfileField, ...] = ()
     supported_capabilities: tuple[str, ...] = ()
     auto_cancel: bool = True
     fail_cancel_once: bool = False
@@ -306,6 +308,7 @@ class FakeEvaluationExecutor:
             observed_at=self.clock.monotonic(),
             fresh_for_s=self.fresh_for_s,
             supported_evidence_kinds=self.supported_evidence_kinds,
+            supported_profile_fields=self.supported_profile_fields,
             supported_capabilities=self.supported_capabilities,
         )
 

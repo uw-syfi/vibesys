@@ -825,3 +825,64 @@ async def test_dispatch_profiles_a_named_revision_instead_of_the_scope_snapshot(
     assert completed.operation.state is ProfilerOperationState.COMPLETED
     (observed,) = await service.project_run()
     assert (observed.principal_id, observed.candidate_snapshot_id) == ("profile-a", "rev-a")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["unsupported", "failed", "canceled"])
+async def test_profiler_host_wait_uses_terminal_signal_and_durable_result(
+    terminal: str, tmp_path: Path
+) -> None:
+    """A deterministic timeout waiter cannot make the host dependency poll."""
+    provision = FakeProfilerTurnProvision()
+    service = _service(tmp_path, provision, options=_ServiceOptions(timeout_immediately=True))
+    dispatched = await service.dispatch(
+        principal_id="owner",
+        scope_id="workspace",
+        request="Explain decode phases",
+        work=_WORK,
+        session_id=None,
+        candidate_snapshot_id="snapshot:workspace",
+    )
+    operation = dispatched.operation_id
+    await provision.wait_started(operation)
+    waiting = asyncio.create_task(service.wait_result(operation, "owner", "workspace"))
+    if terminal == "unsupported":
+        provision.unsupported(operation, "required measurement absent")
+        expected = ProfilerOperationState.COMPLETED
+    elif terminal == "failed":
+        # Unknown citations are a real service boundary failure, rather than a mocked result.
+        provision.complete(operation, evidence_ids=("f" * 64,))
+        expected = ProfilerOperationState.FAILED
+    else:
+        await service.cancel(operation, "owner", "workspace")
+        expected = ProfilerOperationState.CANCELED
+    result = await waiting
+    assert result.state is expected
+    await service.close()
+    restarted = _service(tmp_path, provision, options=_ServiceOptions(timeout_immediately=True))
+    assert (await restarted.wait_result(operation, "owner", "workspace")).state is expected
+    assert len(provision.turns) == 1
+    with pytest.raises(ProfilerAgentAccessError):
+        await restarted.wait_result(operation, "other-owner", "workspace")
+    await restarted.close()
+
+
+@pytest.mark.asyncio
+async def test_framework_capture_requires_configured_profiler_request_preparation(
+    tmp_path: Path,
+) -> None:
+    """A supplied evidence handle must never fall back to a collection request."""
+    provision = FakeProfilerTurnProvision()
+    service = _service(tmp_path, provision)
+    with pytest.raises(ValueError, match="capture_handle requires configured request preparation"):
+        await service.dispatch(
+            principal_id="implementer",
+            scope_id="candidate",
+            request="Interpret this profile.",
+            work=_WORK,
+            session_id=None,
+            candidate_snapshot_id="captured-candidate",
+            capture_handle="existing-profile-capture",
+        )
+    assert not provision.turns
+    await service.close()

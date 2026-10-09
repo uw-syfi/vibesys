@@ -153,6 +153,7 @@ class _ProfilerPayload(BaseModel):
     candidate_snapshot_id: str
     provision_identity: str
     idempotency_key: str | None = None
+    capture_handle: str | None = None
 
 
 class _StoredOperationIndex(BaseModel):
@@ -257,6 +258,9 @@ class _NamespaceOperationStore:
         return f"{_STATE_DIRECTORY}/{operation_id}.json"
 
 
+type _RequestPreparer = Callable[[str | None, str, str, str | None], Awaitable[str]]
+
+
 class _ProfilerRunner:
     def __init__(
         self,
@@ -264,16 +268,26 @@ class _ProfilerRunner:
         resolve_evidence: Callable[
             [str, str | None, str, tuple[str, ...]], Awaitable[tuple[TrustedEvidence, ...]]
         ],
+        prepare_request: _RequestPreparer | None,
     ) -> None:
         self._provision = provision
         self._resolve_evidence = resolve_evidence
+        self._prepare_request = prepare_request
 
     async def run(self, request: OperationRequest) -> JsonValue:
         payload = _ProfilerPayload.model_validate(request.payload)
+        prepared = payload.request
+        if self._prepare_request is not None:
+            prepared = await self._prepare_request(
+                payload.scope_id,
+                payload.candidate_snapshot_id,
+                payload.request,
+                payload.capture_handle,
+            )
         result = await self._provision.run_turn(
             session_id=request.concurrency_key,
             operation_id=request.operation_id,
-            request=payload.request,
+            request=prepared,
             scope_id=payload.scope_id,
             candidate_snapshot_id=payload.candidate_snapshot_id,
         )
@@ -312,6 +326,7 @@ class ProfilerAgentServiceHooks:
     ]
     waiter: OperationWaiter | None = None
     events: Callable[[ProfilerLifecycleEvent], None] | None = None
+    prepare_request: _RequestPreparer | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,6 +338,7 @@ class _IdempotencyLookup:
     session_id: str | None
     key: str
     provision_identity: str
+    capture_handle: str | None
 
 
 @dataclass(slots=True)
@@ -352,6 +368,7 @@ class ProfilerAgentService:
         self._provision = provision
         self._events = hooks.events
         self._candidate_snapshot = hooks.candidate_snapshot
+        self._prepare_request = hooks.prepare_request
         self._start_lock = asyncio.Lock()
         self._dispatch_locks: dict[tuple[str, str | None, str], _DispatchLockEntry] = {}
         self._started = False
@@ -359,7 +376,7 @@ class ProfilerAgentService:
         store = _NamespaceOperationStore(namespace, terminal_retention)
         self._store = store
         self._coordinator = OperationCoordinator(
-            _ProfilerRunner(provision, hooks.resolve_evidence)
+            _ProfilerRunner(provision, hooks.resolve_evidence, hooks.prepare_request)
             if provision is not None
             else _UnavailableRunner(),
             store,
@@ -378,6 +395,7 @@ class ProfilerAgentService:
         session_id: str | None,
         idempotency_key: str | None = None,
         candidate_snapshot_id: str | None = None,
+        capture_handle: str | None = None,
     ) -> ProfilerDispatchedReply:
         """Create or resume a conversation and return before its turn completes.
 
@@ -386,6 +404,9 @@ class ProfilerAgentService:
         """
         if self._provision is None:
             raise ProfilerAgentUnavailableError
+        if capture_handle is not None and self._prepare_request is None:
+            message = "profiler capture_handle requires configured request preparation"
+            raise ValueError(message)
         await self._ensure_started()
         if idempotency_key is not None:
             deduplication_scope = (principal_id, scope_id, idempotency_key)
@@ -399,6 +420,7 @@ class ProfilerAgentService:
                         session_id=session_id,
                         key=idempotency_key,
                         provision_identity=self._provision.identity,
+                        capture_handle=capture_handle,
                     )
                 )
                 if existing is not None:
@@ -411,6 +433,7 @@ class ProfilerAgentService:
                     session_id=session_id,
                     idempotency_key=idempotency_key,
                     candidate_snapshot_id=candidate_snapshot_id,
+                    capture_handle=capture_handle,
                 )
         return await self._dispatch_new(
             principal_id=principal_id,
@@ -420,6 +443,7 @@ class ProfilerAgentService:
             session_id=session_id,
             idempotency_key=None,
             candidate_snapshot_id=candidate_snapshot_id,
+            capture_handle=capture_handle,
         )
 
     @asynccontextmanager
@@ -445,6 +469,7 @@ class ProfilerAgentService:
         session_id: str | None,
         idempotency_key: str | None,
         candidate_snapshot_id: str | None,
+        capture_handle: str | None,
     ) -> ProfilerDispatchedReply:
         """Snapshot and durably submit one operation after deduplication."""
         if self._provision is None:
@@ -477,6 +502,7 @@ class ProfilerAgentService:
                     candidate_snapshot_id=candidate_snapshot_id,
                     provision_identity=self._provision.identity,
                     idempotency_key=idempotency_key,
+                    capture_handle=capture_handle,
                 ).model_dump(mode="json"),
             )
         )
@@ -499,6 +525,7 @@ class ProfilerAgentService:
                 continue
             if (
                 payload.request != lookup.request
+                or payload.capture_handle != lookup.capture_handle
                 or payload.work != lookup.work
                 or payload.provision_identity != lookup.provision_identity
                 or (
@@ -553,6 +580,15 @@ class ProfilerAgentService:
         records = await self._coordinator.records()
         selected = records if limit is None else records[-limit:]
         return tuple(_run_observation(record) for record in selected)
+
+    async def wait_result(
+        self, operation_id: str, principal_id: str, scope_id: str | None
+    ) -> ProfilerOperation:
+        """Suspend a host observer until one owned operation reaches a terminal state."""
+        del scope_id
+        await self._ensure_started()
+        self._require_owner(await self._coordinator.status(operation_id), principal_id)
+        return _operation(await self._coordinator.wait_result(operation_id), include_result=True)
 
     async def await_result(
         self,

@@ -62,6 +62,7 @@ from vs_evaluation.api import (
     EvidenceReply,
     ExecutorObservation,
     FilesystemEvaluationStore,
+    ProfileField,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
     ProfilerStatusCall,
@@ -121,11 +122,18 @@ class _SemanticBackend:
         kinds: tuple[EvidenceKind, ...],
         *,
         own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
+        required_profile_fields: tuple[ProfileField, ...] = (),
     ) -> SubmittedSemanticEvaluation:
         async with self._submissions.track(scope_id):
             content = scope_id or "root"
             request, submitted = await capture_submission(
-                ScenarioSpec(revision=content, patch=content, scope_id=scope_id, kinds=kinds)
+                ScenarioSpec(
+                    revision=content,
+                    patch=content,
+                    scope_id=scope_id,
+                    kinds=kinds,
+                    required_profile_fields=required_profile_fields,
+                )
             )
             await self._coordinator.prepare(request)
             await own(submitted)
@@ -1496,3 +1504,17 @@ async def test_same_scope_cached_submission_preserves_first_admission_order(tmp_
         second.handle_id,
         third.handle_id,
     )
+
+
+def test_dynamic_profiler_caller_is_offered_yield_and_nonblocking_status(tmp_path: Path) -> None:
+    """The dynamic caller cannot spend worker time on profiler polling tools."""
+    tools = build_evaluation_tools(
+        socket_path=tmp_path / "service.sock",
+        token="x" * 32,
+        role=EvaluationAgentRole.IMPLEMENTER,
+        profiler_available=True,
+        evaluation_suspension=True,
+    )
+    names = {tool.name for tool in tools}
+    assert {"dispatch_profiler", "profiler_status"} <= names
+    assert not {"await_profiler", "await_evaluation"} & names

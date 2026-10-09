@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
@@ -35,16 +37,22 @@ from vibesys.orchestration.dynamic.models import (
     DynamicWorkstream,
     ImplementerResult,
     WaitingForEvaluation,
+    WaitingForProfiler,
     WorkstreamBudget,
     WorkstreamPhase,
     WorkstreamPlan,
 )
+from vibesys.orchestration.dynamic.transitions import dependency_wait
 from vibesys.run.dynamic_suspension import (
     EvaluationSuspension,
     EvaluationSuspensionInvariantError,
     EvaluationSuspensionUnresolvedError,
 )
-from vibesys.run.evaluation_backend import SemanticEvaluationStage, agent_evaluation
+from vibesys.run.evaluation_backend import (
+    EvidenceReusingEvaluation,
+    SemanticEvaluationStage,
+    agent_evaluation,
+)
 from vs_agent.api import (
     AgentClient,
     AgentExecutionPolicy,
@@ -56,6 +64,7 @@ from vs_agent.api import (
 from vs_agent.api.testing import FakeAgentSessions, FakeDriver
 from vs_evaluation.api import (
     ContentDigest,
+    EvaluationAgentAccessError,
     EvaluationAgentRole,
     EvaluationRequest,
     EvaluationState,
@@ -67,14 +76,29 @@ from vs_evaluation.api import (
     FailureKind,
     OwnedEvaluationDependencies,
     PartialMeasurement,
+    ProfilerAgentService,
+    ProfilerAgentServiceHooks,
+    ProfilerOperationState,
+    ProfilerWorkKey,
+    ProfilerWorkPurpose,
     StageState,
     SubmitCall,
     SubmittedReply,
     TrustedEvidence,
+    evaluation_principal,
 )
-from vs_evaluation.api.testing import FakeEvaluationSettlements
+from vs_evaluation.api.testing import (
+    FakeEvaluationSettlements,
+    FakeProfilerTurnProvision,
+    InMemoryEvaluationNamespace,
+)
 from vs_runtime.api import AgentToolBindingContext, RuntimeContractError
 from vs_runtime.api.infrastructure import TrustedEvaluationPlan
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from vs_runtime.api import Run
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -1127,3 +1151,257 @@ async def _assert_pending_park(
         await shell.reopen_evaluation_wait(continuation_id, ())
     assert state.workstreams[0].phase is WorkstreamPhase.PARKED
     assert len(calls) == initial_calls
+
+
+@dataclass
+class _HeldProfiler:
+    run: FakeRun
+    runtime: Run
+    state: DynamicState
+    workspace: CandidateWorkspace
+    session: AgentSession
+    client: AgentClient
+    provision: FakeProfilerTurnProvision
+    service: ProfilerAgentService
+    operation_id: str
+    calls: list[AgentTurnRequest]
+    wait_started: asyncio.Event
+    shell: EvaluationSuspension
+
+    def reload_shell(self) -> EvaluationSuspension:
+        """Rebind the shell to the reloaded durable state and its commit boundary."""
+
+        async def commit(label: str) -> None:
+            await self.run.state.commit(self.state, label=label)
+            if label.endswith("DispatchIntent") and any(
+                intent.kind is IntentKind.OBSERVE and intent.stage is IntentStage.DISPATCHED
+                for intent in self.state.lifecycle.intents.values()
+            ):
+                self.wait_started.set()
+
+        return EvaluationSuspension(self.runtime, self.state, asyncio.Lock(), commit)
+
+
+@asynccontextmanager
+async def _held_profiler(tmp_path: Path, *, production: bool) -> AsyncIterator[_HeldProfiler]:
+    run = baseline_run(tmp_path, Script({}))
+    revision = await run.workspaces.root.snapshot("root")
+    workspace = await run.workspaces.create_candidate(revision, member_id="held")
+    assert workspace.id is not None
+    calls: list[AgentTurnRequest] = []
+    session, client = await _session(
+        run,
+        tmp_path,
+        {"summary": "Profile checked", "outcome": "continue", "next_step": "Done"},
+        calls.append,
+        workspace,
+    )
+    digest = ContentDigest.sha256(b"trusted profile capture")
+    evidence = TrustedEvidence(
+        evidence_id="a" * 64,
+        evaluation_id="captured",
+        stage_name=EvidenceKind.PROFILE.value,
+        kind=EvidenceKind.PROFILE,
+        outcome=EvidenceOutcome.OBSERVED,
+        fingerprints=EvidenceFingerprints(
+            candidate=digest, evaluator=digest, workload=digest, environment=digest
+        ),
+        trusted_inputs=digest,
+        accepted_round=0,
+    )
+
+    async def snapshot(_scope: str | None) -> str:
+        return revision
+
+    async def resolve(
+        _principal: str, _scope: str | None, _snapshot: str, ids: tuple[str, ...]
+    ) -> tuple[TrustedEvidence, ...]:
+        return (evidence,) if ids == (evidence.evidence_id,) else ()
+
+    provision = FakeProfilerTurnProvision()
+    service = ProfilerAgentService(
+        provision,
+        InMemoryEvaluationNamespace(),
+        ProfilerAgentServiceHooks(candidate_snapshot=snapshot, resolve_evidence=resolve),
+    )
+    run.evaluation.profiler_service = service
+    effects = (
+        profile_release_effects(
+            tmp_path,
+            run,
+            plan=TrustedEvaluationPlan(
+                accuracy_timeout_seconds=60, framework_setup_timeout_seconds=30
+            ),
+        )
+        if production
+        else None
+    )
+    runtime = (
+        replace(
+            effects.run,
+            evaluation=EvidenceReusingEvaluation(
+                run.evaluation,
+                effects.backend,
+                run_id=run.run_id,
+                scopes=effects.service,
+                profiler=service,
+            ),
+        )
+        if effects is not None
+        else run
+    )
+    principal = evaluation_principal(EvaluationAgentRole.IMPLEMENTER, "held", workspace.id)
+    dispatched = await service.dispatch(
+        principal_id=principal,
+        scope_id=workspace.id,
+        request="Interpret the existing profile",
+        work=ProfilerWorkKey(purpose=ProfilerWorkPurpose.TARGETED_DIAGNOSTIC, focus="phase-costs"),
+        session_id=None,
+        candidate_snapshot_id=revision,
+    )
+    await provision.wait_started(dispatched.operation_id)
+    invocation = "held/implementer/1"
+    state = _retry_state(invocation, revision)
+    wait_started = asyncio.Event()
+
+    async def commit(label: str) -> None:
+        await run.state.commit(state, label=label)
+        if label.endswith("DispatchIntent") and any(
+            intent.kind is IntentKind.OBSERVE and intent.stage is IntentStage.DISPATCHED
+            for intent in state.lifecycle.intents.values()
+        ):
+            wait_started.set()
+
+    shell = EvaluationSuspension(runtime, state, asyncio.Lock(), commit)
+    shell.cursors.record(invocation_id=invocation, workspace_id=workspace.id, preceding_handles=())
+    scenario = _HeldProfiler(
+        run,
+        runtime,
+        state,
+        workspace,
+        cast("AgentSession", session),
+        client,
+        provision,
+        service,
+        dispatched.operation_id,
+        calls,
+        wait_started,
+        shell,
+    )
+    try:
+        yield scenario
+    finally:
+        await service.close()
+        if effects is not None:
+            await effects.close()
+        await session.close()
+        await workspace.discard()
+        client.close()
+        await run.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result", [ProfilerOperationState.COMPLETED, ProfilerOperationState.FAILED]
+)
+@pytest.mark.parametrize("restart", [False, True], ids=["uninterrupted", "restart-while-waiting"])
+@pytest.mark.parametrize("production", [False, True], ids=["fake", "production"])
+async def test_profiler_wait_suspends_once_and_resumes_once(
+    tmp_path: Path, result: ProfilerOperationState, *, restart: bool, production: bool
+) -> None:
+    async with _held_profiler(tmp_path, production=production) as scenario:
+        shell = scenario.shell
+        await shell.yield_turn(
+            0,
+            scenario.workspace,
+            scenario.session,
+            WaitingForProfiler(kind="waiting_for_profiler", handles=(scenario.operation_id,)),
+        )
+        continuation = next(iter(scenario.state.lifecycle.continuations.values()))
+        # Replaying the same durable yield is one logical profiler wait.
+        await shell.apply(dependency_wait(continuation))
+        initial_calls = len(scenario.calls)
+        budget = scenario.state.workstreams[0].budget
+        task = asyncio.create_task(shell.run_wait(0, scenario.workspace, scenario.session))
+        barrier = asyncio.create_task(scenario.wait_started.wait())
+        done, _ = await asyncio.wait({task, barrier}, return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            barrier.cancel()
+            await task
+        assert not task.done()
+        assert len(scenario.calls) == initial_calls
+        assert scenario.state.workstreams[0].budget == budget
+        assert len(scenario.provision.turns) == 1
+        if restart:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            loaded = await scenario.run.state.load(DynamicState)
+            assert loaded is not None
+            scenario.state = loaded
+            shell = scenario.reload_shell()
+            task = asyncio.create_task(shell.run_wait(0, scenario.workspace, scenario.session))
+        scenario.provision.complete(
+            scenario.operation_id,
+            evidence_ids=("a" * 64,) if result is ProfilerOperationState.COMPLETED else ("b" * 64,),
+        )
+        reply, resumed_operation = await task
+        assert isinstance(reply, ImplementerResult)
+        assert len(scenario.calls) == initial_calls + 1
+        assert scenario.calls[-1].expected_provider_session_id == (
+            scenario.session.checkpoint().provider_session_id
+        )
+        assert scenario.operation_id in scenario.calls[-1].message
+        assert f'"state":"{result.value}"' in scenario.calls[-1].message
+        assert len(scenario.provision.turns) == 1
+        assert scenario.state.workstreams[0].budget == budget
+        assert len(scenario.state.lifecycle.continuations) == 1
+        assert (
+            sum(
+                intent.kind is IntentKind.RESUME
+                for intent in scenario.state.lifecycle.intents.values()
+            )
+            == 1
+        )
+        assert (
+            sum(
+                call.message.startswith("dynamic profiler wait:")
+                for call in scenario.run.observations.calls
+            )
+            == 1
+        )
+        # Completing the provider continuation durably prevents replay on restart.
+        await shell.apply(CompleteIntent(operation_id=resumed_operation))
+        loaded = await scenario.run.state.load(DynamicState)
+        assert loaded is not None
+        scenario.state = loaded
+        restarted = scenario.reload_shell()
+        with pytest.raises(EvaluationSuspensionUnresolvedError, match="no dispatch authority"):
+            await restarted.run_wait(0, scenario.workspace, scenario.session)
+        assert len(scenario.calls) == initial_calls + 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("production", [False, True], ids=["fake", "production"])
+async def test_a_profiler_wait_cannot_name_another_principals_operation(
+    tmp_path: Path, *, production: bool
+) -> None:
+    async with _held_profiler(tmp_path, production=production) as scenario:
+        foreign = await scenario.service.dispatch(
+            principal_id="another-implementer",
+            scope_id=scenario.workspace.id,
+            request="Interpret a different question",
+            work=ProfilerWorkKey(purpose=ProfilerWorkPurpose.TARGETED_DIAGNOSTIC, focus="foreign"),
+            session_id=None,
+            candidate_snapshot_id=scenario.state.workstreams[0].parent_revision,
+        )
+        before = scenario.state.model_dump_json()
+        with pytest.raises(EvaluationAgentAccessError):
+            await scenario.shell.yield_turn(
+                0,
+                scenario.workspace,
+                scenario.session,
+                WaitingForProfiler(kind="waiting_for_profiler", handles=(foreign.operation_id,)),
+            )
+        assert scenario.state.model_dump_json() == before
+        assert not scenario.state.lifecycle.continuations

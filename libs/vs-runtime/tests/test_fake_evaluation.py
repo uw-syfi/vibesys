@@ -186,6 +186,7 @@ def test_a_fake_that_cannot_profile_reports_every_profile_unsupported(script: li
     assert asyncio.run(evaluation.can_profile()) is False
     profile = asyncio.run(evaluation.profile("rev", "q", member_id="p"))
     assert profile.status is CandidateProfileStatus.UNSUPPORTED
+    assert profile.capture_started is False
     assert profile.revision == "rev"
     assert asyncio.run(FakeEvaluation(profiling_supported=True).can_profile()) is True
 

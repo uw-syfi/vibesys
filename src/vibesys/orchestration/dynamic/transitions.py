@@ -16,6 +16,7 @@ from vibesys.orchestration.dynamic.lifecycle import (
     CancelEvaluation,
     CompleteIntent,
     ContinuationStatus,
+    DependencyContinuation,
     DispatchIntent,
     EvaluationContinuation,
     EvaluationEvidenceId,
@@ -31,6 +32,7 @@ from vibesys.orchestration.dynamic.lifecycle import (
     LifecycleRequest,
     NonnegativeSeconds,
     PrepareIntent,
+    ProfilerDependency,
     RecoveryStarted,
     ResumeAgentTurn,
     TimedOut,
@@ -102,6 +104,11 @@ class WorkerAwaitingEvaluation(BaseModel):
     continuation: EvaluationContinuation
 
 
+def dependency_wait(continuation: DependencyContinuation) -> WorkerAwaitingEvaluation:
+    """Build the product wait event from a validated typed dependency continuation."""
+    return WorkerAwaitingEvaluation(continuation=continuation)
+
+
 class EvaluationSettled(BaseModel):
     """Trusted observation, attributed to its immutable evidence identity."""
 
@@ -132,6 +139,18 @@ class EvaluationSettled(BaseModel):
             message = "evidence_ids must be unique"
             raise ValueError(message)
         return ids
+
+
+class ProfilerSettled(BaseModel):
+    """Trusted terminal operation observation bound to the yielded principal."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["profiler_settled"] = "profiler_settled"
+    continuation_id: str
+    handle: str
+    principal_id: str
+    request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    outcome: EvaluationOutcome
 
 
 class EvaluationObserved(BaseModel):
@@ -199,6 +218,7 @@ type EnvelopeEvent = (
     | AttemptBoundReached
     | WorkerAwaitingEvaluation
     | EvaluationSettled
+    | ProfilerSettled
     | EvaluationObserved
     | DeadlineReached
     | EvaluationInspected
@@ -220,6 +240,7 @@ def step(
         case (
             WorkerAwaitingEvaluation()
             | EvaluationSettled()
+            | ProfilerSettled()
             | EvaluationObserved()
             | DeadlineReached()
             | EvaluationInspected()
@@ -249,6 +270,7 @@ def _suspension_event(
     state: DynamicState,
     event: WorkerAwaitingEvaluation
     | EvaluationSettled
+    | ProfilerSettled
     | EvaluationObserved
     | DeadlineReached
     | EvaluationInspected
@@ -264,8 +286,12 @@ def _suspension_event(
                     **event.model_dump(exclude={"kind"}), outcome=EvaluationOutcome.UNKNOWN
                 ),
             )
-        case EvaluationSettled():
-            return _evaluation_settled(state, event)
+        case EvaluationSettled() | ProfilerSettled():
+            return (
+                _profiler_settled(state, event)
+                if isinstance(event, ProfilerSettled)
+                else _evaluation_settled(state, event)
+            )
         case DeadlineReached():
             return _deadline_reached(state, event)
         case EvaluationInspected():
@@ -501,7 +527,7 @@ def _await_evaluations(
 
 
 def _validate_yielded_turn(
-    state: DynamicState, continuation: EvaluationContinuation, yielded: LifecycleIntent
+    state: DynamicState, continuation: DependencyContinuation, yielded: LifecycleIntent
 ) -> None:
     if yielded.kind is IntentKind.RESUME:
         previous = state.lifecycle.continuations.get(yielded.continuation_id or "")
@@ -515,6 +541,29 @@ def _validate_yielded_turn(
     if yielded.stage is not IntentStage.DISPATCHED:
         message = "continuation requires a dispatched yielded turn"
         raise EvaluationContinuationError(message)
+
+
+def _profiler_settled(
+    state: DynamicState, event: ProfilerSettled
+) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
+    continuation = state.lifecycle.continuations.get(event.continuation_id)
+    if continuation is None or event.handle in continuation.settlements:
+        return state, ()
+    dependency = next(
+        (item for item in continuation.dependencies if item.handle == event.handle), None
+    )
+    if (
+        not isinstance(dependency, ProfilerDependency)
+        or (dependency.principal_id, dependency.request_digest)
+        != (event.principal_id, event.request_digest)
+        or event.outcome is EvaluationOutcome.UNKNOWN
+    ):
+        return state, ()
+    continuation = continuation.model_copy(
+        update={"settlements": {**continuation.settlements, event.handle: event.outcome}}
+    )
+    state = _store_continuation(state, continuation)
+    return _prepare_resume(state, continuation) if continuation.settled else (state, ())
 
 
 def _evaluation_settled(
@@ -536,6 +585,7 @@ def _evaluation_settled(
     )
     if (
         dependency is None
+        or isinstance(dependency, ProfilerDependency)
         or (
             dependency.candidate_digest,
             dependency.evaluator_digest,
@@ -554,7 +604,7 @@ def _evaluation_settled(
         return state, ()
     continuation = _observed_progress(continuation, event)
     state = _store_continuation(state, continuation)
-    if event.at_s >= continuation.deadline_at_s:
+    if continuation.deadline_at_s is not None and event.at_s >= continuation.deadline_at_s:
         return _deadline_reached(
             state,
             DeadlineReached(
@@ -585,9 +635,9 @@ def _evaluation_settled(
 
 
 def _observed_progress(
-    continuation: EvaluationContinuation,
+    continuation: DependencyContinuation,
     event: EvaluationSettled,
-) -> EvaluationContinuation:
+) -> DependencyContinuation:
     if event.outcome is not EvaluationOutcome.UNKNOWN:
         return continuation
     previous = continuation.progress.get(event.handle)
@@ -611,7 +661,7 @@ def _observed_progress(
     )
 
 
-def _store_continuation(state: DynamicState, continuation: EvaluationContinuation) -> DynamicState:
+def _store_continuation(state: DynamicState, continuation: DependencyContinuation) -> DynamicState:
     state.lifecycle = state.lifecycle.model_copy(
         update={
             "continuations": {
@@ -630,6 +680,7 @@ def _deadline_reached(
     continuation = state.lifecycle.continuations.get(event.continuation_id)
     if (
         continuation is None
+        or continuation.deadline_at_s is None
         or event.at_s < continuation.deadline_at_s
         or continuation.ready_to_resume
         or not continuation_pending(state.lifecycle, event.continuation_id)
@@ -711,7 +762,7 @@ def _deadline_reached(
 
 
 def _evaluation_intent(
-    continuation: EvaluationContinuation,
+    continuation: DependencyContinuation,
     index: int,
     kind: IntentKind,
 ) -> LifecycleIntent:
@@ -787,7 +838,7 @@ def _evaluation_inspected(
 
 
 def _prepare_resume(
-    state: DynamicState, continuation: EvaluationContinuation
+    state: DynamicState, continuation: DependencyContinuation
 ) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
     state.lifecycle, _ = ledger_step(
         state.lifecycle, CompleteIntent(operation_id=f"{continuation.continuation_id}/observe")
@@ -880,7 +931,7 @@ def _reopen_evaluation_wait(
 
 
 def _activate_continuation(
-    state: DynamicState, continuation: EvaluationContinuation
+    state: DynamicState, continuation: DependencyContinuation
 ) -> DynamicState:
     intents = dict(state.lifecycle.intents)
     resume_id = f"{continuation.continuation_id}/resume"

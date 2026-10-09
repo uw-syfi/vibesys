@@ -50,7 +50,7 @@ def _submit_profile(agent: Turn) -> dict[str, object]:
 
 
 def _trusted_profile(agent: Turn) -> dict[str, object]:
-    """Read the host-settled profile evidence in the resumed conversation."""
+    """Interpret the framework's completed capture in the first profiler turn."""
     records = tuple(
         TrustedEvidence.model_validate(record) for record in agent.accepted_evidence("profile")
     )
@@ -60,6 +60,7 @@ def _trusted_profile(agent: Turn) -> dict[str, object]:
     assert evidence.semantic_summary is not None
     assert "queue_step holds 75%" in evidence.semantic_summary
     assert evidence.evidence_id in agent.prompt
+    assert f"Existing evaluation handle: `{evidence.evaluation_id}`" in agent.prompt
     return {
         "outcome": "observed",
         "narrative": "queue_step holds 75% of device time.",
@@ -86,7 +87,7 @@ def test_a_profile_on_slurm_produces_trusted_evidence_that_reaches_the_next_plan
         )
         .implement("A", below_gate)
         .judge("A", PASS)
-        .profile(_submit_profile, _trusted_profile)
+        .profile(_trusted_profile)
         .implement("B", edit_to(3, "B"))
         .judge("B", PASS)
     )
@@ -110,9 +111,10 @@ def test_a_profile_on_slurm_produces_trusted_evidence_that_reaches_the_next_plan
     assert row["status"] == "observed"
     assert row["evidence_ids"] == list(profile.outcome.evidence_ids)
     profiler_prompts = agents.prompts(PROFILER.id)
-    assert len(profiler_prompts) == 2
+    assert len(profiler_prompts) == 1
     assert "Where does A spend its time?" in profiler_prompts[0]
-    assert "Every evaluation you" in profiler_prompts[1]
+    assert "interpretation-only request" in profiler_prompts[0]
+    assert "Existing evaluation handle:" in profiler_prompts[0]
 
 
 def test_a_profile_whose_workload_cannot_run_fails_without_a_profiler_turn(

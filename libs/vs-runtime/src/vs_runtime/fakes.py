@@ -23,6 +23,9 @@ from vs_evaluation.api import (
     EvaluationAgentAccessError,
     EvaluationAgentState,
     EvidenceFingerprints,
+    ProfilerAgentAccessError,
+    ProfilerAgentService,
+    ProfilerOperation,
     ScopeLifecycleStore,
     ScopeRelease,
     StoredEvaluation,
@@ -1354,6 +1357,7 @@ class FakeEvaluation:
     current_receipt_context: EvidenceFingerprints | None = None
     submitted_revisions: dict[str, str] = field(default_factory=dict)
     profiler_revisions: dict[str, str] = field(default_factory=dict)
+    profiler_service: ProfilerAgentService | None = None
     wait_authorization: Callable[..., Awaitable[None]] | None = None
     submitted_generations: dict[tuple[str, str], int] = field(default_factory=dict)
     submitted_deadlines: dict[str, float] = field(default_factory=dict)
@@ -1463,6 +1467,7 @@ class FakeEvaluation:
             return CandidateProfile(
                 revision=revision,
                 status=CandidateProfileStatus.UNSUPPORTED,
+                capture_started=False,
                 diagnosis="this run's evaluation executor cannot produce evidence kind: profile",
             )
         missing = tuple(
@@ -1472,6 +1477,7 @@ class FakeEvaluation:
             return CandidateProfile(
                 revision=revision,
                 status=CandidateProfileStatus.UNSUPPORTED,
+                capture_started=False,
                 missing_fields=missing,
                 diagnosis="configured capture does not supply required fields",
             )
@@ -1559,6 +1565,43 @@ class FakeEvaluation:
             principal_id=principal_id,
             generation=generation,
         )
+
+    def _require_profiler(self) -> ProfilerAgentService:
+        if self.profiler_service is None:
+            raise EvaluationAgentAccessError(AccessErrorCode.PROFILER_DENIED)
+        return self.profiler_service
+
+    async def profiler_operation(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> ProfilerOperation:
+        """Read through the same owned profiler service used by production."""
+        return (
+            await self._require_profiler().status(operation_id, principal_id, scope_id)
+        ).operation
+
+    async def wait_profiler(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> ProfilerOperation:
+        """Suspend on the provision-controlled completion barrier."""
+        return await self._require_profiler().wait_result(operation_id, principal_id, scope_id)
+
+    async def cancel_profiler(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> None:
+        """Cancel through the authoritative lifecycle service."""
+        await self._require_profiler().cancel(operation_id, principal_id, scope_id)
+
+    async def validate_profiler_wait(
+        self, handles: tuple[str, ...], *, principal_id: str, scope_id: str | None
+    ) -> None:
+        """Apply the production profiler principal-ownership checks."""
+        for handle in handles:
+            try:
+                await self.profiler_operation(handle, principal_id=principal_id, scope_id=scope_id)
+            except (ProfilerAgentAccessError, KeyError) as error:
+                raise EvaluationAgentAccessError(
+                    AccessErrorCode.HANDLE_DENIED, str(error)
+                ) from error
 
     async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
         """Read the scripted requester generation after checking recorded association history."""

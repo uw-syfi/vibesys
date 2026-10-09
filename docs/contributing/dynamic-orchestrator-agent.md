@@ -698,11 +698,23 @@ fresh session or blindly replaying.
 
 Deferred scope: single, multi and evolve have no direct bounded-wait calls in their
 fixed agents at this head; their framework-owned measurement paths are unchanged.
-Dynamic and shared profiler grants, and custom callers without the durable-turn
-capability, retain the bounded evaluation API. `await_profiler` is a separate
-delegated-agent lifecycle and remains available.
+Custom callers without the durable-turn capability retain bounded evaluation waits.
+Dynamic implementers suspend with `waiting_for_profiler`, naming operation IDs owned
+by their principal. The operation is a typed durable dependency: one terminal success
+or failure authorizes one continuation. They receive nonblocking `profiler_status`
+and no `await_profiler` polling tool.
 
 Production restart currently rotates the evaluation grant token. The session
 checkpoint fingerprint includes that token and can reject the retained checkpoint.
 Fixing that dependency is required for end-to-end production restart; this rollout
 provides no fresh-session fallback.
+
+The dynamic policy persists waits through `DependencyContinuation`, a strict typed
+contract covering either evaluation captures or owned profiler operations. It replaces
+the evaluation-only authority while preserving historical serialized evaluation waits.
+`EvaluationContinuation` remains a source compatibility alias until retained consumers
+migrate to the generic name; it has no separate definition or durable representation.
+The canonical `vs_core.Continuation` owns the generic kernel lifecycle, but does not
+carry this policy's capture fingerprints, accepted evidence identifiers, retained WIP,
+and profiler principal/request digest bindings. Adapting that kernel contract requires
+a separate migration; this change leaves `libs/vs-core` untouched.
