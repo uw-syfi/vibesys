@@ -579,6 +579,35 @@ def _install_chained_handler(sig: signal.Signals, handler) -> None:  # noqa: ANN
     signal.signal(sig, lambda signum, frame: _SERIAL_HANDLERS.submit(lambda: _run(signum, frame)))
 
 
+def _signal_self(sig: signal.Signals) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(os.getpid(), sig)
+
+
+def _run_auto_window(
+    *,
+    delay_s: float,
+    duration_s: float | None,
+    wait: Callable[[float], bool],
+    send: Callable[[signal.Signals], None],
+) -> None:
+    """Self-trigger one window: wait ``delay_s``, signal start, wait ``duration_s``, signal stop.
+
+    ``wait(seconds)`` returns True when the process is exiting, which ends the
+    schedule without further signals. The clock and the signal delivery are
+    parameters so the schedule can be checked without real time: the duration
+    runs from the start *signal*, not from the moment the handler begins the
+    profiler, so the signal and its handler are not ordered by any clock.
+    """
+    if delay_s > 0 and wait(delay_s):
+        return
+    _log("sending SIGUSR1 (start)")
+    send(signal.SIGUSR1)
+    if duration_s is not None and not wait(duration_s):
+        _log("sending SIGUSR2 (stop, duration_s elapsed)")
+        send(signal.SIGUSR2)
+
+
 def _arm(capture: _Capture, *, delay_s: float, duration_s: float | None, trigger: str) -> None:
     """Install signal handlers and start the readiness watcher.
 
@@ -609,15 +638,9 @@ def _arm(capture: _Capture, *, delay_s: float, duration_s: float | None, trigger
                 os.kill(os.getpid(), signal.SIGUSR1)
         if trigger != _TRIGGER_AUTO:
             return
-        if delay_s > 0 and stop_event.wait(delay_s):
-            return
-        _log("sending SIGUSR1 (start)")
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(os.getpid(), signal.SIGUSR1)
-        if duration_s is not None and not stop_event.wait(duration_s):
-            _log("sending SIGUSR2 (stop, duration_s elapsed)")
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(os.getpid(), signal.SIGUSR2)
+        _run_auto_window(
+            delay_s=delay_s, duration_s=duration_s, wait=stop_event.wait, send=_signal_self
+        )
 
     # Handlers first, so the watcher's own SIGUSR1 can never hit the
     # inherited default disposition.

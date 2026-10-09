@@ -24,6 +24,7 @@ from hypothesis import strategies as st
 from tests.vibesys.loops.torch_inject_fixtures import INJECT_DIR
 
 if TYPE_CHECKING:
+    import signal
     from collections.abc import Callable
 
 _OPS = ("ready", "start", "stop")
@@ -163,3 +164,50 @@ def test_capture_matches_reference_model(inject_module: types.ModuleType, ops: l
         for ack in exported:
             assert len(list(ack.parent.glob("*.pt.trace.json.gz"))) == 1
         assert not (root / "default").exists(), "a named window fell back to the default dir"
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    delay_s=st.floats(0.0, 10.0, allow_nan=False, allow_infinity=False),
+    duration_s=st.one_of(st.none(), st.floats(0.0, 10.0, allow_nan=False, allow_infinity=False)),
+    exit_at=st.integers(0, 3),
+)
+def test_the_auto_window_schedule_waits_exactly_the_configured_times(
+    inject_module: types.ModuleType, delay_s: float, duration_s: float | None, exit_at: int
+) -> None:
+    """Start follows the delay, stop follows the duration from the start signal, in that order.
+
+    A virtual clock stands in for ``Event.wait``: it records each requested wait
+    and reports the process exiting at the ``exit_at``-th wait (3 means never).
+    Properties: waits are exactly the configured delay (only if positive) then
+    duration (only if set); SIGUSR1 precedes SIGUSR2; no signal follows an exit.
+    """
+    events: list[tuple[str, float | str]] = []
+
+    def wait(seconds: float) -> bool:
+        events.append(("wait", seconds))
+        return sum(1 for kind, _ in events if kind == "wait") - 1 == exit_at
+
+    def send(sig: signal.Signals) -> None:
+        events.append(("send", sig.name))
+
+    inject_module._run_auto_window(  # noqa: SLF001  # LW-920471; the standalone injected script's schedule function is private by design
+        delay_s=delay_s, duration_s=duration_s, wait=wait, send=send
+    )
+
+    expected: list[tuple[str, float | str]] = []
+    waits = 0
+
+    def expect_wait(seconds: float) -> bool:
+        nonlocal waits
+        expected.append(("wait", seconds))
+        waits += 1
+        return waits - 1 == exit_at
+
+    if delay_s > 0 and expect_wait(delay_s):
+        assert events == expected
+        return
+    expected.append(("send", "SIGUSR1"))
+    if duration_s is not None and not expect_wait(duration_s):
+        expected.append(("send", "SIGUSR2"))
+    assert events == expected
