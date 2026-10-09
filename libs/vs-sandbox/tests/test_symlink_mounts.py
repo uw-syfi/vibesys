@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_sandbox.api import BeforeReadyContext, SandboxExecutionResult
+from vs_sandbox.api import BeforeReadyContext, CommandResult
 from vs_sandbox.api.symlink_mounts import (
     collect_symlink_mounts,
     find_mount_root,
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class _RecordingSandbox:
-    result: SandboxExecutionResult
+    result: CommandResult
     commands: list[str] = field(default_factory=list)
     saved_symlink_commands: list[str] | None = None
 
@@ -35,7 +35,7 @@ class _RecordingSandbox:
         *,
         timeout: int | None = None,
         cancel: threading.Event | None = None,
-    ) -> SandboxExecutionResult:
+    ) -> CommandResult:
         assert timeout is None
         assert cancel is None
         self.commands.append(command)
@@ -46,7 +46,7 @@ class _RecordingSandbox:
 
 
 def test_lifecycle_hook_installs_and_records_quoted_commands() -> None:
-    sandbox = _RecordingSandbox(SandboxExecutionResult(output="", exit_code=0))
+    sandbox = _RecordingSandbox(CommandResult(output="", exit_code=0))
     hooks = symlink_lifecycle_hooks([("/workspace/model link", "/workspace/_mounts/model target")])
 
     hooks[0].before_ready(BeforeReadyContext(sandbox=sandbox))
@@ -57,7 +57,7 @@ def test_lifecycle_hook_installs_and_records_quoted_commands() -> None:
 
 
 def test_lifecycle_hook_rejects_failed_setup() -> None:
-    sandbox = _RecordingSandbox(SandboxExecutionResult(output="permission denied", exit_code=17))
+    sandbox = _RecordingSandbox(CommandResult(output="permission denied", exit_code=17))
     hooks = symlink_lifecycle_hooks([("/workspace/model", "/mount/model")])
 
     with pytest.raises(RuntimeError, match="permission denied"):

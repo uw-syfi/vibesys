@@ -37,7 +37,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink, FakeRunControlEventSink
 from vs_sandbox.api import ProjectPathPolicy
-from vs_sandbox.api.testing import FakeComputeBackend, FakeSandbox
+from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -51,14 +51,14 @@ if TYPE_CHECKING:
         AgentExecutionConfiguration,
         WorkspaceResourceProvider,
     )
-    from vs_sandbox.api import Sandbox
+    from vs_sandbox.api import CommandRunner
 
 RUN_ID = "workspace-requests"
 
 
 @dataclass
 class _Session:
-    sandbox: Sandbox = field(default_factory=FakeSandbox)
+    sandbox: CommandRunner = field(default_factory=FakeCommandRunner)
     view: RunEnvironmentView = field(
         default_factory=lambda: RunEnvironmentView(
             paths=AgentPaths(), supports_parallel_candidate_evaluation=True

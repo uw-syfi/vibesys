@@ -37,8 +37,8 @@ from vs_runtime.api import (
     RuntimeContractError,
 )
 from vs_runtime.api.testing import FakeWorkspace
-from vs_sandbox.api import SandboxExecutionResult, SandboxKind
-from vs_sandbox.api.testing import FakeComputeBackend, FakeSandbox
+from vs_sandbox.api import CommandResult, SandboxKind
+from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 _PLUGIN = capability_plugin("evaluation")
 
 
-class _BlockingEvaluationSandbox(FakeSandbox):
+class _BlockingEvaluationSandbox(FakeCommandRunner):
     """Hold trusted execution until its lifecycle event is observable."""
 
     def __init__(self) -> None:
@@ -65,7 +65,7 @@ class _BlockingEvaluationSandbox(FakeSandbox):
         *,
         timeout: int | None = None,
         cancel: threading.Event | None = None,
-    ) -> SandboxExecutionResult:
+    ) -> CommandResult:
         del cancel  # the test releases the held command itself
         if not self.started.is_set():
             self.started.set()

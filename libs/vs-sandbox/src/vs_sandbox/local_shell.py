@@ -1,7 +1,7 @@
-"""Unconfined local shell sandbox for backends that run on the host.
+"""Unconfined local shell runner for backends that run on the host.
 
 Commands run under ``/bin/sh -c`` as the VibeSys user, so
-there is no isolation: this is the "no container" sandbox kind. Host confinement
+there is no isolation: this is the "no container" command runner. Host confinement
 of the agent CLI itself is a separate concern (:mod:`vs_sandbox.host_sandbox`).
 """
 
@@ -18,7 +18,7 @@ from vs_sandbox.process_execution import start_process_group
 if TYPE_CHECKING:
     import threading
 
-    from vs_sandbox.execution import SandboxExecutionResult
+    from vs_sandbox.execution import CommandResult
 
 DEFAULT_EXECUTE_TIMEOUT = 120
 DEFAULT_MAX_OUTPUT_CHARS = 100_000
@@ -26,7 +26,7 @@ DEFAULT_MAX_OUTPUT_CHARS = 100_000
 _SHELL = "/bin/sh"
 
 
-class LocalShellSandbox:
+class LocalShellRunner:
     """Run shell commands on the host, in ``root_dir``, with a controlled env."""
 
     def __init__(
@@ -52,7 +52,7 @@ class LocalShellSandbox:
 
     @property
     def id(self) -> str:
-        """Return this sandbox's random identifier."""
+        """Return this runner's random identifier."""
         return self._id
 
     def agent_path(self, host_path: Path | str) -> str:
@@ -65,13 +65,13 @@ class LocalShellSandbox:
         *,
         timeout: int | None = None,
         cancel: threading.Event | None = None,
-    ) -> SandboxExecutionResult:
+    ) -> CommandResult:
         """Run *command* under ``/bin/sh -c`` and return its bounded result.
 
         The command runs in its own process group, so a timeout or a set
         *cancel* stops every process it started (``SIGTERM``, then ``SIGKILL``
         after a grace period). The result contract is documented in
-        :mod:`vs_sandbox.command_execution`; every sandbox kind shares it.
+        :mod:`vs_sandbox.command_execution`; every command runner shares it.
         """
         return execute_command(
             command,

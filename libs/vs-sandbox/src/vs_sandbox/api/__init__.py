@@ -1,9 +1,9 @@
 """Public sandbox contracts, implementations, and resource helpers.
 
 Backend exports load on first access so importing this facade does not import
-optional backend dependencies such as Modal. ``Sandbox`` and
-``SandboxExecutionResult`` describe the execution contract; sandbox classes
-select local, host, or Docker execution. Lifecycle and host-resource types
+optional backend dependencies such as Modal. ``CommandRunner`` and
+``CommandResult`` describe the command-execution contract; runner and
+sandbox classes select local, host, or Docker execution. Lifecycle and host-resource types
 support composition by callers.
 """
 
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from vs_sandbox.device_lease import DeviceLease
     from vs_sandbox.docker_cli import DockerCli
     from vs_sandbox.docker_sandbox import AGENT_HOME, DockerSandbox
-    from vs_sandbox.execution import Sandbox, SandboxExecutionResult
+    from vs_sandbox.execution import CommandResult, CommandRunner
     from vs_sandbox.gpu_monitor import (
         GpuContentionMonitor,
         GpuInfo,
@@ -70,7 +70,7 @@ if TYPE_CHECKING:
     )
     from vs_sandbox.linked_worktree import linked_worktree_git_paths
     from vs_sandbox.local_compute_backend import LocalBackend
-    from vs_sandbox.local_shell import LocalShellSandbox
+    from vs_sandbox.local_shell import LocalShellRunner
     from vs_sandbox.modal_model_setup import ensure_model_volume
     from vs_sandbox.rocm_backend import RocmBackend
     from vs_sandbox.trainium_backend import TrainiumBackend
@@ -81,6 +81,8 @@ __all__ = [
     "AcceleratorDiscovery",
     "AcceleratorInventory",
     "BeforeReadyContext",
+    "CommandResult",
+    "CommandRunner",
     "ComputeBackend",
     "ComputeBackendImpl",
     "ContentionMonitor",
@@ -100,12 +102,10 @@ __all__ = [
     "LandlockSandbox",
     "LinuxBackend",
     "LocalBackend",
-    "LocalShellSandbox",
+    "LocalShellRunner",
     "ProjectPathPolicy",
     "ProjectPathPolicyError",
     "RocmBackend",
-    "Sandbox",
-    "SandboxExecutionResult",
     "SandboxKind",
     "SandboxLifecycle",
     "SandboxLifecycleError",
@@ -158,8 +158,8 @@ _LAZY_EXPORTS = {
     "AGENT_HOME": ("docker_sandbox", "AGENT_HOME"),
     "DockerCli": ("docker_cli", "DockerCli"),
     "DockerSandbox": ("docker_sandbox", "DockerSandbox"),
-    "Sandbox": ("execution", "Sandbox"),
-    "SandboxExecutionResult": ("execution", "SandboxExecutionResult"),
+    "CommandRunner": ("execution", "CommandRunner"),
+    "CommandResult": ("execution", "CommandResult"),
     "EnvironmentBindMount": ("host_resources", "EnvironmentBindMount"),
     "HostResource": ("host_resources", "HostResource"),
     "HostResourceAccess": ("host_resources", "HostResourceAccess"),
@@ -184,7 +184,7 @@ _LAZY_EXPORTS = {
     "start_sandbox": ("lifecycle", "start_sandbox"),
     "stop_sandbox": ("lifecycle", "stop_sandbox"),
     "linked_worktree_git_paths": ("linked_worktree", "linked_worktree_git_paths"),
-    "LocalShellSandbox": ("local_shell", "LocalShellSandbox"),
+    "LocalShellRunner": ("local_shell", "LocalShellRunner"),
     "ensure_model_volume": ("modal_model_setup", "ensure_model_volume"),
 }
 

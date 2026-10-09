@@ -34,7 +34,7 @@ from vs_runtime._failure_classification import (
 )
 from vs_runtime._model_requests import ModelRequestError
 from vs_runtime.contracts import BenchmarkFailureKind
-from vs_sandbox.api import SandboxExecutionResult
+from vs_sandbox.api import CommandResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
     from vs_project.api import GitTracker
     from vs_runtime.api.infrastructure import ModelRequestReconciler
-    from vs_sandbox.api import Sandbox
+    from vs_sandbox.api import CommandRunner
 
 _BENCHMARK_OUTPUT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # lint-waiver: LW-837218 [S108]; remote sandbox bridges allowlist this fixed transport path and every nonce is removed after use.
 _BENCHMARK_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
@@ -255,7 +255,7 @@ class RuntimeTrustedEvaluation:
         self,
         plan: TrustedEvaluationPlan,
         workspace: Path,
-        sandbox: Sandbox,
+        sandbox: CommandRunner,
         git: GitTracker,
         model_requests: ModelRequestReconciler | None,
     ) -> None:
@@ -475,11 +475,11 @@ class RuntimeTrustedEvaluation:
         timeout: int | None,
         label: str,
         cancel: threading.Event,
-    ) -> tuple[SandboxExecutionResult, str | None]:
+    ) -> tuple[CommandResult, str | None]:
         try:
             result = self._sandbox.execute(command, timeout=timeout, cancel=cancel)
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-837217 [BLE001]; trusted command failures are typed policy-visible outcomes rather than run-fatal exceptions.
-            return SandboxExecutionResult(output="", exit_code=None), (
+            return CommandResult(output="", exit_code=None), (
                 f"{label} command could not be executed: {error}"
             )
         return result, None
@@ -545,7 +545,7 @@ def record_state(framed: str) -> RecordState:
 
 
 def _benchmark_failure_kind(
-    record: RecordState, result: SandboxExecutionResult, execution_failure: str | None
+    record: RecordState, result: CommandResult, execution_failure: str | None
 ) -> BenchmarkFailureKind:
     """Whose fault a failed benchmark run is, by its exit status and its record.
 
@@ -744,7 +744,7 @@ def create_trusted_evaluation_executor(
     plan: TrustedEvaluationPlan,
     *,
     workspace: Path,
-    sandbox: Sandbox,
+    sandbox: CommandRunner,
     git: GitTracker,
     model_requests: ModelRequestReconciler | None = None,
 ) -> TrustedEvaluationExecutor:

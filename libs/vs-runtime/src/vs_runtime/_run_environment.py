@@ -2,7 +2,7 @@
 
 Layering:
 
-    product composition -> RunEnvironment -> ComputeBackendImpl.make_sandbox -> Sandbox
+    product composition -> RunEnvironment -> ComputeBackendImpl.make_sandbox -> CommandRunner
 
 Product composition prepares run resources before opening this session.
 
@@ -138,7 +138,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_project.api import StateNamespace
-    from vs_sandbox.api import ComputeBackendImpl, Sandbox
+    from vs_sandbox.api import CommandRunner, ComputeBackendImpl
 
 
 @dataclass(frozen=True)
@@ -299,7 +299,7 @@ class RunEnvironmentRequest:
 class _AgentPathSandbox(Protocol):
     """The one lookup ``AgentPaths`` construction needs from a started sandbox.
 
-    Narrower than ``Sandbox``: a host-only sandbox never
+    Narrower than ``CommandRunner``: a host-only sandbox never
     reaches this contract (``LocalEnvironment`` builds host paths directly),
     while every ``SandboxKind.DOCKER`` build
     (:class:`~vs_sandbox.docker_sandbox.DockerSandbox`) satisfies it.
@@ -311,7 +311,7 @@ class _AgentPathSandbox(Protocol):
 class RunEnvironmentSession(Protocol):
     """Context-managed sandbox session owned by a run environment."""
 
-    sandbox: Sandbox
+    sandbox: CommandRunner
     view: RunEnvironmentView
 
     def __enter__(self) -> RunEnvironmentSession:
@@ -336,11 +336,11 @@ class _BrokeredRunEnvironmentSession:
     _closed: bool = False
 
     @property
-    def sandbox(self) -> Sandbox:
+    def sandbox(self) -> CommandRunner:
         return self.delegate.sandbox
 
     @sandbox.setter
-    def sandbox(self, value: Sandbox) -> None:
+    def sandbox(self, value: CommandRunner) -> None:
         self.delegate.sandbox = value
 
     @property
@@ -950,7 +950,7 @@ class SkyPilotEnvironmentConfig:
 
 @dataclass
 class _SkyPilotRunEnvironmentSession:
-    sandbox: Sandbox
+    sandbox: CommandRunner
     view: RunEnvironmentView
     bridge: SkyPilotBridge
     _closed: bool = False

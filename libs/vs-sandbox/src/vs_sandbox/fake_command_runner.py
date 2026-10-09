@@ -1,12 +1,12 @@
-"""In-memory :class:`~vs_sandbox.execution.Sandbox` test double.
+"""In-memory :class:`~vs_sandbox.execution.CommandRunner` test double.
 
-Mirrors the observable contract of the real sandboxes (an ``id`` property, an
-``execute`` method returning :class:`~vs_sandbox.execution.SandboxExecutionResult`)
+Mirrors the observable contract of the real runners (an ``id`` property, an
+``execute`` method returning :class:`~vs_sandbox.execution.CommandResult`)
 without a subprocess: no shell is ever spawned. A caller scripts specific
-commands with :meth:`FakeSandbox.script` (a canned result), or with
-:meth:`FakeSandbox.script_process` and :meth:`FakeSandbox.script_hang`, which
+commands with :meth:`FakeCommandRunner.script` (a canned result), or with
+:meth:`FakeCommandRunner.script_process` and :meth:`FakeCommandRunner.script_hang`, which
 describe what the command's process did and let the fake build the result
-through the same mapping the real sandboxes use
+through the same mapping the real runners use
 (:func:`~vs_sandbox.command_execution.result_of`), so truncation, timeout and
 cancellation results cannot drift from production. Anything unscripted falls
 back to a configurable default result (a clean success by default), and every
@@ -21,14 +21,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vs_sandbox.command_execution import rejected_result, result_of, validate_timeout
-from vs_sandbox.execution import SandboxExecutionResult
+from vs_sandbox.execution import CommandResult
 from vs_sandbox.process_execution import ProcessOutcome, ProcessStop
 
 if TYPE_CHECKING:
     import threading
 
 #: Result an unscripted command receives when no other default was set.
-DEFAULT_RESULT = SandboxExecutionResult(output="", exit_code=0, stdout="", stderr="")
+DEFAULT_RESULT = CommandResult(output="", exit_code=0, stdout="", stderr="")
 
 _DEFAULT_TIMEOUT_SECONDS = 120
 _DEFAULT_MAX_OUTPUT_CHARS = 100_000
@@ -38,7 +38,7 @@ _SIGTERM_STATUS = 143
 
 @dataclass(frozen=True, slots=True)
 class FakeExecution:
-    """One recorded call to :meth:`FakeSandbox.execute`."""
+    """One recorded call to :meth:`FakeCommandRunner.execute`."""
 
     command: str
     timeout: int | None
@@ -54,27 +54,25 @@ class _Hang:
 
 
 @dataclass(slots=True)
-class FakeSandbox:
-    """Configurable in-memory double for :class:`~vs_sandbox.execution.Sandbox`."""
+class FakeCommandRunner:
+    """Configurable in-memory double for :class:`~vs_sandbox.execution.CommandRunner`."""
 
     _id: str = field(default_factory=lambda: f"fake-{uuid.uuid4().hex[:8]}")
-    default_result: SandboxExecutionResult = field(default_factory=lambda: DEFAULT_RESULT)
+    default_result: CommandResult = field(default_factory=lambda: DEFAULT_RESULT)
     max_output_chars: int = _DEFAULT_MAX_OUTPUT_CHARS
     calls: list[FakeExecution] = field(default_factory=list)
-    _scripted: dict[str, SandboxExecutionResult | ProcessOutcome | _Hang] = field(
-        default_factory=dict
-    )
+    _scripted: dict[str, CommandResult | ProcessOutcome | _Hang] = field(default_factory=dict)
 
     @property
     def id(self) -> str:
-        """Return this sandbox's identifier."""
+        """Return this runner's identifier."""
         return self._id
 
     def agent_path(self, host_path: Path | str) -> str:
         """Return the unchanged path seen by a host-local agent."""
         return str(Path(host_path))
 
-    def script(self, command: str, result: SandboxExecutionResult) -> None:
+    def script(self, command: str, result: CommandResult) -> None:
         """Return *result* the next time (and every time) *command* is executed."""
         self._scripted[command] = result
 
@@ -103,10 +101,10 @@ class FakeSandbox:
         *,
         timeout: int | None = None,
         cancel: threading.Event | None = None,
-    ) -> SandboxExecutionResult:
+    ) -> CommandResult:
         """Return the scripted result for *command*, or the default result.
 
-        Applies the same validation as the real sandboxes: an empty or
+        Applies the same validation as the real runners: an empty or
         non-string command never reaches the script table, and a non-positive
         timeout raises ``ValueError``. A fake command finishes instantly, so
         *cancel* is honored when it is already set.
@@ -136,8 +134,8 @@ class FakeSandbox:
 
 
 @dataclass(slots=True)
-class FakeLifecycleSandbox(FakeSandbox):
-    """In-memory sandbox with an explicit start/stop lifecycle."""
+class FakeLifecycleRunner(FakeCommandRunner):
+    """In-memory command runner with an explicit start/stop lifecycle."""
 
     start_count: int = 0
     stop_count: int = 0

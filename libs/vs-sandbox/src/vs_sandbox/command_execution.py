@@ -1,6 +1,6 @@
-"""One definition of ``Sandbox.execute`` semantics, shared by every sandbox kind.
+"""One definition of ``CommandRunner.execute`` semantics, shared by every command runner.
 
-A sandbox kind supplies only how to *launch* the command (a ``sh -c`` on the
+A command runner supplies only how to *launch* the command (a ``sh -c`` on the
 host, a ``docker exec`` into a container) and, when the command lives outside
 the launched process's group, how to signal it. Validation, process-tree
 stopping, timeout and cancellation results, partial-output retention, and the
@@ -31,7 +31,7 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING
 
-from vs_sandbox.execution import SandboxExecutionResult, bounded_execution_result
+from vs_sandbox.execution import CommandResult, bounded_execution_result
 from vs_sandbox.process_execution import (
     DEFAULT_TERMINATION_GRACE_SECONDS,
     ProcessOutcome,
@@ -59,14 +59,14 @@ def validate_timeout(timeout: int | None, default: int) -> int:
     return effective
 
 
-def rejected_result(message: str, exit_code: int, max_output_chars: int) -> SandboxExecutionResult:
+def rejected_result(message: str, exit_code: int, max_output_chars: int) -> CommandResult:
     """Return a result for a command that never ran: *message* on ``stderr``."""
     return bounded_execution_result(
         stdout="", stderr=f"{message}\n", exit_code=exit_code, max_output_chars=max_output_chars
     )
 
 
-def execute_command(  # noqa: PLR0913  # lint-waiver: LW-731010 [PLR0913]; the shared contract takes the Sandbox.execute arguments plus the two launch hooks, and bundling them would only rename the same keywords.
+def execute_command(  # noqa: PLR0913  # lint-waiver: LW-731010 [PLR0913]; the shared contract takes the CommandRunner.execute arguments plus the two launch hooks, and bundling them would only rename the same keywords.
     command: str,
     *,
     timeout: int | None,
@@ -76,7 +76,7 @@ def execute_command(  # noqa: PLR0913  # lint-waiver: LW-731010 [PLR0913]; the s
     launch: Callable[[], subprocess.Popen[str]],
     signal_remote: Callable[[signal.Signals], None] | None = None,
     grace_seconds: float = DEFAULT_TERMINATION_GRACE_SECONDS,
-) -> SandboxExecutionResult:
+) -> CommandResult:
     """Run *command* through *launch* under the module's result contract.
 
     *launch* starts the command as a process group leader with piped output
@@ -109,9 +109,7 @@ def execute_command(  # noqa: PLR0913  # lint-waiver: LW-731010 [PLR0913]; the s
     return result_of(outcome, effective_timeout, max_output_chars)
 
 
-def result_of(
-    outcome: ProcessOutcome, timeout: int, max_output_chars: int
-) -> SandboxExecutionResult:
+def result_of(outcome: ProcessOutcome, timeout: int, max_output_chars: int) -> CommandResult:
     """Map one process outcome to the contract result."""
     stderr = outcome.stderr
     exit_code = outcome.returncode

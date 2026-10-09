@@ -37,7 +37,7 @@ from vs_sandbox.compute_backends import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
@@ -114,7 +114,7 @@ class TrainiumBackend:
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
-    ) -> Sandbox:
+    ) -> CommandRunner:
         """Create a local or Trainium-enabled Docker sandbox."""
         # Deferred: importing DockerSandbox registers process-wide signal and
         # atexit handlers. Registration must stay side-effect free.

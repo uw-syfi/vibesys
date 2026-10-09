@@ -56,7 +56,7 @@ from vs_runtime.api.testing import (
     FakeWorkspace,
     FakeWorkspaceAgentSessions,
 )
-from vs_sandbox.api import ProjectPathPolicy, SandboxExecutionResult
+from vs_sandbox.api import CommandResult, ProjectPathPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -141,9 +141,9 @@ class _WorkspaceResource:
     def is_directory(self, path: str) -> bool:
         return path in self.directories
 
-    def execute(self, command: str, timeout_seconds: int | None) -> SandboxExecutionResult:
+    def execute(self, command: str, timeout_seconds: int | None) -> CommandResult:
         del command, timeout_seconds
-        return SandboxExecutionResult("", 0)
+        return CommandResult("", 0)
 
     def agent_scope(self) -> AgentExecutionScope:
         assert self.scope_factory is not None

@@ -1,4 +1,4 @@
-"""The ``Sandbox.execute`` contract, held against every implementation.
+"""The ``CommandRunner.execute`` contract, held against every implementation.
 
 The contract (also documented in :mod:`vs_sandbox.command_execution`):
 
@@ -16,10 +16,10 @@ The contract (also documented in :mod:`vs_sandbox.command_execution`):
 * A cancel stops the whole process tree the same way, keeps the partial
   output, and returns ``cancelled=True``.
 
-Implementations: ``LocalShellSandbox`` (real subprocesses), ``DockerSandbox``
+Implementations: ``LocalShellRunner`` (real subprocesses), ``DockerSandbox``
 over ``FakeDockerEngine`` (the real sandbox class, a fake daemon), ``DockerSandbox``
 over a real daemon (opt in: ``VIBESYS_E2E_DOCKER=1`` with ``docker`` on PATH),
-and ``FakeSandbox`` (in-memory). Each implementation supplies a ``_Harness``
+and ``FakeCommandRunner`` (in-memory). Each implementation supplies a ``_Harness``
 that turns a behavior ("print this, then exit 7", "hang with a child") into a
 command for its sandbox; the cases assert only the contract. To hold a new
 implementation to it, add a ``_Harness`` factory to ``_IMPLEMENTATIONS``.
@@ -46,8 +46,8 @@ from typing import TYPE_CHECKING, Protocol
 import pytest
 
 from vs_agent.api.images import agent_image
-from vs_sandbox.api import DockerSandbox, LocalShellSandbox, Sandbox, SandboxExecutionResult
-from vs_sandbox.api.testing import FakeDockerEngine, FakeSandbox
+from vs_sandbox.api import CommandResult, CommandRunner, DockerSandbox, LocalShellRunner
+from vs_sandbox.api.testing import FakeCommandRunner, FakeDockerEngine
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -70,7 +70,7 @@ class _Harness(Protocol):
     """How one implementation runs the behaviors the contract probes."""
 
     @property
-    def sandbox(self) -> Sandbox:
+    def sandbox(self) -> CommandRunner:
         """Return the sandbox under test."""
         ...
 
@@ -106,7 +106,7 @@ class _Harness(Protocol):
 class _ShellHarness:
     """A harness for a sandbox that runs real shell commands in ``workspace``."""
 
-    sandbox: Sandbox
+    sandbox: CommandRunner
     workspace: Path
     _alive_reader: int = -1
 
@@ -163,9 +163,9 @@ class _ShellHarness:
 
 @dataclass
 class _FakeHarness:
-    """A harness for ``FakeSandbox``, which scripts what a process would have done."""
+    """A harness for ``FakeCommandRunner``, which scripts what a process would have done."""
 
-    sandbox: FakeSandbox
+    sandbox: FakeCommandRunner
     _count: int = field(default=0, repr=False)
 
     def _key(self, label: str) -> str:
@@ -200,7 +200,7 @@ class _FakeHarness:
 
 
 def _local(tmp_path: Path) -> Iterator[_Harness]:
-    harness = _ShellHarness(LocalShellSandbox(tmp_path, max_output_chars=_CAP), tmp_path)
+    harness = _ShellHarness(LocalShellRunner(tmp_path, max_output_chars=_CAP), tmp_path)
     try:
         yield harness
     finally:
@@ -247,7 +247,7 @@ def _docker_on_real_daemon(tmp_path: Path) -> Iterator[_Harness]:
 
 def _fake(tmp_path: Path) -> Iterator[_Harness]:
     del tmp_path
-    yield _FakeHarness(FakeSandbox(max_output_chars=_CAP))
+    yield _FakeHarness(FakeCommandRunner(max_output_chars=_CAP))
 
 
 _real_docker_unavailable = os.environ.get(_E2E_DOCKER) != "1" or shutil.which("docker") is None
@@ -284,7 +284,7 @@ class _Execution:
     def __init__(
         self, harness: _Harness, command: str, *, timeout: int, cancel: threading.Event
     ) -> None:
-        self._result: SandboxExecutionResult | None = None
+        self._result: CommandResult | None = None
         self._error: BaseException | None = None
         self._harness = harness
 
@@ -301,7 +301,7 @@ class _Execution:
         self._thread = threading.Thread(target=run)
         self._thread.start()
 
-    def result(self) -> SandboxExecutionResult:
+    def result(self) -> CommandResult:
         self._thread.join()
         if self._error is not None:
             raise self._error
@@ -309,7 +309,7 @@ class _Execution:
         return self._result
 
 
-def _assert_streams_compose_output(result: SandboxExecutionResult) -> None:
+def _assert_streams_compose_output(result: CommandResult) -> None:
     assert result.output == result.stdout + result.stderr
 
 
@@ -322,7 +322,7 @@ def test_id_is_a_nonempty_stable_string(harness: _Harness) -> None:
 def test_streams_and_status_of_a_normal_exit_are_kept_apart(harness: _Harness) -> None:
     result = harness.sandbox.execute(harness.emit("hello\n", "warn\n", 0))
 
-    assert isinstance(result, SandboxExecutionResult)
+    assert isinstance(result, CommandResult)
     assert (result.exit_code, result.stdout, result.stderr) == (0, "hello\n", "warn\n")
     assert not result.truncated
     assert not result.cancelled

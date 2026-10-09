@@ -11,7 +11,7 @@ from entrypoints.cli import _add_common_args
 from vs_sandbox.api import (
     ComputeBackend,
     LocalBackend,
-    LocalShellSandbox,
+    LocalShellRunner,
     SandboxKind,
     create_compute_backend,
 )
@@ -44,7 +44,7 @@ class TestMetalSandbox:
             log_path=None,
             extra_env={"FOO": "bar"},
         )
-        assert isinstance(sb, LocalShellSandbox)
+        assert isinstance(sb, LocalShellRunner)
 
     def test_docker_raises(self, tmp_path: Path) -> None:
         impl = _make_backend(tmp_path)

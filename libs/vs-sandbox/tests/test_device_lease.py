@@ -14,7 +14,7 @@ from vs_sandbox.api import ComputeBackend, DeviceLease
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_sandbox.api import Sandbox, SandboxKind
+    from vs_sandbox.api import CommandRunner, SandboxKind
 
 
 @dataclass
@@ -56,7 +56,7 @@ class _FakeBackend:
         self._monitor = monitor
         self.reselection_count = 0
 
-    def make_sandbox(self, kind: SandboxKind, **kwargs: object) -> Sandbox:
+    def make_sandbox(self, kind: SandboxKind, **kwargs: object) -> CommandRunner:
         raise NotImplementedError
 
     def make_monitor(self, log_dir: Path) -> _RecordingMonitor | None:

@@ -60,7 +60,7 @@ def _run(command: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     framed = build_trusted_benchmark_command(
         command, ProtocolBenchmarkContract(), str(tmp_path / "result.jsonl")
     )
-    # > A FakeSandbox would not run bash, so it could not show that the framing keeps
+    # > A FakeCommandRunner would not run bash, so it could not show that the framing keeps
     # > the benchmark's exit status; shell=False is already in effect.
     return subprocess.run(  # noqa: S603  # lint-waiver: LW-118205 [S603]; the command is this test's own evaluator script framed by the code under test; running it in a real shell is what the test checks.
         ["/bin/bash", "-c", framed],

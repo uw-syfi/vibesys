@@ -16,7 +16,7 @@ from vs_sandbox.api import (
     DockerSandbox,
     HostResource,
     HostResourceAccess,
-    LocalShellSandbox,
+    LocalShellRunner,
     RocmBackend,
     SandboxKind,
     create_compute_backend,
@@ -62,7 +62,7 @@ class TestRocmSandbox:
             log_path=None,
             extra_env={"FOO": "bar"},
         )
-        assert isinstance(sb, LocalShellSandbox)
+        assert isinstance(sb, LocalShellRunner)
 
     def test_docker_forwards_kfd_and_dri_without_gpus_flag(self, tmp_path: Path) -> None:
         """AMD GPUs come in via --device, not the NVIDIA-only --gpus."""

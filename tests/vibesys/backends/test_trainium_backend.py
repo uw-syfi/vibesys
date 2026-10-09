@@ -14,7 +14,7 @@ from vs_sandbox.api import (
     DockerSandbox,
     HostResource,
     HostResourceAccess,
-    LocalShellSandbox,
+    LocalShellRunner,
     SandboxKind,
     TrainiumBackend,
     create_compute_backend,
@@ -53,7 +53,7 @@ class TestTrainiumSandbox:
             log_path=None,
             extra_env={"FOO": "bar"},
         )
-        assert isinstance(sb, LocalShellSandbox)
+        assert isinstance(sb, LocalShellRunner)
 
     def test_docker_forwards_neuron_devices_and_no_gpus(self, tmp_path: Path) -> None:
         impl = _make_backend(tmp_path, devices=["/dev/neuron0", "/dev/neuron1"])

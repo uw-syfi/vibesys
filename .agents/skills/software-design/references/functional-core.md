@@ -12,7 +12,7 @@ logic or an implementation.
   return to the core as events.
 - An **interface** is a `typing.Protocol` declared in the `.api` of the library
   that owns that kind of I/O. Name it by role, with no suffix: `Cluster`,
-  `StateStore`, `AgentSessions`, `Sandbox`, `Evaluator`, `IssueTracker`. This
+  `StateStore`, `AgentSessions`, `CommandRunner`, `Evaluator`, `IssueTracker`. This
   matches existing names such as `AgentSessions`, `EvaluationStore`, and
   `Clock`.
 - An **implementation** fulfills an interface. Name it `<Variant><Role>`:

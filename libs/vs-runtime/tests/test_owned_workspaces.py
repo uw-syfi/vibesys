@@ -28,7 +28,7 @@ from vs_runtime.api.testing import (
     FakeRunControlEventSink,
     FakeWorkspace,
 )
-from vs_sandbox.api import SandboxExecutionResult
+from vs_sandbox.api import CommandResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -47,7 +47,7 @@ class _Resource:
         self.trusted_input_baseline: str | None = revision
         self.closed = False
         self.executions: list[tuple[str, int | None]] = []
-        self.scripted: deque[SandboxExecutionResult] = deque()
+        self.scripted: deque[CommandResult] = deque()
         self.unavailable_revisions: set[str] = set()
         self.accuracy_calls: list[str | None] = []
         self.benchmark_calls: list[tuple[str | None, frozenset[str]]] = []
@@ -103,9 +103,9 @@ class _Resource:
     def is_directory(self, path: str) -> bool:
         return (self.path / path).is_dir()
 
-    def execute(self, command: str, timeout_seconds: int | None) -> SandboxExecutionResult:
+    def execute(self, command: str, timeout_seconds: int | None) -> CommandResult:
         self.executions.append((command, timeout_seconds))
-        return self.scripted.popleft() if self.scripted else SandboxExecutionResult("", 0)
+        return self.scripted.popleft() if self.scripted else CommandResult("", 0)
 
     def agent_scope(self) -> AgentExecutionScope:
         pytest.fail("workspace-only test requested an agent execution scope")
@@ -364,10 +364,10 @@ def test_runtime_commands_capture_and_remove_managed_output(tmp_path: Path) -> N
     provider = _Provider(tmp_path)
     provider.root.scripted.extend(
         (
-            SandboxExecutionResult("runtime-result\n", 0, stdout="runtime-result\n"),
-            SandboxExecutionResult("", 0),
-            SandboxExecutionResult("captured", 0, stdout="captured"),
-            SandboxExecutionResult("", 0),
+            CommandResult("runtime-result\n", 0, stdout="runtime-result\n"),
+            CommandResult("", 0),
+            CommandResult("captured", 0, stdout="captured"),
+            CommandResult("", 0),
         )
     )
 

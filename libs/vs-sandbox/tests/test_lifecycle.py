@@ -16,10 +16,10 @@ from vs_sandbox.api import (
     start_sandbox,
     stop_sandbox,
 )
-from vs_sandbox.api.testing import FakeLifecycleSandbox, FakeSandbox
+from vs_sandbox.api.testing import FakeCommandRunner, FakeLifecycleRunner
 
 if TYPE_CHECKING:
-    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.execution import CommandRunner
 
 
 @dataclass
@@ -38,8 +38,8 @@ class _FailingHooks(SandboxLifecycleHooks):
         raise ValueError(_failure_message)
 
 
-def _sandbox() -> Sandbox:
-    return cast("Sandbox", object())
+def _sandbox() -> CommandRunner:
+    return cast("CommandRunner", object())
 
 
 def test_base_hooks_are_a_noop() -> None:
@@ -93,7 +93,7 @@ def test_failure_names_hooks_provider_preserves_cause_and_stops_dispatch() -> No
 
 
 def test_owned_session_starts_and_stops_sandbox_once() -> None:
-    sandbox = FakeLifecycleSandbox()
+    sandbox = FakeLifecycleRunner()
 
     session = SandboxSession.start(sandbox, {"location": "container"})
 
@@ -109,7 +109,7 @@ def test_owned_session_starts_and_stops_sandbox_once() -> None:
 
 
 def test_owned_session_context_exit_stops_after_an_error() -> None:
-    sandbox = FakeLifecycleSandbox()
+    sandbox = FakeLifecycleRunner()
     failure_message = "failed inside session"
 
     with (
@@ -123,7 +123,7 @@ def test_owned_session_context_exit_stops_after_an_error() -> None:
 
 
 def test_borrowed_session_never_stops_sandbox() -> None:
-    sandbox = FakeLifecycleSandbox()
+    sandbox = FakeLifecycleRunner()
 
     with SandboxSession.borrowed(sandbox, "host") as session:
         assert session.view == "host"
@@ -134,11 +134,11 @@ def test_borrowed_session_never_stops_sandbox() -> None:
 
 
 def test_start_sandbox_rejects_sandbox_without_lifecycle() -> None:
-    sandbox = FakeSandbox()
+    sandbox = FakeCommandRunner()
 
-    with pytest.raises(TypeError, match="FakeSandbox has no execution environment to start"):
+    with pytest.raises(TypeError, match="FakeCommandRunner has no execution environment to start"):
         start_sandbox(sandbox)
 
 
 def test_stop_sandbox_ignores_sandbox_without_lifecycle() -> None:
-    stop_sandbox(FakeSandbox())
+    stop_sandbox(FakeCommandRunner())

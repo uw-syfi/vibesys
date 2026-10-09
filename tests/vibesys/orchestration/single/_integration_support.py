@@ -28,7 +28,7 @@ from vibesys.orchestration.single import (
 from vibesys.orchestration.single.models import SingleState
 from vs_project.api import Project
 from vs_runtime.api import RunStatus
-from vs_sandbox.api import SandboxExecutionResult
+from vs_sandbox.api import CommandResult
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from vs_agent.api.testing import FakeAgentClient
     from vs_runtime.api import OrchestrationPlugin
     from vs_sandbox.api import SandboxKind
-    from vs_sandbox.api.testing import FakeSandbox
+    from vs_sandbox.api.testing import FakeCommandRunner
 
 
 class InterruptedTurnError(RuntimeError):
@@ -73,26 +73,24 @@ class _ProfileAttributionBackend(FakeComputeBackend):
         self,
         kind: SandboxKind,
         **kwargs: Any,  # noqa: ANN401  # LW-040202 [ANN401]; the production factory's extensible keyword boundary is intentionally open.
-    ) -> FakeSandbox:
-        sandbox = cast("FakeSandbox", super().make_sandbox(kind, **kwargs))
+    ) -> FakeCommandRunner:
+        sandbox = cast("FakeCommandRunner", super().make_sandbox(kind, **kwargs))
         output_path = "profile-result.json"
         sandbox.script(
             "mktemp",
-            SandboxExecutionResult(output=output_path, exit_code=0, stdout=output_path),
+            CommandResult(output=output_path, exit_code=0, stdout=output_path),
         )
         sandbox.script(
             f"profile-tool --vs-output {output_path}",
-            SandboxExecutionResult(output="", exit_code=0),
+            CommandResult(output="", exit_code=0),
         )
         sandbox.script(
             f"cat {output_path}",
-            SandboxExecutionResult(
-                output=_ATTRIBUTION_OUTPUT, exit_code=0, stdout=_ATTRIBUTION_OUTPUT
-            ),
+            CommandResult(output=_ATTRIBUTION_OUTPUT, exit_code=0, stdout=_ATTRIBUTION_OUTPUT),
         )
         sandbox.script(
             f"rm -f {output_path}",
-            SandboxExecutionResult(output="", exit_code=0),
+            CommandResult(output="", exit_code=0),
         )
         return sandbox
 

@@ -14,7 +14,7 @@ from vs_sandbox.api import (
     DockerSandbox,
     GpuContentionMonitor,
     GpuInfo,
-    LocalShellSandbox,
+    LocalShellRunner,
     SandboxKind,
     parse_gpu_process_output,
     pick_gpu,
@@ -335,7 +335,7 @@ class TestReselectGpu:
                 )
         else:
             implementer_backend = cast(
-                "LocalShellSandbox",
+                "LocalShellRunner",
                 backend_impl.make_sandbox(
                     SandboxKind.LOCAL,
                     host_workspace=str(ctx.log_dir / "implementer"),
@@ -344,7 +344,7 @@ class TestReselectGpu:
                 ),
             )
             judge_backend = cast(
-                "LocalShellSandbox",
+                "LocalShellRunner",
                 backend_impl.make_sandbox(
                     SandboxKind.LOCAL,
                     host_workspace=str(ctx.log_dir / "judge"),

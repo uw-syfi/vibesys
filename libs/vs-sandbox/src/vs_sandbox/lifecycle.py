@@ -15,13 +15,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.execution import CommandRunner
 
 
-def start_sandbox(sandbox: Sandbox) -> None:
+def start_sandbox(sandbox: CommandRunner) -> None:
     """Start a sandbox that owns an execution environment.
 
-    The base :class:`Sandbox` contract intentionally has no lifecycle because
+    The base :class:`CommandRunner` contract intentionally has no lifecycle because
     host sandboxes have nothing to start. Callers that requested a container
     sandbox use this adapter and receive an immediate, named failure if the
     backend returned a sandbox without the required capability.
@@ -33,7 +33,7 @@ def start_sandbox(sandbox: Sandbox) -> None:
     start()
 
 
-def stop_sandbox(sandbox: Sandbox) -> None:
+def stop_sandbox(sandbox: CommandRunner) -> None:
     """Stop a sandbox-owned execution environment when one exists."""
     stop = getattr(sandbox, "stop", None)
     if callable(stop):
@@ -54,7 +54,7 @@ class SandboxSession[ViewT]:
 
     def __init__(
         self,
-        sandbox: Sandbox,
+        sandbox: CommandRunner,
         view: ViewT,
         *,
         stop_on_close: bool,
@@ -66,12 +66,12 @@ class SandboxSession[ViewT]:
         self._closed = False
 
     @classmethod
-    def borrowed(cls, sandbox: Sandbox, view: ViewT) -> SandboxSession[ViewT]:
+    def borrowed(cls, sandbox: CommandRunner, view: ViewT) -> SandboxSession[ViewT]:
         """Pair a view with a sandbox whose lifecycle the caller still owns."""
         return cls(sandbox, view, stop_on_close=False)
 
     @classmethod
-    def start(cls, sandbox: Sandbox, view: ViewT) -> SandboxSession[ViewT]:
+    def start(cls, sandbox: CommandRunner, view: ViewT) -> SandboxSession[ViewT]:
         """Start a sandbox and own its cleanup for the session lifetime."""
         start_sandbox(sandbox)
         return cls(sandbox, view, stop_on_close=True)
@@ -97,7 +97,7 @@ class SandboxSession[ViewT]:
 class BeforeReadyContext:
     """Resources available while a sandbox is transitioning to ready."""
 
-    sandbox: Sandbox
+    sandbox: CommandRunner
 
 
 class SandboxLifecycleHooks:
@@ -135,7 +135,7 @@ class SandboxLifecycle:
         """Return the hooks providers in their deterministic execution order."""
         return self._hooks
 
-    def before_ready(self, sandbox: Sandbox) -> None:
+    def before_ready(self, sandbox: CommandRunner) -> None:
         """Run every provider's hook, stopping at the first failure."""
         context = BeforeReadyContext(sandbox=sandbox)
         for provider in self._hooks:

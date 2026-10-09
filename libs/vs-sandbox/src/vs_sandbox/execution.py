@@ -1,4 +1,4 @@
-"""Bounded, stream-aware sandbox execution results."""
+"""Bounded, stream-aware command execution results."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ _TRUNCATION_MARKER = "\n...[truncated]...\n"
 
 
 @dataclass
-class SandboxExecutionResult:
+class CommandResult:
     """A command's combined output, exit code, and each process stream.
 
     ``cancelled`` is true when the caller's cancel event stopped the command.
@@ -26,16 +26,18 @@ class SandboxExecutionResult:
     cancelled: bool = False
 
 
-class Sandbox(Protocol):
-    """The command-execution contract every sandbox kind satisfies.
+class CommandRunner(Protocol):
+    """Execute one shell command and return its bounded result.
 
-    Container lifetime (``start``/``stop``) is not part of it: only container
-    sandboxes have one.
+    A command runner isolates nothing. Confinement is a separate contract
+    (:class:`~vs_sandbox.host_sandbox.WorkspaceSandbox`); a ``DockerSandbox``
+    is both. Container lifetime (``start``/``stop``) is not part of this
+    contract: only container runners have one.
     """
 
     @property
     def id(self) -> str:
-        """Return a stable identifier for this sandbox instance."""
+        """Return a stable identifier for this runner instance."""
         ...
 
     def execute(
@@ -44,7 +46,7 @@ class Sandbox(Protocol):
         *,
         timeout: int | None = None,
         cancel: threading.Event | None = None,
-    ) -> SandboxExecutionResult:
+    ) -> CommandResult:
         """Run a shell command and return its bounded result.
 
         Setting *cancel* while the command runs, or exceeding *timeout*,
@@ -67,7 +69,7 @@ def bounded_execution_result(
     stderr: str,
     exit_code: int | None,
     max_output_chars: int,
-) -> SandboxExecutionResult:
+) -> CommandResult:
     """Return a compatible result whose combined output fits the character cap.
 
     Successful commands retain the original combined prefix. Failed commands
@@ -80,7 +82,7 @@ def bounded_execution_result(
     limit = max(0, max_output_chars)
     combined = stdout + stderr
     if len(combined) <= limit:
-        return SandboxExecutionResult(
+        return CommandResult(
             output=combined,
             exit_code=exit_code,
             truncated=False,
@@ -111,7 +113,7 @@ def bounded_execution_result(
         else:
             bounded_stdout += marker
 
-    return SandboxExecutionResult(
+    return CommandResult(
         output=bounded_stdout + bounded_stderr,
         exit_code=exit_code,
         truncated=True,

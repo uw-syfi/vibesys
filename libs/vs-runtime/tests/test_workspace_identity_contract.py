@@ -55,14 +55,14 @@ from vs_runtime.api.testing import (
     FakeWorkspace,
     FakeWorkspaces,
 )
-from vs_sandbox.api.testing import FakeComputeBackend, FakeSandbox
+from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from typing import TextIO
 
     from vs_runtime.api import CandidateWorkspace, RevisionLedger, Workspaces
-    from vs_sandbox.api import Sandbox
+    from vs_sandbox.api import CommandRunner
 
 
 type Implementation = Literal["fake", "git"]
@@ -71,7 +71,7 @@ _IMPLEMENTATIONS: tuple[Implementation, ...] = ("fake", "git")
 
 @dataclass
 class _EnvironmentSession:
-    sandbox: Sandbox
+    sandbox: CommandRunner
     view: RunEnvironmentView
 
     def __enter__(self) -> _EnvironmentSession:
@@ -132,7 +132,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                     framework_root=Path(scratch),
                 ),
                 lambda _request: _EnvironmentSession(
-                    FakeSandbox(),
+                    FakeCommandRunner(),
                     RunEnvironmentView(
                         paths=AgentPaths(), supports_parallel_candidate_evaluation=True
                     ),

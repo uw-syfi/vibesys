@@ -21,14 +21,14 @@ from vs_runtime.api.infrastructure import (
     create_trusted_evaluation_executor,
 )
 from vs_runtime.api.testing import FakeModelVolumeProvisioner
-from vs_sandbox.api import SandboxExecutionResult
-from vs_sandbox.api.testing import FakeSandbox
+from vs_sandbox.api import CommandResult
+from vs_sandbox.api.testing import FakeCommandRunner
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_project.api import GitTracker
-    from vs_sandbox.api import Sandbox
+    from vs_sandbox.api import CommandRunner
 
 
 _MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
@@ -48,7 +48,7 @@ class _Git:
 def _executor(
     tmp_path: Path,
     plan: TrustedEvaluationPlan,
-    sandbox: Sandbox,
+    sandbox: CommandRunner,
     *,
     git: _Git | None = None,
     model_requests: ModelRequestReconciler | None = None,
@@ -63,8 +63,8 @@ def _executor(
 
 
 def test_accuracy_applies_setup_timeout_and_preserves_streams(tmp_path: Path) -> None:
-    sandbox = FakeSandbox(
-        default_result=SandboxExecutionResult(
+    sandbox = FakeCommandRunner(
+        default_result=CommandResult(
             output="out\nwarning\n",
             exit_code=0,
             stdout="out\n",
@@ -92,7 +92,7 @@ def test_accuracy_applies_setup_timeout_and_preserves_streams(tmp_path: Path) ->
 
 
 def test_accuracy_rejects_trusted_input_changes_without_execution(tmp_path: Path) -> None:
-    sandbox = FakeSandbox()
+    sandbox = FakeCommandRunner()
     executor = _executor(
         tmp_path,
         TrustedEvaluationPlan(accuracy_command="check"),
@@ -109,7 +109,7 @@ def test_accuracy_rejects_trusted_input_changes_without_execution(tmp_path: Path
 
 
 def test_accuracy_rejects_mutation_during_execution(tmp_path: Path) -> None:
-    sandbox = FakeSandbox()
+    sandbox = FakeCommandRunner()
     executor = _executor(
         tmp_path,
         TrustedEvaluationPlan(accuracy_command="check"),
@@ -126,8 +126,8 @@ def test_accuracy_rejects_mutation_during_execution(tmp_path: Path) -> None:
 
 def test_scalar_benchmark_decodes_finite_result_and_always_cleans(tmp_path: Path) -> None:
     output = f'noise\n{_MARKER}\n{{"score": 4.5}}\n{_END_MARKER}\n'
-    sandbox = FakeSandbox(
-        default_result=SandboxExecutionResult(output=output, exit_code=0, stdout=output)
+    sandbox = FakeCommandRunner(
+        default_result=CommandResult(output=output, exit_code=0, stdout=output)
     )
     executor = _executor(
         tmp_path,
@@ -149,7 +149,7 @@ def test_scalar_benchmark_decodes_finite_result_and_always_cleans(tmp_path: Path
     assert sandbox.calls[-1].command.startswith("rm -f -- /tmp/vibesys-framework-benchmark-")
 
 
-class _TruncatingSandbox(FakeSandbox):
+class _TruncatingRunner(FakeCommandRunner):
     """Return head-truncated benchmark output, then the framed result file on request."""
 
     def execute(
@@ -158,26 +158,26 @@ class _TruncatingSandbox(FakeSandbox):
         *,
         timeout: int | None = None,
         cancel: threading.Event | None = None,
-    ) -> SandboxExecutionResult:
+    ) -> CommandResult:
         del cancel  # every command here finishes at once
         super().execute(command, timeout=timeout)
         if command.startswith("rm -f -- ") and "--output-json" in command:
             head = "evaluator log line\n" * 10
-            return SandboxExecutionResult(
+            return CommandResult(
                 output=head + "\n\n... Output truncated at 100000 characters.",
                 exit_code=0,
                 truncated=True,
                 stdout=head,
             )
         if command.startswith("printf "):
-            return SandboxExecutionResult(
+            return CommandResult(
                 output=f'\n{_MARKER}\n{{"score": 7.25}}\n{_END_MARKER}\n', exit_code=0
             )
         return self.default_result
 
 
 def test_truncated_benchmark_output_reads_the_result_file_alone(tmp_path: Path) -> None:
-    sandbox = _TruncatingSandbox()
+    sandbox = _TruncatingRunner()
     executor = _executor(
         tmp_path,
         TrustedEvaluationPlan(
@@ -202,8 +202,8 @@ def test_truncated_benchmark_output_reads_the_result_file_alone(tmp_path: Path) 
 
 def test_scalar_benchmark_preserves_legacy_nested_result_shape(tmp_path: Path) -> None:
     output = f'{_MARKER}\n[{{"result": {{"score": 4.5}}}}]\n{_END_MARKER}\n'
-    sandbox = FakeSandbox(
-        default_result=SandboxExecutionResult(output=output, exit_code=0, stdout=output)
+    sandbox = FakeCommandRunner(
+        default_result=CommandResult(output=output, exit_code=0, stdout=output)
     )
     executor = _executor(
         tmp_path,
@@ -231,8 +231,8 @@ def test_protocol_benchmark_returns_full_row_and_declarations(tmp_path: Path) ->
         '{"kind":"result","values":{"throughput":8,"latency":3}}'
     )
     output = f"{_MARKER}\n{records}\n{_END_MARKER}\n"
-    sandbox = FakeSandbox(
-        default_result=SandboxExecutionResult(output=output, exit_code=0, stdout=output)
+    sandbox = FakeCommandRunner(
+        default_result=CommandResult(output=output, exit_code=0, stdout=output)
     )
     executor = _executor(
         tmp_path,
@@ -258,8 +258,8 @@ def test_protocol_rejection_names_reason_and_declared_metrics(tmp_path: Path) ->
         '{"kind":"result","values":{"throughput":8}}'
     )
     output = f"{_MARKER}\n{records}\n{_END_MARKER}\n"
-    sandbox = FakeSandbox(
-        default_result=SandboxExecutionResult(output=output, exit_code=0, stdout=output)
+    sandbox = FakeCommandRunner(
+        default_result=CommandResult(output=output, exit_code=0, stdout=output)
     )
     executor = _executor(
         tmp_path,
@@ -280,8 +280,8 @@ def test_protocol_rejection_names_reason_and_declared_metrics(tmp_path: Path) ->
 
 
 def test_benchmark_timeout_result_is_a_failure_and_cleanup_still_runs(tmp_path: Path) -> None:
-    sandbox = FakeSandbox(
-        default_result=SandboxExecutionResult(output="benchmark timed out", exit_code=-1)
+    sandbox = FakeCommandRunner(
+        default_result=CommandResult(output="benchmark timed out", exit_code=-1)
     )
     executor = _executor(
         tmp_path,
@@ -317,7 +317,7 @@ def test_failure_kind_requires_a_completed_trusted_benchmark_frame(
         TrustedEvaluationPlan(
             benchmark_command="bench", benchmark_contract=ProtocolBenchmarkContract()
         ),
-        FakeSandbox(default_result=SandboxExecutionResult(output=output, exit_code=exit_code)),
+        FakeCommandRunner(default_result=CommandResult(output=output, exit_code=exit_code)),
     )
 
     result = asyncio.run(executor.benchmark())
@@ -342,8 +342,8 @@ def test_evaluator_disappearing_without_a_record_is_retried_once(tmp_path: Path)
         TrustedEvaluationPlan(
             benchmark_command="bench", benchmark_contract=ProtocolBenchmarkContract()
         ),
-        FakeSandbox(
-            default_result=SandboxExecutionResult(output=f"{_MARKER}\n\n{_END_MARKER}", exit_code=1)
+        FakeCommandRunner(
+            default_result=CommandResult(output=f"{_MARKER}\n\n{_END_MARKER}", exit_code=1)
         ),
     )
 
@@ -368,7 +368,7 @@ class _FailingSandbox:
         *,
         timeout: int | None = None,
         cancel: threading.Event | None = None,
-    ) -> SandboxExecutionResult:
+    ) -> CommandResult:
         del cancel  # every command here finishes at once
         del timeout
         self.calls.append(command)
@@ -410,7 +410,7 @@ def test_model_request_failure_prevents_trusted_command(tmp_path: Path) -> None:
         provisioner=provisioner,
         environment={"VIBESYS_MODEL_REQUEST_ALLOW": "allowed/"},
     )
-    sandbox = FakeSandbox()
+    sandbox = FakeCommandRunner()
     executor = _executor(
         tmp_path,
         TrustedEvaluationPlan(accuracy_command="check"),
@@ -444,14 +444,14 @@ class _BlockingSandbox:
         *,
         timeout: int | None = None,
         cancel: threading.Event | None = None,
-    ) -> SandboxExecutionResult:
+    ) -> CommandResult:
         del cancel  # every command here finishes at once
         del timeout
         self.calls.append(command)
         self.started.set()
         self.release.wait()
         self.completed.set()
-        return SandboxExecutionResult(output="", exit_code=0)
+        return CommandResult(output="", exit_code=0)
 
 
 def test_cancellation_drains_owned_accuracy_execution(tmp_path: Path) -> None:

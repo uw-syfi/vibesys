@@ -1,4 +1,4 @@
-"""Behavior specific to :class:`~vs_sandbox.api.testing.FakeSandbox` itself.
+"""Behavior specific to :class:`~vs_sandbox.api.testing.FakeCommandRunner` itself.
 
 The cross-implementation contract lives in ``test_sandbox_contract.py``; this
 file covers scripting and call-recording, which only a fake has.
@@ -6,12 +6,12 @@ file covers scripting and call-recording, which only a fake has.
 
 from __future__ import annotations
 
-from vs_sandbox.api import SandboxExecutionResult
-from vs_sandbox.api.testing import FakeSandbox
+from vs_sandbox.api import CommandResult
+from vs_sandbox.api.testing import FakeCommandRunner
 
 
 def test_unscripted_command_returns_the_default_result() -> None:
-    sandbox = FakeSandbox()
+    sandbox = FakeCommandRunner()
 
     result = sandbox.execute("anything")
 
@@ -20,8 +20,8 @@ def test_unscripted_command_returns_the_default_result() -> None:
 
 
 def test_scripted_command_returns_its_configured_result_every_time() -> None:
-    sandbox = FakeSandbox()
-    sandbox.script("git status", SandboxExecutionResult(output="clean", exit_code=0))
+    sandbox = FakeCommandRunner()
+    sandbox.script("git status", CommandResult(output="clean", exit_code=0))
 
     first = sandbox.execute("git status")
     second = sandbox.execute("git status")
@@ -31,7 +31,7 @@ def test_scripted_command_returns_its_configured_result_every_time() -> None:
 
 
 def test_default_result_is_configurable() -> None:
-    sandbox = FakeSandbox(default_result=SandboxExecutionResult(output="boom", exit_code=1))
+    sandbox = FakeCommandRunner(default_result=CommandResult(output="boom", exit_code=1))
 
     result = sandbox.execute("unscripted")
 
@@ -40,7 +40,7 @@ def test_default_result_is_configurable() -> None:
 
 
 def test_execute_records_every_call() -> None:
-    sandbox = FakeSandbox()
+    sandbox = FakeCommandRunner()
 
     sandbox.execute("echo one", timeout=5)
     sandbox.execute("echo two")
@@ -51,7 +51,7 @@ def test_execute_records_every_call() -> None:
 
 
 def test_invalid_commands_are_not_recorded() -> None:
-    sandbox = FakeSandbox()
+    sandbox = FakeCommandRunner()
 
     sandbox.execute("")
 
@@ -59,4 +59,4 @@ def test_invalid_commands_are_not_recorded() -> None:
 
 
 def test_two_instances_have_distinct_ids() -> None:
-    assert FakeSandbox().id != FakeSandbox().id
+    assert FakeCommandRunner().id != FakeCommandRunner().id

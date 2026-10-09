@@ -2,12 +2,12 @@
 
 A ``ComputeBackendImpl`` knows how to:
 
-1. Construct a sandbox configured for its compute platform
+1. Construct a command runner configured for its compute platform
    (image, GPU runtime args, env vars are all internal to the backend).
 2. Optionally watch the platform for issues (CUDA: nvidia-smi contention).
 3. Optionally migrate compute mid-run (CUDA: re-pick a less-loaded GPU).
 
-Sandbox classes (``DockerSandbox``, ``LocalShellSandbox``)
+Command runner classes (``DockerSandbox``, ``LocalShellRunner``)
 stay backend-agnostic: they accept image/env/gpus as plain parameters.  The
 compute backend supplies the right values for its platform inside
 ``make_sandbox``.
@@ -21,13 +21,13 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from vs_sandbox.lifecycle import SandboxLifecycle
-from vs_sandbox.local_shell import LocalShellSandbox
+from vs_sandbox.local_shell import LocalShellRunner
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
-    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
@@ -89,7 +89,7 @@ class ComputeBackendImpl(Protocol):
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
-    ) -> Sandbox:
+    ) -> CommandRunner:
         """Construct (do not start) a sandbox configured for this backend.
 
         ``extra_init_commands`` is ignored by every current backend: a
@@ -145,13 +145,13 @@ def make_local_shell_sandbox(
     host_workspace: str,
     env: dict[str, str],
     lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
-) -> LocalShellSandbox:
+) -> LocalShellRunner:
     """Construct the unconfined local-shell sandbox and run its lifecycle hooks.
 
     Every backend builds the local sandbox the same way, so the construction
     lives here once.
     """
-    sandbox = LocalShellSandbox(host_workspace, env=env, inherit_env=True)
+    sandbox = LocalShellRunner(host_workspace, env=env, inherit_env=True)
     SandboxLifecycle(lifecycle_hooks).before_ready(sandbox)
     return sandbox
 

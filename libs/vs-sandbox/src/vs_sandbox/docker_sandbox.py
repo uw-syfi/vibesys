@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     import threading
     from collections.abc import Mapping, Sequence
 
-    from vs_sandbox.execution import SandboxExecutionResult
+    from vs_sandbox.execution import CommandResult
     from vs_sandbox.host_resources import HostResource
 
 # Global registry of live containers for cleanup on exit / SIGINT.
@@ -181,7 +181,7 @@ def _agent_path_map(
 
 
 class DockerSandbox(WorkspaceSandbox):
-    """Sandbox that runs all agent operations inside a Docker container.
+    """Run commands and the agent CLI inside a Docker container.
 
     Model weights and other host directories are bind-mounted, eliminating
     symlink issues and path confusion.
@@ -779,7 +779,7 @@ class DockerSandbox(WorkspaceSandbox):
         *,
         timeout: int | None = None,
         cancel: threading.Event | None = None,
-    ) -> SandboxExecutionResult:
+    ) -> CommandResult:
         """Execute a command inside the Docker container.
 
         Every call tags its in-container processes with a per-call marker, so
