@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import secrets
 import tempfile
 import threading
@@ -563,19 +564,28 @@ def _check_call(world: _World, actor: _Actor, tool: ToolSpec[Any], args: BaseMod
     return outcome
 
 
+# The pull-request tier draws a few dozen sequences; the nightly workflow sets
+# ``VIBESYS_FULL_PROPERTIES=1`` and draws thousands.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
 _SETTINGS = settings(
-    max_examples=120,
+    max_examples=2000 if _FULL else 40,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
 )
+_CALLS_PER_EXAMPLE = 6
 
 
-def test_every_tool_reply_is_typed_bounded_and_authorized() -> None:
+@_SETTINGS
+@given(data=st.data())
+def test_every_tool_reply_is_typed_bounded_and_authorized(data: st.DataObject) -> None:
+    """Each example is one self-contained sequence of calls on a fresh service.
+
+    The id pool the arguments sample from grows with the replies, but it is
+    local to the example and built from nothing else, so Hypothesis can replay
+    and shrink any failing example.
+    """
     with _world() as world:
         pool = ["", "unknown", world.victim_handle, world.victim_operation]
-
-        @_SETTINGS
-        @given(data=st.data())
-        def check(data: st.DataObject) -> None:
+        for _ in range(data.draw(st.integers(1, _CALLS_PER_EXAMPLE), label="calls")):
             actor = data.draw(st.sampled_from(world.actors), label="actor")
             surface = data.draw(st.sampled_from(_ROLES), label="tool surface")
             tool = data.draw(st.sampled_from(world.tools(actor, surface)), label="tool")
@@ -584,12 +594,10 @@ def test_every_tool_reply_is_typed_bounded_and_authorized() -> None:
                 args = tool.input_schema.model_validate(raw)
             except ValidationError:
                 event("input rejected by the tool schema")
-                return
+                continue
             outcome = _check_call(world, actor, tool, args)
             event(f"{tool.name}: {'refused' if outcome.refusal is not None else 'reply'}")
             pool.extend(sorted(set(_ids(outcome.document)) - set(pool)))
-
-        check()
 
 
 @dataclass(slots=True)
