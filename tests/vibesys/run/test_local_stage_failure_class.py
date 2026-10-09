@@ -69,7 +69,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink, FakeRunControlEventSink
 from vs_sandbox.api import CommandResult, CommandRunner, ProjectPathPolicy
-from vs_sandbox.api.testing import FakeComputeBackend, FakeCommandRunner
+from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 
 if TYPE_CHECKING:
     import threading
