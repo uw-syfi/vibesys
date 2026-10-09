@@ -67,7 +67,7 @@ loadgroup`; the `serial` marker is a last resort for a host-wide resource.
 
 CI splits the suite across sixteen runners (`VIBESYS_TEST_SHARD=I/16` or
 `--shard=I/16`, balanced by `tests/support/shard_durations.json`). Whole files
-are placed by recorded seconds; a file over 90 s has its tests spread over the
+are placed by recorded seconds; a file over 1.1x the mean shard load has its tests spread over the
 shards. A test must not depend on running beside another test of its file or
 module. Each shard warns when it overruns its budget or runs a file the record
 underestimates. Every green run on main caches its measured seconds and later
