@@ -10,9 +10,8 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from hypothesis import HealthCheck, given, settings
-from hypothesis import strategies as st
 from tests.support.executor_context import context_for
+from tests.support.pairwise import pairwise_rows
 from tests.support.session_lifecycle_world import (
     cancel_request,
     close_request,
@@ -275,17 +274,26 @@ async def test_inspection_after_a_crash_also_reverts_and_reports_the_violation(
     assert inspected.observation.target.observation.accepted
 
 
-NAMES = st.sampled_from(
-    ["candidate.py", "allowed.txt", "other.txt", "out/a.txt", "out/deep/b.txt", "elsewhere/c.txt"]
+# Path judgment is independent per path, so three turns cover its classes: only granted
+# paths, a mix of granted and ungranted ones, and a single ungranted path.
+@pytest.mark.parametrize(
+    "written",
+    [
+        {"allowed.txt", "out/a.txt", "out/deep/b.txt"},
+        {
+            "candidate.py",
+            "allowed.txt",
+            "other.txt",
+            "out/a.txt",
+            "out/deep/b.txt",
+            "elsewhere/c.txt",
+        },
+        {"elsewhere/c.txt"},
+    ],
+    ids=["granted", "mixed", "ungranted"],
 )
-
-
-@settings(
-    max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
-)
-@given(written=st.sets(NAMES, max_size=4))
 def test_a_limited_role_keeps_only_the_paths_its_grant_names(
-    tmp_path_factory: pytest.TempPathFactory, written: set[str]
+    tmp_path: Path, written: set[str]
 ) -> None:
     async def run(world: AccessWorld) -> None:
         world.host.resolver.access = Access.WRITE_ARTIFACTS
@@ -306,7 +314,7 @@ def test_a_limited_role_keeps_only_the_paths_its_grant_names(
         else:
             assert status(result) is ObservationStatus.SUCCEEDED
 
-    with open_workspace_env(tmp_path_factory.mktemp("access")) as env:
+    with open_workspace_env(tmp_path) as env:
         world = AccessWorld(env)
         asyncio.run(run(world))
         for workspaces in env.hosts:
@@ -404,10 +412,13 @@ async def play(world: AccessWorld, outcome: Outcome, restart: Restart) -> None:
         await world.route(inspect_request("req-i2", "inv-1"))
 
 
-@pytest.mark.parametrize("restart", list(Restart))
-@pytest.mark.parametrize("outcome", list(Outcome))
-@pytest.mark.parametrize("writes", list(Writes))
-@pytest.mark.parametrize("role", list(Role))
+# Every pair of (role, writes, outcome, restart) values, not their 216-row cross product:
+# each row replays a crash and restart on a real repository, and an interaction between
+# two factors shows in any row that holds that pair.
+@pytest.mark.parametrize(
+    ("role", "writes", "outcome", "restart"),
+    pairwise_rows(list(Role), list(Writes), list(Outcome), list(Restart)),
+)
 def test_access_is_settled_once_when_the_writer_is_proven_ended_and_never_baselined_before(
     tmp_path: Path, role: Role, writes: Writes, outcome: Outcome, restart: Restart
 ) -> None:
