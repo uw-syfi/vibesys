@@ -230,9 +230,7 @@ LIBRARY_TESTS_RE = re.compile(r"^(?:libs|sdk)/([^/]+)/tests/")
 EXEMPTION_RE = re.compile(r"#\s*test-isolation:(.*)$")
 TYPESCRIPT_EXEMPTION_RE = re.compile(r"//\s*test-isolation:(.*)$")
 AMBIENT_TIMER_RECEIVERS = frozenset({"global", "globalThis", "window", "self"})
-NODE_TIMER_MODULES = frozenset(
-    {"node:timers", "node:timers/promises", "timers", "timers/promises"}
-)
+NODE_TIMER_MODULES = frozenset({"node:timers", "node:timers/promises", "timers", "timers/promises"})
 HEXADECIMAL_DIGITS = frozenset("0123456789abcdefABCDEF")
 HEX_ESCAPE_DIGITS = 2
 UNICODE_ESCAPE_DIGITS = 4
@@ -520,10 +518,14 @@ class _TypeScriptLexer:
         self.index, self.line, self.line_start = _skip_typescript_quoted(
             self.source, self.index, self.line, self.line_start, quote
         )
-        closed = self.index <= len(self.source) and self.source[self.index - 1 : self.index] == quote
+        closed = (
+            self.index <= len(self.source) and self.source[self.index - 1 : self.index] == quote
+        )
         end = self.index - 1 if closed else self.index
         raw = self.source[start + 1 : end]
-        self.tokens.append(_TypeScriptToken(_typescript_cooked_string(raw), start_line, quoted=True))
+        self.tokens.append(
+            _TypeScriptToken(_typescript_cooked_string(raw), start_line, quoted=True)
+        )
 
 
 def _typescript_hex_escape(raw: str, start: int, length: int) -> tuple[str, int] | None:
@@ -779,11 +781,16 @@ def _typescript_destructured_timer_aliases(
     opening = equals - 2
     while opening >= 0 and tokens[opening].value not in {"{", ";"}:
         opening -= 1
-    if opening <= 0 or tokens[opening].value != "{" or tokens[opening - 1].value not in {
-        "const",
-        "let",
-        "var",
-    }:
+    if (
+        opening <= 0
+        or tokens[opening].value != "{"
+        or tokens[opening - 1].value
+        not in {
+            "const",
+            "let",
+            "var",
+        }
+    ):
         return None
 
     clause = tokens[opening + 1 : equals - 1]
@@ -1029,9 +1036,7 @@ def _typescript_timer_reference(
     return _typescript_named_timer_reference(tokens, index, direct, receivers)
 
 
-def _typescript_reference_is_called(
-    tokens: list[_TypeScriptToken], start: int, end: int
-) -> bool:
+def _typescript_reference_is_called(tokens: list[_TypeScriptToken], start: int, end: int) -> bool:
     """Whether a recognized reference is invoked, allowing safe grouping."""
     while (
         start > 0

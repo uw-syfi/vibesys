@@ -19,7 +19,7 @@ import {AgentMapView, nodeLabel} from './agent-map.js';
  */
 describe('nodeLabel', () => {
   function phase(status: AgentPhase['status']): AgentPhase {
-    return {kind: 'implementer', status, roundNumber: null, roundLabel: null};
+    return {kind: 'implementer', status, roundNumber: null, roundKey: null, roundLabel: null};
   }
 
   it('prefixes a caret only when selected, independent of the status marker', () => {
@@ -62,8 +62,8 @@ describe('agent node rendered selection glyph', () => {
       testRenderer.renderer.destroy();
     });
     const phases: AgentPhase[] = [
-      {kind: 'implementer', status: 'active', roundNumber: null, roundLabel: null},
-      {kind: 'judge', status: 'pending', roundNumber: null, roundLabel: null},
+      {kind: 'implementer', status: 'active', roundNumber: null, roundKey: null, roundLabel: null},
+      {kind: 'judge', status: 'pending', roundNumber: null, roundKey: null, roundLabel: null},
     ];
     // A wide, explicit pane width keeps the graph layout (not the stacked
     // fallback) and gives each node room for its full label.
@@ -105,9 +105,15 @@ describe("selected agent node's backdrop", () => {
   /** A three-stage chain: the middle stage has both an incoming and an outgoing edge. */
   function chain(): AgentPhase[] {
     return [
-      {kind: 'orchestrator', status: 'completed', roundNumber: null, roundLabel: null},
-      {kind: 'implementer', status: 'active', roundNumber: null, roundLabel: null},
-      {kind: 'judge', status: 'pending', roundNumber: null, roundLabel: null},
+      {
+        kind: 'orchestrator',
+        status: 'completed',
+        roundNumber: null,
+        roundKey: null,
+        roundLabel: null,
+      },
+      {kind: 'implementer', status: 'active', roundNumber: null, roundKey: null, roundLabel: null},
+      {kind: 'judge', status: 'pending', roundNumber: null, roundKey: null, roundLabel: null},
     ];
   }
 

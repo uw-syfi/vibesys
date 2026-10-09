@@ -7,11 +7,16 @@ import os
 import tempfile
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, ValidationError
 
-from vs_project.errors import ProjectStateError, StateModelNotFoundError
+from vs_project._framework_writes import FRAMEWORK_WRITES
+from vs_project.errors import (
+    ProjectStateError,
+    StateDocumentDamagedError,
+    StateModelNotFoundError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -169,7 +174,8 @@ def atomic_write_bytes(
                 offset += written
             stream.flush()
             filesystem.sync_file(stream)
-        filesystem.replace(temporary_path, path)
+        with FRAMEWORK_WRITES.publishing(path, contents):
+            filesystem.replace(temporary_path, path)
         filesystem.sync_directory(path.parent)
     finally:
         if temporary_path is not None:
@@ -215,18 +221,60 @@ def _load_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> Mode
 def _load_state_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> ModelT:
     """Load and strictly validate a required operational-state model."""
     try:
-        content = path.read_text(encoding="utf-8")
-        return model_type.model_validate_json(content, strict=True)
+        content = path.read_bytes()
     except FileNotFoundError as exc:
         raise StateModelNotFoundError.missing(path) from exc
-    except (OSError, UnicodeError) as exc:
+    except OSError as exc:
         raise ProjectStateError.state_read_failed(path, exc) from exc
+    return decode_state_document(model_type, content, source=path)
+
+
+def decode_state_document[ModelT: BaseModel](
+    model_type: type[ModelT],
+    data: bytes | str,
+    *,
+    source: Path | str,
+    context: dict[str, Any] | None = None,
+    versioned_by: tuple[str, int] | None = None,
+) -> ModelT:
+    """Strictly decode persisted bytes as ``model_type``: the one path every reader uses.
+
+    Every decode failure (malformed or truncated JSON, bad UTF-8, schema
+    violation, a version this release does not read) raises
+    ``StateDocumentDamagedError`` naming ``source`` and the failing fields,
+    never echoing the document. ``versioned_by=(field, expected)`` makes a
+    document whose integer ``field`` differs from ``expected`` report both
+    versions instead of a schema error.
+    """
+    if versioned_by is not None:
+        field, expected = versioned_by
+        found = _declared_version(data, field)
+        if found is not None and found != expected:
+            raise StateDocumentDamagedError.unsupported_version(source, found, expected)
+    try:
+        return model_type.model_validate_json(data, strict=True, context=context)
     except ValidationError as exc:
-        raise ProjectStateError.invalid_state_model(path, _validation_message(exc)) from exc
+        raise StateDocumentDamagedError.invalid(source, _validation_message(exc)) from None
+
+
+def _declared_version(data: bytes | str, field: str) -> int | None:
+    """The integer version a JSON object declares, or None when it declares none."""
+    try:
+        document = json.loads(data)
+    except ValueError:
+        return None
+    if not isinstance(document, dict):
+        return None
+    value = document.get(field)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _validation_message(error: ValidationError) -> str:
-    """Render stable validation details without echoing input values."""
+    """Render stable validation details without echoing input values.
+
+    Field locations are reported, including the name of an unknown field (a
+    newer release's key is the diagnostic), but never the offending values.
+    """
     failures: list[str] = []
     for detail in error.errors(include_url=False, include_context=False, include_input=False):
         location = ".".join(str(part) for part in detail["loc"]) or "metadata"

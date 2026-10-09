@@ -1,14 +1,14 @@
 import type {AgentStatusData, RunEvent} from '@vibesys/backend-client';
 
 export interface ExecutionStatus {
-  executionId: string;
-  sequence: number;
-  observedAt: string;
-  progress: string | null;
-  agentLabel: string | null;
-  elapsedSeconds: number | null;
-  inputTokens: number | null;
-  contextWindow: number | null;
+  readonly executionId: string;
+  readonly sequence: number;
+  readonly observedAt: string;
+  readonly progress: string | null;
+  readonly agentLabel: string | null;
+  readonly elapsedSeconds: number | null;
+  readonly inputTokens: number | null;
+  readonly contextWindow: number | null;
 }
 
 type StatusMap = Record<string, ExecutionStatus>;
@@ -42,8 +42,8 @@ const unresolvedStatusUsageModels = new WeakSet<object>();
 
 /** Returns status only when it belongs to the active execution generation. */
 export function executionStatusFor(
-  statuses: StatusMap,
-  execution: {executionId: string; startedAt: string},
+  statuses: Readonly<StatusMap>,
+  execution: Readonly<{executionId: string; startedAt: string}>,
 ): ExecutionStatus | undefined {
   const status = statuses[execution.executionId];
   if (status === undefined) return undefined;
@@ -270,7 +270,7 @@ function mergeStatus(older: ExecutionStatus | undefined, newer: ExecutionStatus)
 }
 
 /** Reads structured status from the two protocol events that carry it. */
-export function executionStatusData(event: RunEvent): AgentStatusData | null {
+function executionStatusData(event: RunEvent): AgentStatusData | null {
   const data = event.data;
   return data?.kind === 'agent_output_chunk' || data?.kind === 'tool_call'
     ? (data.status ?? null)

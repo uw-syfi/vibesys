@@ -1,5 +1,6 @@
 {
   "schema_version": 2,
+  "seed_commit": "cc0e642a8ca007fdabbe895f2d71f692869c4c9e",
   "replacements": [
     {
       "module": "vibesys.orchestration.dynamic.control.core",
@@ -1269,6 +1270,5 @@
         "retired": false
       }
     }
-  ],
-  "seed_commit": "cc0e642a8ca007fdabbe895f2d71f692869c4c9e"
+  ]
 }

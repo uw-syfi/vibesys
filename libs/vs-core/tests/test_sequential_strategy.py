@@ -265,6 +265,7 @@ def exercise_item(
         event_id=EventId(root=f"workspace:{index}"),
         request_id=workspace_request.request_id,
         scope=workspace_request.scope,
+        admission_id=workspace_request.admission_id,
         sequence=1,
         observed_at=1.0,
         status=ObservationStatus.SUCCEEDED,
@@ -325,6 +326,7 @@ def exercise_item(
         event_id=EventId(root=f"turn:{index}"),
         request_id=request.request_id,
         scope=request.scope,
+        admission_id=request.admission_id,
         sequence=1,
         observed_at=2.0,
         status=ObservationStatus.SUCCEEDED,
@@ -446,6 +448,10 @@ def test_sequential_strategy_has_no_optional_capabilities_or_product_state() -> 
                                 event_id=core.EventId(root=f"released:{intent.request_id.root}"),
                                 request_id=intent.request_id,
                                 scope=intent.request.scope,
+                                admission_id=intent.request.admission_id,
+                                resource_id=core.ResourceId(
+                                    root=f"resource:{intent.request_id.root}"
+                                ),
                                 sequence=1,
                                 observed_at=10.0,
                                 status=core.ObservationStatus.SUCCEEDED,

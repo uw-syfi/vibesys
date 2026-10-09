@@ -46,6 +46,11 @@ executables outside that environment. Capture artifacts belong in the run's
 writable profile artifact directory, and NCU replay timings are diagnostic rather
 than scored benchmark results.
 
+rocprof is the `auto` default for kernel-writing on the ROCm backend when the
+run environment supports it. It uses the same MCP server and prompt as LLM
+serving; the kernel-writing domain's profiler guidance and the
+`kernel-rocprof-analysis` skill supply the kernel-level focus.
+
 ## Add the profiler prompt
 
 Add `<kind>.j2` under each strategy that uses the profiler, currently

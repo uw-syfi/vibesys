@@ -7,6 +7,16 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictStr,
+    ValidationError,
+    field_validator,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
@@ -45,11 +55,35 @@ class ModelRequestError(ValueError):
         return cls(f'{MODEL_MANIFEST_RELPATH} entry {index} "revision" must be a string')
 
     @classmethod
+    def entry_unknown_key(cls, index: int, key: str) -> ModelRequestError:
+        return cls(
+            f'{MODEL_MANIFEST_RELPATH} entry {index} has unknown key "{key}" '
+            '(accepted keys: "id" or "model_id", "revision")'
+        )
+
+    @classmethod
     def model_not_allowed(cls, model_id: str, allowlist: str | None) -> ModelRequestError:
         return cls(
             f"model request {model_id!r} is not permitted by "
             f"{MODEL_REQUEST_ALLOW_ENV}={allowlist!r}"
         )
+
+
+class _ModelEntry(BaseModel):
+    """One manifest entry. Unknown keys are rejected so a typo cannot unpin a revision."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: StrictStr = Field(validation_alias=AliasChoices("id", "model_id"))
+    revision: StrictStr | None = None
+
+    @field_validator("id")
+    @classmethod
+    def _non_blank(cls, value: str) -> str:
+        if not value.strip():
+            message = "id must not be blank"
+            raise ValueError(message)
+        return value.strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,18 +144,27 @@ def _read_model_requests(workspace: Path) -> tuple[_ModelRequest, ...]:
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
             raise ModelRequestError.entry_not_object(index)
-        model_id = entry.get("id") or entry.get("model_id")
-        if not isinstance(model_id, str) or not model_id.strip():
-            raise ModelRequestError.entry_id_missing(index)
-        revision = entry.get("revision")
-        if revision is not None and not isinstance(revision, str):
-            raise ModelRequestError.entry_revision_not_string(index)
-        model_id = model_id.strip()
+        parsed = _parse_entry(index, entry)
+        model_id = parsed.id
+        revision = parsed.revision
         if model_id in seen:
             continue
         seen.add(model_id)
         requests.append(_ModelRequest(model_id, revision))
     return tuple(requests)
+
+
+def _parse_entry(index: int, entry: dict[str, object]) -> _ModelEntry:
+    try:
+        return _ModelEntry.model_validate(entry)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        key = str(first["loc"][0]) if first["loc"] else "id"
+        if first["type"] == "extra_forbidden":
+            raise ModelRequestError.entry_unknown_key(index, key) from exc
+        if key == "revision":
+            raise ModelRequestError.entry_revision_not_string(index) from exc
+        raise ModelRequestError.entry_id_missing(index) from exc
 
 
 def _allow_prefixes(raw: str | None) -> tuple[str, ...] | None:

@@ -6,6 +6,9 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .proof_digest import inspect_source, value_digest
+from .test_proof_ownership_regressions import stopped
+
 TIMES = st.floats(min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False)
 
 
@@ -316,8 +319,11 @@ def test_recovery_dispatch_permits_only_inspection_and_retirement(*, inspection:
     )
     event = core.DispatchAuthorized(request_id=request_id)
     if inspection:
-        with pytest.raises(core.KernelNotImplementedError):
-            core.step(state, event)
+        dispatched = core.step(state, event)
+        (intent,) = (
+            row for row in dispatched.state.intents.intents if row.request_id == request_id
+        )
+        assert intent.phase == core.IntentPhase.DISPATCHED
     else:
         with pytest.raises(core.ContractError, match="recovery"):
             core.step(state, event)
@@ -357,7 +363,7 @@ def test_child_leases_fence_run_closure_until_exact_release_manifest(
     released: bool,
     complete: bool,
 ) -> None:
-    state = core.initial_state()
+    state = stopped(core.initial_state())
     scope = core.Scope(owner=state.run.run_id, generation=0)
     observed = observation(scope, 5.0).model_copy(
         update={
@@ -387,7 +393,12 @@ def test_child_leases_fence_run_closure_until_exact_release_manifest(
                     "result": core.RunResultProposal(outcome="cancelled", reason="cleanup"),
                 }
             ),
-            "intents": state.intents.model_copy(update={"children": (child,)}),
+            "intents": state.intents.model_copy(
+                update={
+                    "children": (child,),
+                    "intents": (inspect_source(observed.request_id, scope),),
+                }
+            ),
         }
     )
     clock = core.ClockAdvanced(now_at=5.0)
@@ -427,7 +438,7 @@ def test_queued_retirement_binds_exact_registration_generation() -> None:
         core.DecisionReceipt(
             decision_id=decision.decision_id,
             decision=decision,
-            payload_digest="committed",
+            payload_digest=value_digest(decision),
             feedback=core.Accepted(decision_id=decision.decision_id),
         )
         for decision in (first, current)

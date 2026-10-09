@@ -23,7 +23,6 @@ from vs_evaluation.api import (
     EvaluationAwaitResult,
     EvaluationCoordinator,
     EvaluationOperationSnapshot,
-    EvaluationRequest,
     EvaluationState,
     EvidenceKind,
     ProfileField,
@@ -43,7 +42,6 @@ from vs_evaluation.api import (
     SubmittedReply,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
-    stable_handle_id,
 )
 from vs_evaluation.api.testing import (
     FakeClock,
@@ -100,44 +98,31 @@ class _ContentBackend:
                     required_profile_fields=required_profile_fields,
                 )
             )
-            request, submitted = await self._claimable(request, submitted)
-            existing = next(
-                (
-                    record
-                    for record in await self._coordinator.history()
-                    if record.request.key == request.key
-                ),
-                None,
-            )
-            if existing is not None:
-                request = existing.request
-            await self._coordinator.prepare(request)
+            history = await self._coordinator.history()
+            base_key = request.key
+            attempt = 0
+            while True:
+                existing = next(
+                    (record for record in history if record.request.key == request.key), None
+                )
+                if existing is None:
+                    break
+                if existing.state not in {
+                    EvaluationState.CANCELED,
+                    EvaluationState.FAILED,
+                    EvaluationState.SUPERSEDED,
+                }:
+                    request = existing.request
+                    break
+                attempt += 1
+                request = request.model_copy(update={"key": f"{base_key}/attempt/{attempt}"})
+            prepared = await self._coordinator.prepare(request)
+            submitted = submitted.model_copy(update={"handle_id": prepared.id})
             await own(submitted)
             self._submissions.check_admission()
             handle = await self._coordinator.submit(request)
             assert handle.id == submitted.handle_id
             return submitted
-
-    async def _claimable(
-        self, request: EvaluationRequest, submitted: SubmittedSemanticEvaluation
-    ) -> tuple[EvaluationRequest, SubmittedSemanticEvaluation]:
-        # Like production, a failed or withdrawn capture permits a fresh attempt.
-        # Keys are opaque coordinator inputs; one stable family deduplicates each retry.
-        base_key = request.key
-        attempt = 0
-        history = await self._coordinator.history()
-        while True:
-            key = base_key if attempt == 0 else f"{base_key}/attempt-{attempt}"
-            existing = next((record for record in history if record.request.key == key), None)
-            if existing is None or existing.state not in {
-                EvaluationState.FAILED,
-                EvaluationState.CANCELED,
-                EvaluationState.SUPERSEDED,
-            }:
-                request = request.model_copy(update={"key": key})
-                submitted = submitted.model_copy(update={"handle_id": stable_handle_id(key)})
-                return request, submitted
-            attempt += 1
 
     async def drain_submissions(self, scope_id: str | None) -> None:
         """Join any submission admitted before closure."""
@@ -169,20 +154,10 @@ class _ContentBackend:
         payload = record.request.stages[0].payload
         if not isinstance(payload, dict) or "fingerprints" not in payload:
             return None
-        # These fixture revision labels are their original patch text, so a
-        # restart replays the immutable capture through the real producer.
         capture = SemanticEvaluationStage.model_validate(payload)
-        _, submitted = await capture_submission(
-            ScenarioSpec(
-                revision=capture.snapshot,
-                patch=capture.snapshot,
-                scope_id=record.request.owner_scope,
-                kinds=tuple(EvidenceKind(stage.name) for stage in record.request.stages),
-            )
+        return SubmittedSemanticEvaluation(
+            handle_id=record.handle_id, fingerprints=capture.fingerprints
         )
-        assert submitted.handle_id == record.handle_id
-        assert submitted.fingerprints == capture.fingerprints
-        return submitted
 
     async def recorded_status(self, handle_id: str) -> EvaluationState:
         """Read committed state without dispatching work."""

@@ -62,12 +62,12 @@ function todoColor(status: string, theme: Theme): string {
   return theme.textMuted;
 }
 
-function todoTitle(todos: TodoItem[]): string {
+function todoTitle(todos: readonly TodoItem[]): string {
   const completed = todos.filter(todo => todo.status === 'completed').length;
   return `Todo ${completed}/${todos.length}`;
 }
 
-export function todoSummaryLine(todos: TodoItem[], maxWidth: number): string {
+export function todoSummaryLine(todos: readonly TodoItem[], maxWidth: number): string {
   const current =
     todos.find(todo => todo.status === 'in_progress') ??
     todos.find(todo => todo.status !== 'completed');
@@ -100,7 +100,7 @@ function truncate(line: string, maxWidth: number): string {
 export class TodoStripView {
   readonly output: BoxRenderable;
   #theme: Theme;
-  #renderedTodos: TodoItem[] | null = null;
+  #renderedTodos: readonly TodoItem[] | null = null;
   #renderedExpanded = false;
   #renderedFocused = false;
   #renderedSelection: number | null = null;
@@ -166,7 +166,7 @@ export class TodoStripView {
     else this.#renderCollapsed(todos);
   }
 
-  #renderCollapsed(todos: TodoItem[]): void {
+  #renderCollapsed(todos: readonly TodoItem[]): void {
     this.output.add(
       new TextRenderable(this.renderer, {
         content: todoSummaryLine(todos, this.#contentWidth(false)),
@@ -177,7 +177,7 @@ export class TodoStripView {
     );
   }
 
-  #renderExpanded(todos: TodoItem[], selected: number | null, focused: boolean): void {
+  #renderExpanded(todos: readonly TodoItem[], selected: number | null, focused: boolean): void {
     const shown = todos.slice(0, MAX_EXPANDED_ITEMS);
     const hidden = todos.length - shown.length;
     const height = shown.length + (hidden > 0 ? 1 : 0) + 2;

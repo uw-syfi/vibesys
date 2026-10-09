@@ -22,12 +22,14 @@ from vs_evaluation.api import (
     AccessErrorCode,
     EvaluationAgentAccessError,
     EvaluationAgentState,
+    EvidenceFingerprints,
     ProfilerAgentAccessError,
     ProfilerAgentService,
     ProfilerOperation,
     ScopeLifecycleStore,
     ScopeRelease,
     StoredEvaluation,
+    TrustedEvidence,
     validate_evaluation_wait,
 )
 from vs_evaluation.api.testing import FakeEvaluationSettlements
@@ -93,7 +95,7 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentInvocationStore, AgentSessions, InvocationOutcome
     from vs_evaluation.api import EvaluationSettlements
-    from vs_runtime._agent_execution import AgentExecutionLifecycleEvent
+    from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
     from vs_runtime._run_control import RunControlTransition
     from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
 
@@ -618,6 +620,14 @@ class FakeWorkspaces:
         default = self._default_patch or f"patch for {revision}"
         return self._patches.get(revision, default)
 
+    async def retains(self, revision: str) -> bool:
+        """Return whether the revision is retained, as opposed to merely present."""
+        return self._root.retains(revision)
+
+    def add_dangling_revision(self, revision: str) -> None:
+        """Make a revision exportable and restorable yet not retained."""
+        self._root.add_dangling_revision(revision)
+
     def set_patch(self, revision: str, patch: str) -> None:
         """Configure the canonical patch exported for a retained revision."""
         if not self._root.knows_revision(revision):
@@ -865,6 +875,7 @@ class FakeWorkspace:
         self._known_revisions = set(known_revisions or ()) | {
             value for value in (revision, self._trusted_input_baseline) if value
         }
+        self._dangling: set[str] = set()
         self._snapshot_count = 0
         # Revision names stay unique when a member-keyed candidate reuses an ID.
         self._revision_prefix = workspace_id or "fake"
@@ -873,6 +884,7 @@ class FakeWorkspace:
         self._pending_changes: list[list[str]] = []
         self._directories: set[str] = set()
         self.restore_calls: list[tuple[str, bool]] = []
+        self._snapshot_labels: dict[str, str] = {}
         self.agent_restore_calls: list[tuple[str, tuple[str, ...]]] = []
 
     @property
@@ -903,9 +915,9 @@ class FakeWorkspace:
     async def snapshot(self, label: str) -> str:
         """Record a deterministic new revision for the current fake tree."""
         await self.access_recovery.reconcile(self)
-        del label
         self._snapshot_count += 1
         revision = f"{self._revision_prefix}-revision-{self._snapshot_count}"
+        self._snapshot_labels[label] = revision
         self._revision = revision
         self._tree_revision = revision
         self.add_retained_revision(revision)
@@ -972,11 +984,39 @@ class FakeWorkspace:
         if error is not None and not after_retention:
             raise error
         self._retained[label] = revision
+        self.add_retained_revision(revision)
         if error is not None:
             raise error
 
-    def knows_revision(self, revision: str) -> bool:
+    async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
+        """Record a revision and retain exactly that revision."""
+        revision = await self.snapshot(label)
+        await self.retain(revision, label=retention_label)
+        return revision
+
+    async def has_revision(self, revision: str) -> bool:
         """Return whether this fake can materialize a revision."""
+        return self.knows_revision(revision)
+
+    async def matches_revision(self, revision: str) -> bool:
+        """Return whether the fake tree is exactly the revision's tree."""
+        return self._tree_revision == revision
+
+    async def find_snapshot(self, label: str) -> str | None:
+        """Return the revision the snapshot with this label recorded."""
+        return self._snapshot_labels.get(label)
+
+    def knows_revision(self, revision: str) -> bool:
+        """Return whether this fake can materialize a revision, retained or dangling."""
+        return revision in self._known_revisions or revision in self._dangling
+
+    def add_dangling_revision(self, revision: str) -> None:
+        """Make a revision exist without being retained, like an unreferenced Git commit."""
+        if revision not in self._known_revisions:
+            self._dangling.add(revision)
+
+    def retains(self, revision: str) -> bool:
+        """Return whether a revision is held by this fake's retained history."""
         return revision in self._known_revisions
 
     @property
@@ -1314,6 +1354,7 @@ class FakeEvaluation:
     deadline_time: float = 0.0
     deadline_wait_started: asyncio.Event = field(default_factory=asyncio.Event)
     _deadline_waiters: list[tuple[float, asyncio.Event]] = field(default_factory=list)
+    current_receipt_context: EvidenceFingerprints | None = None
     submitted_revisions: dict[str, str] = field(default_factory=dict)
     profiler_revisions: dict[str, str] = field(default_factory=dict)
     profiler_service: ProfilerAgentService | None = None
@@ -1456,6 +1497,8 @@ class FakeEvaluation:
     def record_agent_evaluation(self, workspace: Workspace, evaluation: AgentEvaluation) -> None:
         """Record that an agent's evaluation of ``workspace`` reached ``evaluation``'s state."""
         self._agent_evaluations.setdefault(workspace.id, []).append(evaluation)
+        if self.current_receipt_context is None and evaluation.trusted_evidence:
+            self.current_receipt_context = evaluation.trusted_evidence[0].fingerprints
 
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         """Return the evaluations recorded for ``workspace``'s identity, oldest first."""
@@ -1608,6 +1651,23 @@ class FakeEvaluation:
         return StoredEvaluation.model_validate_json(
             self.submitted_reports[handle_id]
         ).model_dump_json()
+
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        """Compare recorded captures with the explicitly scripted canonical context."""
+        current = self.current_receipt_context
+        if current is None:
+            return False
+        recorded = any(
+            row.revision == revision and evidence in row.trusted_evidence
+            for history in self._agent_evaluations.values()
+            for row in history
+        )
+        return recorded and all(
+            getattr(current, name) == getattr(evidence.fingerprints, name)
+            for name in ("evaluator", "workload", "environment")
+        )
 
     async def evidence_revisions(self) -> dict[str, str]:
         """Project only host-scripted capture identities, matching the production registry."""

@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
+import math
 import subprocess
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vs_evaluation.api import (
     AvailabilitySnapshot,
@@ -23,28 +26,36 @@ from vs_evaluation.api import (
     EvaluationStepResult,
     ExecutorCancellationUnknownError,
     ExecutorObservation,
+    ExecutorPoll,
     ExecutorRejectedError,
     ExecutorSubmissionError,
+    LifecyclePublisher,
+    PollPhase,
     ResourceRequirements,
     ReuseStatus,
     StageFailureKind,
     StageState,
+    is_finished,
 )
 from vs_project.api import atomic_write_bytes
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
+    SERVICE_NOT_READY_EXIT_CODE,
     ClusterCollected,
     ClusterConflict,
     ClusterObservation,
     ClusterRejected,
     ClusterSubmitted,
     ClusterUnknown,
+    MergedPhase,
+    PhaseRegister,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
     SlurmBatchStage,
     SlurmError,
     SlurmJobStatus,
+    SlurmPhase,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
     validate_cluster_operation_id,
@@ -62,7 +73,74 @@ if TYPE_CHECKING:
         SlurmService,
     )
 
+_UNRESOLVED_JOB_ID = "0"  # the placeholder id of a submission whose acceptance is unresolved
 _LOG = logging.getLogger(__name__)
+
+
+_ENDED_BEFORE_DISPATCH = ExecutorObservation(state=EvaluationState.CANCELED)
+
+
+@dataclass(frozen=True)
+class _SchedulerView:
+    """What one ordered scheduler phase means for the lifecycle and for a pure poll.
+
+    This is the only place that interprets a scheduler phase. ``lifecycle`` is
+    None when the phase carries no lifecycle information (collection owns the
+    terminal result, or the phase is unknown). ``staged`` says whether a workload
+    stage is known to be running.
+    """
+
+    lifecycle: EvaluationState | None
+    phase: PollPhase
+    staged: bool = False
+
+
+def _scheduler_view(
+    phase: SlurmPhase, status: SlurmJobStatus, *, canceling: bool = False
+) -> _SchedulerView:
+    """The one mapping from an ordered scheduler phase to what the evaluation reports.
+
+    ``canceling`` is true once this executor has sent scancel for the job: a
+    job that still computes or tears down is then CANCELING, not RUNNING.
+    """
+    active = EvaluationState.CANCELING if canceling else EvaluationState.RUNNING
+    match phase:
+        case SlurmPhase.PENDING:
+            # An accepted job still queued in the scheduler is an active
+            # evaluation. Queueing is a poll-phase fact, never a lifecycle
+            # regression to local-admission QUEUED, and no stage is running yet.
+            return _SchedulerView(active, PollPhase.QUEUED)
+        case SlurmPhase.RUNNING:
+            return _SchedulerView(active, PollPhase.RUNNING, staged=not canceling)
+        case SlurmPhase.COMPLETING:
+            # The job script has exited (or been killed); the node is tearing down.
+            return _SchedulerView(active, PollPhase.RUNNING)
+        case SlurmPhase.ENDED if status is SlurmJobStatus.CANCELLED:
+            return _SchedulerView(EvaluationState.CANCELED, PollPhase.ENDED)
+        case SlurmPhase.ENDED:
+            return _SchedulerView(None, PollPhase.ENDED)
+        case SlurmPhase.UNKNOWN:
+            return _SchedulerView(None, PollPhase.UNKNOWN)
+        case _:
+            assert_never(phase)
+
+
+@dataclass(frozen=True)
+class _CancelConfirmed:
+    """The job is observed ended, or was never dispatched."""
+
+
+@dataclass(frozen=True)
+class _CancelRequested:
+    """Cancellation was sent to a known job that has not been seen ending."""
+
+    job_id: str | None
+
+
+_CancelOutcome = _CancelConfirmed | _CancelRequested
+
+# Real clusters keep a cancelled job in COMPLETING for tens of seconds.
+_DEFAULT_CANCEL_CONFIRMATION_SECONDS = 120.0
 
 
 class SlurmTargetLifecycle(StrEnum):
@@ -94,6 +172,9 @@ class SlurmExecutionMetadata(BaseModel):
     collection_failure: str | None = None
     # Distinct from stage evidence: a contradiction can retain complete stages.
     aggregate_unknown: str | None = None
+    # The shared server exited or never answered its readiness probe, so no stage ran;
+    # its log tail is the stage output.
+    service_not_ready: bool = False
 
 
 class SlurmCommandResult(BaseModel):
@@ -172,7 +253,19 @@ class SharedSlurmAdmission:
                     self._condition.notify_all()
 
 
+class _DurableEnd(StrEnum):
+    """How an evaluation ended without ever reaching the scheduler."""
+
+    CANCELLED_BEFORE_DISPATCH = "cancelled_before_dispatch"
+
+
 class _DurableSlurmEvaluation(BaseModel):
+    """The saved record: the only lifecycle state that survives a restart.
+
+    Every read path (poll, inspect, recovery, cancel) decides from this record, so a
+    fact that must outlive the process is written here before it is published.
+    """
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     handle: SlurmBatchHandle | None
@@ -182,6 +275,16 @@ class _DurableSlurmEvaluation(BaseModel):
     # evidence is conservative: never authorize a replay from its absence.
     dispatch_started: bool = True
     submission_rejection: str | None = None
+    # Set once the evaluation was cancelled while it waited for local admission.
+    # Such a record is final: nothing may dispatch it.
+    ended: _DurableEnd | None = None
+
+    @model_validator(mode="after")
+    def _ended_before_dispatch_has_no_job(self) -> _DurableSlurmEvaluation:
+        if self.ended is not None and (self.handle is not None or self.dispatch_started):
+            message = "an evaluation ended before dispatch cannot have a job or a dispatch"
+            raise ValueError(message)
+        return self
 
 
 class SlurmEvaluationExecutor:
@@ -201,6 +304,7 @@ class SlurmEvaluationExecutor:
         cluster: Cluster | None = None,
         pause: Callable[[float], None] | None = None,
         deadline_clock: Callable[[], float] = time.time,
+        cancel_confirmation_seconds: float = _DEFAULT_CANCEL_CONFIRMATION_SECONDS,
     ) -> None:
         """Bind scheduler policy, durable intent, and the cluster interface."""
         self._cluster = (
@@ -210,6 +314,11 @@ class SlurmEvaluationExecutor:
         )
         self._pause = pause
         self._poll_interval = config.poll_interval_seconds
+        # Confirmation is bounded by an inspection count so that it follows the
+        # same pacing as the wait loop (and an injected pause), not the wall clock.
+        self._cancel_confirmations = max(
+            1, math.ceil(cancel_confirmation_seconds / config.poll_interval_seconds)
+        )
         self._deadline_clock = deadline_clock
         self._job_timeout_seconds = config.job_timeout_seconds
         self._workspace = workspace
@@ -221,12 +330,19 @@ class SlurmEvaluationExecutor:
         self._supported_evidence_kinds = supported_evidence_kinds
         self._admission = admission or SharedSlurmAdmission(1)
         self._handles: dict[str, SlurmBatchHandle] = {}
-        self._observations: dict[str, ExecutorObservation] = {}
+        self._lifecycle = LifecyclePublisher()
         self._tasks: dict[str, asyncio.Task[None]] = {}
         # Only observed termination suppresses redundant cancellation. A sent
         # scancel request does not prove that the allocation has stopped.
         self._terminated_jobs: set[str] = set()
-        self._changes: dict[str, asyncio.Event] = {}
+        # One order per evaluation over every scheduler reading, whichever path made it.
+        self._registers: dict[str, PhaseRegister] = {}
+        # Evaluations for which scancel was acknowledged, and the scancel-sent job ids.
+        self._canceling: set[str] = set()
+        self._cancel_sent: set[str] = set()
+        self._confirmations_left: dict[str, int] = {}
+        # Highest stage index reported per evaluation: a running job's stage never goes back.
+        self._stage_floor: dict[str, int] = {}
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         """Report normalized process-local capacity without probing credentials."""
@@ -267,8 +383,7 @@ class SlurmEvaluationExecutor:
         try:
             durable = self._read_evaluation(handle_id)
             self._validate_durable_request(handle_id, request, durable)
-            if durable is not None and durable.submission_rejection is not None:
-                self._publish_rejection(handle_id, durable.submission_rejection)
+            if durable is not None and self._publish_durable_end(handle_id, durable) is not None:
                 return
             if durable is None:
                 self._write_evaluation(handle_id, None, request, dispatch_started=False)
@@ -288,51 +403,108 @@ class SlurmEvaluationExecutor:
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
         """Poll known durable work once without resuming collection or cancelling it."""
         validate_cluster_operation_id(handle_id)
-        observed = self._observations.get(handle_id)
-        if observed is not None and observed.state in {
-            EvaluationState.SUCCEEDED,
-            EvaluationState.FAILED,
-            EvaluationState.CANCELED,
-        }:
+        observed = self._lifecycle.observation(handle_id)
+        if observed is not None and is_finished(observed.state):
             return observed
         durable = self._read_evaluation(handle_id)
         if durable is None:
             return None
-        if durable.submission_rejection is not None:
-            return ExecutorObservation(
-                state=EvaluationState.FAILED, failure=durable.submission_rejection
-            )
+        ended = self._publish_durable_end(handle_id, durable)
+        if ended is not None:
+            return ended
         target = durable.handle if durable.handle is not None else handle_id
         inspected = await asyncio.to_thread(self._cluster.inspect, target)
-        status = (
-            inspected.status
-            if isinstance(inspected, ClusterObservation)
-            else SlurmJobStatus.UNKNOWN
-        )
-        match status:
-            case SlurmJobStatus.PENDING:
-                # RUNNING means the accepted evaluation is active. Scheduler
-                # queueing cannot regress that lifecycle to local admission QUEUED.
-                # No current stage implies that no workload stage is known to run.
-                result = ExecutorObservation(state=EvaluationState.RUNNING)
-            case SlurmJobStatus.RUNNING:
-                result = ExecutorObservation(
-                    state=EvaluationState.RUNNING,
-                    current_stage=durable.request.stages[0].name,
+        if not isinstance(inspected, ClusterObservation):
+            return None
+        # Scheduler terminality cannot replace collected stage evidence. Normal
+        # recovery owns collection; deadline inspection cannot start it or
+        # discard partial results by settling prematurely.
+        observation = self._lifecycle_observation(handle_id, inspected, durable.request)
+        if observation is None:
+            return None
+        # Join with what inspect() reports, so a later inspect() or the
+        # background task's own publication can never read lower than this.
+        return self._publish(handle_id, observation)
+
+    async def poll(self, handle_id: str) -> ExecutorPoll:
+        """Inspect durable work once: no submission, recovery task or workspace.
+
+        A scheduler-terminal job is collected here, so its terminal observation
+        carries every stage result the cluster can still produce, failed stages
+        included. Collection is a read of the cluster's terminal evidence.
+        """
+        validate_cluster_operation_id(handle_id)
+        durable = self._read_evaluation(handle_id)
+        if durable is None:
+            return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
+        if durable.submission_rejection is not None:
+            return ExecutorPoll(
+                phase=PollPhase.ENDED,
+                terminal=ExecutorObservation(
+                    state=EvaluationState.FAILED, failure=durable.submission_rejection
+                ),
+            )
+        if durable.ended is not None:
+            return ExecutorPoll(phase=PollPhase.ENDED, terminal=_ENDED_BEFORE_DISPATCH)
+        if durable.handle is None and not durable.dispatch_started:
+            return ExecutorPoll(phase=PollPhase.QUEUED, detail="awaiting local admission")
+        return await self._poll_cluster(handle_id, durable)
+
+    async def _poll_cluster(self, handle_id: str, durable: _DurableSlurmEvaluation) -> ExecutorPoll:
+        target = durable.handle if durable.handle is not None else handle_id
+        inspected = await asyncio.to_thread(self._cluster.inspect, target)
+        if not isinstance(inspected, ClusterObservation):
+            return ExecutorPoll(phase=PollPhase.UNKNOWN, detail=inspected.reason)
+        view, merged = self._scheduler_view(handle_id, inspected)
+        match view.phase:
+            case PollPhase.QUEUED:
+                return ExecutorPoll(
+                    phase=PollPhase.QUEUED,
+                    attempt=merged.attempt,
+                    pending_reason=inspected.pending_reason,
+                    estimated_start=inspected.estimated_start,
                 )
-            case SlurmJobStatus.CANCELLED:
-                result = ExecutorObservation(state=EvaluationState.CANCELED)
-            case SlurmJobStatus.FAILED | SlurmJobStatus.COMPLETED | SlurmJobStatus.UNKNOWN:
-                # Scheduler terminality cannot replace collected stage evidence.
-                # Normal recovery owns collection; deadline inspection cannot
-                # start it or discard partial results by settling prematurely.
-                result = None
-        return result
+            case PollPhase.RUNNING:
+                return ExecutorPoll(
+                    phase=PollPhase.RUNNING,
+                    attempt=merged.attempt,
+                    current_stage=self._running_stage(handle_id, durable.request, inspected)
+                    if view.staged
+                    else None,
+                )
+            case PollPhase.ENDED if view.lifecycle is EvaluationState.CANCELED:
+                return ExecutorPoll(
+                    phase=PollPhase.ENDED,
+                    terminal=ExecutorObservation(state=EvaluationState.CANCELED),
+                )
+            case _:
+                return await self._poll_terminal(
+                    handle_id, durable, durable.handle or inspected.handle, inspected
+                )
+
+    async def _poll_terminal(
+        self,
+        handle_id: str,
+        durable: _DurableSlurmEvaluation,
+        handle: object,
+        inspected: ClusterObservation,
+    ) -> ExecutorPoll:
+        if not isinstance(handle, SlurmBatchHandle):
+            return ExecutorPoll(phase=PollPhase.UNKNOWN, detail="missing batch identity")
+        # The poll just read this job's terminal state; collecting reuses that reading.
+        collected = await asyncio.to_thread(
+            functools.partial(self._cluster.collect, handle, observed=inspected)
+        )
+        try:
+            terminal = self._collected_observation(handle_id, durable.request, handle, collected)
+        except SlurmError as error:
+            return ExecutorPoll(phase=PollPhase.UNKNOWN, detail=str(error))
+        return ExecutorPoll(phase=PollPhase.ENDED, terminal=terminal)
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Recover durable intent and inspect before resuming unfinished work."""
         validate_cluster_operation_id(handle_id)
-        observed = self._observations.get(handle_id)
+        observed = self._lifecycle.observation(handle_id)
         task = self._tasks.get(handle_id)
         if observed is not None and (
             observed.state
@@ -343,16 +515,16 @@ class SlurmEvaluationExecutor:
         durable = self._read_evaluation(handle_id)
         if durable is None:
             return None
-        if durable.submission_rejection is not None:
-            self._publish_rejection(handle_id, durable.submission_rejection)
-            return self._observations[handle_id]
+        ended = self._publish_durable_end(handle_id, durable)
+        if ended is not None:
+            return ended
         if durable.handle is not None:
             self._handles[handle_id] = durable.handle
-        self._publish(
+        published = self._publish(
             handle_id,
             ExecutorObservation(
                 state=EvaluationState.RUNNING,
-                current_stage=durable.request.stages[0].name,
+                current_stage=self._reported_stage(handle_id, durable.request),
             ),
         )
         stages = self._parse_stages(durable.request)
@@ -360,36 +532,22 @@ class SlurmEvaluationExecutor:
             self._admit_and_execute(handle_id, durable.request, stages, reconcile=True),
             name=f"vibesys-slurm-{handle_id[-12:]}",
         )
-        return self._observations[handle_id]
+        return published
 
     async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
         """Wait boundedly for a sticky lifecycle notification."""
-        event = self._changes.setdefault(handle_id, asyncio.Event())
-        if event.is_set():
-            event.clear()
-            return
-        try:
-            async with asyncio.timeout(timeout_s):
-                await event.wait()
-        except TimeoutError:
-            return
-        finally:
-            event.clear()
+        await self._lifecycle.wait_for_change(handle_id, timeout_s)
 
     async def cancel(self, handle_id: str) -> None:
         """Cancel an accepted batch, including after process restart."""
         validate_cluster_operation_id(handle_id)
-        observed = self._observations.get(handle_id)
-        if observed is not None and observed.state in {
-            EvaluationState.SUCCEEDED,
-            EvaluationState.FAILED,
-            EvaluationState.CANCELED,
-        }:
+        observed = self._lifecycle.observation(handle_id)
+        if observed is not None and is_finished(observed.state):
             return
         durable = self._read_evaluation(handle_id)
-        if durable is not None and durable.submission_rejection is not None:
-            self._publish_rejection(handle_id, durable.submission_rejection)
+        if durable is not None and self._publish_durable_end(handle_id, durable) is not None:
             return
+        outcome: _CancelOutcome = _CancelConfirmed()
         task = self._tasks.get(handle_id)
         if task is not None and not task.done():
             durable = self._read_evaluation(handle_id)
@@ -397,28 +555,39 @@ class SlurmEvaluationExecutor:
                 durable is not None and durable.dispatch_started
             )
             unsubmitted = not handle_known and durable is not None and not durable.dispatch_started
-            if handle_id in self._handles:
-                await self._cancel_running(handle_id)
+            first = handle_id in self._handles
+            if first:
+                outcome = await self._cancel_running(handle_id, resend=True)
             # Drain acceptance before canceling by operation identity. A
             # conflicting payload can prove this executor owns no allocation.
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-            observation = self._observations.get(handle_id)
+            observation = self._lifecycle.observation(handle_id)
             if observation is not None and observation.state is EvaluationState.FAILED:
                 return
             if not unsubmitted:
-                await self._cancel_running(handle_id)
+                outcome = await self._cancel_running(handle_id, resend=not first)
         elif self._read_evaluation(handle_id) is not None:
-            await self._cancel_running(handle_id)
+            outcome = await self._cancel_running(handle_id, resend=True)
         elif handle_id not in self._handles:
             raise ExecutorCancellationUnknownError(handle_id)
-        self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+        if isinstance(outcome, _CancelConfirmed):
+            self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+        # Otherwise the evaluation is CANCELING: the job is known and scancel was
+        # acknowledged, so a later inspect or cancel reconciles it to CANCELED.
 
     async def close(self) -> None:
         """Cancel and drain every background execution owned by this executor."""
         active = tuple(handle_id for handle_id, task in self._tasks.items() if not task.done())
-        await asyncio.gather(*(self.cancel(handle_id) for handle_id in active))
+        # A cancel whose job is still tearing down returns with the evaluation
+        # CANCELING; the durable record keeps the job for a later reconcile.
+        results = await asyncio.gather(
+            *(self.cancel(handle_id) for handle_id in active), return_exceptions=True
+        )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
 
     async def _admit_and_execute(
         self,
@@ -430,22 +599,26 @@ class SlurmEvaluationExecutor:
     ) -> None:
         try:
             async with self._admission.lease(handle_id):
-                self._publish(
-                    handle_id,
-                    ExecutorObservation(
-                        state=EvaluationState.STARTING,
-                        current_stage=request.stages[0].name,
-                    ),
-                )
+                # Recovery through inspect() already published RUNNING; a later
+                # STARTING would regress the lifecycle the coordinator stored.
+                published = self._lifecycle.observation(handle_id)
+                if published is None or published.state is EvaluationState.QUEUED:
+                    self._publish(
+                        handle_id,
+                        ExecutorObservation(
+                            state=EvaluationState.STARTING,
+                            current_stage=request.stages[0].name,
+                        ),
+                    )
                 await self._accept_cancellation_safe(
                     handle_id, request, stages, reconcile=reconcile
                 )
                 await self._execute(handle_id, request)
         except asyncio.CancelledError:
             durable = self._read_evaluation(handle_id)
-            if (
-                durable is not None and not durable.dispatch_started
-            ) or await self._cancel_running_best_effort(handle_id):
+            if durable is not None and not durable.dispatch_started:
+                self._end_before_dispatch(handle_id, durable.request)
+            elif await self._cancel_running_best_effort(handle_id):
                 self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
             raise
         except (SlurmSubmissionRejectedError, ExecutorRejectedError) as exc:
@@ -572,7 +745,7 @@ class SlurmEvaluationExecutor:
             handle_id,
             ExecutorObservation(
                 state=EvaluationState.RUNNING,
-                current_stage=request.stages[0].name,
+                current_stage=self._reported_stage(handle_id, request),
             ),
         )
         durable = self._read_evaluation(handle_id)
@@ -587,6 +760,16 @@ class SlurmEvaluationExecutor:
             with contextlib.suppress(Exception):
                 await collection
             raise
+        self._publish(handle_id, self._collected_observation(handle_id, request, handle, collected))
+
+    @staticmethod
+    def _collected_observation(
+        handle_id: str,
+        request: EvaluationRequest,
+        handle: SlurmBatchHandle,
+        collected: ClusterCollectOutcome,
+    ) -> ExecutorObservation:
+        """Terminal observation with every collectable stage result, kept even when failed."""
         batch = _collected_batch(collected, handle.job.job_id)
         metadata = SlurmExecutionMetadata(
             phase_timings_seconds=dict(batch.phase_timings_seconds),
@@ -594,6 +777,7 @@ class SlurmEvaluationExecutor:
             job_exit_code=batch.job_exit_code,
             collection_failure=batch.collection_failure,
             aggregate_unknown=collected.reason if isinstance(collected, ClusterUnknown) else None,
+            service_not_ready=batch.job_exit_code == SERVICE_NOT_READY_EXIT_CODE,
         )
         by_name = {item.name: item for item in batch.stages}
         results: list[EvaluationStepResult] = []
@@ -668,13 +852,10 @@ class SlurmEvaluationExecutor:
                 else _SlurmExecutionError.batch_failed(batch.job_id, batch.job_exit_code)
             )
             failure = f"{type(error).__name__}: {error}"
-        self._publish(
-            handle_id,
-            ExecutorObservation(
-                state=EvaluationState.FAILED if failure is not None else EvaluationState.SUCCEEDED,
-                stage_results=tuple(results),
-                failure=failure,
-            ),
+        return ExecutorObservation(
+            state=EvaluationState.FAILED if failure is not None else EvaluationState.SUCCEEDED,
+            stage_results=tuple(results),
+            failure=failure,
         )
 
     async def _wait_for_batch(
@@ -708,23 +889,77 @@ class SlurmEvaluationExecutor:
                     SlurmJobStatus.CANCELLED,
                 }:
                     return handle
-                self._publish(
-                    handle_id,
-                    ExecutorObservation(
-                        state=EvaluationState.QUEUED
-                        if observed.status is SlurmJobStatus.PENDING
-                        else EvaluationState.RUNNING,
-                        current_stage=request.stages[0].name,
-                    ),
-                )
+                active = self._lifecycle_observation(handle_id, observed, request)
+                if active is not None:
+                    self._publish(handle_id, active)
             remaining = wait_deadline_epoch_s - self._deadline_clock()
             if remaining <= 0:
                 raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
-            interval = min(self._poll_interval, remaining)
-            if self._pause is None:
-                await asyncio.sleep(interval)
-            else:
-                await asyncio.to_thread(self._pause, interval)
+            await self._pace(min(self._poll_interval, remaining))
+
+    def _scheduler_view(
+        self, handle_id: str, observed: ClusterObservation
+    ) -> tuple[_SchedulerView, MergedPhase]:
+        """Order one reading per attempt, then interpret it. Every read path comes here."""
+        merged = self._registers.setdefault(handle_id, PhaseRegister()).merge(
+            observed.phase, attempt=observed.attempt
+        )
+        if merged.anomaly is not None:
+            _LOG.warning(
+                "evaluation %s: scheduler reading %s at attempt %d was not applied (%s)",
+                handle_id,
+                observed.phase.value,
+                observed.attempt,
+                merged.anomaly.value,
+            )
+        if merged.requeued:
+            _LOG.info(
+                "evaluation %s: scheduler requeued the job (attempt %d)", handle_id, merged.attempt
+            )
+        view = _scheduler_view(
+            merged.phase, observed.status, canceling=handle_id in self._canceling
+        )
+        return view, merged
+
+    def _lifecycle_observation(
+        self, handle_id: str, observed: ClusterObservation, request: EvaluationRequest
+    ) -> ExecutorObservation | None:
+        """The lifecycle observation a scheduler reading implies, if it implies one."""
+        view, _ = self._scheduler_view(handle_id, observed)
+        if view.lifecycle is None:
+            return None
+        return ExecutorObservation(
+            state=view.lifecycle,
+            current_stage=self._running_stage(handle_id, request, observed)
+            if view.staged
+            else None,
+        )
+
+    def _reported_stage(self, handle_id: str, request: EvaluationRequest) -> str:
+        """The stage already reported for a running evaluation, or the first."""
+        return request.stages[self._stage_floor.get(handle_id, 0)].name
+
+    def _running_stage(
+        self, handle_id: str, request: EvaluationRequest, observed: ClusterObservation
+    ) -> str:
+        """The stage a computing job is in, never earlier than one already reported.
+
+        Stages run in order, so the cluster's count of finished stages names the
+        running one. A reading without the count (not observed) says nothing new:
+        it keeps the stage already reported, or the first stage if none was.
+        """
+        last = len(request.stages) - 1
+        floor = self._stage_floor.get(handle_id, 0)
+        reported = observed.completed_stages
+        index = floor if reported is None else max(floor, min(reported, last))
+        self._stage_floor[handle_id] = index
+        return request.stages[index].name
+
+    async def _pace(self, interval: float) -> None:
+        if self._pause is None:
+            await asyncio.sleep(interval)
+        else:
+            await asyncio.to_thread(self._pause, interval)
 
     async def _inspect_cancellation_safe(
         self, handle_id: str, handle: SlurmBatchHandle
@@ -754,56 +989,134 @@ class SlurmEvaluationExecutor:
             )
         return stages
 
-    async def _cancel_running(self, handle_id: str) -> None:
+    async def _cancel_running(self, handle_id: str, *, resend: bool = False) -> _CancelOutcome:
+        """Send scancel once, report CANCELING, then confirm termination within a bound.
+
+        A job that still reads active right after scancel is "cancel requested",
+        not an unknown identity: Slurm keeps a cancelled job in COMPLETING while
+        it tears down. The evaluation is CANCELING from the acknowledged scancel
+        until a terminal reading. Confirmation inspects at the wait loop's pacing
+        and shares one bounded budget of inspections across every call for the
+        evaluation. A retry inspects once and sends no second scancel, unless
+        ``resend`` is set and the budget is spent: a scheduler that acknowledged
+        scancel but still shows the job active deserves one more request.
+        """
         durable = self._read_evaluation(handle_id)
         if durable is not None and durable.submission_rejection is not None:
-            return
+            return _CancelConfirmed()
         handle = self._handles.get(handle_id) or (durable.handle if durable is not None else None)
         target = handle if handle is not None else handle_id
         if handle is not None and handle.job.job_id in self._terminated_jobs:
-            return
-        cancelled = await asyncio.to_thread(self._cluster.cancel, target)
-        if isinstance(cancelled, ClusterUnknown):
-            raise ExecutorCancellationUnknownError(handle_id)
-        if (
-            handle is None
-            and durable is not None
-            and not durable.dispatch_started
-            and cancelled.job_id is None
-        ):
-            # The durable preparation proves this executor never dispatched.
-            # The cluster retained cancellation intent and has no accepted job
-            # identity, so there is no allocation termination to confirm.
-            return
-        observed = await asyncio.to_thread(self._cluster.inspect, target)
-        if not isinstance(observed, ClusterObservation) or observed.status not in {
-            SlurmJobStatus.COMPLETED,
-            SlurmJobStatus.FAILED,
-            SlurmJobStatus.CANCELLED,
-        }:
-            raise ExecutorCancellationUnknownError(handle_id)
-        self._terminated_jobs.add(observed.job_id)
+            return _CancelConfirmed()
+        job_id = handle.job.job_id if handle is not None else None
+        exhausted = resend and self._confirmations_left.get(handle_id) == 0
+        if job_id is None or job_id not in self._cancel_sent or exhausted:
+            if exhausted:
+                self._confirmations_left[handle_id] = self._cancel_confirmations
+            cancelled = await _finish_in_thread(self._cluster.cancel, target)
+            if isinstance(cancelled, ClusterUnknown):
+                job_id = job_id or cancelled.job_id
+                if job_id in {None, _UNRESOLVED_JOB_ID}:
+                    raise ExecutorCancellationUnknownError(handle_id)
+                # A transient scheduler error does not make a known job unknown. The
+                # cluster persisted the cancel intent before it failed, and every
+                # inspection of a cancelled record re-sends scancel, so the bounded
+                # confirmation below is also the retry. `_cancel_sent` stays unset,
+                # so a later call sends scancel again.
+            else:
+                if (
+                    handle is None
+                    and durable is not None
+                    and not durable.dispatch_started
+                    and cancelled.job_id is None
+                ):
+                    # The durable preparation proves this executor never dispatched.
+                    # The cluster retained cancellation intent and has no accepted job
+                    # identity, so there is no allocation termination to confirm.
+                    self._end_before_dispatch(handle_id, durable.request)
+                    return _CancelConfirmed()
+                job_id = job_id or cancelled.job_id
+                if job_id is not None:
+                    self._cancel_sent.add(job_id)
+        if job_id is not None:
+            self._canceling.add(handle_id)
+            self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELING))
+        return await self._confirm_termination(handle_id, target, job_id)
+
+    async def _confirm_termination(
+        self, handle_id: str, target: SlurmBatchHandle | str, job_id: str | None
+    ) -> _CancelOutcome:
+        left = self._confirmations_left.setdefault(handle_id, self._cancel_confirmations)
+        for _ in range(max(left, 1)):
+            observed = await _finish_in_thread(self._cluster.inspect, target)
+            if isinstance(observed, ClusterObservation) and observed.status in {
+                SlurmJobStatus.COMPLETED,
+                SlurmJobStatus.FAILED,
+                SlurmJobStatus.CANCELLED,
+            }:
+                self._terminated_jobs.add(observed.job_id)
+                return _CancelConfirmed()
+            left = max(0, left - 1)
+            self._confirmations_left[handle_id] = left
+            if left > 0:
+                await self._pace(self._poll_interval)
+        return _CancelRequested(job_id)
 
     async def _cancel_running_best_effort(self, handle_id: str) -> bool:
         """Report confirmed cleanup, retaining nonterminal ownership on failure."""
         try:
-            await self._cancel_running(handle_id)
+            outcome = await self._cancel_running(handle_id)
         except (ExecutorCancellationUnknownError, SlurmError, OSError, subprocess.SubprocessError):
             _LOG.exception("could not cancel the Slurm job of evaluation %s", handle_id)
             return False
-        return True
+        match outcome:
+            case _CancelConfirmed():
+                return True
+            case _CancelRequested(job_id=_):
+                _LOG.warning("cancellation of evaluation %s is not yet confirmed", handle_id)
+                return False
+            case _:
+                assert_never(outcome)
 
-    def _publish(self, handle_id: str, observation: ExecutorObservation) -> None:
-        self._observations[handle_id] = observation
-        self._changes.setdefault(handle_id, asyncio.Event()).set()
+    def _publish(self, handle_id: str, observation: ExecutorObservation) -> ExecutorObservation:
+        return self._lifecycle.publish(handle_id, observation)
+
+    def _end_before_dispatch(self, handle_id: str, request: EvaluationRequest) -> None:
+        """End an evaluation that never reached the scheduler: save the end, then publish it.
+
+        The record is written first, so a poll, a restart, or a second cancel can only
+        ever see the end once it is durable, and nothing can dispatch the evaluation.
+        """
+        record = _DurableSlurmEvaluation(
+            handle=None,
+            request=request,
+            dispatch_started=False,
+            ended=_DurableEnd.CANCELLED_BEFORE_DISPATCH,
+        )
+        atomic_write_bytes(
+            self._handle_root / f"{handle_id}.json", (record.model_dump_json() + "\n").encode()
+        )
+        self._publish(handle_id, _ENDED_BEFORE_DISPATCH)
+
+    def _publish_durable_end(
+        self, handle_id: str, durable: _DurableSlurmEvaluation
+    ) -> ExecutorObservation | None:
+        """Publish the end the saved record states, or None when the record holds none."""
+        if durable.submission_rejection is not None:
+            return self._publish_rejection(handle_id, durable.submission_rejection)
+        if durable.ended is not None:
+            return self._publish(handle_id, _ENDED_BEFORE_DISPATCH)
+        return None
 
     def _record_rejection(self, handle_id: str, request: EvaluationRequest, reason: str) -> None:
         record = _DurableSlurmEvaluation(handle=None, request=request, submission_rejection=reason)
         path = self._handle_root / f"{handle_id}.json"
         atomic_write_bytes(path, (record.model_dump_json() + "\n").encode("utf-8"))
 
-    def _publish_rejection(self, handle_id: str, reason: str) -> None:
-        self._publish(handle_id, ExecutorObservation(state=EvaluationState.FAILED, failure=reason))
+    def _publish_rejection(self, handle_id: str, reason: str) -> ExecutorObservation:
+        return self._publish(
+            handle_id, ExecutorObservation(state=EvaluationState.FAILED, failure=reason)
+        )
 
     def _write_evaluation(
         self,
@@ -846,6 +1159,26 @@ class _SlurmStagePayloadError(ValueError):
     @classmethod
     def missing_command(cls, name: str) -> _SlurmStagePayloadError:
         return cls(f"Slurm stage {name!r} requires a nonempty configured command")
+
+
+async def _finish_in_thread[**P, R](
+    function: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
+) -> R:
+    """Run a blocking cluster call that must finish even if its awaiter is cancelled.
+
+    ``asyncio.to_thread`` abandons its worker when the awaiting task is cancelled,
+    so a cancel or inspect could still be mid-flight (an scancel not yet sent) after
+    the executor reported itself closed. This waits for the call to end, then
+    re-raises the cancellation.
+    """
+    work = asyncio.ensure_future(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(work)
+    except asyncio.CancelledError:
+        while not work.done():
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await asyncio.shield(work)
+        raise
 
 
 def _stage_command(name: str, command: str | None) -> tuple[str, ...]:

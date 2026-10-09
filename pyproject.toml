@@ -61,7 +61,7 @@ vs_issue_tracker = ["py.typed"]
 vs_core = ["py.typed"]
 vs_project = ["py.typed"]
 vs_prompts = ["py.typed"]
-vs_runtime = ["py.typed"]
+vs_runtime = ["py.typed", "prompts/*.j2"]
 vs_sandbox = ["py.typed"]
 vs_agent = ["py.typed", "images/*.Dockerfile"]
 vs_slurm = ["py.typed"]
@@ -104,7 +104,7 @@ testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/te
 # Start expensive tests first and keep worker queues short so long tests do not
 # remain queued behind fast tests. CI explicitly selects loadgroup to keep
 # shared native-build fixtures on one worker.
-addopts = "-ra -p no:tach --import-mode=importlib --dist load --maxschedchunk=1 --cov --cov-report=term-missing"
+addopts = "-ra -p no:tach --import-mode=importlib --dist load --maxschedchunk=1 --cov --cov-report=term-missing -m 'not slow'"
 pythonpath = [".", "packaging"]
 markers = [
     # Applied by `pytest_collection_modifyitems` in the root conftest.py, which
@@ -117,6 +117,8 @@ markers = [
     "e2e: drives an installed agent CLI for real; opt in with VIBESYS_E2E_AGENTS=1",
     # A Fake-vs-real contract suite run against the real implementation. Each
     # such test is skipped unless its opt-in environment variable is set.
+    # The exhaustive crash-sequence sweep: deselected by default, run with `-m slow`.
+    "slow: an exhaustive sweep too long for every run; select it with -m slow",
     "real_contract: runs a Fake-vs-real contract suite against the real implementation (real DB, subprocess, or service); opt in with VIBESYS_REAL_CONTRACTS=1",
 ]
 
@@ -153,7 +155,18 @@ floor = 40
 # comment naming why; do not add bare entries. Only list a module that
 # actually falls below the floor: allowlisting a covered module wrongly
 # implies it is untested.
-allowlist = []
+allowlist = [
+    # The dynamic strategy's attempt, planner, settlement and run-driver paths run
+    # only inside the whole-run scenarios in test_scenarios.py. Those are strict
+    # xfails until the core gaps named there close (EVAL-PATH #1333, SESSION-WIRING,
+    # CORE-P2), so these modules report low coverage. Remove each entry when the
+    # xfails are removed.
+    "src/vibesys/orchestration/dynamic/strategy/_attempt_events.py",
+    "src/vibesys/orchestration/dynamic/strategy/_attempts.py",
+    "src/vibesys/orchestration/dynamic/strategy/_planner.py",
+    "src/vibesys/orchestration/dynamic/strategy/_run.py",
+    "src/vibesys/orchestration/dynamic/strategy/_settlement.py",
+]
 
 [tool.vibesys.file_length]
 # God-file ceiling for first-party Python, in physical lines (`wc -l`).

@@ -1,5 +1,5 @@
 import {expect, test} from '@playwright/test';
-import {STREAM_BANNER_COPY} from '../src/banners.js';
+import {EMPTY_TRANSCRIPT_COPY, STREAM_BANNER_COPY} from '../src/banners.js';
 import {withGateway} from './gateway.js';
 
 /**
@@ -59,6 +59,9 @@ test('states that an ended run transcript stopped short when the stream drops', 
     const banner = page.getByTestId('stream-banner');
     await expect(banner).toBeVisible();
     await expect(banner).toContainText(STREAM_BANNER_COPY.ended);
+    // The empty panel must describe the same unavailable stream, not promise
+    // that an ended run will eventually replay activity into it.
+    await expect(page.locator('.empty')).toHaveText(EMPTY_TRANSCRIPT_COPY.unavailable);
     // An ended run cannot be resubscribed, so the affordance is withheld rather
     // than offered as a no-op.
     await expect(banner.getByRole('button', {name: 'Reattach'})).toHaveCount(0);

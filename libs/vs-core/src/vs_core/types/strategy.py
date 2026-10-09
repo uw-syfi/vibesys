@@ -10,6 +10,7 @@ from pydantic import (
     PrivateAttr,
     SerializeAsAny,
     ValidationInfo,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -251,6 +252,12 @@ class Proposal[S: StrategyState](Value):
 
     state: S
     decisions: tuple[Decision, ...]
+    wake_at: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    """The earliest run-clock time the strategy wants to be asked again, when it waits for time.
+
+    A strategy that holds work back until a time returns that time here, so the run loop
+    wakes then instead of concluding that nothing can happen. None means it waits for no time.
+    """
 
 
 class StrategyDeclaration(Value):
@@ -262,6 +269,11 @@ class StrategyDeclaration(Value):
     optional_operations: tuple[OperationSchemaRef, ...] = ()
     required: frozenset[LifecycleCapability] = frozenset()
     optional: frozenset[LifecycleCapability] = frozenset()
+
+    @field_serializer("required", "optional", when_used="json")
+    def _sorted_abilities(self, value: frozenset[LifecycleCapability]) -> list[str]:
+        """Write the sets in sorted order, as `Capabilities.lifecycle` does."""
+        return sorted(value)
 
 
 class Accepted(Value):

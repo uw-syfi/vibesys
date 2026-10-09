@@ -13,6 +13,7 @@ import {
   type ServerTransport,
   type SubscribeOptions,
 } from '@vibesys/backend-client';
+import {chatEvent, event} from '@vibesys/backend-client/testing';
 import {resolveStartupTrace} from './boot-trace.js';
 import {fuzzyMatchCommands} from './commands.js';
 import {readNote, writeNote} from './notes-store.js';
@@ -115,6 +116,27 @@ describe('session controller', () => {
     expect(controller.state.core.sequence).toBe(2);
     await controller.stop();
     expect(transport.closed).toBe(true);
+  });
+
+  it('does not treat another tagged message carrying events as an event batch', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    // A future `subscribed` member could add observability events. Dispatch is
+    // by its wire tag, never by an incidental payload field.
+    const subscribedWithEvents = {
+      type: 'subscribed' as const,
+      request_id: 'subscription',
+      run_id: 'run',
+      latest_sequence: 0,
+      events: [event(1, 'agent_output_chunk', 'must not fold\n')],
+    };
+    transport.emit(subscribedWithEvents);
+
+    expect(controller.state.core.sequence).toBe(0);
+    expect(controller.state.core.transcript).toEqual([]);
+    await controller.stop();
   });
 
   // A chat RPC answers with the journal tail written while the request was in
@@ -467,21 +489,36 @@ describe('session controller', () => {
   it('opens a multi-turn chat panel and renders agent answers there', async () => {
     const transport = new FakeTransport(
       [
-        chatEvent(1, 'agent_output_chunk', {
-          kind: 'agent_output_chunk',
-          channel: 'analysis',
-          content: 'Reading progress.md',
-        }),
-        chatEvent(2, 'tool_call', {
-          kind: 'tool_call',
-          tool: 'read_file',
-          args: {path: 'progress.md'},
-          status: null,
-        }),
-        chatEvent(3, 'chat', {
-          kind: 'chat',
-          answer: 'Round 2 improved throughput.',
-        }),
+        chatEvent(
+          1,
+          'agent_output_chunk',
+          {
+            kind: 'agent_output_chunk',
+            channel: 'analysis',
+            content: 'Reading progress.md',
+          },
+          {invocation_id: 'chat-1'},
+        ),
+        chatEvent(
+          2,
+          'tool_call',
+          {
+            kind: 'tool_call',
+            tool: 'read_file',
+            args: {path: 'progress.md'},
+            status: null,
+          },
+          {invocation_id: 'chat-1'},
+        ),
+        chatEvent(
+          3,
+          'chat',
+          {
+            kind: 'chat',
+            answer: 'Round 2 improved throughput.',
+          },
+          {invocation_id: 'chat-1'},
+        ),
       ],
       [],
       {
@@ -2077,6 +2114,31 @@ describe('session controller', () => {
     expect(controller.state.core.transcript).toHaveLength(1_500);
   });
 
+  it('retries a backfill range whose prefix belongs to another run', async () => {
+    const foreign = {...event(1_000, 'agent_output_chunk', 'foreign\n'), run_id: 'run-b'};
+    const transport = new HistoryTransport([foreign]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emitBatch(
+      [{...event(1_501, 'agent_output_chunk', 'tail\n'), run_id: 'run-a'}],
+      1_500,
+    );
+
+    await expect(controller.loadOlderHistory()).resolves.toBe(false);
+
+    expect(controller.state.core.historyAfterSequence).toBe(1_500);
+    expect(
+      controller.state.core.diagnostics.some(item => item.code === 'run_identity_mismatch'),
+    ).toBe(true);
+
+    await expect(controller.loadOlderHistory()).resolves.toBe(false);
+    expect(eventsQueries(transport)).toEqual([
+      {type: 'query.events', after_sequence: 500, before_sequence: 1_501},
+      {type: 'query.events', after_sequence: 500, before_sequence: 1_501},
+    ]);
+    expect(controller.state.core.historyAfterSequence).toBe(1_500);
+  });
+
   it('stops asking once the history floor reaches the start of the run', async () => {
     const history = longHistory(2_000);
     const transport = new HistoryTransport(history);
@@ -2637,6 +2699,24 @@ describe('stream reconnect', () => {
     expect(controller.state.core.historyAfterSequence).toBe(5);
   });
 
+  it('replaces the floor for a marked rebootstrap inside a resumed stream', async () => {
+    const transport = new ReconnectTransport();
+    const controller = new SocketSessionController(transport, undefined, undefined, [0]);
+    await controller.start();
+    transport.emitBatch([event(6, 'agent_output_chunk', 'six\n')], 5, 'run-store');
+    expect(controller.state.core.historyAfterSequence).toBe(5);
+
+    transport.sever();
+    await settle();
+    // The reconnect itself is a continuation, but the same socket then sends
+    // a tail-overflow bootstrap. Keeping the dial-level `resumed` tag here
+    // would preserve floor 5 and let scrollback address the superseded fold.
+    transport.emitBatch([event(20, 'agent_output_chunk', 'twenty\n')], 19, 'run-store', true);
+
+    expect(controller.state.core.sequence).toBe(20);
+    expect(controller.state.core.historyAfterSequence).toBe(19);
+  });
+
   it('re-bootstraps when the store was swapped while the stream was severed', async () => {
     const transport = new ReconnectTransport();
     const controller = new SocketSessionController(transport, undefined, undefined, [0]);
@@ -2955,12 +3035,18 @@ class ReconnectTransport implements ServerTransport {
     this.#message?.(message);
   }
 
-  emitBatch(events: readonly RunEvent[], historyAfterSequence = 0, storeId?: string): void {
+  emitBatch(
+    events: readonly RunEvent[],
+    historyAfterSequence = 0,
+    storeId?: string,
+    rebootstrap?: boolean,
+  ): void {
     this.#message?.({
       type: 'event_batch',
       events: [...events],
       history_after_sequence: historyAfterSequence,
       ...(storeId === undefined ? {} : {store_id: storeId}),
+      ...(rebootstrap === undefined ? {} : {rebootstrap}),
     });
   }
 
@@ -3478,34 +3564,5 @@ function entry(
     kept: false,
     active: false,
     ...overrides,
-  };
-}
-
-function event(sequence: number, type: RunEvent['type'], content?: string): RunEvent {
-  return {
-    sequence,
-    timestamp: '2026-01-01T00:00:00Z',
-    type,
-    ...(content === undefined
-      ? {}
-      : {
-          data: {kind: 'agent_output_chunk', channel: 'assistant', content},
-        }),
-  };
-}
-
-function chatEvent(
-  sequence: number,
-  type: RunEvent['type'],
-  data: NonNullable<RunEvent['data']>,
-): RunEvent {
-  return {
-    sequence,
-    timestamp: '2026-01-01T00:00:00Z',
-    type,
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
-    invocation_id: 'chat-1',
-    data,
   };
 }

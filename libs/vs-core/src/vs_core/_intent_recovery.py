@@ -2,10 +2,27 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
+from ._intent_ledger import RETRYABLE_FAILURES
+from ._proofs import (
+    Mismatch,
+    Missing,
+    ProofField,
+    ProofReason,
+    Proven,
+    Verdict,
+    current_admission,
+    current_closure,
+    descriptor_matches,
+    fresh_observation,
+    invocation_for,
+    observation_for,
+    operation_for,
+    released_owner,
+    resolved_observation,
+    submission_budget_for,
+)
 from ._registry import ContractError
 from .types.attempts import (
     AttemptPhase,
@@ -31,7 +48,6 @@ from .types.common import (
 from .types.evaluation import (
     CancelOwnedJob,
     OwnedJob,
-    PreparedSubmissionReceipt,
     RegisteredOwnedJob,
     SubmitMeasurement,
 )
@@ -41,6 +57,7 @@ from .types.intents import (
     ChildLease,
     ChildObservationWatermark,
     InspectRequest,
+    IntentBlocked,
     IntentPhase,
     ReconciliationDeadline,
     RecoveryBarrier,
@@ -52,82 +69,67 @@ from .types.intents import (
 )
 from .types.kernel import AreaChange
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
-from .types.sessions import CancelTurn, CloseSession, DispatchTurn, EnsureSession, ResumeSessionTurn
-from .types.strategy import Operation
+from .types.sessions import (
+    CancelTurn,
+    CloseSession,
+    DispatchTurn,
+    EnsureSession,
+    ResumeSessionTurn,
+    SessionPhase,
+)
 
 if TYPE_CHECKING:
     from .types.common import Observation, ResourceId
-    from .types.intents import Intent, IntentsEvent, IntentsState, Request
+    from .types.intents import Intent, IntentsEvent, IntentsState, Request, TargetObservation
     from .types.kernel import IntentsContext
-    from .types.sessions import Invocation
+    from .types.sessions import Invocation, SessionView
+    from .types.strategy import Operation
 
 type Resolution = Literal["pending", "safe-prepared", "reattached", "terminal", "blocked"]
 
 
-class _ChildProofReason(StrEnum):
-    HISTORY = "watermark_history_complete"
-    INSPECTION = "inspection"
-
-
-class _ChildProofField(StrEnum):
-    SOURCE = "source_requests"
-    OBSERVATION = "observation_watermarks"
-    INSPECTION = "inspection"
-
-
-class _Verdict:
-    def __bool__(self) -> bool:
-        message = "inspect the proof verdict variant explicitly"
-        raise TypeError(message)
-
-
-@dataclass(frozen=True, slots=True)
-class _Proven(_Verdict):
-    value: tuple[Observation, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class _Missing(_Verdict):
-    reason: _ChildProofReason
-
-
-@dataclass(frozen=True, slots=True)
-class _Mismatch(_Verdict):
-    field: _ChildProofField
-
-
-def _child_sources(child: ChildLease, state: IntentsState) -> _Proven | _Missing | _Mismatch:
+def _child_sources(child: ChildLease, state: IntentsState) -> Verdict[tuple[Observation, ...]]:
     """Complete, exact per-source facts are the only child ownership proof."""
     if not child.watermark_history_complete:
-        return _Missing(_ChildProofReason.HISTORY)
+        return Missing(ProofReason.INCOMPLETE_HISTORY)
     marks = {mark.source_request: mark.observation for mark in child.observation_watermarks}
     if set(marks) != set(child.source_requests):
-        return _Mismatch(_ChildProofField.SOURCE)
+        return Mismatch(ProofField.REQUEST_ID)
     for source, observation in marks.items():
         sources = tuple(intent for intent in state.intents if intent.request_id == source)
         if len(sources) != 1 or sources[0].request.scope != child.scope:
-            return _Mismatch(_ChildProofField.SOURCE)
+            return Mismatch(ProofField.REQUEST_ID)
         intent = sources[0]
         if (
-            observation.request_id != source
-            or observation.scope != child.scope
+            not isinstance(observation_for(intent, observation), Proven)
             or observation.resource_id != child.resource_id
-            or observation.admission_id != intent.request.admission_id
         ):
-            return _Mismatch(_ChildProofField.OBSERVATION)
-    return _Proven(tuple(marks.values()))
+            return Mismatch(ProofField.ADMISSION_ID)
+    return Proven(tuple(marks.values()))
+
+
+def _child_query(state: IntentsState, event: RequestObserved) -> Verdict[Intent]:
+    queries = tuple(row for row in state.intents if row.request_id == event.observation.request_id)
+    if len(queries) > 1:
+        return Mismatch(ProofField.REQUEST_ID)
+    if not queries:
+        return Missing(ProofReason.ABSENT_REQUEST)
+    query = queries[0]
+    source = observation_for(query, event.observation)
+    return Proven(query) if isinstance(source, Proven) else source
 
 
 def _child_inspection_fact(
     state: IntentsState, event: RequestObserved
-) -> _Proven | _Missing | _Mismatch:
+) -> Verdict[tuple[Observation, ...]]:
     """A refreshed watermark requires its exact committed successful query."""
     target = event.target
-    query = next(
-        (row for row in state.intents if row.request_id == event.observation.request_id), None
-    )
-    if query is None or target is None:
-        return _Missing(_ChildProofReason.INSPECTION)
+    proof = _child_query(state, event)
+    if not isinstance(proof, Proven):
+        return proof
+    if target is None:
+        return Missing(ProofReason.ABSENT_OBSERVATION)
+    query = proof.value
     if (
         not isinstance(query.request, InspectRequest)
         or query.request.target != target.observation.request_id
@@ -136,14 +138,14 @@ def _child_inspection_fact(
         or query.request.admission_id != target.observation.admission_id
         or query.observation != event.observation
     ):
-        return _Mismatch(_ChildProofField.INSPECTION)
+        return Mismatch(ProofField.PAYLOAD)
     if (
         query.phase != IntentPhase.COMPLETED
         or not event.observation.terminal
         or not event.observation.accepted
         or event.observation.status != ObservationStatus.SUCCEEDED
     ):
-        return _Missing(_ChildProofReason.INSPECTION)
+        return Missing(ProofReason.ABSENT_OBSERVATION)
     lease = next(
         (
             child
@@ -165,68 +167,49 @@ def _child_inspection_fact(
             != _child_inspection(source, lease.resource_id, state.recovery.epoch).request_id
         )
     ):
-        return _Missing(_ChildProofReason.INSPECTION)
-    return _Proven((target.observation,))
-
-
-def _released(observation: Observation | None) -> bool:
-    return (
-        observation is not None
-        and observation.terminal
-        and observation.released
-        and observation.children_complete
-        and observation.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
-    )
+        return Missing(ProofReason.ABSENT_OBSERVATION)
+    return Proven((target.observation,))
 
 
 def _operation_decision(intent: Intent, context: IntentsContext) -> Operation | None:
     request = intent.request
     if not isinstance(request, ExecuteRegisteredOperation):
         return None
-    return next(
-        (
-            receipt.decision
-            for receipt in context.run.receipts
-            if isinstance(receipt.decision, Operation)
-            and (
-                intent.request_id in receipt.request_ids
-                or request.decision_id == receipt.decision_id
-            )
-            and receipt.decision.scope == request.scope
-            and receipt.decision.registered_wire == request.operation
-        ),
-        None,
-    )
+    proof = operation_for(context.run.receipts, request)
+    return proof.value if isinstance(proof, Proven) else None
 
 
 def _invocation_owner(
     intent: Intent, context: IntentsContext, invocation: Invocation, observation: Observation
 ) -> bool:
     request = intent.request
+    registered = None
     if isinstance(request, DispatchTurn | ResumeSessionTurn):
-        payload_matches = invocation.turn == request.turn
+        turn = request.turn
     elif isinstance(request, ExecuteRegisteredOperation):
         decision = _operation_decision(intent, context)
-        payload_matches = (
-            decision is not None
-            and decision.normalized_turn == invocation.turn
-            and invocation.registered_operation == request.operation_id
-        )
+        if (
+            decision is None
+            or decision.registered_turn is None
+            or request.operation.schema_ref.lifecycle != LifecycleClass.SESSION_TURN
+            or intent.lifecycle != LifecycleClass.SESSION_TURN
+        ):
+            return False
+        turn = decision.registered_turn
+        registered = request.operation_id
     else:
         return False
+    proof = invocation_for(context.sessions.invocations, turn, observation.scope)
     previous = invocation.observation
     return (
-        payload_matches
-        and invocation.scope == observation.scope
-        and invocation.invocation.invocation_id == invocation.turn.invocation_id
-        and invocation.invocation.session_id == invocation.turn.session.session_id
-        and invocation.invocation.generation == observation.scope.generation
+        isinstance(proof, Proven)
+        and proof.value == invocation
+        and (registered is None or invocation.registered_operation == registered)
         and (
             previous is None
             or (
-                previous.request_id == intent.request_id
+                isinstance(observation_for(intent, previous), Proven)
                 and previous.resource_id in (None, observation.resource_id)
-                and previous.admission_id == intent.request.admission_id
             )
         )
     )
@@ -241,17 +224,13 @@ def _typed_job_owner(
     """One canonical job correspondence for reattachment and lease transfer."""
     request = intent.request
     if (
-        observation.request_id != intent.request_id
-        or observation.scope != request.scope
-        or observation.admission_id != request.admission_id
+        not isinstance(observation_for(intent, observation), Proven)
         or job.scope != observation.scope
         or job.resource_id not in (None, observation.resource_id)
         or (
             job.observation is not None
             and (
-                job.observation.request_id != intent.request_id
-                or job.observation.scope != request.scope
-                or job.observation.admission_id != request.admission_id
+                not isinstance(observation_for(intent, job.observation), Proven)
                 or job.observation.resource_id not in (None, observation.resource_id)
             )
         )
@@ -265,33 +244,32 @@ def _typed_job_owner(
         )
     if not isinstance(request, ExecuteRegisteredOperation):
         return False
-    schema = request.operation.schema_ref
+    decision = _operation_decision(intent, context)
+    descriptor = descriptor_matches(
+        context.registry,
+        context.run.capabilities,
+        request.operation,
+        LifecycleClass.OWNED_JOB,
+        OperationNormalizationKind.NONE,
+    )
     return (
-        job.request_id == intent.request_id
+        decision is not None
+        and isinstance(descriptor, Proven)
+        and descriptor.value.resource_pool == job.resource_pool
+        and job.request_id == intent.request_id
         and job.operation_id == request.operation_id
-        and schema.lifecycle == LifecycleClass.OWNED_JOB
-        and any(
-            descriptor.kind == schema.kind
-            and descriptor.request_schema == schema.request_schema
-            and descriptor.outcome_schema == schema.outcome_schema
-            and descriptor.lifecycle == schema.lifecycle
-            and descriptor.resource_pool == job.resource_pool
-            for descriptor in context.registry
-        )
+        and job.expected_measurement == decision.registered_measurement
     )
 
 
-def _submission_owner(intent: Intent, context: IntentsContext, observation: Observation) -> bool:
+def _submission_owner(intent: Intent, context: IntentsContext) -> bool:
     if not isinstance(intent.request, SubmitMeasurement):
         return False
-    return any(
-        budget.scope == observation.scope
-        and any(
-            isinstance(receipt, PreparedSubmissionReceipt)
-            and receipt.request_id == intent.request_id
-            for receipt in budget.receipts
-        )
-        for budget in context.evaluation.submission_budgets
+    return isinstance(
+        submission_budget_for(
+            intent.request, context.evaluation.submission_budgets, context.run.receipts
+        ),
+        Proven,
     )
 
 
@@ -299,14 +277,42 @@ def _workspace_owner(intent: Intent, context: IntentsContext, observation: Obser
     request = intent.request
     if not isinstance(request, EnsureWorkspace):
         return False
+    # The attempt keeps the ensure request pending only while it acquires. Once it
+    # consumed the accepted answer (it left ACQUIRING) the workspace is the attempt's own,
+    # and a restart must still recognise the resource as owned: otherwise the recovery
+    # check of a completed ensure never resolves.
+    consumed = (
+        intent.phase == IntentPhase.COMPLETED
+        and observation.accepted
+        and observation.status == ObservationStatus.SUCCEEDED
+    )
     return any(
         owner.attempt_id == request.attempt.attempt_id
         and owner.generation == request.attempt.generation
-        and observation.scope == Scope(owner=owner.attempt_id, generation=owner.generation)
-        and owner.admission_id == request.admission_id
+        and isinstance(current_admission(owner, observation.scope, request.admission_id), Proven)
         and owner.workspace == request.plan
-        and intent.request_id in owner.pending_intents
+        and (
+            intent.request_id in owner.pending_intents
+            or (consumed and owner.phase != AttemptPhase.ACQUIRING)
+        )
         for owner in context.attempts.attempts
+    )
+
+
+def _session_created(intent: Intent, observation: Observation, session: SessionView) -> bool:
+    """The session is the one this completed ensure created, and it is busy with its first turn.
+
+    A session's own acceptance waits for that turn's reply, and the turn waits for recovery
+    to be ready, so recovery cannot wait for acceptance to recognise the ensure's resource.
+    An idle session has no turn to wait on, so it needs its acceptance as before.
+    """
+    return (
+        intent.phase == IntentPhase.COMPLETED
+        and observation.accepted
+        and observation.status == ObservationStatus.SUCCEEDED
+        and session.phase in (SessionPhase.ACQUIRING, SessionPhase.EXECUTING)
+        and session.resource_id is not None
+        and observation.resource_id == session.resource_id
     )
 
 
@@ -316,9 +322,7 @@ def _known_owner(intent: Intent, context: IntentsContext, observation: Observati
         for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs)
     ):
         return True
-    if _submission_owner(intent, context, observation) or _workspace_owner(
-        intent, context, observation
-    ):
+    if _submission_owner(intent, context) or _workspace_owner(intent, context, observation):
         return True
     if isinstance(intent.request, EnsureSession) and any(
         session.scope == observation.scope
@@ -332,6 +336,7 @@ def _known_owner(intent: Intent, context: IntentsContext, observation: Observati
         and (
             (session.accepted and session.resource_id is not None)
             or intent.request_id in session.pending_intents
+            or _session_created(intent, observation, session)
         )
         for session in context.sessions.sessions
     ):
@@ -362,7 +367,9 @@ def _prepared_episode(intent: Intent, context: IntentsContext) -> bool:
         ),
         None,
     )
-    if owner is None or owner.admission_id is None or request.admission_id != owner.admission_id:
+    if owner is None or not isinstance(
+        current_admission(owner, request.scope, request.admission_id), Proven
+    ):
         return False
     if owner.phase in (AttemptPhase.ACQUIRING, AttemptPhase.ACTIVE):
         return True
@@ -371,11 +378,17 @@ def _prepared_episode(intent: Intent, context: IntentsContext) -> bool:
         CloseAttemptScope | CloseSession | DiscardWorkspace | RetainRevision | SnapshotAndRetain,
     )
     if isinstance(request, ExecuteRegisteredOperation):
-        cleanup = any(
-            descriptor.kind == request.operation.schema_ref.kind
-            and descriptor.revision_authority
-            in (RevisionAuthority.SNAPSHOT, RevisionAuthority.RETAIN, RevisionAuthority.DISCARD)
-            for descriptor in context.registry
+        descriptor = descriptor_matches(
+            context.registry,
+            context.run.capabilities,
+            request.operation,
+            intent.lifecycle,
+            OperationNormalizationKind.NONE,
+        )
+        cleanup = isinstance(descriptor, Proven) and descriptor.value.revision_authority in (
+            RevisionAuthority.SNAPSHOT,
+            RevisionAuthority.RETAIN,
+            RevisionAuthority.DISCARD,
         )
     if not cleanup:
         return False
@@ -384,13 +397,10 @@ def _prepared_episode(intent: Intent, context: IntentsContext) -> bool:
         identities.add(request.operation_id)
     if isinstance(request, CloseSession):
         identities.add(request.session_id)
-    return (
-        owner.closure is not None
-        and owner.closure.admission_id == request.admission_id
-        and (
-            owner.closure.authority == intent.request_id
-            or any(edge.identity in identities for edge in owner.release_dependencies)
-        )
+    closure = current_closure(owner, owner.closure)
+    return isinstance(closure, Proven) and (
+        closure.value.authority == intent.request_id
+        or any(edge.identity in identities for edge in owner.release_dependencies)
     )
 
 
@@ -398,23 +408,28 @@ def _reopen_resolved(intent: Intent, context: IntentsContext) -> bool:
     request = intent.request
     if not isinstance(request, ExecuteRegisteredOperation):
         return True
-    descriptor = next(
-        (
-            descriptor
-            for descriptor in context.registry
-            if descriptor.kind == request.operation.schema_ref.kind
-            and descriptor.request_schema == request.operation.schema_ref.request_schema
-            and descriptor.outcome_schema == request.operation.schema_ref.outcome_schema
-            and descriptor.lifecycle == request.operation.schema_ref.lifecycle
-        ),
-        None,
+    declarations = tuple(
+        descriptor
+        for descriptor in context.registry
+        if descriptor.kind == request.operation.schema_ref.kind
     )
-    if descriptor is None:
+    if len(declarations) != 1:
         return False
-    if descriptor.normalization != OperationNormalizationKind.SCOPE_REOPEN:
+    descriptor = descriptor_matches(
+        context.registry,
+        context.run.capabilities,
+        request.operation,
+        intent.lifecycle,
+        declarations[0].normalization,
+    )
+    if not isinstance(descriptor, Proven):
+        return False
+    decision = _operation_decision(intent, context)
+    if decision is None:
+        return False
+    if descriptor.value.normalization != OperationNormalizationKind.SCOPE_REOPEN:
         return True
     outcome = intent.outcome
-    decision = _operation_decision(intent, context)
     normalization = decision.normalized_scope_reopen if decision is not None else None
     return (
         isinstance(outcome, ScopedAdmissionReopenOutcome)
@@ -448,13 +463,22 @@ def _session_resources(intent: Intent, context: IntentsContext) -> set[ResourceI
     }
 
 
-def _resource_identified(intent: Intent, context: IntentsContext, observation: Observation) -> bool:
-    request = intent.request
-    resource_bearing = intent.lifecycle in (
+def _owns_resource(intent: Intent) -> bool:
+    """Whether the request creates or ends the lifecycle of the resource it reports.
+
+    Every other request only names a resource that another request owns (a snapshot, a
+    retain or an adoption names the workspace), so its observation says nothing about
+    that resource's release.
+    """
+    return intent.lifecycle in (
         LifecycleClass.OWNED_JOB,
         LifecycleClass.SESSION_TURN,
-    ) or isinstance(request, EnsureSession | EnsureWorkspace | CloseSession)
-    if not resource_bearing:
+    ) or isinstance(intent.request, EnsureSession | EnsureWorkspace | CloseSession)
+
+
+def _resource_identified(intent: Intent, context: IntentsContext, observation: Observation) -> bool:
+    request = intent.request
+    if not _owns_resource(intent):
         return True
     if observation.resource_id is None:
         return not observation.accepted and observation.status in (
@@ -482,25 +506,40 @@ def _resolution(intent: Intent, context: IntentsContext) -> Resolution:
     if intent.phase == IntentPhase.PREPARED and observation is None:
         return "safe-prepared" if _prepared_episode(intent, context) else "pending"
     if (
-        observation is None
+        not isinstance(observation_for(intent, observation), Proven)
+        or observation is None
         or observation.status == ObservationStatus.UNKNOWN
-        or observation.request_id != intent.request_id
-        or observation.scope != intent.request.scope
-        or observation.admission_id != intent.request.admission_id
         or not _reopen_resolved(intent, context)
     ):
         return "pending"
     if not _resource_identified(intent, context, observation):
         return "pending"
     terminal = observation.terminal and observation.status != ObservationStatus.PENDING
-    resource_free = (
-        intent.lifecycle not in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
+    # A completed request that does not own its resource has nothing left to recover: it
+    # creates no children and its resource is another request's to release.
+    names_only = (
+        not _owns_resource(intent)
+        and observation.accepted
+        and observation.status == ObservationStatus.SUCCEEDED
+    )
+    # A rejection that accepted nothing performed nothing: no resource, no children to find.
+    refused = (
+        observation.status == ObservationStatus.REJECTED
+        and not observation.accepted
         and observation.resource_id is None
         and not observation.children
-        and observation.children_complete
+    )
+    resource_free = (
+        intent.lifecycle not in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
+        and (observation.resource_id is None or names_only)
+        and not observation.children
+        and (observation.children_complete or names_only)
     )
     if terminal and (
-        intent.lifecycle == LifecycleClass.QUERY or resource_free or _released(observation)
+        intent.lifecycle == LifecycleClass.QUERY
+        or resource_free
+        or refused
+        or isinstance(released_owner(intent, (intent,)), Proven)
     ):
         return "terminal"
     if (
@@ -511,6 +550,17 @@ def _resolution(intent: Intent, context: IntentsContext) -> Resolution:
     ):
         return "reattached"
     return "pending"
+
+
+def _reports(intent: Intent, target: TargetObservation) -> bool:
+    """Whether the ledger committed this inspection's facts about the intent.
+
+    A request proven never begun commits no observation: the ledger reissues it, so it is
+    PREPARED again and the inspection has answered its check.
+    """
+    if target.reissue is not None and intent.phase == IntentPhase.PREPARED:
+        return True
+    return intent.observation == target.observation
 
 
 def _inspection(intent: Intent, epoch: int) -> InspectRequest:
@@ -535,8 +585,7 @@ def _child_inspection(intent: Intent, resource: ResourceId, epoch: int) -> Inspe
 
 
 def _child_released(child: ChildLease, state: IntentsState) -> bool:
-    proof = _child_sources(child, state)
-    return isinstance(proof, _Proven) and all(_released(row) for row in proof.value)
+    return isinstance(released_owner(child, state.intents), Proven)
 
 
 def _child_ready(child: ChildLease) -> bool:
@@ -547,7 +596,7 @@ def _child_ready(child: ChildLease) -> bool:
         and observation.scope == child.scope
         and observation.resource_id == child.resource_id
         and (
-            _released(observation)
+            isinstance(resolved_observation(observation), Proven)
             or (
                 observation is not None
                 and observation.status != ObservationStatus.UNKNOWN
@@ -560,7 +609,7 @@ def _child_ready(child: ChildLease) -> bool:
 
 def _child_proven(child: ChildLease, state: IntentsState) -> bool:
     proof = _child_sources(child, state)
-    return isinstance(proof, _Proven) and all(
+    return isinstance(proof, Proven) and all(
         _child_ready(child.model_copy(update={"observation": row})) for row in proof.value
     )
 
@@ -641,7 +690,7 @@ def _transfer_children(state: IntentsState, context: IntentsContext) -> IntentsS
                     and observation.resource_id == child.resource_id
                     and observation.admission_id == source.request.admission_id
                     and (
-                        _released(observation)
+                        isinstance(resolved_observation(observation), Proven)
                         or (
                             observation.accepted
                             and observation.children_complete
@@ -693,6 +742,28 @@ def _finish(state: IntentsState, barrier: RecoveryBarrier) -> AreaChange[Intents
     return AreaChange(state=state.model_copy(update={"recovery": barrier}), signals=signals)
 
 
+def _requeue_lost_inspection(state: IntentsState, intent: Intent) -> IntentsState:
+    """An earlier epoch's inspection that never reported is issued again, not left dispatched.
+
+    Its target is inspected afresh by this epoch, but the old request would stay in flight
+    for good and hold the run open. An inspection only reads, so issuing it again is safe.
+    """
+    if not (
+        isinstance(intent.request, InspectRequest)
+        and intent.phase in (IntentPhase.DISPATCHED, IntentPhase.RECONCILING)
+        and intent.observation is None
+    ):
+        return state
+    requeued = intent.model_copy(update={"phase": IntentPhase.PREPARED})
+    return state.model_copy(
+        update={
+            "intents": tuple(
+                requeued if row.request_id == intent.request_id else row for row in state.intents
+            )
+        }
+    )
+
+
 def _start(
     state: IntentsState, context: IntentsContext, event: RecoveryStarted
 ) -> AreaChange[IntentsState]:
@@ -704,13 +775,9 @@ def _start(
         return AreaChange(state=state)
     updated = state
     for intent in state.intents:
-        if (
-            intent.observation is not None
-            and intent.observation.request_id == intent.request_id
-            and intent.observation.scope == intent.request.scope
-            and intent.observation.admission_id == intent.request.admission_id
-        ):
-            updated = _observe_children(updated, RequestObserved(observation=intent.observation))
+        proof = observation_for(intent, intent.observation)
+        if isinstance(proof, Proven):
+            updated = _observe_children(updated, RequestObserved(observation=proof.value))
     checks: list[RecoveryCheck] = []
     requests: list[Request] = []
     targets = {intent.request_id for intent in state.intents}
@@ -725,6 +792,7 @@ def _start(
                 for child in updated.children
             )
         ):
+            updated = _requeue_lost_inspection(updated, intent)
             continue
         resolution = _aggregate_resolution(intent, context, updated)
         inspection = (
@@ -827,10 +895,7 @@ def _source_observation(state: IntentsState, event: RequestObserved) -> Observat
             ("observation", "request_id"), "child ownership requires a unique canonical source"
         )
     source = sources[0]
-    if (
-        observation.scope != source.request.scope
-        or observation.admission_id != source.request.admission_id
-    ):
+    if not isinstance(observation_for(source, observation), Proven):
         raise ContractError(
             ("observation", "admission_id"), "child ownership requires canonical source episode"
         )
@@ -845,9 +910,10 @@ def _ignore_ownership_fact(
         return False
     if canonical.request_id != observation.request_id:
         return child
-    if observation.sequence < canonical.sequence:
-        return True
-    if observation.sequence == canonical.sequence and observation != canonical:
+    proof = fresh_observation((canonical,), observation, complete=True)
+    if not isinstance(proof, Proven):
+        if observation.sequence < canonical.sequence:
+            return True
         raise ContractError(
             ("observation", "sequence"), "conflicting ownership observation sequence"
         )
@@ -860,9 +926,9 @@ def _observe_fact(state: IntentsState, event: RequestObserved) -> IntentsState:
     previous = None
     if event.target is not None and event.target.target_resource is not None:
         inspection = _child_inspection_fact(state, event)
-        if isinstance(inspection, _Missing):
+        if isinstance(inspection, Missing):
             return state
-        if isinstance(inspection, _Mismatch):
+        if isinstance(inspection, Mismatch):
             raise ContractError(
                 ("target", inspection.field),
                 "child inspection differs from committed canonical query",
@@ -1097,15 +1163,15 @@ def _observe(
             if intent is not None and child_resource is not None
             else None
         )
+        # One fact, one path: any committed observation about the target re-resolves its
+        # check from the target's current resolution, whichever inspection delivered it
+        # (the check's own, a turn's InspectTurn from Sessions, or a continuation's).
+        # A child's check still names its own inspection: the child is a different resource.
         matches = (
             check.target == target
             and event.target is not None
             and (
-                child_resource is not None
-                or (intent is not None and intent.observation == event.target.observation)
-            )
-            and (
-                check.inspection == event.observation.request_id
+                intent is not None and _reports(intent, event.target)
                 if child_resource is None
                 else expected_child == event.observation.request_id
             )
@@ -1233,19 +1299,26 @@ def _deadline(
             or request.admission_id != intent.request.admission_id
         ):
             raise ContractError(("request_id",), "reconciliation successor identity conflict")
-    requests: list[Request] = [
-        BlockIntent(
-            request_id=block_id,
-            scope=intent.request.scope,
-            admission_id=intent.request.admission_id,
-            deadline_at=max(context.run.now_at, event.now_at)
-            + context.run.limits.reconciliation_bound,
-            target=intent.request_id,
-            diagnostic="reconciliation deadline reached without conclusive ownership proof",
+    block = BlockIntent(
+        request_id=block_id,
+        scope=intent.request.scope,
+        admission_id=intent.request.admission_id,
+        deadline_at=max(context.run.now_at, event.now_at) + context.run.limits.reconciliation_bound,
+        target=intent.request_id,
+        diagnostic="reconciliation deadline reached without conclusive ownership proof",
+    )
+    requests: list[Request] = []
+    events: tuple[IntentBlocked, ...] = ()
+    if previous_block is None:
+        requests.append(block)
+        events = (
+            IntentBlocked(
+                request_id=block_id,
+                target=block.target,
+                scope=block.scope,
+                diagnostic=block.diagnostic,
+            ),
         )
-    ]
-    if previous_block is not None:
-        requests.clear()
     observation = intent.observation
     resources = []
     if (
@@ -1253,11 +1326,9 @@ def _deadline(
         and observation is not None
         and observation.accepted
         and observation.resource_id is not None
-        and observation.scope == intent.request.scope
-        and observation.request_id == intent.request_id
-        and observation.admission_id == intent.request.admission_id
+        and isinstance(observation_for(intent, observation), Proven)
         and _resource_identified(intent, context, observation)
-        and not _released(observation)
+        and not isinstance(resolved_observation(observation), Proven)
     ):
         resources.append(observation.resource_id)
     resources.extend(
@@ -1281,13 +1352,63 @@ def _deadline(
         for resource in sorted(set(resources), key=lambda value: value.root)
     )
     requests.extend(_pending_cancellations(state, tuple(cancellations)))
-    barrier, inspection = _deadline_barrier(state, context, intent, now_at)
-    if inspection is not None:
-        requests.append(inspection)
+    barrier = state.recovery
+    if barrier.phase != RecoveryPhase.READY:
+        # Recovery is gating the run: record the blocked check and inspect once more. A
+        # bound passing while the run is live (an executor answered and went silent) blocks
+        # the intent for the strategy to handle and leaves scheduling open.
+        barrier, inspection = _deadline_barrier(state, context, intent, now_at)
+        if inspection is not None:
+            requests.append(inspection)
 
     return AreaChange(
-        state=state.model_copy(update={"recovery": barrier}), requests=tuple(requests)
+        state=state.model_copy(update={"recovery": barrier}),
+        requests=tuple(requests),
+        events=events,
     )
+
+
+def _answered_open(intent: Intent) -> bool:
+    """An intent whose executor answered without concluding, so nothing is in flight for it.
+
+    RECONCILING is an Unknown or an unproven acceptance; DISPATCHED with an observation is
+    a retryable failure (never PENDING, which is progress). Both wait for an inspection or a later observation that no
+    live request is going to produce. A DISPATCHED intent with no observation may still be
+    executing, so it is not here.
+    """
+    if intent.phase == IntentPhase.RECONCILING:
+        return True
+    observation = intent.observation
+    return (
+        intent.phase == IntentPhase.DISPATCHED
+        and observation is not None
+        and observation.status in RETRYABLE_FAILURES
+    )
+
+
+def _canonical(intent: Intent) -> bool:
+    return not isinstance(intent.request, InspectRequest | CancelOwnedResource | BlockIntent)
+
+
+def overdue_reconciliations(
+    state: IntentsState, now_at: float
+) -> tuple[ReconciliationDeadline, ...]:
+    """One deadline event per answered-but-open canonical intent whose bound has passed."""
+    return tuple(
+        ReconciliationDeadline(request_id=intent.request_id, now_at=now_at)
+        for intent in state.intents
+        if _answered_open(intent) and _canonical(intent) and intent.reconcile_deadline_at <= now_at
+    )
+
+
+def next_reconciliation_at(state: IntentsState) -> float | None:
+    """The earliest time a ``ClockAdvanced`` would block an answered-but-open intent."""
+    due = [
+        intent.reconcile_deadline_at
+        for intent in state.intents
+        if _answered_open(intent) and _canonical(intent)
+    ]
+    return min(due, default=None)
 
 
 def advance(

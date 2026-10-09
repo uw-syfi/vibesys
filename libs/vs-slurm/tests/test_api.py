@@ -31,6 +31,9 @@ from vs_slurm.api import (
     runtime_content_identity,
 )
 
+# test-isolation: the public Fake connector's sacct renderer keeps this stub's rows realistic.
+from vs_slurm.fake_connector import sacct_row
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -54,6 +57,25 @@ def _config(**overrides: object) -> SlurmConfig:
     }
     values.update(overrides)
     return SlurmConfig.model_validate(values)
+
+
+def _moves(tokens: Sequence[str]) -> list[tuple[str, str]]:
+    """Return the (source, destination) operands of every ``mv`` in a tokenized script."""
+    moves: list[tuple[str, str]] = []
+    for index, word in enumerate(tokens):
+        if word != "mv":
+            continue
+        operands: list[str] = []
+        options_ended = False
+        for operand in tokens[index + 1 :]:
+            if not options_ended and operand.startswith("-"):
+                options_ended = operand == "--"
+                continue
+            operands.append(operand)
+            if len(operands) == 2:
+                moves.append((operands[0], operands[1]))
+                break
+    return moves
 
 
 class _FakeConnector:
@@ -163,7 +185,7 @@ class _FakeConnector:
             return "RUNNING\n"
         if command.startswith("sacct"):
             state = "FAILED" if self.job_exit_code else "COMPLETED"
-            return f"{state} {self.job_exit_code}:0\n"
+            return sacct_row(state, f"{self.job_exit_code}:0", parsable="-P" in tokens)
         return ""
 
     def _content_cache_response(self, tokens: list[str]) -> str | None:
@@ -179,12 +201,11 @@ class _FakeConnector:
                 return "READY"
             if ready_path in self.ready_content_objects:
                 return "READY"
-            target = tokens[tokens.index("mv") + 4]
+            _source, target = _moves(tokens)[0]
             self.ready_content_objects.add(f"{target}/ready")
             return "PUBLISHED"
-        for index, word in enumerate(tokens[:-3]):
-            if word == "mv" and tokens[index + 1 : index + 3] == ["-T", "--"]:
-                self.ready_content_objects.add(f"{tokens[index + 3]}/ready")
+        for _source, target in _moves(tokens):
+            self.ready_content_objects.add(f"{target}/ready")
         if "rmdir" in tokens:
             self.locked_content_objects.discard(tokens[tokens.index("rmdir") + 2])
         return None
@@ -360,7 +381,7 @@ class _FakeSshProcess:
             if "sbatch" in remote_command:
                 stdout = "Submitted batch job 4567\n"
             elif remote_command.startswith("sacct"):
-                stdout = "COMPLETED 0:0\n"
+                stdout = sacct_row("COMPLETED", "0:0", parsable="-P" in remote_command.split())
             elif "for attempt in" in remote_command:
                 stdout = "PUBLISHED"
             elif "printf 'READY'" in remote_command:
@@ -807,7 +828,7 @@ def test_batch_runs_ordered_stages_in_one_allocation_and_stops_after_failure(
     assert "export PORT=" in script
     assert 'http://127.0.0.1:"${PORT}"' in script
     assert script.index("accuracy.py") < script.index("benchmark.py") < script.index("profile.py")
-    assert "timeout --signal=TERM --kill-after=5s 13s python benchmark.py" in script
+    assert "vs_timeout --signal=TERM --kill-after=5s 13s python benchmark.py" in script
     assert "exit 0" in script
 
     handle_document = handle.model_dump(mode="json")
@@ -1204,9 +1225,9 @@ def test_content_addressed_staging_reuses_objects_and_keeps_workspaces_fresh(
     assert len(sync_requests) == 2
     commands = [str(request.get("command", "")) for request in connector.requests]
     assert sum("rsync -a --chmod=Du+w,Fu+w --delete" in command for command in commands) >= 4
-    publish_commands = [command for command in commands if "mv -T --" in command]
+    publish_commands = [command for command in commands if _moves(shlex.split(command))]
     assert len(publish_commands) == 2
-    assert all(command.index("touch ") < command.index("mv -T --") for command in publish_commands)
+    assert all(command.index("touch ") < command.index("mv") for command in publish_commands)
 
     (workspace / "candidate.py").write_text("version = 2\n", encoding="utf-8")
     third = runner.submit(
@@ -1328,7 +1349,7 @@ def test_failed_content_upload_does_not_publish_a_ready_object(tmp_path: Path) -
         for request in connector.requests
         if request["operation"] == "exec"
     ]
-    assert not any("mv -T --" in command for command in remote_commands)
+    assert not any(_moves(shlex.split(command)) for command in remote_commands)
     assert not connector.ready_content_objects
     assert not connector.locked_content_objects
 
@@ -1388,7 +1409,7 @@ def test_cache_lock_timeout_is_reported_as_retryable_and_never_deletes_target(
     )
     assert "owner=%s\\npid=%s\\ncreated=%s" in publish
     assert "[ $((now - created_at)) -ge 300 ]" in publish
-    assert "mv -- " in publish
+    assert _moves(shlex.split(publish))
     assert "rm -rf --" in publish
 
 

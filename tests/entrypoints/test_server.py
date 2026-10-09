@@ -21,6 +21,7 @@ from tests.entrypoints.support import (
     GATEWAY_PID,
     IDLE_DIRECTORY,
     INSTANCE_PATH,
+    POLL_SECONDS,
     FakeDetachedGateway,
     gateway_record,
 )
@@ -46,6 +47,7 @@ from entrypoints.server import (
     stop_detached_gateway,
 )
 from server.transport.discovery import WebInstanceClaim, WebInstanceHold, WebInstanceRecord
+from server.transport.websocket import WebSocketLimits
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -373,6 +375,21 @@ def test_stop_detached_gateway_waits_until_the_instance_files_are_released() -> 
     assert gateway.signals == [GATEWAY_PID]
     assert gateway.observations == 5
     assert gateway.sleeps == [0.05] * 4
+
+
+def test_stop_budget_observes_release_after_the_websocket_close_boundary() -> None:
+    close_timeout_seconds = WebSocketLimits().close_timeout_seconds
+    close_bound_polls = int(close_timeout_seconds / POLL_SECONDS)
+    gateway = FakeDetachedGateway(polls_before_release=close_bound_polls)
+
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
+
+    # A peer may consume the entire transport close bound, and the released
+    # files then become visible only on the next observation. Equal transport
+    # and operator bounds returned failure at that boundary under CI load.
+    assert result == GatewayStopResult(GatewayStopOutcome.STOPPED, IDLE_DIRECTORY, GATEWAY_PID)
+    assert close_timeout_seconds < GATEWAY_STOP_TIMEOUT_SECONDS
+    assert gateway.monotonic() == close_timeout_seconds + POLL_SECONDS
 
 
 def test_stop_detached_gateway_waits_out_a_gateway_that_already_dropped_its_record() -> None:

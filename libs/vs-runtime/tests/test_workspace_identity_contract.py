@@ -3,25 +3,37 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import CalledProcessError
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from tests.support import run_test_command
+from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_proof
 from tests.support.run_execution import run_execution_record
+from tests.support.runtime_operations import VerifyParentRevision as _VerifyRequest
 
 from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
+from vs_core.api import HostFence, HostId
 from vs_project.api import NullGitTrackerEvents, OrchestrationDescriptor, RunEnvironmentRecord
 from vs_runtime.api import (
     RuntimeContractError,
     WorkspaceRestoreError,
     member_workspace_id,
     validate_member_id,
+)
+from vs_runtime.api.core import (
+    ExecutionContext,
+    RetainRevisionOwner,
+    VerifyRevisionOwner,
+    commit_of,
+    revision_ref,
 )
 from vs_runtime.api.infrastructure import (
     AgentPaths,
@@ -49,7 +61,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from typing import TextIO
 
-    from vs_runtime.api import CandidateWorkspace, Workspaces
+    from vs_runtime.api import CandidateWorkspace, RevisionLedger, Workspaces
     from vs_sandbox.api import Sandbox
 
 
@@ -425,3 +437,128 @@ def test_concurrent_member_creation_has_one_owner(member_id: str) -> None:
 
     for implementation in _IMPLEMENTATIONS:
         asyncio.run(exercise(implementation))
+
+
+def _ledger(workspaces: Workspaces) -> RevisionLedger:
+    """Both implementations keep a revision ledger beside their workspaces."""
+    return cast("RevisionLedger", workspaces)
+
+
+def _dangling_revision(workspaces: Workspaces, serial: int) -> str:
+    """A revision that exists in the repository but that nothing references."""
+    if isinstance(workspaces, FakeWorkspaces):
+        revision = f"dangling-{serial}"
+        workspaces.add_dangling_revision(revision)
+        return revision
+    environment = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+        "PATH": os.environ["PATH"],
+        "HOME": str(workspaces.root.path),
+    }
+    created = run_test_command(
+        ["git", "commit-tree", "HEAD^{tree}", "-m", f"dangling {serial}"],
+        cwd=workspaces.root.path,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return created.stdout.strip()
+
+
+@settings(max_examples=5, deadline=None)
+@given(steps=st.lists(st.sampled_from(["root", "candidate", "dangling"]), min_size=1, max_size=6))
+@example(steps=["dangling"])
+def test_retention_is_reachability_not_presence(steps: list[str]) -> None:
+    """Both implementations retain exactly what a snapshot or candidate kept, never a bare object.
+
+    Exporting a patch succeeds for a dangling revision in both, so it cannot be the
+    retention check; ``retains`` is, and an unknown revision is simply not retained.
+    """
+
+    async def exercise(implementation: Implementation) -> None:
+        async with _workspaces(implementation) as workspaces:
+            retained: set[str] = set()
+            dangling: set[str] = set()
+            for serial, step in enumerate(steps):
+                (workspaces.root.path / "candidate.py").write_text(f"VALUE = {serial}\n")
+                if step == "root":
+                    retained.add(await workspaces.root.snapshot(f"root-{serial}"))
+                elif step == "candidate":
+                    candidate = await workspaces.create_candidate(member_id=f"m{serial}")
+                    if implementation == "git":  # the fake candidate has no directory on disk
+                        (candidate.path / "candidate.py").write_text(f"VALUE = {serial}0\n")
+                    retained.add(await candidate.snapshot(f"candidate-{serial}"))
+                    await candidate.discard()
+                else:
+                    dangling.add(_dangling_revision(workspaces, serial))
+            for revision in retained:
+                assert await _ledger(workspaces).retains(revision)
+            for revision in dangling:
+                assert not await _ledger(workspaces).retains(revision)
+                await workspaces.export_patch(revision)
+            assert not await _ledger(workspaces).retains("0" * 40)
+
+    for implementation in _IMPLEMENTATIONS:
+        asyncio.run(exercise(implementation))
+
+
+def test_parent_verification_over_real_git_accepts_only_retained_commits() -> None:
+    """The production owner, parser and Git ledger agree: a dangling commit never verifies."""
+
+    async def exercise() -> None:
+        async with _workspaces("git") as workspaces:
+            owner = VerifyRevisionOwner(workspaces, _ledger(workspaces), commit_of)
+            context = ExecutionContext(
+                fence=HostFence(host_id=HostId(root="h"), epoch=1), now_at=5.0, payload_digest="d"
+            )
+
+            async def verified(commit: str) -> object:
+                request = _VerifyRequest(parent=revision_ref(commit))
+                return (await owner.execute(request, context))["verified"]
+
+            retained = await workspaces.root.snapshot("retained")
+            candidate = await workspaces.create_candidate(retained, member_id="parent")
+            (candidate.path / "candidate.py").write_text("VALUE = 5\n", encoding="utf-8")
+            held = await candidate.snapshot("held")
+            await candidate.discard()
+            assert await verified(retained) is True
+            assert await verified(held) is True
+            assert await verified(_dangling_revision(workspaces, 0)) is False
+            assert await verified("0" * 40) is False
+
+    asyncio.run(exercise())
+
+
+def test_retention_over_real_git_keeps_a_proven_commit_and_refuses_the_rest() -> None:
+    """A dangling commit becomes retained once its accuracy proof is accepted, and only then."""
+
+    async def exercise() -> None:
+        async with _workspaces("git") as workspaces:
+            ledger = _ledger(workspaces)
+            owner = RetainRevisionOwner(workspaces, ledger, commit_of, "verified")
+            context = ExecutionContext(
+                fence=HostFence(host_id=HostId(root="h"), epoch=1), now_at=5.0, payload_digest="d"
+            )
+            dangling = _dangling_revision(workspaces, 0)
+            other = _dangling_revision(workspaces, 1)
+            proof = accepted_accuracy_proof(revision_ref(dangling))
+            assert not await ledger.retains(dangling)
+            wrong = RetainWithProof(revision=revision_ref(other), accuracy_proof=proof)
+            assert (await owner.execute(wrong, context))["retained"] is False
+            assert not await ledger.retains(other)
+            request = RetainWithProof(revision=revision_ref(dangling), accuracy_proof=proof)
+            first = await owner.execute(request, context)
+            assert first["retained"] is True
+            assert await ledger.retains(dangling)
+            assert await owner.execute(request, context) == first
+            missing = RetainWithProof(
+                revision=revision_ref("0" * 40),
+                accuracy_proof=accepted_accuracy_proof(revision_ref("0" * 40)),
+            )
+            assert (await owner.execute(missing, context))["retained"] is False
+
+    asyncio.run(exercise())

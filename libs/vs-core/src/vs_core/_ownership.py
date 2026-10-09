@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._proofs import Proven, released_owner
 from .types.attempts import AttemptPhase
-from .types.common import LifecycleClass, ObservationStatus
-from .types.evaluation import RegisteredOwnedJob
+from .types.common import LifecycleClass
+from .types.evaluation import ContinuationPhase
 
 if TYPE_CHECKING:
-    from .types.common import Observation
-    from .types.evaluation import OwnedJob
+    from .types.evaluation import OwnedJob, RegisteredOwnedJob
     from .types.intents import ChildLease, Intent
+    from .types.sessions import Invocation
 from .types.intents import IntentPhase
 from .types.sessions import SessionPhase
 
@@ -38,14 +39,17 @@ def cleanup_pending(state: CoreState) -> bool:
             ),
             any(session.phase != SessionPhase.TERMINAL for session in state.sessions.sessions),
             any(
-                not _job_release_confirmed(job)
+                not _job_release_confirmed(job, state.intents.intents)
                 for job in (*state.evaluation.jobs, *state.evaluation.registered_jobs)
             ),
             any(
-                intent.phase != IntentPhase.COMPLETED
-                or (
-                    intent.lifecycle in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
-                    and (not _intent_release_confirmed(intent))
+                not _blocked_unnamed(intent)
+                and (
+                    intent.phase != IntentPhase.COMPLETED
+                    or (
+                        intent.lifecycle in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
+                        and (not _intent_release_confirmed(intent, state.intents.intents))
+                    )
                 )
                 for intent in state.intents.intents
             ),
@@ -53,86 +57,59 @@ def cleanup_pending(state: CoreState) -> bool:
             any(claim.phase != "completed" for claim in state.sessions.interrupts),
             _unreleased_children(state),
             any(group.phase == "acquiring" for group in state.sessions.acquisition_groups),
-            any(not _child_release_confirmed(child) for child in state.intents.children),
             any(
-                invocation.phase
-                not in (SessionPhase.TERMINAL, SessionPhase.CHECKPOINTED, SessionPhase.IDLE)
-                for invocation in state.sessions.invocations
+                not _child_release_confirmed(child, state.intents.intents)
+                for child in state.intents.children
+            ),
+            any(
+                _invocation_pending(state, invocation) for invocation in state.sessions.invocations
             ),
         )
     )
 
 
-def _release_confirmed(observation: Observation | None) -> bool:
-    """Release includes an authoritative child manifest, never an empty default."""
-    return (
-        observation is not None
-        and observation.terminal
-        and observation.released
-        and observation.children_complete
-        and observation.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
-    )
+def _blocked_unnamed(intent: Intent) -> bool:
+    """A blocked intent that was never accepted and named nothing owns nothing to release.
 
-
-def _positive_nonownership(observation: Observation) -> bool:
-    return not observation.accepted and observation.status in (
-        ObservationStatus.REJECTED,
-        ObservationStatus.FAILED,
-        ObservationStatus.CANCELLED,
-    )
-
-
-def _job_release_confirmed(job: OwnedJob | RegisteredOwnedJob) -> bool:
-    observation = job.observation
-    if (
-        observation is None
-        or not job.terminal
-        or not job.released
-        or not _release_confirmed(observation)
-    ):
-        return False
-    request_id = job.request_id if isinstance(job, RegisteredOwnedJob) else job.submission_id
-    if observation.request_id != request_id or observation.scope != job.scope:
-        return False
-    if observation.resource_id != job.resource_id:
-        return False
-    if isinstance(job, RegisteredOwnedJob) and job.resource_id is None:
-        return _positive_nonownership(observation)
-    return True
-
-
-def _intent_release_confirmed(intent: Intent) -> bool:
+    Reconciliation blocked it after its executor answered without a conclusion. With the
+    launch unaccepted and no resource or children in that answer there is no identity left
+    to cancel or wait on, so the block ends the intent's claim on the run's closure; the strategy has
+    already been told (``IntentBlocked``). A blocked intent that named a resource still
+    holds closure until that resource is proven released.
+    """
     observation = intent.observation
-    if observation is None or not _release_confirmed(observation):
-        return False
-    if observation.request_id != intent.request_id or observation.scope != intent.request.scope:
-        return False
-    if intent.lifecycle == LifecycleClass.OWNED_JOB and observation.resource_id is None:
-        return _positive_nonownership(observation)
-    return True
-
-
-def _child_release_confirmed(child: ChildLease) -> bool:
-    """Independent source claims all retain ownership until conclusive release."""
-    observation = child.observation
     return (
-        child.watermark_history_complete
-        and all(_release_confirmed(mark.observation) for mark in child.observation_watermarks)
-        and _release_confirmed(observation)
+        intent.phase == IntentPhase.BLOCKED
         and observation is not None
-        and observation.resource_id == child.resource_id
-        and observation.scope == child.scope
-        and observation.request_id in child.source_requests
+        and not observation.accepted
+        and observation.resource_id is None
+        and not observation.children
     )
+
+
+def _job_release_confirmed(job: OwnedJob | RegisteredOwnedJob, sources: tuple[Intent, ...]) -> bool:
+    return isinstance(released_owner(job, sources), Proven)
+
+
+def _intent_release_confirmed(intent: Intent, sources: tuple[Intent, ...]) -> bool:
+    return isinstance(released_owner(intent, sources), Proven)
+
+
+def _child_release_confirmed(child: ChildLease, sources: tuple[Intent, ...]) -> bool:
+    return isinstance(released_owner(child, sources), Proven)
 
 
 def _unreleased_children(state: CoreState) -> bool:
     jobs = (*state.evaluation.jobs, *state.evaluation.registered_jobs)
-    released = {(job.resource_id, job.scope) for job in jobs if _job_release_confirmed(job)}
+    released = {
+        (job.resource_id, job.scope)
+        for job in jobs
+        if _job_release_confirmed(job, state.intents.intents)
+    }
     released.update(
         (child.resource_id, child.scope)
         for child in state.intents.children
-        if _child_release_confirmed(child)
+        if _child_release_confirmed(child, state.intents.intents)
     )
     observations = tuple(
         intent.observation for intent in state.intents.intents if intent.observation is not None
@@ -151,10 +128,30 @@ def _unreleased_children(state: CoreState) -> bool:
         for intent in state.intents.intents
         if intent.lifecycle in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
         and intent.observation is not None
-        and _intent_release_confirmed(intent)
+        and _intent_release_confirmed(intent, state.intents.intents)
     )
     children = tuple((child, job.scope) for job in jobs for child in job.children)
     children += tuple(
-        (child, observation.scope) for observation in observations for child in observation.children
+        (child, observation.scope)
+        for observation in observations
+        for child in observation.descendants
     )
     return any(child not in released for child in children)
+
+
+def _invocation_pending(state: CoreState, invocation: Invocation) -> bool:
+    """Whether the invocation still holds work.
+
+    A yielded (SUSPENDED) invocation stays in that phase for the record. It holds
+    nothing once its continuation was resumed or cancelled.
+    """
+    if invocation.phase in (SessionPhase.TERMINAL, SessionPhase.CHECKPOINTED, SessionPhase.IDLE):
+        return False
+    return not (
+        invocation.phase == SessionPhase.SUSPENDED
+        and any(
+            row.invocation == invocation.invocation
+            and row.phase in (ContinuationPhase.RESUMED, ContinuationPhase.CANCELLED)
+            for row in state.evaluation.continuations
+        )
+    )

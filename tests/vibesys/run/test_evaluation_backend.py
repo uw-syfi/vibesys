@@ -15,8 +15,8 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
 from vibesys.run.evaluation_backend import (
     EvidenceReusingEvaluation,
@@ -26,6 +26,7 @@ from vibesys.run.evaluation_backend import (
 )
 from vs_evaluation.api import (
     EVALUATION_ACCESS_STATE_PATH,
+    AccessErrorCode,
     AdditionalProfileCaptureReason,
     AwaitCall,
     AwaitReply,
@@ -1994,3 +1995,22 @@ def test_direct_profiler_dispatch_reuses_captures_without_changing_retry_identit
             complete_first=complete_first, completion_order=completion_order
         )
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handles", [("never-issued",), ("a", "b")])
+async def test_a_yielded_profiler_wait_without_a_profiler_is_a_typed_agent_rejection(
+    tmp_path: Path, handles: tuple[str, ...]
+) -> None:
+    """Citing a profiler operation when none is provisioned is not an ambiguous dispatch."""
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    harness = _release_harness(tmp_path, run)
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation, harness.backend, run_id=run.run_id, scopes=harness.service, profiler=None
+    )
+
+    with pytest.raises(EvaluationAgentAccessError) as raised:
+        await evaluation.validate_profiler_wait(handles, principal_id="p", scope_id=None)
+    assert raised.value.code is AccessErrorCode.PROFILER_DENIED
+    await harness.profiler.close()
+    await harness.backend.close()

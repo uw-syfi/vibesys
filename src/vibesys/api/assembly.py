@@ -22,6 +22,7 @@ if TYPE_CHECKING:
         ToolServerDescriptor,
     )
     from vs_runtime.api import AgentToolBindingContext
+    from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment, StopTimer
     from vs_sandbox.api import ComputeBackendImpl, HostResource
 
@@ -63,6 +64,7 @@ class SessionImplementations:
     agents: SessionAgents
     agent_drivers: tuple[AuxiliaryAgentDriver, ...]
     stop_timer: StopTimer
+    timing: RunTiming
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
     agent_tool_bindings: (
         Mapping[str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]]

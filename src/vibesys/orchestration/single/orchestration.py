@@ -10,6 +10,7 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.hypothesis import (
+    AgentAttribution,
     AttemptState,
     Continue,
     Finished,
@@ -24,6 +25,7 @@ from vibesys.hypothesis import (
     build_round_record,
 )
 from vibesys.metrics import FrameworkBenchmarkOutcome
+from vibesys.orchestration.attempts import AttemptKey, Implement, NextStep, next_step
 from vibesys.orchestration.profilers import (
     ProfilerKind,
     ProfilerSummary,
@@ -232,6 +234,7 @@ class _SingleRun:
                 round_number=self.round_number,
                 current_commit=current_revision,
                 records=self.records,
+                input_baseline=self.workspace.trusted_input_baseline,
             )
             self.state = self.state.model_copy(update={"search": started.state}, deep=True)
             self.files.write_plan(self.round_number, plan)
@@ -299,26 +302,16 @@ class _SingleRun:
         )
         return hypothesis
 
-    def _first_attempt(self, selected: _SelectedRound) -> int:
-        marker = self.state.last_paid_attempt
-        if (
-            marker is not None
-            and marker.round_number == self.round_number
-            and marker.role_id == IMPLEMENTER.id
-            and marker.member_id == selected.plan.hypothesis_id
-        ):
-            return marker.turn_number + 1
-        return 1
+    def _next_step(self, selected: _SelectedRound) -> NextStep:
+        return next_step(
+            marker=self.state.last_paid_attempt,
+            key=AttemptKey(self.round_number, selected.plan.hypothesis_id),
+            max_attempts=self.options.max_retries_per_round,
+        )
 
     async def _run_attempts(self, selected: _SelectedRound) -> None:
-        first = self._first_attempt(selected)
-        if first > self.options.max_retries_per_round:
-            message = (
-                f"round {self.round_number} exhausted its "
-                f"{self.options.max_retries_per_round} paid attempts"
-            )
-            raise RuntimeError(message)
-        for retry in range(first, self.options.max_retries_per_round + 1):
+        while isinstance(step := self._next_step(selected), Implement):
+            retry = step.attempt
             selected.attempt.retry = retry
             selected.attempt.official_reason = None
             await self._mark_paid(
@@ -469,10 +462,13 @@ class _SingleRun:
                 framework_benchmark_configured=self.run.facts.benchmark_configured,
                 accuracy_configured=self.run.facts.accuracy_configured,
                 candidate_commit=candidate_revision,
-                backend_name=binding.backend,
-                driver_name=binding.driver,
-                provider=binding.provider,
-                model=binding.model,
+                implementer=(
+                    AgentAttribution(
+                        binding.backend, binding.driver, binding.provider, binding.model
+                    )
+                    if binding
+                    else None
+                ),
             )
         )
         state = self.state.search

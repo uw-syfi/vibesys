@@ -1,0 +1,1378 @@
+/* Generated from the Python protocol models. Do not edit. */
+
+const responsePayloadSchema: Record<string, unknown> = {
+  "$defs": {
+    "ActiveAgentExecution": {
+      "additionalProperties": false,
+      "description": "Authoritative activity checkpoint for one running agent execution.",
+      "properties": {
+        "execution_id": {
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "agent_kind": {
+          "title": "Agent Kind",
+          "type": "string"
+        },
+        "round_label": {
+          "title": "Round Label",
+          "type": "string"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "attempt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt"
+        },
+        "assignment": {
+          "title": "Assignment",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "activity": {
+          "$ref": "#/$defs/AgentExecutionActivityData"
+        },
+        "driver": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Driver"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        }
+      },
+      "required": [
+        "execution_id",
+        "agent_kind",
+        "round_label",
+        "stage",
+        "assignment",
+        "started_at",
+        "activity"
+      ],
+      "title": "ActiveAgentExecution",
+      "type": "object"
+    },
+    "ActiveExecutions": {
+      "items": {
+        "$ref": "#/$defs/ActiveAgentExecution"
+      },
+      "type": "array"
+    },
+    "AgentExecutionActivityData": {
+      "description": "Complete current activity for an active agent execution.",
+      "properties": {
+        "kind": {
+          "const": "agent_execution_activity_changed",
+          "default": "agent_execution_activity_changed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "thinking",
+            "responding",
+            "tool",
+            "waiting"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool"
+        }
+      },
+      "required": [
+        "kind",
+        "mode",
+        "summary"
+      ],
+      "title": "AgentExecutionActivityData",
+      "type": "object"
+    },
+    "CandidateDisposition": {
+      "description": "How a measured candidate should be retained independently of its hypothesis.\n\nHypothesis truth and checkpoint utility are different questions. A causal\nforecast can be disproven while its implementation still establishes a\nuseful throughput/latency tradeoff. These values keep that distinction\nexplicit without promoting provisional evidence to an official result.",
+      "enum": [
+        "unassessed",
+        "discard",
+        "prerequisite",
+        "pareto_frontier"
+      ],
+      "title": "CandidateDisposition",
+      "type": "string"
+    },
+    "ChatModelOption": {
+      "additionalProperties": false,
+      "description": "One offered chat model and the source of its suggestion.",
+      "properties": {
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "run",
+            "role",
+            "suggested"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "default": {
+          "type": "boolean",
+          "default": false,
+          "title": "Default"
+        }
+      },
+      "required": [
+        "model",
+        "source"
+      ],
+      "title": "ChatModelOption",
+      "type": "object"
+    },
+    "ChatOptions": {
+      "additionalProperties": false,
+      "description": "All offered chat selections grouped by provider.",
+      "properties": {
+        "providers": {
+          "items": {
+            "$ref": "#/$defs/ChatProviderOptions"
+          },
+          "title": "Providers",
+          "type": "array"
+        }
+      },
+      "title": "ChatOptions",
+      "type": "object"
+    },
+    "ChatProviderOptions": {
+      "additionalProperties": false,
+      "description": "One supported chat provider and its suggested models.",
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/ChatModelOption"
+          },
+          "title": "Models",
+          "type": "array"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "title": "ChatProviderOptions",
+      "type": "object"
+    },
+    "ChatResult": {
+      "additionalProperties": false,
+      "description": "Answer and thread identity returned by experiment chat.",
+      "properties": {
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "answer": {
+          "title": "Answer",
+          "type": "string"
+        },
+        "effect": {
+          "const": "none",
+          "default": "none",
+          "title": "Effect",
+          "type": "string"
+        },
+        "thread_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Thread Id"
+        }
+      },
+      "required": [
+        "question",
+        "answer"
+      ],
+      "title": "ChatResult",
+      "type": "object"
+    },
+    "ChatThreadInfo": {
+      "additionalProperties": false,
+      "description": "Resolved identity and agent settings of one experiment-chat thread.",
+      "properties": {
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "driver": {
+          "title": "Driver",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "driver",
+        "provider",
+        "model"
+      ],
+      "title": "ChatThreadInfo",
+      "type": "object"
+    },
+    "CommandAck": {
+      "additionalProperties": false,
+      "description": "Acknowledgment of a requested run command.",
+      "properties": {
+        "action": {
+          "enum": [
+            "pause",
+            "resume",
+            "steer",
+            "stop"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "consumed"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "status"
+      ],
+      "title": "CommandAck",
+      "type": "object"
+    },
+    "DesignFileChange": {
+      "additionalProperties": false,
+      "description": "One workspace file a round's commit range touched.",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "change": {
+          "enum": [
+            "added",
+            "modified",
+            "deleted",
+            "renamed"
+          ],
+          "title": "Change",
+          "type": "string"
+        },
+        "renamed_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Renamed From"
+        }
+      },
+      "required": [
+        "path",
+        "change"
+      ],
+      "title": "DesignFileChange",
+      "type": "object"
+    },
+    "DesignPatch": {
+      "additionalProperties": false,
+      "description": "One file's unified patch text from a round's commit range.\n\n``patch`` is the raw ``git diff`` output for the one file (rename\ndetection on, so a renamed file arrives as a single patch spanning both\npaths). None means the workspace repository could not produce the text\n(repository missing or unreadable), which is distinct from an empty\nstring, a file the range lists but whose content did not change.\n\n``truncated`` marks a patch cut at the server's size bound. The echoed\nrange and paths let a client show the exact ``git diff`` command that\nreproduces the full output externally.",
+      "properties": {
+        "base": {
+          "title": "Base",
+          "type": "string"
+        },
+        "head": {
+          "title": "Head",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "renamed_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Renamed From"
+        },
+        "patch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Patch"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "base",
+        "head",
+        "path"
+      ],
+      "title": "DesignPatch",
+      "type": "object"
+    },
+    "DesignRound": {
+      "additionalProperties": false,
+      "description": "What one round changed in the workspace.\n\nDeliberately narrow: every other per-round fact (outcome, review,\nofficial evaluation, candidate disposition, measurement) already crosses\nthe protocol on ``HypothesisRound``, and a client joins the two by\n``round``. Publishing a second copy here let the two fetches disagree\nabout the same round.\n\n``files`` is derived from the run workspace's git history. None means the\nround's commit range could not be resolved (no checkpoint recorded, or the\nworkspace history no longer has it), which is distinct from an empty list,\na resolved range that touched nothing outside framework bookkeeping.",
+      "properties": {
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commit"
+        },
+        "base": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base"
+        },
+        "files": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DesignFileChange"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Files"
+        }
+      },
+      "required": [
+        "round"
+      ],
+      "title": "DesignRound",
+      "type": "object"
+    },
+    "ExperimentUpdate": {
+      "additionalProperties": false,
+      "description": "How to apply ``Response.experiments`` to a client's prior snapshot.\n\nA reset replaces the entire list. A delta replaces entries by stable\nhypothesis ID and then removes the named IDs. ``from_revision`` is None for\na reset because no prior client state is trusted.",
+      "properties": {
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "projection_id": {
+          "title": "Projection Id",
+          "type": "string"
+        },
+        "from_revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Revision"
+        },
+        "through_revision": {
+          "minimum": 0,
+          "title": "Through Revision",
+          "type": "integer"
+        },
+        "reset": {
+          "title": "Reset",
+          "type": "boolean"
+        },
+        "removed_hypothesis_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Removed Hypothesis Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run_id",
+        "projection_id",
+        "through_revision",
+        "reset"
+      ],
+      "title": "ExperimentUpdate",
+      "type": "object"
+    },
+    "HypothesisEntry": {
+      "additionalProperties": false,
+      "description": "One unit of investigation: a hypothesis and every round it spans.\n\n``resolved_outcome`` is copied from the server's typed hypothesis state,\nnever recomputed by the server or client.",
+      "properties": {
+        "hypothesis_id": {
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "identified": {
+          "default": true,
+          "title": "Identified",
+          "type": "boolean"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "claim": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claim"
+        },
+        "action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action"
+        },
+        "first_round": {
+          "title": "First Round",
+          "type": "integer"
+        },
+        "last_round": {
+          "title": "Last Round",
+          "type": "integer"
+        },
+        "rounds": {
+          "items": {
+            "$ref": "#/$defs/HypothesisRound"
+          },
+          "title": "Rounds",
+          "type": "array"
+        },
+        "resolved_outcome": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Outcome"
+        },
+        "judge_verdict": {
+          "anyOf": [
+            {
+              "enum": [
+                "pass",
+                "fail"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judge Verdict"
+        },
+        "perf_metric": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Metric"
+        },
+        "perf_unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Unit"
+        },
+        "perf_delta_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Delta Pct"
+        },
+        "perf_metric_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Metric Name"
+        },
+        "perf_direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "max",
+                "min"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Direction"
+        },
+        "perf_baseline_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Baseline Value"
+        },
+        "perf_baseline_round": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Baseline Round"
+        },
+        "perf_baseline_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Baseline Commit"
+        },
+        "perf_delta_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PerfDeltaReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kept": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kept"
+        },
+        "strategy_disposition": {
+          "anyOf": [
+            {
+              "enum": [
+                "available",
+                "parked",
+                "abandoned"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strategy Disposition"
+        },
+        "strategy_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strategy Reason"
+        },
+        "active": {
+          "default": false,
+          "title": "Active",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hypothesis_id",
+        "first_round",
+        "last_round"
+      ],
+      "title": "HypothesisEntry",
+      "type": "object"
+    },
+    "HypothesisOutcome": {
+      "description": "Implementer-owned status for the active experimental hypothesis.\n\n``SUPPORTED`` and ``NOMINATED`` are deliberately distinct from\n``PROVEN``: an implementer may submit evidence for independent review,\nbut only the judge can establish that the scoped hypothesis held.\n``NOMINATED`` additionally asks the framework to run its global gates for\nthe current candidate checkpoint. It does not imply that the overall\nobjective or terminal target has been achieved.",
+      "enum": [
+        "continue",
+        "supported",
+        "nominated",
+        "disproven",
+        "implementation_failed",
+        "inconclusive",
+        "blocked"
+      ],
+      "title": "HypothesisOutcome",
+      "type": "string"
+    },
+    "HypothesisResolution": {
+      "description": "Framework-owned resolution after all available evidence is known.",
+      "enum": [
+        "proven",
+        "disproven",
+        "inconclusive",
+        "implementation_failed",
+        "blocked",
+        "rejected",
+        "unmeasured"
+      ],
+      "title": "HypothesisResolution",
+      "type": "string"
+    },
+    "HypothesisRound": {
+      "additionalProperties": false,
+      "description": "One round belonging to a hypothesis, for the experiment-log drill-down.\n\nThis is the single source for every per-round fact the server publishes.\nSurfaces that need more about a round (the design log's file list, for\nexample) join to this row by ``round`` rather than restating its fields.\n\n``hypothesis_outcome`` and ``candidate_disposition`` are closed sets, so\nthe generated client union is closed too. A round record written before a\nmember existed, or carrying a value the framework no longer defines, is\nprojected as ``None``: unreadable and unrecorded are the same thing to a\nclient, and a stale string must not take down the whole log.",
+      "properties": {
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "reviewed": {
+          "title": "Reviewed",
+          "type": "boolean"
+        },
+        "hypothesis_outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HypothesisOutcome"
+            },
+            {
+              "$ref": "#/$defs/HypothesisResolution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hypothesis Outcome"
+        },
+        "judge_verdict": {
+          "anyOf": [
+            {
+              "enum": [
+                "pass",
+                "fail",
+                "deferred"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judge Verdict"
+        },
+        "perf_metric": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Metric"
+        },
+        "perf_unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Unit"
+        },
+        "perf_delta_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Delta Pct"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commit"
+        },
+        "official_evaluation": {
+          "default": false,
+          "title": "Official Evaluation",
+          "type": "boolean"
+        },
+        "candidate_disposition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CandidateDisposition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "round",
+        "passed",
+        "reviewed"
+      ],
+      "title": "HypothesisRound",
+      "type": "object"
+    },
+    "InteractiveSetupDefaults": {
+      "additionalProperties": false,
+      "description": "JSON contract passed to the interactive launch form.",
+      "properties": {
+        "runs_dir": {
+          "title": "Runs Dir",
+          "type": "string"
+        },
+        "input_path": {
+          "title": "Input Path",
+          "type": "string"
+        },
+        "experiment_name": {
+          "title": "Experiment Name",
+          "type": "string"
+        },
+        "repository_owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Repository Owner"
+        },
+        "repository_name": {
+          "title": "Repository Name",
+          "type": "string"
+        },
+        "visibility": {
+          "$ref": "#/$defs/RepositoryVisibility"
+        },
+        "theme": {
+          "$ref": "#/$defs/TuiTheme"
+        }
+      },
+      "required": [
+        "runs_dir",
+        "input_path",
+        "experiment_name",
+        "repository_owner",
+        "repository_name",
+        "visibility",
+        "theme"
+      ],
+      "title": "InteractiveSetupDefaults",
+      "type": "object"
+    },
+    "PerfDeltaReason": {
+      "description": "Why a headline measurement carries no causal delta.\n\nAlways re-derived from round evidence (``perf_provenance`` and the\nbaseline fields), never stored on the round record, so it cannot drift\nfrom them. Absent entirely for records that predate provenance tracking:\na legacy absolute number keeps reading as a deliberate absolute rather\nthan being relabelled as unresolved.",
+      "enum": [
+        "no_baseline_yet",
+        "baseline_unresolved",
+        "not_framework_measured"
+      ],
+      "title": "PerfDeltaReason",
+      "type": "string"
+    },
+    "PerformanceContext": {
+      "additionalProperties": false,
+      "description": "What the performance plot measures and how to read it.\n\nCopied from recorded run state and the run manifest, never recomputed.\nEvery field is optional so the section can describe the objective before\nthe first measurement and omit facts a run never recorded; a run whose\nprose is known before its metric still gets a description-only context.",
+      "properties": {
+        "objective_metric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Objective Metric"
+        },
+        "objective_unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Objective Unit"
+        },
+        "objective_direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "max",
+                "min"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Objective Direction"
+        },
+        "objective_baseline_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Objective Baseline Value"
+        },
+        "objective_baseline_round": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Objective Baseline Round"
+        },
+        "objective_baseline_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Objective Baseline Commit"
+        },
+        "objective_description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Objective Description"
+        }
+      },
+      "title": "PerformanceContext",
+      "type": "object"
+    },
+    "PerformanceRound": {
+      "additionalProperties": false,
+      "description": "One measured performance result in a run.",
+      "properties": {
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "perf_metric": {
+          "title": "Perf Metric",
+          "type": "number"
+        },
+        "perf_unit": {
+          "title": "Perf Unit",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "profile_skipped": {
+          "default": false,
+          "title": "Profile Skipped",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "round",
+        "perf_metric",
+        "perf_unit",
+        "passed"
+      ],
+      "title": "PerformanceRound",
+      "type": "object"
+    },
+    "RepositoryVisibility": {
+      "description": "Supported GitHub repository visibility values.",
+      "enum": [
+        "private",
+        "public",
+        "internal"
+      ],
+      "title": "RepositoryVisibility",
+      "type": "string"
+    },
+    "RunSnapshot": {
+      "additionalProperties": false,
+      "description": "Current server projection of a run's public state.",
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "agent_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Kind"
+        },
+        "round_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Round Label"
+        },
+        "active_executions": {
+          "$ref": "#/$defs/ActiveExecutions"
+        },
+        "chat_threads": {
+          "items": {
+            "$ref": "#/$defs/ChatThreadInfo"
+          },
+          "title": "Chat Threads",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run_id",
+        "sequence",
+        "status"
+      ],
+      "title": "RunSnapshot",
+      "type": "object"
+    },
+    "RunStatus": {
+      "description": "Lifecycle status of one run, as frontends observe it.\n\nThis is the authoritative closed set for the ``status`` field of\n``RunSnapshot`` and of ``RunStatusChangedData``; the generated TypeScript\nprotocol types derive their union from it.\n\n``PAUSING`` and ``PAUSED`` are distinct because a pause is only applied at\nan invocation boundary: ``/pause`` records the request, and the run keeps\nexecuting the call already in flight until it reaches that boundary.\n``STOPPING`` and ``STOPPED`` split the same way for ``/stop``, whose\nboundary is where the run ends instead of where it parks.",
+      "enum": [
+        "starting",
+        "running",
+        "pausing",
+        "paused",
+        "stopping",
+        "stopped",
+        "completed",
+        "failed"
+      ],
+      "title": "RunStatus",
+      "type": "string"
+    },
+    "TuiTheme": {
+      "description": "Selectable terminal UI themes.",
+      "enum": [
+        "dark",
+        "light",
+        "solarized-dark",
+        "solarized-light",
+        "catppuccin-mocha",
+        "catppuccin-latte",
+        "high-contrast-dark",
+        "high-contrast-light"
+      ],
+      "title": "TuiTheme",
+      "type": "string"
+    }
+  },
+  "type": "object",
+  "properties": {
+    "ack": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CommandAck"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "chat": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChatResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "chat_thread": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChatThreadInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "chat_options": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChatOptions"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "tui_defaults": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InteractiveSetupDefaults"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "snapshot": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunSnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "performance": {
+      "items": {
+        "$ref": "#/$defs/PerformanceRound"
+      },
+      "title": "Performance",
+      "type": "array"
+    },
+    "performance_context": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PerformanceContext"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "experiments": {
+      "items": {
+        "$ref": "#/$defs/HypothesisEntry"
+      },
+      "title": "Experiments",
+      "type": "array"
+    },
+    "experiment_update": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExperimentUpdate"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "experiments_ready": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Experiments Ready"
+    },
+    "design": {
+      "items": {
+        "$ref": "#/$defs/DesignRound"
+      },
+      "title": "Design",
+      "type": "array"
+    },
+    "design_ready": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Design Ready"
+    },
+    "design_patch": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DesignPatch"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  }
+};
+
+export default responsePayloadSchema;

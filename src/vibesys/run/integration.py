@@ -34,7 +34,7 @@ from vs_runtime.api.infrastructure import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
     from typing import Literal, TextIO
 
@@ -135,6 +135,9 @@ class _RunProjection(Protocol):
     @property
     def experiment_revision(self) -> int | None: ...
 
+    @property
+    def projection(self) -> Mapping[str, object] | None: ...
+
 
 class CommittedStateProjector(Protocol):
     """Project just-committed plugin state into product run facts."""
@@ -212,6 +215,41 @@ def _emit_commit_events(
         )
 
 
+def _experiments_view(view: _RunProjection) -> Mapping[str, object]:
+    """The experiments a frontend shows, without the revision stamp that every commit bumps."""
+    return {
+        key: value for key, value in (view.projection or {}).items() if key != "experiment_revision"
+    }
+
+
+def _emit_core_commit_events(
+    events: EventJournal,
+    before: _RunProjection | None,
+    after: _RunProjection | None,
+) -> None:
+    """Emit what one confirmed core commit made newly observable.
+
+    A core run stamps every projection with its commit revision, so the stamp cannot say
+    whether the experiments changed. This compares what the projection shows instead.
+    """
+    if after is None:
+        return
+    before_rounds = _round_entries(before)
+    after_rounds = _round_entries(after)
+    new_round_numbers = sorted(number for number in after_rounds if number not in before_rounds)
+    for number in new_round_numbers:
+        _emit_round_finished(events, after_rounds[number])
+    if before is None or _experiments_view(before) == _experiments_view(after):
+        return
+    events.emit(
+        CoreEventType.EXPERIMENTS_CHANGED,
+        data=ExperimentsChangedData(
+            reason="round_persisted" if new_round_numbers else "active_hypothesis_changed",
+            revision=after.experiment_revision,
+        ),
+    )
+
+
 def _emit_round_finished(events: EventJournal, round_summary: _RoundProjection) -> None:
     status = EventStatus.FAILED if round_summary.status == "failed" else EventStatus.COMPLETED
     events.emit(
@@ -226,6 +264,17 @@ def _emit_round_finished(events: EventJournal, round_summary: _RoundProjection) 
             profile_skipped=round_summary.profile_skipped,
         ),
     )
+
+
+class _CoreCommitObserver(_StateCommitObserver):
+    """Publish a confirmed core commit: the committed-view hint, then its semantic events."""
+
+    def committed(self, previous: BaseModel | None, current: BaseModel) -> None:
+        """Publish the durable state hint before the events derived from it."""
+        self._integration.publish_committed_state(self._namespace, current)
+        _emit_core_commit_events(
+            self._integration.events, self._project(previous), self._project(current)
+        )
 
 
 class LocalRunIntegration:
@@ -358,6 +407,15 @@ class LocalRunIntegration:
     ) -> _StateCommitObserver:
         """Bind durable plugin state to product hints and semantic events."""
         return _StateCommitObserver(self, run_id, projector, namespace)
+
+    def core_commit_observer(
+        self,
+        run_id: str,
+        projector: CommittedStateProjector | None,
+        namespace: str,
+    ) -> _CoreCommitObserver:
+        """Bind a core run's confirmed commits to product hints and semantic events."""
+        return _CoreCommitObserver(self, run_id, projector, namespace)
 
     def publish_committed_state(
         self,

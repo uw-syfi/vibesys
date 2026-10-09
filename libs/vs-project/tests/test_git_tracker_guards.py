@@ -8,18 +8,23 @@ import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from tests.support import run_test_command
 from tests.support.run_execution import run_execution_record
 
 from vs_project.api import (
     GitTracker,
+    LocalAtomicWriteEffects,
     NullGitTrackerEvents,
     OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
+    atomic_write_bytes,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 _IDENTITY = {
@@ -375,3 +380,173 @@ def test_reading_pending_changes_never_writes_the_repository_index(tmp_path: Pat
     assert tracker.pending_changes() == []
 
     assert (index.read_bytes(), index.stat().st_mtime_ns) == before
+
+
+_NAMESPACE = "turn-state"
+_FRAMEWORK_FILES = ("a.json", "b.json")
+_AGENT_PATHS = (
+    "main.py",
+    "pkg/new.py",
+    ".vibesys/other.txt",
+    ".vibesys/state/runs/guard-run/turn-state/a.json",
+    ".vibesys/state/runs/guard-run/turn-state/b.json",
+    ".vibesys/state/runs/guard-run/turn-state/stray.txt",
+)
+_BASELINE = {
+    "main.py": b"VALUE = 1\n",
+    ".vibesys/state/runs/guard-run/turn-state/a.json": b"fw-initial",
+}
+
+
+@st.composite
+def _turn(draw: st.DrawFn) -> list[tuple[str, str, bytes | None]]:
+    """Interleaved framework and agent writes; agent bytes never equal framework bytes."""
+    framework = st.tuples(
+        st.just("framework"),
+        st.sampled_from(_FRAMEWORK_FILES),
+        st.sampled_from([b"fw-0", b"fw-1", b"fw-initial"]),
+    )
+    agent = st.tuples(
+        st.just("agent"),
+        st.sampled_from(_AGENT_PATHS),
+        st.sampled_from([None, b"agent-0", b"agent-1", b"VALUE = 1\n"]),
+    )
+    return draw(st.lists(st.one_of(framework, agent), max_size=8))
+
+
+@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(turn=_turn())
+def test_isolation_reports_exactly_what_the_agent_wrote_including_below_vibesys(
+    tmp_path_factory: pytest.TempPathFactory, turn: list[tuple[str, str, bytes | None]]
+) -> None:
+    """Framework state written during a turn is not the agent's; any other write is.
+
+    The framework publishes run state below ``.vibesys`` while a turn is in flight, so
+    the isolation check cannot ignore that directory without letting a read-only role
+    write there unnoticed. Whatever the interleaving, the paths reported are exactly
+    those whose last writer was the agent and whose content then differs from the
+    baseline the turn started from.
+    """
+    root = tmp_path_factory.mktemp("project")
+    tracker = _initialized_tracker(root)
+    project = _project(root, tracker)
+    namespace = project.state.portable_namespace(tracker.run_id, _NAMESPACE)
+    namespace.write_bytes("a.json", _BASELINE[".vibesys/state/runs/guard-run/turn-state/a.json"])
+    tracker.snapshot_framework_state("baseline framework state", namespace.snapshot())
+    assert tracker.pending_changes() == []
+
+    final: dict[str, bytes | None] = {}
+    last_writer: dict[str, str] = {}
+    for writer, name, content in turn:
+        if writer == "framework":
+            assert content is not None
+            namespace.write_bytes(name, content)
+            path = namespace.agent_visible_path(name)
+        else:
+            path = name
+            target = root / path
+            if content is None:
+                target.unlink(missing_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+        final[path] = content
+        last_writer[path] = writer
+
+    expected = sorted(
+        path
+        for path, writer in last_writer.items()
+        if writer == "agent" and final[path] != _BASELINE.get(path)
+    )
+    assert tracker.pending_changes() == expected
+
+
+def test_an_agent_overwrite_of_a_framework_file_is_reported(tmp_path: Path) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    project = _project(tmp_path, tracker)
+    namespace = project.state.portable_namespace(tracker.run_id, _NAMESPACE)
+    namespace.write_bytes("a.json", b"fw-0")
+    assert tracker.pending_changes() == []
+
+    (tmp_path / namespace.agent_visible_path("a.json")).write_bytes(b"agent-0")
+
+    assert tracker.pending_changes() == [namespace.agent_visible_path("a.json")]
+
+
+class _CheckedMidPublication(LocalAtomicWriteEffects):
+    """Local effects that run ``during`` right after the file is replaced, before publication ends.
+
+    A read-only turn is checked on another thread while the framework commits run state,
+    so the check can land at any point of a commit. This lands it at the point where the
+    new bytes are on disk and the commit has not finished, deterministically.
+    """
+
+    def __init__(self, during: Callable[[], None]) -> None:
+        self._during = during
+
+    def replace(self, temporary: Path, destination: Path) -> None:
+        super().replace(temporary, destination)
+        self._during()
+
+
+@pytest.mark.parametrize("overwrite", [False, True], ids=["first-write", "overwrite"])
+def test_an_isolation_check_during_a_framework_commit_does_not_blame_the_agent(
+    tmp_path: Path, *, overwrite: bool
+) -> None:
+    """Regression: a planner turn failed with 'wrote outside its workspace access' on store.json.
+
+    The check landed between the framework replacing its state file and recording what it
+    wrote, saw bytes it had no record of, and attributed them to the read-only agent.
+    """
+    tracker = _initialized_tracker(tmp_path)
+    state_file = tmp_path / ".vibesys" / "state" / "runs" / "guard-run" / "turn-state" / "a.json"
+    if overwrite:
+        atomic_write_bytes(state_file, b"fw-0")
+    else:
+        state_file.parent.mkdir(parents=True)
+    seen: list[list[str]] = []
+    effects = _CheckedMidPublication(lambda: seen.append(tracker.pending_changes()))
+
+    atomic_write_bytes(state_file, b"fw-1", effects=effects)
+
+    assert seen == [[]]
+    assert tracker.pending_changes() == []
+    state_file.write_bytes(b"agent")
+    assert tracker.pending_changes() == [state_file.relative_to(tmp_path).as_posix()]
+
+
+def test_files_a_library_writes_in_a_framework_directory_are_not_the_agents(
+    tmp_path: Path,
+) -> None:
+    """A path-based library (the artifact store) writes inside the directory it is handed."""
+    tracker = _initialized_tracker(tmp_path)
+    project = _project(tmp_path, tracker)
+    namespace = project.state.portable_namespace(tracker.run_id, _NAMESPACE)
+    (namespace.external_directory("objects") / "0123abcd").write_bytes(b"object")
+    assert tracker.pending_changes() == []
+
+    stray = tmp_path / ".vibesys" / "stray.txt"
+    stray.write_bytes(b"agent")
+
+    assert tracker.pending_changes() == [".vibesys/stray.txt"]
+
+
+def test_is_retained_separates_reachable_commits_from_dangling_and_unknown_ones(
+    tmp_path: Path,
+) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    tree = _git(tmp_path, "rev-parse", "HEAD^{tree}")
+    dangling = _git(tmp_path, "commit-tree", tree, "-m", "dangling")
+    held = _git(tmp_path, "commit-tree", tree, "-p", head, "-m", "held")
+    child = _git(tmp_path, "commit-tree", tree, "-p", held, "-m", "child")
+    assert tracker.is_retained(head)
+    assert not tracker.is_retained(dangling)
+    assert not tracker.is_retained(held)
+    tracker.retain_candidate("held-one", child)
+    assert tracker.is_retained(child)
+    assert tracker.is_retained(held)  # an ancestor of a retained tip is retained
+    assert not tracker.is_retained(dangling)
+    assert not tracker.is_retained("0" * 40)
+    with pytest.raises(ValueError, match="not a commit object name"):
+        tracker.is_retained("--all")

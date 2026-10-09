@@ -1,7 +1,7 @@
 {
   "id": "tail-overflow-rebootstrap",
   "title": "More live output than the tail bound triggers a fresh bootstrap",
-  "description": "A tail subscription sees more new events in one wait than the bound would replay, so the server bootstraps again at a fresh tail and the next batch supersedes the client's fold rather than extending it.",
+  "description": "A tail subscription sees more new events in one wait than the bound would replay, so the server bootstraps again at a fresh tail and marks that second, in-loop bootstrap. The marked batch supersedes the client's fold rather than extending it.",
   "role": "subscribe",
   "transports": [
     "unix",
@@ -28,13 +28,15 @@
     {
       "dir": "s2c",
       "expect": {
-        "type": "event_batch"
+        "type": "event_batch",
+        "rebootstrap": false
       }
     },
     {
       "dir": "s2c",
       "expect": {
-        "type": "event_batch"
+        "type": "event_batch",
+        "rebootstrap": true
       }
     }
   ]

@@ -16,6 +16,7 @@ from vibesys.inputs import (
     InputSynthesisError,
     SynthesizedInputSpec,
     load_input_bundle,
+    load_objectives,
     load_project_task,
     synthesize_input_bundle,
     with_operator_constraints,
@@ -27,6 +28,7 @@ from vibesys.repository import (
     validate_experiment_name,
 )
 from vibesys.run.contracts import ProfilerKind, RunRequest
+from vibesys.run.core_run import ensure_not_legacy_resume
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.profilers import validate_run_request as validate_execution_request
 from vibesys.run.skill_sources import resolve_skill_source_dirs
@@ -68,6 +70,7 @@ __all__ = [
     "generate_experiment_name",
     "load_input_bundle",
     "load_objective",
+    "load_objectives",
     "load_project_task",
     "make_run_environment_spec",
     "repository_name_from_experiment",
@@ -101,6 +104,8 @@ def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry
         backend=request.agent_backend,
         provider=request.cli_provider,
     )
+    if request.resume is not None and registration.plugin.core is not None:
+        ensure_not_legacy_resume(request.project_root, request.resume.run_id)
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:

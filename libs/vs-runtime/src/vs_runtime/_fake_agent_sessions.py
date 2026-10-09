@@ -27,7 +27,12 @@ from vs_agent.api import (
 from vs_prompts.api import RenderedPrompt
 from vs_runtime._agent_sessions import await_session_operation
 from vs_runtime._fake_agent_invocations import FakeAgentInvocations, FakeInvocationIdentity
-from vs_runtime._workspace_access import WorkspaceAccessRecovery, WorkspaceAccessTarget
+from vs_runtime._workspace_access import (
+    AccessGrant,
+    WorkspaceAccessRecovery,
+    WorkspaceAccessTarget,
+    enforce_workspace_access,
+)
 from vs_runtime.contracts import (
     AgentBinding,
     AgentRole,
@@ -177,6 +182,8 @@ class FakeAgentSession:
         if not self._session_key.durable:
             detail = "durable agent session transport is not configured"
             raise SessionTransportUnavailableError(detail)
+        if self._session_transport is None and not self._history:
+            raise SessionResumeError(str(self._session_key), "provider checkpoint is missing")
         try:
             return self._initial_invocations.checkpoint()
         except SessionConfigurationError as error:
@@ -194,6 +201,13 @@ class FakeAgentSession:
         if not self._session_key.durable:
             self.checkpoint()
         return self._initial_invocations.inspect(invocation_id)
+
+    def _current_checkpoint(self) -> AgentSessionCheckpoint | None:
+        if self._session_transport is None and not self._history:
+            return None
+        if self._session_transport is not None:
+            return self._session_transport.checkpoint(self._session_key)
+        return self._initial_invocations.checkpoint()
 
     async def resume(
         self,
@@ -221,7 +235,8 @@ class FakeAgentSession:
                         asyncio.to_thread(
                             transport.resume, self._session_key, message, invocation_id
                         )
-                    )
+                    ),
+                    stop=lambda: transport.cancel(self._session_key, invocation_id),
                 )
             finally:
                 await await_session_operation(
@@ -238,15 +253,20 @@ class FakeAgentSession:
         self, message: RenderedPrompt, invocation_id: str, response: type[BaseModel] | None
     ) -> InvocationOutcome:
         previous = self.inspect(invocation_id)
-        checkpoint = previous.checkpoint or self.checkpoint()
+        # Recorded evidence is authoritative even when this Fake instance has
+        # no live history. Read journal proof before diagnosing missing history;
+        # begin validates replay without requiring a new provider dispatch.
+        checkpoint = previous.checkpoint or self._initial_invocations.checkpoint()
         if previous.checkpoint is None and not self._history:
             raise SessionResumeError(
-                str(self._session_key), "provider conversation history is unavailable"
+                str(self._session_key),
+                "provider conversation history is unavailable for the recorded checkpoint",
             )
         recorded = self._initial_invocations.begin(
             message,
             None if response is None else response.model_json_schema(),
             invocation_id,
+            read_checkpoint=self._current_checkpoint,
             checkpoint=checkpoint,
         )
         if recorded is not None:
@@ -303,6 +323,7 @@ class FakeAgentSession:
             message,
             None if response is None else response.model_json_schema(),
             invocation_id,
+            read_checkpoint=self._current_checkpoint,
             checkpoint=checkpoint,
         )
         if outcome is not None:
@@ -406,17 +427,17 @@ class FakeAgentSession:
             raise StructuredResponseError(self._role.id, response, detail=error.detail) from error
 
     async def _enforce_workspace_access(self, revision: str) -> list[str]:
-        if self._role.workspace_access is not WorkspaceAccess.READ_WRITE:
-            limited = self._role.workspace_access is WorkspaceAccess.LIMITED
-            self._workspace.access_recovery.begin(
-                revision,
-                self._role.id,
-                self._writable_paths if limited else (),
-                self._writable_directory_paths if limited else (),
-            )
-        if self._role.workspace_access is WorkspaceAccess.READ_WRITE:
-            return await self._workspace.pending_changes()
-        result = await self._workspace.access_recovery.reconcile(self._workspace)
+        limited = self._role.workspace_access is WorkspaceAccess.LIMITED
+        result = await enforce_workspace_access(
+            self._workspace,
+            AccessGrant(
+                role_id=self._role.id,
+                access=self._role.workspace_access,
+                paths=self._writable_paths if limited else (),
+                directories=self._writable_directory_paths if limited else (),
+            ),
+            revision,
+        )
         return result.pending_changes
 
     async def close(self) -> None:

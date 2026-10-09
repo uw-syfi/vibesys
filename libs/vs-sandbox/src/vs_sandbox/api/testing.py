@@ -12,6 +12,7 @@ from vs_sandbox.fake_compute_backend import (
     FakeSandboxCreation,
 )
 from vs_sandbox.fake_docker_command import DockerCommandCall, FakeDockerCommandRunner
+from vs_sandbox.fake_docker_engine import FakeDockerEngine
 from vs_sandbox.fake_sandbox import (
     DEFAULT_RESULT,
     FakeExecution,
@@ -25,6 +26,7 @@ __all__ = [
     "FakeAcceleratorDiscovery",
     "FakeComputeBackend",
     "FakeDockerCommandRunner",
+    "FakeDockerEngine",
     "FakeExecution",
     "FakeLifecycleSandbox",
     "FakeSandbox",

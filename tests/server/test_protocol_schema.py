@@ -11,12 +11,31 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
-from server.api.protocol import ProtocolRequest, ServerMessage
-from server.api.schema import protocol_json_schema, require_tagged_union_discriminants
+from server.api.protocol import ProtocolRequest, Response, ServerMessage
+from server.api.schema import (
+    fully_populated_response,
+    protocol_json_schema,
+    require_supported_response_payload_schema,
+    require_supported_run_event_schema,
+    require_tagged_union_discriminants,
+    response_payload_json_schema,
+    response_payload_typescript,
+    run_event_typescript,
+)
 from server.events import EventData
-from vibesys.api import ToolResultPayload
+from vibesys.api import RunFailedData, RunFailure, ToolResultPayload
 
 SCHEMA_PATH = Path("clients/backend-client/src/generated/protocol.schema.json")
+RESPONSE_PAYLOAD_SCHEMA_PATH = Path(
+    "clients/backend-client/src/generated/response-payload.schema.json"
+)
+RESPONSE_PAYLOAD_MODULE_PATH = Path(
+    "clients/backend-client/src/generated/response-payload.schema.ts"
+)
+RESPONSE_PAYLOAD_FIXTURE_PATH = Path(
+    "clients/backend-client/src/generated/response-payload.fixture.json"
+)
+RUN_EVENT_MODULE_PATH = Path("clients/backend-client/src/generated/run-event.schema.ts")
 
 # The public alias of every tagged union the protocol publishes. A member model
 # is only reachable through one of these, which is why the exported schema may
@@ -56,6 +75,170 @@ def test_committed_protocol_schema_matches_python_contract() -> None:
     assert _committed_schema() == protocol_json_schema()
 
 
+def test_committed_response_payload_schema_matches_python_contract() -> None:
+    assert json.loads(RESPONSE_PAYLOAD_SCHEMA_PATH.read_text()) == response_payload_json_schema()
+
+
+def test_committed_response_payload_module_matches_python_contract() -> None:
+    assert RESPONSE_PAYLOAD_MODULE_PATH.read_text() == response_payload_typescript()
+
+
+def test_committed_response_payload_fixture_is_a_real_server_model_dump() -> None:
+    response = fully_populated_response()
+    assert isinstance(response, Response)
+    assert RESPONSE_PAYLOAD_FIXTURE_PATH.read_text() == response.model_dump_json() + "\n"
+
+
+def test_committed_run_event_module_matches_python_contract() -> None:
+    assert RUN_EVENT_MODULE_PATH.read_text() == run_event_typescript()
+
+
+@pytest.mark.parametrize(
+    "keyword",
+    [
+        "allOf",
+        "exclusiveMinimum",
+        "maxItems",
+        "maxLength",
+        "maximum",
+        "minItems",
+        "minLength",
+        "multipleOf",
+        "not",
+        "oneOf",
+        "pattern",
+        "uniqueItems",
+    ],
+)
+def test_response_payload_descriptor_refuses_unimplemented_validation_keywords(
+    keyword: str,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=rf"\$: unsupported response payload schema keyword '{keyword}'",
+    ):
+        require_supported_response_payload_schema({"type": "string", keyword: 1})
+
+
+@pytest.mark.parametrize(
+    ("schema", "reason"),
+    [
+        ({"type": "string", "minimum": 0}, "minimum requires a numeric type"),
+        ({"type": "integer", "minimum": True}, "minimum must be a finite number"),
+        ({"type": "integer", "format": "date-time"}, "unsupported.*format"),
+        ({"type": "integer", "const": "one"}, "const does not match its type"),
+        ({"type": "object", "additionalProperties": {}}, "additionalProperties must be boolean"),
+        ({"type": "object", "required": ["value", "value"]}, "unique strings"),
+        ({"anyOf": []}, "anyOf must be a nonempty array"),
+        ({"type": "array", "const": []}, "const must be a scalar"),
+        ({"type": "object", "const": {}}, "const must be a scalar"),
+        ({"const": ["value"]}, "const must be a scalar"),
+        (
+            {"type": "integer", "const": 1, "minimum": 2},
+            "cannot combine an applicator with another shape",
+        ),
+    ],
+)
+def test_response_payload_descriptor_refuses_unenforceable_keyword_values(
+    schema: dict[str, Any], reason: str
+) -> None:
+    with pytest.raises(ValueError, match=reason):
+        require_supported_response_payload_schema(schema)
+
+
+def test_run_event_descriptor_accepts_only_a_complete_discriminated_union() -> None:
+    member = {
+        "type": "object",
+        "properties": {"kind": {"const": "known", "type": "string"}},
+        "required": ["kind"],
+    }
+    descriptor = {
+        "$defs": {"Known": member},
+        "type": "object",
+        "properties": {
+            "value": {
+                "oneOf": [{"$ref": "#/$defs/Known"}],
+                "discriminator": {
+                    "propertyName": "kind",
+                    "mapping": {"known": "#/$defs/Known"},
+                },
+            }
+        },
+    }
+
+    assert require_supported_run_event_schema(descriptor) is descriptor
+    with pytest.raises(ValueError, match="mapping must name every member exactly once"):
+        require_supported_run_event_schema(
+            {
+                **descriptor,
+                "properties": {
+                    "value": {
+                        "oneOf": [{"$ref": "#/$defs/Known"}],
+                        "discriminator": {"propertyName": "kind", "mapping": {}},
+                    }
+                },
+            }
+        )
+
+    with pytest.raises(ValueError, match=r"mapping key 'wrong' does not match.*const 'known'"):
+        require_supported_run_event_schema(
+            {
+                **descriptor,
+                "properties": {
+                    "value": {
+                        "oneOf": [{"$ref": "#/$defs/Known"}],
+                        "discriminator": {
+                            "propertyName": "kind",
+                            "mapping": {"wrong": "#/$defs/Known"},
+                        },
+                    }
+                },
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("choices", "mapping", "reason"),
+    [
+        (
+            [{"$ref": "#/$defs/Known"}, {"$ref": "#/$defs/Known"}],
+            {"known": "#/$defs/Known", "alias": "#/$defs/Known"},
+            "members must contain unique references",
+        ),
+        (
+            [{"$ref": "#/$defs/Known"}, {"$ref": "#/$defs/Other"}],
+            {"known": "#/$defs/Known", "other": "#/$defs/Known"},
+            "mapping must contain unique references",
+        ),
+    ],
+)
+def test_run_event_descriptor_rejects_repeated_tagged_union_references(
+    choices: list[dict[str, str]], mapping: dict[str, str], reason: str
+) -> None:
+    definitions = {
+        name: {
+            "type": "object",
+            "properties": {"kind": {"const": tag, "type": "string"}},
+            "required": ["kind"],
+        }
+        for name, tag in (("Known", "known"), ("Other", "other"))
+    }
+
+    with pytest.raises(ValueError, match=reason):
+        require_supported_run_event_schema(
+            {
+                "$defs": definitions,
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "oneOf": choices,
+                        "discriminator": {"propertyName": "kind", "mapping": mapping},
+                    }
+                },
+            }
+        )
+
+
 def test_committed_schema_requires_every_tagged_union_discriminant() -> None:
     """Regression for #860: an optional tag is a union no client can narrow."""
     document = _committed_schema()
@@ -77,6 +260,19 @@ def test_committed_schema_discriminants_are_literal_tags() -> None:
         if "const" not in _definition(document, ref)["properties"][discriminant]
     ]
     assert non_literal == []
+
+
+def test_committed_schema_reuses_the_active_execution_list_definition() -> None:
+    """Snapshots and event batches expose one shared execution checkpoint type."""
+    document = _committed_schema()
+    definitions = document["$defs"]
+
+    assert definitions["RunSnapshot"]["properties"]["active_executions"] == {
+        "$ref": "#/$defs/ActiveExecutions"
+    }
+    assert definitions["EventBatchMessage"]["properties"]["active_executions"] == {
+        "$ref": "#/$defs/ActiveExecutions"
+    }
 
 
 @pytest.mark.parametrize("alias", TAGGED_UNION_ALIASES)
@@ -176,3 +372,13 @@ def test_member_missing_the_discriminant_property_names_its_path() -> None:
     }
     with pytest.raises(ValueError, match=r"mapping/a: union member declares no 'kind'"):
         require_tagged_union_discriminants(document)
+
+
+def test_wire_run_failure_is_the_core_contract() -> None:
+    """The published RunFailure schema is core's own model, so the two cannot diverge."""
+    defs = protocol_json_schema()["$defs"]
+    core = RunFailure.model_json_schema()
+    assert defs["RunFailure"]["properties"] == core["properties"]
+    assert defs["RunFailure"]["required"] == core["required"]
+    assert defs["RunFailureKind"]["enum"] == core["$defs"]["RunFailureKind"]["enum"]
+    assert RunFailedData.model_fields["failure"].annotation is RunFailure

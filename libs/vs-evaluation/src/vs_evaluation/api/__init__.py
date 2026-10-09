@@ -4,6 +4,7 @@ from vs_evaluation.agent_evidence import (
     MAX_EVIDENCE_SUMMARY_CHARS,
     ArtifactDigest,
     ContentDigest,
+    EvidenceFailureKind,
     EvidenceFingerprints,
     EvidenceKind,
     EvidenceMetric,
@@ -47,6 +48,8 @@ from vs_evaluation.agent_models import (
     RunStoppingReply,
     ScopeRelease,
     ScopeReleasedReply,
+    SocketFailure,
+    SocketSuccess,
     StatusCall,
     StatusReply,
     SubmitArgs,
@@ -81,7 +84,15 @@ from vs_evaluation.filesystem_store import (
     EvaluationStoreCorruptionError,
     FilesystemEvaluationStore,
 )
+from vs_evaluation.lifecycle import (
+    FINISHED_STATES,
+    LifecyclePublisher,
+    is_finished,
+    join_observation,
+    state_rank,
+)
 from vs_evaluation.models import (
+    STAGE_OUTPUT_TAIL_CHARS,
     AvailabilitySnapshot,
     AvailabilityState,
     CostClass,
@@ -98,6 +109,8 @@ from vs_evaluation.models import (
     EvaluationStepResult,
     EvaluationTimedOut,
     ExecutorObservation,
+    ExecutorPoll,
+    PollPhase,
     ResourceRequirements,
     ReuseStatus,
     StageFailureKind,
@@ -110,9 +123,11 @@ from vs_evaluation.ports import (
     EvaluationEventSink,
     EvaluationExecutor,
     EvaluationStore,
+    ExecutorCancellationUnconfirmedError,
     ExecutorCancellationUnknownError,
     ExecutorRejectedError,
     ExecutorSubmissionError,
+    PollingEvaluationExecutor,
 )
 from vs_evaluation.profiler_models import (
     MAX_PROFILER_NARRATIVE_CHARS,
@@ -167,6 +182,11 @@ from vs_evaluation.scope_state import (
     ScopeState,
     ScopeSubmissionTracker,
 )
+from vs_evaluation.semantic_stage import (
+    EvidenceResultIdentity,
+    SemanticEvaluationStage,
+    evidence_identity,
+)
 from vs_evaluation.settlements import (
     EvaluationDependencyError,
     EvaluationPending,
@@ -185,6 +205,7 @@ from vs_evaluator_protocol.api import ProfileField
 
 __all__ = [
     "EVALUATION_ACCESS_STATE_PATH",
+    "FINISHED_STATES",
     "MAX_AGENT_AWAIT_S",
     "MAX_EVIDENCE_SUMMARY_CHARS",
     "MAX_LIVE_PROFILER_OPERATIONS",
@@ -192,6 +213,7 @@ __all__ = [
     "MAX_PROFILER_REQUEST_CHARS",
     "MAX_STAGE_SUMMARY_TAIL_CHARS",
     "PROFILER_TERMINAL_RETENTION",
+    "STAGE_OUTPUT_TAIL_CHARS",
     "AccessErrorCode",
     "AdditionalProfileCaptureReason",
     "AgentAwaitResult",
@@ -256,6 +278,7 @@ __all__ = [
     "EvaluationTimeoutError",
     "EvaluationUnknown",
     "EvidenceCall",
+    "EvidenceFailureKind",
     "EvidenceFingerprints",
     "EvidenceKind",
     "EvidenceMetric",
@@ -264,8 +287,11 @@ __all__ = [
     "EvidencePreflightDecision",
     "EvidencePreflightResolution",
     "EvidenceReply",
+    "EvidenceResultIdentity",
+    "ExecutorCancellationUnconfirmedError",
     "ExecutorCancellationUnknownError",
     "ExecutorObservation",
+    "ExecutorPoll",
     "ExecutorRejectedError",
     "ExecutorSubmissionError",
     "FailureKind",
@@ -274,8 +300,11 @@ __all__ = [
     "HandleAccess",
     "HandleAssociation",
     "InFlightProfilerOperation",
+    "LifecyclePublisher",
     "OwnedEvaluationDependencies",
     "PartialMeasurement",
+    "PollPhase",
+    "PollingEvaluationExecutor",
     "ProfileField",
     "ProfilerAgentAccessError",
     "ProfilerAgentCapacityError",
@@ -331,6 +360,7 @@ __all__ = [
     "decide_evidence_preflight",
     "detect_repeated_failure",
     "evaluation_principal",
+    "evidence_identity",
     "failure_signature",
     "stable_handle_id",
     "submission_evidence_kinds",
@@ -346,4 +376,10 @@ __all__ += [
     "ScopeReleasedReply",
     "ScopeState",
     "ScopeSubmissionTracker",
+    "SemanticEvaluationStage",
+    "SocketFailure",
+    "SocketSuccess",
+    "is_finished",
+    "join_observation",
+    "state_rank",
 ]

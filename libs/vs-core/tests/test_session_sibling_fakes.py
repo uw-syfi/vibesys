@@ -207,7 +207,10 @@ def fake_attempts(
                 "observation", "terminal proof differs from invocation"
             )
         return core.AreaChange(state=state)
-    if event.authority != invocation.observation.request_id:
+    if event.authority not in (
+        invocation.observation.request_id,
+        core.write_turn_authority(event.invocation),
+    ):
         raise core.ContractValidationError("authority", "checkpoint lacks exact terminal authority")
     request_id = core.RequestId(
         root=f"checkpoint:{len(event.authority.root)}:{event.authority.root}:"
@@ -220,6 +223,7 @@ def fake_attempts(
         deadline_at=min(context.run.deadline_at, invocation.turn.deadline_at),
         attempt=event.attempt,
         retention=event.retention,
+        invocation=event.invocation,
     )
     if request_id in owner.pending_intents:
         return core.AreaChange(state=state)

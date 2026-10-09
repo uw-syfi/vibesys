@@ -13,6 +13,7 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
+from tests.support.posix_tools import install_posix_tool_shims
 
 
 class _SuiteEnvironment:
@@ -33,6 +34,10 @@ class _SuiteEnvironment:
         for variable, name in (("GOCACHE", "go-build"), ("GOMODCACHE", "go-modules")):
             if variable not in os.environ:
                 self.environment.setenv(variable, str(root / name))
+        # Scripts the executing Fake Slurm cluster runs locally must stay
+        # portable to macOS, so every test sees the strict tools first.
+        shims = install_posix_tool_shims(root / "posix-bin")
+        self.environment.setenv("PATH", f"{shims}{os.pathsep}{os.environ['PATH']}")
         for variable, name in (
             ("HOME", "home"),
             ("VIBESYS_STATE_HOME", "state"),

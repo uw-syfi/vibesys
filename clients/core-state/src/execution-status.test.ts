@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'bun:test';
 import type {RunEvent} from '@vibesys/backend-client';
+import {statusEvent, timestamp} from '@vibesys/backend-client/testing';
 import {
   applyExecutionStatus,
   applyExecutionStatusUsage,
@@ -22,11 +23,11 @@ describe('execution status usage prefix merge', () => {
 
   it('combines an older partial status with the suffix update that owns usage', () => {
     const active = {'exec-a': {startedAt: timestamp(1)}};
-    const olderEvent = statusEvent(2, 'exec-a', {
+    const olderEvent = toolStatusEvent(2, 'exec-a', {
       input_tokens: 4_000,
       context_window: 200_000,
     });
-    const newerEvent = statusEvent(3, 'exec-a', {input_tokens: 9_000});
+    const newerEvent = toolStatusEvent(3, 'exec-a', {input_tokens: 9_000});
     const olderStatuses = applyExecutionStatus({}, olderEvent);
     const newerStatuses = applyExecutionStatus({}, newerEvent);
     const usage = applyExecutionStatusUsage(null, {}, newerStatuses, active, newerEvent);
@@ -42,11 +43,11 @@ describe('execution status usage prefix merge', () => {
 
   it('does not borrow status fields from an earlier execution generation', () => {
     const active = {'exec-a': {startedAt: timestamp(4)}};
-    const olderEvent = statusEvent(2, 'exec-a', {
+    const olderEvent = toolStatusEvent(2, 'exec-a', {
       input_tokens: 4_000,
       context_window: 200_000,
     });
-    const newerEvent = statusEvent(5, 'exec-a', {input_tokens: 9_000});
+    const newerEvent = toolStatusEvent(5, 'exec-a', {input_tokens: 9_000});
     const olderStatuses = applyExecutionStatus({}, olderEvent);
     const newerStatuses = applyExecutionStatus({}, newerEvent);
     const usage = applyExecutionStatusUsage(null, {}, newerStatuses, active, newerEvent);
@@ -61,7 +62,7 @@ describe('execution status usage prefix merge', () => {
   });
 
   it('backfills a model once while retaining suffix token ownership', () => {
-    const sourceEvent = statusEvent(3, 'exec-a', {input_tokens: 9_000});
+    const sourceEvent = toolStatusEvent(3, 'exec-a', {input_tokens: 9_000});
     const statuses = applyExecutionStatus({}, sourceEvent);
     const usage = applyExecutionStatusUsage(
       null,
@@ -88,10 +89,6 @@ describe('execution status usage prefix merge', () => {
   });
 });
 
-function timestamp(sequence: number): string {
-  return `2026-01-01T00:00:0${sequence}Z`;
-}
-
 function startedEvent(sequence: number, executionId: string): RunEvent {
   return {
     sequence,
@@ -103,19 +100,10 @@ function startedEvent(sequence: number, executionId: string): RunEvent {
   };
 }
 
-function statusEvent(
+function toolStatusEvent(
   sequence: number,
   executionId: string,
   status: {input_tokens: number; context_window?: number},
 ): RunEvent {
-  return {
-    sequence,
-    timestamp: timestamp(sequence),
-    type: 'tool_call',
-    execution_id: executionId,
-    invocation_id: executionId,
-    agent_kind: 'implementer',
-    round_label: 'round-1',
-    data: {kind: 'tool_call', tool: 'Bash', call_id: `call-${sequence}`, args: {}, status},
-  };
+  return statusEvent(sequence, executionId, 'tool_call', status, {round_label: 'round-1'});
 }

@@ -13,8 +13,8 @@ from tests.vibesys.orchestration.dynamic._support import (
     implementation,
     portfolio,
 )
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_evaluation.api import EvidenceKind
 from vs_runtime.api import (

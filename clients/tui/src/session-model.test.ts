@@ -1,9 +1,27 @@
 import {describe, expect, it, test} from 'bun:test';
 import type {RunEvent, RunSnapshot, RunStatus} from '@vibesys/backend-client';
+import {
+  chatEvent as fixtureChatEvent,
+  event as fixtureEvent,
+} from '@vibesys/backend-client/testing';
 import {hasRunEnded} from '@vibesys/core-state';
+import {
+  enterExperimentDrilldown,
+  enterExperimentRound,
+  enterUnownedExperimentRound,
+  experimentIndexItems,
+  hypothesisPlanningActivity,
+  leaveExperimentDrilldown,
+  leaveHypothesisDetail,
+  moveExperimentSelection,
+  moveHypothesisRoundSelection,
+  selectExperimentActivity,
+  setExperiments,
+  unownedExperimentRounds,
+} from './experiments.js';
+import {selectNextAgent, selectNextRound, selectRound} from './round-agent-selection.js';
 import type {SessionState} from './session-model.js';
 import {
-  applyActiveExecutionCheckpoint,
   applyEvent,
   applyEventBatch,
   applyEventPrefix,
@@ -14,52 +32,41 @@ import {
   clearInputError,
   closeNotepad,
   closePane,
-  closeThemePicker,
   cyclePaneFocus,
   dismissErrorBanner,
-  enterExperimentDrilldown,
-  enterExperimentRound,
-  enterUnownedExperimentRound,
-  experimentIndexItems,
   failPane,
   focusedPane,
   focusPane,
   focusRound,
   hydrateNotepad,
-  hypothesisPlanningActivity,
   initialSessionState,
-  leaveExperimentDrilldown,
-  leaveHypothesisDetail,
   markEventStreamUnavailable,
-  moveExperimentSelection,
-  moveHypothesisRoundSelection,
-  moveThemeSelection,
   notepadPromotionText,
   openChat,
   openNotepad,
   openPane,
-  openThemePicker,
   reportError,
   runStatusLabel,
-  selectExperimentActivity,
-  selectNextAgent,
-  selectNextRound,
-  selectRound,
   setChatDockFits,
-  setExperiments,
   setNotepadText,
   setPaneContent,
-  setTheme,
   showDetail,
+  stripRounds,
   togglePaneZoom,
   toggleTodos,
-  unownedExperimentRounds,
   updateChatConversation,
   visibleActiveExecutions,
   visibleConversation,
   visiblePhases,
+  visibleRoundNumber,
   visibleTodos,
 } from './session-model.js';
+import {
+  closeThemePicker,
+  moveThemeSelection,
+  openThemePicker,
+  setTheme,
+} from './theme-picker-model.js';
 import {headerSegments, runStateText, usageText} from './ui/header.js';
 
 describe('input errors', () => {
@@ -325,7 +332,7 @@ describe('event batch projection', () => {
     const dismissed = dismissErrorBanner(failed);
 
     const chatted = applyEventBatch(dismissed, [
-      chatEvent(3, 'chat', {kind: 'chat', answer: 'The gate exited 1.'}),
+      sessionChatEvent(3, 'chat', {kind: 'chat', answer: 'The gate exited 1.'}),
     ]);
 
     expect(chatted.core.status).toBe('failed');
@@ -349,8 +356,10 @@ describe('event batch projection', () => {
     expect(failed.errorBanner?.count).toBe(1);
 
     const chatted = applyEventBatch(
-      applyEventBatch(failed, [chatEvent(2, 'chat', {kind: 'chat', answer: 'first answer'})]),
-      [chatEvent(3, 'chat', {kind: 'chat', answer: 'second answer'})],
+      applyEventBatch(failed, [
+        sessionChatEvent(2, 'chat', {kind: 'chat', answer: 'first answer'}),
+      ]),
+      [sessionChatEvent(3, 'chat', {kind: 'chat', answer: 'second answer'})],
     );
 
     expect(chatted.errorBanner?.count).toBe(1);
@@ -427,7 +436,7 @@ describe('chat backfill ordering', () => {
   it('inserts backfilled exchanges at their transcript position, not the tail', () => {
     const live = applyEventBatch(
       initialSessionState(),
-      [chatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
+      [sessionChatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
       undefined,
       100,
       90,
@@ -436,7 +445,7 @@ describe('chat backfill ordering', () => {
 
     const backfilled = applyEventPrefix(
       live,
-      [chatEvent(10, 'chat', {kind: 'chat', answer: 'older answer'})],
+      [sessionChatEvent(10, 'chat', {kind: 'chat', answer: 'older answer'})],
       0,
     );
 
@@ -452,7 +461,7 @@ describe('chat backfill ordering', () => {
   it('backfills above a local question instead of splitting it from its answer', () => {
     const live = applyEventBatch(
       initialSessionState(),
-      [chatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
+      [sessionChatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
       undefined,
       100,
       90,
@@ -464,7 +473,7 @@ describe('chat backfill ordering', () => {
 
     const backfilled = applyEventPrefix(
       asked,
-      [chatEvent(10, 'chat', {kind: 'chat', answer: 'older answer'})],
+      [sessionChatEvent(10, 'chat', {kind: 'chat', answer: 'older answer'})],
       0,
     );
 
@@ -478,7 +487,7 @@ describe('chat backfill ordering', () => {
   it('keeps a pending question above the fresh answer that lands after it', () => {
     const live = applyEventBatch(
       initialSessionState(),
-      [chatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
+      [sessionChatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
       undefined,
       100,
       90,
@@ -489,7 +498,7 @@ describe('chat backfill ordering', () => {
     ]);
 
     const answered = applyEventBatch(asked, [
-      chatEvent(101, 'chat', {kind: 'chat', answer: 'follow-up answer'}),
+      sessionChatEvent(101, 'chat', {kind: 'chat', answer: 'follow-up answer'}),
     ]);
 
     expect(answered.chatConversation.map(entry => entry.id)).toEqual(['100', 'chat-user-1', '101']);
@@ -512,6 +521,7 @@ describe('hypothesis planning activity', () => {
               kind,
               status: 'active',
               roundNumber: 3,
+              roundKey: {kind: 'number' as const, number: 3},
               roundLabel,
               startedAt: '2026-01-01T00:00:00Z',
             },
@@ -572,23 +582,31 @@ describe('hypothesis planning activity', () => {
   });
 
   it('keeps elapsed planning time from the earliest observed planning phase', () => {
-    const state = stateFor('orchestrator', 'round-3-plan');
-    state.core.phases = [
-      {
-        kind: 'orchestrator',
-        status: 'completed',
-        roundNumber: 3,
-        roundLabel: 'round-3-pre',
-        startedAt: '2026-01-01T00:00:00Z',
+    const base = stateFor('orchestrator', 'round-3-plan');
+    const state: SessionState = {
+      ...base,
+      core: {
+        ...base.core,
+        phases: [
+          {
+            kind: 'orchestrator',
+            status: 'completed',
+            roundNumber: 3,
+            roundKey: {kind: 'number' as const, number: 3},
+            roundLabel: 'round-3-pre',
+            startedAt: '2026-01-01T00:00:00Z',
+          },
+          {
+            kind: 'orchestrator',
+            status: 'active',
+            roundNumber: 3,
+            roundKey: {kind: 'number' as const, number: 3},
+            roundLabel: 'round-3-plan',
+            startedAt: '2026-01-01T00:01:00Z',
+          },
+        ],
       },
-      {
-        kind: 'orchestrator',
-        status: 'active',
-        roundNumber: 3,
-        roundLabel: 'round-3-plan',
-        startedAt: '2026-01-01T00:01:00Z',
-      },
-    ];
+    };
 
     expect(hypothesisPlanningActivity(state)?.startedAt).toBe('2026-01-01T00:00:00Z');
   });
@@ -603,7 +621,9 @@ describe('hypothesis planning activity', () => {
         ...stateFor('orchestrator', 'round-3-plan'),
         core: {
           ...stateFor('orchestrator', 'round-3-plan').core,
-          rounds: [{number: 3, status: 'active' as const}],
+          rounds: [
+            {key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const},
+          ],
         },
       },
       [
@@ -632,7 +652,7 @@ describe('hypothesis planning activity', () => {
       ...stateFor('orchestrator', 'round-3-pre'),
       core: {
         ...stateFor('orchestrator', 'round-3-pre').core,
-        rounds: [{number: 3, status: 'active' as const}],
+        rounds: [{key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const}],
       },
     };
 
@@ -645,7 +665,7 @@ describe('hypothesis planning activity', () => {
       ...stateFor('orchestrator', 'round-3-plan'),
       core: {
         ...stateFor('orchestrator', 'round-3-plan').core,
-        rounds: [{number: 3, status: 'active' as const}],
+        rounds: [{key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const}],
       },
     };
 
@@ -663,13 +683,14 @@ describe('hypothesis planning activity', () => {
               kind: 'orchestrator',
               status: 'active' as const,
               roundNumber: 5,
+              roundKey: {kind: 'number' as const, number: 5},
               roundLabel: 'round-5-plan',
             },
           ],
           rounds: [
-            {number: 4, status: 'completed' as const},
-            {number: 2, status: 'completed' as const},
-            {number: 5, status: 'active' as const},
+            {key: {kind: 'number' as const, number: 4}, number: 4, status: 'completed' as const},
+            {key: {kind: 'number' as const, number: 2}, number: 2, status: 'completed' as const},
+            {key: {kind: 'number' as const, number: 5}, number: 5, status: 'active' as const},
           ],
         },
       },
@@ -713,7 +734,9 @@ describe('hypothesis planning activity', () => {
           ...stateFor('orchestrator', 'round-3-plan'),
           core: {
             ...stateFor('orchestrator', 'round-3-plan').core,
-            rounds: [{number: 3, status: 'active' as const}],
+            rounds: [
+              {key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const},
+            ],
           },
         },
         [],
@@ -836,7 +859,9 @@ describe('unowned rounds', () => {
       ...initialSessionState(),
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 9, status: 'completed' as const}],
+        rounds: [
+          {key: {kind: 'number' as const, number: 9}, number: 9, status: 'completed' as const},
+        ],
         transcript: [
           {id: 'r8', kind: 'assistant' as const, content: 'old', roundNumber: 8},
           {id: 'r9', kind: 'assistant' as const, content: 'kept', roundNumber: 9},
@@ -874,6 +899,29 @@ describe('unowned rounds', () => {
     ]);
 
     expect(enterExperimentRound(state, 0)).toBeNull();
+  });
+});
+
+describe('unnumbered round compatibility', () => {
+  it('retains fallback rows while numeric selectors and experiment joins skip them', () => {
+    const base = initialSessionState();
+    const state: SessionState = {
+      ...base,
+      core: {
+        ...base.core,
+        rounds: [
+          {key: {kind: 'number', number: 1}, number: 1, status: 'completed'},
+          {key: {kind: 'label', label: 'future-loop'}, number: null, status: 'active'},
+        ],
+      },
+    };
+
+    expect(stripRounds(state).map(round => round.key)).toEqual([
+      {kind: 'number', number: 1},
+      {kind: 'label', label: 'future-loop'},
+    ]);
+    expect(visibleRoundNumber(state)).toBe(1);
+    expect(unownedExperimentRounds(state)).toEqual([1]);
   });
 });
 
@@ -995,44 +1043,6 @@ describe('session event model', () => {
     expect(disconnected.core).toBe(active.core);
     expect(disconnected.core.activeExecutions['impl-1']).toBeDefined();
     expect(visibleActiveExecutions(disconnected)).toEqual([]);
-  });
-
-  it('reconciles from a checkpoint without advancing the replay cursor', () => {
-    const state = applyActiveExecutionCheckpoint(initialSessionState(), [
-      {
-        execution_id: 'judge-2',
-        agent_kind: 'judge',
-        round_label: 'round-2-judge',
-        stage: 'evaluation',
-        attempt: 1,
-        assignment: 'Evaluate the candidate',
-        started_at: '2026-01-01T00:00:00Z',
-        activity: {
-          kind: 'agent_execution_activity_changed',
-          mode: 'thinking',
-          summary: 'Inspecting the diff',
-          tool: null,
-        },
-      },
-    ]);
-
-    expect(state.core.sequence).toBe(0);
-    expect(state.core.activeExecutions['judge-2']).toMatchObject({
-      agentKind: 'judge',
-      roundNumber: 2,
-      activity: {summary: 'Inspecting the diff'},
-    });
-
-    const newer = {
-      ...state,
-      core: {
-        ...state.core,
-        sequence: 5,
-      },
-    };
-    expect(applyActiveExecutionCheckpoint(newer, [], 4).core.activeExecutions).toEqual(
-      state.core.activeExecutions,
-    );
   });
 
   it('clears every active execution when the run is interrupted', () => {
@@ -1434,7 +1444,7 @@ describe('session event model', () => {
     let state = initialSessionState();
     state = applyEvent(
       state,
-      chatEvent(1, 'agent_output_chunk', {
+      sessionChatEvent(1, 'agent_output_chunk', {
         kind: 'agent_output_chunk',
         channel: 'analysis',
         content: 'Inspecting the latest round',
@@ -1442,7 +1452,7 @@ describe('session event model', () => {
     );
     state = applyEvent(
       state,
-      chatEvent(2, 'tool_call', {
+      sessionChatEvent(2, 'tool_call', {
         kind: 'tool_call',
         tool: 'read_file',
         args: {path: 'progress.md'},
@@ -1451,7 +1461,7 @@ describe('session event model', () => {
     );
     state = applyEvent(
       state,
-      chatEvent(3, 'tool_result', {
+      sessionChatEvent(3, 'tool_result', {
         kind: 'tool_result',
         tool: 'read_file',
         content: 'Round 2 improved throughput.',
@@ -1460,7 +1470,7 @@ describe('session event model', () => {
     );
     state = applyEvent(
       state,
-      chatEvent(4, 'chat', {
+      sessionChatEvent(4, 'chat', {
         kind: 'chat',
         answer: 'Round 2 improved throughput.',
       }),
@@ -1701,6 +1711,7 @@ describe('session event model', () => {
         executionId: null,
         agentKind: 'judge',
         roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
         items: [
           {content: 'Set up project', status: 'completed'},
           {content: 'Add tests', status: 'pending'},
@@ -1924,7 +1935,9 @@ describe('session event model', () => {
       agent_kind: 'orchestrator',
     });
 
-    expect(state.core.rounds).toMatchObject([{number: 1, status: 'active'}]);
+    expect(state.core.rounds).toMatchObject([
+      {key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'},
+    ]);
     expect(visiblePhases(state).map(phase => `${phase.kind}:${phase.status}`)).toEqual([
       'orchestrator:completed',
       'implementer:pending',
@@ -1935,6 +1948,7 @@ describe('session event model', () => {
       kind: 'orchestrator',
       status: 'completed',
       roundNumber: 1,
+      roundKey: {kind: 'number' as const, number: 1},
       roundLabel: 'round-1',
     });
   });
@@ -2240,15 +2254,13 @@ function event(
   data?: RunEvent['data'],
   invocationId?: string,
 ): RunEvent {
-  return {
-    sequence,
+  return fixtureEvent(sequence, type, {
     timestamp: '2026-01-01T00:00:00Z',
-    type,
     round_label: 'round-1',
     ...(type === 'run_started' ? {} : {agent_kind: 'judge'}),
     ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
     ...(data === undefined ? {} : {data}),
-  };
+  });
 }
 
 function executionEvent(
@@ -2269,16 +2281,12 @@ function executionEvent(
   };
 }
 
-function chatEvent(
+function sessionChatEvent(
   sequence: number,
   type: RunEvent['type'],
   data: NonNullable<RunEvent['data']>,
 ): RunEvent {
-  return {
-    ...event(sequence, type, data, 'chat-1'),
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
-  };
+  return fixtureChatEvent(sequence, type, data, {invocation_id: 'chat-1'});
 }
 
 describe('theme picker', () => {
@@ -2536,17 +2544,24 @@ describe('re-entering a round after leaving it', () => {
       core: {
         ...initialSessionState().core,
         rounds: [
-          {number: 1, status: 'completed'},
-          {number: 2, status: 'active'},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'},
+          {key: {kind: 'number' as const, number: 2}, number: 2, status: 'active'},
         ],
         phases: [
           {
             kind: 'implementer',
             status: 'completed',
             roundNumber: 1,
+            roundKey: {kind: 'number' as const, number: 1},
             roundLabel: 'round-1-implementer',
           },
-          {kind: 'judge', status: 'completed', roundNumber: 1, roundLabel: 'round-1-judge'},
+          {
+            kind: 'judge',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: {kind: 'number' as const, number: 1},
+            roundLabel: 'round-1-judge',
+          },
         ],
         transcript: [
           {id: 'a', kind: 'assistant', label: 'implementer', content: 'patched', roundNumber: 1},
@@ -2638,9 +2653,9 @@ describe('scope follows round navigation', () => {
         core: {
           ...initialSessionState().core,
           rounds: [
-            {number: 1, status: 'completed' as const},
-            {number: 2, status: 'completed' as const},
-            {number: 3, status: 'active' as const},
+            {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed' as const},
+            {key: {kind: 'number' as const, number: 2}, number: 2, status: 'completed' as const},
+            {key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const},
           ],
         },
       },

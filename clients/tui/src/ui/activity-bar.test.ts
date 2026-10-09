@@ -13,6 +13,7 @@ function execution(
     agentKind: 'implementer',
     roundLabel: 'round-1-implementer',
     roundNumber: 1,
+    roundKey: {kind: 'number' as const, number: 1},
     stage: 'implementation',
     attempt: 1,
     assignment: 'Implement the queue',

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vs_sandbox.api import BeforeReadyContext, Sandbox, SandboxLifecycleError, SandboxLifecycleHooks
+from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sandbox.docker_sandbox import (
     AGENT_HOME,
     DockerSandbox,
@@ -329,32 +330,26 @@ class TestAgentUserRemap:
         assert mock_run.call_count == 2
         assert not any("usermod" in " ".join(c[0][0]) for c in mock_run.call_args_list)
 
-    @patch("subprocess.run")
-    def test_remap_runs_as_root_but_agent_commands_do_not(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_remap_runs_as_root_but_agent_commands_do_not(self, tmp_path: Path) -> None:
+        (tmp_path / "workspace").mkdir()
+        (tmp_path / "engine").mkdir()
+        engine = FakeDockerEngine(tmp_path / "engine", agent_ids=(1000, 1000))
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
             agent_uid=4242,
             agent_gid=4343,
+            docker=engine,
         )
-        mock_run.side_effect = [
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-        ]
         sandbox.start()
-        mock_run.reset_mock()
-        mock_run.side_effect = None
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="hi\n", stderr=""
-        )
+        try:
+            sandbox.execute("echo hi")
 
-        sandbox.execute("echo hi")
-
-        exec_cmd = mock_run.call_args[0][0]
-        assert "-u" not in exec_cmd
+            execs = [call for call in engine.calls if call[1] == "exec"]
+            assert any(call[2:4] == ("-u", "root") and "usermod" in call[-1] for call in execs)
+            assert "-u" not in execs[-1]
+        finally:
+            sandbox.stop()
 
 
 class TestAuthFileCopy:
@@ -396,147 +391,49 @@ class TestAuthFileCopy:
 
 
 class TestExecute:
-    @patch("subprocess.run")
-    def test_execute_runs_docker_exec(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
-        # Start first
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123container\n", stderr=""
+    """Docker-specific execution facts; the result contract is in test_sandbox_contract.py."""
+
+    @staticmethod
+    def _started(tmp_path: Path) -> tuple[DockerSandbox, FakeDockerEngine]:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (tmp_path / "engine").mkdir()
+        engine = FakeDockerEngine(tmp_path / "engine", agent_ids=(os.getuid(), os.getgid()))
+        sandbox = DockerSandbox(
+            host_workspace=str(workspace),
+            image="nvcr.io/nvidia/pytorch:25.04-py3",
+            agent_uid=os.getuid(),
+            agent_gid=os.getgid(),
+            docker=engine,
         )
         sandbox.start()
-        mock_run.reset_mock()
+        return sandbox, engine
 
-        # Execute command
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="hello world\n", stderr=""
-        )
+    def test_execute_runs_bash_in_the_workspace_through_docker_exec(self, tmp_path: Path) -> None:
+        sandbox, engine = self._started(tmp_path)
+        try:
+            result = sandbox.execute("pwd -P && echo hello > made-by-exec")
+            exec_calls = [call for call in engine.calls if call[1] == "exec"][-1]
+
+            assert result.exit_code == 0
+            assert result.stdout == f"{(tmp_path / 'workspace').resolve()}\n"
+            assert (tmp_path / "workspace" / "made-by-exec").read_text() == "hello\n"
+            assert exec_calls[exec_calls.index("-w") + 1] == "/workspace"
+            assert exec_calls[-3:-1] == ("bash", "-c")
+        finally:
+            sandbox.stop()
+
+    def test_a_container_removed_underneath_reports_the_daemon_error(self, tmp_path: Path) -> None:
+        sandbox, engine = self._started(tmp_path)
+        engine.run(("docker", "rm", "-f", sandbox.container_id), timeout_seconds=1)
 
         result = sandbox.execute("echo hello")
 
-        cmd = mock_run.call_args[0][0]
-        assert cmd[0] == "docker"
-        assert "exec" in cmd
-        assert "-w" in cmd
-        assert "/workspace" in cmd
-        assert result.output == "hello world\n"
-        assert result.exit_code == 0
-
-    @patch("subprocess.run")
-    def test_execute_timeout(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
-        sandbox.start()
-        mock_run.reset_mock()
-
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="docker exec", timeout=5)
-
-        result = sandbox.execute("sleep 100", timeout=5)
-
-        assert result.exit_code == -1
-        assert "timed out" in result.output.lower()
-
-    @patch("subprocess.run")
-    def test_execute_output_truncation(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        sandbox = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"),
-            image="nvcr.io/nvidia/pytorch:25.04-py3",
-            gpus="all",
-            max_output_bytes=50,
-        )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
-        sandbox.start()
-        mock_run.reset_mock()
-
-        big_output = "x" * 200
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=big_output, stderr=""
-        )
-
-        result = sandbox.execute("cat bigfile")
-
-        assert result.truncated is True
-        assert len(result.output) <= 50 + 100  # some overhead for truncation message
-
-    @patch("subprocess.run")
-    def test_failed_execute_preserves_stderr_tail_with_bounded_output(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        sandbox = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"),
-            image="nvcr.io/nvidia/pytorch:25.04-py3",
-            gpus="all",
-            max_output_bytes=80,
-        )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
-        sandbox.start()
-        mock_run.reset_mock()
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="x" * 200, stderr="fatal compiler error\n"
-        )
-
-        result = sandbox.execute("failing compiler")
-
-        assert len(result.output) <= 80
-        assert result.output.endswith("fatal compiler error\n")
-        assert result.stdout.startswith("x")
-        assert result.stderr.endswith("fatal compiler error\n")
-        assert result.truncated
-
-    @patch("subprocess.run")
-    def test_failed_stderr_only_execute_bounds_and_keeps_tail(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        sandbox = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"),
-            image="nvcr.io/nvidia/pytorch:25.04-py3",
-            gpus="all",
-            max_output_bytes=60,
-        )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
-        sandbox.start()
-        mock_run.reset_mock()
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="", stderr="old\n" * 100 + "fatal tail\n"
-        )
-
-        result = sandbox.execute("failing compiler")
-
-        assert len(result.output) == 60
-        assert result.stdout == ""
-        assert result.stderr.endswith("fatal tail\n")
-        assert result.truncated
-
-    @patch("subprocess.run")
-    def test_execute_combines_stdout_stderr(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
-    ) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
-        sandbox.start()
-        mock_run.reset_mock()
-
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="out\n", stderr="err\n"
-        )
-
-        result = sandbox.execute("failing_cmd")
-
-        assert "out" in result.output
-        assert "err" in result.output
         assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "No such container" in result.stderr
 
-    @patch("subprocess.run")
-    def test_execute_without_start_raises(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
-    ) -> None:
-        del mock_run
+    def test_execute_without_start_raises(self, sandbox: DockerSandbox) -> None:
         with pytest.raises(RuntimeError, match="not started"):
             sandbox.execute("echo hello")
 

@@ -8,11 +8,10 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass, replace
 from datetime import timedelta
-from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel
 
 from vs_agent.api import (
     AgentExecutionPolicy,
@@ -30,6 +29,13 @@ from vs_agent.api import (
     Unknown,
     build_agent_client,
     parse_typed_response,
+)
+from vs_runtime._agent_lifecycle import (
+    AgentExecutionFinished,
+    AgentExecutionLifecycleEvent,
+    AgentExecutionLifecycleSink,
+    AgentExecutionStarted,
+    AgentExecutionStatus,
 )
 from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
 
@@ -224,59 +230,13 @@ class AgentExecutionScope:
     agent_homes_directory: Path | None = None
 
 
-class AgentExecutionStatus(StrEnum):
-    """Driver-neutral outcome of one agent execution."""
-
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    INTERRUPTED = "interrupted"
-
-
-class AgentExecutionStarted(BaseModel):
-    """Semantic start of one provider invocation."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    agent_id: str
-    label: str
-    execution_id: str
-    system_prompt: str
-    user_prompt: str
-    driver: str | None = None
-    provider: str | None = None
-    model: str | None = None
-
-
-class AgentExecutionFinished(BaseModel):
-    """Semantic terminal observation for one provider invocation."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    agent_id: str
-    label: str
-    execution_id: str
-    status: AgentExecutionStatus
-    result: Any = None
-    error: str | None = None
-
-
-type AgentExecutionLifecycleEvent = AgentExecutionStarted | AgentExecutionFinished
-
-
-class AgentExecutionLifecycleSink(Protocol):
-    """Record one semantic execution lifecycle observation synchronously."""
-
-    def __call__(self, event: AgentExecutionLifecycleEvent) -> object: ...
-
-
 type AgentMessageRouter = Callable[[str, tuple[str, ...]], str]
 type AgentClientFactory = Callable[..., AgentClientProtocol]
 
 
 @dataclass(frozen=True, slots=True)
 class AgentResumeConfiguration:
-    """Initial-turn schema and tool configuration restored for continuation."""
+    """Requested schema and tool configuration for continuation and replay."""
 
     system_prompt: str
     response: type[BaseModel] | None
@@ -339,7 +299,6 @@ class RuntimeAgentExecution:
         self._close_task: asyncio.Task[None] | None = None
         self._sessions: ClientAgentSessions | None = None
         self._session_specs: dict[AgentSessionKey, AgentSessionSpec] = {}
-        self._resume_turns: dict[AgentSessionKey, AgentTurnRequest] = {}
 
     @classmethod
     async def open(  # noqa: PLR0913  # lint-waiver: LW-837207 [PLR0913]; composition supplies independent lower-layer effects once; callers use the resulting deep execution object.
@@ -603,13 +562,6 @@ class RuntimeAgentExecution:
             error = exc
             raise
         else:
-            self._resume_turns[session_key] = AgentTurnRequest(
-                message="",
-                instructions=system_prompt,
-                output_schema=response,
-                timeout=self._turn_timeout(),
-                label="evaluation-resume",
-            )
             return result
         finally:
             self._lifecycle(
@@ -741,7 +693,7 @@ class RuntimeAgentExecution:
         transport = self._transport(key)
         previous = transport.inspect(key, invocation_id)
         checkpoint = previous.checkpoint or transport.checkpoint(key)
-        turn = self._resume_turns.get(key) or AgentTurnRequest(
+        turn = AgentTurnRequest(
             message="",
             instructions=configuration.system_prompt,
             output_schema=configuration.response,
@@ -784,8 +736,8 @@ class RuntimeAgentExecution:
                 if configuration.response is not None:
                     # Keep malformed output observable; the caller owns reply
                     # validation and the transition for a malformed response.
-                    with suppress(ValidationError):
-                        result = configuration.response.model_validate_json(outcome.result.text)
+                    with suppress(AgentOutputSchemaError):
+                        result = outcome.parse(configuration.response)
             elif isinstance(outcome, (Unknown, InvalidResponse)):
                 detail = outcome.detail
         except BaseException as error:

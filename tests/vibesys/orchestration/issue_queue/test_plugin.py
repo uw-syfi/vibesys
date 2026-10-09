@@ -637,6 +637,50 @@ def test_paid_turn_failure_leaves_resumable_cursor_and_closes_sessions(tmp_path:
     assert all(session.closed for session in run.agents.sessions)
 
 
+def test_crash_between_recorded_attempt_and_judge_cursor_still_judges_the_attempt(
+    tmp_path: Path,
+) -> None:
+    # The attempt is recorded on the board before the judge cursor commits. A host that
+    # dies in between must resume at the judge: re-running the implementer would pay again,
+    # and with a one-attempt budget the paid, unjudged work would be blocked instead.
+    options = _options(max_rounds=1, max_attempts_per_issue=1)
+    first = _Script(_implementation())
+    second = _Script(_review(passed=True), _performance())
+
+    async def crash_and_reopen() -> RunStatus:
+        interrupted = _fake_host(tmp_path, first)
+        interrupted.state.script_commit_at(
+            "issue_queue: begin judge for issue 1", RuntimeError("commit interrupted")
+        )
+        try:
+            with pytest.raises(RuntimeError, match="commit interrupted"):
+                await PLUGIN.orchestrate(interrupted, options)
+            persisted = await interrupted.state.load(IssueQueueState)
+            assert persisted is not None
+        finally:
+            await interrupted.close()
+        reopened = _fake_host(tmp_path, second)
+        await reopened.state.commit(
+            persisted, workspace=reopened.workspaces.root, label="reopen persisted state"
+        )
+        try:
+            return await PLUGIN.orchestrate(reopened, options)
+        finally:
+            await reopened.close()
+
+    status = asyncio.run(crash_and_reopen())
+
+    assert status is RunStatus.SUCCEEDED
+    assert [call[0] for call in (*first.calls, *second.calls)] == [
+        "implementer",
+        "judge",
+        "perf_eval",
+    ]
+    issue = IssueBoard(tmp_path / "issues.json").get(1)
+    assert issue is not None
+    assert (issue.status, issue.attempts) == (IssueStatus.CLOSED, 1)
+
+
 def test_judge_crash_reopens_without_repeating_paid_implementation(tmp_path: Path) -> None:
     baseline_status, baseline_host = _run(
         tmp_path / "baseline",

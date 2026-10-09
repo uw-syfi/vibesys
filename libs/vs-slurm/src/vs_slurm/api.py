@@ -37,10 +37,14 @@ from .config import (
     load_slurm_config,
     shell_join_with_port,
 )
-from .fake_cluster import FakeCluster
-from .fake_connector import FakeConnector
+from .fake_cluster import FakeCluster, ManualClock, SecondsRange, SlurmTimingProfile
+from .fake_connector import REQUESTS_FILE, FakeConnector
 from .identity import runtime_content_identity
+from .phase_register import MergedPhase, PhaseAnomaly, PhaseRegister
+from .recorded_traces import CANCEL_REACTIONS, LIFETIMES
 from .runner import (
+    SERVICE_NOT_READY_EXIT_CODE,
+    SchedulerReading,
     SlurmArtifactTarget,
     SlurmBatchHandle,
     SlurmBatchRequest,
@@ -54,16 +58,28 @@ from .runner import (
     SlurmJobRequest,
     SlurmJobResult,
     SlurmJobRunner,
-    SlurmJobStatus,
     SlurmJobWaitResult,
     SlurmProcess,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
 )
+from .scheduler_states import SlurmJobStatus, SlurmPhase, SlurmRawState, phase_of
 from .staging import tree_content_identity
+from .trace_replay import (
+    DEFAULT_COMMAND_SECONDS,
+    IssuedCommand,
+    SchedulerTrace,
+    TraceConnector,
+    TraceStep,
+)
 
 __all__ = [
+    "CANCEL_REACTIONS",
+    "DEFAULT_COMMAND_SECONDS",
+    "LIFETIMES",
     "PORT_PLACEHOLDER",
+    "REQUESTS_FILE",
+    "SERVICE_NOT_READY_EXIT_CODE",
     "Cluster",
     "ClusterCancelOutcome",
     "ClusterCancelRequested",
@@ -81,6 +97,14 @@ __all__ = [
     "ClusterUnknown",
     "FakeCluster",
     "FakeConnector",
+    "IssuedCommand",
+    "ManualClock",
+    "MergedPhase",
+    "PhaseAnomaly",
+    "PhaseRegister",
+    "SchedulerReading",
+    "SchedulerTrace",
+    "SecondsRange",
     "SlurmArtifactTarget",
     "SlurmBatchHandle",
     "SlurmBatchRequest",
@@ -100,13 +124,19 @@ __all__ = [
     "SlurmJobRunner",
     "SlurmJobStatus",
     "SlurmJobWaitResult",
+    "SlurmPhase",
     "SlurmProcess",
+    "SlurmRawState",
     "SlurmService",
     "SlurmSshTransport",
     "SlurmSubmissionRejectedError",
+    "SlurmTimingProfile",
     "SlurmTransport",
     "SlurmTreeArtifact",
+    "TraceConnector",
+    "TraceStep",
     "load_slurm_config",
+    "phase_of",
     "runtime_content_identity",
     "shell_join_with_port",
     "tree_content_identity",
@@ -136,6 +166,12 @@ class Cluster(Protocol):
         """Record cancellation intent, leaving confirmation to inspect."""
         ...
 
-    def collect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCollectOutcome:
+    def collect(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCollectOutcome:
         """Collect terminal evidence, preserving partial results as Unknown."""
         ...

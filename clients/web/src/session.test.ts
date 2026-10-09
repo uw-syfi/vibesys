@@ -5,15 +5,17 @@ import {
   type ControlTransport,
   type ProtocolResponse,
   type RequestInput,
-  type RunEvent,
+  type ScheduleTimeout,
   type ServerMessage,
   type SubscribeOptions,
   sameControlChannelState,
 } from '@vibesys/backend-client';
+import {event, eventBatch, snapshotResponse} from '@vibesys/backend-client/testing';
 import {connectionBanners, STREAM_BANNER_COPY} from './banners.js';
 import {
   type BrowserLifecycle,
   WebSession,
+  type WebSessionOptions,
   type WebSessionTransportHooks,
   webSocketUrlFromLocation,
 } from './session.js';
@@ -64,6 +66,25 @@ class FakeLifecycle implements BrowserLifecycle {
   }
 }
 
+/** Deterministic scheduler for the stream's reconnect backoff. */
+class ManualScheduler {
+  readonly #pending: Array<{callback: () => void; cancelled: boolean}> = [];
+
+  readonly scheduleTimeout: ScheduleTimeout = callback => {
+    const pending = {callback, cancelled: false};
+    this.#pending.push(pending);
+    return () => {
+      pending.cancelled = true;
+    };
+  };
+
+  runNext(): void {
+    const pending = this.#pending.shift();
+    if (pending === undefined) throw new Error('No reconnect is scheduled');
+    if (!pending.cancelled) pending.callback();
+  }
+}
+
 interface SubscriptionRecord {
   readonly afterSequence: number;
   readonly options: SubscribeOptions | undefined;
@@ -81,6 +102,7 @@ class FakeTransport implements ControlTransport {
   readonly requests: RequestInput[] = [];
   readonly subscriptions: SubscriptionRecord[] = [];
   readonly snapshots: Array<ProtocolResponse | Error> = [];
+  readonly #subscriptionWaiters: Array<(subscription: SubscriptionRecord) => void> = [];
   /**
    * How many upcoming dials connect without delivering their bootstrap batch,
    * as a socket that dies between `subscribed` and the first batch does: the
@@ -157,8 +179,9 @@ class FakeTransport implements ControlTransport {
       closed: false,
     };
     this.subscriptions.push(record);
+    this.#subscriptionWaiters.shift()?.(record);
     if (this.silentDials > 0) this.silentDials -= 1;
-    else onMessage(eventBatch(`store-${this.subscriptions.length}`, afterSequence + 1));
+    else onMessage(streamBatch(`store-${this.subscriptions.length}`, afterSequence + 1));
     return {
       close: async () => {
         record.closed = true;
@@ -168,6 +191,11 @@ class FakeTransport implements ControlTransport {
 
   async close(): Promise<void> {
     this.closeCalls++;
+  }
+
+  /** Resolves when the stream makes its next dial. */
+  nextSubscription(): Promise<SubscriptionRecord> {
+    return new Promise(resolve => this.#subscriptionWaiters.push(resolve));
   }
 }
 
@@ -278,6 +306,71 @@ describe('WebSession', () => {
     expect(transport.subscriptions).toHaveLength(2);
   });
 
+  test('re-bootstraps when one store raises its declared history floor', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    await session.start();
+
+    transport.subscriptions[0]?.onMessage(streamBatch('run-store', 100, 10));
+    transport.subscriptions[0]?.onMessage(streamBatch('run-store', 20, 50));
+
+    expect(session.store.getState().sequence).toBe(20);
+    expect(session.store.getState().historyAfterSequence).toBe(50);
+    await session.close();
+  });
+
+  test('uses the fresh-path empty-store rule instead of keeping a stale identity', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    await session.start();
+
+    transport.subscriptions[0]?.onMessage(streamBatch('run-store', 100));
+    transport.subscriptions[0]?.onMessage(streamBatch('', 2));
+
+    expect(session.store.getState().sequence).toBe(2);
+    await session.close();
+  });
+
+  test('rejects an invalid declared floor without mutating the fold', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    await session.start();
+    const before = session.store.getState();
+
+    expect(() => transport.subscriptions[0]?.onMessage(streamBatch('store-1', 2, -1))).toThrow(
+      'event_batch.history_after_sequence',
+    );
+
+    expect(session.store.getState()).toBe(before);
+    await session.close();
+  });
+
+  test('keeps the reached history floor across a resumed batch', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new ManualScheduler();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    await session.start();
+    transport.subscriptions[0]?.onMessage(streamBatch('run-store', 100, 50));
+    transport.silentDials = 1;
+    const resumed = transport.nextSubscription();
+
+    transport.subscriptions[0]?.onDisconnect(disconnect('gateway restarted'));
+    scheduler.runNext();
+    const subscription = await resumed;
+    subscription.onMessage(streamBatch('run-store', 101, 0));
+
+    expect(subscription).toMatchObject({
+      afterSequence: 100,
+      options: {storeId: 'run-store'},
+    });
+    expect(session.store.getState().sequence).toBe(101);
+    expect(session.store.getState().historyAfterSequence).toBe(50);
+    await session.close();
+  });
+
   test('keeps a failed snapshot stale until an explicit wake succeeds', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
@@ -369,7 +462,7 @@ describe('WebSession', () => {
   test('publishes an outage on an ended run rather than judging it', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
-    transport.snapshots.push(snapshotResponse('completed'));
+    transport.snapshots.push(snapshotResponse({status: 'completed'}));
 
     await session.start();
     expect(session.store.getState().status).toBe('completed');
@@ -399,7 +492,7 @@ describe('WebSession', () => {
   test('says the transcript stopped short when the stream faults on an ended run', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
-    transport.snapshots.push(snapshotResponse('completed'));
+    transport.snapshots.push(snapshotResponse({status: 'completed'}));
     transport.silentDials = 1;
 
     await session.start();
@@ -477,7 +570,7 @@ describe('WebSession', () => {
     await session.start();
     transport.dropControlChannel(disconnect('gateway restarted'));
     // Newer than the batch `start()` already folded, so the fold takes it.
-    transport.snapshots.push(snapshotResponse('completed', 5));
+    transport.snapshots.push(snapshotResponse({status: 'completed', sequence: 5}));
     session.reattach();
     await settle();
     expect(session.store.getState().status).toBe('completed');
@@ -523,7 +616,10 @@ function healthy(): ReturnType<WebSession['getState']> {
  * real one: the factory receives the session's observers, so the control
  * channel has somewhere to report.
  */
-function sessionWith(lifecycle: FakeLifecycle): {
+function sessionWith(
+  lifecycle: FakeLifecycle,
+  options: Pick<WebSessionOptions, 'reconnectDelaysMs' | 'scheduleTimeout'> = {},
+): {
   readonly session: WebSession;
   readonly transport: FakeTransport;
 } {
@@ -535,38 +631,20 @@ function sessionWith(lifecycle: FakeLifecycle): {
       built.push(transport);
       return transport;
     },
-    reconnectDelaysMs: [0],
+    reconnectDelaysMs: options.reconnectDelaysMs ?? [0],
+    ...(options.scheduleTimeout === undefined ? {} : {scheduleTimeout: options.scheduleTimeout}),
   });
   const transport = built[0];
   if (transport === undefined) throw new Error('WebSession did not build its transport');
   return {session, transport};
 }
 
-function snapshotResponse(status = 'running', sequence = 0): ProtocolResponse {
-  return {
-    ok: true,
-    request_id: 'request-1',
-    snapshot: {
-      run_id: 'run-1',
-      sequence,
-      status,
-    },
-  } as ProtocolResponse;
-}
-
-function eventBatch(storeId: string, sequence: number): ServerMessage {
-  const event: RunEvent = {
-    sequence,
-    timestamp: `2026-09-27T00:00:0${sequence}Z`,
-    type: 'server_ready',
-  };
-  return {
-    type: 'event_batch',
-    events: [event],
+function streamBatch(storeId: string, sequence: number, historyAfterSequence = 0): ServerMessage {
+  return eventBatch([event(sequence, 'server_ready')], {
     through_sequence: sequence,
     store_id: storeId,
-    history_after_sequence: 0,
-  } as ServerMessage;
+    history_after_sequence: historyAfterSequence,
+  });
 }
 
 async function settle(): Promise<void> {

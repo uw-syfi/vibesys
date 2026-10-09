@@ -167,6 +167,19 @@ pnpm build:clients
 pnpm check:ts
 ```
 
+Run only one client build, check, or test command at a time in a checkout. These commands may
+rebuild runtime workspace dependencies, and each build deletes its shared `dist` before writing
+the replacement. `--workspace-concurrency=1` orders packages within one pnpm process; it cannot
+coordinate a second process in the same checkout. Use a separate Git worktree when client commands
+must run concurrently.
+
+An overlap commonly fails with either `Cannot find module '@vibesys/core-state'` or
+`Cannot find module '@vibesys/backend-client'`. A late overlap can instead produce
+`Incomplete test run: ... test files reported no tests`. Stop the overlapping command, run
+`pnpm build:clients`, then rerun the failed command. The build is deliberately not changed to
+preserve the old `dist`: clearing it prevents renamed or deleted source files from surviving as
+stale JavaScript or declarations.
+
 When Python protocol models change, regenerate the files under
 `clients/backend-client/src/generated/` and review the diff.
 See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
@@ -215,11 +228,31 @@ and native commands. `support/repoctl/` provides configurable adapters for
 language and package manifests. The component graph records cross-component
 effects those manifests cannot express. The job prints each selection and its
 reason; an unowned changed path fails selection instead of silently skipping
-checks. To run the selected checks locally, use one command:
+checks. To run the selected check groups configured for local runs, use one
+command. The wrapper runs the repository's Go tool, so install Go 1.25 first:
 
 ```bash
 ./support/repoctl/repoctl test
 ```
+
+This does not run every CI check. Browser end-to-end tests (`tui_e2e`) are
+CI-only by default: Playwright needs Chromium and its system libraries as well
+as the client and Python environments, so making the normal local command
+acquire or require them would make it unexpectedly heavyweight. Run that group
+explicitly when browser coverage is needed. Local port 5173 must be free or
+already serve this checkout's web app: Playwright reuses a local listener, so
+an unrelated listener would run the wrong app.
+
+```bash
+uv sync --dev
+pnpm --dir clients install --frozen-lockfile
+(cd clients && pnpm --filter @vibesys/web exec playwright install --with-deps chromium)
+./support/repoctl/repoctl run-checks --group tui_e2e
+```
+
+The CI-only decision is specific to `tui_e2e`. It does not change the
+selection policy for the other check groups without local-selection keys; each
+has its own prerequisites and needs its own policy decision.
 
 Use `./support/repoctl/repoctl plan` to inspect the selection without running checks.
 The workflow runs named check groups from `.repoctl/checks.toml`. Run

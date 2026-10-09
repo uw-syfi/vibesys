@@ -95,6 +95,36 @@ class AttemptCheckpoint(Value):
     retention: Literal["wip", "candidate"]
 
 
+class CheckpointDecline(StrEnum):
+    """Why an invocation checkpoint was not taken, so a decline is never silent."""
+
+    WRITER_ACTIVE = "writer_active"
+    """Another writer of the attempt's workspace has not ended, so a snapshot would
+    be torn. The later writer's own terminal turn requests the checkpoint."""
+
+    UNAUTHORIZED = "unauthorized"
+    """Neither an interruption claim nor a terminal write turn authorizes it."""
+
+    UNCHARGED = "uncharged"
+    """The invocation has no live charge in this attempt, so it is not this
+    attempt's work."""
+
+    NOT_ACTIVE = "not_active"
+    """The attempt is not active; its closure retains the workspace itself."""
+
+    SNAPSHOT_FAILED = "snapshot_failed"
+    """The executor ended the snapshot request without a retained revision. Closure
+    still retains the workspace, so the attempt can release."""
+
+
+class CheckpointDeclined(Value):
+    """Durable record that one invocation's checkpoint was not taken, and why."""
+
+    invocation: InvocationRef
+    authority: RequestId
+    reason: CheckpointDecline
+
+
 class AttemptView(Value):
     """Attempt authority, receipt history, retained checkpoints and release graph.
 
@@ -120,6 +150,7 @@ class AttemptView(Value):
     release_dependencies: tuple[ReleaseDependency, ...] = ()
     evaluation_history: AttemptEvaluationHistory = AttemptEvaluationHistory()
     terminal_reason: AttemptTerminalReason | None = None
+    checkpoint_declines: tuple[CheckpointDeclined, ...] = ()
 
     @model_validator(mode="after")
     def evaluation_scope(self) -> AttemptView:
@@ -242,6 +273,15 @@ class SnapshotAndRetain(RequestBase):
     kind: Literal["snapshot_and_retain"] = "snapshot_and_retain"
     attempt: AttemptRef
     retention: Literal["wip", "candidate"]
+    invocation: InvocationRef | None = None
+    """Invocation whose yield or interruption this snapshot retains.
+
+    Attempts sets it from InvocationCheckpointRequested.invocation, and Sessions and
+    Attempts accept a retained checkpoint of an invocation only when the request
+    names that invocation. It stays optional because the same request also carries
+    attempt-level cleanup snapshots (closure and recovery fences), which belong to
+    no invocation and are never accepted as invocation checkpoints.
+    """
 
 
 class RetainRevision(RequestBase):
@@ -254,7 +294,14 @@ class RetainRevision(RequestBase):
 
 
 class DiscardWorkspace(RequestBase):
-    """Discard workspace lifecycle contract."""
+    """Discard workspace lifecycle contract.
+
+    For an EXCLUSIVE_ROOT attempt the workspace is the run-owned root, so this
+    request releases the attempt's hold on the root and never deletes its files;
+    retention requests that precede it already preserved any revision. Core frees
+    the root for the next exclusive attempt from the holder's phase, not from the
+    executor's answer, so the executor's hold must end on this request.
+    """
 
     kind: Literal["discard_workspace"] = "discard_workspace"
     attempt: AttemptRef
@@ -384,7 +431,8 @@ class InvocationCheckpointRequested(Value):
     kind: Literal["invocation_checkpoint_requested"] = "invocation_checkpoint_requested"
     attempt: AttemptRef
     invocation: InvocationRef
-    retention: Literal["wip", "candidate"]
+    retention: Literal["wip"]
+    """Only work in progress: closure retains a candidate from an explicit revision."""
     authority: RequestId
 
 

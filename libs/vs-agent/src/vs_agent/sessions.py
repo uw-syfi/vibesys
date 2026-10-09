@@ -24,6 +24,7 @@ from vs_agent.contracts import (
     SessionDisposition,
     session_spec_fingerprint,
 )
+from vs_agent.runner import parse_typed_response
 from vs_agent.session_errors import (
     InvocationConflictError,
     SessionConfigurationError,
@@ -83,6 +84,14 @@ class Completed(_InvocationObservation):
     invocation_id: str = Field(min_length=1)
     result: AgentTurnResult
     checkpoint: AgentSessionCheckpoint
+
+    def parse[T: BaseModel](self, response_cls: type[T]) -> T:
+        """The reply as *response_cls*, recovered from prose by ``parse_typed_response``.
+
+        Raises ``AgentOutputSchemaError`` when no JSON value in the text validates.
+        This is the only way completed agent text becomes a model.
+        """
+        return parse_typed_response(self.result.text, response_cls)
 
     @model_validator(mode="after")
     def _same_conversation(self) -> Completed:
@@ -146,6 +155,21 @@ class AgentSessions(Protocol):
         self, key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest
     ) -> InvocationOutcome:
         """Journal a keyed initial turn, replaying only durable completion evidence."""
+        ...
+
+    def cancel(self, key: AgentSessionKey, invocation_id: str) -> None:
+        """Ask the provider to stop *invocation_id* if this instance is running it.
+
+        A request, not a proof: only a later ``inspect`` that is not ``Pending``
+        shows the turn ended. Any other invocation is left alone.
+        """
+        ...
+
+    def release(self, key: AgentSessionKey) -> None:
+        """Release the key's live provider resources, keeping its durable checkpoint.
+
+        Raises InvocationConflictError while an invocation of the key is active.
+        """
         ...
 
     def release_interrupted(self, key: AgentSessionKey, invocation_id: str) -> None:
@@ -299,6 +323,14 @@ class AgentTurnExecutor(Protocol):
         """Return the conversation the next keyed turn will continue."""
         ...
 
+    def cancel_session(self, key: AgentSessionKey) -> None:
+        """Ask the keyed conversation's in-flight turn to stop, keeping its checkpoint."""
+        ...
+
+    def release_session(self, key: AgentSessionKey) -> None:
+        """Release the keyed conversation's live resources, keeping its checkpoint."""
+        ...
+
     def run(
         self,
         *,
@@ -339,16 +371,47 @@ class ClientAgentSessions:
             yield self._slot
 
     def bind(self, key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest) -> None:
-        """Install immutable dispatch configuration; no workspace/role policy lives here."""
+        """Bind fixed session configuration and the requested turn response schema.
+
+        Only the response schema may change between turns. Active dispatch and
+        all session, identity, and other turn configuration remain fenced.
+        """
         if not key.durable:
             detail = f"session key {key} is not durable"
             raise SessionConfigurationError.because(detail)
         with self._lock:
             old = self._bindings.get(key)
-            if old is not None and old != (spec, turn):
+            if (
+                old is not None
+                and old != (spec, turn)
+                and (
+                    key in self._active_keys
+                    or old[0] != spec
+                    or replace(old[1], output_schema=turn.output_schema) != turn
+                )
+            ):
                 detail = f"session key {key} is already bound"
                 raise SessionConfigurationError.because(detail)
             self._bindings[key] = (spec, turn)
+
+    def cancel(self, key: AgentSessionKey, invocation_id: str) -> None:
+        """Ask the provider to stop *invocation_id* if this instance is running it."""
+        self._validate_invocation(key, invocation_id)
+        with self._lock:
+            running = invocation_id in self._active
+        if running:
+            self._client.cancel_session(key)
+
+    def release(self, key: AgentSessionKey) -> None:
+        """Release the key's live provider resources, keeping its durable checkpoint."""
+        if not key.durable:
+            detail = f"session key {key} is not durable"
+            raise SessionConfigurationError.because(detail)
+        with self._lock:
+            if key in self._active_keys:
+                detail = f"session {key} has an active invocation"
+                raise InvocationConflictError.because(detail)
+            self._client.release_session(key)
 
     def checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint:
         """Report an existing durable conversation, refusing missing checkpoints."""
@@ -465,7 +528,7 @@ class ClientAgentSessions:
             if key in self._active_keys:
                 detail = f"session {key} already has an active invocation"
                 raise InvocationConflictError.because(detail)
-            checkpoint = None if initial else self.checkpoint(key)
+            checkpoint = self._initial_checkpoint(key) if initial else self.checkpoint(key)
             self._ensure_session_resolved(state, key)
             self._validate_checkpoint(state, key, checkpoint, template.expected_provider_session_id)
             pending = Pending(
@@ -487,6 +550,7 @@ class ClientAgentSessions:
                     template,
                     message=message,
                     invocation_id=invocation_id,
+                    require_provider_checkpoint=True,
                     expected_provider_session_id=(
                         checkpoint.provider_session_id if checkpoint is not None else None
                     ),
@@ -524,6 +588,14 @@ class ClientAgentSessions:
                     self._active_keys.discard(key)
         return outcome
 
+    def _initial_checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint | None:
+        identity = self._client.provider_session_id(key)
+        return (
+            None
+            if identity is None
+            else AgentSessionCheckpoint(session_key=str(key), provider_session_id=identity)
+        )
+
     @staticmethod
     def _validate_checkpoint(
         state: AgentInvocationState,
@@ -531,9 +603,9 @@ class ClientAgentSessions:
         checkpoint: AgentSessionCheckpoint | None,
         expected: str | None,
     ) -> None:
-        if checkpoint is None:
-            return
-        if expected is not None and checkpoint.provider_session_id != expected:
+        if expected is not None and (
+            checkpoint is None or checkpoint.provider_session_id != expected
+        ):
             raise SessionResumeError(str(key), "bound checkpoint identity changed")
         records = [
             record
@@ -545,7 +617,7 @@ class ClientAgentSessions:
             if record.sequence != latest:
                 continue
             prior = record.outcome
-            if prior.checkpoint is None:
+            if checkpoint is None or prior.checkpoint is None:
                 raise SessionResumeError(str(key), "acknowledged provider checkpoint is missing")
             if prior.checkpoint != checkpoint:
                 raise SessionResumeError(str(key), "provider checkpoint identity changed")

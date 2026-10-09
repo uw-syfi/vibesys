@@ -22,6 +22,7 @@ from vs_project.api import (
     ObservationFault,
     Project,
     QuarantinedEnvelope,
+    StateDocumentDamagedError,
     StateStoreWriteError,
     StoredEnvelope,
     StoreFence,
@@ -77,6 +78,16 @@ def _local(
 @pytest.fixture(scope="session", params=[_fake, _local], ids=["fake", "local"])
 def make_store(request: pytest.FixtureRequest) -> StoreFactory:
     return request.param
+
+
+def _damage(store: StateStore, root: Path, contents: bytes) -> None:
+    """Replace the store's persisted document, as a crash or another release would."""
+    if isinstance(store, FakeStateStore):
+        store.replace_document(contents)
+        return
+    state = Project.open(root).state
+    document = state.state_store_namespace("run-1").external_directory() / "store.json"
+    document.write_bytes(contents)
 
 
 def _envelope(revision: int, payload: bytes = b"state,outbox,cursor") -> StoredEnvelope:
@@ -647,3 +658,48 @@ def test_observation_error_returns_no_authority_and_preserves_whole_record(
     successor = _envelope(1, b"reconciled")
     assert store.commit(0, successor, fence, now=2) == Committed(record=successor)
     assert store.load() == successor
+
+
+_LEAK_MARKER = "s3cr3t-document-bytes"
+
+_DAMAGES = {
+    "truncated": b'{"version":1,"record":{"revision":0,"schema_version":1,"payload":"'
+    + _LEAK_MARKER.encode(),
+    "not_utf8": b"\xff\xfe\x00" + _LEAK_MARKER.encode(),
+    "not_an_object": b'["' + _LEAK_MARKER.encode() + b'"]',
+    "unknown_key": b'{"version":1,"written_by_newer_release":"' + _LEAK_MARKER.encode() + b'"}',
+    "wrong_field_type": b'{"version":1,"observed_at":"' + _LEAK_MARKER.encode() + b'"}',
+}
+
+
+@pytest.mark.parametrize("damage", sorted(_DAMAGES))
+@pytest.mark.parametrize("operation", ["load", "acquire", "commit"])
+def test_a_damaged_document_is_a_typed_error_that_does_not_echo_it(
+    make_store: StoreFactory, tmp_path: Path, damage: str, operation: str
+) -> None:
+    store = make_store(tmp_path, ())
+    fence = store.acquire("host-a", now=0, duration=10)
+    assert fence is not None
+    _damage(store, tmp_path, _DAMAGES[damage])
+
+    attempt = {
+        "load": store.load,
+        "acquire": lambda: store.acquire("host-b", now=50, duration=10),
+        "commit": lambda: store.commit(None, _envelope(0), fence, now=2),
+    }[operation]
+
+    with pytest.raises(StateDocumentDamagedError) as failure:
+        attempt()
+    assert _LEAK_MARKER not in str(failure.value)
+    assert "store.json" in str(failure.value)
+
+
+def test_a_document_from_a_newer_release_names_both_versions(
+    make_store: StoreFactory, tmp_path: Path
+) -> None:
+    store = make_store(tmp_path, ())
+    assert store.acquire("host-a", now=0, duration=10) is not None
+    _damage(store, tmp_path, b'{"version":2,"record":null}')
+
+    with pytest.raises(StateDocumentDamagedError, match=r"version 2.*reads version 1"):
+        store.load()

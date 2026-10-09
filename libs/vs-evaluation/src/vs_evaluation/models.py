@@ -28,6 +28,10 @@ class EvaluationState(StrEnum):
     QUEUED = "queued"
     STARTING = "starting"
     RUNNING = "running"
+    # Cancellation was requested for known work that is not yet seen ending
+    # (for example a cluster job tearing down). Not terminal: a later reading
+    # confirms CANCELED, or the work finishes first and reports its own outcome.
+    CANCELING = "canceling"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELED = "canceled"
@@ -44,6 +48,7 @@ class EvaluationLifecyclePhase(StrEnum):
     QUEUED = "queued"
     STARTING = "starting"
     RUNNING = "running"
+    CANCELING = "canceling"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELED = "canceled"
@@ -183,8 +188,17 @@ class AvailabilitySnapshot(BaseModel):
         return 0 <= now - self.observed_at <= self.fresh_for_s
 
 
+STAGE_OUTPUT_TAIL_CHARS = 4000
+"""The most output kept per stream of one stage, from the end where the cause usually is."""
+
+
 class EvaluationStepResult(BaseModel):
-    """Terminal result and elapsed duration for one planned stage."""
+    """Terminal result and elapsed duration for one planned stage.
+
+    ``stdout_tail`` and ``stderr_tail`` are what the stage's command printed, for an
+    operator watching the run. They are no evidence: they never enter an evidence
+    identity and no agent reads them.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -195,6 +209,8 @@ class EvaluationStepResult(BaseModel):
     failure_kind: StageFailureKind | None = None
     """Absent legacy provenance retains execution stop-on-failure semantics."""
     duration_s: FiniteFloat | None = Field(default=None, ge=0)
+    stdout_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
+    stderr_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
 
     @model_validator(mode="after")
     def _result_matches_state(self) -> EvaluationStepResult:
@@ -228,6 +244,44 @@ class ExecutorObservation(BaseModel):
             and self.current_stage is not None
         ):
             raise ValueError("terminal evaluation cannot have current_stage")  # noqa: TRY003  # lint-waiver: LW-930026 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
+        return self
+
+
+class PollPhase(StrEnum):
+    """Where an executor's work stands, as seen by one pure inspection."""
+
+    UNSUBMITTED = "unsubmitted"
+    QUEUED = "queued"
+    RUNNING = "running"
+    ENDED = "ended"
+    UNKNOWN = "unknown"
+
+
+class ExecutorPoll(BaseModel):
+    """One pure inspection of submitted work, never a submission or a recovery.
+
+    ENDED carries the executor's terminal observation, including the evidence of
+    every stage it could collect, so a reader never sees an ended job without
+    its partial results. UNKNOWN means the inspection could not tell, which is
+    neither progress nor termination.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    phase: PollPhase
+    # Scheduler attempt (restart count). Phases are ordered per attempt: a
+    # requeue raises the attempt and may legitimately drop RUNNING to QUEUED.
+    attempt: int = 0
+    current_stage: str | None = None
+    pending_reason: str | None = None
+    estimated_start: str | None = None
+    detail: str = ""
+    terminal: ExecutorObservation | None = None
+
+    @model_validator(mode="after")
+    def _terminal_exactly_when_ended(self) -> ExecutorPoll:
+        if (self.phase is PollPhase.ENDED) != (self.terminal is not None):
+            raise ValueError("terminal observation is present exactly when the work ended")  # noqa: TRY003  # lint-waiver: LW-940001 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
         return self
 
 

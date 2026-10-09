@@ -40,6 +40,7 @@ export type {
   ServerMessage,
   TuiDefaults,
 } from './protocol.js';
+export {validateRunEvent} from './protocol-parse.js';
 export {
   type AbortSignalLike,
   DEFAULT_REQUEST_POLICY,

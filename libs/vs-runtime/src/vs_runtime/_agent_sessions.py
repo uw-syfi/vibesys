@@ -34,6 +34,7 @@ from vs_runtime._agent_declarations import (
 )
 from vs_runtime._agent_execution import AgentResumeConfiguration, RuntimeAgentExecution
 from vs_runtime._prepared_conversations import prepare_agent_conversation
+from vs_runtime._workspace_access import AccessGrant, enforce_workspace_access
 from vs_runtime.contracts import (
     AgentBinding,
     AgentCapability,
@@ -95,22 +96,35 @@ def _supports_required_capability(
     return bool(getattr(capabilities, capability.value))
 
 
-async def await_session_operation[Result](operation: asyncio.Task[Result]) -> Result:
-    """Retain the session's resources until dispatch or access enforcement settles."""
+async def await_session_operation[Result](
+    operation: asyncio.Task[Result], *, stop: Callable[[], None] | None = None
+) -> Result:
+    """Retain the session's resources until dispatch or access enforcement settles.
+
+    A cancelled caller cannot interrupt the operation's thread, so ``stop`` asks the
+    provider to end the turn (once, off the event loop); without it a hung provider turn
+    would outlive the cancellation that is waiting for it.
+    """
     try:
         return await asyncio.shield(operation)
     except asyncio.CancelledError as cancelled:
-        settled = asyncio.gather(operation, return_exceptions=True)
+        stopping = [] if stop is None else [asyncio.ensure_future(asyncio.to_thread(stop))]
+        settled = asyncio.gather(operation, *stopping, return_exceptions=True)
         while not settled.done():
             try:
                 await asyncio.shield(settled)
             except asyncio.CancelledError:
                 continue
-        outcome = settled.result()[0]
+        outcome, *stopped = settled.result()
         if isinstance(outcome, BaseException):
             cancelled.add_note(
                 f"session operation also failed: {type(outcome).__name__}: {outcome}"
             )
+        for failure in stopped:
+            if isinstance(failure, BaseException):
+                cancelled.add_note(
+                    f"provider cancel also failed: {type(failure).__name__}: {failure}"
+                )
         raise
 
 
@@ -322,15 +336,17 @@ class RuntimeAgentSession:
         return result
 
     async def _enforce_workspace_access(self, revision: str) -> None:
-        if self._role.workspace_access is not WorkspaceAccess.READ_WRITE:
-            limited = self._role.workspace_access is WorkspaceAccess.LIMITED
-            self._workspace.access_recovery.begin(
-                revision,
-                self._role.id,
-                self._writable_paths if limited else (),
-                self._writable_directory_paths if limited else (),
-            )
-        restored = await self._workspace.access_recovery.reconcile(self._workspace)
+        limited = self._role.workspace_access is WorkspaceAccess.LIMITED
+        restored = await enforce_workspace_access(
+            self._workspace,
+            AccessGrant(
+                role_id=self._role.id,
+                access=self._role.workspace_access,
+                paths=self._writable_paths if limited else (),
+                directories=self._writable_directory_paths if limited else (),
+            ),
+            revision,
+        )
         unauthorized = restored.restored_paths
         if unauthorized:
             self._log(

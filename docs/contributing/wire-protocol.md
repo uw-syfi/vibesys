@@ -129,9 +129,10 @@ a close (a slept laptop, a killed tab) leaves the server with no FIN to read. Th
   it. That case is handled by the send-side write deadline below, and by the optional client
   heartbeat (`WP-HEARTBEAT`).
 
-The bounds are stated, not inherited. The `WebSocketLimits` dataclass in `websocket.py` names every
-one of them and `_serve_until_stopped` passes them all to `serve()`, so a `websockets` upgrade
-cannot move a bound a subscriber depends on. Three of them compose into the liveness ceiling:
+The bounds are stated, not inherited. The `src/server/transport/websocket.py:WebSocketLimits` dataclass
+names every one of them and `src/server/transport/websocket.py:WebSocketGateway._serve_until_stopped`
+passes them all to `serve()`, so a `websockets` upgrade cannot move a bound a subscriber depends on.
+Three of them compose into the liveness ceiling:
 
 | Bound | Value | Role |
 | --- | --- | --- |
@@ -160,10 +161,11 @@ the send-side high-water mark, and it is the one that carries the contract below
 **The send-side overflow policy is to stall the producer, not to drop events and not to disconnect
 on the first slow read.** Past the high-water mark the producing coroutine suspends in the library's
 `drain()` until the peer catches up. This is deliberately the same shape as the Unix path, where
-`_write_message` in `unix_jsonl.py` does a blocking `wfile.write` plus `flush`, and it is
-what preserves burst batching on both transports: a stalled stream loop is not reading the journal,
-so the next `subscription_checkpoint` coalesces the whole backlog into one `event_batch` instead of
-one frame per event. Slow consumers get fewer, larger batches rather than lost events.
+`src/server/transport/unix_jsonl.py:_RequestHandler._write_message` does a blocking `wfile.write` plus
+`flush`, and it is what preserves burst batching on both transports: a stalled stream loop is not
+reading the journal, so the next `subscription_checkpoint` coalesces the whole backlog into one
+`event_batch` instead of one frame per event. Slow consumers get fewer, larger batches rather than
+lost events.
 
 The stall is bounded. A single frame may stall for `write_deadline_seconds`, one full keepalive
 reaping window (40s) by default; past that the peer is treated as gone and its socket is aborted.
@@ -223,10 +225,13 @@ a continuation:
 - More live output landed in one wait than the `tail` bound was willing to replay
   (`unix_jsonl.py:_stream`).
 
-In both cases the next `event_batch` supersedes the client's fold rather than extending it, and its
-`through_sequence` is not the client's cursor plus one. A client keys continuation on `store_id` and
-the batch, not on sequence contiguity. A transport carries these batches unchanged; the rebootstrap
-decision is server logic, not framing.
+In both cases the next `event_batch` sets `rebootstrap: true`, supersedes the client's fold rather
+than extending it, and its `through_sequence` is not the client's cursor plus one. The marker means
+this is a second bootstrap on an already-open subscription. The first batch of a reconnect remains
+`rebootstrap: false`, even when a changed `store_id` makes that new connection's first batch a fresh
+fold. A client keys continuation on the dial context, the marker, and `store_id`, not sequence
+contiguity. A transport carries these batches unchanged; the rebootstrap decision is server logic,
+not framing.
 
 Rebootstrap is the sole projection transition allowed to adopt a different `run_id`. Within any
 ordinary batch, event identity also guards the batch-level `active_executions`,

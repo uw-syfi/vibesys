@@ -14,7 +14,6 @@ import uuid
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -35,6 +34,12 @@ from .remote_operations import (
     RemoteOperations,
     operation_job_name,
 )
+from .scheduler_states import (
+    SlurmJobStatus,
+    SlurmPhase,
+    classify,
+    parse_accounting_row,
+)
 from .staging import _ContentStageError, _stage_tree, _TreeStageRequest
 
 if TYPE_CHECKING:
@@ -42,10 +47,10 @@ if TYPE_CHECKING:
     from threading import Event
 
 _JOB_ID = re.compile(r"Submitted batch job ([0-9]+)")
-_TERMINAL_STATES = frozenset(
-    {"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "PREEMPTED"}
-)
 _ACCOUNTING_FIELD_COUNT = 2
+# The allocation's own exit status when its server never answered the readiness probe
+# (it exited or hung while starting), so no stage ran. The job script writes it.
+SERVICE_NOT_READY_EXIT_CODE = 70
 _MAX_PROCESS_EXIT_CODE = 255
 _BATCH_RESULT_ROOT = ".vibesys-slurm-results"
 _SERVICE_LOG_TAIL = "service-log-tail.txt"
@@ -153,20 +158,20 @@ class SlurmBatchRequest:
     cancel_event: Event | None = None
 
 
-class SlurmJobStatus(StrEnum):
-    """Scheduler state visible through the public job lifecycle API."""
-
-    UNKNOWN = "unknown"
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
 _PUBLIC_TERMINAL_STATES = frozenset(
     {SlurmJobStatus.COMPLETED, SlurmJobStatus.FAILED, SlurmJobStatus.CANCELLED}
 )
+
+
+@dataclass(frozen=True)
+class SchedulerReading:
+    """One scheduler observation: the only product of the raw-state mapping."""
+
+    status: SlurmJobStatus
+    phase: SlurmPhase
+    reason: str | None = None
+    estimated_start: str | None = None
+    attempt: int = 0
 
 
 class SlurmArtifactTarget(BaseModel):
@@ -746,6 +751,21 @@ class SlurmJobRunner:
             stop_on_failure=request.stop_on_failure,
         )
 
+    def completed_stages(self, handle: SlurmBatchHandle) -> int:
+        """How many stages of a batch have written their result, in one remote command.
+
+        Stages run in order, so with ``n`` results written, stage ``n`` is the one
+        running. A stage that is running has not written its exit code yet.
+        """
+        root = PurePosixPath(handle.job.remote_workspace) / _BATCH_RESULT_ROOT
+        output = self._transport.exec(
+            f"ls -1 {shlex.quote(root.as_posix())}/*/exit-code.txt 2>/dev/null | wc -l"
+        ).stdout
+        try:
+            return max(0, int(output.strip() or "0"))
+        except ValueError as error:
+            raise SlurmError.malformed_result() from error
+
     def poll_batch(self, handle: SlurmBatchHandle) -> SlurmJobStatus:
         """Read the scheduler state of a batch handle."""
         return self.poll(handle.job)
@@ -772,11 +792,17 @@ class SlurmJobRunner:
         """Cancel the single Slurm job that owns all batch stages."""
         self.cancel(handle.job)
 
-    def collect_batch(self, handle: SlurmBatchHandle) -> SlurmBatchResult:
-        """Collect ordered stage outcomes and only artifacts from passed stages."""
+    def collect_batch(
+        self, handle: SlurmBatchHandle, *, observed: SlurmJobStatus | None = None
+    ) -> SlurmBatchResult:
+        """Collect ordered stage outcomes and only artifacts from passed stages.
+
+        ``observed`` is the terminal status the caller just read; it saves a second
+        scheduler query (two remote commands).
+        """
         self._validate_batch_handle(handle)
         collection_started = self._clock()
-        job_result = self.collect_evidence(handle.job)
+        job_result = self.collect_evidence(handle.job, observed=observed)
         stage_results: list[SlurmBatchStageResult] = []
         timings: dict[str, float] = {
             "staging": handle.job.staging_seconds,
@@ -889,20 +915,7 @@ class SlurmJobRunner:
     def poll(self, handle: SlurmJobHandle) -> SlurmJobStatus:
         """Read the scheduler state for a submitted or recovered handle."""
         self._validate_handle(handle)
-        active = self._transport.exec(f"squeue -h -j {handle.job_id} -o %T").stdout.strip()
-        if active:
-            state = active.splitlines()[0].strip().split()[0].upper()
-            return _public_status(state)
-        accounting = self._transport.exec(
-            f"sacct -n -X -j {handle.job_id} --format=State,ExitCode"
-        ).stdout.strip()
-        parsed = _accounting_state(accounting)
-        if parsed is None:
-            return SlurmJobStatus.UNKNOWN
-        state, exit_code = parsed
-        if state == "COMPLETED":
-            return SlurmJobStatus.COMPLETED if exit_code.startswith("0:") else SlurmJobStatus.FAILED
-        return _public_status(state)
+        return self.inspect_job(handle.job_id).status
 
     def wait(
         self,
@@ -1122,31 +1135,75 @@ class SlurmJobRunner:
             raise SlurmError.operation_identity_ambiguous()
         return next(iter(ids), None)
 
-    def inspect_job(self, job_id: str) -> tuple[SlurmJobStatus, str | None, str | None]:
+    def inspect_job(self, job_id: str) -> SchedulerReading:
         """Read scheduler state with queue reason and estimated start evidence."""
         if re.fullmatch(r"[0-9]+", job_id) is None:
             raise SlurmError.invalid_job_id()
-        active = self._transport.exec(f"squeue -h -j {job_id} -o '%T|%r|%S'").stdout.strip()
+        # Accounting, not the queue, is authoritative for an ended job: slurmctld
+        # purges it after MinJobAge (300 s by default) and ``squeue -j`` then fails
+        # with "Invalid job id specified". A failed queue read is therefore not a
+        # verdict; sacct decides, and only both failing (or sacct knowing nothing
+        # of a job the queue could not be read for) leaves the state unknown.
+        queue_failure: SlurmError | None = None
+        try:
+            active = self._queue_state(job_id)
+        except SlurmError as exc:
+            queue_failure, active = exc, ""
+        queued = None
         if active:
             fields = active.splitlines()[0].split("|")
-            status = _public_status(fields[0].strip().upper())
             reason = fields[1].strip() if len(fields) > 1 else None
             start = fields[2].strip() if len(fields) > _ACCOUNTING_FIELD_COUNT else None
-            return status, reason or None, None if start in {None, "", "N/A", "Unknown"} else start
-        accounting = self._transport.exec(f"sacct -n -X -j {job_id} --format=State,ExitCode").stdout
-        parsed = _accounting_state(accounting)
-        if parsed is None:
-            return SlurmJobStatus.UNKNOWN, None, None
-        state, code = parsed
-        status = _public_status(state)
-        if state == "COMPLETED" and not code.startswith("0:"):
-            status = SlurmJobStatus.FAILED
-        return status, None, None
+            queued = _reading(
+                fields[0].strip().upper(),
+                reason=reason or None,
+                estimated_start=None if start in {None, "", "N/A", "Unknown"} else start,
+            )
+            if queued.phase is not SlurmPhase.COMPLETING:
+                return queued
+        try:
+            accounting = self._transport.exec(
+                f"sacct -n -P -X -j {job_id} --format=State,ExitCode"
+            ).stdout
+        except SlurmError:
+            # Accounting only refines what the queue said (a COMPLETING job may have
+            # ended). Without it the queue reading stands; with no queue reading
+            # either, the job's state is unknown and the failure is the answer.
+            if queued is None:
+                raise
+            return queued
+        parsed = parse_accounting_row(accounting)
+        if parsed is not None:
+            ended = _reading(parsed[0], exit_code=parsed[1])
+            # Slurm keeps a finished or cancelled job in COMPLETING for 20 to 40 s
+            # while the node tears down, but accounting already records its final
+            # state, and the job script has exited. The job has ended for every
+            # purpose of this API; waiting for the queue to forget it only delays
+            # the result.
+            if queued is None or ended.phase is SlurmPhase.ENDED:
+                return ended
+        if queue_failure is not None:
+            raise queue_failure
+        return queued if queued is not None else _reading("UNKNOWN")
 
-    def collect_evidence(self, handle: SlurmJobHandle) -> SlurmJobResult:
-        """Preserve available evidence even when terminal status artifacts are absent."""
+    def _queue_state(self, job_id: str) -> str:
+        """The queue's line for the job; one lost read is retried, a second one raises."""
+        command = f"squeue -h -j {job_id} -o '%T|%r|%S'"
+        try:
+            return self._transport.exec(command).stdout.strip()
+        except SlurmError:
+            return self._transport.exec(command).stdout.strip()
+
+    def collect_evidence(
+        self, handle: SlurmJobHandle, *, observed: SlurmJobStatus | None = None
+    ) -> SlurmJobResult:
+        """Preserve available evidence even when terminal status artifacts are absent.
+
+        ``observed`` is a terminal status the caller just read; without it the scheduler
+        is queried.
+        """
         self._validate_handle(handle)
-        status = self.poll(handle)
+        status = observed if observed is not None else self.poll(handle)
         if status not in _PUBLIC_TERMINAL_STATES:
             raise SlurmError.job_not_terminal(handle.job_id)
         failures: list[str] = []
@@ -1587,8 +1644,21 @@ def _validate_batch_request(request: SlurmBatchRequest) -> tuple[SlurmBatchStage
     return request.stages
 
 
+# ``timeout`` is GNU coreutils; stock macOS lacks it (Homebrew installs it as
+# ``gtimeout``) and the Fake cluster runs this script with the local shell.
+# Fail loudly rather than run a stage without its time limit.
+_TIMEOUT_FUNCTION = (
+    "vs_timeout() { "
+    'if command -v timeout >/dev/null 2>&1; then timeout "$@"; '
+    'elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$@"; '
+    "else echo 'vs-slurm: timeout(1) is not installed' >&2; return 127; fi; }"
+)
+
+
 def _batch_script(stages: Sequence[SlurmBatchStage], *, stop_on_failure: bool) -> str:
     lines = ["set +e", f"mkdir -p {shlex.quote(_BATCH_RESULT_ROOT)}", "batch_failed=0"]
+    if any(stage.timeout_seconds is not None for stage in stages):
+        lines.append(_TIMEOUT_FUNCTION)
     for index, stage in enumerate(stages):
         result_root = PurePosixPath(_BATCH_RESULT_ROOT) / f"{index:04d}"
         stdout_path = result_root / "stdout.txt"
@@ -1597,7 +1667,7 @@ def _batch_script(stages: Sequence[SlurmBatchStage], *, stop_on_failure: bool) -
         elapsed_path = result_root / "elapsed-seconds.txt"
         command = shell_join_with_port(stage.command)
         if stage.timeout_seconds is not None:
-            command = f"timeout --signal=TERM --kill-after=5s {stage.timeout_seconds}s {command}"
+            command = f"vs_timeout --signal=TERM --kill-after=5s {stage.timeout_seconds}s {command}"
         lines.extend(
             [
                 f"mkdir -p {shlex.quote(result_root.as_posix())}",
@@ -1742,7 +1812,10 @@ def _service_script(
         lines.append(
             f"printf '%s\\n' $((SECONDS - service_started)) > {shlex.quote(timing_path.as_posix())}"
         )
-    lines.append('if [ "$ready" -ne 1 ]; then tail -40 .vs-slurm-service.log; job_status=70; else')
+    lines.append(
+        'if [ "$ready" -ne 1 ]; then tail -40 .vs-slurm-service.log;'
+        f" job_status={SERVICE_NOT_READY_EXIT_CODE}; else"
+    )
     return lines
 
 
@@ -1776,26 +1849,17 @@ def _distinct_tail(path: Path) -> str:
     return "\n".join(reversed(kept))
 
 
-def _accounting_state(output: str) -> tuple[str, str] | None:
-    for line in output.splitlines():
-        fields = line.strip().split()
-        if len(fields) >= _ACCOUNTING_FIELD_COUNT:
-            return fields[0].split("+")[0], fields[1]
-    return None
-
-
-def _public_status(state: str) -> SlurmJobStatus:
-    if state in {"PENDING", "CONFIGURING", "REQUEUED", "RESV_DEL_HOLD"}:
-        return SlurmJobStatus.PENDING
-    if state in {"RUNNING", "COMPLETING", "SUSPENDED", "STAGE_OUT"}:
-        return SlurmJobStatus.RUNNING
-    if state == "COMPLETED":
-        return SlurmJobStatus.COMPLETED
-    if state in {"CANCELLED", "PREEMPTED"}:
-        return SlurmJobStatus.CANCELLED
-    if state in _TERMINAL_STATES:
-        return SlurmJobStatus.FAILED
-    return SlurmJobStatus.UNKNOWN
+def _reading(
+    raw_state: str, *, exit_code: str | None = None, **evidence: str | None
+) -> SchedulerReading:
+    """The single raw-state to public-status and phase mapping every read path uses."""
+    phase, status = classify(raw_state, exit_code)
+    return SchedulerReading(
+        status=status,
+        phase=phase,
+        reason=evidence.get("reason"),
+        estimated_start=evidence.get("estimated_start"),
+    )
 
 
 def _read_exit_code(path: Path) -> int:

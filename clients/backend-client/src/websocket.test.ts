@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 import {describe, it} from 'node:test';
 import type {
   BackendClientError,
@@ -7,6 +8,7 @@ import type {
   RequestInput,
 } from './index.js';
 import {REQUEST_POLICIES} from './index.js';
+import {parseProtocolResponse} from './protocol-parse.js';
 import {expect} from './test-support/expect.js';
 import {FakeClock as FakeScheduler} from './testing/fake-clock.test-helper.js';
 import {type WebSocketLike, WebSocketTransport} from './websocket.js';
@@ -153,6 +155,22 @@ const okResponse = (requestId: string, body: Record<string, unknown> = {}) => ({
 
 const response = okResponse;
 
+function tuiDefaults(): Record<string, unknown> {
+  return {
+    runs_dir: 'runs',
+    input_path: 'input.py',
+    experiment_name: 'experiment',
+    repository_owner: null,
+    repository_name: 'repository',
+    visibility: 'private',
+    theme: 'dark',
+  };
+}
+
+function responsePayloadFixture(): string {
+  return readFileSync('src/generated/response-payload.fixture.json', 'utf8');
+}
+
 describe('WebSocketTransport', () => {
   it('keeps control messages one text frame and correlates the response', async () => {
     const sockets: FakeSocket[] = [];
@@ -174,7 +192,7 @@ describe('WebSocketTransport', () => {
     };
     expect(sockets[0]?.sent[0]?.endsWith('\n')).toBe(false);
     expect(frame.client_id).toBe('browser-client');
-    sockets[0]?.respond(response(frame.request_id ?? '', {tui_defaults: {theme: 'default'}}));
+    sockets[0]?.respond(response(frame.request_id ?? '', {tui_defaults: tuiDefaults()}));
     await expect(pending).resolves.toMatchObject({ok: true});
     await transport.close();
   });
@@ -305,7 +323,7 @@ describe('WebSocketTransport', () => {
     const second = transport.request({type: 'query.tui_defaults'});
     await tick();
     const frame = JSON.parse(sockets[1]?.sent[0] ?? '{}') as {request_id?: string};
-    sockets[1]?.respond(response(frame.request_id ?? '', {tui_defaults: {theme: 'default'}}));
+    sockets[1]?.respond(response(frame.request_id ?? '', {tui_defaults: tuiDefaults()}));
     await expect(second).resolves.toMatchObject({ok: true});
     await transport.close();
   });
@@ -1113,6 +1131,14 @@ describe('WebSocketTransport', () => {
  * case here waits on a real connection.
  */
 describe('wire payload validation', () => {
+  it('refuses a malformed snapshot payload by its nested path', () => {
+    expect(() =>
+      parseProtocolResponse(
+        '{"protocol_version":1,"request_id":"r","ok":true,"error":null,"snapshot":{"run_id":"r","sequence":0,"status":7,"active_executions":[],"chat_threads":[]},"events":[],"performance":[],"experiments":[],"design":[]}',
+      ),
+    ).toThrow(/response.snapshot.status/);
+  });
+
   /**
    * The frames below are `model_dump_json()` output from the server's own
    * models, pasted verbatim, because the server dumps every field rather than
@@ -1153,6 +1179,129 @@ describe('wire payload validation', () => {
 
     await expect(pending).resolves.toMatchObject({ok: true, request_id: requestId});
     await transport.close();
+  });
+
+  it('accepts the generated fully populated server response fixture', () => {
+    const response = responsePayloadFixture();
+
+    expect(parseProtocolResponse(response)).toMatchObject({
+      snapshot: {status: 'running'},
+      experiments: [{rounds: [{round: 1}]}],
+    });
+  });
+
+  it('rejects a wrong kind for every generated response payload', () => {
+    const fixture = JSON.parse(responsePayloadFixture()) as Record<string, unknown>;
+    const payloads = [
+      'ack',
+      'chat',
+      'chat_thread',
+      'chat_options',
+      'tui_defaults',
+      'snapshot',
+      'performance',
+      'performance_context',
+      'experiments',
+      'experiment_update',
+      'experiments_ready',
+      'design',
+      'design_ready',
+      'design_patch',
+    ] as const;
+
+    for (const payload of payloads) {
+      const corrupt = {...fixture, [payload]: 'wrong kind'};
+      expect(() => parseProtocolResponse(JSON.stringify(corrupt))).toThrow(
+        new RegExp(`response\\.${payload}`),
+      );
+    }
+  });
+
+  it('rejects experiment-update revisions below the generated minimum', () => {
+    for (const field of ['from_revision', 'through_revision'] as const) {
+      const response = {
+        protocol_version: 1,
+        request_id: 'r',
+        ok: true,
+        error: null,
+        experiment_update: {
+          run_id: 'run',
+          projection_id: 'projection',
+          from_revision: 0,
+          through_revision: 0,
+          reset: false,
+          [field]: -1,
+        },
+      };
+      expect(() => parseProtocolResponse(JSON.stringify(response))).toThrow(
+        new RegExp(`response\\.experiment_update\\.${field}`),
+      );
+    }
+  });
+
+  it('enforces RFC 3339 for generated date-time fields', () => {
+    for (const startedAt of [
+      '2023-02-29T00:00:00Z',
+      '2024-04-31T00:00:00Z',
+      '2024-01-01 00:00:00Z',
+      '2024-01-01T24:00:00Z',
+      '2024-01-01T00:60:00Z',
+      '2024-01-01T00:00:61Z',
+      '2024-01-01T00:00:00',
+      '2024-01-01T00:00:00+24:00',
+      '2024-01-01T00:00:00+00:60',
+      '2026-01-01T00:00:60Z',
+      '0072-06-30T23:59:60Z',
+    ]) {
+      const response = JSON.parse(responsePayloadFixture()) as {
+        snapshot: {active_executions: Array<{started_at: string}>};
+      };
+      const execution = response.snapshot.active_executions[0];
+      if (execution === undefined)
+        throw new Error('Generated fixture must contain an active execution');
+      execution.started_at = startedAt;
+      expect(() => parseProtocolResponse(JSON.stringify(response))).toThrow(
+        'response.snapshot.active_executions[0].started_at',
+      );
+    }
+
+    for (const startedAt of [
+      '2024-02-29T23:59:59.123456Z',
+      '2024-01-01t00:00:00-00:00',
+      '1990-12-31T15:59:60-08:00',
+    ]) {
+      const response = JSON.parse(responsePayloadFixture()) as {
+        snapshot: {active_executions: Array<{started_at: string}>};
+      };
+      const execution = response.snapshot.active_executions[0];
+      if (execution === undefined)
+        throw new Error('Generated fixture must contain an active execution');
+      execution.started_at = startedAt;
+      expect(() => parseProtocolResponse(JSON.stringify(response))).not.toThrow();
+    }
+  });
+
+  it('accepts an unrecognized closed-set member with the declared kind', () => {
+    expect(() =>
+      parseProtocolResponse(
+        '{"protocol_version":1,"request_id":"r","ok":true,"error":null,"snapshot":{"run_id":"r","sequence":0,"status":"future-status"},"events":[],"performance":[],"experiments":[],"design":[]}',
+      ),
+    ).not.toThrow();
+  });
+
+  it('keeps unknown response fields forward compatible but requires nested protocol versions', () => {
+    const response = {
+      protocol_version: 1,
+      request_id: 'r',
+      ok: true,
+      error: null,
+      snapshot: {run_id: 'r', sequence: 0, status: 'running', future_field: 'accepted'},
+    };
+    expect(() => parseProtocolResponse(JSON.stringify(response))).not.toThrow();
+    const badVersion = {...response, snapshot: {...response.snapshot, protocol_version: 2}};
+    expect(() => parseProtocolResponse(JSON.stringify(badVersion))).toThrow(
+      /response.snapshot.protocol_version/,
+    );
   });
 
   it('refuses a corrupt batch and takes the subscription down', async () => {
@@ -1276,6 +1425,22 @@ describe('wire payload validation', () => {
     expect(accepted.batches[0]?.history_after_sequence).toBe(-1);
   });
 
+  it('accepts an optional rebootstrap marker and rejects another kind', async () => {
+    const accepted = await deliverFrames([
+      {type: 'event_batch', events: [], rebootstrap: true},
+      {type: 'event_batch', events: [], rebootstrap: false},
+      {type: 'event_batch', events: []},
+    ]);
+    expect(accepted.disconnects).toEqual([]);
+    expect(accepted.batches.map(batch => batch.rebootstrap)).toEqual([true, false, undefined]);
+
+    const rejected = await deliverFrames([{type: 'event_batch', events: [], rebootstrap: 'true'}]);
+    expect(kindOf(rejected.disconnects[0])).toBe('parse');
+    expect(rejected.disconnects[0]?.message).toContain(
+      'rebootstrap must be a boolean when present',
+    );
+  });
+
   it('refuses a malformed diagnostic on a protocol error and keeps a valid one', async () => {
     const rejected = await deliverFrames([
       {
@@ -1294,6 +1459,38 @@ describe('wire payload validation', () => {
         code: 'stream_failed',
         message: 'not available',
         diagnostic: {code: 'stream_failed', summary: 'the stream ended', scope: 'transport'},
+      },
+    ]);
+    expect(accepted.disconnects).toEqual([]);
+  });
+
+  it('validates diagnostic validation paths as string or integer segments', async () => {
+    const rejected = await deliverFrames([
+      {
+        type: 'protocol_error',
+        code: 'stream_failed',
+        message: 'not available',
+        diagnostic: {
+          code: 'stream_failed',
+          summary: 'the stream ended',
+          scope: 'transport',
+          validation_paths: [['items', true]],
+        },
+      },
+    ]);
+    expect(kindOf(rejected.disconnects[0])).toBe('parse');
+
+    const accepted = await deliverFrames([
+      {
+        type: 'protocol_error',
+        code: 'stream_failed',
+        message: 'not available',
+        diagnostic: {
+          code: 'stream_failed',
+          summary: 'the stream ended',
+          scope: 'transport',
+          validation_paths: [['items', 1, 'name']],
+        },
       },
     ]);
     expect(accepted.disconnects).toEqual([]);
@@ -1338,7 +1535,7 @@ function runEvent(sequence: number): Record<string, unknown> {
     execution_id: 'exec-1',
     chat_thread_id: null,
     diagnostic: null,
-    data: {kind: 'agent_output_chunk', channel: 'stdout'},
+    data: {kind: 'agent_output_chunk', channel: 'stdout', content: 'partial output'},
   };
 }
 

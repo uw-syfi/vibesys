@@ -4,28 +4,34 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._adoption import fences_root_mutation
+from ._deadlines import has_time_for
+from ._proofs import Proven, accepted_receipt_for, descriptor_matches
 from ._values import canonical_json, deeply_immutable
 from .types.attempts import AttemptPhase
 from .types.common import (
     AttemptRef,
     CompletionStatus,
     InvocationRef,
+    LifecycleCapability,
     OperationDescriptor,
     OperationNormalizationKind,
     OperationRef,
-    OperationSchemaRef,
     RejectionCode,
     RunStatus,
+    WorkspaceMode,
 )
 from .types.intents import RecoveryPhase
 from .types.strategy import (
     Cancel,
     Decision,
     Interrupt,
+    Measure,
     Operation,
     Park,
     Rejected,
     RequestTurn,
+    StartAttempt,
     Stop,
     Withdraw,
 )
@@ -54,35 +60,92 @@ def validate_decision(
         return _reject(
             decision, RejectionCode.CLOSED_SCOPE, ("scope",), "run not accepting decisions"
         )
-    rejection = validate_scope(state, decision)
+    rejection = validate_scope(state, decision) or _validate_root_fence(state, decision)
     if rejection is not None:
         return rejection
     for dependency in decision.depends_on:
-        receipt = next(
-            (receipt for receipt in state.run.receipts if receipt.decision_id == dependency),
-            None,
-        )
-        if (
-            receipt is None
-            or isinstance(receipt.feedback, Rejected)
-            or receipt.completion in (CompletionStatus.FAILED, CompletionStatus.CANCELLED)
+        proof = accepted_receipt_for(state.run.receipts, dependency, None)
+        if not isinstance(proof, Proven) or proof.value.completion in (
+            CompletionStatus.FAILED,
+            CompletionStatus.CANCELLED,
         ):
             return _reject(
                 decision, RejectionCode.DEPENDENCY, ("depends_on",), "dependency not accepted"
             )
-    if (
-        isinstance(decision, Stop)
-        and decision.result.outcome == "success"
-        and not state.settlement.settlements
-        and not state.run.requirements.allow_empty_queue_success
-    ):
+    if isinstance(decision, Stop):
+        rejection = _validate_stop_result(state, decision)
+        if rejection is not None:
+            return rejection
+    return _validate_time_left(state, decision) or validate_offer(state, decision)
+
+
+def _validate_time_left(state: CoreState, decision: Decision) -> Rejected | None:
+    if has_time_for(state.run, decision):
+        return None
+    return _reject(
+        decision, RejectionCode.BUDGET, ("deadline_at",), "run has no time left for the request"
+    )
+
+
+def _validate_stop_result(state: CoreState, decision: Stop) -> Rejected | None:
+    """A claimed success needs completed work, and a named winner needs its verified adoption."""
+    result = decision.result
+    if result.outcome != "success":
+        return None
+    if not state.settlement.settlements and not state.run.requirements.allow_empty_queue_success:
         return _reject(
             decision,
             RejectionCode.EVIDENCE,
             ("result", "outcome"),
             "zero completed work cannot claim success",
         )
-    return validate_offer(state, decision)
+    adoption = state.settlement.adoption
+    if result.selection is not None and not (
+        adoption is not None and adoption.verified and adoption.selection == result.selection
+    ):
+        return _reject(
+            decision,
+            RejectionCode.EVIDENCE,
+            ("result", "selection"),
+            "a successful result must name the verified adopted selection",
+        )
+    return None
+
+
+def _required_capability(decision: Decision) -> LifecycleCapability | None:
+    """The host capability a decision depends on, if any."""
+    if isinstance(decision, Withdraw):
+        if isinstance(decision.disposition, Park):
+            return "park"
+        if isinstance(decision.disposition, Interrupt):
+            return "interrupt"
+    if isinstance(decision, Measure) and decision.plan.purpose == "profile":
+        return "profile-capture"
+    return None
+
+
+def _required_capability(decision: Decision) -> LifecycleCapability | None:
+    """The host capability a decision depends on, if any."""
+    if isinstance(decision, Withdraw):
+        if isinstance(decision.disposition, Park):
+            return "park"
+        if isinstance(decision.disposition, Interrupt):
+            return "interrupt"
+    if isinstance(decision, Measure) and decision.plan.purpose == "profile":
+        return "profile-capture"
+    return None
+
+
+def _required_capability(decision: Decision) -> LifecycleCapability | None:
+    """The host capability a decision depends on, if any."""
+    if isinstance(decision, Withdraw):
+        if isinstance(decision.disposition, Park):
+            return "park"
+        if isinstance(decision.disposition, Interrupt):
+            return "interrupt"
+    if isinstance(decision, Measure) and decision.plan.purpose == "profile":
+        return "profile-capture"
+    return None
 
 
 def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
@@ -125,12 +188,7 @@ def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
             return _reject(
                 decision, RejectionCode.OWNERSHIP, ("target",), "target/disposition mismatch"
             )
-    capability = None
-    if isinstance(decision, Withdraw):
-        if isinstance(decision.disposition, Park):
-            capability = "park"
-        elif isinstance(decision.disposition, Interrupt):
-            capability = "interrupt"
+    capability = _required_capability(decision)
     if capability is not None and capability not in state.run.capabilities.lifecycle:
         return _reject(
             decision, RejectionCode.CAPABILITY, ("disposition", "kind"), f"unsupported {capability}"
@@ -138,6 +196,29 @@ def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
     if isinstance(decision, Operation):
         return validate_operation(state, decision)
     return None
+
+
+def _validate_root_fence(state: CoreState, decision: Decision) -> Rejected | None:
+    """No decision takes the root workspace while an adoption is rewriting it."""
+    if not fences_root_mutation(state.settlement, state.intents):
+        return None
+    if isinstance(decision, StartAttempt):
+        takes_root = decision.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT
+    elif isinstance(decision, Operation) and decision.normalized_scope_reopen is not None:
+        reopened = decision.normalized_scope_reopen.attempt
+        takes_root = any(
+            attempt.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT
+            and (attempt.attempt_id, attempt.generation)
+            == (reopened.attempt_id, reopened.generation)
+            for attempt in state.attempts.attempts
+        )
+    else:
+        takes_root = False
+    if not takes_root:
+        return None
+    return _reject(
+        decision, RejectionCode.DEPENDENCY, ("workspace",), "root workspace adoption in progress"
+    )
 
 
 def validate_scope(state: CoreState, decision: Decision) -> Rejected | None:
@@ -235,11 +316,12 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
             ("request", "schema"),
             "registered codec ingress required",
         )
-    schema = OperationSchemaRef(
-        kind=registered.kind,
-        request_schema=registered.request_schema,
-        outcome_schema=registered.outcome_schema,
-        lifecycle=registered.lifecycle,
+    declaration = descriptor_matches(
+        state.registry,
+        state.run.capabilities,
+        wire,
+        decision.request.lifecycle,
+        offered.normalization,
     )
     if (
         not deeply_immutable(decision.request)
@@ -254,7 +336,7 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
             ("request", "payload"),
             "registered codec proof does not match current payload",
         )
-    if wire.schema_ref != schema or registered != offered:
+    if not isinstance(declaration, Proven):
         return _reject(
             decision,
             RejectionCode.UNKNOWN_SCHEMA,

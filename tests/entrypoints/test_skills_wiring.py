@@ -349,6 +349,8 @@ def test_all_repository_skill_metadata_is_valid() -> None:
     assert metadata["kernel-performance"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-ncu-analysis"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-ncu-analysis"].backends == (ComputeBackend.CUDA,)
+    assert metadata["kernel-rocprof-analysis"].domains == (DomainName.KERNEL_WRITING,)
+    assert metadata["kernel-rocprof-analysis"].backends == (ComputeBackend.ROCM,)
     assert set(metadata) >= NKI_SKILL_NAMES
 
 
@@ -362,12 +364,23 @@ def test_kernel_skills_follow_domain_and_backend(tmp_path: Path) -> None:
     _, trainium_skills, _ = load_config_and_skills(
         _args(tmp_path, ComputeBackend.TRAINIUM), domain=DomainName.KERNEL_WRITING
     )
+    _, rocm_skills, _ = load_config_and_skills(
+        _args(tmp_path, ComputeBackend.ROCM), domain=DomainName.KERNEL_WRITING
+    )
+    _, rocm_serving_skills, _ = load_config_and_skills(
+        _args(tmp_path, ComputeBackend.ROCM), domain=DomainName.LLM_SERVING
+    )
 
-    kernel_names = {"kernel-correctness", "kernel-performance", "kernel-ncu-analysis"}
-    assert kernel_names <= _skill_names(kernel_skills)
-    assert kernel_names.isdisjoint(_skill_names(serving_skills))
-    assert "kernel-ncu-analysis" not in _skill_names(trainium_skills)
-    assert {"kernel-correctness", "kernel-performance"} <= _skill_names(trainium_skills)
+    shared = {"kernel-correctness", "kernel-performance"}
+    analysis = {"kernel-ncu-analysis", "kernel-rocprof-analysis"}
+    assert shared | {"kernel-ncu-analysis"} <= _skill_names(kernel_skills)
+    assert "kernel-rocprof-analysis" not in _skill_names(kernel_skills)
+    assert shared | {"kernel-rocprof-analysis"} <= _skill_names(rocm_skills)
+    assert "kernel-ncu-analysis" not in _skill_names(rocm_skills)
+    assert (shared | analysis).isdisjoint(_skill_names(serving_skills))
+    assert (shared | analysis).isdisjoint(_skill_names(rocm_serving_skills))
+    assert analysis.isdisjoint(_skill_names(trainium_skills))
+    assert shared <= _skill_names(trainium_skills)
 
 
 def test_all_nki_skills_inherit_trainium_scope_from_wrapper_sidecar() -> None:

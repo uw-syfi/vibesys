@@ -1,7 +1,13 @@
 import {describe, expect, test} from 'bun:test';
 import {BackendClientError, type RunEvent} from '@vibesys/backend-client';
 import {type CoreRunStatus, hasRunEnded, initialCoreState} from '@vibesys/core-state';
-import {CONTROLS_BANNER_COPY, connectionBanners, STREAM_BANNER_COPY} from './banners.js';
+import {
+  CONTROLS_BANNER_COPY,
+  connectionBanners,
+  EMPTY_TRANSCRIPT_COPY,
+  emptyTranscriptCopy,
+  STREAM_BANNER_COPY,
+} from './banners.js';
 import type {WebSessionState, WebSessionStatus} from './session.js';
 import {createCoreStateStore} from './store.js';
 
@@ -29,6 +35,7 @@ const outage = new BackendClientError('disconnected', 'Server disconnected');
 // is what let the e2e spec drift onto text the source no longer produced.
 const {lost: LOST, cold: COLD} = CONTROLS_BANNER_COPY;
 const {live: GAP_OPEN, ended: GAP_FINAL} = STREAM_BANNER_COPY;
+const {waiting: WAITING, unavailable: UNAVAILABLE, complete: COMPLETE} = EMPTY_TRANSCRIPT_COPY;
 
 function sessionState(
   status: WebSessionStatus,
@@ -192,6 +199,18 @@ describe('connectionBanners', () => {
     });
   });
 
+  test('pairs an empty transcript with its stale stream banner', () => {
+    const run = runWith('completed');
+    const banners = connectionBanners(run, sessionState('stale', 'up'));
+
+    expect({banner: banners.stream?.message, empty: emptyTranscriptCopy(run, banners)}).toEqual({
+      banner: GAP_FINAL,
+      empty: UNAVAILABLE,
+    });
+    expect(emptyTranscriptCopy(run, banners)).not.toContain('Waiting');
+    expect(emptyTranscriptCopy(run, banners)).not.toContain('replay');
+  });
+
   /**
    * Exhaustive over the closed input space (10 run statuses x 3 session
    * statuses x 4 channel states), so the properties hold for every combination
@@ -219,6 +238,7 @@ function checkCombination(
   const run = runWith(runStatus);
   const ended = hasRunEnded(run);
   const banners = connectionBanners(run, sessionState(sessionStatus, controls));
+  const empty = emptyTranscriptCopy(run, banners);
   const where = {runStatus, sessionStatus, controls};
   const down = controls !== 'up';
 
@@ -230,6 +250,17 @@ function checkCombination(
   expect({...where, shown: banners.stream !== null}).toEqual({
     ...where,
     shown: sessionStatus === 'stale',
+  });
+  // The empty panel is a projection of the same facts as the banner. In
+  // particular, a stream fault wins over terminal status because the fold may
+  // be empty only because its bootstrap batch did not arrive.
+  expect({...where, empty}).toEqual({
+    ...where,
+    empty: sessionStatus === 'stale' ? UNAVAILABLE : ended ? COMPLETE : WAITING,
+  });
+  expect({...where, callsLiveGatewayAReplay: empty.includes('replay')}).toEqual({
+    ...where,
+    callsLiveGatewayAReplay: false,
   });
   // The controls' does, and only while the run can still act on a reconnect.
   expect({...where, shown: banners.controls !== null}).toEqual({...where, shown: down && !ended});

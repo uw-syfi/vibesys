@@ -7,27 +7,35 @@ import inspect
 import re
 import unicodedata
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import (
     Path,
     PurePosixPath,
     PureWindowsPath,
 )  # Pydantic resolves WorkspaceRef at runtime.
-from typing import TYPE_CHECKING, Annotated, Protocol, TypeVar, overload
+from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar, overload
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
-from vs_evaluation.api import ProfileField
+from vs_core.api import EvidenceRequirements
+from vs_evaluation.api import EvidenceFailureKind, ProfileField, TrustedEvidence
 from vs_evaluator_protocol.api import PartialMeasurement
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_agent.api import AgentSessionCheckpoint, AgentSessionKey, InvocationOutcome
+    from vs_core.api import Limits, OperationRegistration, RevisionRef, SchemaRef, Strategy
+    from vs_core.api import RunFacts as CoreRunFacts
     from vs_evaluation.api import EvaluationSettlements, ProfilerOperation
     from vs_project.api import OrchestrationDescriptor, StateModels
     from vs_prompts.api import RenderedPrompt
+    from vs_runtime._agent_evaluation import AgentEvaluationPolicy
+    from vs_runtime._artifact_store import ArtifactStore
+    from vs_runtime._operation_wiring import OperationRole
+    from vs_runtime._run_environment import RunEnvironmentView
+    from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 _CONTROL_CHARACTER_LIMIT = 32
@@ -45,6 +53,10 @@ def _is_concrete_model_class(value: object) -> bool:
 
 class RuntimeContractError(RuntimeError):
     """Base class for typed runtime operation failures."""
+
+
+class UnresolvedDispatchError(RuntimeContractError):
+    """A provider turn was dispatched and its outcome is unknown; it needs reconciliation."""
 
 
 class SessionTransportUnavailableError(RuntimeContractError):
@@ -194,7 +206,12 @@ class Workspace(Protocol):
         ...
 
     async def restore(self, revision: str, *, clean: bool = True) -> None:
-        """Materialize a retained revision or raise :class:`WorkspaceRestoreError`."""
+        """Materialize a retained revision or raise :class:`WorkspaceRestoreError`.
+
+        In a runtime-created candidate worktree the tree becomes exactly the revision,
+        ignored files included. In the root workspace only untracked, non-ignored
+        files are removed; ignored files (virtualenvs, caches) are never touched.
+        """
         ...
 
     async def try_restore(self, revision: str, *, clean: bool = True) -> bool:
@@ -203,6 +220,26 @@ class Workspace(Protocol):
 
     async def retain(self, revision: str, *, label: str) -> None:
         """Keep a revision reachable under a policy-owned semantic label."""
+        ...
+
+    async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
+        """Record the current tree and keep exactly that revision reachable."""
+        ...
+
+    async def has_revision(self, revision: str) -> bool:
+        """Return whether this run's repository can materialize the revision."""
+        ...
+
+    async def matches_revision(self, revision: str) -> bool:
+        """Return whether the materialized tree equals the revision's tree.
+
+        Preserved framework memory is exempt. Ignored files count in a
+        runtime-created candidate worktree and are not compared in the root workspace.
+        """
+        ...
+
+    async def find_snapshot(self, label: str) -> str | None:
+        """Return the revision a snapshot with this exact label created, if any."""
         ...
 
     async def pending_changes(self) -> list[str]:
@@ -469,6 +506,19 @@ class Workspaces(Protocol):
 
     async def export_patch(self, revision: str) -> str:
         """Export a retained revision against the trusted-input baseline."""
+        ...
+
+
+class RevisionLedger(Protocol):
+    """The run's record of which revisions it keeps reachable."""
+
+    async def retains(self, revision: str) -> bool:
+        """Whether this run keeps the revision reachable, not merely present.
+
+        True for the root's history and for every revision a candidate retained or
+        snapshotted. False for an unreferenced commit that still exists, and for an
+        unknown revision. Exporting a patch proves only that an object exists.
+        """
         ...
 
 
@@ -749,11 +799,9 @@ class AccuracyEvaluation(BaseModel):
         return self.feedback is None
 
 
-class BenchmarkFailureKind(StrEnum):
-    """Whether a benchmark failure describes its workload or execution infrastructure."""
-
-    WORKLOAD = "workload"
-    INFRASTRUCTURE = "infrastructure"
+# Whether a benchmark failure describes its workload or execution infrastructure. It is
+# the evidence's own failure kind, so the executor's claim reaches the evidence unconverted.
+BenchmarkFailureKind = EvidenceFailureKind
 
 
 class BenchmarkEvaluation(BaseModel):
@@ -868,6 +916,9 @@ class AgentEvaluation(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    handle_id: str | None = Field(default=None, min_length=1)
+    submission_index: int = Field(default=0, ge=0)
+    trusted_evidence: tuple[TrustedEvidence, ...] = ()
     revision: str = Field(min_length=1, description="The workspace snapshot that was evaluated.")
     kinds: tuple[str, ...] = Field(min_length=1, description="Evaluated evidence kinds.")
     status: AgentEvaluationStatus
@@ -1097,6 +1148,16 @@ class Evaluation(Protocol):
         """
         ...
 
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        """Check exact captured identity against the canonical evaluator's current context.
+
+        Missing canonical context returns False; history and adoption authority
+        remain unchanged.
+        """
+        ...
+
     async def evidence_revisions(self) -> dict[str, str]:
         """Return immutable captured revisions keyed by handles and accepted evidence aliases."""
         ...
@@ -1216,20 +1277,116 @@ class OrchestrationResumeDecision:
 
 
 @dataclass(frozen=True, slots=True)
+class CoreRunContext:
+    """What the host resolved before a core run starts, for the policy's per-run plan.
+
+    Everything here is a fact about this run, never a choice: the validated options,
+    the prompt-visible run facts, the trusted baseline revision, the trusted evaluation
+    plan and the run environment it was resolved for, the run's artifact store, and the
+    limits of the run environment and product config.
+    """
+
+    run_id: str
+    options: BaseModel
+    facts: RunFacts
+    baseline: RevisionRef
+    evaluation_plan: TrustedEvaluationPlan
+    environment: RunEnvironmentView
+    artifacts: ArtifactStore
+    """The run's content-addressed artifact store, where a plan may store its recipe."""
+    evaluation_capacity: int
+    """How many evaluation jobs the run environment executes at once (at least 1)."""
+    queue_allowance_seconds: int
+    """How long a submitted evaluation may wait for capacity before it counts as stuck."""
+    observe_interval_seconds: int
+    """How often a running evaluation job is polled."""
+    observe_backoff_cap_seconds: int
+    """The longest wait after a poll that could not read the job."""
+    max_run_seconds: int | None
+    """Wall-clock budget of the run, or ``None`` for no deadline."""
+
+
+@dataclass(frozen=True, slots=True)
+class CoreOperation:
+    """One operation a strategy declares, and the runtime role that performs it."""
+
+    role: OperationRole
+    registration: OperationRegistration
+
+
+@dataclass(frozen=True, slots=True)
+class CorePlan:
+    """What a policy resolves for one run: the pure strategy and the facts it starts from.
+
+    ``deadline_seconds`` is the run's budget, counted from the moment the run first
+    starts; the host places it on the run clock's timeline.
+    """
+
+    strategy: Strategy[Any]
+    reply_schemas: Mapping[SchemaRef, type[BaseModel]]
+    facts: CoreRunFacts
+    limits: Limits
+    deadline_seconds: float
+    prompt_variables: Mapping[str, object] = field(default_factory=dict)
+    requirements: EvidenceRequirements = field(default_factory=EvidenceRequirements)
+    """Who may vouch for a candidate and which proofs make it winner-eligible."""
+    agent_evaluation: AgentEvaluationPolicy | None = None
+    """The plan an agent measures with through its in-turn tool; None offers no tool."""
+    """Run-level template variables (such as the objective) every rendered prompt can read."""
+
+
+@dataclass(frozen=True, slots=True)
+class CorePolicy:
+    """Declarative data that makes a plugin a core run: a pure plan and what it needs.
+
+    The runtime owns the loop. The policy supplies the plan (resolved from the host's
+    ``CoreRunContext`` once resources are open), the operations it registers and the
+    runtime role behind each, and the labels and directories the operations use. No
+    field is an async loop or a service; the host builds those from the run's resources.
+    """
+
+    plan: Callable[[CoreRunContext], CorePlan]
+    operations: tuple[CoreOperation, ...]
+    retention_label: str
+    """Label of the snapshot that retains a verified revision."""
+    prompt_templates: Path
+    """Directory of the templates the strategy's render operation reads."""
+    artifact_directories: tuple[str, ...] = ()
+    """Workspace-relative directories a write-artifacts turn may write."""
+
+
+async def core_driven(run: Run, options: BaseModel) -> RunStatus:
+    """The ``orchestrate`` of a plugin whose ``core`` policy the runtime drives.
+
+    Awaiting it is a bug: the product host runs such a plugin through the core run
+    loop and never calls ``orchestrate``.
+    """
+    del run, options
+    message = "this plugin is driven by its core policy and has no orchestrate"
+    raise RuntimeContractError(message)
+
+
+@dataclass(frozen=True, slots=True)
 class OrchestrationPlugin:
     """One validated orchestration and every policy value it owns.
 
     ``agents`` is the sole role catalog. Runtime implementations may construct
     a private lookup from it, but no second public registry can disagree.
+
+    A plugin is driven one of two ways, never both: ``orchestrate`` is the legacy
+    async policy that receives the run's capabilities, and ``core`` is declarative
+    data for a run whose loop the runtime owns (see ``CorePolicy``). A core plugin
+    leaves ``orchestrate`` at ``core_driven``, which fails if it is ever awaited.
     """
 
     id: str
     agents: tuple[AgentRole, ...]
     options: type[BaseModel]
-    orchestrate: Callable[[Run, BaseModel], Awaitable[RunStatus]]
+    orchestrate: Callable[[Run, BaseModel], Awaitable[RunStatus]] = core_driven
     config_version: int = 1
     state: type[BaseModel] | None = None
     memory_paths: tuple[str, ...] = ()
+    core: CorePolicy | None = None
 
     def __post_init__(self) -> None:
         """Reject duplicate role IDs before any run resources open."""
@@ -1238,6 +1395,12 @@ class OrchestrationPlugin:
             raise ValueError(message)
         if self.config_version < 1:
             message = "orchestration plugin config version must be positive"
+            raise ValueError(message)
+        if (self.orchestrate is core_driven) == (self.core is None):
+            message = (
+                f"orchestration plugin {self.id!r} needs exactly one of orchestrate and core, "
+                f"got {'neither' if self.core is None else 'both'}"
+            )
             raise ValueError(message)
         if not _is_concrete_model_class(self.options):
             message = "orchestration plugin options must be a concrete BaseModel subclass"

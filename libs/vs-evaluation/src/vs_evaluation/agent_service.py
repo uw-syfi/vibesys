@@ -58,6 +58,7 @@ from vs_evaluation.agent_models import (
     WaitCall,
     WaitReply,
 )
+from vs_evaluation.lifecycle import FINISHED_STATES
 from vs_evaluation.models import (
     AvailabilitySnapshot,
     AvailabilityState,
@@ -93,14 +94,6 @@ if TYPE_CHECKING:
     from vs_evaluation.state_namespace import EvaluationStateNamespace
 
 _STATE_PATH = EVALUATION_ACCESS_STATE_PATH
-_TERMINAL_EVALUATION_STATES = frozenset(
-    {
-        EvaluationState.SUCCEEDED,
-        EvaluationState.FAILED,
-        EvaluationState.CANCELED,
-        EvaluationState.SUPERSEDED,
-    }
-)
 _EVALUATION_CLEANUP_FAILED = "evaluation service cleanup failed"
 _CALL_ADAPTER = TypeAdapter(AgentEvaluationCall)
 _REPLY_ADAPTER = TypeAdapter(AgentEvaluationReply)
@@ -740,7 +733,7 @@ class EvaluationAgentService:
                     )
                 }
             ).detach(scope_id=scope_id, principal_id=principal_id)
-            if record.state in _TERMINAL_EVALUATION_STATES:
+            if record.state in FINISHED_STATES:
                 access = access.model_copy(update={"cancel_pending": False})
             self._save_access(state, access)
             if not access.cancel_pending:
@@ -760,7 +753,7 @@ class EvaluationAgentService:
 
     async def _finish_association_cancel(self, access: HandleAccess) -> None:
         record = await self._backend.cancel(access.handle_id)
-        if record.state in _TERMINAL_EVALUATION_STATES:
+        if record.state in FINISHED_STATES:
             state = (
                 self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
                 or EvaluationAgentState()
@@ -788,8 +781,8 @@ class EvaluationAgentService:
             canceled = await self._detach_requester(
                 handle_id, scope_id=scope_id, canonical_claimed=handle_id in claimed_handles
             )
-            if canceled and record.state not in _TERMINAL_EVALUATION_STATES:
-                if await self._backend.status(handle_id) not in _TERMINAL_EVALUATION_STATES:
+            if canceled and record.state not in FINISHED_STATES:
+                if await self._backend.status(handle_id) not in FINISHED_STATES:
                     raise ScopeClosingError(scope_id)
                 evaluations.append(handle_id)
         profiler_operations = (
@@ -854,6 +847,21 @@ class EvaluationAgentService:
         if not generations:
             raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
         return max(generations)
+
+    async def requester_submission_index(self, handle_id: str, scope_id: str | None) -> int:
+        """Read this producer's canonical admission ordinal, never another requester's.
+
+        Zero preserves legacy unknown chronology. Historical reads grant no
+        wait, resume or adoption authority.
+        """
+        associations = tuple(
+            item
+            for item in await self._recorded_associations(handle_id)
+            if item.scope_id == scope_id
+        )
+        if not associations:
+            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
+        return min(item.submission_index for item in associations)
 
     async def _recorded_associations(self, handle_id: str) -> tuple[HandleAssociation, ...]:
         async with self._state_lock:
@@ -1212,7 +1220,7 @@ class EvaluationAgentService:
                 if existing is None
                 else existing.requesters(legacy_generation=record.request.owner_generation),
                 cancel_pending=(
-                    existing.cancel_pending and record.state not in _TERMINAL_EVALUATION_STATES
+                    existing.cancel_pending and record.state not in FINISHED_STATES
                     if existing
                     else False
                 ),

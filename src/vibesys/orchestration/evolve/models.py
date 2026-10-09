@@ -212,6 +212,26 @@ class EvolveOptions(BaseModel):
         )
 
 
+BOOTSTRAP_MEMBER = "bootstrap"
+"""The attempt-budget member that owns every cold-start attempt of a campaign."""
+
+
+class RecordedBootstrapAttempt(BaseModel):
+    """Durable proof that one cold-start attempt's outcome was admitted (generation 0).
+
+    Unlike the single and multi plugins, evolve has no durable commit before an attempt's
+    turn, so an attempt interrupted before it was admitted leaves no trace and is re-run.
+    What the budget bounds is attempts recorded across restarts, whatever else the
+    population holds.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    round_number: Literal[0] = 0
+    member_id: Literal["bootstrap"] = BOOTSTRAP_MEMBER
+    turn_number: Annotated[int, Field(gt=0)]
+
+
 class EvolveState(BaseModel):
     """Complete crash-recoverable evolutionary-search aggregate."""
 
@@ -221,9 +241,11 @@ class EvolveState(BaseModel):
     metric_space: MetricSpace = Field(default_factory=MetricSpace)
     generation_start: PopulationState | None = None
     admitted_slots: int = Field(default=0, ge=0)
+    last_recorded_bootstrap: RecordedBootstrapAttempt | None = None
 
 
 __all__ = [
+    "BOOTSTRAP_MEMBER",
     "CandidateJudgeContext",
     "CandidateProfilerContext",
     "EvolveOptions",
@@ -231,5 +253,6 @@ __all__ = [
     "JudgeResponse",
     "MutatorContext",
     "MutatorResponse",
+    "RecordedBootstrapAttempt",
     "resolve_openevolve_options",
 ]

@@ -12,6 +12,7 @@ from .types.common import (
     ContractValidationError,
     DependencyRef,
     EvidenceId,
+    EvidenceKey,
     ObservationStatus,
     RejectionCode,
     Scope,
@@ -21,7 +22,13 @@ from .types.common import (
 )
 from .types.kernel import AreaChange, DecisionCompleted
 from .types.sessions import DispatchTurn, ResumeSessionTurn, SessionPhase
-from .types.settlement import AssessmentSubmitted, AttemptSettled, OwnershipSettled, SettlementState
+from .types.settlement import (
+    AssessmentSubmitted,
+    AttemptSettled,
+    OwnershipSettled,
+    Settlement,
+    SettlementState,
+)
 from .types.strategy import Accepted, Rejected, Settle, Withdraw
 
 if TYPE_CHECKING:
@@ -31,7 +38,7 @@ if TYPE_CHECKING:
     from .types.intents import Intent
     from .types.kernel import DecisionReceipt, SettlementContext
     from .types.sessions import Invocation
-    from .types.settlement import AssessmentProposal, Settlement, SettlementEvent
+    from .types.settlement import AssessmentProposal, SettlementEvent
 
 
 def _owner(context: SettlementContext, attempt: AttemptRef) -> AttemptView | None:
@@ -170,10 +177,13 @@ def _assessment_valid(
         return False
     scope = Scope(owner=owner.attempt_id, generation=owner.generation)
     for source in assessment.sources:
-        if isinstance(source, EvidenceId):
-            evidence = next(
-                (item for item in context.evaluation.evidence if item.evidence_id == source), None
+        if isinstance(source, EvidenceId | EvidenceKey):
+            matches = tuple(
+                item
+                for item in context.evaluation.evidence
+                if (item.key if isinstance(source, EvidenceKey) else item.evidence_id) == source
             )
+            evidence = matches[0] if len(matches) == 1 else None
             if (
                 evidence is None
                 or settlement.candidate is None
@@ -461,6 +471,33 @@ def _accept_proposal(
     )
 
 
+def _cancelled_choice(
+    state: SettlementState, context: SettlementContext, attempt: AttemptRef
+) -> Settlement | None:
+    """The result of an attempt cancelled before it submitted any assessment.
+
+    A cancelled attempt still ends with one ineligible, discarded settlement, so
+    the strategy sees every attempt finish exactly once.
+    """
+    owner = _owner(context, attempt)
+    if (
+        owner is None
+        or owner.closure is None
+        or owner.closure.disposition != "cancel"
+        or any(item.attempt == attempt for item in (*state.settlements, *state.pending))
+    ):
+        return None
+    return Settlement(
+        settlement_id=SettlementId(root=f"settlement:{owner.closure.authority.root}"),
+        attempt=attempt,
+        candidate=None,
+        assessments=(),
+        eligible=False,
+        retention="discard",
+        outcome="cancelled",
+    )
+
+
 def advance(
     state: SettlementState, context: SettlementContext, event: SettlementEvent
 ) -> AreaChange[SettlementState]:
@@ -475,6 +512,8 @@ def advance(
             return _submit(state, context, proposal)
         case OwnershipSettled(attempt=attempt, released=True, blocked=False):
             pending = next((item for item in state.pending if item.attempt == attempt), None)
+            if pending is None:
+                pending = _cancelled_choice(state, context, attempt)
             return (
                 AreaChange[SettlementState](state=state)
                 if pending is None

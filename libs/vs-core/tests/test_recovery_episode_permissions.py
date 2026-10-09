@@ -200,6 +200,9 @@ def test_prepared_registered_cleanup_uses_descriptor_and_exact_release_identity(
     state = state.model_copy(
         update={
             "registry": (descriptor,),
+            "run": state.run.model_copy(
+                update={"capabilities": core.Capabilities(operations=(descriptor,))}
+            ),
             "attempts": core.AttemptsState(attempts=(owner,)),
             "intents": state.intents.model_copy(
                 update={"intents": (record, state.intents.intents[1])}

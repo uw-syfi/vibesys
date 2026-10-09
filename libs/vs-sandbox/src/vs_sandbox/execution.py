@@ -47,10 +47,16 @@ class Sandbox(Protocol):
     ) -> SandboxExecutionResult:
         """Run a shell command and return its bounded result.
 
-        Setting *cancel* while the command runs stops the command and every
-        process it started (``SIGTERM``, then ``SIGKILL`` after a grace period)
-        and returns a result with ``cancelled=True``. A sandbox that cannot
-        stop its commands must raise rather than ignore *cancel*.
+        Setting *cancel* while the command runs, or exceeding *timeout*,
+        stops the command and every process it started (``SIGTERM``, then
+        ``SIGKILL`` after a grace period). A cancel returns ``cancelled=True``;
+        a timeout returns exit code 124. Either keeps the output written
+        before the stop. ``output == stdout + stderr`` and never exceeds the
+        sandbox's cap; a signalled command reports ``128 + N``; an empty
+        command returns exit code 1 without running; a non-positive *timeout*
+        raises ``ValueError``. A sandbox that cannot stop its commands must
+        raise rather than ignore *cancel*. The full contract is in
+        :mod:`vs_sandbox.command_execution` and ``tests/test_sandbox_contract.py``.
         """
         ...
 

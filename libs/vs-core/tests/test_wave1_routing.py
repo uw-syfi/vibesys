@@ -34,7 +34,6 @@ EXPECTED_TARGET = {
                 "attempt_evaluation_history_updated",
                 "attempt_registered",
                 "attempt_reacquire_requested",
-                "workspace_observed",
                 "invocation_checkpointed",
                 "revision_operation_requested",
                 "revision_operation_observed",
@@ -47,6 +46,7 @@ EXPECTED_TARGET = {
                 "attempt_charge_refund_requested",
             ),
         ),
+        ("vs_core.attempts._workspace_observed", ("workspace_observed",)),
         (
             "vs_core._attempt_retirement.advance",
             (
@@ -65,14 +65,13 @@ EXPECTED_TARGET = {
             (
                 "registered_turn_requested",
                 "turn_requested",
-                "turn_observed",
-                "session_observed",
                 "sessions_acquire_requested",
                 "invocation_charges_authorized",
                 "invocation_cancellation_requested",
                 "turn_inputs_reserved",
             ),
         ),
+        ("vs_core.sessions._observed_after_stop", ("turn_observed", "session_observed")),
         (
             "vs_core._session_turns.advance_run_authority",
             ("run_invocation_checkpoint_requested", "run_invocation_checkpoint_observed"),
@@ -95,7 +94,9 @@ EXPECTED_TARGET = {
                 "registered_job_observed",
                 "registered_job_requested",
                 "measurement_requested",
+                "agent_measurement_requested",
                 "job_observed",
+                "observations_due",
                 "job_termination_requested",
                 "jobs_drain_requested",
                 "measurement_submission_observed",
@@ -155,6 +156,7 @@ EXPECTED_TARGET = {
                 "queue_entry_retired",
                 "clock_advanced",
                 "admission_control",
+                "adoption_fence_lifted",
             ),
         ),
     )

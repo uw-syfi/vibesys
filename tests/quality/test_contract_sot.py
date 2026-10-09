@@ -96,6 +96,28 @@ def test_relative_import_reexport_chain_is_counted_at_each_consumer(tmp_path: Pa
     )
 
 
+def test_a_quoted_alias_spelled_in_several_consumers_is_counted_in_each(tmp_path: Path) -> None:
+    consumer = "from legacy.types import OldModel\nAlias = 'OldModel'\nx: 'Alias' = 1\n"
+    repository(tmp_path, consumer)
+    (tmp_path / "src/second.py").write_text(consumer)
+    (tmp_path / "src/unrelated.py").write_text("Alias = 'OldModel'\nx: 'Alias' = 1\n")
+    assert measure(tmp_path).counts == Counter(
+        {
+            ("src/legacy/__init__.py", OWNER, "OldModel"): 1,
+            ("src/legacy/bridge.py", OWNER, "OldModel"): 1,
+            ("src/consumer.py", OWNER, "OldModel"): 1,
+            ("src/second.py", OWNER, "OldModel"): 1,
+        }
+    )
+
+
+def test_a_scan_reflects_files_changed_since_the_previous_scan(tmp_path: Path) -> None:
+    repository(tmp_path, "Alias = 'OldModel'\n")
+    assert ("src/consumer.py", OWNER, "OldModel") not in measure(tmp_path).counts
+    (tmp_path / "src/consumer.py").write_text("from legacy.types import OldModel\n")
+    assert measure(tmp_path).counts[("src/consumer.py", OWNER, "OldModel")] == 1
+
+
 @pytest.mark.parametrize(
     ("consumer", "reason"),
     [

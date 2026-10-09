@@ -107,6 +107,16 @@ def persisted_step(state: core.CoreState, event: core.CoreEvent) -> core.Transit
     assert result.state.scheduling == state.scheduling
     assert result.state.sessions == state.sessions
     assert result.state.settlement == state.settlement
+    if isinstance(event, core.TurnSuspended) and result.state.evaluation.continuations != (
+        state.evaluation.continuations
+    ):
+        # The strategy hears of a new suspension first, once, as recorded while waiting.
+        recorded = result.state.evaluation.continuations[-1]
+        notice = result.events[0]
+        assert isinstance(notice, core.TurnSuspended)
+        assert notice.continuation.continuation_id == recorded.continuation_id
+        assert notice.continuation.phase == core.ContinuationPhase.WAITING
+        return result.model_copy(update={"events": result.events[1:]})
     return result
 
 
@@ -2022,3 +2032,164 @@ def test_unknown_job_inspection_identity_frames_continuation_and_resource(fragme
         duplicate = persisted_step(result.state, signal)
         assert duplicate.requests == ()
     assert identities[0] != identities[1]
+
+
+@pytest.mark.parametrize("settled", [False, True])
+def test_new_suspension_is_published_to_the_strategy_exactly_once(*, settled: bool) -> None:
+    state, continuation = fixture(settled=settled)
+    first = core.step(state, core.TurnSuspended(continuation=continuation))
+    notice = first.events[0]
+    assert isinstance(notice, core.TurnSuspended)
+    assert notice.continuation.continuation_id == continuation.continuation_id
+    assert notice.continuation.phase == core.ContinuationPhase.WAITING
+    assert [type(e) for e in first.events[1:]] == ([core.ResumeAuthorized] if settled else [])
+    replay = core.step(first.state, core.TurnSuspended(continuation=continuation))
+    assert replay.events == ()
+    wire = first.events[0].model_dump_json()
+    assert core.TurnSuspended.model_validate_json(wire) == first.events[0]
+
+
+@pytest.mark.parametrize("dispatched", [False, True])
+@pytest.mark.parametrize("phase", list(core.ContinuationPhase))
+def test_a_scope_takes_a_new_suspension_only_when_no_earlier_resume_is_owed(
+    phase: core.ContinuationPhase, *, dispatched: bool
+) -> None:
+    """Waiting, parked and reopening continuations owe a resume; an authorized one does
+    until its successor ran, even when the successor ended without yielding again."""
+    state, continuation = fixture()
+    ref = continuation.invocation
+    invocations = state.sessions.invocations
+    if dispatched:
+        (first,) = invocations
+        ran = first.model_copy(
+            update={
+                "invocation": continuation.next_invocation,
+                "phase": core.SessionPhase.CHECKPOINTED,
+            }
+        )
+        invocations = (first, ran)
+    state = state.model_copy(
+        update={
+            "sessions": state.sessions.model_copy(update={"invocations": invocations}),
+            "evaluation": state.evaluation.model_copy(
+                update={"continuations": (continuation.model_copy(update={"phase": phase}),)}
+            ),
+        }
+    )
+    owed = phase in (
+        core.ContinuationPhase.WAITING,
+        core.ContinuationPhase.PARKED,
+        core.ContinuationPhase.REOPENING,
+    ) or (phase == core.ContinuationPhase.AUTHORIZED and not dispatched)
+    expected = core.SuspensionRefusal.OPEN_CONTINUATION if owed else None
+    assert core.suspension_refusal(prefixed(state), ref) == expected
+
+
+def prefixed(
+    state: core.CoreState, cursor: core.EvaluationHistoryCursor | None = None
+) -> core.CoreState:
+    """The state with the suspended turn holding ``cursor`` (the empty prefix) as its prefix."""
+    cursor = core.EvaluationHistoryCursor() if cursor is None else cursor
+    invocations = tuple(
+        row.model_copy(update={"evaluation_prefix": cursor}) for row in state.sessions.invocations
+    )
+    return state.model_copy(
+        update={"sessions": state.sessions.model_copy(update={"invocations": invocations})}
+    )
+
+
+def test_a_retired_scope_takes_no_suspension() -> None:
+    state, continuation = fixture()
+    (attempt,) = state.attempts.attempts
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(
+                attempts=(attempt.model_copy(update={"phase": core.AttemptPhase.CLOSING}),)
+            )
+        }
+    )
+    refusal = core.suspension_refusal(prefixed(state), continuation.invocation)
+    assert refusal == core.SuspensionRefusal.SCOPE_NOT_ACTIVE
+
+
+def test_an_invocation_core_does_not_hold_takes_no_suspension() -> None:
+    state, continuation = fixture()
+    unknown = continuation.invocation.model_copy(
+        update={"invocation_id": core.InvocationId(root="unknown")}
+    )
+    assert (
+        core.suspension_refusal(prefixed(state), unknown) == core.SuspensionRefusal.SCOPE_NOT_ACTIVE
+    )
+
+
+@pytest.mark.parametrize("reason", ["paid-limit", None])
+def test_an_exhausted_attempt_takes_no_suspension_because_its_resume_would_be_refused(
+    reason: str | None,
+) -> None:
+    state, continuation = fixture()
+    (attempt,) = state.attempts.attempts
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(
+                attempts=(attempt.model_copy(update={"terminal_reason": reason}),)
+            )
+        }
+    )
+    expected = None if reason is None else core.SuspensionRefusal.NOT_RESUMABLE
+    assert core.suspension_refusal(prefixed(state), continuation.invocation) == expected
+
+
+_COVERED = tuple(core.RequestId(root=f"submission-{n}") for n in range(3))
+
+
+def _with_history(state: core.CoreState, covered: tuple[core.RequestId, ...]) -> core.CoreState:
+    (attempt,) = state.attempts.attempts
+    history = core.AttemptEvaluationHistory(covered_submissions=covered)
+    attempt = attempt.model_copy(update={"evaluation_history": history})
+    return state.model_copy(update={"attempts": core.AttemptsState(attempts=(attempt,))})
+
+
+@given(
+    covered=st.integers(0, 3),
+    ordinal=st.integers(0, 4),
+    submission=st.integers(0, 3),
+    has_prefix=st.booleans(),
+)
+def test_a_suspension_needs_the_turns_exact_paid_prefix(
+    covered: int, ordinal: int, submission: int, *, has_prefix: bool
+) -> None:
+    """A turn with no paid prefix (dispatched while a measurement was in flight), or one that
+    is not a prefix of the attempt's covered submissions, takes no suspension."""
+    state, continuation = fixture(settled=True)
+    state = _with_history(state, _COVERED[:covered])
+    cursor = (
+        core.EvaluationHistoryCursor(
+            ordinal=ordinal,
+            submission_id=core.RequestId(root=f"submission-{submission}") if ordinal else None,
+        )
+        if has_prefix
+        else None
+    )
+    if cursor is not None:
+        state = prefixed(state, cursor)
+    exact = cursor is not None and (
+        ordinal == 0 or (ordinal <= covered and _COVERED[ordinal - 1] == cursor.submission_id)
+    )
+    expected = None if exact else core.SuspensionRefusal.PREFIX_MISMATCH
+    assert core.suspension_refusal(state, continuation.invocation) == expected
+
+
+@given(owned=st.booleans(), late=st.booleans(), repeated=st.booleans())
+def test_a_wait_names_only_owned_jobs(*, owned: bool, late: bool, repeated: bool) -> None:
+    """The one suspension gate refuses a wait on a job the scope does not own. A wait that ends
+    after the run is bounded to it, not refused; a repeated job is a malformed wait."""
+    state, continuation = fixture(settled=True)
+    jobs = (
+        continuation.jobs if owned else (*continuation.jobs, core.ResourceId(root="job:not-owned"))
+    )
+    deadline = state.run.deadline_at + (1.0 if late else 0.0)
+    wait = continuation.model_copy(update={"jobs": jobs, "deadline_at": deadline})
+    if repeated:
+        wait = wait.model_copy(update={"jobs": (*jobs, *jobs)})
+    expected = None if owned else core.SuspensionRefusal.JOB_NOT_OWNED
+    assert core.suspension_refusal(prefixed(state), wait.invocation, wait) == expected

@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
+from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import PROFILER
 from vibesys.run.evaluation_backend import EvidenceReusingEvaluation, SemanticEvaluationStage
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
@@ -56,6 +56,7 @@ from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, Slurm
 from vs_slurm.api import (
     FakeCluster,
     FakeConnector,
+    SchedulerReading,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
@@ -67,6 +68,7 @@ from vs_slurm.api import (
     SlurmJobHandle,
     SlurmJobRunner,
     SlurmJobStatus,
+    SlurmPhase,
     SlurmSshTransport,
 )
 
@@ -76,6 +78,15 @@ if TYPE_CHECKING:
     from tests.support.evaluation_scenarios import EvaluationScenario
 
     from vs_runtime.api import CandidateWorkspace, Workspace, Workspaces
+
+_PHASES = {
+    SlurmJobStatus.PENDING: SlurmPhase.PENDING,
+    SlurmJobStatus.RUNNING: SlurmPhase.RUNNING,
+    SlurmJobStatus.COMPLETED: SlurmPhase.ENDED,
+    SlurmJobStatus.FAILED: SlurmPhase.ENDED,
+    SlurmJobStatus.CANCELLED: SlurmPhase.ENDED,
+    SlurmJobStatus.UNKNOWN: SlurmPhase.UNKNOWN,
+}
 
 
 class _TrackedCandidate:
@@ -240,7 +251,7 @@ class _Runner(SlurmJobRunner):
         self.job_status = SlurmJobStatus.RUNNING
         return self.handle
 
-    def inspect_job(self, job_id: str) -> tuple[SlurmJobStatus, str | None, str | None]:
+    def inspect_job(self, job_id: str) -> SchedulerReading:
         """Expose the same deterministic scheduler evidence through public inspection."""
         assert self.handle is not None
         assert job_id == self.handle.job.job_id
@@ -251,7 +262,7 @@ class _Runner(SlurmJobRunner):
                 self.job_status = (
                     SlurmJobStatus.COMPLETED if self.job_exit_code == 0 else SlurmJobStatus.FAILED
                 )
-        return self.job_status, None, None
+        return SchedulerReading(status=self.job_status, phase=_PHASES[self.job_status])
 
     def wait_batch(
         self,
@@ -268,7 +279,10 @@ class _Runner(SlurmJobRunner):
             self.job_status = SlurmJobStatus.COMPLETED
         return SlurmBatchWaitResult(handle=handle, status=self.job_status, timed_out=False)
 
-    def collect_batch(self, handle: SlurmBatchHandle) -> SlurmBatchResult:
+    def collect_batch(
+        self, handle: SlurmBatchHandle, *, observed: object = None
+    ) -> SlurmBatchResult:
+        del observed
         result = super().collect_batch(handle)
         # Explicit scheduler/collection faults are raw boundary inputs. Keep the
         # actual producer's job attribution, artifact targets and result envelope.

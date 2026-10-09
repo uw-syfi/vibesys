@@ -33,6 +33,7 @@ from .types.attempts import (
 )
 from .types.common import Area
 from .types.evaluation import (
+    AgentMeasurementRequested,
     ContinuationJobsChanged,
     ContinuationReopenRequested,
     ContinuationRetireRequested,
@@ -43,6 +44,7 @@ from .types.evaluation import (
     JobTerminationRequested,
     MeasurementRequested,
     MeasurementSubmissionObserved,
+    ObservationsDue,
     RegisteredJobObserved,
     RegisteredJobRequested,
     TurnSuspended,
@@ -68,6 +70,7 @@ from .types.kernel import (
 from .types.scheduling import (
     AdmissionControl,
     AdmitAttempt,
+    AdoptionFenceLifted,
     AttemptReady,
     AttemptReopenRequested,
     AttemptRequested,
@@ -133,6 +136,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | SlotReleased()
             | ClockAdvanced()
             | AdmissionControl()
+            | AdoptionFenceLifted()
             | AdmitAttempt()
             | CloseAdmission()
             | RunDrained()
@@ -199,9 +203,11 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | ContinuationScopeReopened()
             | RegisteredJobRequested()
             | MeasurementRequested()
+            | AgentMeasurementRequested()
             | JobObserved()
             | TurnSuspended()
             | DeadlineReached()
+            | ObservationsDue()
         ):
             return Area.EVALUATION
         case (

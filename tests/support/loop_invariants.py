@@ -12,6 +12,11 @@ only records, never agent choices, so they hold for any agent behavior:
   workspace's ``logs`` directory;
 - the Fake Slurm cluster's job ledger (``vs_slurm.fake_connector`` state).
 
+A core-path run (the vs-core policy driven by the vs-runtime shell) has no
+``state.json``: its committed record is the run envelope (``RunRecords.from_core``),
+whose ``core`` holds the run status, result and measurement intents and whose
+``strategy`` holds the search state. Its event stream is the host's ``CoreEvent`` rows.
+
 Each violated invariant yields a :class:`Violation` naming the
 :class:`Invariant` and the offending record.
 """
@@ -39,6 +44,8 @@ class Invariant(StrEnum):
     TERMINAL_STATUS = "terminal_status"
     # A run that completes scheduled at least one workstream or profile.
     EMPTY_COMPLETION = "empty_completion"
+    # The terminal event and the committed core record describe the same ending.
+    RECORD_DISAGREES = "record_disagrees"
     # An offered capability is served at least once or withdrawn after a
     # typed ``unsupported``; it is never offered again after withdrawal.
     CAPABILITY_UNSERVED = "capability_unserved"
@@ -91,6 +98,28 @@ class RunRecords:
     usage: Sequence[Record] = ()
     # Fake Slurm job id -> its ledger line ("" while the job script runs).
     cluster_jobs: Mapping[str, str] = field(default_factory=dict)
+    # A core-path run's committed envelope (``core`` and ``strategy``), if one was committed.
+    envelope: Record | None = None
+
+    @classmethod
+    def from_core(
+        cls,
+        events: Sequence[Record],
+        envelope: Record | None,
+        cluster: Path | None = None,
+        logs_dir: Path | None = None,
+    ) -> RunRecords:
+        """Build records from a core-path run: events, committed envelope, Fake cluster, usage.
+
+        ``logs_dir`` is the run's log directory, where its agent clients append usage rows.
+        """
+        loaded = cls.load(Path("/nonexistent"), None, cluster)
+        return cls(
+            events=events,
+            cluster_jobs=loaded.cluster_jobs,
+            envelope=envelope,
+            usage=[] if logs_dir is None else _usage_rows(logs_dir),
+        )
 
     @classmethod
     def load(
@@ -104,25 +133,34 @@ class RunRecords:
         )
         jobs_dir = cluster / "jobs" if cluster is not None else None
         jobs = (
-            {path.name: path.read_text(encoding="utf-8").strip() for path in jobs_dir.iterdir()}
+            {
+                path.name: path.read_text(encoding="utf-8").strip()
+                for path in jobs_dir.iterdir()
+                if path.name.isdigit()
+            }
             if jobs_dir is not None and jobs_dir.is_dir()
             else {}
         )
         return cls(
             events=_jsonl(logs_dir / "core-events.jsonl"),
             state=state,
-            # A turn's usage row lands in its workspace's log directory:
-            # the run's own for root-workspace roles, a candidate's otherwise.
-            usage=[
-                row
-                for path in (
-                    logs_dir / "usage.jsonl",
-                    *sorted(logs_dir.parent.glob("runtime/workspaces/*/logs/usage.jsonl")),
-                )
-                for row in _jsonl(path)
-            ],
+            usage=_usage_rows(logs_dir),
             cluster_jobs=jobs,
         )
+
+
+def _usage_rows(logs_dir: Path) -> list[Record]:
+    """Every turn's usage row. It lands in its workspace's log directory:
+    the run's own for root-workspace roles, a candidate's otherwise.
+    """
+    return [
+        row
+        for path in (
+            logs_dir / "usage.jsonl",
+            *sorted(logs_dir.parent.glob("runtime/workspaces/*/logs/usage.jsonl")),
+        )
+        for row in _jsonl(path)
+    ]
 
 
 def _jsonl(path: Path) -> list[Record]:
@@ -191,7 +229,43 @@ def terminal_status(records: RunRecords) -> list[Violation]:
         scheduled = len(_list(records.state, "workstreams")) + len(_list(records.state, "profiles"))
         if scheduled == 0:
             return [Violation(Invariant.EMPTY_COMPLETION, "completed with zero workstreams")]
-    return []
+    if status == "completed" and records.envelope is not None:
+        strategy = records.envelope.get("strategy")
+        if isinstance(strategy, dict) and not _list(strategy, "hypotheses"):
+            return [Violation(Invariant.EMPTY_COMPLETION, "completed with zero hypotheses")]
+    return record_agreement(records, str(status))
+
+
+def record_agreement(records: RunRecords, status: str) -> list[Violation]:
+    """The terminal event's status matches the committed core run record, when there is one."""
+    run = _run_record(records)
+    if run is None:
+        return []
+    recorded = run.get("status")
+    result = run.get("result")
+    outcome = result.get("outcome") if isinstance(result, dict) else None
+    allowed: dict[str, bool] = {
+        "completed": recorded == "terminal" and outcome == "success",
+        "failed": recorded == "terminal" and outcome != "success",
+        # A stop either ends the record as cancelled or leaves it open for a resume.
+        "interrupted": recorded in {"running", "closing"}
+        or (recorded == "terminal" and outcome == "cancelled"),
+        "cancelled": recorded == "terminal" and outcome == "cancelled",
+    }
+    if allowed.get(status, True):
+        return []
+    return [
+        Violation(
+            Invariant.RECORD_DISAGREES,
+            f"terminal event {status!r} but the core record is {recorded!r} ({outcome!r})",
+        )
+    ]
+
+
+def _run_record(records: RunRecords) -> Record | None:
+    core = records.envelope.get("core") if records.envelope is not None else None
+    run = core.get("run") if isinstance(core, dict) else None
+    return run if isinstance(run, dict) else None
 
 
 def _list(record: Record, key: str) -> list[Record]:
@@ -342,6 +416,7 @@ def stop_bound(records: RunRecords, grace_s: float | None) -> list[Violation]:
         and _data(event).get("state") == _SUBMITTED
         and _time(event) > stopped_at
     ]
+    violations.extend(_core_evaluations_after(records, stopped_at))
     terminal = terminal_event(records)
     if grace_s is not None and terminal is not None:
         elapsed = (_time(terminal) - stopped_at).total_seconds()
@@ -352,12 +427,35 @@ def stop_bound(records: RunRecords, grace_s: float | None) -> list[Violation]:
     return violations
 
 
+def _core_evaluations_after(records: RunRecords, stopped_at: datetime) -> list[Violation]:
+    """Measurement submissions the core record shows after the stop request."""
+    core = records.envelope.get("core") if records.envelope is not None else None
+    intents = core.get("intents") if isinstance(core, dict) else None
+    rows = intents.get("intents") if isinstance(intents, dict) else None
+    violations: list[Violation] = []
+    for row in rows if isinstance(rows, list) else []:
+        request = row.get("request") if isinstance(row, dict) else None
+        plan = request.get("plan") if isinstance(request, dict) else None
+        if not isinstance(request, dict) or request.get("kind") != "submit_measurement":
+            continue
+        submitted = plan.get("submitted_at") if isinstance(plan, dict) else None
+        if isinstance(submitted, (int, float)) and submitted > stopped_at.timestamp():
+            request_id = request.get("request_id")
+            violations.append(
+                Violation(
+                    Invariant.EVALUATION_AFTER_STOP,
+                    f"measurement {request_id} submitted after the stop request",
+                )
+            )
+    return violations
+
+
 def cluster_jobs(records: RunRecords) -> list[Violation]:
     """No Fake cluster job is pending or still running once the run has ended."""
     return [
         Violation(Invariant.CLUSTER_JOB_LEFT, f"job {job} left {line or 'RUNNING'}")
         for job, line in sorted(records.cluster_jobs.items())
-        if line in {"", "PENDING"}
+        if line in {"", "PENDING", "RUNNING"}
     ]
 
 

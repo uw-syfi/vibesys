@@ -4,7 +4,7 @@ import io
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
 
@@ -29,6 +29,8 @@ from vs_agent.api import (
     AgentOutputSchemaError,
     AgentSessionKey,
     AgentUsage,
+    SessionDisposition,
+    SessionResumeError,
     SessionScope,
     StdioServerDescriptor,
 )
@@ -41,7 +43,6 @@ from vs_agent.contracts import (
     AgentTurnRequest,
     AgentTurnResult,
     MCPServerSpec,
-    SessionDisposition,
 )
 
 
@@ -536,6 +537,55 @@ def test_reset_disposition_evicts_session(result: AgentTurnResult) -> None:
 
     assert first.close_calls == 1
     assert len(driver.specs) == 2
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        AgentTurnResult("missing identity"),
+        AgentTurnResult(
+            "forced reset",
+            provider_session_id="thread-1",
+            disposition=SessionDisposition.RESET_REQUIRED,
+        ),
+    ],
+)
+def test_checkpoint_required_turn_refuses_missing_identity_and_actual_reset(
+    result: AgentTurnResult,
+) -> None:
+    session = _FakeSession(results=[result])
+
+    class _DurableDriver(_FakeDriver):
+        @property
+        def capabilities(self) -> AgentCapabilities:
+            return replace(super().capabilities, provider_session_resume=True)
+
+    driver = _DurableDriver([session])
+    key = _key("impl")
+    with AgentClient(driver, event_sink=NULL_AGENT_EVENT_SINK) as client:
+        with pytest.raises(SessionResumeError, match="provider reset or replaced"):
+            client.run(
+                session_spec=_spec(),
+                turn=AgentTurnRequest("one", require_provider_checkpoint=True),
+                session_key=key,
+            )
+        assert client.provider_session_id(key) is None
+        assert len(session.turns) == 1
+        assert session.close_calls == 1
+
+
+def test_checkpoint_required_turn_refuses_nonresumable_provider_before_dispatch() -> None:
+    session = _FakeSession(results=[AgentTurnResult("accepted", provider_session_id="thread-1")])
+    driver = _FakeDriver([session])
+    with AgentClient(driver, event_sink=NULL_AGENT_EVENT_SINK) as client:
+        with pytest.raises(SessionResumeError, match="provider cannot resume"):
+            client.run(
+                session_spec=_spec(),
+                turn=AgentTurnRequest("one", require_provider_checkpoint=True),
+                session_key=_key("impl"),
+            )
+        assert not session.turns
+        assert not driver.specs
 
 
 def test_turn_exception_evicts_session() -> None:

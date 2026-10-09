@@ -104,7 +104,9 @@ class HypothesisSearch:
         default_parent_round = round_number - 1 if round_number > 1 else None
         return NewHypothesis(default_parent_round=default_parent_round, context=context)
 
-    def start(
+    def start(  # noqa: PLR0913  # LW-731906 [PLR0913]; the input baseline is an independent run fact beside the current commit and records.
+        # > Bundling it with current_commit into a carrier type hides which revision is which;
+        # > moving it into HypothesisConfig mixes a run fact into policy configuration.
         self,
         state: HypothesisState,
         plan: OrchestratorPlan,
@@ -112,16 +114,25 @@ class HypothesisSearch:
         round_number: int,
         current_commit: str | None,
         records: Sequence[RoundRecord],
+        input_baseline: str | None = None,
     ) -> StartedHypothesis:
         """Start a designer's new hypothesis and resolve its rollback target.
 
         ``current_commit`` seeds the parent commit when no earlier round
-        recorded one. Rollback resolution (``RoundHistory.resolve_rollback_commit``)
-        is for orchestration's workspace checkout; it never touches the
-        filesystem itself.
+        recorded one. ``revert_to_round=0`` names the run's input
+        implementation: the hypothesis starts from ``input_baseline`` with no
+        parent round, as round 1 does. Rollback resolution
+        (``RoundHistory.resolve_rollback_commit``) is for orchestration's
+        workspace checkout; it never touches the filesystem itself.
         """
         records = list(records)
-        parent_round = plan.revert_to_round or (round_number - 1 if round_number > 1 else None)
+        revert_to_round = plan.revert_to_round
+        if revert_to_round is None:
+            parent_round = round_number - 1 if round_number > 1 else None
+        elif revert_to_round == 0:
+            parent_round = None
+        else:
+            parent_round = revert_to_round
         parent = next(
             (record for record in reversed(records) if record.round_number == parent_round),
             None,
@@ -130,7 +141,14 @@ class HypothesisSearch:
             parent.commit if parent is not None and parent.commit is not None else current_commit
         )
         rollback: RollbackTarget | None = None
-        if plan.revert_to_round is not None:
+        if revert_to_round == 0:
+            parent_commit = input_baseline or current_commit
+            rollback = RollbackTarget(
+                commit=input_baseline,
+                failed_child_round=None,
+                resolved=input_baseline is not None,
+            )
+        elif revert_to_round is not None:
             if parent is None or not parent.commit:
                 rollback = RollbackTarget(commit=None, failed_child_round=None, resolved=False)
             else:

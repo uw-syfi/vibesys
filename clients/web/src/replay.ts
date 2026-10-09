@@ -1,4 +1,4 @@
-import type {RunEvent} from '@vibesys/backend-client';
+import {type RunEvent, validateRunEvent} from '@vibesys/backend-client';
 import type {CoreStateStore} from './store.js';
 
 export const DEFAULT_REPLAY_FIXTURE_URL = '/__vibesys/fixtures/framework-events.jsonl';
@@ -16,10 +16,22 @@ export async function loadReplayFixture(
   const events: RunEvent[] = [];
   for (const [index, line] of (await response.text()).split('\n').entries()) {
     if (line.trim().length === 0) continue;
+    const lineNumber = index + 1;
+    let value: unknown;
     try {
-      events.push(JSON.parse(line) as RunEvent);
+      value = JSON.parse(line);
     } catch (reason) {
-      throw new Error(`Replay fixture contains invalid JSON on line ${index + 1}`, {cause: reason});
+      throw new Error(`Replay fixture contains invalid JSON on line ${lineNumber}`, {
+        cause: reason,
+      });
+    }
+    try {
+      events.push(validateRunEvent(value));
+    } catch (reason) {
+      const detail = reason instanceof Error ? `: ${reason.message}` : '';
+      throw new Error(`Replay fixture contains invalid event on line ${lineNumber}${detail}`, {
+        cause: reason,
+      });
     }
   }
   store.append(events);

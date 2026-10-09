@@ -9,7 +9,7 @@ test('renders a recorded run through the live WebSocket gateway', async ({page})
     page.on('pageerror', error => pageErrors.push(error.message));
 
     await page.goto(gateway.url);
-    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
     await expect(page.getByText('15 folded events')).toBeVisible();
     await expect(page.getByRole('alert')).toHaveCount(0);
     // Named explicitly as well as counted: a control channel that reported a
@@ -34,17 +34,17 @@ test('removes the launch capability while preserving same-browser history', asyn
 }) => {
   await withGateway(async gateway => {
     await page.goto(gateway.url);
-    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
 
     const cleanUrl = page.url();
     expect(cleanUrl).toBe(new URL('/', gateway.url).toString());
     expect(cleanUrl).not.toContain('token=');
 
     await page.reload();
-    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
     await page.goto('about:blank');
     await page.goBack();
-    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
 
     const freshContext = await browser.newContext();
     try {
@@ -69,7 +69,7 @@ test('uses the direct gateway cookie when session storage is denied', async ({pa
 
   await withGateway(async gateway => {
     await page.goto(gateway.url);
-    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
     expect(page.url()).toBe(new URL('/', gateway.url).toString());
     expect(page.url()).not.toContain('token=');
   });

@@ -1,6 +1,12 @@
 """Owned in-memory test implementations for :mod:`vs_runtime.api`."""
 
+from vs_runtime._evidence_ledger import FakeEvidenceLedger
 from vs_runtime._fake_agent_sessions import FakeAgentSession, TurnResponder
+from vs_runtime._fake_core_execution import (
+    ExecutedRequest,
+    FakePublicationDelivery,
+    FakeRequestExecution,
+)
 from vs_runtime._runs import FakeRunHandle, FakeRuns
 from vs_runtime.fakes import (
     FakeAccuracyCall,
@@ -37,6 +43,7 @@ from vs_runtime.fakes import (
 )
 
 __all__ = [
+    "ExecutedRequest",
     "FakeAccuracyCall",
     "FakeAgentExecutionEnvironment",
     "FakeAgentExecutionLifecycleSink",
@@ -48,6 +55,7 @@ __all__ = [
     "FakeControl",
     "FakeEvaluation",
     "FakeEvaluationGate",
+    "FakeEvidenceLedger",
     "FakeGitRunner",
     "FakeLocalValidationCall",
     "FakeModelVolumeProvisioner",
@@ -55,6 +63,8 @@ __all__ = [
     "FakeObservations",
     "FakeProfileCall",
     "FakeProjectMaterializationEffects",
+    "FakePublicationDelivery",
+    "FakeRequestExecution",
     "FakeRun",
     "FakeRunControlEventSink",
     "FakeRunHandle",

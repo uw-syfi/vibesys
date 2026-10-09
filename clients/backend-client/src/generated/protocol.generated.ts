@@ -144,6 +144,7 @@ export type DiagnosticRetryability = "automatic" | "manual" | "never" | "unknown
 export type CauseId = string | null;
 export type DebugRef = string | null;
 export type Source = string | null;
+export type ValidationPaths = (string | number)[][] | null;
 export type Action = "pause" | "resume" | "steer" | "stop";
 export type Status = "pending" | "consumed";
 export type Question = string;
@@ -283,6 +284,7 @@ export type Data =
       | OutputData
       | ServerReadyData
       | RunStartedData
+      | RunFailedData
       | RunInterruptedData
       | RunStatusChangedData
       | ExperimentsChangedData
@@ -341,23 +343,32 @@ export type OuterLoop = string;
 export type Input = string;
 export type MaxRounds = number | null;
 export type ExpectedRoles = string[];
-export type Kind10 = "run_interrupted";
+export type Kind10 = "run_failed";
+/**
+ * Why a run ended without a result the operator can keep.
+ */
+export type RunFailureKind = "budget_exhausted" | "deadline" | "no_result";
 export type Reason = string;
+export type WorkstreamsStarted = number;
+export type WorkstreamBudget = number;
+export type CandidatesKept = number;
+export type Kind11 = "run_interrupted";
+export type Reason1 = string;
 export type Signal = string | null;
-export type Kind11 = "run_status_changed";
-export type Kind12 = "experiments_changed";
-export type Reason1 = "project_attached" | "active_hypothesis_changed" | "round_persisted";
+export type Kind12 = "run_status_changed";
+export type Kind13 = "experiments_changed";
+export type Reason2 = "project_attached" | "active_hypothesis_changed" | "round_persisted";
 export type Revision1 = number | null;
-export type Kind13 = "configuration_failed";
+export type Kind14 = "configuration_failed";
 export type Code1 = string;
 export type Stage2 = string;
 export type Message = string;
 export type Usage = string | null;
 export type ExitCode = number;
-export type Kind14 = "phase";
+export type Kind15 = "phase";
 export type Phase = string;
 export type Attempt2 = number | null;
-export type Kind15 = "agent_output_chunk";
+export type Kind16 = "agent_output_chunk";
 export type Channel = "assistant" | "analysis" | "tool" | "diagnostic" | "prompt";
 export type Content1 = string;
 export type Progress = string | null;
@@ -365,54 +376,54 @@ export type AgentLabel = string | null;
 export type ElapsedSeconds = number;
 export type InputTokens = number;
 export type ContextWindow = number | null;
-export type Kind16 = "subprocess_output";
+export type Kind17 = "subprocess_output";
 export type ProcessId = string;
 export type ProcessKind = string;
 export type Stream1 = "stdout" | "stderr";
 export type Content2 = string;
-export type Kind17 = "judge_result";
+export type Kind18 = "judge_result";
 export type Verdict = "pass" | "fail";
 export type Feedback = string;
 export type Attempt3 = number;
-export type Kind18 = "benchmark_result";
+export type Kind19 = "benchmark_result";
 export type Metric = string;
 export type Value = number;
 export type Unit = string;
-export type Kind19 = "round_finished";
+export type Kind20 = "round_finished";
 export type Attempts = number;
 export type JudgeVerdict = "pass" | "fail" | "skipped";
 export type PerfMetric = number | null;
 export type PerfUnit = string | null;
 export type ProfileSkipped = boolean;
-export type Kind20 = "tool_call";
+export type Kind21 = "tool_call";
 export type Tool1 = string;
 export type CallId = string | null;
-export type Kind21 = "tool_result";
+export type Kind22 = "tool_result";
 export type Tool2 = string;
 export type CallId1 = string | null;
 export type Content3 = string;
 export type IsError = boolean;
 export type Payload = (CommandResultPayload | JsonResultPayload) | null;
-export type Kind22 = "command";
+export type Kind23 = "command";
 export type Stdout = string;
 export type Stderr = string;
 export type ExitCode1 = number | null;
 export type Duration = number | null;
-export type Kind23 = "json";
+export type Kind24 = "json";
 export type Value1 =
   | {
       [k: string]: unknown;
     }
   | unknown[];
-export type Kind24 = "todo_update";
+export type Kind25 = "todo_update";
 export type Content4 = string;
 export type Status1 = string;
 export type Todos = TodoItemData[];
-export type Kind25 = "usage_update";
+export type Kind26 = "usage_update";
 export type InputTokens1 = number;
 export type ContextWindow1 = number | null;
 export type Model6 = string | null;
-export type Kind26 = "gate_started";
+export type Kind27 = "gate_started";
 /**
  * Closed set of framework-owned gates a candidate passes through.
  */
@@ -424,7 +435,7 @@ export type Command = string | null;
  */
 export type FrameworkSource = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel = string | null;
-export type Kind27 = "gate_finished";
+export type Kind28 = "gate_finished";
 export type Recipe1 = string | null;
 export type Reused = boolean;
 export type Metric1 = string | null;
@@ -436,7 +447,7 @@ export type OutputTail = string | null;
  */
 export type FrameworkSource1 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel1 = string | null;
-export type Kind28 = "workspace_snapshot";
+export type Kind29 = "workspace_snapshot";
 export type Label = string;
 export type Commit = string | null;
 export type Baseline = string | null;
@@ -445,7 +456,7 @@ export type ExcludedPaths = string[];
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource2 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind29 = "run_configured";
+export type Kind30 = "run_configured";
 export type RunLogPath = string;
 export type ProjectRoot = string;
 export type Model7 = string | null;
@@ -457,7 +468,7 @@ export type ParetoObjectives = string | null;
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource3 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind30 = "framework_warning";
+export type Kind31 = "framework_warning";
 export type Summary2 = string;
 export type Detail1 = string | null;
 /**
@@ -580,9 +591,9 @@ export type Type17 = "event";
 export type Type18 = "event_batch";
 export type Events1 = RunEvent[];
 export type ThroughSequence = number;
-export type ActiveExecutions1 = ActiveAgentExecution[];
 export type StoreId1 = string;
 export type HistoryAfterSequence = number;
+export type Rebootstrap = boolean;
 export type Type19 = "protocol_error";
 export type RequestId18 = string | null;
 export type ClientId18 = string;
@@ -852,6 +863,7 @@ export interface Diagnostic {
   cause_id?: CauseId;
   debug_ref?: DebugRef;
   source?: Source;
+  validation_paths?: ValidationPaths;
 }
 /**
  * Acknowledgment of a requested run command.
@@ -1078,11 +1090,33 @@ export interface RunStartedData {
   [k: string]: unknown;
 }
 /**
+ * Why a run ended without a result to keep, with the counts behind it.
+ */
+export interface RunFailedData {
+  kind: Kind10;
+  failure: RunFailure;
+  [k: string]: unknown;
+}
+/**
+ * What a failed run did and why it stopped, as data; frontends choose the wording.
+ *
+ * ``reason`` is the strategy's own account of the stop. ``workstreams_started`` counts
+ * attempts core admitted, against the ``workstream_budget`` the run was allowed.
+ * ``candidates_kept`` counts settled candidates eligible for adoption.
+ */
+export interface RunFailure {
+  kind: RunFailureKind;
+  reason: Reason;
+  workstreams_started: WorkstreamsStarted;
+  workstream_budget: WorkstreamBudget;
+  candidates_kept: CandidatesKept;
+}
+/**
  * Reason and optional signal for an interrupted run.
  */
 export interface RunInterruptedData {
-  kind: Kind10;
-  reason: Reason;
+  kind: Kind11;
+  reason: Reason1;
   signal?: Signal;
   [k: string]: unknown;
 }
@@ -1096,7 +1130,7 @@ export interface RunInterruptedData {
  * other execution-scoped fact, not repeated here.
  */
 export interface RunStatusChangedData {
-  kind: Kind11;
+  kind: Kind12;
   status: RunStatus;
   previous: RunStatus;
   [k: string]: unknown;
@@ -1105,8 +1139,8 @@ export interface RunStatusChangedData {
  * Reason and revision for a changed experiment projection.
  */
 export interface ExperimentsChangedData {
-  kind: Kind12;
-  reason: Reason1;
+  kind: Kind13;
+  reason: Reason2;
   revision?: Revision1;
   [k: string]: unknown;
 }
@@ -1114,7 +1148,7 @@ export interface ExperimentsChangedData {
  * Diagnostic details for configuration-stage failure.
  */
 export interface ConfigurationFailedData {
-  kind: Kind13;
+  kind: Kind14;
   code: Code1;
   stage: Stage2;
   message: Message;
@@ -1126,7 +1160,7 @@ export interface ConfigurationFailedData {
  * Name and optional attempt number for a loop phase.
  */
 export interface PhaseData {
-  kind: Kind14;
+  kind: Kind15;
   phase: Phase;
   attempt?: Attempt2;
   [k: string]: unknown;
@@ -1135,7 +1169,7 @@ export interface PhaseData {
  * Incremental output produced during agent execution.
  */
 export interface AgentOutputChunkData {
-  kind: Kind15;
+  kind: Kind16;
   channel: Channel;
   content: Content1;
   status?: AgentStatusData | null;
@@ -1160,7 +1194,7 @@ export interface AgentStatusData {
  * Captured output from a managed subprocess.
  */
 export interface SubprocessOutputData {
-  kind: Kind16;
+  kind: Kind17;
   process_id: ProcessId;
   process_kind: ProcessKind;
   stream: Stream1;
@@ -1171,7 +1205,7 @@ export interface SubprocessOutputData {
  * Verdict and feedback returned by the judge.
  */
 export interface JudgeResultData {
-  kind: Kind17;
+  kind: Kind18;
   verdict: Verdict;
   feedback: Feedback;
   attempt: Attempt3;
@@ -1181,7 +1215,7 @@ export interface JudgeResultData {
  * Metric result emitted by a benchmark stage.
  */
 export interface BenchmarkResultData {
-  kind: Kind18;
+  kind: Kind19;
   metric: Metric;
   value: Value;
   unit: Unit;
@@ -1191,7 +1225,7 @@ export interface BenchmarkResultData {
  * Summary of attempt, judge, and performance outcomes for a round.
  */
 export interface RoundFinishedData {
-  kind: Kind19;
+  kind: Kind20;
   attempts: Attempts;
   judge_verdict: JudgeVerdict;
   perf_metric?: PerfMetric;
@@ -1203,7 +1237,7 @@ export interface RoundFinishedData {
  * Tool name, call identity, and arguments emitted by an agent.
  */
 export interface ToolCallData {
-  kind: Kind20;
+  kind: Kind21;
   tool: Tool1;
   call_id?: CallId;
   args?: Args;
@@ -1217,7 +1251,7 @@ export interface Args {
  * Raw tool result and optional structured rendering payload.
  */
 export interface ToolResultData {
-  kind: Kind21;
+  kind: Kind22;
   tool: Tool2;
   call_id?: CallId1;
   content: Content3;
@@ -1229,7 +1263,7 @@ export interface ToolResultData {
  * Structured result of a command-style tool execution.
  */
 export interface CommandResultPayload {
-  kind: Kind22;
+  kind: Kind23;
   stdout: Stdout;
   stderr: Stderr;
   exit_code?: ExitCode1;
@@ -1240,7 +1274,7 @@ export interface CommandResultPayload {
  * A tool result that is a JSON object or array, already parsed.
  */
 export interface JsonResultPayload {
-  kind: Kind23;
+  kind: Kind24;
   value: Value1;
   [k: string]: unknown;
 }
@@ -1248,7 +1282,7 @@ export interface JsonResultPayload {
  * Current todo list reported by an agent.
  */
 export interface TodoUpdateData {
-  kind: Kind24;
+  kind: Kind25;
   todos?: Todos;
   [k: string]: unknown;
 }
@@ -1264,7 +1298,7 @@ export interface TodoItemData {
  * Token usage reported by the active model.
  */
 export interface UsageUpdateData {
-  kind: Kind25;
+  kind: Kind26;
   input_tokens: InputTokens1;
   context_window?: ContextWindow1;
   model?: Model6;
@@ -1274,7 +1308,7 @@ export interface UsageUpdateData {
  * One framework gate began evaluating the current candidate.
  */
 export interface GateStartedData {
-  kind: Kind26;
+  kind: Kind27;
   gate: GateKind;
   recipe?: Recipe;
   command?: Command;
@@ -1291,7 +1325,7 @@ export interface GateStartedData {
  * output on failure.
  */
 export interface GateFinishedData {
-  kind: Kind27;
+  kind: Kind28;
   gate: GateKind;
   recipe?: Recipe1;
   reused?: Reused;
@@ -1312,7 +1346,7 @@ export interface GateFinishedData {
  * change carries ``excluded_paths``.
  */
 export interface WorkspaceSnapshotData {
-  kind: Kind28;
+  kind: Kind29;
   label?: Label;
   commit?: Commit;
   baseline?: Baseline;
@@ -1324,7 +1358,7 @@ export interface WorkspaceSnapshotData {
  * One per run: the resolved configuration a loop starts with.
  */
 export interface RunConfiguredData {
-  kind: Kind29;
+  kind: Kind30;
   run_log_path: RunLogPath;
   project_root: ProjectRoot;
   model?: Model7;
@@ -1342,7 +1376,7 @@ export interface RunConfiguredData {
  * ``diagnostic`` field so diagnostic-oriented clients need no new handling.
  */
 export interface FrameworkWarningData {
-  kind: Kind30;
+  kind: Kind31;
   summary: Summary2;
   detail?: Detail1;
   source?: FrameworkSource4;
@@ -1521,9 +1555,10 @@ export interface EventBatchMessage {
   type: Type18;
   events: Events1;
   through_sequence?: ThroughSequence;
-  active_executions?: ActiveExecutions1;
+  active_executions?: ActiveExecutions;
   store_id?: StoreId1;
   history_after_sequence?: HistoryAfterSequence;
+  rebootstrap?: Rebootstrap;
 }
 /**
  * Structured error envelope for protocol failures.

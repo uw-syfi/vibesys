@@ -35,8 +35,16 @@ from .evaluation import (
     EvidenceRef,
     MeasurementResult,
     ResumeAuthorized,
+    TurnSuspended,
 )
-from .intents import IntentsEvent, IntentsState, OperationResult, OperationView, Request
+from .intents import (
+    IntentBlocked,
+    IntentsEvent,
+    IntentsState,
+    OperationResult,
+    OperationView,
+    Request,
+)
 from .scheduling import (
     AdmitAttempt,
     AttemptReady,
@@ -56,7 +64,9 @@ from .sessions import (
     TurnResult,
 )
 from .settlement import (
+    AdoptionFailed,
     AdoptionResult,
+    AdoptionView,
     AttemptSettled,
     EvidenceRequirements,
     RunResultProposal,
@@ -139,6 +149,10 @@ class RunView(Value):
     artifacts: tuple[ArtifactRef, ...]
     controls: tuple[ControlInput, ...]
     inputs: tuple[InputRecord, ...]
+    adoption: AdoptionView | None = None
+    # Earliest core time a ClockAdvanced does work: a paced job poll comes due, or an
+    # answered-but-open intent passes its reconciliation bound. None when neither is scheduled.
+    next_observe_at: Seconds | None = None
 
 
 class DecisionSubmitted(Value):
@@ -228,9 +242,12 @@ type StrategyEvent = Annotated[
     | InterruptCompleted
     | MeasurementResult
     | ResumeAuthorized
+    | TurnSuspended
     | OperationResult
+    | IntentBlocked
     | ControlChanged
     | AdoptionResult
+    | AdoptionFailed
     | RunEnded,
     Field(discriminator="kind"),
 ]
@@ -271,12 +288,14 @@ class SchedulingContext(AreaContext):
     attempts: AttemptsState
     intents: IntentsState
     sessions: SessionsState
+    settlement: SettlementState
 
 
 class AttemptsContext(AreaContext):
     """Required attempts cross-area facts."""
 
     run: RunState
+    scheduling: SchedulingState
     sessions: SessionsState
     evaluation: EvaluationState
     settlement: SettlementState

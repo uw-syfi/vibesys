@@ -19,6 +19,7 @@ from typing import Literal
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import ValidationError
 
 from vibesys.hypothesis import (
     CandidateDisposition,
@@ -33,6 +34,7 @@ from vibesys.hypothesis import (
     HypothesisStrategyUpdate,
     NewHypothesis,
     OrchestratorPlan,
+    RollbackTarget,
     RoundRecord,
 )
 from vibesys.hypothesis import cadence as hypothesis_cadence
@@ -314,6 +316,55 @@ def test_start_rollback_unresolved_when_the_named_round_has_no_commit() -> None:
     assert started.rollback is not None
     assert not started.rollback.resolved
     assert started.rollback.commit is None
+
+
+def test_start_revert_to_round_zero_restores_the_input_baseline() -> None:
+    search = HypothesisSearch(HypothesisConfig(max_rounds=10))
+    records = [
+        _round(1, hypothesis_id="H-1", commit="a" * 40, outcome="disproven"),
+        _round(
+            2,
+            hypothesis_id="H-2",
+            commit="b" * 40,
+            outcome="continue",
+            declared="continue",
+            parent_round=1,
+            parent_commit="a" * 40,
+        ),
+    ]
+    started = search.start(
+        HypothesisState(),
+        _plan("H-3", revert_to_round=0),
+        round_number=3,
+        current_commit="c" * 40,
+        records=records,
+        input_baseline="0" * 40,
+    )
+    assert started.rollback == RollbackTarget(
+        commit="0" * 40, failed_child_round=None, resolved=True
+    )
+    assert started.hypothesis.parent_round is None
+    assert started.hypothesis.parent_commit == "0" * 40
+
+
+def test_start_revert_to_round_zero_is_unresolved_without_an_input_baseline() -> None:
+    search = HypothesisSearch(HypothesisConfig(max_rounds=10))
+    started = search.start(
+        HypothesisState(),
+        _plan("H-2", revert_to_round=0),
+        round_number=2,
+        current_commit="c" * 40,
+        records=[_round(1, hypothesis_id="H-1", commit="a" * 40)],
+    )
+    assert started.rollback is not None
+    assert not started.rollback.resolved
+    assert started.hypothesis.parent_round is None
+    assert started.hypothesis.parent_commit == "c" * 40
+
+
+def test_plan_rejects_a_negative_revert_to_round() -> None:
+    with pytest.raises(ValidationError, match="revert_to_round"):
+        _plan("H-1", revert_to_round=-1)
 
 
 def test_start_with_no_revert_falls_back_to_the_current_commit() -> None:

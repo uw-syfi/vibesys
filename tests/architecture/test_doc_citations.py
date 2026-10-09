@@ -208,6 +208,18 @@ def test_every_gated_doc_resolves() -> None:
     assert cited, "a gated doc with no citations at all means the sweep stopped happening"
 
 
+def test_wire_protocol_cites_its_transport_symbols_by_complete_path() -> None:
+    """Protocol transport claims stay tied to the implementation they describe."""
+    wire_protocol = REPO_ROOT / "docs/contributing/wire-protocol.md"
+    cited = set(_citations(wire_protocol.read_text(encoding="utf-8")))
+
+    assert {
+        "src/server/transport/websocket.py:WebSocketLimits",
+        "src/server/transport/websocket.py:WebSocketGateway._serve_until_stopped",
+        "src/server/transport/unix_jsonl.py:_RequestHandler._write_message",
+    } <= cited
+
+
 def test_a_gated_doc_that_no_longer_exists_is_reported() -> None:
     """A gate that quietly checks nothing is the failure mode to avoid."""
     assert stale_gate_entries(()) == list(GATED_DOCS)

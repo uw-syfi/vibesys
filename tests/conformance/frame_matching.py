@@ -9,15 +9,13 @@ discriminant.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import Any
 
 from pydantic import ValidationError
 
 from server.api.protocol import Response
 from server.api.schema import ProtocolDocument
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
 
 _TYPE_KEY = "type"
 
@@ -90,4 +88,14 @@ def assert_frame_matches(actual: Mapping[str, Any], expected: Mapping[str, Any])
         )
         expected = {key: value for key, value in expected.items() if key != _TYPE_KEY}
     for key, value in expected.items():
-        assert actual.get(key) == value, f"expected {key}={value!r}, received {actual.get(key)!r}"
+        _assert_subset(actual.get(key), value, key)
+
+
+def _assert_subset(actual: object, expected: object, path: str) -> None:
+    """Assert a partial frame value without forcing nested objects to be complete."""
+    if isinstance(expected, Mapping):
+        assert isinstance(actual, Mapping), f"expected {path}={expected!r}, received {actual!r}"
+        for key, value in expected.items():
+            _assert_subset(actual.get(key), value, f"{path}.{key}")
+        return
+    assert actual == expected, f"expected {path}={expected!r}, received {actual!r}"

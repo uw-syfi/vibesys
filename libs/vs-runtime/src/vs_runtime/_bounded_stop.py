@@ -7,6 +7,7 @@ import math
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
+from vs_async_ops.api import drain
 from vs_runtime._run_control import RunStopped
 
 if TYPE_CHECKING:
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
         OwnedEvaluationDependencies,
         ProfilerOperation,
         StoredEvaluation,
+        TrustedEvidence,
     )
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import (
@@ -47,7 +49,12 @@ class StopGraceError(ValueError):
 
 
 class _StopSupervisor:
-    """Act on stop requests for the task running one ``bounded_stop`` block."""
+    """Act on stop requests for the task running one ``bounded_stop`` block.
+
+    Two jobs, two owners. The grace wait belongs to the block: it ends with the
+    block. A stop's cleanup (``on_stop``) belongs to the stop: it runs in its
+    own task and is always seen through, even if the block ends first.
+    """
 
     def __init__(
         self,
@@ -66,6 +73,8 @@ class _StopSupervisor:
         self._on_stop = on_stop
         self._timer = timer
         self._requested = asyncio.Event()
+        self._grace_waits: list[asyncio.Task[None]] = []
+        self._cleanups: list[asyncio.Task[None]] = []
         self.forced = False
         self.failures: list[Exception] = []
 
@@ -73,20 +82,36 @@ class _StopSupervisor:
         """Wake the supervisor; called on the event loop."""
         self._requested.set()
 
-    async def supervise(self) -> None:
+    def start(self) -> None:
+        """Begin watching for stop requests."""
+        self._grace_waits.append(asyncio.create_task(self._watch()))
+
+    async def end(self) -> None:
+        """Abandon the grace wait and see every stop cleanup through to its end."""
+        for wait in self._grace_waits:
+            wait.cancel()
+        await drain(*self._grace_waits, *self._cleanups)
+
+    async def _watch(self) -> None:
         """Stop new work at each request; cancel the block if the stop outlives the grace."""
         while True:
             await self._requested.wait()
             self._requested.clear()
-            try:
-                await self._on_stop()
-            except Exception as error:  # noqa: BLE001  # lint-waiver: LW-122301 [BLE001]; on_stop cancels independently owned external work, and any failure of it must still leave the grace bound armed; a narrower catch would let an unlisted transport error make the stop unbounded, and the error is re-raised when the block ends.
-                self.failures.append(error)
+            cleanup = asyncio.create_task(self._stop_new_work())
+            self._cleanups.append(cleanup)
+            # ``wait`` leaves *cleanup* running if this watcher is cancelled.
+            await asyncio.wait({cleanup})
             await self._timer(self._grace_s)
             if self._channel.stop_requested():
                 self.forced = True
                 self._task.cancel()
                 return
+
+    async def _stop_new_work(self) -> None:
+        try:
+            await self._on_stop()
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-122301 [BLE001]; on_stop cancels independently owned external work, and any failure of it must still leave the grace bound armed; a narrower catch would let an unlisted transport error make the stop unbounded, and the error is re-raised when the block ends.
+            self.failures.append(error)
 
     def ended(self, error: BaseException) -> BaseException:
         """Return the error the block leaves with, given the error it raised."""
@@ -118,6 +143,10 @@ async def bounded_stop(
     leaves as :class:`RunStopped`. A resume within the grace period disarms
     the cancellation. A failure of ``on_stop`` does not disarm it: the error
     is raised when the block ends, or noted on the error the block ends with.
+
+    ``on_stop`` runs to completion even when the block ends first: leaving the
+    block abandons the grace wait, never a cleanup already started, so the
+    block does not exit until it has finished.
     """
     if not math.isfinite(grace_s) or grace_s <= 0:
         raise StopGraceError(grace_s)
@@ -126,19 +155,18 @@ async def bounded_stop(
     unsubscribe = channel.on_stop_requested(lambda: loop.call_soon_threadsafe(supervisor.notify))
     if channel.stop_requested():
         supervisor.notify()
-    watcher = asyncio.create_task(supervisor.supervise())
+    supervisor.start()
     try:
         yield
     except BaseException as error:
+        unsubscribe()
+        await supervisor.end()
         outcome = supervisor.ended(error)
         if outcome is error:
             raise
         raise outcome from error
-    finally:
-        unsubscribe()
-        if not watcher.done():
-            watcher.cancel()
-            await asyncio.gather(watcher, return_exceptions=True)
+    unsubscribe()
+    await supervisor.end()
     if supervisor.failures:
         raise supervisor.failures[0]
 
@@ -239,6 +267,11 @@ class _StopGatedEvaluation:
 
     async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
         return await self._inner.submitted_report(handle_id, scope_id=scope_id)
+
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        return await self._inner.receipt_matches_current_context(revision, evidence)
 
     async def evidence_revisions(self) -> dict[str, str]:
         return await self._inner.evidence_revisions()

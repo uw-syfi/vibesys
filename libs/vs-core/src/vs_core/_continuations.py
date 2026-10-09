@@ -7,10 +7,13 @@ no-new-evaluation policy must consume the durable history and publication bounds
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
-from ._evaluation_history import produce_history
+from ._deadlines import bound_to_run, time_remains
+from ._evaluation_history import attempt_settled, produce_history
 from ._registry import ContractError
+from ._session_scope import dispatching_request
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
     AttemptPhase,
@@ -18,6 +21,7 @@ from .types.attempts import (
     ScopeReopenRequested,
 )
 from .types.common import (
+    AttemptId,
     AttemptRef,
     CompletionStatus,
     ExecuteRegisteredOperation,
@@ -48,24 +52,225 @@ from .types.evaluation import (
 from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import InspectRequest, IntentPhase
 from .types.job_observations import JobTimeout, TimedOut
-from .types.kernel import AreaChange
+from .types.kernel import AreaChange, EvaluationContext
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
 from .types.sessions import Access, DispatchTurn, InspectTurn, ResumeSessionTurn, SessionPhase
 from .types.strategy import Accepted, Operation
 
 if TYPE_CHECKING:
-    from .types.attempts import AttemptView
-    from .types.common import EvidenceId, Observation, ResourceId
+    from .types.attempts import AttemptsState, AttemptView
+    from .types.common import EvidenceKey, InvocationRef, Observation, ResourceId
     from .types.evaluation import (
         EvaluationEvent,
         EvaluationState,
         EvidenceRef,
         OwnedJob,
     )
-    from .types.evaluation_history import EvaluationHistoryCursor
+    from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryCursor
     from .types.intents import ChildLease, Intent, Request
-    from .types.kernel import EvaluationContext, Signal, StrategyEvent
-    from .types.sessions import Invocation
+    from .types.kernel import RunState, SessionsContext, Signal, StrategyEvent
+    from .types.sessions import Invocation, SessionsState
+
+
+class SuspensionRefusal(StrEnum):
+    """Why a scope cannot take a new suspension now.
+
+    Each reason is caused by what an agent does or when it does it, so a caller that
+    forwards an agent's request to wait asks ``suspension_refusal`` first and tells the
+    agent, instead of letting the suspension reach the commit that would reject it.
+    """
+
+    SCOPE_NOT_ACTIVE = "scope_not_active"
+    """The run is not running, or the scope's owner is retired, closing or unadmitted."""
+    OPEN_CONTINUATION = "open_continuation"
+    """An earlier continuation in the scope is still waiting for its single resume."""
+    NOT_RESUMABLE = "not_resumable"
+    """The attempt is exhausted, so core would refuse the resume."""
+    PREFIX_MISMATCH = "prefix_mismatch"
+    """The turn has no paid-cycle history prefix that matches the attempt's history.
+
+    A turn dispatched while an earlier measurement of its attempt was still in flight has
+    none, and core authorizes a resume only from an exact prefix.
+    """
+
+    JOB_NOT_OWNED = "job_not_owned"
+    """A job the suspension waits on is not one of the scope's owned jobs."""
+    DEADLINE_EXCEEDED = "deadline_exceeded"
+    """The run has no time left for the suspension. A later deadline is bounded, not refused."""
+
+    @property
+    def detail(self) -> str:
+        """The contract-error text for this reason."""
+        return _REFUSAL_DETAIL[self]
+
+
+_REFUSAL_DETAIL = {
+    SuspensionRefusal.SCOPE_NOT_ACTIVE: "requires current active ownership",
+    SuspensionRefusal.OPEN_CONTINUATION: "already owns an unfinished continuation",
+    SuspensionRefusal.NOT_RESUMABLE: "attempt is exhausted, so its resume cannot be authorized",
+    SuspensionRefusal.PREFIX_MISMATCH: "attempt resume requires exact paid-cycle history prefix",
+    SuspensionRefusal.JOB_NOT_OWNED: "dependency requires exactly one job owned by the scope",
+    SuspensionRefusal.DEADLINE_EXCEEDED: "run has no time left",
+}
+
+
+def paid_prefix_refusal(
+    history: AttemptEvaluationHistory, prefix: EvaluationHistoryCursor | None
+) -> SuspensionRefusal | None:
+    """Whether ``prefix`` is an exact prefix of the attempt's covered submissions.
+
+    One rule for two callers: the suspension gate asks it of the turn that wants to
+    wait, and resume authorization asks it of the turn that waited. Coverage only grows,
+    so a prefix that holds at the wait still holds at the resume.
+    """
+    if (
+        prefix is None
+        or prefix.ordinal > len(history.covered_submissions)
+        or (
+            prefix.ordinal
+            and history.covered_submissions[prefix.ordinal - 1] != prefix.submission_id
+        )
+    ):
+        return SuspensionRefusal.PREFIX_MISMATCH
+    return None
+
+
+def exhausted(attempts: AttemptsState, scope: Scope) -> bool:
+    """Whether ``scope`` is an attempt that ended (a spent paid limit, for one).
+
+    Core authorizes no resume for such an attempt, so a suspension in it can never end.
+    An attempt's history completes only after its measurements end, so history
+    completeness is a property of the resume, not of the suspension.
+    """
+    return isinstance(scope.owner, AttemptId) and any(
+        row.attempt_id == scope.owner
+        and row.generation == scope.generation
+        and row.terminal_reason is not None
+        for row in attempts.attempts
+    )
+
+
+def _open(context: EvaluationContext, row: Continuation) -> bool:
+    """Whether the continuation still owes its single resume.
+
+    A waiting, parked or reopening continuation does. An authorized one does until its
+    successor invocation was dispatched: a successor that ran has consumed the resume,
+    even when it ended without yielding again (nothing else marks it resumed then).
+    """
+    if row.phase in (
+        ContinuationPhase.WAITING,
+        ContinuationPhase.PARKED,
+        ContinuationPhase.REOPENING,
+    ):
+        return True
+    return row.phase == ContinuationPhase.AUTHORIZED and not any(
+        held.invocation == row.next_invocation for held in context.sessions.invocations
+    )
+
+
+def wait_refused_at_turn_end(
+    sessions: SessionsState, context: SessionsContext, invocation: Invocation, wait: Continuation
+) -> bool:
+    """Whether the suspension gate refuses ``wait`` against the state a turn's end produces."""
+    evaluation = EvaluationContext(
+        run=context.run, attempts=context.attempts, sessions=sessions, intents=context.intents
+    )
+    return wait_refusal_in(evaluation, context.evaluation, invocation, wait) is not None
+
+
+def suspension_refusal_in(
+    context: EvaluationContext,
+    state: EvaluationState,
+    scope: Scope,
+    *,
+    holder: InvocationRef | None = None,
+) -> SuspensionRefusal | None:
+    """The reason ``scope`` cannot take a new suspension, or None when it can.
+
+    A suspension is claimed from the moment a turn is observed with one (it is pending
+    on its invocation) until it is recorded as a continuation, so a second turn of the
+    scope is refused while the first holds the claim. ``holder`` is the invocation asking:
+    its own claim is not a reason to refuse it.
+    """
+    if not _active(context, scope):
+        return SuspensionRefusal.SCOPE_NOT_ACTIVE
+    claimed = any(
+        row.pending_suspension is not None and row.scope == scope and row.invocation != holder
+        for row in context.sessions.invocations
+    )
+    if claimed or any(
+        _open(context, row) and _invocation(context, row).scope == scope
+        for row in state.continuations
+    ):
+        return SuspensionRefusal.OPEN_CONTINUATION
+    return None
+
+
+def commit_refusal_in(
+    context: EvaluationContext,
+    state: EvaluationState,
+    invocation: Invocation,
+    wait: Continuation | None = None,
+) -> SuspensionRefusal | None:
+    """Why recording a suspension of ``invocation`` would be refused, or None.
+
+    These are the refusals core's commit of a suspension raises for what the world did
+    (a peer's claim, a retired scope, a job the scope does not own), as opposed to a
+    malformed continuation. With ``wait`` it also checks the continuation's jobs and
+    deadline.
+    """
+    refusal = suspension_refusal_in(context, state, invocation.scope, holder=invocation.invocation)
+    if refusal is not None or wait is None:
+        return refusal
+    owned = (*state.jobs, *state.registered_jobs)
+    # An empty or repeating job list is a malformed continuation, not a refusal: it halts.
+    for identity in wait.jobs:
+        matching = tuple(row for row in owned if row.resource_id == identity)
+        if len(matching) != 1 or matching[0].scope != invocation.scope:
+            return SuspensionRefusal.JOB_NOT_OWNED
+    if not time_remains(context.run, wait.deadline_at):
+        return SuspensionRefusal.DEADLINE_EXCEEDED
+    return None
+
+
+def bounded_wait(run: RunState, wait: Continuation) -> Continuation:
+    """``wait`` with its deadline bounded to the run, the form every gate and row sees."""
+    deadline = bound_to_run(run, wait.deadline_at)
+    return (
+        wait if deadline == wait.deadline_at else wait.model_copy(update={"deadline_at": deadline})
+    )
+
+
+def wait_refusal_in(
+    context: EvaluationContext,
+    state: EvaluationState,
+    invocation: Invocation,
+    wait: Continuation | None = None,
+) -> SuspensionRefusal | None:
+    """Why ``invocation`` cannot suspend now, or None when it can: the one suspension gate.
+
+    Asked when an agent requests a wait and again when its turn is observed with the
+    suspension, before anything durable claims it. It adds the refusals that are valid
+    to commit but make the resume raise (an exhausted attempt, a prefix mismatch) to
+    ``commit_refusal_in``.
+    """
+    refusal = commit_refusal_in(context, state, invocation, wait)
+    if refusal is not None:
+        return refusal
+    if exhausted(context.attempts, invocation.scope):
+        return SuspensionRefusal.NOT_RESUMABLE
+    owner = next(
+        (
+            row
+            for row in context.attempts.attempts
+            if row.attempt_id == invocation.scope.owner
+            and row.generation == invocation.scope.generation
+        ),
+        None,
+    )
+    if owner is not None:
+        return paid_prefix_refusal(owner.evaluation_history, invocation.evaluation_prefix)
+    return None
 
 
 def _invocation(context: EvaluationContext, continuation: Continuation) -> Invocation:
@@ -144,14 +349,14 @@ def _settled(job: OwnedJob | RegisteredOwnedJob) -> bool:
 
 
 def _feedback_evidence(records: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:
-    unique: dict[EvidenceId, EvidenceRef] = {}
+    unique: dict[EvidenceKey, EvidenceRef] = {}
     for evidence in records:
-        previous = unique.get(evidence.evidence_id)
+        previous = unique.get(evidence.key)
         if previous is not None and previous != evidence:
             raise ContractError(
                 ("evidence", evidence.evidence_id.root), "conflicting evidence identity"
             )
-        unique[evidence.evidence_id] = evidence
+        unique[evidence.key] = evidence
     return tuple(unique.values())
 
 
@@ -219,7 +424,10 @@ def _descendants(
     resources = {_resource(job) for job in jobs}
     descendants = {child for job in jobs for child in job.children}
     descendants.update(
-        child for job in jobs if job.observation is not None for child in job.observation.children
+        child
+        for job in jobs
+        if job.observation is not None
+        for child in job.observation.descendants
     )
     while True:
         previous = (len(resources), len(sources))
@@ -229,7 +437,7 @@ def _descendants(
                 sources.add(_submission(job))
                 descendants.update(job.children)
                 if job.observation is not None:
-                    descendants.update(job.observation.children)
+                    descendants.update(job.observation.descendants)
         for child in context.intents.children:
             if child.scope == scope and (
                 sources.intersection(child.source_requests)
@@ -237,7 +445,7 @@ def _descendants(
             ):
                 descendants.add(child.resource_id)
                 if child.observation is not None:
-                    descendants.update(child.observation.children)
+                    descendants.update(child.observation.descendants)
         resources.update(descendants)
         if previous == (len(resources), len(sources)):
             break
@@ -317,6 +525,9 @@ def _authorize(
     _deadline_proof(state, continuation)
     invocation = _invocation(context, continuation)
     if not _active(context, invocation.scope):
+        return AreaChange(state=state)
+    if not attempt_settled(invocation.scope, state, context.intents):
+        # Stay WAITING: each submission's conclusive observation wakes this again.
         return AreaChange(state=state)
     _successor(context, continuation)
     _yield_proof(state, context, invocation, continuation, retained=reopened)
@@ -425,31 +636,18 @@ def _validate_new(
         invocation.turn.invocation_id != current.invocation_id
         or invocation.turn.session.session_id != current.session_id
         or invocation.scope.generation != current.generation
-        or not _active(context, invocation.scope)
     ):
         raise ContractError(("continuation", "invocation"), "requires current active ownership")
     if any(job.scope != invocation.scope for job in _jobs(state, continuation)):
         raise ContractError(("continuation", "jobs"), "dependency belongs to a different scope")
-    if continuation.deadline_at > context.run.deadline_at:
-        raise ContractError(("continuation", "deadline_at"), "exceeds run deadline")
+    if refusal := commit_refusal_in(context, state, invocation, continuation):
+        raise ContractError(("continuation", "invocation"), refusal.detail)
     if any(
-        row.invocation == current
-        or row.next_invocation == continuation.next_invocation
-        or (
-            row.phase
-            in (
-                ContinuationPhase.WAITING,
-                ContinuationPhase.PARKED,
-                ContinuationPhase.REOPENING,
-                ContinuationPhase.AUTHORIZED,
-            )
-            and row.next_invocation != current
-            and _invocation(context, row).scope == invocation.scope
-        )
+        row.invocation == current or row.next_invocation == continuation.next_invocation
         for row in state.continuations
     ):
         raise ContractError(
-            ("continuation", "invocation"), "already owns an unfinished continuation"
+            ("continuation", "invocation"), SuspensionRefusal.OPEN_CONTINUATION.detail
         )
     return invocation
 
@@ -740,7 +938,7 @@ def _publication_history(
 def _suspend(
     state: EvaluationState, context: EvaluationContext, event: TurnSuspended
 ) -> AreaChange[EvaluationState]:
-    continuation = event.continuation
+    continuation = bounded_wait(context.run, event.continuation)
     previous = next(
         (row for row in state.continuations if row.continuation_id == continuation.continuation_id),
         None,
@@ -766,6 +964,7 @@ def _suspend(
                     scope=invocation.scope,
                     deadline_at=context.run.deadline_at,
                     invocation=invocation.invocation,
+                    dispatch=dispatching_request(context.intents, invocation),
                 ),
             ),
         )
@@ -787,8 +986,12 @@ def _suspend(
     )
     updated = state.model_copy(update={"continuations": (*history, continuation)})
     _deadline_proof(updated, continuation)
+    # The strategy learns of the suspension exactly once, when the continuation is
+    # first recorded; a replay returns above without events.
+    notice: tuple[StrategyEvent, ...] = (TurnSuspended(continuation=continuation),)
     if _ready(updated, continuation):
-        return _authorize(updated, context, continuation)
+        change = _authorize(updated, context, continuation)
+        return change.model_copy(update={"events": (*notice, *change.events)})
     requests: list[Request] = []
     for job in _jobs(state, continuation):
         if _settled(job):
@@ -801,7 +1004,7 @@ def _suspend(
                 scope=job.scope, resource_id=_resource(job), deadline_at=continuation.deadline_at
             )
         )
-    return AreaChange(state=updated, requests=tuple(requests))
+    return AreaChange(state=updated, requests=tuple(requests), events=notice)
 
 
 def _deadline(

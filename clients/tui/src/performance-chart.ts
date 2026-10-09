@@ -1,5 +1,5 @@
 import type {ProtocolResponse, RunEvent} from '@vibesys/backend-client';
-import {roundNumberFromLabel} from '@vibesys/core-state';
+import {roundKeyFor} from '@vibesys/core-state';
 
 interface PerfPoint {
   round: number;
@@ -94,8 +94,9 @@ function performancePoints(
     });
   }
   for (const event of events ?? []) {
-    const round = roundNumberFromLabel(event.round_label);
-    if (round === null) continue;
+    const key = roundKeyFor(event);
+    if (key?.kind !== 'number') continue;
+    const round = key.number;
     const point = performancePointFromEvent(event, round);
     if (point !== null) byRound.set(round, point);
   }

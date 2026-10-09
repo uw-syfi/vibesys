@@ -101,6 +101,8 @@ class ReplyGenerator:
         for keyword in ("anyOf", "oneOf"):
             if keyword in schema:
                 options = cast("list[dict[str, object]]", schema[keyword])
+                if not (self._bold or self._filling) and self._leaves_null(options):
+                    return None
                 return self.value(rng.choice(options), root)
         kind = schema.get("type")
         if kind == "object":
@@ -125,6 +127,24 @@ class ReplyGenerator:
         if kind == "boolean":
             return bool(rng.getrandbits(1))
         return None
+
+    def _leaves_null(self, options: list[dict[str, object]]) -> bool:
+        """Return whether a careful agent answers ``null`` rather than invent a reference.
+
+        True for an optional string (``X | None``) with no vocabulary entry that
+        fits it: a free string cannot name anything the agent was offered, so
+        the only value it could give is an invented one.
+        """
+        present = [item for item in options if item.get("type") != "null"]
+        if len(present) != 1 or len(options) != len(present) + 1:
+            return False
+        option = present[0]
+        if option.get("type") != "string" or "enum" in option or "const" in option:
+            return False
+        pattern = option.get("pattern")
+        if pattern is None:
+            return True
+        return not any(re.search(str(pattern), word) for word in self._vocabulary)
 
     def _object(self, schema: dict[str, object], root: dict[str, object]) -> dict[str, Json]:
         properties = cast("dict[str, dict[str, object]]", schema.get("properties", {}))

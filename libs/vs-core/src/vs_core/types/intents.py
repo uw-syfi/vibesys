@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, assert_never
 
 from pydantic import BaseModel, Field, SerializeAsAny, ValidationInfo, model_validator
 
 from vs_core._outcomes import OutcomeCodecError, OutcomeValue, bind_outcome
 
-from .attempts import WorkspaceRequest
+from .attempts import (
+    CloseAttemptScope,
+    DiscardWorkspace,
+    EnsureWorkspace,
+    RestoreRevision,
+    RetainRevision,
+    SnapshotAndRetain,
+    WorkspaceRequest,
+)
 from .common import (
     CompletionStatus,
     ContractValidationError,
@@ -18,6 +26,7 @@ from .common import (
     ExecuteRegisteredOperation,
     LifecycleClass,
     Observation,
+    ObservationStatus,
     OperationId,
     OperationRef,
     OperationSchemaRef,
@@ -33,11 +42,31 @@ from .common import (
     Value,
     validate_setup_failure,
 )
-from .evaluation import Continuation, EvaluationRequest, EvidenceRef, MeasurementIdentity
+from .evaluation import (
+    CancelOwnedJob,
+    CollectEvidence,
+    Continuation,
+    EvaluationRequest,
+    EvidenceRef,
+    InspectOwnedJob,
+    MeasurementIdentity,
+    ObserveOwnedJob,
+    SubmitMeasurement,
+)
 from .evaluation_history import EvaluationTerminalFacts
 from .job_observations import JobProgress, MeasurementFailure
-from .sessions import SessionRequest, TurnSpec
-from .settlement import AdoptionRequest
+from .sessions import (
+    CancelTurn,
+    CloseSession,
+    DispatchTurn,
+    EnsureSession,
+    InspectTurn,
+    ResumeSessionTurn,
+    SessionRequest,
+    SnapshotAndRetainRun,
+    TurnSpec,
+)
+from .settlement import AdoptionRequest, AdoptRevision, VerifyAdoption
 
 
 class InspectRequest(RequestBase):
@@ -61,6 +90,21 @@ class BlockIntent(RequestBase):
 
     kind: Literal["block_intent"] = "block_intent"
     target: RequestId
+    diagnostic: str
+
+
+class IntentBlocked(Value):
+    """Diagnostic that reconciliation blocked one intent, published once.
+
+    request_id is the BlockIntent request, target the blocked intent. Emitted when
+    the block is first prepared, never on replay, so hosts and strategies can
+    surface it without reading the intent ledger.
+    """
+
+    kind: Literal["intent_blocked"] = "intent_blocked"
+    request_id: RequestId
+    target: RequestId
+    scope: Scope
     diagnostic: str
 
 
@@ -318,6 +362,17 @@ class DispatchAuthorized(Value):
     request_id: RequestId
 
 
+class ReissueProof(StrEnum):
+    """What an executor's own record proves about an inspected request that has no result."""
+
+    NEVER_BEGAN = "never_began"
+    """No begun record: the effect never started, so the same request is simply sent again."""
+
+    BEGUN_UNSEALED = "begun_unsealed"
+    """A begun record and no sealed result: the effect may have run, so the request is sent
+    again to resume, and its executor inspects the external effect before repeating it."""
+
+
 class TargetObservation(OutcomeValue):
     """Lifecycle facts for the inspected target, separate from query completion.
 
@@ -340,11 +395,14 @@ class TargetObservation(OutcomeValue):
     outcome_json: str | None = None
     outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
     operation_schema: OperationSchemaRef | None = None
+    reissue: ReissueProof | None = None
+    """Why core may send the inspected request out again, when the executor can prove it."""
 
     @model_validator(mode="after")
     def registered_outcome(self, info: ValidationInfo) -> TargetObservation:
         """Restore registered target subtypes at the owning codec boundary."""
         validate_setup_failure(self.observation, self.setup_failure)
+        self._validate_reissue()
         if self.evaluation_result is not None:
             self.evaluation_result.validate_observation(self.observation)
         if self.target_resource is not None and (
@@ -373,6 +431,32 @@ class TargetObservation(OutcomeValue):
                 "progress", "sequence and time must match its observation"
             )
         return bind_outcome(self, info)
+
+    def _validate_reissue(self) -> None:
+        observation = self.observation
+        owns_nothing = (
+            observation.resource_id is None
+            and not observation.children
+            and self.target_resource is None
+        )
+        match self.reissue:
+            case None:
+                return
+            case ReissueProof.NEVER_BEGAN:
+                valid = (
+                    observation.status == ObservationStatus.REJECTED
+                    and observation.terminal
+                    and not observation.accepted
+                    and owns_nothing
+                )
+            case ReissueProof.BEGUN_UNSEALED:
+                valid = observation.status == ObservationStatus.UNKNOWN and not observation.terminal
+            case _ as unreachable:
+                assert_never(unreachable)
+        if not valid:
+            raise ContractValidationError(
+                "reissue", f"{self.reissue.value} does not fit the observation it accompanies"
+            )
 
 
 class RequestObserved(OutcomeValue):
@@ -479,3 +563,43 @@ type IntentsEvent = Annotated[
     | DecisionDependencyResolved,
     Field(discriminator="kind"),
 ]
+
+
+def request_lifecycle(request: Request) -> LifecycleClass:
+    """Classify the canonical request without reducer or backend knowledge."""
+    match request:
+        case ExecuteRegisteredOperation():
+            lifecycle = request.operation.schema_ref.lifecycle
+        case DispatchTurn() | ResumeSessionTurn():
+            lifecycle = LifecycleClass.SESSION_TURN
+        case SubmitMeasurement():
+            lifecycle = LifecycleClass.OWNED_JOB
+        case (
+            InspectTurn()
+            | ObserveOwnedJob()
+            | InspectOwnedJob()
+            | CollectEvidence()
+            | InspectRequest()
+            | VerifyAdoption()
+        ):
+            lifecycle = LifecycleClass.QUERY
+        case (
+            EnsureWorkspace()
+            | RestoreRevision()
+            | SnapshotAndRetain()
+            | SnapshotAndRetainRun()
+            | RetainRevision()
+            | DiscardWorkspace()
+            | CloseAttemptScope()
+            | EnsureSession()
+            | CancelTurn()
+            | CloseSession()
+            | CancelOwnedJob()
+            | AdoptRevision()
+            | CancelOwnedResource()
+            | BlockIntent()
+        ):
+            lifecycle = LifecycleClass.IDEMPOTENT_WRITE
+        case _:
+            assert_never(request)
+    return lifecycle

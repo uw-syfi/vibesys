@@ -36,6 +36,7 @@ from vs_agent.contracts import (
     AgentTurnTimeoutError,
     AgentUsage,
     MCPServerSpec,
+    SessionDisposition,
 )
 from vs_agent.events import (
     AgentOutputChannel,
@@ -170,6 +171,7 @@ __all__ = [
     "Pending",
     "RoundProgress",
     "SessionConfigurationError",
+    "SessionDisposition",
     "SessionPersistenceError",
     "SessionResumeError",
     "SessionScope",

@@ -57,9 +57,17 @@ class WorkspaceResource(Protocol):
 
     def retain(self, revision: str, reference: str) -> None: ...
 
+    def has_revision(self, revision: str) -> bool: ...
+
+    def matches_revision(self, revision: str) -> bool: ...
+
+    def find_snapshot(self, label: str) -> str | None: ...
+
     def pending_changes(self) -> list[str]: ...
 
     def candidate_patch(self, revision: str) -> str: ...
+
+    def is_retained(self, revision: str) -> bool: ...
 
     def trusted_input_changes(self) -> list[str]: ...
 
@@ -93,6 +101,10 @@ class WorkspaceResourceProvider(Protocol):
     def supports_parallel_candidates(self) -> bool: ...
 
     def create_candidate(self, workspace_id: str, revision: str, /) -> WorkspaceResource: ...
+
+    def reattach_candidate(self, workspace_id: str, revision: str, /) -> WorkspaceResource | None:
+        """Reopen a candidate worktree a stopped host left on disk, keeping its content."""
+        ...
 
 
 class OwnedWorkspaces(Workspaces, Protocol):
@@ -140,7 +152,14 @@ class RuntimeWorkspace:
         self._resource = resource
         self._id = resource.id
         self.access_recovery = WorkspaceAccessRecovery()
+        if owner.access_fence is not None:
+            self.guard_access(owner.access_fence)
         self._closed = False
+
+    def guard_access(self, fenced_by: Callable[[Path], tuple[str, ...]]) -> None:
+        """Refuse snapshots of this workspace while *fenced_by* names its unjudged invocations."""
+        resource = self._resource
+        self.access_recovery.guard(lambda: fenced_by(resource.path))
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -206,6 +225,25 @@ class RuntimeWorkspace:
             self._ensure_open()
             await run_sync(self._resource.retain, revision, f"retained-{digest}")
 
+    async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
+        revision = await self.snapshot(label)
+        await self.retain(revision, label=retention_label)
+        return revision
+
+    async def has_revision(self, revision: str) -> bool:
+        self._ensure_open()
+        return await run_sync(self._resource.has_revision, revision)
+
+    async def matches_revision(self, revision: str) -> bool:
+        self._ensure_open()
+        async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402310 [SLF001]; a workspace handle delegates synchronization to its owning collection.
+            return await run_sync(self._resource.matches_revision, revision)
+
+    async def find_snapshot(self, label: str) -> str | None:
+        self._ensure_open()
+        async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402311 [SLF001]; a workspace handle delegates synchronization to its owning collection.
+            return await run_sync(self._resource.find_snapshot, label)
+
     async def pending_changes(self) -> list[str]:
         self._ensure_open()
         return await run_sync(self._resource.pending_changes)
@@ -262,7 +300,17 @@ class RuntimeWorkspaces:
         self._close_task: asyncio.Task[None] | None = None
         self._sessions: RuntimeWorkspaceAgentSessions | None = None
         self._evaluations: set[asyncio.Task[object]] = set()
+        self.access_fence: Callable[[Path], tuple[str, ...]] | None = None
         self.root = RuntimeWorkspace(self, resources.root)
+
+    def guard_access(self, fenced_by: Callable[[Path], tuple[str, ...]]) -> None:
+        """Refuse snapshots of any workspace of this collection while *fenced_by* names a fence.
+
+        Applies to the root, to live candidates, and to candidates opened later.
+        """
+        self.access_fence = fenced_by
+        for handle in (self.root, *self._candidates.values()):
+            handle.guard_access(fenced_by)
 
     def _attach_sessions(self, sessions: RuntimeWorkspaceAgentSessions) -> None:
         """Complete the private ownership cycle during runtime construction."""
@@ -318,16 +366,54 @@ class RuntimeWorkspaces:
                     else:
                         await run_sync(task.result().close)
                     raise
-                candidate = RuntimeCandidateWorkspace(self, resource)
-                self._candidates[workspace_id] = candidate
-                self._candidate_locks[workspace_id] = asyncio.Lock()
-                return candidate
+                return self._register(workspace_id, resource)
+
+    def _register(
+        self, workspace_id: str, resource: WorkspaceResource
+    ) -> RuntimeCandidateWorkspace:
+        candidate = RuntimeCandidateWorkspace(self, resource)
+        self._candidates[workspace_id] = candidate
+        self._candidate_locks[workspace_id] = asyncio.Lock()
+        return candidate
+
+    async def reattach_candidate(self, member_id: str) -> RuntimeCandidateWorkspace | None:
+        """Reopen the candidate a stopped host left on disk for this member, if any.
+
+        The worktree keeps its content, unlike :meth:`create_candidate`, which
+        replaces a leftover directory. Returns the live handle when this process
+        already has one, and ``None`` when no worktree exists for the member.
+        """
+        workspace_id = member_workspace_id(member_id)
+        async with self._lifecycle_lock:
+            if self._closed:
+                message = "workspace collection is closed"
+                raise RuntimeContractError(message)
+            async with self._root_lock:
+                live = self._candidates.get(workspace_id)
+                if live is not None:
+                    return live
+                revision = self.root.revision
+                if revision is None:
+                    return None
+                resource = await run_sync(
+                    self._resources.reattach_candidate, workspace_id, revision
+                )
+                if resource is None:
+                    return None
+                return self._register(workspace_id, resource)
+
+    def live_candidate(self, member_id: str) -> RuntimeCandidateWorkspace | None:
+        """Return the live candidate of one member, or ``None`` once released."""
+        return self._candidates.get(member_workspace_id(member_id))
 
     async def adopt(self, revision: str) -> None:
         await self.root.restore(revision)
 
     async def export_patch(self, revision: str) -> str:
         return await self.root.candidate_patch(revision)
+
+    async def retains(self, revision: str) -> bool:
+        return await run_sync(self.resource_for(self.root).is_retained, revision)
 
     def resource_for(self, workspace: Workspace) -> WorkspaceResource:
         if isinstance(workspace, RuntimeWorkspace):

@@ -245,25 +245,33 @@ def _built_in_python(expr: ast.expr) -> str | None:
             return None
 
 
-def _assignments(scope: ast.AST, name: str) -> tuple[list[ast.expr], list[ast.AugAssign]]:
-    values: list[ast.expr] = []
-    augmented: list[ast.AugAssign] = []
+@cache
+def _assignment_index(
+    scope: ast.AST,
+) -> dict[str, tuple[list[ast.expr], list[ast.AugAssign]]]:
+    """Every assigned name in ``scope``, in ``ast.walk`` order (top-level only for a module).
+
+    Built once per scope: a lookup per ``Name`` node would otherwise re-walk the scope.
+    """
+    index: dict[str, tuple[list[ast.expr], list[ast.AugAssign]]] = {}
     nodes = ast.walk(scope) if not isinstance(scope, ast.Module) else iter(scope.body)
     for node in nodes:
         match node:
-            case ast.Assign(targets=targets, value=value) if any(
-                isinstance(t, ast.Name) and t.id == name for t in targets
-            ):
-                values.append(value)
-            case ast.AnnAssign(target=ast.Name(id=target), value=ast.expr() as value) if (
-                target == name
-            ):
-                values.append(value)
-            case ast.AugAssign(target=ast.Name(id=target)) if target == name:
-                augmented.append(node)
+            case ast.Assign(targets=targets, value=value):
+                names = {t.id for t in targets if isinstance(t, ast.Name)}
+                for name in sorted(names):
+                    index.setdefault(name, ([], []))[0].append(value)
+            case ast.AnnAssign(target=ast.Name(id=target), value=ast.expr() as value):
+                index.setdefault(target, ([], []))[0].append(value)
+            case ast.AugAssign(target=ast.Name(id=target)):
+                index.setdefault(target, ([], []))[1].append(node)
             case _:
                 pass
-    return values, augmented
+    return index
+
+
+def _assignments(scope: ast.AST, name: str) -> tuple[list[ast.expr], list[ast.AugAssign]]:
+    return _assignment_index(scope).get(name, ([], []))
 
 
 # A function name mapped to its ``RenderedPrompt`` parameters: (positional index, name).
@@ -434,7 +442,12 @@ def _minting_sites(path: Path, *, calls: bool) -> list[int]:
     Tests may call the constructor to prove it rejects a foreign token.
     """
     lines: list[int] = []
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+    source = path.read_text(encoding="utf-8")
+    # Every site below names RenderedPrompt, _RENDER_TOKEN or a vs_prompts module,
+    # so a file without those words has none; skip parsing it.
+    if not any(word in source for word in (*_MINTING_NAMES, "vs_prompts")):
+        return lines
+    for node in ast.walk(ast.parse(source, filename=str(path))):
         match node:
             case ast.Call(
                 func=ast.Name(id="RenderedPrompt") | ast.Attribute(attr="RenderedPrompt")

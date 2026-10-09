@@ -9,64 +9,69 @@ import {
   removeExecutionStatus,
 } from './execution-status.js';
 import {
+  ownProjectionInput,
+  publishProjectionFields,
+  type ReadonlyProjection,
+} from './publication.js';
+import {type RoundKey, roundKeyFor, roundNumberFor, sameRoundKey} from './round-key.js';
+import {
   type AgentPhase,
   adoptRunMapArrays,
   applyRunMapEvent,
   indexRunMapArrays,
   mergePhaseLists,
   mergeRoundLists,
-  type RoundSummary,
-  roundNumberFromLabel,
+  type RoundState,
 } from './run-map.js';
 
 export type AgentExecutionMode = 'thinking' | 'responding' | 'tool' | 'waiting';
 
 export interface ActiveAgentExecution {
-  executionId: string;
-  agentKind: string;
-  roundLabel: string | null;
-  roundNumber: number | null;
-  stage: string;
-  attempt: number | null;
-  assignment: string;
-  startedAt: string;
-  activity: {mode: AgentExecutionMode; summary: string; tool?: string | null};
-  driver?: string | null;
-  provider?: string | null;
-  model?: string | null;
+  readonly executionId: string;
+  readonly agentKind: string;
+  readonly roundLabel: string | null;
+  readonly roundNumber: number | null;
+  readonly roundKey: RoundKey | null;
+  readonly stage: string;
+  readonly attempt: number | null;
+  readonly assignment: string;
+  readonly startedAt: string;
+  readonly activity: Readonly<{mode: AgentExecutionMode; summary: string; tool?: string | null}>;
+  readonly driver?: string | null;
+  readonly provider?: string | null;
+  readonly model?: string | null;
 }
 
 export interface TodoItem {
-  content: string;
-  status: string;
+  readonly content: string;
+  readonly status: string;
 }
 
 export interface ExecutionTodos {
-  executionId?: string | null;
-  agentKind: string | null;
-  roundNumber: number | null;
-  items: TodoItem[];
+  readonly executionId?: string | null;
+  readonly agentKind: string | null;
+  readonly roundNumber: number | null;
+  readonly roundKey: RoundKey | null;
+  readonly items: readonly TodoItem[];
 }
 
 export interface UsageMeter {
-  inputTokens: number;
-  contextWindow: number | null;
-  model: string | null;
+  readonly inputTokens: number;
+  readonly contextWindow: number | null;
+  readonly model: string | null;
 }
 
 export interface BenchmarkRecord {
-  sequence: number;
-  roundNumber: number | null;
-  metric: string;
-  value: number;
-  unit: string;
+  readonly sequence: number;
+  readonly roundNumber: number | null;
+  readonly roundKey: RoundKey | null;
+  readonly metric: string;
+  readonly value: number;
+  readonly unit: string;
 }
 
-/** A round as core state carries the run map's timing, status, and profile result. */
-export type RoundState = RoundSummary;
-
 type RunEventData = NonNullable<RunEvent['data']>;
-export type TypedToolResult = Extract<RunEventData, {kind?: 'tool_result'}>;
+export type TypedToolResult = ReadonlyProjection<Extract<RunEventData, {kind?: 'tool_result'}>>;
 /** Typed structure a producer preserved alongside the raw tool-result text. */
 export type ToolResultPayload = NonNullable<TypedToolResult['payload']>;
 
@@ -79,17 +84,17 @@ export const DEFAULT_CHAT_THREAD_ID = 'default';
  * agent selection of its own.
  */
 export interface ChatThread {
-  id: string;
+  readonly id: string;
   /** Backend-owned title; empty until the server has derived or been given one. */
-  title: string;
-  driver: string | null;
-  provider: string | null;
-  model: string | null;
+  readonly title: string;
+  readonly driver: string | null;
+  readonly provider: string | null;
+  readonly model: string | null;
 }
 
 export interface TranscriptEntry {
-  id: string;
-  kind:
+  readonly id: string;
+  readonly kind:
     | 'assistant'
     | 'prompt'
     | 'analysis'
@@ -98,51 +103,52 @@ export interface TranscriptEntry {
     | 'subprocess'
     | 'status'
     | 'result';
-  content: string;
-  label?: string;
-  tone?: 'normal' | 'success' | 'failure';
-  agentKind?: string;
-  roundLabel?: string;
-  roundNumber?: number;
-  turnId?: string;
-  invocationId?: string;
-  startsTurn?: boolean;
-  toolCall?: string;
+  readonly content: string;
+  readonly label?: string;
+  readonly tone?: 'normal' | 'success' | 'failure';
+  readonly agentKind?: string;
+  readonly roundLabel?: string;
+  readonly roundNumber?: number;
+  readonly roundKey?: RoundKey;
+  readonly turnId?: string;
+  readonly invocationId?: string;
+  readonly startsTurn?: boolean;
+  readonly toolCall?: string;
   /**
    * A shell command to give code treatment instead of word-wrapped prose.
    * Populated straight from a typed `gate_started` event's `command` field,
    * or, for recorded/legacy prose, split out by `splitFrameworkValidationCommand`.
    */
-  command?: string;
-  toolResponse?: string;
-  toolName?: string;
-  toolCallId?: string;
-  toolArguments?: Record<string, unknown>;
-  toolResult?: TypedToolResult;
+  readonly command?: string;
+  readonly toolResponse?: string;
+  readonly toolName?: string;
+  readonly toolCallId?: string;
+  readonly toolArguments?: ReadonlyProjection<Record<string, unknown>>;
+  readonly toolResult?: TypedToolResult;
 }
 
 /** Backend diagnostic facts. Visibility and dismissal belong to the UI. */
 export interface CoreDiagnostic {
-  id: string | null;
-  code: string | null;
-  failureKind: Diagnostic['scope'] | 'run_interruption';
-  summary: string;
-  detail: string | null;
-  hint: string | null;
-  severity: 'warning' | 'error' | 'fatal';
-  scope: Diagnostic['scope'];
+  readonly id: string | null;
+  readonly code: string | null;
+  readonly failureKind: Diagnostic['scope'] | 'run_interruption';
+  readonly summary: string;
+  readonly detail: string | null;
+  readonly hint: string | null;
+  readonly severity: 'warning' | 'error' | 'fatal';
+  readonly scope: Diagnostic['scope'];
   /** Which subsystem raised it, e.g. `loop` on a framework warning (#692). */
-  source: string | null;
-  agentKind: string | null;
-  roundLabel: string | null;
-  invocationId: string | null;
-  sequence: number;
+  readonly source: string | null;
+  readonly agentKind: string | null;
+  readonly roundLabel: string | null;
+  readonly invocationId: string | null;
+  readonly sequence: number;
 }
 
 export interface RunLifetimeBoundary {
-  event: RunEvent;
+  readonly event: ReadonlyProjection<RunEvent>;
   /** Last event observed before a resumed run_started boundary, if known. */
-  closeout: {sequence: number; timestamp: string} | null;
+  readonly closeout: Readonly<{sequence: number; timestamp: string}> | null;
 }
 
 function isRunLifetimeBoundary(event: RunEvent): boolean {
@@ -179,7 +185,7 @@ export interface CoreState {
    * Foreign data is diagnosed and rejected; only `reduceEventRebootstrap` may
    * build a replacement projection that adopts another identity.
    */
-  runId: string | null;
+  readonly runId: string | null;
   /**
    * The contiguous stream position: every event up to and including this
    * sequence has been folded, so a subscription resumes from here.
@@ -188,7 +194,7 @@ export interface CoreState {
    * ordered events, move it. `reduceResponseEvents` folds out of band and
    * leaves it where it was.
    */
-  sequence: number;
+  readonly sequence: number;
   /**
    * Sequences folded out of band, all of them strictly above `sequence`.
    *
@@ -198,47 +204,49 @@ export interface CoreState {
    * list is bounded by how far one RPC response can outrun the stream rather
    * than by the length of the run.
    */
-  foldedOutOfBand: readonly number[];
-  status: CoreRunStatus;
-  agentKind: string | null;
-  roundLabel: string | null;
-  outerLoop: string | null;
+  readonly foldedOutOfBand: readonly number[];
+  readonly status: CoreRunStatus;
+  /** @deprecated Last event cursor; use `activeRunFocus` for current work. */
+  readonly agentKind: string | null;
+  /** @deprecated Last event cursor; use `activeRunFocus` for current work. */
+  readonly roundLabel: string | null;
+  readonly outerLoop: string | null;
   /**
    * The agent roles the backend advertised in `run_started`; null on
    * recordings that predate the field (see `expectedRolesForSeeding`).
    */
-  expectedRoles: readonly string[] | null;
-  maxRounds: number | null;
-  rounds: RoundState[];
-  phases: AgentPhase[];
+  readonly expectedRoles: readonly string[] | null;
+  readonly maxRounds: number | null;
+  readonly rounds: readonly RoundState[];
+  readonly phases: readonly AgentPhase[];
   /**
    * Timestamp of the newest event the run map folded, or null before the first
    * one. The run map owns the field and its meaning; see `RunMapState`.
    */
-  lastEventTimestamp: string | null;
+  readonly lastEventTimestamp: string | null;
   /** Sequence of the latest non-chat event folded through the run map. */
-  lastRunMapSequence: number;
+  readonly lastRunMapSequence: number;
   /** Run lifetime boundaries retained from the replayed event stream. */
-  runLifetimeBoundaries: readonly RunLifetimeBoundary[];
-  activeExecutions: Record<string, ActiveAgentExecution>;
+  readonly runLifetimeBoundaries: readonly RunLifetimeBoundary[];
+  readonly activeExecutions: Readonly<Record<string, ActiveAgentExecution>>;
   /** Freshest structured status for each active or not-yet-checkpointed execution. */
-  executionStatuses: Record<string, ExecutionStatus>;
-  transcript: TranscriptEntry[];
+  readonly executionStatuses: Readonly<Record<string, ExecutionStatus>>;
+  readonly transcript: readonly TranscriptEntry[];
   /** The default thread's transcript; equals `chatTranscripts[DEFAULT_CHAT_THREAD_ID]`. */
-  chatTranscript: TranscriptEntry[];
+  readonly chatTranscript: readonly TranscriptEntry[];
   /** Every thread's transcript, keyed by thread id. */
-  chatTranscripts: Record<string, TranscriptEntry[]>;
+  readonly chatTranscripts: Readonly<Record<string, readonly TranscriptEntry[]>>;
   /** The default thread first, then created threads in replay order. */
-  chatThreads: ChatThread[];
-  todos: ExecutionTodos[];
-  usage: UsageMeter | null;
-  benchmarks: BenchmarkRecord[];
-  diagnostics: CoreDiagnostic[];
+  readonly chatThreads: readonly ChatThread[];
+  readonly todos: readonly ExecutionTodos[];
+  readonly usage: UsageMeter | null;
+  readonly benchmarks: readonly BenchmarkRecord[];
+  readonly diagnostics: readonly CoreDiagnostic[];
   /** Sequence of the latest semantic experiment invalidation. */
-  experimentsRevision: number;
-  typedToolEvents: boolean;
+  readonly experimentsRevision: number;
+  readonly typedToolEvents: boolean;
   /** Per thread id: typed tool events seen, so legacy tool chunks are dropped. */
-  chatTypedToolEvents: Record<string, boolean>;
+  readonly chatTypedToolEvents: Readonly<Record<string, boolean>>;
   /**
    * Every event this state folded had `sequence > historyAfterSequence`.
    *
@@ -246,11 +254,13 @@ export interface CoreState {
    * the newest sequence the client skipped and lowers it to `0` as older chunks
    * are folded in through `reduceEventPrefix`.
    */
-  historyAfterSequence: number;
+  readonly historyAfterSequence: number;
 }
 
+type MutableCoreState = {-readonly [Key in keyof CoreState]: CoreState[Key]};
+
 export function initialCoreState(): CoreState {
-  return {
+  return publishCoreState({
     runId: null,
     sequence: 0,
     foldedOutOfBand: [],
@@ -283,7 +293,14 @@ export function initialCoreState(): CoreState {
     typedToolEvents: false,
     chatTypedToolEvents: {},
     historyAfterSequence: 0,
-  };
+  });
+}
+
+function publishCoreState(state: CoreState): CoreState {
+  // Lazy run-map accessors publish their arrays when first read. Every eager
+  // projection reference is frozen here; projection sites own any protocol
+  // references first, so neither caller values nor the hidden index are frozen.
+  return publishProjectionFields(state);
 }
 
 /**
@@ -321,13 +338,9 @@ function endedRunStatus(status: CoreRunStatus): EndedRunStatus | null {
 }
 
 /** The transcript for one chat thread; unknown threads read as empty. */
-export function chatTranscriptFor(state: CoreState, threadId: string): TranscriptEntry[] {
-  return state.chatTranscripts[threadId] ?? [];
-}
-
 export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreState {
   const identity = foldRunIdentity(state, snapshot.run_id, snapshot.sequence);
-  if (!identity.accepted) return identity.state;
+  if (!identity.accepted) return publishCoreState(identity.state);
   state = identity.state;
   // The thread registry is a server projection of history already written, and
   // under a tail bootstrap it names threads created before the replay window.
@@ -345,19 +358,21 @@ export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreSta
       }),
     state,
   );
-  if (snapshot.sequence < registered.sequence) return registered;
+  if (snapshot.sequence < registered.sequence) return publishCoreState(registered);
   // Boot issues the snapshot query and the subscription concurrently, so a
   // snapshot can arrive after the events it was taken alongside. Once the fold
   // has seen the run end, a snapshot no newer than the fold cannot un-end it;
   // a genuinely newer one (a resumed run) still applies.
-  if (hasRunEnded(registered) && snapshot.sequence <= registered.sequence) return registered;
+  if (hasRunEnded(registered) && snapshot.sequence <= registered.sequence) {
+    return publishCoreState(registered);
+  }
   const next = cloneCoreStateWith(registered, {
     status: snapshot.status,
     agentKind: snapshot.agent_kind ?? null,
     roundLabel: snapshot.round_label ?? null,
     activeExecutions: activeExecutionsFromCheckpoint(snapshot.active_executions ?? []),
   });
-  return next;
+  return publishCoreState(next);
 }
 
 export type ActiveExecutionCheckpoint = NonNullable<RunSnapshot['active_executions']>;
@@ -372,7 +387,7 @@ export function reconcileActiveExecutions(
   const next = cloneCoreStateWith(state, {
     activeExecutions: activeExecutionsFromCheckpoint(executions),
   });
-  return next;
+  return publishCoreState(next);
 }
 
 /**
@@ -396,14 +411,16 @@ export function reduceEventBatch(
   historyAfterSequence?: number,
 ): CoreState {
   const batch = foldIdentityAwareBatch(state, events);
-  if (!batch.acceptsMetadata) return batch.state;
+  if (!batch.acceptsMetadata) return publishCoreState(batch.state);
   const reduced =
     historyAfterSequence === undefined
       ? batch.state
       : cloneCoreStateWith(batch.state, {historyAfterSequence});
-  return activeExecutions === undefined
-    ? reduced
-    : reconcileActiveExecutions(reduced, activeExecutions, throughSequence);
+  return publishCoreState(
+    activeExecutions === undefined
+      ? reduced
+      : reconcileActiveExecutions(reduced, activeExecutions, throughSequence),
+  );
 }
 
 /**
@@ -440,11 +457,13 @@ export function reduceEventRebootstrap(
   // proves it still describes the same run. Unknown or mixed identity resets
   // it rather than relabeling another run's threads.
   if (state.runId === null || reduced.runId !== state.runId || !batch.acceptsMetadata) {
-    return reduced;
+    return publishCoreState(reduced);
   }
-  return cloneCoreStateWith(reduced, {
-    chatThreads: mergeChatThreadsPrefix(state.chatThreads, reduced.chatThreads),
-  });
+  return publishCoreState(
+    cloneCoreStateWith(reduced, {
+      chatThreads: mergeChatThreadsPrefix(state.chatThreads, reduced.chatThreads),
+    }),
+  );
 }
 
 /**
@@ -483,7 +502,7 @@ export function reduceEventPrefix(
       runId: state.runId,
       runLifetimeBoundaries: state.runLifetimeBoundaries,
     },
-    [...prefix.acceptedEvents, ...boundaries.map(boundary => boundary.event)].sort(
+    [...prefix.acceptedEvents, ...boundaries.map(replayBoundaryEvent)].sort(
       (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0),
     ),
   );
@@ -561,7 +580,7 @@ export function reduceEventPrefix(
       : state.historyAfterSequence,
   };
   indexRunMapArrays(merged);
-  return merged;
+  return publishCoreState(merged);
 }
 
 /**
@@ -683,8 +702,8 @@ function entryOrder(entry: TranscriptEntry | undefined): number {
 }
 
 function mergeChatTranscriptsPrefix(
-  older: Record<string, TranscriptEntry[]>,
-  newer: Record<string, TranscriptEntry[]>,
+  older: Readonly<Record<string, readonly TranscriptEntry[]>>,
+  newer: Readonly<Record<string, readonly TranscriptEntry[]>>,
 ): Record<string, TranscriptEntry[]> {
   const merged: Record<string, TranscriptEntry[]> = {};
   for (const [threadId, entries] of Object.entries(older)) {
@@ -741,7 +760,7 @@ function sameTodoTarget(candidate: ExecutionTodos, incoming: ExecutionTodos): bo
   return (
     candidate.executionId == null &&
     candidate.agentKind === incoming.agentKind &&
-    candidate.roundNumber === incoming.roundNumber
+    sameRoundKey(candidate.roundKey, incoming.roundKey)
   );
 }
 
@@ -778,13 +797,18 @@ function mergeRunLifetimeBoundaries(
   );
 }
 
+/** Restores the generated input view for replay; the fold never mutates events. */
+function replayBoundaryEvent(boundary: RunLifetimeBoundary): RunEvent {
+  return boundary.event as RunEvent;
+}
+
 function boundaryFor(
   boundaries: readonly RunLifetimeBoundary[],
   event: RunEvent,
   state: CoreState,
 ): RunLifetimeBoundary {
   const sequence = event.sequence;
-  if (sequence === undefined) return {event, closeout: null};
+  if (sequence === undefined) return {event: ownProjectionInput(event), closeout: null};
   const known = boundaries.find(boundary => boundary.event.sequence === sequence);
   // Chat events return before the run map fold, so the map's last timestamp
   // and sequence, rather than the core cursor, identify the closeout point.
@@ -795,7 +819,7 @@ function boundaryFor(
       ? {sequence: state.lastRunMapSequence, timestamp: state.lastEventTimestamp}
       : null;
   return {
-    event,
+    event: ownProjectionInput(event),
     closeout:
       observed !== null && observed.sequence > (known?.closeout?.sequence ?? -1)
         ? observed
@@ -804,7 +828,7 @@ function boundaryFor(
 }
 
 export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
-  return foldEvent(state, event, null);
+  return publishCoreState(foldEvent(state, event, null));
 }
 
 /**
@@ -825,7 +849,7 @@ export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
  * and only advance the cursor over them.
  */
 export function reduceResponseEvents(state: CoreState, events: readonly RunEvent[]): CoreState {
-  return foldIdentityAwareBatch(state, events, 'response').state;
+  return publishCoreState(foldIdentityAwareBatch(state, events, 'response').state);
 }
 
 /** Which of the two routes a journal event reached the fold by. */
@@ -912,6 +936,12 @@ function foldRunIdentity(
   };
 }
 
+/**
+ * Clone-stage contract: `foldAcceptedEvent` owns the only mutable stage of an
+ * event fold. It clones first, its `apply*` stages may replace fields on that
+ * clone, and the public reducer freezes published arrays only after the fold.
+ * No stage may mutate arrays or objects reachable from the input state.
+ */
 function foldEvent(
   state: CoreState,
   event: RunEvent,
@@ -939,11 +969,12 @@ function foldAcceptedEvent(
     return route === 'stream' ? advanceStreamCursor(state, sequence) : state;
   }
   let next = cloneCoreState(state);
+  const mutable = next as MutableCoreState;
   if (route === 'stream') {
-    next.sequence = Math.max(state.sequence, sequence);
-    next.foldedOutOfBand = aboveCursor(state.foldedOutOfBand, next.sequence);
+    mutable.sequence = Math.max(state.sequence, sequence);
+    mutable.foldedOutOfBand = aboveCursor(state.foldedOutOfBand, next.sequence);
   } else if (sequence > 0) {
-    next.foldedOutOfBand = [...state.foldedOutOfBand, sequence];
+    mutable.foldedOutOfBand = [...state.foldedOutOfBand, sequence];
   }
   next = applyDiagnosticEvent(next, event);
   next = applyAgentExecutionEvent(next, event);
@@ -954,8 +985,8 @@ function foldAcceptedEvent(
   // covers chat `usage_update` events, which `applyRunFacts` never sees.
   if (event.agent_kind === 'chat') return applyChatEvent(next, event, folder);
   next = applyAgentStatusEvent(next, event);
-  if (event.agent_kind) next.agentKind = event.agent_kind;
-  if (event.round_label) next.roundLabel = event.round_label;
+  if (event.agent_kind) (next as MutableCoreState).agentKind = event.agent_kind;
+  if (event.round_label) (next as MutableCoreState).roundLabel = event.round_label;
   next = applyRunMapProjection(next, state, event, sequence);
   next = applyRunFacts(next, event, sequence);
   next = applyRunTranscript(next, event, folder);
@@ -983,38 +1014,42 @@ function applyRunMapProjection(
   event: RunEvent,
   sequence: number,
 ): CoreState {
+  const mutable = next as MutableCoreState;
   const boundary =
     event.type === 'run_started' && event.sequence !== undefined
       ? boundaryFor(previous.runLifetimeBoundaries, event, previous)
       : isRunLifetimeBoundary(event)
-        ? {event, closeout: null}
+        ? {event: ownProjectionInput(event), closeout: null}
         : null;
   const runMap = applyRunMapEvent(next, event, boundary?.closeout?.timestamp ?? null);
-  next.outerLoop = runMap.outerLoop;
-  next.expectedRoles = runMap.expectedRoles;
+  mutable.outerLoop = runMap.outerLoop;
+  mutable.expectedRoles = runMap.expectedRoles;
   adoptRunMapArrays(next, runMap);
-  next.lastEventTimestamp = runMap.lastEventTimestamp;
-  next.lastRunMapSequence = sequence;
+  mutable.lastEventTimestamp = runMap.lastEventTimestamp;
+  mutable.lastRunMapSequence = sequence;
   if (boundary !== null) {
-    next.runLifetimeBoundaries = mergeRunLifetimeBoundaries(next.runLifetimeBoundaries, [boundary]);
+    mutable.runLifetimeBoundaries = mergeRunLifetimeBoundaries(next.runLifetimeBoundaries, [
+      boundary,
+    ]);
   }
   return next;
 }
 
 function applyRunFacts(state: CoreState, event: RunEvent, sequence: number): CoreState {
+  const mutable = state as MutableCoreState;
   const data = event.data;
-  if (data?.kind === 'tool_call' || data?.kind === 'tool_result') state.typedToolEvents = true;
-  if (data?.kind === 'todo_update') state.todos = updateTodos(state.todos, event);
+  if (data?.kind === 'tool_call' || data?.kind === 'tool_result') mutable.typedToolEvents = true;
+  if (data?.kind === 'todo_update') mutable.todos = updateTodos(state.todos, event);
   if (data?.kind === 'usage_update') {
-    state.usage = {
+    mutable.usage = {
       inputTokens: data.input_tokens,
       contextWindow: data.context_window ?? null,
       model: data.model ?? null,
     };
   }
   const benchmark = benchmarkFromEvent(event, sequence);
-  if (benchmark !== null) state.benchmarks = [...state.benchmarks, benchmark];
-  if (data?.kind === 'experiments_changed') state.experimentsRevision = sequence;
+  if (benchmark !== null) mutable.benchmarks = [...state.benchmarks, benchmark];
+  if (data?.kind === 'experiments_changed') mutable.experimentsRevision = sequence;
   // The backend owns the run's lifecycle and publishes every move through it,
   // so the projection folds the status it is told rather than inferring one.
   if (data?.kind === 'run_status_changed') return applyRunStatus(state, data.status);
@@ -1035,10 +1070,12 @@ export function recordsBenchmark(event: RunEvent): boolean {
 
 function benchmarkFromEvent(event: RunEvent, sequence: number): BenchmarkRecord | null {
   const data = event.data;
+  const roundKey = roundKeyFor(event);
   if (data?.kind === 'benchmark_result') {
     return {
       sequence,
-      roundNumber: roundNumberFromLabel(event.round_label),
+      roundNumber: roundNumberFor(roundKey),
+      roundKey,
       metric: data.metric,
       value: data.value,
       unit: data.unit,
@@ -1064,7 +1101,8 @@ function benchmarkFromEvent(event: RunEvent, sequence: number): BenchmarkRecord 
   }
   return {
     sequence,
-    roundNumber: roundNumberFromLabel(event.round_label),
+    roundNumber: roundNumberFor(roundKey),
+    roundKey,
     metric: data.metric,
     value: data.value,
     unit: data.unit ?? data.metric,
@@ -1082,7 +1120,8 @@ function applyRunTranscript(
   if (legacyToolChunk) return state;
   const entry = eventToTranscriptEntry(event);
   if (entry === null) return state;
-  if (folder === null) state.transcript = appendTranscript(state.transcript, entry);
+  if (folder === null)
+    (state as MutableCoreState).transcript = appendTranscript(state.transcript, entry);
   else folder.buffer(RUN_TRANSCRIPT, state.transcript).append(entry);
   return state;
 }
@@ -1090,8 +1129,9 @@ function applyRunTranscript(
 function applyRunLifecycle(state: CoreState, event: RunEvent): CoreState {
   const data = event.data;
   if (event.type === 'run_started') {
-    state.status = 'running';
-    if (data?.kind === 'run_started') state.maxRounds = data.max_rounds ?? null;
+    const mutable = state as MutableCoreState;
+    mutable.status = 'running';
+    if (data?.kind === 'run_started') mutable.maxRounds = data.max_rounds ?? null;
   }
   if (event.type === 'configuration_failed') return terminate(state, 'failed');
   if (event.type === 'run_finished') return terminate(state, 'completed');
@@ -1180,28 +1220,33 @@ function activeExecutionsFromCheckpoint(
   executions: ActiveExecutionCheckpoint,
 ): Record<string, ActiveAgentExecution> {
   return Object.fromEntries(
-    executions.map(execution => [
-      execution.execution_id,
-      {
-        executionId: execution.execution_id,
-        agentKind: execution.agent_kind,
-        roundLabel: execution.round_label ?? null,
-        roundNumber: roundNumberFromLabel(execution.round_label),
-        stage: execution.stage,
-        attempt: execution.attempt ?? null,
-        assignment: execution.assignment,
-        startedAt: execution.started_at,
-        activity: {
-          mode: execution.activity.mode,
-          summary: execution.activity.summary,
-          tool: execution.activity.tool ?? null,
-        },
-        driver: execution.driver ?? null,
-        provider: execution.provider ?? null,
-        model: execution.model ?? null,
-      },
-    ]),
+    executions.map(execution => [execution.execution_id, activeExecutionFromCheckpoint(execution)]),
   );
+}
+
+function activeExecutionFromCheckpoint(
+  execution: ActiveExecutionCheckpoint[number],
+): ActiveAgentExecution {
+  const roundKey = roundKeyFor(execution);
+  return {
+    executionId: execution.execution_id,
+    agentKind: execution.agent_kind,
+    roundLabel: execution.round_label ?? null,
+    roundNumber: roundNumberFor(roundKey),
+    roundKey,
+    stage: execution.stage,
+    attempt: execution.attempt ?? null,
+    assignment: execution.assignment,
+    startedAt: execution.started_at,
+    activity: {
+      mode: execution.activity.mode,
+      summary: execution.activity.summary,
+      tool: execution.activity.tool ?? null,
+    },
+    driver: execution.driver ?? null,
+    provider: execution.provider ?? null,
+    model: execution.model ?? null,
+  };
 }
 
 function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState {
@@ -1209,6 +1254,7 @@ function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState 
   const data = event.data;
   if (executionId == null) return state;
   if (data?.kind === 'agent_execution_started') {
+    const roundKey = roundKeyFor(event);
     return cloneCoreStateWith(state, {
       activeExecutions: {
         ...state.activeExecutions,
@@ -1216,7 +1262,8 @@ function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState 
           executionId,
           agentKind: event.agent_kind ?? 'agent',
           roundLabel: event.round_label ?? null,
-          roundNumber: roundNumberFromLabel(event.round_label),
+          roundNumber: roundNumberFor(roundKey),
+          roundKey,
           stage: data.stage,
           attempt: data.attempt ?? null,
           assignment: data.user_prompt ?? '',
@@ -1280,15 +1327,21 @@ function applyAgentStatusEvent(state: CoreState, event: RunEvent): CoreState {
   return cloneCoreStateWith(state, {executionStatuses, usage});
 }
 
-function updateTodos(previous: ExecutionTodos[], event: RunEvent): ExecutionTodos[] {
+function updateTodos(
+  previous: readonly ExecutionTodos[],
+  event: RunEvent,
+): readonly ExecutionTodos[] {
   const data = event.data;
   if (data?.kind !== 'todo_update') return previous;
   const agentKind = event.agent_kind ?? null;
-  const roundNumber = roundNumberFromLabel(event.round_label);
+  const roundKey = roundKeyFor(event);
+  const roundNumber = roundNumberFor(roundKey);
   const executionId = event.execution_id ?? event.invocation_id ?? null;
   const retained = previous.filter(item =>
     executionId === null
-      ? item.executionId != null || item.agentKind !== agentKind || item.roundNumber !== roundNumber
+      ? item.executionId != null ||
+        item.agentKind !== agentKind ||
+        !sameRoundKey(item.roundKey, roundKey)
       : item.executionId !== executionId,
   );
   return [
@@ -1297,6 +1350,7 @@ function updateTodos(previous: ExecutionTodos[], event: RunEvent): ExecutionTodo
       executionId,
       agentKind,
       roundNumber,
+      roundKey,
       items: (data.todos ?? []).map(todo => ({
         content: String(todo.content),
         status: String(todo.status),

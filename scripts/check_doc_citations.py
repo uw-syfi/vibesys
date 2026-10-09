@@ -29,10 +29,13 @@ What counts as a citation:
     Everything else in a doc is prose and is ignored: a path with no locator
     (`protocol.py`), a span that is not a path (`extra="forbid"`), a host and
     port (`127.0.0.1:8765`, whose last dot-segment is not alphabetic), a URL,
-    and anything inside a fenced code block. The lexer deciding what an inline
-    code span is belongs to `scripts/check_doc_links.py`, which strips exactly
-    the spans this script reads, so the two cannot disagree about where a
-    citation can hide.
+    and anything inside a fenced code block. A bare path remains prose even in
+    a gated doc: documentation must be able to name local files and external
+    reference checkouts without claiming a checked code citation. Add a
+    locator when the sentence needs that stronger claim. The lexer deciding
+    what an inline code span is belongs to `scripts/check_doc_links.py`, which
+    strips exactly the spans this script reads, so the two cannot disagree
+    about where a citation can hide.
 
 The rule:
     A line locator always fails. Nothing about `foo.py:120-138` is checkable:

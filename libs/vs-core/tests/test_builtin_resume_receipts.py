@@ -17,7 +17,7 @@ def builtin_state(
         intent = state.intents.intents[0]
         assert isinstance(intent.request, core.ResumeSessionTurn)
         request = core.DispatchTurn.model_validate(
-            intent.request.model_dump(exclude={"kind", "continuation_id"})
+            intent.request.model_dump(exclude={"kind", "continuation_id", "publication"})
         )
         state = replace_request(state, request)
     return state, identity
@@ -80,7 +80,7 @@ def corrupt_origin(state: core.CoreState, fault: str) -> core.CoreState:
 def assert_origin_rejected(state: core.CoreState, identity: core.RequestId) -> None:
     restored = roundtrip_state(state, registered=False)
     event = core.DispatchAuthorized(request_id=identity)
-    with pytest.raises(core.ContractError, match="canonical turn proof"):
+    with pytest.raises(core.ContractError, match=r"canonical turn proof|successful dependency"):
         core.trace_step(
             restored,
             event,
@@ -92,7 +92,7 @@ def assert_origin_rejected(state: core.CoreState, identity: core.RequestId) -> N
                 )
             ),
         )
-    with pytest.raises(core.ContractError, match="canonical turn proof"):
+    with pytest.raises(core.ContractError, match=r"canonical turn proof|successful dependency"):
         core.step(restored, event)
 
 

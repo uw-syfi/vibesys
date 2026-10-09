@@ -476,14 +476,10 @@ def test_long_agent_text_is_kept_whole_and_the_planner_history_stays_bounded(
     assert long not in second_planning
 
 
-# Accuracy reads ``VALUE`` and passes; the benchmark process exits with a
-# failure after measuring, as a benchmark killed at its time limit does.
-_SLOW_CANDIDATE = """\
-import sys
-VALUE = 2
-if "--vs-output" in sys.argv:
-    raise SystemExit("warmup timed out at 2 requests/s; 80 needed")
-"""
+# Accuracy reads ``VALUE`` and passes; the benchmark reports an evaluator error
+# after measuring (``REQUIRED`` above ``VALUE``), as a warmup cut short does. A
+# benchmark that exits without any result record is infrastructure, not this.
+_SLOW_CANDIDATE = "VALUE = 2\nREQUIRED = 80\n"
 # A deadlock guard for turns that wait on each other; each wait ends within
 # seconds, and a longer bound never turns a failure into a pass.
 _HANDOFF_S = 120.0
@@ -584,7 +580,7 @@ def test_the_planner_sees_a_running_turns_stage_outcomes_and_its_applied_parks(
         ("accuracy", "passed"),
         ("benchmark", "failed"),
     ]
-    assert "warmup timed out at 2 requests/s" in str(live["failure_tail"])
+    assert "warmup stopped: 2/80 rounds" in str(live["failure_tail"])
     # The run-wide operations tool says the same: recorded is not passed.
     operations = seen["operations"]
     assert isinstance(operations, dict)
@@ -697,7 +693,9 @@ def test_a_new_workstream_builds_on_content_its_implementer_verified(tmp_path: P
 
 def _buildable(prompt: str) -> list[dict[str, Any]]:
     """Return the buildable candidates one planning prompt lists, in its order."""
-    match = re.search(r"Buildable candidates .*?: (\[[^\n]*\])$", prompt, re.DOTALL | re.MULTILINE)
+    match = re.search(
+        r"Buildable candidates[^\n]*:\n(\[[^\n]*\])$", prompt, re.DOTALL | re.MULTILINE
+    )
     assert match is not None
     rows = json.loads(match.group(1))
     assert isinstance(rows, list)

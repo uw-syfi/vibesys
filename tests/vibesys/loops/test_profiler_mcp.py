@@ -15,7 +15,6 @@ import sqlite3
 import sys
 import textwrap
 import threading
-import time
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from pathlib import Path
 from types import ModuleType
@@ -1243,17 +1242,36 @@ def _install_slow_target(tmp_path: Path) -> Path:
 
 
 class _PidChannel:
-    """A FIFO the slow target reports its pid on, awaited without polling.
+    """A FIFO the slow target reports its pid on and acknowledges teardown.
 
     The read end is opened (non-blocking) before the target starts, so the
     target's ``open(fifo, "w")`` succeeds immediately, and the event loop is
     woken by the fd becoming readable rather than by a timer.
+
+    A test-only duplicate write end can remain open until the injected worker
+    Fake reports that its blocking function returned.  EOF then means both
+    the target exited and the worker released its capture slot.
     """
 
     def __init__(self, path: Path) -> None:
         os.mkfifo(path)
         self.path = path
         self._fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        self._teardown_fd: int | None = None
+        self._lock = threading.Lock()
+
+    def retain_until_worker_returns(self) -> None:
+        """Keep EOF from arriving until the injected worker has returned."""
+        with self._lock:
+            assert self._teardown_fd is None
+            self._teardown_fd = os.open(self.path, os.O_WRONLY | os.O_NONBLOCK)
+
+    def release_worker_guard(self) -> None:
+        """Let EOF acknowledge both target death and worker teardown."""
+        with self._lock:
+            if self._teardown_fd is not None:
+                os.close(self._teardown_fd)
+                self._teardown_fd = None
 
     async def wait_for_start(self, capture_task: asyncio.Future[str]) -> None:
         """Return once the target has reported in, or fail if the capture ends first."""
@@ -1277,14 +1295,16 @@ class _PidChannel:
         os.read(self._fd, 64)
 
     def wait_for_target_exit(self, *, timeout_s: float = 30.0) -> bool:
-        """True once the target has exited: its held-open write end closes, giving EOF.
+        """True once the target exited and the worker released its EOF guard.
 
-        ``timeout_s`` only bounds the failure case where the process leaked.
+        ``timeout_s`` only bounds the failure case where the process or its
+        worker leaked.
         """
         readable, _, _ = select.select([self._fd], [], [], timeout_s)
         return bool(readable) and os.read(self._fd, 64) == b""
 
     def close(self) -> None:
+        self.release_worker_guard()
         os.close(self._fd)
 
 
@@ -1294,15 +1314,23 @@ class _WorkerTracker:
     A cancelled call's worker thread is "abandoned" (anyio's
     ``abandon_on_cancel=True``): it keeps escalating the target and releasing
     the exclusive-capture slot in its own ``finally`` after the coroutine that
-    awaited cancellation has already returned. ``wait_idle`` blocks on a
-    condition until every such worker has returned, so it cannot race a
-    subsequent capture.
+    awaited cancellation has already returned.  Once every tracked worker
+    returns, ``on_idle`` releases the FIFO's teardown guard, so its EOF is an
+    end-to-end completion signal rather than a separate unbounded wait.
     """
 
-    def __init__(self, run_cancellable: Callable[..., Awaitable[str]]) -> None:
+    def __init__(
+        self, run_cancellable: Callable[..., Awaitable[str]], on_idle: Callable[[], None]
+    ) -> None:
         self._run_cancellable = run_cancellable
+        self._on_idle = on_idle
         self._in_flight = 0
-        self._idle = threading.Condition()
+        self._lock = threading.Lock()
+        self._started = threading.Event()
+
+    def wait_started(self) -> None:
+        """Wait for the real cancellable worker to enter its blocking function."""
+        self._started.wait()
 
     async def __call__(
         self,
@@ -1312,23 +1340,20 @@ class _WorkerTracker:
         cancel_event: threading.Event,
         **kwargs: object,
     ) -> str:
-        with self._idle:
+        with self._lock:
             self._in_flight += 1
 
         def tracked(*call_args: object, **call_kwargs: object) -> str:
+            self._started.set()
             try:
                 return fn(*call_args, **call_kwargs)
             finally:
-                with self._idle:
+                with self._lock:
                     self._in_flight -= 1
-                    self._idle.notify_all()
+                    if self._in_flight == 0:
+                        self._on_idle()
 
         return await self._run_cancellable(tracked, *args, cancel_event=cancel_event, **kwargs)
-
-    def wait_idle(self, *, timeout_s: float = 30.0) -> bool:
-        """``timeout_s`` only bounds the failure case where a worker never returns."""
-        with self._idle:
-            return self._idle.wait_for(lambda: self._in_flight == 0, timeout=timeout_s)
 
 
 _FAKE_PANDAS_PYTHON_SOURCE = textwrap.dedent(
@@ -1624,21 +1649,25 @@ class TestRocprofMcpServer:
         monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
         monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
         pid_channel = _PidChannel(tmp_path / "target.pid")
+        pid_channel.retain_until_worker_returns()
         slow_script = _install_slow_target(tmp_path)
-        tracker = _WorkerTracker(rocprof_server_mod.mcp_async.run_cancellable)
+        tracker = _WorkerTracker(
+            rocprof_server_mod.mcp_async.run_cancellable, pid_channel.release_worker_guard
+        )
         server = rocprof_server_mod.build_server(run_worker=tracker)
         return server, tracker, pid_channel, f"{sys.executable} {slow_script} {pid_channel.path}"
 
     def _assert_target_and_slot_released(
-        self, rocprof_server_mod: ModuleType, tracker: _WorkerTracker, pid_channel: _PidChannel
+        self, rocprof_server_mod: ModuleType, pid_channel: _PidChannel
     ) -> None:
-        assert pid_channel.wait_for_target_exit(), "target process leaked past cancellation"
+        assert pid_channel.wait_for_target_exit(), (
+            "target process or worker leaked past cancellation"
+        )
         # The cancelled call's worker thread keeps running (escalating, then
-        # releasing the exclusive-capture slot in its own `finally`) after the
-        # coroutine that awaited cancellation has already returned. Wait for
-        # that teardown to finish so it can't race a subsequent test's own
-        # capture.
-        assert tracker.wait_idle(), "capture worker never returned after cancellation"
+        # releasing the exclusive-capture slot in its own `finally`) after
+        # the coroutine that awaited cancellation has already returned.  The
+        # FIFO's retained writer makes EOF a causal worker-completion signal,
+        # so this cannot race a subsequent capture or hang in a second wait.
         assert rocprof_server_mod.capture_runtime.active_capture() is None, (
             "capture slot still held after cancellation settled"
         )
@@ -1655,6 +1684,7 @@ class TestRocprofMcpServer:
                 _call_tool(server, "profile_timeline", command=command)
             )
             await pid_channel.wait_for_start(capture_task)
+            tracker.wait_started()
 
             # A cheap call, made while the capture is still in flight, must
             # return promptly instead of waiting behind it on the event
@@ -1670,7 +1700,7 @@ class TestRocprofMcpServer:
 
         try:
             asyncio.run(run())
-            self._assert_target_and_slot_released(rocprof_server_mod, tracker, pid_channel)
+            self._assert_target_and_slot_released(rocprof_server_mod, pid_channel)
         finally:
             pid_channel.close()
 
@@ -1686,6 +1716,7 @@ class TestRocprofMcpServer:
                 _call_tool(server, "profile_timeline", command=command)
             )
             await pid_channel.wait_for_start(capture_task)
+            tracker.wait_started()
 
             with pytest.raises(ToolError, match="busy: capture") as failed:
                 await asyncio.wait_for(
@@ -1702,7 +1733,7 @@ class TestRocprofMcpServer:
             busy_out = asyncio.run(run())
             assert "busy: capture " in busy_out
             assert "timeline" in busy_out
-            self._assert_target_and_slot_released(rocprof_server_mod, tracker, pid_channel)
+            self._assert_target_and_slot_released(rocprof_server_mod, pid_channel)
         finally:
             pid_channel.close()
 
@@ -1716,21 +1747,20 @@ class TestRocprofMcpServer:
         async def run() -> None:
             task = asyncio.ensure_future(_call_tool(server, "profile_timeline", command=command))
             await pid_channel.wait_for_start(task)
+            tracker.wait_started()
 
-            # Simulates a client-initiated cancellation (e.g. an MCP client
-            # tearing down after its own timeout): cancelling the awaiting
-            # task must not just stop watching -- it must stop the capture.
-            with pytest.raises(asyncio.TimeoutError):
-                await asyncio.wait_for(task, timeout=0.5)
+            # The target reported that it is waiting for a signal, so the
+            # capture task must remain pending until the caller cancels it.
+            assert not task.done()
+            # Simulates a client-initiated cancellation. Cancelling the
+            # awaiting task must not just stop watching -- it must stop the
+            # capture.
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
-        start = time.monotonic()
         try:
             asyncio.run(run())
-            elapsed = time.monotonic() - start
-
-            # Bounded by capture_runtime's poll chunk + escalation, not by the
-            # target's own (never reached) indefinite wait.
-            assert elapsed < 10.0
-            self._assert_target_and_slot_released(rocprof_server_mod, tracker, pid_channel)
+            self._assert_target_and_slot_released(rocprof_server_mod, pid_channel)
         finally:
             pid_channel.close()

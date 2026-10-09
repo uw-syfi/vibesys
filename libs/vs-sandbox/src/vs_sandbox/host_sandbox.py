@@ -41,12 +41,14 @@ externally managed sandbox, so those paths never build a sandbox here.
 Operator controls (read from the agent's environment):
 
 ``VIBESYS_AGENT_SANDBOX``
-    Set to ``0``/``false``/``off``/``no`` to disable host confinement (e.g. for
-    debugging, or on a host whose toolchain layout the default allowlist does
-    not cover). Disabling is logged loudly. On Linux it also selects the
-    mechanism: ``auto`` (default) and ``bwrap`` require bubblewrap, while
-    ``landlock`` opts in to the weaker :class:`LandlockSandbox`. An
-    unrecognized value is rejected rather than treated as the default.
+    ``0``/``false``/``off``/``no`` request no host confinement. They take
+    effect only when the caller does not set ``require_enforcement``; VibeSys
+    runs on the host always do, so there they raise
+    :class:`SandboxUnavailableError`. Disabling is logged loudly. On Linux the
+    variable also selects the mechanism: ``auto`` (default) and ``bwrap``
+    require bubblewrap, while ``landlock`` opts in to the weaker
+    :class:`LandlockSandbox`. An unrecognized value is rejected rather than
+    treated as the default.
 
 Resource discovery and policy are deliberately outside this module. The caller
 passes declarations through the public resource SDK; this consumer only

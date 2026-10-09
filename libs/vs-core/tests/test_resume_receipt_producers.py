@@ -205,7 +205,8 @@ def dispatch_publication(state: core.CoreState, wait: core.Continuation) -> core
 def test_actual_suspension_publication_survives_restart_and_authorizes_dispatch() -> None:
     state, wait = publication_state()
     published = core.step(state, core.TurnSuspended(continuation=wait))
-    feedback = published.events[0]
+    assert isinstance(published.events[0], core.TurnSuspended)
+    feedback = published.events[1]
     assert isinstance(feedback, core.ResumeAuthorized)
     stored = published.state.evaluation.continuations[0]
     assert stored.authorization_receipt is not None

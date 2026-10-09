@@ -230,6 +230,8 @@ class AgentTurnRequest:
     label: str | None = None
     expected_provider_session_id: str | None = None
     """Strict continuation: refuse any reset, replacement, or fresh session."""
+    require_provider_checkpoint: bool = False
+    """Retain resumable history after this turn, including an initial dispatch."""
 
 
 @dataclass(frozen=True, slots=True)

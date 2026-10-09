@@ -51,6 +51,9 @@ _FAKE_AGENT_CAPABILITIES = frozenset(
 )
 
 
+_DISCONNECTED = "agent disconnected"
+
+
 def _options(**changes: object) -> BaseModel:
     return PLUGIN.options.model_validate(
         {
@@ -510,6 +513,111 @@ def test_paid_attempt_is_not_replayed_after_interrupted_turn(tmp_path: Path) -> 
     ]
     assert [session.member_id for session in implementer_sessions] == ["H-01", "H-01"]
     assert all(session.closed for session in run.agents.sessions)
+
+
+def test_interrupted_final_paid_attempt_closes_its_round_and_the_run_continues(
+    tmp_path: Path,
+) -> None:
+    # A host dies during the round's last paid implementer turn. That attempt is paid and
+    # must not be repeated, so resume closes the round as failed (as an uninterrupted run
+    # whose last attempt failed does) and moves on, instead of refusing to run.
+    options = _options(max_rounds=2, max_retries_per_round=1)
+
+    async def scenario() -> tuple[RunStatus, _Script, MultiState | None]:
+        script = _Script(
+            _pre_round(),
+            _plan("H-01"),
+            RuntimeError("agent disconnected"),
+            _implementation(),
+            _judge(),
+        )
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
+        try:
+            with pytest.raises(RuntimeError, match="agent disconnected"):
+                await PLUGIN.orchestrate(run, options)
+            status = await PLUGIN.orchestrate(run, options)
+            return status, script, await run.state.load(MultiState)
+        finally:
+            await run.close()
+
+    status, script, state = asyncio.run(scenario())
+
+    assert status is RunStatus.SUCCEEDED
+    assert [role for role, _history, _message in script.calls] == [
+        DESIGNER.id,
+        DESIGNER.id,
+        IMPLEMENTER.id,
+        IMPLEMENTER.id,
+        JUDGE.id,
+    ]
+    assert state is not None
+    assert state.last_paid_attempt is None
+    assert [(record.round_number, record.passed) for record in state.search.rounds] == [
+        (1, False),
+        (2, True),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("budget", "crash_at"),
+    [(budget, crash) for budget in (1, 2, 3) for crash in range(1, budget + 1)],
+)
+def test_resume_runs_the_same_implementer_attempts_as_an_uninterrupted_run(
+    tmp_path: Path, budget: int, crash_at: int
+) -> None:
+    # Whatever attempt the host dies in, a failing round pays exactly its budget of
+    # attempts across both processes, and the resumed run closes it like an uninterrupted one.
+    def implementer_calls(crash: int | None, root: Path) -> tuple[RunStatus, int, MultiState]:
+        turns = 0
+
+        def respond(
+            role: AgentRole,
+            _history: tuple[str, ...],
+            _message: str,
+            schema: type[BaseModel] | None,
+        ) -> object:
+            nonlocal turns
+            if role.id == DESIGNER.id:
+                return _pre_round() if schema is PreRoundDecision else _plan("H-01")
+            if role.id == JUDGE.id:
+                return _judge(verdict=Verdict.FAIL, feedback="still wrong")
+            turns += 1
+            if turns == crash:
+                raise RuntimeError(_DISCONNECTED)
+            return _implementation()
+
+        async def scenario() -> tuple[RunStatus, MultiState | None]:
+            run = FakeRun(
+                PLUGIN,
+                project_root=root,
+                responder=respond,
+                supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+            )
+            options = _options(max_rounds=1, max_retries_per_round=budget)
+            try:
+                if crash is not None:
+                    with pytest.raises(RuntimeError, match="agent disconnected"):
+                        await PLUGIN.orchestrate(run, options)
+                status = await PLUGIN.orchestrate(run, options)
+                return status, await run.state.load(MultiState)
+            finally:
+                await run.close()
+
+        status, state = asyncio.run(scenario())
+        assert state is not None
+        return status, turns, state
+
+    base_status, base_turns, _ = implementer_calls(None, tmp_path / "base")
+    status, turns, state = implementer_calls(crash_at, tmp_path / "crashed")
+
+    assert (status, turns) == (base_status, base_turns) == (RunStatus.SUCCEEDED, budget)
+    assert state.last_paid_attempt is None
+    assert [(record.round_number, record.passed) for record in state.search.rounds] == [(1, False)]
 
 
 def test_failed_implementer_turn_feeds_a_durable_framework_reason_to_the_retry(

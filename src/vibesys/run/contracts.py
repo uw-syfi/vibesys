@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_va
 
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
+from vibesys.events import RunFailure, RunFailureKind
 from vibesys.inputs import InputBundle
 from vibesys.repository import RepositoryVisibility
 from vs_project.api import OrchestrationDescriptor, ProjectStateError, validate_run_id
@@ -130,6 +131,7 @@ class RunResult(BaseModel):
     loop: str
     succeeded: bool
     status: Literal[RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.STOPPED] = RunStatus.FAILED
+    failure: RunFailure | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -145,6 +147,9 @@ class RunResult(BaseModel):
     def _consistent_status(self) -> RunResult:
         if self.succeeded != (self.status is RunStatus.COMPLETED):
             message = "RunResult.succeeded must agree with status"
+            raise ValueError(message)
+        if self.failure is not None and self.status is not RunStatus.FAILED:
+            message = "only a failed RunResult carries a failure"
             raise ValueError(message)
         return self
 
@@ -191,6 +196,8 @@ __all__ = [
     "ProfilerKind",
     "ResumeRef",
     "RoundSummary",
+    "RunFailure",
+    "RunFailureKind",
     "RunRequest",
     "RunResult",
     "RunStatus",

@@ -9,6 +9,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vs_project.api import StateNamespace
+
+_DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 class ArtifactStoreError(Exception):
@@ -101,11 +104,44 @@ class ArtifactStore:
         object.__setattr__(receipt, "sha256", digest)
         return receipt
 
+    def contains(self, content: bytes) -> bool:
+        """Whether exactly these bytes are already stored, without writing anything.
+
+        Raises ``ArtifactCorruptionError`` if the object at their address is corrupt.
+        """
+        digest = hashlib.sha256(content).hexdigest()
+        path = self._root / digest
+        if not (path.exists() or path.is_symlink()):
+            return False
+        self._verified_read(path, digest, len(content))
+        return True
+
     def read(self, receipt: ArtifactReceipt) -> bytes:
         """Read a receipt's bytes after verifying its path, size, and SHA-256."""
         if receipt.path != self._root / receipt.sha256:
             raise ArtifactStoreError(receipt.path, "receipt belongs to another store")
         return self._verified_read(receipt.path, receipt.sha256, receipt.size)
+
+    def read_digest(self, digest: str) -> bytes | None:
+        """The verified bytes of the object whose SHA-256 is *digest*; None when absent.
+
+        *digest* is the bare lowercase hex digest. Raises ``ArtifactCorruptionError``
+        when the object exists but does not hash to its address.
+        """
+        if _DIGEST.fullmatch(digest) is None:
+            return None
+        path = self._root / digest
+        if not (path.exists() or path.is_symlink()):
+            return None
+        if path.is_symlink():
+            raise ArtifactCorruptionError(path, "content-addressed file is a symlink")
+        try:
+            content = path.read_bytes()
+        except OSError as exc:
+            raise ArtifactStoreError(path, str(exc)) from exc
+        if hashlib.sha256(content).hexdigest() != digest:
+            raise ArtifactCorruptionError(path, "SHA-256 does not match")
+        return content
 
     def _publish(self, path: Path, content: bytes, directory_fd: int) -> None:
         if path.exists() or path.is_symlink():

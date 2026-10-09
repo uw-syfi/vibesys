@@ -5,6 +5,10 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .proof_digest import canonical_source
+from .test_proof_ownership_regressions import stopped
+from .test_silent_executor_deadline import _silent
+
 
 def released_observation(scope: core.Scope, resource: core.ResourceId | None) -> core.Observation:
     return core.Observation(
@@ -23,6 +27,7 @@ def released_observation(scope: core.Scope, resource: core.ResourceId | None) ->
 
 
 def close_run(state: core.CoreState) -> core.RunStatus:
+    state = stopped(state)
     state = state.model_copy(
         update={
             "run": state.run.model_copy(
@@ -76,7 +81,32 @@ def test_registered_job_missing_identity_or_unknown_facts_retain_provisional_own
         released=True,
         observation=observation,
     )
-    state = state.model_copy(update={"evaluation": core.EvaluationState(registered_jobs=(job,))})
+    source = canonical_source(
+        core.ExecuteRegisteredOperation(
+            request_id=observation.request_id,
+            scope=scope,
+            deadline_at=100.0,
+            operation_id=job.operation_id,
+            operation=core.OperationWire(
+                schema_ref=core.OperationSchemaRef(
+                    kind="test.job",
+                    request_schema=core.SchemaRef(name="job", version=1),
+                    outcome_schema=core.SchemaRef(name="job-result", version=1),
+                    lifecycle=core.LifecycleClass.OWNED_JOB,
+                ),
+                payload_json="{}",
+            ),
+            retry_limit=0,
+        ),
+        core.LifecycleClass.OWNED_JOB,
+        observation,
+    )
+    state = state.model_copy(
+        update={
+            "evaluation": core.EvaluationState(registered_jobs=(job,)),
+            "intents": state.intents.model_copy(update={"intents": (source,)}),
+        }
+    )
     conclusive = status not in (core.ObservationStatus.UNKNOWN, core.ObservationStatus.PENDING)
     nonownership = not accepted and status in (
         core.ObservationStatus.REJECTED,
@@ -150,7 +180,23 @@ def test_builtin_root_release_keeps_discovered_child_until_exact_child_release(
     state = state.model_copy(
         update={
             "evaluation": core.EvaluationState(jobs=(job,)),
-            "intents": state.intents.model_copy(update={"children": (child,)}),
+            "intents": state.intents.model_copy(
+                update={
+                    "children": (child,),
+                    "intents": (
+                        canonical_source(
+                            core.SubmitMeasurement(
+                                request_id=observation.request_id,
+                                scope=scope,
+                                deadline_at=100.0,
+                                plan=plan,
+                            ),
+                            core.LifecycleClass.OWNED_JOB,
+                            observation,
+                        ),
+                    ),
+                }
+            ),
         }
     )
     expected = (
@@ -242,3 +288,27 @@ def test_inspection_command_success_cannot_release_its_parent_targets_child(
         }
     )
     assert close_run(state) == core.RunStatus.CLOSING
+
+
+@given(accepted=st.booleans(), identified=st.booleans())
+def test_a_blocked_intent_releases_closure_only_when_it_was_never_accepted_and_unnamed(
+    *, accepted: bool, identified: bool
+) -> None:
+    state = _silent(core.IntentPhase.BLOCKED, core.ObservationStatus.UNKNOWN, terminal=False)
+    intent = state.intents.intents[0]
+    assert intent.observation is not None
+    observation = intent.observation.model_copy(
+        update={
+            "accepted": accepted,
+            "resource_id": core.ResourceId(root="job") if identified else None,
+        }
+    )
+    state = state.model_copy(
+        update={
+            "intents": state.intents.model_copy(
+                update={"intents": (intent.model_copy(update={"observation": observation}),)}
+            )
+        }
+    )
+    closed = close_run(state) == core.RunStatus.TERMINAL
+    assert closed == (not accepted and not identified)

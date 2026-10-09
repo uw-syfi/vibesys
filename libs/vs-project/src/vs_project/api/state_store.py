@@ -165,6 +165,14 @@ class StateStore(Protocol):
         """Extend a live matching epoch without shrinking its expiry."""
         ...
 
+    def release(self, fence: StoreFence, now: float) -> bool:
+        """End a live matching lease at ``now``; False when this fence no longer holds it.
+
+        The epoch is kept, so the next acquire still gets a higher one and this host's
+        token stays invalid.
+        """
+        ...
+
     def verify(self, fence: StoreFence, now: float) -> bool:
         """Verify current owner and epoch against authoritative expiry.
 

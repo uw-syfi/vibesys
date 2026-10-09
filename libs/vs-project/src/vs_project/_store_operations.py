@@ -21,6 +21,8 @@ from vs_project.api.state_store import (
     Unknown,
 )
 
+STORE_DOCUMENT_VERSION = 1
+
 
 class StoreDocument(BaseModel):
     """One atomic document owns both CAS record and dispatch fencing."""
@@ -28,7 +30,9 @@ class StoreDocument(BaseModel):
     model_config = ConfigDict(
         extra="forbid", frozen=True, strict=True, ser_json_bytes="base64", val_json_bytes="base64"
     )
-    version: int = Field(default=1, ge=1, le=1)
+    version: int = Field(
+        default=STORE_DOCUMENT_VERSION, ge=STORE_DOCUMENT_VERSION, le=STORE_DOCUMENT_VERSION
+    )
     record: StoreRecord | None = None
     fence: StoreFence | None = None
     observed_at: float = Field(default=0, ge=0, allow_inf_nan=False)
@@ -127,6 +131,22 @@ class StoreOperations(ABC):
                 document.model_copy(update={"fence": renewed, "observed_at": timing.now})
             )
             return renewed
+
+    def release(self, fence: StoreFence, now: float) -> bool:
+        """End matching ownership at ``now`` so the next host can acquire at once."""
+        timing = _Time(now=now)
+        with self._transaction():
+            document = self._read()
+            current = document.fence
+            if current is None or not _valid_fence(document, fence, timing.now):
+                return False
+            released = StoreFence(
+                host_id=current.host_id, epoch=current.epoch, expires_at=timing.now
+            )
+            self._write_lease(
+                document.model_copy(update={"fence": released, "observed_at": timing.now})
+            )
+            return True
 
     def verify(self, fence: StoreFence, now: float) -> bool:
         """Check persisted owner, epoch, expiry and time watermark."""

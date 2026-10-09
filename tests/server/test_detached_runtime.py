@@ -16,10 +16,13 @@ from tests.server.support import build_server_parts
 
 from launch import default_runs
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
+from server.events import EventType
 from server.runtime import ServerRuntime
 from server.transport.discovery import WebInstanceHold, WebInstanceRecord
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -74,6 +77,75 @@ def test_detached_runtime_runs_without_a_subscriber_and_accepts_reattach(
     assert not thread.is_alive()
     assert holder["result"] == "done"
     assert not socket_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("failure_factory", "terminal_type"),
+    [
+        pytest.param(
+            lambda: RuntimeError("callback failed"),
+            EventType.RUN_FAILED,
+            id="generic",
+        ),
+        pytest.param(
+            lambda: ConfigurationError(
+                ConfigurationDiagnostic(
+                    code="invalid_arguments",
+                    stage="argument_parsing",
+                    message="invalid argument",
+                    usage="usage: vibesys",
+                )
+            ),
+            EventType.CONFIGURATION_FAILED,
+            id="configuration",
+        ),
+    ],
+)
+def test_detached_runtime_unwinds_callback_failures_without_shutdown(
+    tmp_path: Path,
+    failure_factory: Callable[[], ConfigurationError | RuntimeError],
+    terminal_type: EventType,
+) -> None:
+    """A callback failure records its terminal event and releases its transport.
+
+    The wait is a deadlock guard, not a scheduling verdict: the callback or
+    runtime has no external work to await, and the test always releases a
+    merge-base runtime from its old detached wait in ``finally``.
+    """
+    runtime = ServerRuntime(
+        runs=default_runs(),
+        socket_path=tmp_path / "control.sock",
+        detach=True,
+    )
+    failure = failure_factory()
+    completed = threading.Event()
+    raised: list[ConfigurationError | RuntimeError] = []
+
+    def fail() -> None:
+        raise failure
+
+    def invoke() -> None:
+        try:
+            runtime.run(fail)
+        except (ConfigurationError, RuntimeError) as error:
+            raised.append(error)
+        finally:
+            completed.set()
+
+    thread = threading.Thread(target=invoke)
+    thread.start()
+    try:
+        assert completed.wait(timeout=5), "callback failure must unwind without shutdown"
+    finally:
+        runtime.shutdown()
+        thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert raised == [failure]
+    assert [event.type for event in runtime.journal.read() if event.type is terminal_type] == [
+        terminal_type
+    ]
+    assert not runtime.socket_path.exists()
 
 
 def test_finished_journal_reopens_read_only_without_mutating_storage(tmp_path: Path) -> None:

@@ -17,7 +17,7 @@ is the default ``sbatch``. The cluster has two modes, chosen by files in
   ``sbatch`` runs the job script to completion before it returns, so the job
   is ``COMPLETED`` or ``FAILED`` at its first poll and nobody waits. Job ids
   are unique. While ``hold`` exists, a new job is not run and stays
-  ``PENDING`` until ``scancel``.
+  ``PENDING`` until ``scancel`` or :func:`release_job` starts its retained script.
 
 The same cluster also stands in for the SSH transport's programs, so a test
 can route every call through the host-side broker as production does: set
@@ -33,6 +33,10 @@ Other files in ``STATE_DIR``:
 - ``submitted``: if this path exists (typically a FIFO the test reads), the
   connector writes the job id to it when a job is left pending. A FIFO lets a
   test block until the job exists without polling.
+- ``polled``: like ``submitted``, but written once, when the scheduler is first asked about
+  a job it holds pending (``squeue -j``). The caller has then recorded the job's
+  acceptance, so a test that blocks on it signals a caller that is waiting on the job,
+  not one that is still submitting it.
 - ``cancelled``: created when ``scancel`` cancels a job.
 """
 
@@ -47,22 +51,25 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-from .runner import SlurmJobStatus
+    from .runner import SlurmJobStatus
 
 JOB_ID = "4242"
 REQUESTS_FILE = "requests.jsonl"
 SUBMITTED_FILE = "submitted"
+POLLED_FILE = "polled"
 CANCELLED_FILE = "cancelled"
 RUN_FILE = "run"
 HOLD_FILE = "hold"
 _JOBS_DIRECTORY = "jobs"
 _PENDING = "PENDING"
+_SACCT_STATE_WIDTH = 10
 _FIRST_EXECUTING_JOB = 5000
 _MKDIR_BASE_POSITION = 2
 _METADATA_FAILED = "Fake cluster metadata command failed"
@@ -71,6 +78,25 @@ _STDIN_REQUIRED = "connector stdin must contain one request"
 _LOST_REPLY = "submit reply lost after scheduler acceptance"
 _LOST_CLAIM_REPLY = "claim reply lost before intent publication"
 _UNKNOWN_FAULT = "unknown scripted connector fault"
+
+
+def sacct_row(state: str, exit_code: str, *, parsable: bool) -> str:
+    """One ``sacct -n --format=State,ExitCode`` row as real Slurm prints it.
+
+    With ``-P`` the values are whole and ``|``-delimited. Without it State is a
+    10-column field whose longer values are cut and marked with ``+``
+    (``OUT_OF_MEMORY`` prints as ``OUT_OF_ME+``, ``CANCELLED by 1000`` as
+    ``CANCELLED+``) and ExitCode is right-aligned in 8 columns.
+    """
+    if parsable:
+        return f"{state}|{exit_code}\n"
+    cut = state if len(state) <= _SACCT_STATE_WIDTH else state[: _SACCT_STATE_WIDTH - 1] + "+"
+    return f"{cut:<{_SACCT_STATE_WIDTH}} {exit_code:>8}\n"
+
+
+def _sacct_record_row(record: str, tokens: list[str]) -> str:
+    state, _, exit_code = record.partition(" ")
+    return sacct_row(state, exit_code or "0:0", parsable="-P" in tokens)
 
 
 def executing_cluster(state: Path) -> Path:
@@ -114,16 +140,21 @@ def _pending_query(state: Path, tokens: list[str]) -> str:
             job_id = names.get(tokens[tokens.index("--name") + 1])
             return f"{job_id}\n" if job_id else ""
         job_state = _job_state(state, tokens[tokens.index("-j") + 1])
-        return f"{job_state}\n" if job_state and job_state != _PENDING else "CANCELLED 0:0\n"
+        record = job_state or "CANCELLED 0:0"
+        return _sacct_record_row(record, tokens)
     if "-n" in tokens:
         job_id = names.get(tokens[tokens.index("-n") + 1])
-        return f"{job_id}\n" if job_id and _job_state(state, job_id) == _PENDING else ""
+        return (
+            f"{job_id}\n" if job_id and _job_state(state, job_id) in {_PENDING, "RUNNING"} else ""
+        )
     job_id = tokens[tokens.index("-j") + 1]
     job_state = _job_state(state, job_id)
     if (job_state and job_state != _PENDING) or (
         not job_state and (state / CANCELLED_FILE).exists()
     ):
         return ""
+    _announce(state, job_id, POLLED_FILE)
+    (state / POLLED_FILE).unlink(missing_ok=True)  # announced once: later polls do not block
     return "PENDING||\n" if "%T|%r|%S" in tokens else "PENDING\n"
 
 
@@ -156,8 +187,8 @@ def _pending_exec(state: Path, command: str) -> str:
     return ""
 
 
-def _announce(state: Path, job_id: str) -> None:
-    submitted = state / SUBMITTED_FILE
+def _announce(state: Path, job_id: str, name: str = SUBMITTED_FILE) -> None:
+    submitted = state / name
     if submitted.exists():
         with submitted.open("w", encoding="utf-8") as handle:
             handle.write(job_id)
@@ -179,18 +210,76 @@ def _allocate_job(state: Path, *, first: int = _FIRST_EXECUTING_JOB) -> tuple[st
 
 
 def _submit(state: Path, tokens: list[str]) -> str:
-    """Run one ``cd BASE && sbatch --output=LOG ... SCRIPT`` to completion, or hold it."""
+    """Run one production job script, or retain its allocation while held."""
     job_id, record = _allocate_job(state)
+    record.write_text(_PENDING, encoding="utf-8")
+    name = next((token.split("=", 1)[1] for token in tokens if token.startswith("--job-name=")), "")
+    if name:
+        record.with_suffix(".name").write_text(name, encoding="utf-8")
+    record.with_suffix(".request.json").write_text(json.dumps(tokens), encoding="utf-8")
     if (state / HOLD_FILE).exists():
-        record.write_text(_PENDING, encoding="utf-8")
         _announce(state, job_id)
-        return f"Submitted batch job {job_id}\n"
+    else:
+        release_job(state, job_id)
+    return f"Submitted batch job {job_id}\n"
+
+
+def active_jobs(state: Path) -> tuple[str, ...]:
+    """Return numeric scheduler identities whose allocations remain nonterminal."""
+    return tuple(
+        sorted(
+            path.name
+            for path in (state / _JOBS_DIRECTORY).glob("*")
+            if path.name.isdecimal()
+            and path.read_text(encoding="utf-8") in {"", _PENDING, "RUNNING"}
+        )
+    )
+
+
+def pending_jobs(state: Path, *, operation_id: str | None = None) -> tuple[str, ...]:
+    """Return queued allocations, optionally selected by their stable operation name."""
+    suffix = hashlib.sha256(operation_id.encode()).hexdigest()[:32] if operation_id else None
+    return tuple(
+        job_id
+        for job_id in active_jobs(state)
+        if _job_state(state, job_id) == _PENDING
+        and (
+            suffix is None
+            or (state / _JOBS_DIRECTORY / job_id)
+            .with_suffix(".name")
+            .read_text(encoding="utf-8")
+            .endswith(suffix)
+        )
+    )
+
+
+def release_jobs(state: Path) -> None:
+    """Start all held allocations and allow subsequent submissions to execute."""
+    (state / HOLD_FILE).unlink(missing_ok=True)
+    for job_id in pending_jobs(state):
+        release_job(state, job_id)
+
+
+def release_job(state: Path, job_id: str) -> None:
+    """Start a pending executing allocation; terminal jobs cannot run again.
+
+    The retained directory, script, output path and numeric scheduler identity
+    are the ones accepted at submission. A cancelled allocation stays cancelled.
+    """
+    record = state / _JOBS_DIRECTORY / job_id
+    if not (state / RUN_FILE).exists():
+        message = "only executing Fake Slurm allocations can be released"
+        raise ValueError(message)
+    if _job_state(state, job_id) != _PENDING:
+        return
+    tokens = json.loads(record.with_suffix(".request.json").read_text(encoding="utf-8"))
     start = tokens.index("sbatch")
     directory = Path(tokens[tokens.index("cd") + 1]) if "cd" in tokens[:start] else Path.cwd()
     output = next(
         Path(token.split("=", 1)[1]) for token in tokens[start:] if token.startswith("--output=")
     )
     script = Path(tokens[-1])
+    record.write_text("RUNNING", encoding="utf-8")
     with output.open("w", encoding="utf-8") as log:
         # lint-waiver: LW-140001 [S603]; the Fake cluster runs the exact
         # > production-generated job script; reading the script instead of
@@ -198,8 +287,6 @@ def _submit(state: Path, tokens: list[str]) -> str:
         completed = subprocess.run(  # noqa: S603
             ("/bin/bash", str(script)),
             cwd=directory,
-            # A job script reads its id as Slurm sets it (a service job derives
-            # its port from it).
             env={**os.environ, "SLURM_JOB_ID": job_id},
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -209,7 +296,6 @@ def _submit(state: Path, tokens: list[str]) -> str:
         "COMPLETED 0:0" if completed.returncode == 0 else f"FAILED {completed.returncode}:0"
     )
     record.write_text(state_line, encoding="utf-8")
-    return f"Submitted batch job {job_id}\n"
 
 
 def _job_state(state: Path, job_id: str) -> str:
@@ -221,10 +307,10 @@ def _executing_exec(state: Path, command: str) -> tuple[int, str, str]:
     tokens = shlex.split(command)
     if "sbatch" in tokens:
         return 0, _submit(state, tokens), ""
-    if tokens[:1] == ["squeue"]:
-        return 0, ("PENDING\n" if _job_state(state, tokens[3]) == _PENDING else ""), ""
-    if tokens[:1] == ["sacct"]:
-        return 0, f"{_job_state(state, tokens[4])}\n", ""
+    if tokens[:1] in (["squeue"], ["sacct"]):
+        if "-j" in tokens and not _job_state(state, tokens[tokens.index("-j") + 1]):
+            return 0, "", ""
+        return 0, _pending_query(state, tokens), ""
     if tokens[:1] == ["scancel"]:
         record = state / _JOBS_DIRECTORY / tokens[1]
         if record.is_file() and record.read_text(encoding="utf-8") == _PENDING:
@@ -314,11 +400,17 @@ class _ScheduledJob:
     states: tuple[SlurmJobStatus, ...]
     pending_reason: str | None
     estimated_start: str | None
+    purged: bool = False
     position: int = 0
 
     @property
     def status(self) -> SlurmJobStatus:
         return self.states[self.position]
+
+    @property
+    def active(self) -> bool:
+        status_type = type(self.status)
+        return self.status in {status_type.PENDING, status_type.RUNNING}
 
     def advance(self) -> None:
         self.position = min(self.position + 1, len(self.states) - 1)
@@ -334,6 +426,7 @@ class _SubmitPlan:
     missing_stage_result: bool
     rejected_reason: str | None
     lost_claim_reply: bool
+    purged: bool
 
 
 class _ConnectorOptions(TypedDict, total=False):
@@ -345,6 +438,7 @@ class _ConnectorOptions(TypedDict, total=False):
     rejected_reason: str
     lost_claim_reply: bool
     on_dispatch: Callable[[], None]
+    purged: bool
 
 
 class FakeConnector:
@@ -380,11 +474,17 @@ class FakeConnector:
         self,
         operation_id: str,
         *,
-        states: tuple[SlurmJobStatus, ...] = (SlurmJobStatus.COMPLETED,),
+        states: tuple[SlurmJobStatus, ...] | None = None,
         **options: Unpack[_ConnectorOptions],
     ) -> None:
         """Configure scheduler observations and explicitly named transport faults."""
-        if not states or any(not isinstance(state, SlurmJobStatus) for state in states):
+        # Scripted in-process observations need the runner's enum. The executable
+        # connector does not; importing the runner for every request repeats its
+        # configuration-model construction in hundreds of short-lived processes.
+        status_type = import_module("vs_slurm.runner").SlurmJobStatus
+        if states is None:
+            states = (status_type.COMPLETED,)
+        if not states or any(not isinstance(state, status_type) for state in states):
             raise ValueError(_STATES_REQUIRED)
         unknown = options.keys() - _ConnectorOptions.__annotations__.keys()
         if unknown:
@@ -400,6 +500,7 @@ class FakeConnector:
             options.get("missing_stage_result", False),
             options.get("rejected_reason"),
             options.get("lost_claim_reply", False),
+            options.get("purged", False),
         )
         callback = options.get("on_dispatch")
         if callback is not None:
@@ -458,7 +559,7 @@ class FakeConnector:
             return
         job_id = str(response["stdout"]).split()[-1]
         self._jobs[name] = _ScheduledJob(
-            job_id, plan.states, plan.pending_reason, plan.estimated_start
+            job_id, plan.states, plan.pending_reason, plan.estimated_start, plan.purged
         )
         if plan.missing_exit_status or plan.missing_stage_result:
             start = tokens.index("sbatch")
@@ -480,7 +581,7 @@ class FakeConnector:
         if "-n" in tokens and tokens[0] == "squeue":
             name = tokens[tokens.index("-n") + 1]
             job = None if name in self._forgotten_names else self._jobs.get(name)
-            if job is not None and job.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
+            if job is not None and job.active:
                 output = f"{job.job_id}\n"
         elif "--name" in tokens:
             name = tokens[tokens.index("--name") + 1]
@@ -491,17 +592,19 @@ class FakeConnector:
             job = next((item for item in self._jobs.values() if item.job_id == job_id), None)
             if job is None:
                 return None
+            if job.purged and not job.active and tokens[0] in {"squeue", "scancel"}:
+                return _purged_reply(tokens[0], job.job_id)
             output = self._job_output(job, tokens)
         return {"version": 1, "returncode": 0, "stdout": output, "stderr": ""}
 
     @staticmethod
     def _job_output(job: _ScheduledJob, tokens: list[str]) -> str:
         if tokens[0] == "scancel":
-            if job.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
-                job.states = (SlurmJobStatus.CANCELLED,)
+            if job.active:
+                job.states = (type(job.status).CANCELLED,)
                 job.position = 0
             return ""
-        active = job.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}
+        active = job.active
         if tokens[0] == "squeue":
             if not active:
                 return ""
@@ -512,9 +615,23 @@ class FakeConnector:
             return output + "\n"
         if active:
             return ""
-        output = f"{job.status.value.upper()} 0:0\n"
+        output = sacct_row(job.status.value.upper(), "0:0", parsable="-P" in tokens)
         job.advance()
         return output
+
+
+def _purged_reply(program: str, job_id: str) -> dict[str, object]:
+    """What ``squeue -j`` and ``scancel`` print for a job slurmctld no longer holds.
+
+    The controller forgets an ended job ``MinJobAge`` (300 s by default) after it
+    ended; only accounting still knows it. Both programs exit 1.
+    """
+    stderr = (
+        "slurm_load_jobs error: Invalid job id specified\n"
+        if program == "squeue"
+        else f"scancel: error: Kill job error on job id {job_id}: Invalid job id specified\n"
+    )
+    return {"version": 1, "returncode": 1, "stdout": "", "stderr": stderr}
 
 
 def _rsync(state: Path, arguments: list[str]) -> None:

@@ -15,7 +15,8 @@ const PACKAGE_SOURCES = `^(?:${PACKAGE_DIRECTORIES})/src/`;
 const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
-const BACKEND_CLIENT_TEST_SUPPORT =
+const BACKEND_CLIENT_TEST_ONLY = '^backend-client/src/(?:test-support/|testing/)';
+const BACKEND_CLIENT_NODE_TEST_SUPPORT =
   '^backend-client/src/(?:test-support/|testing/.*\\.test-helper\\.[cm]?[jt]sx?$)';
 
 // The replay harness is tooling, but it has its own rule below, with the reason it exists; the
@@ -148,7 +149,7 @@ export default {
       name: 'production-code-does-not-import-backend-client-test-support',
       severity: 'error',
       from: {path: SCANNED, pathNot: TEST_FILE},
-      to: {path: BACKEND_CLIENT_TEST_SUPPORT},
+      to: {path: BACKEND_CLIENT_TEST_ONLY},
     },
     {
       // Core state is below every frontend, not only the two that happened to exist when the rule
@@ -198,7 +199,7 @@ export default {
       severity: 'error',
       from: {
         path: '^backend-client/src/',
-        pathNot: ['^backend-client/src/node/', TEST_FILE, BACKEND_CLIENT_TEST_SUPPORT],
+        pathNot: ['^backend-client/src/node/', TEST_FILE, BACKEND_CLIENT_NODE_TEST_SUPPORT],
       },
       to: {dependencyTypes: ['core']},
     },

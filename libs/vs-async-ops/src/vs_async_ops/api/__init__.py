@@ -30,6 +30,7 @@ from vs_async_ops.ports import (
     OperationStore,
     OperationWaiter,
 )
+from vs_async_ops.settling import drain, finish
 
 __all__ = [
     "NULL_OPERATION_EVENT_SINK",
@@ -56,4 +57,6 @@ __all__ = [
     "OperationStore",
     "OperationTimedOut",
     "OperationWaiter",
+    "drain",
+    "finish",
 ]

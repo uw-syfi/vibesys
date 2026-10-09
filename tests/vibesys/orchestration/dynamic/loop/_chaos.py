@@ -33,12 +33,13 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
 from vibesys.api import RunStopped
 from vibesys.orchestration.dynamic import DynamicPlanningError
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
-from vs_agent.api import AgentCapabilities, AgentOutputSchemaError
+from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, AgentOutputSchemaError
 from vs_agent.api.testing import FakeAgentClient
 from vs_evaluation.api import EvaluationAgentRole
 from vs_evaluation.api.tools import EvaluationServiceClientError, build_evaluation_tools
 from vs_faults.api import (
     AgentCrashError,
+    AgentFault,
     Boundary,
     FaultPlan,
     FaultyAgentClient,
@@ -50,11 +51,12 @@ from vs_faults.api import (
     injected_faults,
     prompt_vocabulary,
 )
-from vs_runtime.api import RuntimeContractError
+from vs_runtime.api import UnresolvedDispatchError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from vs_agent.api import SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
 
 ROLES = (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id, PROFILER.id)
@@ -72,14 +74,17 @@ TOOLS = (
     "await_profiler",
     "cancel_profiler",
 )
-#: Outcomes a run may end with: a typed run result or a typed agent failure.
-TYPED_ENDS = (
-    RunStopped,
-    DynamicPlanningError,
-    RuntimeContractError,
-    AgentCrashError,
-    AgentOutputSchemaError,
+#: Output faults: the agent's reply is wrong, so a schema or planning failure may follow.
+_OUTPUT_FAULTS = frozenset(
+    {
+        AgentFault.MALFORMED,
+        AgentFault.SCHEMA_INVALID,
+        AgentFault.EXTRA_KEYS,
+        AgentFault.WRONG_VALUES,
+    }
 )
+#: Transport faults: the turn's fate is unknown, so its dispatch is unresolved.
+_TRANSPORT_FAULTS = frozenset({AgentFault.CRASH, AgentFault.TIMEOUT})
 #: A deadlock guard: a chaos run finishes in seconds; raising it never turns a hang into a pass.
 RUN_GUARD_S = 600.0
 _MAX_TOOL_CALLS = 6
@@ -106,6 +111,43 @@ class ChaosInvariant:
     UNTYPED_END = "untyped_end"
     STATE_UNLOADABLE = "state_unloadable"
     TOOL_HANDLER_CRASH = "tool_handler_crash"
+    UNEXPLAINED_END = "unexplained_end"
+
+
+@dataclass(frozen=True)
+class Injected:
+    """The faults a run actually suffered, which decide the endings it may have."""
+
+    agent: frozenset[AgentFault] = frozenset()
+    #: The user's stop reached the session during the run (not merely scheduled).
+    stop_delivered: bool = False
+
+
+#: Each ending a run may have, with the agent faults that can cause it. The map
+#: is closed: an error type outside it (any other ``RuntimeContractError``
+#: included) is a violation whatever was injected. A transport fault leaves a
+#: turn's fate unknown; an output fault makes a reply wrong, which schema and
+#: planning errors report.
+_EXPLAINED_BY: dict[type[BaseException], frozenset[AgentFault]] = {
+    UnresolvedDispatchError: _TRANSPORT_FAULTS,
+    AgentCrashError: frozenset({AgentFault.CRASH}),
+    AgentOutputSchemaError: _OUTPUT_FAULTS,
+    DynamicPlanningError: _OUTPUT_FAULTS,
+}
+
+
+def unexplained_end(error: BaseException | None, injected: Injected) -> str | None:
+    """Return why ``error`` is no ending ``injected`` can explain (``None``: it is explained)."""
+    if error is None:
+        return None
+    if isinstance(error, RunStopped):
+        return None if injected.stop_delivered else "stopped without a delivered stop"
+    for error_type, causes in _EXPLAINED_BY.items():
+        if isinstance(error, error_type):
+            if injected.agent & causes:
+                return None
+            return f"{error_type.__name__} without a fault that can cause it"
+    return "an ending no fault is declared to cause"
 
 
 def repro(seed: int) -> str:
@@ -123,19 +165,39 @@ class ChaosAgents:
     plan: FaultPlan
     #: Request a stop when the ``stop_at``-th agent turn starts (``None``: never).
     stop_at: int | None = None
+    stop_delivered: bool = False
     session: Any = None
     tool_errors: list[str] = field(default_factory=list)
     faulty: FaultyAgentClient | None = None
+    #: One dispatch for the whole run, so a tool rule counts calls across turns and
+    #: fires once; each call is delivered to the tools of the turn making it.
+    dispatch: FaultyToolDispatch = field(init=False)
+    _turn: threading.local = field(default_factory=threading.local, init=False)
     _counts: Counter[str] = field(default_factory=Counter)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def client(self) -> FaultyAgentClient:
+    def __post_init__(self) -> None:
+        """Build the run's single tool dispatch."""
+        self.dispatch = FaultyToolDispatch(self._route, self.plan)
+
+    def _route(self, name: str, arguments: Mapping[str, object]) -> dict[str, object]:
+        """Deliver one call to the tools of the turn (thread) that made it."""
+        return _deliver(self._turn.tools)(name, arguments)
+
+    def client(
+        self,
+        *,
+        session_store: SessionStore | None = None,
+        skill_selection: SkillSelection = NULL_SKILL_SELECTION,
+    ) -> FaultyAgentClient:
         """Build the run's client: a production-capable Fake behind the fault wrapper."""
         fake = FakeAgentClient(
             capabilities=AgentCapabilities(
                 tool_servers=True, session_reuse=True, provider_session_resume=True
             ),
             session_reuse=True,
+            session_store=session_store,
+            skill_selection=skill_selection,
         )
         replies = generated_replies(self.plan)
 
@@ -161,13 +223,15 @@ class ChaosAgents:
             # The user's Ctrl-C reaches a run as this request (the engine's
             # signal handler calls it); the turn itself continues.
             self.session.stop()
+            self.stop_delivered = True
         rng = self.plan.rng("act", invocation.kind, ordinal)
         candidate = invocation.workspace / "queue.py"
         editing = invocation.kind == IMPLEMENTER.id and candidate.is_file()
         if editing:
             _edit(candidate, rng.randint(-1, 9), rng.choice((None, 3, 12)))
         tools = _evaluation_tools(invocation)
-        dispatch = FaultyToolDispatch(_deliver(tools), self.plan)
+        self._turn.tools = tools
+        dispatch = self.dispatch
         vocabulary = list(prompt_vocabulary(invocation.user_prompt))
         if _EVIDENCE_TOOL in tools and rng.random() < _READS_EVIDENCE:
             # A correct agent reads the trusted evidence it may cite (every
@@ -361,6 +425,7 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     thread.start()
     thread.join(RUN_GUARD_S)
     injected = [str(item) for item in (agents.faulty.injected if agents.faulty else [])]
+    injected += [f"tool {item}" for item in agents.dispatch.injected]
     injected += [json.dumps(item) for item in injected_faults(faults_dir / "cluster")]
     violations: list[Violation | tuple[str, str]] = [
         (ChaosInvariant.TOOL_HANDLER_CRASH, error) for error in agents.tool_errors
@@ -372,8 +437,12 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     if not finished:
         return ChaosRun(seed, plan, None, violations, injected, agents.stop_at)
     run = finished[0]
-    if run.error is not None and not isinstance(run.error, TYPED_ENDS):
-        violations.append((ChaosInvariant.UNTYPED_END, repr(run.error)))
+    suffered = Injected(
+        agent=frozenset(item[2] for item in (agents.faulty.injected if agents.faulty else [])),
+        stop_delivered=agents.stop_delivered,
+    )
+    if (reason := unexplained_end(run.error, suffered)) is not None:
+        violations.append((ChaosInvariant.UNEXPLAINED_END, f"{reason}: {run.error!r}"))
     # A profile that failed because the plan faulted its agent or its job, or
     # because the run stopped, is a typed failure, not an unservable capability.
     profiles_faulted = agents.stop_at is not None or any(

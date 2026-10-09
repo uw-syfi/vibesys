@@ -33,6 +33,8 @@ const DEPENDENCY_SECTIONS = [
   'peerDependencies',
 ];
 
+const DEPENDENCY_BUILD_COMMANDS = ['build', 'check', 'test'];
+
 export function manifestErrors(root) {
   const errors = [];
   const {packages} = workspaceLayout(root);
@@ -54,27 +56,27 @@ export function manifestErrors(root) {
 }
 
 /**
- * Whether a package's tests build the workspace dependencies they import.
+ * Whether each direct package command builds the workspace dependencies it imports.
  *
- * `pnpm -r run test` runs the packages in topological order but runs only `test`, so nothing in
- * that order writes the `dist` a workspace import resolves to. pnpm links every declared workspace
- * dependency into `<package>/node_modules/@vibesys/*`, and that link resolves through the
- * dependency's `exports` to its `dist`, so the import reads build output unless every entry point
- * is redirected to source by a tsconfig `paths` entry. The hook is required of a package with a
- * workspace dependency whether or not it has that redirection today: the redirection is per
- * specifier, so adding a subpath import or dropping an alias silently puts the suite back on
- * whichever `dist` the last build in the checkout left behind. `@vibesys/web` declared no
- * `pretest` at all (#1039). Its argument is derivable from the package name, so this checks the
- * derived value rather than accepting any script.
+ * A direct `pnpm --filter <package> <command>` has no workspace scheduler to prepare its runtime
+ * dependencies. Recursive `check` and `test` runs order packages, but invoke only that command,
+ * which doesn't emit the dependency `dist` their imports resolve through. The hook is required
+ * whether or not every entry point is redirected to source today: aliases are per specifier, so a
+ * new subpath import can silently return to build output. The hook's argument is derivable from the
+ * package name, and the required command set is closed here, so the checker accepts neither a
+ * partial lifecycle nor an arbitrary script that happens to start with pnpm (#1039).
  */
 function buildOrderErrors(relativePath, name, policy, manifest) {
   if (policy.runtimeWorkspaceDependencies.length === 0) return [];
   const expected = `pnpm --filter ${name}^... build`;
-  if (manifest.scripts?.pretest === expected) return [];
-  return [
-    `${relativePath}: ${name} must declare "pretest": "${expected}", because ` +
-      '`pnpm -r test` runs the packages in order but builds none of them',
-  ];
+  return DEPENDENCY_BUILD_COMMANDS.flatMap(command => {
+    const hook = `pre${command}`;
+    if (manifest.scripts?.[hook] === expected) return [];
+    return [
+      `${relativePath}: ${name} must declare "${hook}": "${expected}", because direct ` +
+        `"${command}" must build its runtime workspace dependencies first`,
+    ];
+  });
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288

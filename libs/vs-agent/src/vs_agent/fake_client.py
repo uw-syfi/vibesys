@@ -17,21 +17,28 @@ import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self, TypeVar
+from uuid import uuid4
 
 from pydantic import BaseModel
 
+from vs_agent.cli_common import materialize_skills
 from vs_agent.contracts import (
     AgentCapabilities,
     AgentEvent,
     AgentEventKind,
     AgentOutputSchemaError,
+    AgentSkillUse,
     AgentTurnResult,
+    AgentUsage,
     session_spec_fingerprint,
 )
 from vs_agent.runner import validate_typed_response
 from vs_agent.session_errors import SessionResumeError
+from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
+from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.tools import StdioServerDescriptor
+from vs_agent.usage_records import append_usage_record
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,6 +46,7 @@ if TYPE_CHECKING:
     from vs_agent.contracts import AgentObserver, AgentSessionSpec, AgentTurnRequest
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
+    from vs_agent.skills import SkillSelection
     from vs_agent.tools import ToolServerDescriptor
 T = TypeVar("T", bound=BaseModel)
 
@@ -145,8 +153,15 @@ class FakeAgentClient:
         session_reuse: bool = False,
         capabilities: AgentCapabilities | None = None,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
+        session_store: SessionStore | None = None,
+        skill_selection: SkillSelection = NULL_SKILL_SELECTION,
+        log_dir: Path | None = None,
     ) -> None:
         """Create a fake client; see the class docstring for defaults.
+
+        With ``log_dir`` every dispatched turn, failed or not, appends one row to its
+        ``usage.jsonl``, as the production client does; ``set_usage`` fills the row's
+        token counts.
 
         ``capabilities`` overrides the reported feature set (e.g. to report
         ``tool_servers=True`` for a backend that hosts issue-tracker tools); when
@@ -165,6 +180,10 @@ class FakeAgentClient:
         )
         self._session_reuse = self._capabilities.session_reuse
         self._sink = event_sink
+        self._session_store = session_store or NullSessionStore()
+        self._skill_selection = skill_selection
+        self._log_dir = log_dir
+        self._usage = AgentUsage()
         self._default_text: TextSource = DEFAULT_TEXT
 
         self.calls: list[FakeInvocation] = []
@@ -184,10 +203,11 @@ class FakeAgentClient:
         self._sessions: dict[AgentSessionKey, str] = {}
         self._last_turn_sessions: dict[AgentSessionKey, str] = {}
         self._raw_fingerprints: dict[AgentSessionKey, str] = {}
-        self._session_counter = 0
 
         self._closed = False
         self.cancel_count = 0
+        self.cancelled_sessions: list[AgentSessionKey] = []
+        self.released_sessions: list[AgentSessionKey] = []
         self._cancelled = threading.Event()
 
     # -- AgentClientProtocol: attribution ---------------------------------
@@ -213,7 +233,11 @@ class FakeAgentClient:
 
     def provider_session_id(self, session_key: AgentSessionKey) -> str | None:
         """Return the id minted or seeded for ``session_key``, else ``None``."""
-        return self._sessions.get(session_key)
+        cached = self._sessions.get(session_key)
+        checkpoint = self._session_store.get(session_key)
+        return (
+            cached if cached is not None else None if checkpoint is None else checkpoint.session_id
+        )
 
     def last_turn_provider_session_id(self, session_key: AgentSessionKey) -> str | None:
         """Return the id used on ``session_key``'s last turn, else ``None``."""
@@ -236,6 +260,16 @@ class FakeAgentClient:
         """Record a cancellation request and release turns waiting for one."""
         self.cancel_count += 1
         self._cancelled.set()
+
+    def cancel_session(self, key: AgentSessionKey) -> None:
+        """Record a cancellation of one key and release turns waiting for a cancellation."""
+        self.cancelled_sessions.append(key)
+        self._cancelled.set()
+
+    def release_session(self, key: AgentSessionKey) -> None:
+        """Drop the live conversation of *key*; its stored checkpoint survives."""
+        self.released_sessions.append(key)
+        self._sessions.pop(key, None)
 
     def wait_cancelled(self, timeout: float) -> bool:
         """Block until :meth:`cancel` is called; return whether it was.
@@ -312,6 +346,11 @@ class FakeAgentClient:
             self._model = model
         return self
 
+    def set_usage(self, usage: AgentUsage) -> Self:
+        """Report ``usage`` for every turn from now on (the default reports none)."""
+        self._usage = usage
+        return self
+
     def set_model_for_kind(self, mapping: dict[str, str]) -> Self:
         """Set per-kind model overrides, merged into any already configured."""
         self._model_for_kind.update(mapping)
@@ -345,6 +384,7 @@ class FakeAgentClient:
         """
         self._sessions.pop(session_key, None)
         self._last_turn_sessions.pop(session_key, None)
+        self._session_store.clear(session_key)
         return self
 
     def stream_output(self, kind: str, chunks: Sequence[str]) -> Self:
@@ -375,14 +415,13 @@ class FakeAgentClient:
     ) -> AgentTurnResult:
         """Execute a raw turn with the same scripts and strict identity fences."""
         fingerprint = session_spec_fingerprint(session_spec)
-        expected = turn.expected_provider_session_id
-        if expected is not None:
-            self._validate_raw_continuation(session_key, expected, fingerprint)
-        elif (
-            session_key is not None
-            and self._raw_fingerprints.get(session_key, fingerprint) != fingerprint
-        ):
-            self._sessions.pop(session_key, None)
+        if turn.require_provider_checkpoint and (session_key is None or not session_key.durable):
+            raise SessionResumeError(
+                str(session_key), "strict continuation requires a durable session key"
+            )
+        if turn.require_provider_checkpoint and not self.capabilities.provider_session_resume:
+            raise SessionResumeError(str(session_key), "provider cannot resume durable sessions")
+        self._prepare_raw_turn(session_spec, turn, session_key, fingerprint)
         tools: list[ToolServerDescriptor] = [
             StdioServerDescriptor(
                 server.name, server.command, server.args, server.env, server.runtime_env
@@ -404,6 +443,9 @@ class FakeAgentClient:
             reuse_session=True,
             session_key=session_key,
         )
+        self._write_usage(
+            session_spec.role, turn.label, session_spec.model, session_spec.reasoning_effort
+        )
         self._maybe_raise(session_spec.role)
         self._update_session(reuse_session=True, session_key=session_key)
         if session_key is not None:
@@ -422,10 +464,59 @@ class FakeAgentClient:
                 None if session_key is None else self.provider_session_id(session_key)
             ),
         )
+        self._record_raw_checkpoint(session_spec, session_key, fingerprint, result)
         if observer is not None:
             for chunk in self._stream_chunks.get(session_spec.role) or [text]:
                 observer.on_event(AgentEvent(kind=AgentEventKind.TEXT, text=chunk))
         return result
+
+    def _prepare_raw_turn(
+        self,
+        session_spec: AgentSessionSpec,
+        turn: AgentTurnRequest,
+        session_key: AgentSessionKey | None,
+        fingerprint: str,
+    ) -> None:
+        """Fence continuation identity, then materialize skills for a new spec."""
+        expected = turn.expected_provider_session_id
+        if expected is None and turn.require_provider_checkpoint and session_key is not None:
+            expected = self.provider_session_id(session_key)
+        if expected is not None:
+            self._validate_raw_continuation(session_key, expected, fingerprint)
+        elif session_key is not None:
+            checkpoint = self._session_store.get(session_key)
+            known_fingerprint = self._raw_fingerprints.get(
+                session_key, None if checkpoint is None else checkpoint.spec_fingerprint
+            )
+            if known_fingerprint is not None and known_fingerprint != fingerprint:
+                self._sessions.pop(session_key, None)
+                self._session_store.clear(session_key)
+        if session_key is None or self._raw_fingerprints.get(session_key) != fingerprint:
+            materialize_skills(
+                session_spec.workspace,
+                list(session_spec.skills),
+                selection=self._skill_selection,
+                event_sink=self._sink,
+            )
+
+    def _record_raw_checkpoint(
+        self,
+        session_spec: AgentSessionSpec,
+        session_key: AgentSessionKey | None,
+        fingerprint: str,
+        result: AgentTurnResult,
+    ) -> None:
+        """Persist the provider session id a raw turn produced."""
+        if session_key is None or result.provider_session_id is None:
+            return
+        self._session_store.record(
+            session_key,
+            spec_fingerprint=fingerprint,
+            provider=session_spec.provider,
+            model=session_spec.model,
+            session_id=result.provider_session_id,
+            role=session_spec.role,
+        )
 
     def _validate_raw_continuation(
         self, key: AgentSessionKey | None, expected: str, fingerprint: str
@@ -436,7 +527,11 @@ class FakeAgentClient:
             )
         if self.provider_session_id(key) != expected:
             raise SessionResumeError(str(key), "provider checkpoint identity changed")
-        if self._raw_fingerprints.get(key) != fingerprint:
+        checkpoint = self._session_store.get(key)
+        known_fingerprint = self._raw_fingerprints.get(
+            key, None if checkpoint is None else checkpoint.spec_fingerprint
+        )
+        if known_fingerprint != fingerprint:
             raise SessionResumeError(str(key), "session specification changed")
 
     def invoke(  # noqa: PLR0913  # lint-waiver: LW-010178 [PLR0913]; Preserve FakeAgentClient.invoke's named-argument contract because callers pass these independent settings directly.
@@ -471,6 +566,7 @@ class FakeAgentClient:
             reuse_session=reuse_session,
             session_key=session_key,
         )
+        self._write_usage(kind, round_label, self.model_for_kind(kind), None)
         self._maybe_raise(kind)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
@@ -507,6 +603,7 @@ class FakeAgentClient:
             reuse_session=reuse_session,
             session_key=session_key,
         )
+        self._write_usage(kind, round_label, self.model_for_kind(kind), None)
         self._maybe_raise(kind)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
@@ -551,6 +648,23 @@ class FakeAgentClient:
             callback(invocation)
         return invocation
 
+    def _write_usage(
+        self, kind: str, round_label: str | None, model: str | None, reasoning_effort: str | None
+    ) -> None:
+        """Append the turn's usage row, before its outcome is known, like the real client."""
+        if self._log_dir is None:
+            return
+        append_usage_record(
+            self._log_dir,
+            kind=kind,
+            round_label=round_label,
+            provider=self._provider,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            usage=self._usage,
+            skills=AgentSkillUse(),
+        )
+
     def _maybe_raise(self, kind: str) -> None:
         state = self._failures.get(kind)
         if state is None:
@@ -566,11 +680,10 @@ class FakeAgentClient:
     ) -> None:
         if not (self._session_reuse and reuse_session and session_key is not None):
             return
-        session_id = self._sessions.get(session_key)
+        session_id = self.provider_session_id(session_key)
         if session_id is None:
-            self._session_counter += 1
-            session_id = f"fake-session-{self._session_counter}"
-            self._sessions[session_key] = session_id
+            session_id = f"fake-session-{uuid4()}"
+        self._sessions[session_key] = session_id
         self._last_turn_sessions[session_key] = session_id
 
     def _emit_stream(self, kind: str, invocation: FakeInvocation) -> None:

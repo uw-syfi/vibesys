@@ -6,10 +6,12 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._git_process import git_environment, run_git
 from vs_project.project import Project
 
@@ -236,6 +238,42 @@ class GitTracker:
         self.run(["git", "update-ref", ref, sha])
         return ref
 
+    def is_retained(self, commit: str) -> bool:
+        """Whether this run keeps ``commit`` reachable, as opposed to merely present.
+
+        A commit is retained when it is an ancestor of the root checkout's HEAD or
+        of the trusted-input baseline, or of any candidate ref created by
+        ``retain_candidate``. A commit that exists in the object database but that
+        no ref reaches (a dangling commit) is not retained, and neither is an
+        unknown one. Read-only; a malformed object name raises ``ValueError``.
+        """
+        if self._OBJECT_NAME.fullmatch(commit) is None:
+            message = f"not a commit object name: {commit!r}"
+            raise ValueError(message)
+        resolved = self.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}"], check=False
+        )
+        if resolved.returncode != 0:
+            return False
+        sha = resolved.stdout.decode(errors="replace").strip()
+        anchors = [anchor for anchor in ("HEAD", self._trusted_input_baseline) if anchor]
+        for anchor in anchors:
+            reaches = self.run(["git", "merge-base", "--is-ancestor", sha, anchor], check=False)
+            if reaches.returncode == 0:
+                return True
+        held = self.run(
+            [
+                "git",
+                "for-each-ref",
+                "--count=1",
+                f"--contains={sha}",
+                "--format=%(refname)",
+                f"refs/vibesys/{self.run_id}/candidates/",
+            ],
+            check=False,
+        )
+        return held.returncode == 0 and bool(held.stdout.strip())
+
     def retain_worktree(self, worktree_dir: Path, candidate_id: str) -> str:
         """Retain the current commit from a caller-created local worktree."""
         destination = self._validate_local_worktree_path(worktree_dir)
@@ -415,7 +453,8 @@ class GitTracker:
         for state_file in plan.files:
             state_file.destination.parent.mkdir(parents=True, exist_ok=True)
             state_file.destination.write_bytes(state_file.contents)
-            self.run(["git", "add", "--force", "--", state_file.pathspec])
+        if plan.files:
+            self.run(["git", "add", "--force", "--", *(file.pathspec for file in plan.files)])
         self._commit_staged(label)
 
     def snapshot_framework_metadata_only(
@@ -600,6 +639,12 @@ class GitTracker:
         inspect the candidate but not mutate it.  Callers checkpoint framework
         state first, then use this method to detect any writes the agent made
         during its turn before restoring the checkpoint.
+
+        The framework writes its own run state below ``.vibesys`` while a turn is in
+        flight, so a path is not reported when it is exactly what the framework last
+        published there (see ``_framework_writes``). Any other change below
+        ``.vibesys`` is reported like a change anywhere else: an isolated role must
+        not rewrite framework state either.
         """
         result = self.run(
             [
@@ -613,36 +658,54 @@ class GitTracker:
         )
         prefix_result = self.run(["git", "rev-parse", "--show-prefix"])
         prefix = prefix_result.stdout.decode(errors="replace").strip()
-        return sorted(
+        changed = sorted(
             line[3:].removeprefix(prefix) if prefix else line[3:]
             for line in result.stdout.decode(errors="replace").splitlines()
             if line[3:]
         )
+        return [
+            path for path in changed if not FRAMEWORK_WRITES.is_framework_state(self.root / path)
+        ]
 
     def checkout_tree(
         self,
         sha: str,
         *,
         clean: bool = False,
+        clean_ignored: bool = False,
         preserve_paths: Iterable[str | Path] = (),
     ) -> bool:
         """Materialize *sha*'s tree into the working directory.
 
-        Restores the worktree from *sha* so paths introduced after that
-        snapshot are deleted as well as modified paths being reset. The index
+        Restores the worktree from *sha*: paths absent from the current ``HEAD``
+        are created, paths absent from *sha* are deleted, and modified paths are
+        reset. The index
         is reset to ``HEAD`` and stays clean, while HEAD itself stays where it
         is. A later candidate checkpoint can therefore commit the restored
         tree as a new child instead of encountering staged changes or
         rewriting run history. With ``clean=True``, untracked files
         left over from a prior failed attempt are removed via ``git clean
-        -fd``. Files below workspace-relative ``preserve_paths`` are captured
-        before the restore and reapplied afterwards. This is intended for
+        -fd``; ``clean_ignored=True`` uses ``-fdx`` so ignored files go too and
+        the tree is exact. Files below workspace-relative ``preserve_paths`` are
+        captured before the restore and reapplied afterwards. This is intended for
         framework-owned memory that must survive a candidate-code rollback.
         """
         preserved: dict[Path, bytes] = {}
         try:
             preserved = self._capture_preserved_paths(preserve_paths)
             self.run(["git", "reset", "--mixed", "HEAD"])
+            if clean:
+                # Clean before restoring: restored paths that HEAD lacks are untracked,
+                # so cleaning afterwards would delete them again.
+                clean_cmd = [
+                    "git",
+                    "clean",
+                    "-fdx" if clean_ignored else "-fd",
+                    "-e",
+                    self._state_integration.metadata_clean_exclusion,
+                ]
+                clean_cmd.extend(["--", "."])
+                self.run(clean_cmd, check=False)
             restore_cmd = [
                 "git",
                 "restore",
@@ -653,16 +716,6 @@ class GitTracker:
             ]
             restore_cmd.extend(self._state_integration.metadata_restore_exclusions)
             self.run(restore_cmd)
-            if clean:
-                clean_cmd = [
-                    "git",
-                    "clean",
-                    "-fd",
-                    "-e",
-                    self._state_integration.metadata_clean_exclusion,
-                ]
-                clean_cmd.extend(["--", "."])
-                self.run(clean_cmd, check=False)
             self._restore_preserved_paths(preserved)
         except (OSError, subprocess.SubprocessError) as exc:
             try:
@@ -679,6 +732,45 @@ class GitTracker:
             return False
         else:
             return True
+
+    def matches_tree(
+        self,
+        sha: str,
+        *,
+        exempt_paths: Iterable[str | Path] = (),
+        include_ignored: bool = False,
+    ) -> bool:
+        """Return whether the working directory holds exactly *sha*'s tree.
+
+        Tracked content and untracked files count. Ignored files count only with
+        ``include_ignored=True``, which pairs with ``checkout_tree(clean_ignored=True)``.
+        Trusted VibeSys files (which tree restores preserve) and files below
+        workspace-relative ``exempt_paths`` are not compared.
+        """
+        exempt = [f":(exclude){Path(path).as_posix().rstrip('/')}" for path in exempt_paths]
+        pathspec = [
+            "--",
+            ".",
+            *self._state_integration.metadata_restore_exclusions,
+            *exempt,
+        ]
+        # Compare through a scratch index: stage every file into a copy of *sha*'s tree, then ask Git whether anything differs. A plain
+        # ``git diff <sha>`` cannot see files that are untracked here.
+        with tempfile.TemporaryDirectory() as scratch:
+            environment = git_environment(
+                safe_directory=self._work_tree or self.root,
+                overrides={**self._git_env, "GIT_INDEX_FILE": str(Path(scratch) / "index")},
+            )
+
+            def git(*args: str) -> subprocess.CompletedProcess[bytes]:
+                return run_git(list(args), cwd=self.root, env=environment)
+
+            if git("read-tree", sha).returncode != 0:
+                return False
+            add = ["add", "--all", *(["--force"] if include_ignored else []), *pathspec]
+            if git(*add).returncode != 0:
+                return False
+            return git("diff", "--cached", "--quiet", sha, *pathspec).returncode == 0
 
     def _capture_preserved_paths(self, paths: Iterable[str | Path]) -> dict[Path, bytes]:
         """Read regular files below workspace-relative *paths*."""
@@ -1063,7 +1155,8 @@ class GitTracker:
         permission failure (a file may appear between the scan and the add).
         """
         self._exclude_paths(self._collect_unreadable())
-        if self.current_sha() is not None:
+        has_head = self.current_sha() is not None
+        if has_head:
             # Discard any index mutations made by the candidate before staging
             # the exact candidate-owned path set ourselves.
             self.run(["git", "reset", "--quiet", "HEAD", "--", "."])
@@ -1071,7 +1164,7 @@ class GitTracker:
         for _ in range(3):
             result = self.run(add_cmd, check=False)
             if result.returncode == 0:
-                self._unstage_project_owned_paths()
+                self._unstage_project_owned_paths(has_head=has_head)
                 return
             stderr = result.stderr.decode(errors="replace")
             offenders = self._unreadable_from_stderr(stderr)
@@ -1080,10 +1173,14 @@ class GitTracker:
             self._exclude_paths(offenders)
         # Final attempt: let run() raise with full diagnostics if it still fails.
         self.run(add_cmd)
-        self._unstage_project_owned_paths()
+        self._unstage_project_owned_paths(has_head=has_head)
 
-    def _unstage_project_owned_paths(self) -> None:
-        """Remove framework, private, and cache paths from the candidate index."""
+    def _unstage_project_owned_paths(self, *, has_head: bool) -> None:
+        """Remove framework, private, and cache paths from the candidate index.
+
+        ``has_head`` is whether ``HEAD`` resolves; ``_add_all`` already knows,
+        and staging does not move ``HEAD``.
+        """
         protected = [
             self._state_integration.metadata_pathspec,
             ".env",
@@ -1101,10 +1198,10 @@ class GitTracker:
                 protected.append(f":(glob)**/{normalized}/**")
             else:
                 protected.append(f":(glob)**/{normalized}")
-        if self.current_sha() is None:
-            self.run(["git", "rm", "--cached", "-r", "--ignore-unmatch", "--", *protected])
-        else:
+        if has_head:
             self.run(["git", "reset", "--quiet", "HEAD", "--", *protected])
+        else:
+            self.run(["git", "rm", "--cached", "-r", "--ignore-unmatch", "--", *protected])
 
     def _bind_repository(self) -> None:
         """Pin future commands to the repository currently containing ``root``.
@@ -1114,12 +1211,20 @@ class GitTracker:
         explicit ``GIT_DIR``/``GIT_WORK_TREE``, later commands silently switch
         repositories based on the current directory.
         """
-        git_dir = self.run(["git", "rev-parse", "--absolute-git-dir"])
-        work_tree = self.run(["git", "rev-parse", "--show-toplevel"])
-        self._git_dir = Path(git_dir.stdout.decode(errors="replace").strip()).resolve()
-        self._work_tree = Path(work_tree.stdout.decode(errors="replace").strip()).resolve()
-        exclude_file = self.run(["git", "rev-parse", "--git-path", "info/exclude"])
-        exclude_path = Path(exclude_file.stdout.decode(errors="replace").strip())
+        located = self.run(
+            [
+                "git",
+                "rev-parse",
+                "--absolute-git-dir",
+                "--show-toplevel",
+                "--git-path",
+                "info/exclude",
+            ]
+        )
+        git_dir, work_tree, exclude_file = located.stdout.decode(errors="replace").splitlines()
+        self._git_dir = Path(git_dir.strip()).resolve()
+        self._work_tree = Path(work_tree.strip()).resolve()
+        exclude_path = Path(exclude_file.strip())
         if not exclude_path.is_absolute():
             exclude_path = self.root / exclude_path
         self._exclude_file = exclude_path.resolve()

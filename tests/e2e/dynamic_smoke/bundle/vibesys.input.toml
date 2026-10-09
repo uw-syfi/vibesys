@@ -5,7 +5,12 @@ domain = "llm-serving"
 
 [accuracy]
 command = ["python", "accuracy.py"]
+timeout_seconds = 30
 
 [benchmark]
 command = ["python", "benchmark.py"]
+timeout_seconds = 30
 result_protocol = 2
+
+[profile]
+command = ["python", "profile.py"]

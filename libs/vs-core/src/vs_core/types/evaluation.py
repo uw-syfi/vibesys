@@ -13,6 +13,7 @@ from .common import (
     ContractValidationError,
     Count,
     EvidenceId,
+    EvidenceKey,
     EvidenceKind,
     ExecuteRegisteredOperation,
     InvocationRef,
@@ -67,6 +68,12 @@ class MeasurementPlan(Value):
     deadline_at: Seconds
     reusable_evidence: tuple[EvidenceId, ...] = ()
     submission_limit: int = Field(default=1, ge=1)
+    accuracy_stage: str | None = Field(default=None, min_length=1)
+    """The stage whose pass is the correctness (accuracy) gate, named explicitly.
+
+    None declares no accuracy stage: correctness evidence then requires every
+    stage to pass instead of inferring a gate from stage dependencies.
+    """
 
     @model_validator(mode="after")
     def validate_stage_dag(self) -> MeasurementPlan:
@@ -74,6 +81,8 @@ class MeasurementPlan(Value):
         graph = {stage.stage_id: set(stage.depends_on) for stage in self.stages}
         if len(graph) != len(self.stages):
             raise MeasurementPlanError("stages", "duplicate stage ID")
+        if self.accuracy_stage is not None and self.accuracy_stage not in graph:
+            raise MeasurementPlanError("accuracy_stage", "unknown stage")
         for stage in self.stages:
             if set(stage.depends_on) - graph.keys():
                 raise MeasurementPlanError(stage.stage_id, "unknown dependency")
@@ -116,6 +125,9 @@ class EvidenceAcceptanceReceipt(Value):
         return self
 
 
+_PROOF_KINDS = frozenset({EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK})
+
+
 class EvidenceRef(Value):
     """Evidence ref lifecycle contract."""
 
@@ -134,6 +146,28 @@ class EvidenceRef(Value):
     artifacts: tuple[ArtifactRef, ...] = ()
     acceptance_receipt: EvidenceAcceptanceReceipt | None = None
 
+    @property
+    def key(self) -> EvidenceKey:
+        """Run-wide identity: evidence IDs are unique only within a source request."""
+        return EvidenceKey(source_request=self.source_request, evidence_id=self.evidence_id)
+
+    @model_validator(mode="after")
+    def local_validation_is_never_proof(self) -> EvidenceRef:
+        """Keep an agent's own evaluation out of the kinds that prove eligibility.
+
+        Local-validation purpose records come from the agent's in-turn
+        ``submit_evaluation`` tool. They are advice, never accuracy or benchmark
+        proof, so they carry a kind that no eligibility requirement or
+        ``accuracy_proof`` ever selects. Without this, a candidate with an agent
+        record and its official record would hold two CORRECTNESS rows and
+        ``accuracy_proof`` would call them ambiguous.
+        """
+        if self.purpose == "local-validation" and self.kind in _PROOF_KINDS:
+            raise ContractValidationError(
+                "kind", "a local-validation record cannot be correctness or benchmark proof"
+            )
+        return self
+
     @model_validator(mode="after")
     def original_acceptance(self) -> EvidenceRef:
         """Bind historical source proof without inferring absent authority."""
@@ -149,6 +183,18 @@ class EvidenceRef(Value):
                     "acceptance_receipt", "source, scope, sequence and status must match evidence"
                 )
         return self
+
+
+class ObservePacing(Value):
+    """When core next polls one job.
+
+    next_at is the core time at which the next ObserveOwnedJob is issued, or None
+    while a poll is outstanding or the job needs none. retries counts consecutive
+    unknown polls, and sets the backoff delay.
+    """
+
+    next_at: Seconds | None = None
+    retries: Count = 0
 
 
 class OwnedJob(Value):
@@ -170,6 +216,7 @@ class OwnedJob(Value):
     terminal: bool = False
     released: bool = False
     evidence: tuple[EvidenceRef, ...] = ()
+    pacing: ObservePacing = ObservePacing()
 
 
 class RegisteredOwnedJob(Value):
@@ -195,6 +242,7 @@ class RegisteredOwnedJob(Value):
     released: bool = False
     children: tuple[ResourceId, ...] = ()
     evidence: tuple[EvidenceRef, ...] = ()
+    pacing: ObservePacing = ObservePacing()
 
 
 class ContinuationPhase(StrEnum):
@@ -305,6 +353,24 @@ class MeasurementIdentity(Value):
     environment_digest: str = Field(min_length=1)
     recipe_digest: str = Field(min_length=1)
     stages: tuple[MeasurementStageIdentity, ...]
+    accuracy_stage: str | None = Field(default=None, min_length=1)
+
+    @classmethod
+    def from_plan(cls, plan: MeasurementPlan, candidate: RevisionRef) -> MeasurementIdentity:
+        """The one projection from a plan and its resolved revision to its identity."""
+        return cls(
+            purpose=plan.purpose,
+            candidate=candidate,
+            evaluator_digest=plan.evaluator_digest,
+            workload_digest=plan.workload_digest,
+            environment_digest=plan.environment_digest,
+            recipe_digest=plan.recipe.digest,
+            stages=tuple(
+                MeasurementStageIdentity(stage_id=stage.stage_id, depends_on=stage.depends_on)
+                for stage in plan.stages
+            ),
+            accuracy_stage=plan.accuracy_stage,
+        )
 
     @model_validator(mode="after")
     def canonical_stage_dag(self) -> MeasurementIdentity:
@@ -312,6 +378,8 @@ class MeasurementIdentity(Value):
         graph = {stage.stage_id: set(stage.depends_on) for stage in self.stages}
         if len(graph) != len(self.stages):
             raise MeasurementPlanError("stages", "duplicate stage ID")
+        if self.accuracy_stage is not None and self.accuracy_stage not in graph:
+            raise MeasurementPlanError("accuracy_stage", "unknown stage")
         for stage in self.stages:
             if len(set(stage.depends_on)) != len(stage.depends_on):
                 raise MeasurementPlanError(stage.stage_id, "duplicate dependency")
@@ -404,6 +472,31 @@ class EvaluationState(Value):
     continuations: tuple[Continuation, ...] = ()
     evidence: tuple[EvidenceRef, ...] = ()
     submission_budgets: tuple[SubmissionBudget, ...] = ()
+    agent_calls: tuple[AgentCall, ...] = ()
+
+    def evidence_for(self, key: EvidenceKey) -> EvidenceRef | None:
+        """The ledger record with this full identity, or None."""
+        return next((item for item in self.evidence if item.key == key), None)
+
+    def accuracy_proof(self, candidate: RevisionRef) -> EvidenceRef | None:
+        """The one accepted accuracy proof for a candidate, or None.
+
+        Ingress admits successful CORRECTNESS evidence only after the accuracy
+        stage and gate passed, so a ledger record that is trusted, successful and
+        carries its acceptance receipt proves accuracy. Two such records are
+        ambiguous and prove nothing. Operations that retain or promote a revision
+        carry this record by value, and the owner checks it against the revision.
+        """
+        proofs = tuple(
+            item
+            for item in self.evidence
+            if item.candidate == candidate
+            and item.kind == EvidenceKind.CORRECTNESS
+            and item.status == ObservationStatus.SUCCEEDED
+            and item.provenance == "trusted"
+            and item.acceptance_receipt is not None
+        )
+        return proofs[0] if len(proofs) == 1 else None
 
 
 class MeasurementRequested(Value):
@@ -412,6 +505,45 @@ class MeasurementRequested(Value):
     kind: Literal["measurement_requested"] = "measurement_requested"
     scope: Scope
     plan: MeasurementPlan
+
+
+class AgentMeasurementRequested(Value):
+    """An agent's in-turn evaluation tool call, admitted by core like a Measure decision.
+
+    The scope is the calling principal: its owner is the attempt that holds the turn
+    and its generation fences stale callers. call_id is the tool server's idempotency
+    key; a replayed call never allocates a second submission. The candidate must
+    already be a revision (the host snapshots the caller's workspace); budget,
+    admission and identity are decided by core exactly as for Measure.
+    """
+
+    kind: Literal["agent_measurement_requested"] = "agent_measurement_requested"
+    scope: Scope
+    plan: MeasurementPlan
+    call_id: str = Field(min_length=1)
+
+
+class AgentRejection(StrEnum):
+    """Why core refused an agent's evaluation call; nothing was charged."""
+
+    RUN_STOPPING = "run_stopping"
+    """The run is no longer running, so it starts no new work."""
+    NOT_ADMITTED = "not_admitted"
+    """The scope is not a current admitted owner: a stale generation, or a closed attempt."""
+    INVALID_PLAN = "invalid_plan"
+    """The plan names no candidate revision, so no measurement identity exists."""
+    NOT_ALLOWED = "not_allowed"
+    """The identity's submission budget is spent, or the plan exceeds a run limit or deadline."""
+
+
+class AgentCall(Value):
+    """Record of one admitted or rejected agent tool call, keyed by its call_id."""
+
+    call_id: str
+    scope: Scope
+    request_id: RequestId | None = None
+    """The submission it allocated, or None when core rejected the call."""
+    rejection: AgentRejection | None = None
 
 
 class RegisteredJobRequested(Value):
@@ -432,6 +564,10 @@ class JobObserved(Value):
     observation: Observation
     evidence: tuple[EvidenceRef, ...] = ()
     evaluation_result: EvaluationTerminalFacts | None = None
+    # The executor's classification of a failed job. It narrows what the observation
+    # proves (see `MeasurementFailure`) and lets the submission be retried only when
+    # it says infrastructure.
+    failure: MeasurementFailure | None = None
 
     @model_validator(mode="after")
     def correlated_progress(self) -> JobObserved:
@@ -484,6 +620,16 @@ class DeadlineReached(Value):
     now_at: Seconds
 
 
+class ObservationsDue(Value):
+    """Core time reached now_at: poll every job whose next_at has come.
+
+    Internal signal raised whenever the clock advances, never shell input.
+    """
+
+    kind: Literal["observations_due"] = "observations_due"
+    now_at: Seconds
+
+
 class ResumeAuthorized(Value):
     """One strategy feedback authorization for the canonical next invocation.
 
@@ -514,6 +660,9 @@ class ResumeAuthorized(Value):
         return self
 
 
+MEASUREMENT_DIAGNOSTIC_LIMIT = 4000
+
+
 class MeasurementResult(Value):
     """Measurement result retains evidence and typed submission failure.
 
@@ -525,8 +674,20 @@ class MeasurementResult(Value):
     kind: Literal["measurement_result"] = "measurement_result"
     failure: MeasurementFailure | None = None
     scope: Scope
+    source_request: RequestId | None = None
+    """The submission request this result reports, keying it with its scope.
+
+    None only when no request was prepared: rejection at admission, or a result
+    served entirely from reusable evidence.
+    """
     evidence: tuple[EvidenceRef, ...]
     status: ObservationStatus
+    diagnostic: str = ""
+    """The executor's failure text, its last `MEASUREMENT_DIAGNOSTIC_LIMIT` characters.
+
+    It is the only account of a failure that left no evidence, such as a benchmark that
+    died without a result record, so the strategy can tell the agent why it was given up.
+    """
 
 
 class SubmitMeasurement(RequestBase):
@@ -708,9 +869,11 @@ type EvaluationEvent = Annotated[
     RegisteredJobObserved
     | RegisteredJobRequested
     | MeasurementRequested
+    | AgentMeasurementRequested
     | JobObserved
     | TurnSuspended
     | DeadlineReached
+    | ObservationsDue
     | ContinuationJobsChanged
     | JobTerminationRequested
     | ContinuationRetireRequested

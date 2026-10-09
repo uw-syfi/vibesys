@@ -1,4 +1,5 @@
 import {describe, expect, it} from 'bun:test';
+import {event as fixtureEvent, timestamp} from '@vibesys/backend-client/testing';
 import {
   closeActiveAgentTimings,
   finishAgentTiming,
@@ -83,20 +84,13 @@ describe('agent timing prefix merge', () => {
   });
 });
 
-function timestamp(sequence: number): string {
-  return `2026-01-01T00:00:0${sequence}Z`;
-}
-
 function event(
   sequence: number,
   type: 'agent_execution_started' | 'agent_execution_finished' | 'phase_finished',
   executionId: string,
 ) {
-  return {
-    sequence,
-    timestamp: timestamp(sequence),
-    type,
+  return fixtureEvent(sequence, type, {
     execution_id: executionId,
     agent_kind: 'implementer',
-  };
+  });
 }

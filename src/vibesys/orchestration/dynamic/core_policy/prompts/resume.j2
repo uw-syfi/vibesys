@@ -1,0 +1,27 @@
+{% from '_macros.j2' import rev %}
+Continue your suspended {{ role }} turn in this same provider session.
+{% if retained_revision %}
+The retained workspace revision is `{{ rev(retained_revision) }}`. Check the tree before
+relying on prior uncommitted or untracked files.
+{% endif %}
+Your original task and pass criteria remain in force; this continuation does not start
+another attempt.
+
+{% if timed_out %}
+The suspension deadline expired. Evaluations may still be running; the timeout ends
+this suspension, not the evaluation job, and supplies no passing or failing result.
+{% else %}
+Every evaluation you awaited is terminal.
+{% endif %}
+{% if evidence %}
+Accepted evidence for the original submitted candidate, not a measurement of later
+workspace edits: {{ evidence | map(attribute='root') | join(', ') }}
+{% endif %}
+{% if repeated_failure %}
+
+Repeated failure: {{ repeated_failure }}
+{% endif %}
+
+A failed or cancelled evaluation is an ordinary terminal outcome. Do not duplicate a
+trusted measurement for an unchanged candidate. Continue the original stage and return
+its schema-valid {% if role == 'judge' %}review{% else %}implementation{% endif %} JSON.

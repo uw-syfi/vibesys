@@ -64,7 +64,12 @@ class EvaluationPending(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     outcome: Literal["pending"] = "pending"
-    state: Literal[EvaluationState.QUEUED, EvaluationState.STARTING, EvaluationState.RUNNING]
+    state: Literal[
+        EvaluationState.QUEUED,
+        EvaluationState.STARTING,
+        EvaluationState.RUNNING,
+        EvaluationState.CANCELING,
+    ]
 
 
 class EvaluationUnknown(BaseModel):
@@ -184,7 +189,12 @@ def recorded_result(record: StoredEvaluation) -> EvaluationSettlementOutcome:
             return EvaluationFailed(handle_id=record.handle_id, message=record.failure)
         case EvaluationState.CANCELED | EvaluationState.SUPERSEDED:
             return EvaluationCanceled(handle_id=record.handle_id, state=record.state)
-        case EvaluationState.QUEUED | EvaluationState.STARTING | EvaluationState.RUNNING:
+        case (
+            EvaluationState.QUEUED
+            | EvaluationState.STARTING
+            | EvaluationState.RUNNING
+            | EvaluationState.CANCELING
+        ):
             return EvaluationPending(state=record.state)
 
 

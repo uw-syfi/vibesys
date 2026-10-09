@@ -1,5 +1,7 @@
 """Public recovery properties for typed child correspondence and source authority."""
 
+import json
+from hashlib import sha256
 from typing import ClassVar, Literal
 
 import pytest
@@ -9,13 +11,17 @@ from pydantic import BaseModel
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
+    Accepted,
     Access,
     ArtifactId,
     ArtifactRef,
     CancelOwnedResource,
+    Capabilities,
     ChildLease,
     ChildObservationWatermark,
     CoreState,
+    DecisionId,
+    DecisionReceipt,
     EnsureSession,
     EvaluationState,
     EventCursor,
@@ -32,6 +38,7 @@ from vs_core.api import (
     MeasurementStage,
     Observation,
     ObservationStatus,
+    Operation,
     OperationDescriptor,
     OperationId,
     OperationRegistration,
@@ -93,7 +100,7 @@ def pending_intent(identity: str, phase: IntentPhase = IntentPhase.DISPATCHED) -
     return Intent(
         request_id=request_id,
         request=request,
-        payload_digest=f"persisted-{identity}",
+        payload_digest=fixture_digest(request),
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=phase,
         reconcile_deadline_at=100.0,
@@ -152,11 +159,74 @@ def registered_intent(
         request_id=original.request_id,
         scope=original.request.scope,
         deadline_at=100.0,
-        operation_id=OperationId(root=f"operation-{identity}"),
+        decision_id=DecisionId(root=identity),
+        operation_id=OperationId(root=f"operation:{identity}"),
         operation=codec.encode(JobRequest()),
         retry_limit=0,
     )
-    return original.model_copy(update={"request": request, "lifecycle": lifecycle}), descriptor
+    return original.model_copy(
+        update={
+            "request": request,
+            "lifecycle": lifecycle,
+            "payload_digest": fixture_digest(request),
+        }
+    ), descriptor
+
+
+def fixture_digest(value: Value) -> str:
+    """Canonical bytes for scalar and ordered fixture contracts."""
+    return sha256(
+        json.dumps(value.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def with_registered_origins(state: CoreState) -> CoreState:
+    """Supply independent codec-bound accepted origins for eligible fixtures."""
+    codec = OperationRegistry(
+        tuple(
+            OperationRegistration(
+                descriptor=descriptor,
+                request_model=JobRequest,
+                outcome_model=JobRequest.outcome_model,
+            )
+            for descriptor in state.registry
+        )
+    )
+    receipts = list(state.run.receipts)
+    for record in state.intents.intents:
+        request = record.request
+        if not isinstance(request, ExecuteRegisteredOperation):
+            continue
+        assert request.decision_id is not None
+        decision = codec.validate_decision(
+            Operation(
+                decision_id=request.decision_id,
+                scope=request.scope,
+                request=codec.decode(request.operation),
+                deadline_at=request.deadline_at,
+            )
+        )
+        receipts.append(
+            DecisionReceipt(
+                decision_id=decision.decision_id,
+                decision=decision,
+                payload_digest=fixture_digest(decision),
+                request_ids=(record.request_id,),
+                feedback=Accepted(
+                    decision_id=decision.decision_id, request_ids=(record.request_id,)
+                ),
+            )
+        )
+    return state.model_copy(
+        update={
+            "run": state.run.model_copy(
+                update={
+                    "receipts": tuple(receipts),
+                    "capabilities": Capabilities(operations=state.registry),
+                }
+            )
+        }
+    )
 
 
 def reload(state: CoreState) -> CoreState:
@@ -543,6 +613,7 @@ def test_complete_source_history_transfers_only_after_every_independent_release(
             "intents": state.intents.model_copy(update={"children": (lease,)}),
         }
     )
+    state = with_registered_origins(state)
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
     conclusive = (
         terminal

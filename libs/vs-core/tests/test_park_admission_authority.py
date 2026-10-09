@@ -250,9 +250,11 @@ def test_cleanup_requires_owner_closure_and_request_in_same_present_episode(
         result = core.step(state, event)
         assert result.state.evaluation.continuations[0].phase == core.ContinuationPhase.PARKED
     else:
-        # Public step reaches the Attempts B owner only after forwarding the guarded signal.
-        with pytest.raises(core.KernelNotImplementedError) as forwarded:
-            core.step(state, event)
-        assert forwarded.value.area == core.Area.ATTEMPTS
-        assert forwarded.value.event_kind == core.ScopeReopenRequested.model_fields["kind"].default
+        # Public step forwards the guarded signal to Attempts B. The fixture has no
+        # release proof for the parked scope, so B declines without effect; its
+        # accept path is covered in test_attempt_retirement.
+        result = core.step(state, event)
+        assert result.requests == result.events == ()
+        assert result.state.scheduling == state.scheduling
+        assert result.state.attempts == state.attempts
     assert state.model_dump_json() == before

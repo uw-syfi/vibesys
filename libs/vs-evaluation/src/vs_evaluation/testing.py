@@ -26,6 +26,7 @@ from vs_evaluation.coordinator import (
     EvaluationKeyConflictError,
     RevisionConflictError,
 )
+from vs_evaluation.lifecycle import FINISHED_STATES, LifecyclePublisher, is_finished
 from vs_evaluation.models import (
     AvailabilitySnapshot,
     AvailabilityState,
@@ -192,13 +193,9 @@ class InMemoryEvaluationStore:
 
     async def nonterminal(self) -> tuple[StoredEvaluation, ...]:
         """Return every accepted, queued, or running evaluation."""
-        terminal = {
-            EvaluationState.SUCCEEDED,
-            EvaluationState.FAILED,
-            EvaluationState.CANCELED,
-            EvaluationState.SUPERSEDED,
-        }
-        return tuple(record for record in await self.records() if record.state not in terminal)
+        return tuple(
+            record for record in await self.records() if record.state not in FINISHED_STATES
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,8 +215,7 @@ class FakeEvaluationBackend:
     """
 
     submissions: list[FakeSubmission] = field(default_factory=list)
-    _states: dict[str, ExecutorObservation] = field(default_factory=dict)
-    _events: dict[str, asyncio.Event] = field(default_factory=dict)
+    _lifecycle: LifecyclePublisher = field(default_factory=LifecyclePublisher)
     _active: set[str] = field(default_factory=set)
 
     @property
@@ -229,7 +225,7 @@ class FakeEvaluationBackend:
 
     def accept(self, handle_id: str, request: EvaluationRequest) -> bool:
         """Idempotently accept one queued remote execution."""
-        if handle_id in self._states:
+        if self._lifecycle.observation(handle_id) is not None:
             return False
         self.submissions.append(FakeSubmission(handle_id, request))
         self._active.add(handle_id)
@@ -238,27 +234,21 @@ class FakeEvaluationBackend:
 
     def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Return the latest remote observation."""
-        return self._states.get(handle_id)
+        return self._lifecycle.observation(handle_id)
 
     def publish(self, handle_id: str, observation: ExecutorObservation) -> None:
-        """Persist a remote observation and wake waiting clients."""
-        self._states[handle_id] = observation
-        if observation.state in {
-            EvaluationState.SUCCEEDED,
-            EvaluationState.FAILED,
-            EvaluationState.CANCELED,
-            EvaluationState.SUPERSEDED,
-        }:
+        """Persist a remote observation and wake waiting clients.
+
+        Publication joins in the lifecycle order like every real executor: a finished
+        evaluation keeps its first finished observation.
+        """
+        self._lifecycle.publish(handle_id, observation)
+        if self._lifecycle.is_finished(handle_id):
             self._active.discard(handle_id)
-        self.change_event(handle_id).set()
 
     def change_event(self, handle_id: str) -> asyncio.Event:
         """Return the sticky notification for one remote execution."""
-        event = self._events.get(handle_id)
-        if event is None:
-            event = asyncio.Event()
-            self._events[handle_id] = event
-        return event
+        return self._lifecycle.change_event(handle_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -377,15 +367,9 @@ class FakeEvaluationExecutor:
 
     async def close(self) -> None:
         """Release every accepted nonterminal execution owned by this Fake."""
-        terminal = {
-            EvaluationState.SUCCEEDED,
-            EvaluationState.FAILED,
-            EvaluationState.CANCELED,
-            EvaluationState.SUPERSEDED,
-        }
         for submission in self.submissions:
             observation = self.backend.inspect(submission.handle_id)
-            if observation is not None and observation.state not in terminal:
+            if observation is not None and not is_finished(observation.state):
                 await self.cancel(submission.handle_id)
 
     def set_state(

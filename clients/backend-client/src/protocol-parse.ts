@@ -1,5 +1,7 @@
 import {BackendClientError, ServerError} from './errors.js';
-import type {Diagnostic, ProtocolResponse, ServerMessage} from './protocol.js';
+import responsePayloadSchema from './generated/response-payload.schema.js';
+import runEventSchema from './generated/run-event.schema.js';
+import type {Diagnostic, ProtocolResponse, RunEvent, ServerMessage} from './protocol.js';
 
 const RESPONSE = 'response';
 const STREAM = 'event-stream message';
@@ -7,16 +9,9 @@ const STREAM = 'event-stream message';
 /**
  * Parse and validate a response independently of the transport framing.
  *
- * The envelope and the two payloads that leave this package as protocol values
- * are checked: every event in `events`, which the folds apply exactly as a
- * streamed batch's events are applied, and `diagnostic`, which `responseError`
- * hands to callers inside a `ServerError`. The remaining payload fields a
- * response can carry (`snapshot`, `experiments`, `design`, `chat`,
- * `chat_options`, `tui_defaults`, `performance`, `ack`, ...) are fifteen
- * further nested models that no event-stream frame reaches, so the assertion
- * below is earned for the envelope, the events, and the diagnostic, and is
- * still an assumption for the rest. Closing that is the response half of this
- * boundary and wants its own change rather than a partial descent here.
+ * A compact generated descriptor validates every response payload before the
+ * assertion. The hand-written checks retain their specific diagnostics for the
+ * envelope, event batch, and diagnostic that have public error-taxonomy behavior.
  */
 export function parseProtocolResponse(line: string): ProtocolResponse {
   const value = parseJson(line, RESPONSE);
@@ -33,7 +28,310 @@ export function parseProtocolResponse(line: string): ProtocolResponse {
   nullableString(record, 'error', RESPONSE);
   validateDiagnostic(record, RESPONSE);
   if (record['events'] !== undefined) validateEventList(record, 'events', RESPONSE);
+  validateSchema(value, responsePayloadSchema as Schema, RESPONSE);
   return value as ProtocolResponse;
+}
+
+/** Validate an event from a non-transport boundary and return its typed value. */
+export function validateRunEvent(value: unknown): RunEvent {
+  return validateRunEventAt(value, 'run event');
+}
+
+type Schema = Record<string, unknown>;
+const RFC3339_DATE_TIME =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|([+-])(\d{2}):(\d{2}))$/;
+// RFC 3339 admits :60 only at an announced UTC leap second. These are every
+// insertion month through the most recent leap second in December 2016.
+const RFC3339_LEAP_SECONDS = new Set([
+  '1972-06',
+  '1972-12',
+  '1973-12',
+  '1974-12',
+  '1975-12',
+  '1976-12',
+  '1977-12',
+  '1978-12',
+  '1979-12',
+  '1981-06',
+  '1982-06',
+  '1983-06',
+  '1985-06',
+  '1987-12',
+  '1989-12',
+  '1990-12',
+  '1992-06',
+  '1993-06',
+  '1994-06',
+  '1995-12',
+  '1997-06',
+  '1998-12',
+  '2005-12',
+  '2008-12',
+  '2012-06',
+  '2015-06',
+  '2016-12',
+]);
+
+/** Validate generated protocol shape, intentionally leaving closed-set membership open. */
+function validateSchema(value: unknown, schema: Schema, path: string): void {
+  const ref = schema['$ref'];
+  if (typeof ref === 'string') {
+    validateSchema(value, schemaReference(ref), path);
+    return;
+  }
+  const constant = schema['const'];
+  if (constant !== undefined) {
+    validateConstant(value, constant, path);
+    return;
+  }
+  const choices = schema['anyOf'];
+  if (Array.isArray(choices)) {
+    validateAnyOf(value, choices, path);
+    return;
+  }
+  const alternatives = schema['oneOf'];
+  const discriminator = schema['discriminator'];
+  if (Array.isArray(alternatives) && isRecord(discriminator)) {
+    validateTaggedUnion(value, discriminator, path);
+    return;
+  }
+  validateTypedSchema(value, schema, path);
+}
+
+function schemaDefinition(name: string): Schema {
+  for (const document of [responsePayloadSchema, runEventSchema]) {
+    const definitions = (document as {$defs?: Record<string, Schema>}).$defs;
+    const definition = definitions?.[name];
+    if (definition !== undefined) return definition;
+  }
+  throw new BackendClientError('parse', `Invalid protocol schema ref: #/$defs/${name}`);
+}
+
+function schemaReference(ref: string): Schema {
+  const name = ref.startsWith('#/$defs/') ? ref.slice('#/$defs/'.length) : ref;
+  return schemaDefinition(name);
+}
+
+function validateConstant(value: unknown, constant: unknown, path: string): void {
+  // String literals are closed-set members, which stay forward compatible.
+  // Numeric literals are protocol-version boundaries and must agree exactly.
+  if (typeof constant === 'string' && typeof value === 'string') return;
+  if (value === constant) return;
+  throw new BackendClientError('parse', `Invalid server ${path}: must be a ${typeof constant}`);
+}
+
+function validateAnyOf(value: unknown, choices: unknown[], path: string): void {
+  let mismatch: BackendClientError | undefined;
+  for (const choice of choices) {
+    if (!isRecord(choice)) continue;
+    try {
+      validateSchema(value, choice, path);
+      return;
+    } catch (error) {
+      if (!(error instanceof BackendClientError)) throw error;
+      mismatch ??= error;
+    }
+  }
+  throw (
+    mismatch ??
+    new BackendClientError('parse', `Invalid server ${path}: does not match its protocol shape`)
+  );
+}
+
+function validateTaggedUnion(
+  value: unknown,
+  discriminator: Record<string, unknown>,
+  path: string,
+): void {
+  const record = requireRecord(value, path);
+  const property = discriminator['propertyName'];
+  const mapping = discriminator['mapping'];
+  if (typeof property !== 'string' || !isRecord(mapping)) {
+    throw new BackendClientError('parse', `Invalid protocol schema discriminator at ${path}`);
+  }
+  const tag = record[property];
+  if (typeof tag !== 'string') throw fieldError(path, property, 'a string');
+  const reference = mapping[tag];
+  // #869: a newer server may add a union member without changing the protocol
+  // version. Its tag and object shape are still checked, but only a member in
+  // this generated client's mapping has a known schema to validate deeply.
+  if (typeof reference !== 'string') return;
+  validateSchema(value, {$ref: reference}, path);
+}
+
+function validateTypedSchema(value: unknown, schema: Schema, path: string): void {
+  const type = schema['type'];
+  switch (type) {
+    case 'array':
+      validateArray(value, schema, path);
+      return;
+    case 'object':
+      validateObject(value, schema, path);
+      return;
+    case 'null':
+      validatePrimitive(value === null, type, path);
+      return;
+    case 'string':
+      validateString(value, schema, path);
+      return;
+    case 'number':
+      validateNumber(value, schema, path, false);
+      return;
+    case 'integer':
+      validateNumber(value, schema, path, true);
+      return;
+    case 'boolean':
+      validatePrimitive(typeof value === 'boolean', type, path);
+  }
+}
+
+function validateString(value: unknown, schema: Schema, path: string): void {
+  if (typeof value !== 'string') {
+    validatePrimitive(false, 'string', path);
+    return;
+  }
+  if (schema['format'] !== 'date-time') return;
+  if (!isRfc3339DateTime(value)) {
+    throw new BackendClientError('parse', `Invalid server ${path}: must be a date-time`);
+  }
+}
+
+function isRfc3339DateTime(value: string): boolean {
+  const parts = RFC3339_DATE_TIME.exec(value);
+  if (parts === null) return false;
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+    offsetSign,
+    offsetHourText,
+    offsetMinuteText,
+  ] = parts;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const offsetHour = offsetHourText === undefined ? 0 : Number(offsetHourText);
+  const offsetMinute = offsetMinuteText === undefined ? 0 : Number(offsetMinuteText);
+  return (
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= daysInMonth(year, month) &&
+    hour <= 23 &&
+    minute <= 59 &&
+    offsetHour <= 23 &&
+    offsetMinute <= 59 &&
+    (second <= 59 ||
+      (second === 60 &&
+        isAnnouncedLeapSecond({
+          year,
+          month,
+          day,
+          hour,
+          minute,
+          offsetSign,
+          offsetHour,
+          offsetMinute,
+        })))
+  );
+}
+
+interface DateTimeParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  offsetSign: string | undefined;
+  offsetHour: number;
+  offsetMinute: number;
+}
+
+function isAnnouncedLeapSecond({
+  year,
+  month,
+  day,
+  hour,
+  minute,
+  offsetSign,
+  offsetHour,
+  offsetMinute,
+}: DateTimeParts): boolean {
+  const direction = offsetSign === '-' ? -1 : 1;
+  const offsetMilliseconds = direction * (offsetHour * 60 + offsetMinute) * 60_000;
+  // Date.UTC treats years 0 through 99 as 1900 through 1999. Set the full year
+  // explicitly so an ancient date cannot borrow a modern leap-second entry.
+  const utc = new Date(0);
+  utc.setUTCFullYear(year, month - 1, day);
+  utc.setUTCHours(hour, minute, 59, 0);
+  utc.setTime(utc.getTime() - offsetMilliseconds);
+  const utcMonth = `${utc.getUTCFullYear()}-${String(utc.getUTCMonth() + 1).padStart(2, '0')}`;
+  return (
+    utc.getUTCDate() === daysInMonth(utc.getUTCFullYear(), utc.getUTCMonth() + 1) &&
+    utc.getUTCHours() === 23 &&
+    utc.getUTCMinutes() === 59 &&
+    RFC3339_LEAP_SECONDS.has(utcMonth)
+  );
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function validateNumber(value: unknown, schema: Schema, path: string, integer: boolean): void {
+  const type = integer ? 'integer' : 'number';
+  if (typeof value !== 'number' || (integer && !Number.isInteger(value))) {
+    validatePrimitive(false, type, path);
+    return;
+  }
+  const minimum = schema['minimum'];
+  if (typeof minimum === 'number' && value < minimum) {
+    throw new BackendClientError('parse', `Invalid server ${path}: must be at least ${minimum}`);
+  }
+}
+
+function validatePrimitive(valid: boolean, type: string, path: string): void {
+  if (valid) return;
+  throw new BackendClientError('parse', `Invalid server ${path}: must be a ${type}`);
+}
+
+function validateArray(value: unknown, schema: Schema, path: string): void {
+  if (!Array.isArray(value))
+    throw new BackendClientError('parse', `Invalid server ${path}: must be an array`);
+  const items = schema['items'];
+  if (!isRecord(items)) return;
+  for (const [index, item] of value.entries()) validateSchema(item, items, `${path}[${index}]`);
+}
+
+function validateObject(value: unknown, schema: Schema, path: string): void {
+  const record = requireRecord(value, path);
+  validateRequired(record, schema['required'], path);
+  const properties = schema['properties'];
+  if (!isRecord(properties)) return;
+  // #869: newly added server fields must not make an older client disconnect.
+  // Validate known fields only; the generated types retain the known contract.
+  for (const [key, child] of Object.entries(properties)) {
+    if (key in record && isRecord(child)) validateSchema(record[key], child, `${path}.${key}`);
+  }
+}
+
+function validateRequired(record: Record<string, unknown>, required: unknown, path: string): void {
+  if (!Array.isArray(required)) return;
+  for (const key of required) {
+    if (typeof key === 'string' && !(key in record)) throw fieldError(path, key, 'present');
+  }
 }
 
 /**
@@ -52,7 +350,7 @@ export function parseServerMessage(line: string): ServerMessage {
       validateSubscribed(record);
       break;
     case 'event':
-      validateRunEvent(record['event'], `${STREAM} event`);
+      validateRunEventAt(record['event'], `${STREAM} event`);
       break;
     case 'event_batch':
       validateEventBatch(record);
@@ -146,6 +444,7 @@ function validateEventBatch(record: Record<string, unknown>): void {
   // there: its comment records why the boundary must not refuse a value the
   // web client currently folds through `?? 0` and never reads back.
   optionalNumber(record, 'history_after_sequence', STREAM);
+  optionalBoolean(record, 'rebootstrap', STREAM);
   validateActiveExecutions(record, STREAM);
 }
 
@@ -161,11 +460,11 @@ function validateEventList(record: Record<string, unknown>, key: string, path: s
   const items = record[key];
   if (!Array.isArray(items)) throw fieldError(path, key, 'an array');
   for (let index = 0; index < items.length; index += 1) {
-    validateRunEvent(items[index], `${path} ${key}[${index}]`);
+    validateRunEventAt(items[index], `${path} ${key}[${index}]`);
   }
 }
 
-function validateRunEvent(value: unknown, path: string): void {
+function validateRunEventAt(value: unknown, path: string): RunEvent {
   const record = requireRecord(value, path);
   const version = record['protocol_version'];
   if (version !== undefined && version !== 1) throw fieldError(path, 'protocol_version', '1');
@@ -181,24 +480,8 @@ function validateRunEvent(value: unknown, path: string): void {
   nullableString(record, 'execution_id', path);
   nullableString(record, 'chat_thread_id', path);
   validateDiagnostic(record, path);
-  validateEventData(record, path);
-}
-
-/**
- * `RunEvent.data` is a tagged union of thirty payloads, and every one of them
- * is open: the generated variants carry `[k: string]: unknown` because the
- * server models accept extra keys. Validated to the depth the tag makes
- * meaningful, so absent, null, or an object carrying a string `kind`.
- * Descending per variant would put a second copy of thirty server models here,
- * and a weak one, since each variant's index signature admits anything it did
- * not name; the folds already branch on `kind` and ignore a payload whose tag
- * they do not recognize.
- */
-function validateEventData(record: Record<string, unknown>, path: string): void {
-  const data = record['data'];
-  if (data === undefined || data === null) return;
-  if (!isRecord(data)) throw fieldError(path, 'data', 'an object or null when present');
-  requireString(data, 'kind', `${path}.data`);
+  validateSchema(value, runEventSchema as Schema, path);
+  return value as RunEvent;
 }
 
 function validateActiveExecutions(record: Record<string, unknown>, path: string): void {
@@ -251,10 +534,29 @@ function validateDiagnostic(record: Record<string, unknown>, path: string): Diag
   nullableString(value, 'cause_id', nested);
   nullableString(value, 'debug_ref', nested);
   nullableString(value, 'source', nested);
+  validateValidationPaths(value, nested);
   // Re-read rather than asserting `value`: an index-signature read is `unknown`,
   // so this is one assertion out of the type the checks above established, not a
   // double one through `unknown`.
   return record['diagnostic'] as Diagnostic;
+}
+
+function validateValidationPaths(record: Record<string, unknown>, path: string): void {
+  const paths = record['validation_paths'];
+  if (paths === undefined || paths === null) return;
+  if (!Array.isArray(paths))
+    throw fieldError(path, 'validation_paths', 'an array or null when present');
+  for (let index = 0; index < paths.length; index += 1) {
+    const segments = paths[index];
+    const segmentPath = `validation_paths[${index}]`;
+    if (!Array.isArray(segments)) throw fieldError(path, segmentPath, 'an array');
+    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
+      const segment = segments[segmentIndex];
+      if (typeof segment !== 'string' && typeof segment !== 'number') {
+        throw fieldError(path, `${segmentPath}[${segmentIndex}]`, 'a string or number');
+      }
+    }
+  }
 }
 
 function parseJson(line: string, path: string): unknown {
@@ -338,6 +640,13 @@ function optionalNumber(record: Record<string, unknown>, key: string, path: stri
   const value = record[key];
   if (value !== undefined && typeof value !== 'number') {
     throw fieldError(path, key, 'a number when present');
+  }
+}
+
+function optionalBoolean(record: Record<string, unknown>, key: string, path: string): void {
+  const value = record[key];
+  if (value !== undefined && typeof value !== 'boolean') {
+    throw fieldError(path, key, 'a boolean when present');
   }
 }
 

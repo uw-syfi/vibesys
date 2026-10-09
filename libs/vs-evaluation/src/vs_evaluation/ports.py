@@ -12,6 +12,7 @@ if TYPE_CHECKING:
         EvaluationLifecycleEvent,
         EvaluationRequest,
         ExecutorObservation,
+        ExecutorPoll,
         ResourceRequirements,
         StoredEvaluation,
     )
@@ -35,6 +36,26 @@ class ExecutorCancellationUnknownError(RuntimeError):
             f"evaluation {handle_id!r} has unknown external identity; cancellation is unresolved"
         )
         self.handle_id = handle_id
+
+
+class ExecutorCancellationUnconfirmedError(RuntimeError):
+    """Cancellation was requested for a known external job that is not yet seen ending.
+
+    The job identity is known, so this is not an unknown identity: the executor
+    sent its cancel request and its bounded confirmation wait ended while the
+    provider still reported the job active (for example while it tears down).
+    The caller treats the job as still owned and reconciles later, by cancelling
+    again or inspecting until a terminal state appears.
+    """
+
+    def __init__(self, handle_id: str, job_id: str) -> None:
+        """Retain the logical handle and the provider job that is still active."""
+        super().__init__(
+            f"cancellation of evaluation {handle_id!r} was requested for job {job_id!r}, "
+            "but the job was not observed to end within the confirmation wait"
+        )
+        self.handle_id = handle_id
+        self.job_id = job_id
 
 
 class ExecutorRejectedError(ValueError):
@@ -133,6 +154,14 @@ class EvaluationExecutor(Protocol):
 
     async def cancel(self, handle_id: str) -> None:
         """Request cancellation; inspect the resulting stage to confirm it."""
+        ...
+
+
+class PollingEvaluationExecutor(EvaluationExecutor, Protocol):
+    """Executor that can be inspected purely, without recovery tasks or workspaces."""
+
+    async def poll(self, handle_id: str) -> ExecutorPoll:
+        """Inspect handle_id once. Never submit, resume, cancel or create a workspace."""
         ...
 
 

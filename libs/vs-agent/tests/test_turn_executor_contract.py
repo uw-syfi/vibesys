@@ -107,3 +107,37 @@ def test_executor_initial_and_strict_continuation_share_one_conversation(
         assert len(calls) == 3
     finally:
         executor.close()
+
+
+@pytest.mark.parametrize("implementation", ["client", "fake"])
+def test_cancelling_and_releasing_one_key_leaves_the_client_usable_for_others(
+    tmp_path: Path, implementation: str
+) -> None:
+    if implementation == "client":
+        executor: AgentTurnExecutor = AgentClient(FakeDriver(answer={"value": 7}))
+    else:
+        fake = FakeAgentClient(
+            capabilities=AgentCapabilities(provider_session_resume=True, session_reuse=True)
+        )
+        fake.set_response("worker", {"value": 7})
+        executor = fake
+    key = AgentSessionKey(SessionScope.MEMBER, "worker:member")
+    other = AgentSessionKey(SessionScope.MEMBER, "worker:other")
+    spec = AgentSessionSpec(
+        role="worker",
+        provider="fake",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    turn = AgentTurnRequest(message="work", output_schema=Reply, invocation_id="first")
+    try:
+        executor.run(session_spec=spec, turn=turn, session_key=key)
+        executor.cancel_session(key)
+        executor.release_session(key)
+        executor.release_session(key)
+        result = executor.run(
+            session_spec=spec, turn=replace(turn, invocation_id="other"), session_key=other
+        )
+        assert result.provider_session_id is not None
+    finally:
+        executor.close()

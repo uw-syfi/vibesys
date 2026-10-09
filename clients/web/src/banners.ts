@@ -94,6 +94,13 @@ export const STREAM_BANNER_COPY = {
     'The event stream dropped before the run finished streaming, so this transcript may be missing its tail. The run has ended, so it will not fill in.',
 } as const;
 
+/** What an empty transcript says for each state visible beside it. */
+export const EMPTY_TRANSCRIPT_COPY = {
+  waiting: 'Waiting for activity events…',
+  unavailable: 'No activity events are available because the event stream dropped.',
+  complete: 'This run produced no activity events.',
+} as const;
+
 /**
  * What the controls banner says, by whether the channel ever had a connection.
  *
@@ -147,4 +154,18 @@ export function connectionBanners(run: CoreState, session: WebSessionState): Con
         ? null
         : {message: describeOutage(outage), retrying: outage.retrying},
   };
+}
+
+/**
+ * Describe an empty transcript without contradicting the connectivity banner.
+ *
+ * A stale stream means the reader cannot tell an empty fold from one missing
+ * its first batch, whatever the run's terminal status. Only a connected ended
+ * run can truthfully say that it produced no activity. Keeping this projection
+ * beside `connectionBanners` makes both statements derive from the same
+ * stream judgment rather than leaving JSX to rediscover it.
+ */
+export function emptyTranscriptCopy(run: CoreState, banners: ConnectionBanners): string {
+  if (banners.stream !== null) return EMPTY_TRANSCRIPT_COPY.unavailable;
+  return hasRunEnded(run) ? EMPTY_TRANSCRIPT_COPY.complete : EMPTY_TRANSCRIPT_COPY.waiting;
 }

@@ -93,6 +93,12 @@
       "title": "ActiveAgentExecution",
       "type": "object"
     },
+    "ActiveExecutions": {
+      "items": {
+        "$ref": "#/$defs/ActiveAgentExecution"
+      },
+      "type": "array"
+    },
     "AgentExecutionActivityData": {
       "description": "Complete current activity for an active agent execution.",
       "properties": {
@@ -1252,6 +1258,31 @@
           ],
           "default": null,
           "title": "Source"
+        },
+        "validation_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Validation Paths"
         }
       },
       "required": [
@@ -1321,11 +1352,7 @@
           "type": "integer"
         },
         "active_executions": {
-          "items": {
-            "$ref": "#/$defs/ActiveAgentExecution"
-          },
-          "title": "Active Executions",
-          "type": "array"
+          "$ref": "#/$defs/ActiveExecutions"
         },
         "store_id": {
           "default": "",
@@ -1337,6 +1364,11 @@
           "minimum": 0,
           "title": "History After Sequence",
           "type": "integer"
+        },
+        "rebootstrap": {
+          "default": false,
+          "title": "Rebootstrap",
+          "type": "boolean"
         }
       },
       "required": [
@@ -3385,6 +3417,7 @@
                   "phase": "#/$defs/PhaseData",
                   "round_finished": "#/$defs/RoundFinishedData",
                   "run_configured": "#/$defs/RunConfiguredData",
+                  "run_failed": "#/$defs/RunFailedData",
                   "run_interrupted": "#/$defs/RunInterruptedData",
                   "run_started": "#/$defs/RunStartedData",
                   "run_status_changed": "#/$defs/RunStatusChangedData",
@@ -3428,6 +3461,9 @@
                 },
                 {
                   "$ref": "#/$defs/RunStartedData"
+                },
+                {
+                  "$ref": "#/$defs/RunFailedData"
                 },
                 {
                   "$ref": "#/$defs/RunInterruptedData"
@@ -3502,6 +3538,73 @@
       ],
       "title": "RunEvent",
       "type": "object"
+    },
+    "RunFailedData": {
+      "description": "Why a run ended without a result to keep, with the counts behind it.",
+      "properties": {
+        "kind": {
+          "const": "run_failed",
+          "default": "run_failed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "failure": {
+          "$ref": "#/$defs/RunFailure"
+        }
+      },
+      "required": [
+        "kind",
+        "failure"
+      ],
+      "title": "RunFailedData",
+      "type": "object"
+    },
+    "RunFailure": {
+      "additionalProperties": false,
+      "description": "What a failed run did and why it stopped, as data; frontends choose the wording.\n\n``reason`` is the strategy's own account of the stop. ``workstreams_started`` counts\nattempts core admitted, against the ``workstream_budget`` the run was allowed.\n``candidates_kept`` counts settled candidates eligible for adoption.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RunFailureKind"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "workstreams_started": {
+          "minimum": 0,
+          "title": "Workstreams Started",
+          "type": "integer"
+        },
+        "workstream_budget": {
+          "minimum": 0,
+          "title": "Workstream Budget",
+          "type": "integer"
+        },
+        "candidates_kept": {
+          "minimum": 0,
+          "title": "Candidates Kept",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "reason",
+        "workstreams_started",
+        "workstream_budget",
+        "candidates_kept"
+      ],
+      "title": "RunFailure",
+      "type": "object"
+    },
+    "RunFailureKind": {
+      "description": "Why a run ended without a result the operator can keep.",
+      "enum": [
+        "budget_exhausted",
+        "deadline",
+        "no_result"
+      ],
+      "title": "RunFailureKind",
+      "type": "string"
     },
     "RunInterruptedData": {
       "description": "Reason and optional signal for an interrupted run.",
@@ -3582,11 +3685,7 @@
           "title": "Round Label"
         },
         "active_executions": {
-          "items": {
-            "$ref": "#/$defs/ActiveAgentExecution"
-          },
-          "title": "Active Executions",
-          "type": "array"
+          "$ref": "#/$defs/ActiveExecutions"
         },
         "chat_threads": {
           "items": {

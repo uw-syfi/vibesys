@@ -292,15 +292,15 @@ class TestEventStore:
 
     def test_append_wakes_multiple_independent_readers(self, tmp_path: Path) -> None:
         store = EventStore(tmp_path / "events.jsonl", run_id="active-run")
-        ready = threading.Barrier(3)
+        waiting = [threading.Event(), threading.Event()]
 
-        def wait_for_first_event() -> list[RunEvent]:
-            ready.wait()
-            return store.wait(after_sequence=0, timeout=2)
+        def wait_for_first_event(reader: int) -> list[RunEvent]:
+            return store.wait(after_sequence=0, on_waiting=waiting[reader].set)
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            readers = [executor.submit(wait_for_first_event) for _ in range(2)]
-            ready.wait()
+            readers = [executor.submit(wait_for_first_event, reader) for reader in range(2)]
+            for registered in waiting:
+                registered.wait()
             appended = store.append(make_event(EventType.OUTPUT, "visible"))
 
         batches = [reader.result() for reader in readers]

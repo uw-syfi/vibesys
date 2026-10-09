@@ -318,3 +318,66 @@ async def test_gated_evaluation_releases_jobs_after_a_stop_and_refuses_later_pro
     assert await evaluation.jobs_released("h1")
     profile = await inner.profile("fake-revision", "Where does time go?", member_id="h1")
     assert profile.status is CandidateProfileStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_a_block_that_ends_during_on_stop_does_not_abort_the_stop_cleanup() -> None:
+    """on_stop cancels external work (evaluations, Slurm jobs); the block ending must not abort it.
+
+    Chaos seed 11: a stop cancels an evaluation whose sbatch is in flight; the run
+    body then leaves with RunStopped, bounded_stop cancels its watcher, and that
+    cancellation reaches the executor's submission, so the job's identity is lost.
+    """
+    channel = create_run_control_channel(FakeRunControlEventSink())
+    timer = FakeStopTimer()
+    cleanup_started = asyncio.Event()
+    external_work_settled = asyncio.Event()
+    outcome: list[str] = []
+
+    async def on_stop() -> None:
+        cleanup_started.set()
+        try:
+            await external_work_settled.wait()
+        except asyncio.CancelledError:
+            outcome.append("aborted")
+            raise
+        outcome.append("finished")
+
+    async def run() -> None:
+        async with bounded_stop(channel, grace_s=_GRACE_S, on_stop=on_stop, timer=timer):
+            try:
+                await cleanup_started.wait()
+            finally:
+                # The external work settles as the block unwinds.
+                external_work_settled.set()
+
+    task = asyncio.create_task(run())
+    await asyncio.sleep(0)
+    channel.request_stop()
+    await task
+
+    assert outcome == ["finished"]
+
+
+@pytest.mark.asyncio
+async def test_a_stop_cleanup_that_fails_after_the_block_ended_is_still_raised() -> None:
+    channel = create_run_control_channel(FakeRunControlEventSink())
+    cleanup_started = asyncio.Event()
+    block_ended = asyncio.Event()
+
+    async def on_stop() -> None:
+        cleanup_started.set()
+        await block_ended.wait()
+        message = "cancel failed"
+        raise RuntimeError(message)
+
+    async def run() -> None:
+        async with bounded_stop(channel, grace_s=_GRACE_S, on_stop=on_stop, timer=FakeStopTimer()):
+            await cleanup_started.wait()
+            block_ended.set()
+
+    task = asyncio.create_task(run())
+    await asyncio.sleep(0)
+    channel.request_stop()
+    with pytest.raises(RuntimeError, match="cancel failed"):
+        await task

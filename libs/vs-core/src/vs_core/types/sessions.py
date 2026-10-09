@@ -22,6 +22,7 @@ from .common import (
     InvocationId,
     InvocationRef,
     Observation,
+    ObservationStatus,
     OperationId,
     RequestBase,
     RequestId,
@@ -38,7 +39,7 @@ from .common import (
     WorkspaceRef,
     validate_setup_failure,
 )
-from .evaluation import Continuation
+from .evaluation import Continuation, ResumeAuthorizationReceipt
 from .evaluation_history import EvaluationHistoryCursor
 from .session_inputs import InputRecord, InvocationInputTarget, SessionInput
 
@@ -375,14 +376,52 @@ class InterruptRequested(Value):
     authority: RequestId
 
 
+TURN_FAILURE_DETAIL_LIMIT = 4000
+"""Longest failure text a TurnResult carries, in characters."""
+
+
+class TurnFailureKind(StrEnum):
+    """Why a turn ended without a usable reply, as a closed set strategies match on."""
+
+    PROVIDER_FAILED = "provider_failed"
+    """The executor ended the turn: the provider refused it, or its reply broke the schema."""
+    TRANSPORT_LOST = "transport_lost"
+    """Acceptance stayed unknown after inspection, so core released the turn unfinished."""
+    CANCELLED = "cancelled"
+    """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
+
+
 class TurnResult(Value):
-    """Turn result lifecycle contract."""
+    """Terminal result of one turn, with the failure text when it did not succeed.
+
+    ``failure`` is None exactly when the turn succeeded; ``detail`` is the executor's
+    diagnostic, cut to ``TURN_FAILURE_DETAIL_LIMIT`` characters, so a correction
+    prompt can name the error without reading the raw observation.
+    """
 
     kind: Literal["turn_result"] = "turn_result"
     invocation: InvocationRef
     observation: Observation
     output_schema: SchemaRef | None = None
     output_json: str | None = None
+    failure: TurnFailureKind | None = None
+    detail: str = Field(default="", max_length=TURN_FAILURE_DETAIL_LIMIT)
+    suspending: bool = False
+    """Core recorded the turn's wait, so a ``TurnSuspended`` follows when it checkpoints.
+
+    False for a turn that ends without one, whatever its reply says: the agent never
+    asked to wait, core refused the wait it asked for, or the host lost the wait. A
+    strategy must not wait for a resume of a turn that is not suspending.
+    """
+
+    @model_validator(mode="after")
+    def failure_matches_status(self) -> TurnResult:
+        """A failure kind and its text belong to a turn that did not succeed."""
+        if self.observation.status == ObservationStatus.SUCCEEDED and (
+            self.failure is not None or self.detail
+        ):
+            raise ContractValidationError("failure", "a succeeded turn carries no failure")
+        return self
 
 
 class EnsureSession(RequestBase):
@@ -416,6 +455,13 @@ class InspectTurn(RequestBase):
 
     kind: Literal["inspect_turn"] = "inspect_turn"
     invocation: InvocationRef
+    dispatch: RequestId | None = None
+    """The request that dispatched the turn, when core can name it.
+
+    An executor attributes its facts about a turn that never started to this request,
+    because it has no record of its own to name the dispatch by. Without it such an
+    executor can only report the turn as unknown.
+    """
 
 
 class CancelTurn(RequestBase):
@@ -436,6 +482,15 @@ class CloseSession(RequestBase):
 
     kind: Literal["close_session"] = "close_session"
     session_id: SessionId
+    resource_id: ResourceId | None = None
+    """The physical lease this request releases, as the session recorded it.
+
+    None means no lease was ever recorded (an acquisition that never completed).
+    An executor releases only this lease, never a newer one under the same
+    ``session_id``.
+    """
+    episode: DecisionId | None = None
+    """The admission episode the released lease was held under (None for run scope)."""
 
 
 class ResumeSessionTurn(RequestBase):
@@ -451,6 +506,13 @@ class ResumeSessionTurn(RequestBase):
     turn: TurnSpec
     inputs: tuple[SessionInput, ...] = ()
     continuation_id: ContinuationId
+    publication: ResumeAuthorizationReceipt | None = None
+    """The publication proof core held for this continuation when it issued the resume.
+
+    An executor compares it with its own continuation record (successor, evidence
+    and history cursor) before it dispatches. None only for requests issued before
+    this field existed.
+    """
 
 
 class SessionInputReceived(Value):

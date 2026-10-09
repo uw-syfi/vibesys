@@ -8,6 +8,7 @@ import math
 from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
+from vs_evaluation.lifecycle import FINISHED_STATES, state_rank
 from vs_evaluation.models import (
     EvaluationAwaitResult,
     EvaluationCanceled,
@@ -41,24 +42,6 @@ if TYPE_CHECKING:
         EvaluationExecutor,
         EvaluationStore,
     )
-
-_TERMINAL = frozenset(
-    {
-        EvaluationState.SUCCEEDED,
-        EvaluationState.FAILED,
-        EvaluationState.CANCELED,
-        EvaluationState.SUPERSEDED,
-    }
-)
-_STATE_ORDER = {
-    EvaluationState.QUEUED: 0,
-    EvaluationState.STARTING: 1,
-    EvaluationState.RUNNING: 2,
-    EvaluationState.SUCCEEDED: 3,
-    EvaluationState.FAILED: 3,
-    EvaluationState.CANCELED: 3,
-    EvaluationState.SUPERSEDED: 3,
-}
 
 
 class EvaluationLifecycleError(RuntimeError):
@@ -183,10 +166,12 @@ class EvaluationCoordinator:
         """
         async with self._lock_for(handle_id):
             current = await self._required_record(handle_id)
-            if current.state in _TERMINAL:
+            if current.state in FINISHED_STATES:
                 return current
             observed = await self._executor.inspect_only(handle_id)
-            if observed is None or (current.submission_pending and observed.state not in _TERMINAL):
+            if observed is None or (
+                current.submission_pending and observed.state not in FINISHED_STATES
+            ):
                 return None
             return await self._apply_observation(current, observed)
 
@@ -226,7 +211,7 @@ class EvaluationCoordinator:
         """Durably claim work and return its stable handle without awaiting completion."""
         handle = await self.prepare(request)
         record = await self._required_record(handle.id)
-        if record.state not in _TERMINAL:
+        if record.state not in FINISHED_STATES:
             await self._ensure_submitted(record)
         return handle
 
@@ -242,7 +227,7 @@ class EvaluationCoordinator:
     async def _ensure_submitted(self, record: StoredEvaluation) -> StoredEvaluation:
         async with self._lock_for(record.handle_id):
             current = await self._required_record(record.handle_id)
-            if current.state in _TERMINAL:
+            if current.state in FINISHED_STATES:
                 return current
             if current.cancel_requested:
                 await self._executor.cancel(current.handle_id)
@@ -279,7 +264,7 @@ class EvaluationCoordinator:
             except RevisionConflictError:
                 current = await self._required_record(current.handle_id)
                 if (
-                    current.state in _TERMINAL
+                    current.state in FINISHED_STATES
                     or current.cancel_requested
                     or current.dispatch_authorized is not True
                 ):
@@ -330,12 +315,12 @@ class EvaluationCoordinator:
 
     async def _refresh(self, handle_id: str) -> StoredEvaluation:
         current = await self._required_record(handle_id)
-        if current.state in _TERMINAL:
+        if current.state in FINISHED_STATES:
             return current
         if current.cancel_requested:
             async with self._lock_for(handle_id):
                 current = await self._required_record(handle_id)
-                if current.state in _TERMINAL:
+                if current.state in FINISHED_STATES:
                     return current
                 await self._executor.cancel(handle_id)
                 observed = await self._executor.inspect(handle_id)
@@ -350,14 +335,14 @@ class EvaluationCoordinator:
     async def _apply_observation(
         self, current: StoredEvaluation, observed: ExecutorObservation
     ) -> StoredEvaluation:
-        if current.state in _TERMINAL:
+        if current.state in FINISHED_STATES:
             if current.state is not observed.state:
                 raise EvaluationLifecycleError(
                     LifecycleErrorCode.TERMINAL_TRANSITION,
                     f"{current.state.value!r} -> {observed.state.value!r}",
                 )
             return current
-        if _STATE_ORDER[observed.state] < _STATE_ORDER[current.state]:
+        if state_rank(observed.state) < state_rank(current.state):
             raise EvaluationLifecycleError(
                 LifecycleErrorCode.STATE_REGRESSION,
                 f"{current.state.value!r} -> {observed.state.value!r}",
@@ -391,7 +376,7 @@ class EvaluationCoordinator:
     async def _cancel(self, handle_id: str) -> StoredEvaluation:
         async with self._lock_for(handle_id):
             current = await self._required_record(handle_id)
-            if current.state in _TERMINAL:
+            if current.state in FINISHED_STATES:
                 return current
             if current.dispatch_authorized is False and current.submission_pending:
                 canceled = current.model_copy(
@@ -408,7 +393,7 @@ class EvaluationCoordinator:
                     )
                 except RevisionConflictError:
                     current = await self._required_record(current.handle_id)
-                    if current.state in _TERMINAL:
+                    if current.state in FINISHED_STATES:
                         return current
                 else:
                     self._publish_record(stored)

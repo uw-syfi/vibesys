@@ -196,6 +196,41 @@ class RunStartedData(EventPayload):
     expected_roles: tuple[str, ...] = ()
 
 
+class RunFailureKind(StrEnum):
+    """Why a run ended without a result the operator can keep."""
+
+    BUDGET_EXHAUSTED = "budget_exhausted"
+    """Every workstream the run was allowed to start ran, and none produced a result."""
+    DEADLINE = "deadline"
+    """The run's time limit ended it before any candidate was adopted."""
+    NO_RESULT = "no_result"
+    """The strategy ended the run with nothing to keep while workstream budget remained."""
+
+
+class RunFailure(BaseModel):
+    """What a failed run did and why it stopped, as data; frontends choose the wording.
+
+    ``reason`` is the strategy's own account of the stop. ``workstreams_started`` counts
+    attempts core admitted, against the ``workstream_budget`` the run was allowed.
+    ``candidates_kept`` counts settled candidates eligible for adoption.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: RunFailureKind
+    reason: str
+    workstreams_started: int = Field(ge=0)
+    workstream_budget: int = Field(ge=0)
+    candidates_kept: int = Field(ge=0)
+
+
+class RunFailedData(EventPayload):
+    """Why a run ended without a result to keep, with the counts behind it."""
+
+    kind: Literal["run_failed"] = "run_failed"
+    failure: RunFailure
+
+
 ExperimentsChangeReason = Literal[
     "project_attached", "active_hypothesis_changed", "round_persisted"
 ]
@@ -408,6 +443,7 @@ CoreEventData = Annotated[
     | AgentExecutionActivityData
     | AgentExecutionFinishedData
     | RunStartedData
+    | RunFailedData
     | ExperimentsChangedData
     | PhaseData
     | AgentOutputChunkData

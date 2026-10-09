@@ -1,5 +1,6 @@
+import {activeRunFocus, phaseText} from '@vibesys/core-state';
 import {type FormEvent, type JSX, useEffect, useState, useSyncExternalStore} from 'react';
-import {connectionBanners} from './banners.js';
+import {connectionBanners, emptyTranscriptCopy} from './banners.js';
 import {bootstrapGateway, GatewaySessionStore, targetFromCapability} from './gateway-session.js';
 import {DEFAULT_REPLAY_FIXTURE_URL, loadReplayFixture} from './replay.js';
 import type {WebSession} from './session.js';
@@ -26,6 +27,13 @@ export function App({
     session?.getState ?? (() => EMPTY_SESSION_STATE),
   );
   const banners = connectionBanners(state, sessionState);
+  const emptyTranscript = emptyTranscriptCopy(state, banners);
+  const active = activeRunFocus(state);
+  const focus =
+    active.length > 1
+      ? `${active.length} agents active`
+      : (phaseText(active[0]?.description ?? null) ??
+        (state.status === 'connecting' ? 'Replay is loading' : 'Run overview'));
   const [replayError, setReplayError] = useState<Error | null>(null);
   const [replayAttempt, setReplayAttempt] = useState(0);
   useEffect(() => {
@@ -46,7 +54,7 @@ export function App({
       <header className="header">
         <div>
           <p className="eyebrow">VIBESYS / RUN VIEWER</p>
-          <h1>{state.roundLabel ?? 'Replay is loading'}</h1>
+          <h1>{focus}</h1>
         </div>
         <span className={`status status-${state.status}`}>{state.status}</span>
       </header>
@@ -133,7 +141,7 @@ export function App({
           <span>{state.transcript.length} folded events</span>
         </div>
         {state.transcript.length === 0 ? (
-          <p className="empty">Waiting for the replay stream…</p>
+          <p className="empty">{emptyTranscript}</p>
         ) : (
           <ol className="transcript">
             {state.transcript.slice(-8).map(entry => (

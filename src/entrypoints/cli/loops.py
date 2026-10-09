@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import math
 import sys
-import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,14 +20,18 @@ from vibesys.api import (
     DomainName,
     OrchestrationDescriptor,
     ResumeRef,
+    RunFailure,
+    RunFailureKind,
     RunRequest,
     RunResult,
+    Runs,
     boot_trace,
 )
 from vibesys.api.evolve import resolve_openevolve_options
 from vibesys.api.metrics import MetricSpace, Objective
 from vibesys.api.request import (
     InputBundle,
+    load_objectives,
     with_operator_constraints,
 )
 from vs_issue_tracker.api import IssueTrackerConfig
@@ -135,31 +137,13 @@ def _load_metric_space_toml(input_path: Path) -> MetricSpace:
     variation can opt into a relative margin under ``[pareto]`` without
     imposing one domain's noise level on every optimization workload.
     """
-    path = input_path / "objectives.toml"
-    if not path.exists():
-        return MetricSpace()
-    data = tomllib.loads(path.read_text())
-    objectives = []
-    for entry in data.get("objective") or []:
-        name = entry.get("name")
-        direction = entry.get("direction")
-        if not name or direction not in ("max", "min"):
-            _exception_message_2 = f"Malformed entry in {path}: {entry!r}. Each [[objective]] must set name and direction (max|min)."
-            raise ValueError(_exception_message_2)
-        objectives.append(Objective(name=name, direction=direction))
-    raw_value = (data.get("pareto") or {}).get("relative_noise", 0.0)
-    if isinstance(raw_value, bool):
-        message = f"Malformed pareto.relative_noise in {path}: {raw_value!r}"
-        raise ValueError(message)  # noqa: TRY004  # lint-waiver: LW-010200 [TRY004]; malformed objective files use the CLI's established ValueError diagnostic contract.
-    try:
-        value = float(raw_value)
-    except (TypeError, ValueError) as exc:
-        _exception_message_3 = f"Malformed pareto.relative_noise in {path}: {raw_value!r}"
-        raise ValueError(_exception_message_3) from exc
-    if not math.isfinite(value) or not 0 <= value < 1:
-        _exception_message = f"Malformed pareto.relative_noise in {path}: expected a finite value in [0, 1), got {raw_value!r}"
-        raise ValueError(_exception_message)
-    return MetricSpace(objectives=tuple(objectives), relative_noise=value)
+    file = load_objectives(input_path)
+    return MetricSpace(
+        objectives=tuple(
+            Objective(name=axis.name, direction=axis.direction) for axis in file.objective
+        ),
+        relative_noise=float(file.pareto.relative_noise),
+    )
 
 
 def _resolve_metric_space(args: argparse.Namespace) -> MetricSpace:
@@ -267,7 +251,15 @@ def _agent_policy_descriptor(
         "max_retries_per_round": args.max_retries_per_round,
         "judge_every": args.judge_every,
         "official_eval_every": args.official_eval_every,
-        **({"max_in_flight": args.max_in_flight} if args.outer_loop == "dynamic" else {}),
+        **(
+            {
+                "max_in_flight": args.max_in_flight,
+                "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
+                "max_unmeasured_turns": args.max_unmeasured_turns,
+            }
+            if args.outer_loop == "dynamic"
+            else {}
+        ),
         "operator_constraints": [item.strip() for item in args.constraint if item.strip()],
         "metric_space": metrics.model_dump(mode="json"),
         "profile_guided": bundle.manifest.profile_guided.model_dump(mode="json")
@@ -368,16 +360,39 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
         )
 
 
-def _run_request(args: argparse.Namespace) -> None:
+def _run_request(args: argparse.Namespace, runs: Runs | None = None) -> None:
     request = _build_run_request(args)
-    result = _execute_run_request(request)
+    result = _execute_run_request(request, default_runs() if runs is None else runs)
     if result.succeeded:
         sys.stdout.write(f"\n{request.orchestration.id} run completed.\n")
     else:
         sys.stdout.write(f"\n{request.orchestration.id} run stopped early.\n")
+        if result.failure is not None:
+            sys.stdout.write(f"{describe_failure(result.failure)}\n")
         sys.exit(1)
 
 
-def _execute_run_request(request: RunRequest) -> RunResult:
+_FAILURE_HEADLINES = {
+    RunFailureKind.BUDGET_EXHAUSTED: "the workstream budget ran out",
+    RunFailureKind.DEADLINE: "the run's time limit ended it",
+    RunFailureKind.NO_RESULT: "the run ended",
+}
+
+
+def describe_failure(failure: RunFailure) -> str:
+    """One line saying why a run failed: the cause, what was kept, the counts, then its account.
+
+    Candidates can be kept yet not adopted, so the line says "no result to keep" only
+    when none was kept.
+    """
+    kept = "with no result to keep" if failure.candidates_kept == 0 else "with no candidate adopted"
+    counts = (
+        f"{failure.workstreams_started} of {failure.workstream_budget} workstreams started, "
+        f"{failure.candidates_kept} candidates kept"
+    )
+    return f"Reason: {_FAILURE_HEADLINES[failure.kind]} {kept} ({counts}). {failure.reason}"
+
+
+def _execute_run_request(request: RunRequest, runs: Runs) -> RunResult:
     """Run *request* to completion via `headless.run`."""
-    return run_headless(request, default_runs())
+    return run_headless(request, runs)

@@ -24,16 +24,18 @@ from vs_agent.api import (
 from vs_runtime._agent_execution import (
     AgentExecutionConfiguration,
     AgentExecutionEnvironment,
-    AgentExecutionFinished,
-    AgentExecutionLifecycleEvent,
-    AgentExecutionLifecycleSink,
     AgentExecutionScope,
-    AgentExecutionStarted,
-    AgentExecutionStatus,
     AgentMessageRouter,
     ScopedAgentEnvironment,
     SharedAgentEnvironmentConflictError,
     open_agent_execution_environment,
+)
+from vs_runtime._agent_lifecycle import (
+    AgentExecutionFinished,
+    AgentExecutionLifecycleEvent,
+    AgentExecutionLifecycleSink,
+    AgentExecutionStarted,
+    AgentExecutionStatus,
 )
 from vs_runtime._agent_sessions import RuntimeWorkspaceAgentSessions
 from vs_runtime._bounded_stop import (
@@ -67,6 +69,13 @@ from vs_runtime._evaluator_packages import (
     resolve_evaluator_package,
 )
 from vs_runtime._event_journal import DurableEventJournal, EventCodec
+from vs_runtime._failure_classification import (
+    RecordState,
+    TerminalSignal,
+    classify,
+    job_failure,
+    signal_of,
+)
 from vs_runtime._input_project import InputDependency, materialize_input_project
 from vs_runtime._linux_cpu_profiler import (
     Capability as LinuxProfilerCapability,
@@ -186,6 +195,10 @@ from vs_runtime._sdk_paths import (
     relative_sdk_source,
     resolve_sdk_source,
 )
+from vs_runtime._semantic_slurm_evaluation import (
+    SemanticSlurmEvaluationExecutor,
+    StageFailureText,
+)
 from vs_runtime._skills import (
     SkillCatalogEntry,
     SkillMetadataError,
@@ -242,6 +255,7 @@ from vs_runtime._workspace_runtime import (
 )
 from vs_runtime._workspaces import (
     OwnedWorkspaces,
+    RuntimeWorkspace,
     RuntimeWorkspaces,
     WorkspaceResource,
     WorkspaceResourceProvider,
@@ -495,6 +509,7 @@ __all__ = [
     "ProjectStateDeclaration",
     "ProjectTreeCopy",
     "ProtocolBenchmarkContract",
+    "RecordState",
     "ResolvedEvaluatorPackage",
     "RoundRecoveryOutcome",
     "RoundTransactionError",
@@ -515,10 +530,12 @@ __all__ = [
     "RuntimeAccuracyRun",
     "RuntimeBenchmarkRun",
     "RuntimeRunHost",
+    "RuntimeWorkspace",
     "RuntimeWorkspaceEvaluation",
     "SDKRoots",
     "ScalarBenchmarkContract",
     "ScopedAgentEnvironment",
+    "SemanticSlurmEvaluationExecutor",
     "SharedAgentEnvironmentConflictError",
     "SkillCatalogEntry",
     "SkillMetadataError",
@@ -526,8 +543,10 @@ __all__ = [
     "SkyPilotEnvironmentFacts",
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
+    "StageFailureText",
     "StopGraceError",
     "StopTimer",
+    "TerminalSignal",
     "TrustedAccuracyResult",
     "TrustedBenchmarkContract",
     "TrustedBenchmarkDecoding",
@@ -551,6 +570,7 @@ __all__ = [
     "build_run_environment",
     "build_skill_catalog",
     "build_trusted_benchmark_command",
+    "classify",
     "collect_linux_profile",
     "collect_macos_profile",
     "create_managed_conversation",
@@ -568,6 +588,7 @@ __all__ = [
     "docker_evaluator_tools_root",
     "evaluator_agent_toolchains",
     "evaluator_container_setup",
+    "job_failure",
     "load_evaluator_package",
     "load_skill_frontmatter",
     "make_run_environment_spec",
@@ -597,6 +618,7 @@ __all__ = [
     "resolve_skill_resources",
     "run_environment_record",
     "run_local_validation",
+    "signal_of",
     "stop_gated_evaluation",
     "summarize_linux_profile",
     "validate_run_environment_profile",

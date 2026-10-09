@@ -11,13 +11,34 @@ from pydantic import BaseModel
 
 import vs_core.api as core
 
+from .proof_digest import value_digest
+
 
 def assert_input_boundary(state: core.CoreState, event: core.CoreEvent, kind: str) -> None:
-    """Pin the exact missing sibling, so another leaf's failure cannot satisfy a trace."""
-    with pytest.raises(core.KernelNotImplementedError) as boundary:
-        core.step(state, event)
-    assert boundary.value.subarea == "_session_inputs"
-    assert boundary.value.event_kind == kind
+    """Verify the formerly missing Inputs boundary by its public result."""
+    result = core.step(state, event)
+    if kind == "input_reservation_requested":
+        assert any(
+            isinstance(row, core.DispatchTurn | core.ResumeSessionTurn) for row in result.requests
+        )
+    elif kind == "input_acceptance_observed":
+        assert any(
+            row.observation is not None and row.observation.accepted
+            for row in result.state.sessions.invocations
+        )
+        assert all(
+            row.receipt is not None
+            for row in result.state.sessions.inputs
+            if row.reserved_to is not None
+        )
+    elif kind == "input_reservation_released":
+        assert all(
+            row.receipt is not None or row.reserved_to is None
+            for row in result.state.sessions.inputs
+        )
+    else:
+        assert kind == "session_drain_requested"
+        assert any(isinstance(row, core.InspectRequest) for row in result.requests)
 
 
 def turn(identity: str = "planner", charge: str = "free", max_turns: int = 1) -> core.TurnSpec:
@@ -380,6 +401,67 @@ def turn_observation(
     )
 
 
+_FAILURE_KINDS = {
+    core.ObservationStatus.FAILED: core.TurnFailureKind.PROVIDER_FAILED,
+    core.ObservationStatus.REJECTED: core.TurnFailureKind.PROVIDER_FAILED,
+    core.ObservationStatus.CANCELLED: core.TurnFailureKind.CANCELLED,
+}
+
+
+@given(
+    status=st.sampled_from(sorted(_FAILURE_KINDS, key=str)),
+    diagnostic=st.text(max_size=3 * core.TURN_FAILURE_DETAIL_LIMIT),
+)
+@example(
+    status=core.ObservationStatus.FAILED, diagnostic="x" * (core.TURN_FAILURE_DETAIL_LIMIT + 1)
+)
+def test_a_failed_turn_result_carries_its_kind_and_the_bounded_executor_text(
+    status: core.ObservationStatus, diagnostic: str
+) -> None:
+    spec = turn()
+    dispatched = reload_step(
+        waiting_turn_state(spec), core.TurnInputsReserved(invocation=invocation(spec), input_ids=())
+    )
+    observation = turn_observation(dispatched.requests[0], terminal=True, status=status)
+    observation = observation.model_copy(update={"diagnostic": diagnostic})
+
+    result = reload_step(
+        dispatched.state, core.TurnObserved(invocation=invocation(spec), observation=observation)
+    )
+
+    (event,) = (row for row in result.events if isinstance(row, core.TurnResult))
+    assert event.failure is _FAILURE_KINDS[status]
+    assert event.detail == diagnostic[: core.TURN_FAILURE_DETAIL_LIMIT]
+
+
+@given(diagnostic=st.text(max_size=64))
+def test_a_succeeded_turn_result_carries_no_failure(diagnostic: str) -> None:
+    spec = turn()
+    dispatched = reload_step(
+        waiting_turn_state(spec), core.TurnInputsReserved(invocation=invocation(spec), input_ids=())
+    )
+    observation = turn_observation(
+        dispatched.requests[0],
+        terminal=True,
+        accepted=True,
+        status=core.ObservationStatus.SUCCEEDED,
+    ).model_copy(update={"diagnostic": diagnostic})
+
+    result = reload_step(
+        dispatched.state,
+        core.TurnObserved(
+            invocation=invocation(spec),
+            observation=observation,
+            output_schema=spec.output_schema,
+            output_json="{}",
+        ),
+    )
+
+    (event,) = (row for row in result.events if isinstance(row, core.TurnResult))
+    assert event.failure is None
+    assert event.detail == ""
+
+
 def test_unknown_acceptance_inspects_exact_turn_and_keeps_currency_and_payload() -> None:
     spec = turn()
     dispatched = reload_step(
@@ -421,6 +503,14 @@ def with_intent(state: core.CoreState, request: core.Request) -> core.CoreState:
     )
     return state.model_copy(
         update={"intents": state.intents.model_copy(update={"intents": (record,)})}
+    )
+
+
+def request_index(prepared: core.Transition, session_id: core.SessionId) -> int:
+    return next(
+        index
+        for index, item in enumerate(prepared.requests)
+        if isinstance(item, core.EnsureSession) and item.spec.session_id == session_id
     )
 
 
@@ -505,7 +595,7 @@ def test_f1_planner_acquisition_and_correction_reach_declared_input_boundary(
             ensure, accepted=True, terminal=True, status=core.ObservationStatus.SUCCEEDED
         ),
     )
-    # The independent Sessions B leaf remains frozen; prove A reaches its exact signal.
+    # Acquisition now composes with the implemented occurrence reservation.
     assert_input_boundary(reload_state(prepared.state), event, "input_reservation_requested")
     state, predecessor = malformed_planner_state()
     state = state.model_copy(
@@ -647,12 +737,13 @@ def test_initial_group_prepares_all_sessions_once_and_waits_for_every_member() -
     ).model_copy(
         update={"admission_id": admission, "resource_id": core.ResourceId(root="reviewer-lease")}
     )
-    with pytest.raises(core.KernelNotImplementedError) as ready:
-        core.step(
-            acquired.state, core.SessionObserved(session_id=second.session_id, observation=last)
-        )
-    assert ready.value.subarea == "_attempt_acquisition"
-    assert ready.value.event_kind == "initial_sessions_ready"
+    ready = core.step(
+        acquired.state, core.SessionObserved(session_id=second.session_id, observation=last)
+    )
+    assert ready.requests == ()
+    assert ready.events == ()
+    assert ready.state.sessions.acquisition_groups[0].phase == "ready"
+    assert ready.state.attempts.attempts[0].phase == core.AttemptPhase.ACQUIRING
 
 
 def test_reacquisition_has_episode_identity_and_requires_exact_retained_conversation() -> None:
@@ -743,6 +834,13 @@ def test_failed_initial_group_late_acceptance_only_adds_cleanup(indices: list[in
         assert result.state.sessions.acquisition_groups[0].phase == "failed"
         assert result.events == ()
         assert all(isinstance(item, core.CloseSession) for item in result.requests)
+        # Each close names the physical lease and episode it releases.
+        for item in result.requests:
+            assert isinstance(item, core.CloseSession)
+            assert item.resource_id == core.ResourceId(
+                root=f"lease-{request_index(prepared, item.session_id)}"
+            )
+            assert item.episode == admission
         closes.extend(result.requests)
         state = result.state
     assert len(closes) == len(set(indices))
@@ -992,10 +1090,12 @@ def test_interrupted_replacement_requires_terminal_checkpoint_and_completed_refu
     state, previous, successor, owner_scope = interrupted_attempt_state(phase)
     event = core.TurnRequested(scope=owner_scope, turn=successor)
     if phase == "completed":
-        with pytest.raises(core.KernelNotImplementedError) as reached:
-            core.step(reload_state(state), event)
-        assert reached.value.subarea == "_attempt_acquisition"
-        assert reached.value.event_kind == "invocation_charge_requested"
+        reached = core.step(reload_state(state), event)
+        assert reached.requests == ()
+        assert reached.events == ()
+        # The interrupted predecessor's paid charge already covers the replacement.
+        assert reached.state.attempts.attempts[0].charges == state.attempts.attempts[0].charges
+        assert reached.state.sessions.invocations[-1].phase == core.SessionPhase.ACQUIRING
     else:
         with pytest.raises(core.ContractValidationError, match="completed"):
             core.step(reload_state(state), event)
@@ -1120,10 +1220,9 @@ def test_resume_requires_exact_authorized_continuation(phase: core.ContinuationP
     )
     event = core.TurnRequested(scope=state.sessions.invocations[0].scope, turn=resumed)
     if phase == core.ContinuationPhase.AUTHORIZED:
-        with pytest.raises(core.KernelNotImplementedError) as reached:
-            core.step(reload_state(state), event)
-        assert reached.value.subarea == "_attempt_acquisition"
-        assert reached.value.event_kind == "invocation_charge_requested"
+        # The attempt leaf now authorizes the resume charge; the turn then
+        # stops at the still-unimplemented session-input reservation.
+        assert_input_boundary(reload_state(state), event, "input_reservation_requested")
     else:
         with pytest.raises(core.ContractValidationError, match="authorization"):
             core.step(reload_state(state), event)
@@ -1380,7 +1479,7 @@ def registered_turn_state(
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="accepted-custom-proposal",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id, request_ids=(request.request_id,)),
         request_ids=(request.request_id,),
     )
@@ -1449,7 +1548,7 @@ def test_registered_turn_manifest_uses_original_canonical_request() -> None:
             )
         }
     )
-    with pytest.raises(core.ContractValidationError, match="reserved-input transport"):
+    with pytest.raises(core.ContractValidationError, match="canonical manifest"):
         core.step(
             with_notes,
             core.TurnInputsReserved(invocation=invocation(spec), input_ids=(note.input_id,)),
@@ -1940,11 +2039,10 @@ def test_acquisition_requires_conclusive_readiness_or_nonacceptance(
         core.ObservationStatus.CANCELLED,
     )
     if abandonment or (accepted and status == core.ObservationStatus.SUCCEEDED):
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(reload_state(prepared.state), event)
-        assert boundary.value.subarea == "_session_inputs"
-        assert boundary.value.event_kind == (
-            "input_reservation_released" if abandonment else "input_reservation_requested"
+        assert_input_boundary(
+            reload_state(prepared.state),
+            event,
+            "input_reservation_released" if abandonment else "input_reservation_requested",
         )
     else:
         result = reload_step(prepared.state, event)
@@ -2011,7 +2109,7 @@ def test_late_acquisition_closes_lease_and_cancels_waiting_decision(*, registere
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="pending-turn",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
         request_ids=(ensure.request_id,),
     )
@@ -2195,10 +2293,11 @@ def test_required_group_reattaches_run_owned_lease_without_transferring_or_closi
     ).model_copy(update={"admission_id": admission, "resource_id": resource})
     confirmed = core.SessionObserved(session_id=spec.session.session_id, observation=observation)
     if case == "ready":
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(reload_state(acquired.state), confirmed)
-        assert boundary.value.subarea == "_attempt_acquisition"
-        assert boundary.value.event_kind == "initial_sessions_ready"
+        boundary = core.step(reload_state(acquired.state), confirmed)
+        assert boundary.requests == ()
+        assert boundary.events == ()
+        assert boundary.state.sessions.acquisition_groups[0].phase == "ready"
+        assert boundary.state.attempts.attempts[0].phase == core.AttemptPhase.ACQUIRING
     else:
         failed = acquired.state.sessions.acquisition_groups[0].model_copy(
             update={
@@ -2221,3 +2320,73 @@ def test_required_group_reattaches_run_owned_lease_without_transferring_or_closi
         assert result.state.sessions.sessions[0].phase == core.SessionPhase.IDLE
         assert result.state.sessions.run_charges == ()
         assert result.state.attempts == state.attempts
+
+
+def test_a_session_close_releases_its_closing_attempt_exactly_once() -> None:
+    """One release per close: two emitters failed the step, and a dropped edge stalled closure.
+
+    Sessions marks the lease terminal before the release arrives, so graph discovery no
+    longer lists the edge; the closing attempt must still progress to its discard.
+    """
+    state, request = closing_session_state()
+    attempt_id = core.AttemptId(root="closing")
+    owner_scope = core.Scope(owner=attempt_id, generation=0)
+    admission = core.DecisionId(root="admission")
+    request = request.model_copy(update={"scope": owner_scope, "admission_id": admission})
+    session = state.sessions.sessions[0].model_copy(update={"scope": owner_scope})
+    state = state.model_copy(
+        update={"sessions": state.sessions.model_copy(update={"sessions": (session,)})}
+    )
+    state = with_intent(state, request)
+    dependency = core.ReleaseDependency(kind="session", identity=request.session_id)
+    owner = core.AttemptView(
+        attempt_id=attempt_id,
+        item_id=core.ItemId(root="item"),
+        generation=0,
+        phase=core.AttemptPhase.CLOSING,
+        workspace=core.WorkspacePlan(
+            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
+        ),
+        budget=core.AttemptBudget(),
+        admission_id=admission,
+        closure=core.AttemptClosure(
+            disposition="cancel",
+            requested_at=1.0,
+            authority=core.RequestId(root="retire"),
+            admission_id=admission,
+        ),
+        release_dependencies=(dependency,),
+    )
+    fence = core.CloseAttemptScope(
+        request_id=core.RequestId(root="retire"),
+        scope=owner_scope,
+        admission_id=admission,
+        deadline_at=100.0,
+        attempt=core.AttemptRef(attempt_id=attempt_id, generation=0),
+    )
+    fenced = (
+        with_intent(state, fence)
+        .intents.intents[0]
+        .model_copy(
+            update={
+                "observation": turn_observation(
+                    fence, terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
+                ).model_copy(update={"children_complete": True, "admission_id": admission})
+            }
+        )
+    )
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(attempts=(owner,)),
+            "intents": state.intents.model_copy(
+                update={"intents": (*state.intents.intents, fenced)}
+            ),
+        }
+    )
+    observation = turn_observation(
+        request, terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
+    ).model_copy(update={"released": True, "children_complete": True, "admission_id": admission})
+    result = reload_step(state, core.RequestObserved(observation=observation))
+    assert result.state.sessions.sessions[0].phase == core.SessionPhase.TERMINAL
+    assert any(isinstance(item, core.DiscardWorkspace) for item in result.requests)
+    assert dependency not in result.state.attempts.attempts[0].release_dependencies

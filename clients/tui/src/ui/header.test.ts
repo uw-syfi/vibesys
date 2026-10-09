@@ -1,12 +1,8 @@
 import {describe, expect, it} from 'bun:test';
 import type {RunEvent} from '@vibesys/backend-client';
-import {applyRunMapEvent, type CoreRunStatus} from '@vibesys/core-state';
-import {
-  initialSessionState,
-  runStatusLabel,
-  type SessionState,
-  selectAgent,
-} from '../session-model.js';
+import {type CoreRunStatus, initialCoreState, reduceEvent} from '@vibesys/core-state';
+import {selectAgent} from '../round-agent-selection.js';
+import {initialSessionState, runStatusLabel, type SessionState} from '../session-model.js';
 import {contrastRatio, listThemes, resolveTheme, type Theme} from '../theme.js';
 import {
   type HeaderSpan,
@@ -63,6 +59,30 @@ function runningImplementer(): SessionState {
       status: 'running',
       agentKind: 'implementer',
       roundLabel: 'round-1-retry-2-implementer',
+      phases: [
+        {
+          kind: 'implementer',
+          status: 'active',
+          roundNumber: 1,
+          roundKey: {kind: 'number', number: 1},
+          roundLabel: 'round-1-retry-2-implementer',
+          executionId: 'exec-1',
+        },
+      ],
+      activeExecutions: {
+        'exec-1': {
+          executionId: 'exec-1',
+          agentKind: 'implementer',
+          roundLabel: 'round-1-retry-2-implementer',
+          roundNumber: 1,
+          roundKey: {kind: 'number', number: 1},
+          stage: 'implementation',
+          attempt: 2,
+          assignment: 'Implement',
+          startedAt: '2026-01-01T00:00:00Z',
+          activity: {mode: 'thinking', summary: 'Implementing'},
+        },
+      },
       usage: {inputTokens: 223_000, contextWindow: 400_000, model: 'claude-opus-5'},
     },
   );
@@ -123,6 +143,19 @@ describe('header', () => {
       expect(header).not.toContain(roundLabel);
       expect(header).not.toMatch(/round-\d|gen-\d|cand-\d|retry-\d|att\d/);
     }
+  });
+
+  it('ignores the deprecated cursor when active execution focus disagrees', () => {
+    const state = runningImplementer();
+    const header = line(
+      {...state, core: {...state.core, agentKind: 'judge', roundLabel: 'round-99-judge'}},
+      false,
+      WIDE,
+    );
+
+    expect(header).toContain('implementing · attempt 2');
+    expect(header).not.toContain('judging');
+    expect(header).not.toContain('round-99-judge');
   });
 
   it('fits 100 columns whole, where the old header clipped the title', () => {
@@ -211,10 +244,7 @@ describe('header', () => {
     // `selectAgent` stores the phase kind verbatim, so an operator selecting
     // the measurement phase put `selected perf_eval` on the curated header:
     // the backend identifier this header exists to remove.
-    const seeded = applyRunMapEvent(
-      {outerLoop: 'plain', expectedRoles: null, rounds: [], phases: [], lastEventTimestamp: null},
-      perfEvalStart(),
-    );
+    const seeded = reduceEvent(initialCoreState(), perfEvalStart());
     const kinds = seeded.phases.map(phase => phase.kind);
     expect(kinds).toContain('perf_eval');
 

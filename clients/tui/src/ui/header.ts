@@ -22,10 +22,9 @@
  *   gives each role a tone: the run state carries a verdict, the phase and the
  *   title are content, the metadata recedes.
  */
-import {hasRunEnded} from '@vibesys/core-state';
+import {activeRunFocus, agentKindText, hasRunEnded, phaseText} from '@vibesys/core-state';
 import {runStatusLabel, type SessionState} from '../session-model.js';
 import type {Theme} from '../theme.js';
-import {agentKindText, describePhase, phaseText} from './phase-label.js';
 import {displayWidth, truncateToWidth} from './text-width.js';
 
 /** Separator between header segments, matching the rest of the interface. */
@@ -190,7 +189,11 @@ export function headerSegments(state: SessionState, showLog: boolean): Segment[]
   if (showLog) {
     segments.push({text: 'experiments', role: 'phase', priority: PRIORITY.phase});
   } else {
-    const phase = phaseText(describePhase(state.core.roundLabel, state.core.agentKind));
+    const active = activeRunFocus(state.core);
+    const phase =
+      active.length > 1
+        ? `${active.length} agents active`
+        : phaseText(active[0]?.description ?? null);
     if (phase !== null) segments.push({text: phase, role: 'phase', priority: PRIORITY.phase});
     if (state.hypothesisScope !== null) {
       segments.push({

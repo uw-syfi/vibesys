@@ -672,7 +672,7 @@ def test_explicit_drained_interruption_releases_key_without_replaying_unknown(
     assert harness.sessions.resume(KEY, harness.message, "interrupted-1") == interrupted
 
 
-def test_observed_initial_schema_rejection_allows_live_correction_but_not_restart(
+def test_initial_schema_rejection_without_checkpoint_fences_live_and_recovered_corrections(
     tmp_path: Path,
 ) -> None:
     calls: list[AgentTurnRequest] = []
@@ -700,13 +700,9 @@ def test_observed_initial_schema_rejection_allows_live_correction_but_not_restar
         recovered = ClientAgentSessions(client, ledger)
         with pytest.raises(SessionResumeError, match="acknowledged provider checkpoint is missing"):
             recovered.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
-        corrected = sessions.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
-        assert isinstance(corrected, Completed)
-        assert len(calls) == 2
-        assert (
-            recovered.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
-            == corrected
-        )
+        with pytest.raises(SessionResumeError, match="acknowledged provider checkpoint is missing"):
+            sessions.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
+        assert len(calls) == 1
     finally:
         client.close()
 
@@ -768,3 +764,42 @@ def test_generation_identity_is_roundtrippable_and_disjoint(
     assert key != AgentSessionKey.for_member(role, member, generation=generation + 1)
     assert key != AgentSessionKey.for_member(role + ":", member, generation=generation)
     assert key != AgentSessionKey.for_member(role, member + ":", generation=generation)
+
+
+def test_release_keeps_the_checkpoint_and_the_conversation_continues(harness: _Harness) -> None:
+    before = harness.sessions.checkpoint(KEY)
+    harness.sessions.release(KEY)
+    harness.sessions.release(KEY)
+    assert harness.sessions.checkpoint(KEY) == before
+    result = harness.sessions.resume(KEY, harness.message, "after-release")
+    assert isinstance(result, Completed)
+    assert result.checkpoint == before
+
+
+def test_release_refuses_while_an_invocation_is_active_and_cancel_ignores_idle_turns(
+    harness: _Harness,
+) -> None:
+    seen: list[str] = []
+
+    def during_turn() -> None:
+        harness.sessions.cancel(KEY, "idle")
+        try:
+            harness.sessions.release(KEY)
+        except InvocationConflictError as error:
+            seen.append(str(error))
+
+    harness.boundary.effect = during_turn
+    assert isinstance(harness.sessions.resume(KEY, harness.message, "busy"), Completed)
+    assert len(seen) == 1
+    assert "active invocation" in seen[0]
+
+
+@pytest.mark.parametrize("method", ["cancel", "release"])
+def test_cancel_and_release_reject_a_nondurable_key(harness: _Harness, method: str) -> None:
+    key = AgentSessionKey(SessionScope.ROLE, "worker")
+    call = {
+        "cancel": lambda: harness.sessions.cancel(key, "inv"),
+        "release": lambda: harness.sessions.release(key),
+    }[method]
+    with pytest.raises(SessionConfigurationError, match="not durable"):
+        call()

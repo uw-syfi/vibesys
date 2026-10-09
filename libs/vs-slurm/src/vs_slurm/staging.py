@@ -112,20 +112,21 @@ def _stage_tree(
     payload = object_root / "payload"
     ready_marker = object_root / "ready"
     ready = shlex.quote(ready_marker.as_posix())
+    temporary_root = request.cache_root / f"{digest}.tmp.{request.staging_id}"
+    temporary_payload = temporary_root / "payload"
+    # One round trip decides hit or miss and, on a miss, creates the upload directory.
     probe = transport.exec(
         f"if [ -f {ready} ]; then printf 'READY'; "
         f"elif [ -e {shlex.quote(object_root.as_posix())} ]; then printf 'INCOMPLETE'; "
-        "else printf 'MISSING'; fi"
+        f"else mkdir -p {shlex.quote(temporary_payload.as_posix())} && printf 'MISSING'; fi"
     ).stdout.strip()
     if probe not in {"READY", "MISSING"}:
         raise _ContentStageError.invalid_readiness_response()
 
     cache_hit = probe == "READY"
-    temporary_root = request.cache_root / f"{digest}.tmp.{request.staging_id}"
     if not cache_hit:
-        temporary_payload = temporary_root / "payload"
+        published = False
         try:
-            transport.exec(f"mkdir -p {shlex.quote(temporary_payload.as_posix())}")
             transport.sync_to(
                 request.source,
                 temporary_payload,
@@ -139,15 +140,18 @@ def _stage_tree(
             ).stdout.strip()
             if publish == "READY":
                 cache_hit = True
-            elif publish != "PUBLISHED":
-                if publish == "BUSY":
-                    raise _ContentStageError.cache_busy(digest)
+            elif publish == "PUBLISHED":
+                published = True
+            elif publish == "BUSY":
+                raise _ContentStageError.cache_busy(digest)
+            else:
                 raise _ContentStageError.invalid_readiness_response()
         finally:
-            # The name is unique to this staging request. After successful
-            # rename it no longer exists, so this can never remove a cache hit.
-            with suppress(Exception):
-                transport.exec(f"rm -rf -- {shlex.quote(temporary_root.as_posix())}")
+            # The name is unique to this staging request, so this can never remove a
+            # cache hit. A successful publish renamed it away: nothing to remove.
+            if not published:
+                with suppress(Exception):
+                    transport.exec(f"rm -rf -- {shlex.quote(temporary_root.as_posix())}")
 
     transport.exec(_materialize_command(request, payload))
     return _ContentStageResult(digest=digest, cache_hit=cache_hit)
@@ -245,6 +249,7 @@ def _publish_command(
     ready = shlex.quote((object_root / "ready").as_posix())
     stale_prefix = shlex.quote((object_root.parent / f"{object_root.name}.lock.stale").as_posix())
     temporary_ready = shlex.quote((temporary_root / "ready").as_posix())
+    nested = shlex.quote((object_root / temporary_root.name).as_posix())
     return (
         "for attempt in $(seq 1 30); do "
         f"if [ -f {ready} ]; then printf 'READY'; exit 0; fi; "
@@ -254,7 +259,11 @@ def _publish_command(
         f'printf \'owner=%s\\npid=%s\\ncreated=%s\\n\' {staging} "$$" "$(date +%s)" > {owner}; '
         f"if [ -f {ready} ]; then printf 'READY'; exit 0; fi; "
         f"if [ -e {target} ]; then exit 73; fi; "
-        f"touch {temporary_ready} && mv -T -- {temporary} {target} || exit 74; "
+        # POSIX mv has no -T: if a directory appeared at the target after the
+        # check above, mv would move the temporary tree inside it and exit 0.
+        # Publishing counts only if the target is the ready tree itself.
+        f"touch {temporary_ready} && mv -- {temporary} {target} && "
+        f"[ -f {ready} ] && [ ! -e {nested} ] || exit 74; "
         "printf 'PUBLISHED'; exit 0; fi; "
         f"owner_pid=$(sed -n 's/^pid=//p' {owner} 2>/dev/null); "
         f"created_at=$(sed -n 's/^created=//p' {owner} 2>/dev/null); "

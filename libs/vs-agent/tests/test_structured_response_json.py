@@ -27,3 +27,26 @@ def test_provider_json_preserves_strict_tuple_response(
     elif presentation == "prose":
         text = "Result: " + text
     assert parse_typed_response(text, StrictReply) == reply
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("", "\nNote: each {item} cites one file."),
+        ('The schema is {"evidence": [str]}. Answer:\n', ""),
+        ("", '\nEarlier I drafted {"evidence": 1}, which was wrong.'),
+    ],
+    ids=["trailing-braces", "leading-braces", "rejected-draft"],
+)
+@given(evidence=st.lists(st.text(), max_size=5))
+def test_a_valid_reply_object_is_recovered_beside_other_braced_prose(
+    before: str, after: str, evidence: list[str]
+) -> None:
+    """Mechanism: only the span from the first ``{`` to the last ``}`` was tried.
+
+    Prose with its own braces around one valid object made that span invalid JSON,
+    and the agent was told its reply held no JSON object.
+    """
+    reply = StrictReply(evidence=tuple(evidence))
+    text = before + reply.model_dump_json() + after
+    assert parse_typed_response(text, StrictReply) == reply

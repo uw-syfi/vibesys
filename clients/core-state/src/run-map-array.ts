@@ -38,15 +38,6 @@ export function appendRunMapArrayEntry<T>(values: T[], value: T): T[] {
   return arrayFor(vectorSet(vector, vector.length, value));
 }
 
-/** Sets a possibly sparse internal index entry. Public run-map arrays use dense indexes. */
-export function setRunMapArrayEntry<T>(values: T[], index: number, value: T): T[] {
-  if (!Number.isSafeInteger(index) || index < 0) {
-    throw new RangeError(`Invalid run-map index ${index}`);
-  }
-  const vector = vectorFor(values) ?? vectorFrom(values);
-  return arrayFor(vectorSet(vector, index, value));
-}
-
 /** Builds a persistent array after a whole-collection operation such as closeout. */
 export function runMapArrayFrom<T>(values: readonly T[]): T[] {
   return arrayFor(vectorFrom(values));

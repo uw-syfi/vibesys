@@ -7,6 +7,7 @@ from hypothesis import strategies as st
 import vs_core.api as core
 
 from .test_intent_child_guards import pending_intent, recovering_state, reload
+from .test_proof_ownership_regressions import stopped
 
 
 def discovered_state(count: int = 1) -> core.CoreState:
@@ -127,6 +128,7 @@ def apply_inspection(
 
 
 def drain(state: core.CoreState) -> core.Transition:
+    state = stopped(state)
     state = state.model_copy(
         update={
             "run": state.run.model_copy(

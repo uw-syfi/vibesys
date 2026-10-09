@@ -22,6 +22,7 @@ from vs_evaluation.api import (
     ExecutorObservation,
     ExecutorRejectedError,
     FilesystemEvaluationStore,
+    PollPhase,
     StageState,
 )
 from vs_evaluation.api.testing import FakeClock
@@ -276,7 +277,14 @@ class _ScenarioCluster(FakeCluster):
             return observed.model_copy(update={"job_id": handle.job.job_id})
         return observed
 
-    def collect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCollectOutcome:
+    def collect(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCollectOutcome:
+        del observed  # the reading names the producer's job; re-inspect the translated one
         translated, by_job_id = self._shadow_target(target, by_job_id=by_job_id)
         collected = super().collect(translated, by_job_id=by_job_id)
         if collected.operation_id not in self._producer_handles:
@@ -359,6 +367,23 @@ class _BlockingCluster(_ScenarioCluster):
         return cancelled
 
 
+class _GatedScancelCluster(_BlockingCluster):
+    """A scheduler whose scancel is slow: it ends only when the test opens its gate."""
+
+    def __init__(self, config: SlurmConfig) -> None:
+        super().__init__(config)
+        self.scancel_entered = threading.Event()
+        self.scancel_gate = threading.Event()
+        self.scancel_done = threading.Event()
+
+    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+        self.scancel_entered.set()
+        self.scancel_gate.wait()
+        cancelled = super().cancel(target, by_job_id=by_job_id)
+        self.scancel_done.set()
+        return cancelled
+
+
 class _UnreachableSchedulerCluster(_BlockingCluster):
     def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
         cancelled = super().cancel(target, by_job_id=by_job_id)
@@ -387,6 +412,9 @@ def _config() -> SlurmConfig:
         name="fake-cluster",
         remote_workspace_root="/runs",
         transport=SlurmSshTransport(host="fake-cluster"),
+        # The Fake scheduler reports teardown for a few inspections; pace the
+        # wait loop tightly so those inspections do not cost real seconds.
+        poll_interval_seconds=0.001,
     )
 
 
@@ -827,6 +855,39 @@ async def test_executor_recovers_durable_handle_without_resubmission(tmp_path: P
 
 
 @pytest.mark.asyncio
+async def test_recovered_evaluation_never_reports_starting_after_running(tmp_path: Path) -> None:
+    config = _config()
+    runner = _ScenarioCluster(config)
+    handle_root = tmp_path / "handles"
+
+    def executor() -> SlurmEvaluationExecutor:
+        return SlurmEvaluationExecutor(
+            config,
+            workspace=_workspace(tmp_path),
+            setup_script=None,
+            service=None,
+            support_trees={},
+            handle_root=handle_root,
+            cluster=runner,
+        )
+
+    first = executor()
+    await first.submit(_request(), handle_id="eval-monotonic")
+    assert (await _terminal(first, "eval-monotonic")).state is EvaluationState.SUCCEEDED
+
+    resumed = executor()
+    recovered = await resumed.inspect("eval-monotonic")
+    assert recovered is not None
+    assert recovered.state is EvaluationState.RUNNING
+    # Let the recovery task take its admission lease before the next poll.
+    await asyncio.sleep(0)
+    polled = await resumed.inspect("eval-monotonic")
+    assert polled is not None
+    assert polled.state is not EvaluationState.STARTING
+    assert (await _terminal(resumed, "eval-monotonic")).state is EvaluationState.SUCCEEDED
+
+
+@pytest.mark.asyncio
 async def test_executor_enforces_one_persisted_wait_deadline(tmp_path: Path) -> None:
     config = _config().model_copy(update={"job_timeout_seconds": 10})
     runner = _TimedOutCluster(config, already_waited=4.0)
@@ -984,6 +1045,46 @@ async def test_cancelling_the_execution_task_cancels_the_submitted_slurm_job(
 
 
 @pytest.mark.asyncio
+async def test_a_cancelled_cancel_still_finishes_the_scancel_before_it_returns(
+    tmp_path: Path,
+) -> None:
+    config = _config()
+    runner = _GatedScancelCluster(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=runner,
+    )
+    try:
+        await executor.submit(_request(), handle_id="eval-double-cancel")
+        await asyncio.to_thread(runner.wait_started.wait)
+        canceller = asyncio.create_task(executor.cancel("eval-double-cancel"))
+        await asyncio.to_thread(runner.scancel_entered.wait)
+
+        # A second cancellation (teardown cancelling a task already being cancelled)
+        # must not abandon the scancel worker thread mid-flight.
+        canceller.cancel()
+        for _ in range(50):
+            await asyncio.sleep(0)
+        assert not canceller.done()
+
+        runner.scancel_gate.set()
+        outcome = await asyncio.gather(canceller, return_exceptions=True)
+
+        assert [type(item) for item in outcome] == [asyncio.CancelledError]
+        assert runner.scancel_done.is_set()
+        assert runner.handle is not None
+        assert runner.cancelled_job_ids == [runner.handle.job.job_id]
+    finally:
+        runner.scancel_gate.set()
+        runner.release()
+
+
+@pytest.mark.asyncio
 async def test_a_failed_scancel_does_not_stop_the_cancellation_from_finishing(
     tmp_path: Path,
 ) -> None:
@@ -1025,6 +1126,8 @@ class _PendingCancellationCluster(_BlockingCluster):
         if self.terminate:
             return super().cancel(target, by_job_id=by_job_id)
         observed = _ScenarioCluster.inspect(self, target, by_job_id=by_job_id)
+        # Like _BlockingCluster.cancel, the acknowledgement frees the blocked inspection.
+        self._release_wait.set()
         if isinstance(observed, ClusterObservation):
             self.cancellations += 1
             self.cancelled_job_ids.append(observed.job_id)
@@ -1049,15 +1152,15 @@ async def test_scancel_acknowledgement_does_not_complete_release_or_suppress_ret
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        cancel_confirmation_seconds=3 * config.poll_interval_seconds,
     )
     try:
         await executor.submit(_request(), handle_id="eval-pending-cancel")
         await asyncio.to_thread(runner.wait_started.wait)
-        with pytest.raises(ExecutorCancellationUnknownError):
-            await executor.cancel("eval-pending-cancel")
+        await executor.cancel("eval-pending-cancel")
         observed = await executor.inspect("eval-pending-cancel")
         assert observed is not None
-        assert observed.state is EvaluationState.RUNNING
+        assert observed.state is EvaluationState.CANCELING
         assert runner.cancellations == 1
         runner.terminate = True
         await executor.cancel("eval-pending-cancel")
@@ -1524,7 +1627,57 @@ async def test_read_only_pending_scheduler_does_not_regress_active_evaluation(
     inspected = await coordinator.inspect_snapshot(handle.id)
     assert inspected is not None
     assert inspected.state is EvaluationState.RUNNING
-    assert inspected.current_stage is None
+    # An unstaged reading at the same state is not news: the stage already reported stays.
+    assert inspected.current_stage == "accuracy"
     assert runner.submissions == 1
     assert runner.cancellations == 0
     await executor.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("implementation", ["fake", "slurm"])
+async def test_poll_reports_each_lifecycle_phase_without_submitting_or_recovering(
+    tmp_path: Path, implementation: str
+) -> None:
+    operation_id = "polled-operation"
+    states = (SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED)
+    if implementation == "fake":
+        cluster = FakeCluster()
+        config = _config()
+        cluster.script(operation_id, states=states)
+    else:
+        connector = FakeConnector(tmp_path / "connector")
+        connector.script(operation_id, states=states)
+        remote = tmp_path / "remote"
+        remote.mkdir()
+        config = SlurmConfig(
+            name="fake-cluster",
+            remote_workspace_root=str(remote),
+            transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+        )
+        cluster = SlurmCluster(
+            SlurmJobRunner(config, process=connector), state_root=tmp_path / "cluster-identity"
+        )
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=cluster,
+    )
+    try:
+        assert (await executor.poll(operation_id)).phase is PollPhase.UNSUBMITTED
+        assert list((tmp_path / "handles").iterdir()) == []
+        await executor.submit(_request(), handle_id=operation_id)
+        await _terminal(executor, operation_id)
+        phases = [(await executor.poll(operation_id)).phase for _ in range(4)]
+        assert phases[-1] is PollPhase.ENDED
+        assert phases == sorted(phases, key=list(PollPhase).index)
+        ended = await executor.poll(operation_id)
+        assert ended.terminal is not None
+        # No stage result was scripted, so both clusters end without inventing a success.
+        assert ended.terminal.state is EvaluationState.FAILED
+    finally:
+        await executor.close()

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import threading
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import timedelta
 from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
@@ -38,6 +37,7 @@ from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
+from vs_agent.usage_records import USAGE_FILE, append_usage_record, usage_dict
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -149,34 +149,13 @@ class _LoggerObserver:
                 ),
             )
         elif event.kind is AgentEventKind.USAGE and event.usage is not None:
-            self._logger.update_usage(_usage_dict(event.usage))
+            self._logger.update_usage(usage_dict(event.usage))
         elif event.kind is AgentEventKind.SKILL:
             self._logger.on_diagnostic(f"[skill] {event.text or 'unknown'}")
 
     def close(self) -> None:
         """Close any assistant-text segment left open at turn completion."""
         self._logger.end_text()
-
-
-def _usage_dict(usage: AgentUsage) -> dict[str, int | float | None]:
-    return {
-        "input_tokens": usage.input_tokens,
-        "cache_creation_input_tokens": usage.cache_creation_input_tokens,
-        "cache_read_input_tokens": usage.cache_read_input_tokens,
-        "output_tokens": usage.output_tokens,
-        "total_cost_usd": usage.total_cost_usd,
-        "duration_ms": usage.duration_ms,
-    }
-
-
-def _skill_dict(skills: AgentSkillUse) -> dict[str, int | list[str] | None]:
-    """Usage-record fields for skill use; ``None`` where the provider cannot say."""
-    invoked = skills.invoked
-    return {
-        "skill_uses": None if invoked is None else len(invoked),
-        "skills_invoked": None if invoked is None else list(invoked),
-        "skills_offered": None if skills.offered is None else len(skills.offered),
-    }
 
 
 def _translate_tool_servers(
@@ -536,24 +515,22 @@ class AgentClient:
             return
         usage = result.usage if result is not None else AgentUsage()
         skills = result.skills if result is not None else AgentSkillUse()
-        record = {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "kind": kind,
-            "round_label": round_label,
-            "provider": self._provider,
-            "model": model,
-            "reasoning_effort": reasoning_effort,
-            **_usage_dict(usage),
-            **_skill_dict(skills),
-        }
-        target = self._log_dir / "usage.jsonl"
         try:
-            with target.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps(record) + "\n")
+            append_usage_record(
+                self._log_dir,
+                kind=kind,
+                round_label=round_label,
+                provider=self._provider,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                usage=usage,
+                skills=skills,
+            )
         except OSError as exc:
             _emit_and_log(
                 self._sink,
-                f"[usage] failed to append {target}: {type(exc).__name__}: {exc}",
+                f"[usage] failed to append {self._log_dir / USAGE_FILE}: "
+                f"{type(exc).__name__}: {exc}",
                 self._run_log_file,
             )
 
@@ -590,9 +567,8 @@ class AgentClient:
             return self._run_ephemeral(session_spec, turn, observer)
 
         fingerprint = session_spec_fingerprint(session_spec)
+        turn = self._bind_continuation(session_key, session_spec, turn)
         expected = turn.expected_provider_session_id
-        if expected is not None:
-            self._validate_continuation(session_key, session_spec, expected)
         cached = self._sessions.get(session_key)
         if cached is not None and cached.spec != session_spec:
             # The configuration changed within this process. Drop the live
@@ -629,7 +605,12 @@ class AgentClient:
                 error.add_note(f"agent session cleanup also failed: {cleanup_error}")
             raise
 
-        self._validate_continuation_result(session_key, expected, result)
+        self._validate_continuation_result(
+            session_key,
+            expected,
+            result,
+            require_provider_checkpoint=turn.require_provider_checkpoint,
+        )
 
         # Recorded for both dispositions, and exactly as reported: this is where
         # the turn ran, which a reset afterwards does not change.
@@ -660,6 +641,17 @@ class AgentClient:
         record = self._session_store.get(session_key)
         return None if record is None else record.session_id
 
+    def _bind_continuation(
+        self, key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest
+    ) -> AgentTurnRequest:
+        expected = turn.expected_provider_session_id
+        if expected is None and turn.require_provider_checkpoint:
+            expected = self.provider_session_id(key)
+        if expected is None:
+            return turn
+        self._validate_continuation(key, spec, expected)
+        return replace(turn, expected_provider_session_id=expected)
+
     def last_turn_provider_session_id(self, session_key: AgentSessionKey) -> str | None:
         """Name the provider conversation the last completed turn on the key ran in.
 
@@ -672,10 +664,15 @@ class AgentClient:
         """
         return self._last_turn_sessions.get(session_key)
 
-    @staticmethod
-    def _validate_continuation_key(key: AgentSessionKey | None, turn: AgentTurnRequest) -> None:
-        if turn.expected_provider_session_id is not None and (key is None or not key.durable):
+    def _validate_continuation_key(
+        self, key: AgentSessionKey | None, turn: AgentTurnRequest
+    ) -> None:
+        if (turn.expected_provider_session_id is not None or turn.require_provider_checkpoint) and (
+            key is None or not key.durable
+        ):
             raise SessionResumeError(str(key), "strict continuation requires a durable session key")
+        if turn.require_provider_checkpoint and not self.capabilities.provider_session_resume:
+            raise SessionResumeError(str(key), "provider cannot resume durable sessions")
 
     def _create_checkpointed_session(
         self,
@@ -693,12 +690,18 @@ class AgentClient:
         return session
 
     def _validate_continuation_result(
-        self, key: AgentSessionKey, expected: str | None, result: AgentTurnResult
+        self,
+        key: AgentSessionKey,
+        expected: str | None,
+        result: AgentTurnResult,
+        *,
+        require_provider_checkpoint: bool,
     ) -> None:
-        if expected is None:
+        if expected is None and not require_provider_checkpoint:
             return
         if (
-            result.provider_session_id != expected
+            not result.provider_session_id
+            or (expected is not None and result.provider_session_id != expected)
             or result.disposition is SessionDisposition.RESET_REQUIRED
         ):
             self._evict(key)
@@ -802,6 +805,20 @@ class AgentClient:
             active = tuple(self._active_sessions)
         for session in active:
             session.cancel()
+
+    def cancel_session(self, key: AgentSessionKey) -> None:
+        """Stop the in-flight turn of one keyed conversation, keeping its checkpoint.
+
+        Unlike :meth:`cancel` this leaves the client usable for every other key,
+        and a key with no live session is a no-op.
+        """
+        cached = self._sessions.get(key)
+        if cached is not None:
+            cached.session.cancel()
+
+    def release_session(self, key: AgentSessionKey) -> None:
+        """Release the live provider session of one key but keep its stored checkpoint."""
+        self._evict(key)
 
     def _run_ephemeral(
         self,

@@ -12,7 +12,7 @@ export type RunSnapshot = ProtocolDocument['snapshot'];
 export type RunStatus = RunSnapshot['status'];
 export type ServerMessage = ProtocolDocument['server_message'];
 /** The `event_batch` arm of `ServerMessage`: a run of events plus cursor metadata. */
-export type EventBatchMessage = Extract<ServerMessage, {events: RunEvent[]}>;
+export type EventBatchMessage = Extract<ServerMessage, {type: 'event_batch'}>;
 export type Diagnostic = NonNullable<ProtocolResponse['diagnostic']>;
 export type HypothesisEntry = NonNullable<ProtocolResponse['experiments']>[number];
 export type ExperimentUpdate = NonNullable<ProtocolResponse['experiment_update']>;

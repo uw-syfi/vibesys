@@ -70,7 +70,7 @@ describe('typed tool result previews', () => {
     // Python-repr content would defeat the string sniffer; the payload wins.
     const preview = toolResultPreview("{'rows': [1, 2]}", {
       kind: 'json',
-      value: {rows: [1, 2]},
+      value: {rows: [1, 2] as const},
     });
 
     expect(preview.content).toBe('{\n  "rows": [\n    1,\n    2\n  ]\n}');
@@ -291,7 +291,9 @@ describe('collapsed typed result summaries', () => {
   });
 
   it('shows an array json result as its length', () => {
-    const value = Array.from({length: 12}, (_, index) => ({index}));
+    const value = Array.from({length: 12}, (_, index) => ({index})) as readonly {
+      readonly index: number;
+    }[];
 
     expect(toolResultPreview('irrelevant', {kind: 'json', value}).content).toBe('[12 items]');
     expect(jsonShapeSummary([])).toBe('[0 items]');
