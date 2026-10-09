@@ -84,14 +84,9 @@ if TYPE_CHECKING:
 
     from vibesys.events import CoreEvent
     from vibesys.run.contracts import PluginProjection
-    from vs_agent.api import (
-        AgentClientProtocol,
-        AgentSessionKey,
-        SessionStore,
-        SkillSelection,
-        ToolSpec,
-    )
+    from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
+    from vs_mcp.api import ToolSpec
 
 
 def _project(raw_state: BaseModel) -> PluginProjection:

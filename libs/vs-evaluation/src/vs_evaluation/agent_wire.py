@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from vs_agent.api import ToolSpec
 from vs_evaluation.agent_models import AgentEvaluationReply, SocketFailure, SocketReply
 from vs_evaluation.profiler_models import AgentToolArgs
+from vs_mcp.api import ToolSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable

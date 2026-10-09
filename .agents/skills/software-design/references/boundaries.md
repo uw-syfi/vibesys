@@ -92,7 +92,7 @@ arguments, in any order, at any time.
   reuse it, or a standalone server under `resources/`, such as the
   profilers in `resources/profilers/`.
 - Servers in `src/` and `libs/` build their tools on the shared tool layer
-  (`vs_agent` `ToolSpec` and `serve_stdio`), not a hand-built `FastMCP`, so
+  (`vs_mcp` `ToolSpec` and `serve_stdio`), not a hand-built `FastMCP`, so
   that cross-cutting mechanisms cover every tool: deadlines, result size
   limits, fault injection. A standalone server under `resources/` may use
   FastMCP directly. Share its conventions through the `_common` package of

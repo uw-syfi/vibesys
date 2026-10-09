@@ -49,6 +49,7 @@ FRAMEWORK_PACKAGES = (
     "vs_runtime",
     "vs_sandbox",
     "vs_slurm",
+    "vs_mcp",
     "vs_faults",
 )
 REQUIRED_SYSTEM_TOOLS = ("git",)

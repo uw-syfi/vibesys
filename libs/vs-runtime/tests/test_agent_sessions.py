@@ -92,7 +92,8 @@ from vs_runtime.api.testing import (
 from vs_sandbox.api import ProjectPathPolicy
 
 if TYPE_CHECKING:
-    from vs_agent.api import AgentClientProtocol, AgentSessions, SessionStore, ToolServerDescriptor
+    from vs_agent.api import AgentClientProtocol, AgentSessions, SessionStore
+    from vs_mcp.api import ToolServerDescriptor
 
 
 class _Reply(BaseModel):

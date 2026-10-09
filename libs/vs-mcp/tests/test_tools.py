@@ -19,8 +19,7 @@ from hypothesis import strategies as st
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel
 
-from vs_agent.api import (
-    MCPServerSpec,
+from vs_mcp.api import (
     StdioServerDescriptor,
     ToolSpec,
     expose_as_tools,
@@ -237,15 +236,13 @@ class TestRegisterTool:
         assert names == {"echo", "shout"}
 
 
-@pytest.mark.parametrize("factory", [StdioServerDescriptor, MCPServerSpec])
 @given(st.text(), st.text())
 def test_runtime_environment_values_do_not_change_session_identity(
-    factory: type[StdioServerDescriptor] | type[MCPServerSpec],
     first: str,
     second: str,
 ) -> None:
     """Ephemeral values may rotate; their names and stable capability values may not."""
-    one = factory(
+    one = StdioServerDescriptor(
         name="evaluation",
         command="python",
         env=(("role", "implementer"),),
@@ -258,15 +255,13 @@ def test_runtime_environment_values_do_not_change_session_identity(
     assert one != dataclasses.replace(one, env=(("role", "judge"),))
 
 
-@pytest.mark.parametrize("factory", [StdioServerDescriptor, MCPServerSpec])
 @given(st.text(min_size=1), st.text(), st.text())
 def test_runtime_environment_cannot_override_identity(
-    factory: type[StdioServerDescriptor] | type[MCPServerSpec],
     key: str,
     first: str,
     second: str,
 ) -> None:
     with pytest.raises(ValueError, match="overlaps identity environment keys"):
-        factory(
+        StdioServerDescriptor(
             name="evaluation", command="python", env=((key, first),), runtime_env=((key, second),)
         )

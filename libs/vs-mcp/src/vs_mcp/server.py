@@ -1,4 +1,4 @@
-"""Generic FastMCP stdio runner for :class:`~vs_agent.tools.ToolSpec` lists.
+"""Generic FastMCP stdio runner for :class:`~vs_mcp.tools.ToolSpec` lists.
 
 This module registers tools generically from data and knows nothing about what
 any tool does.
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_agent.tools import ToolSpec
+    from vs_mcp.tools import ToolSpec
 
 
 def _make_tool_function[T: BaseModel](spec: ToolSpec[T]) -> Callable[..., str]:

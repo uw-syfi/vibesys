@@ -22,6 +22,7 @@ members = [
     "vs-evaluator-protocol",
     "vs-github",
     "vs-issue-tracker",
+    "vs-mcp",
     "vs-project",
     "vs-prompts",
     "vs-slurm",
@@ -2970,6 +2971,21 @@ dependencies = [
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-github", editable = "libs/vs-github" },
+]
+
+[[package]]
+name = "vs-mcp"
+version = "0.1.0"
+source = { editable = "libs/vs-mcp" }
+dependencies = [
+    { name = "mcp" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcp", specifier = ">=1.0,<2" },
+    { name = "pydantic", specifier = ">=2" },
 ]
 
 [[package]]

@@ -55,8 +55,8 @@ if TYPE_CHECKING:
         InvocationOutcome,
         SessionStore,
         SkillSelection,
-        ToolServerDescriptor,
     )
+    from vs_mcp.api import ToolServerDescriptor
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime._run_environment import RunEnvironmentRequest, RunEnvironmentSession

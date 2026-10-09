@@ -48,14 +48,10 @@ from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.single import agents as single
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.structured_turn import structured_turn
-from vs_agent.api import (
-    AgentClient,
-    AgentOutputSchemaError,
-    DurableSessionStore,
-    StdioServerDescriptor,
-)
+from vs_agent.api import AgentClient, AgentOutputSchemaError, DurableSessionStore
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver, FakeTurnScript
 from vs_evaluation.api import ProfilerAgentResult
+from vs_mcp.api import StdioServerDescriptor
 from vs_runtime.api import (
     AgentCapability,
     SessionResumeError,

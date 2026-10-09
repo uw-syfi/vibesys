@@ -40,10 +40,10 @@ from vs_agent.api import (
     Pending,
     SessionPersistenceError,
     SessionResumeError,
-    StdioServerDescriptor,
     Unknown,
 )
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver, FakeTurnScript
+from vs_mcp.api import StdioServerDescriptor
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (

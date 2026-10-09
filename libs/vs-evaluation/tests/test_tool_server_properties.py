@@ -37,7 +37,6 @@ from pydantic import BaseModel, ValidationError
 from tests.support.evaluation_scenarios import ScenarioSpec, capture_submission
 
 from vibesys.run.evaluation_backend import SemanticEvaluationStage
-from vs_agent.api import register_tool
 from vs_async_ops.api.testing import ImmediateTimeoutWaiter
 from vs_evaluation.api import (
     MAX_PROFILER_REQUEST_CHARS,
@@ -86,6 +85,7 @@ from vs_evaluation.api.tools import (
     build_evaluation_tools,
     evaluation_tool_names,
 )
+from vs_mcp.api import register_tool
 from vs_project.api import (
     OrchestrationDescriptor,
     Project,
@@ -96,7 +96,7 @@ from vs_project.api import (
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Iterator
 
-    from vs_agent.api import ToolSpec
+    from vs_mcp.api import ToolSpec
 
 # The socket client's documented reply bound: a larger reply raises
 # EvaluationServiceClientError.oversized() (vs_evaluation/agent_mcp.py).

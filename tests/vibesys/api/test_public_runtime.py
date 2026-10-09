@@ -25,7 +25,7 @@ from vibesys.events import (
 )
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
-from vs_agent.api import ToolServerDescriptor
+from vs_mcp.api import ToolServerDescriptor
 from vs_runtime.api import AgentToolBindingContext
 from vs_sandbox.api.testing import FakeComputeBackend
 

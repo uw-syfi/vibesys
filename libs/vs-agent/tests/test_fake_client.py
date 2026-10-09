@@ -19,15 +19,17 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
-from vs_agent.api import AgentOutputSchemaError, StdioServerDescriptor
+from vs_agent.api import AgentOutputSchemaError
 from vs_agent.contracts import AgentCapabilities, AgentUsage
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.sink import AgentEventSink
+from vs_mcp.api import StdioServerDescriptor
 
 if TYPE_CHECKING:
-    from vs_agent.api import AgentProgress, ToolServerDescriptor
+    from vs_agent.api import AgentProgress
     from vs_agent.events import AgentOutputChannel, AgentStatusData, TodoItemData, ToolResultPayload
+    from vs_mcp.api import ToolServerDescriptor
 
 
 class _Response(BaseModel):

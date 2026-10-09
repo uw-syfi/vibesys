@@ -37,8 +37,8 @@ from vs_agent.session_errors import SessionResumeError
 from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vs_agent.skills import NULL_SKILL_SELECTION
-from vs_agent.tools import StdioServerDescriptor
 from vs_agent.usage_records import append_usage_record
+from vs_mcp.api import StdioServerDescriptor
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
     from vs_agent.skills import SkillSelection
-    from vs_agent.tools import ToolServerDescriptor
+    from vs_mcp.api import ToolServerDescriptor
 T = TypeVar("T", bound=BaseModel)
 
 #: Default answer :meth:`FakeAgentClient.invoke_text` returns when nothing is

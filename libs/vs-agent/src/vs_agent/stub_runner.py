@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
-    from vs_agent.tools import ToolServerDescriptor
+    from vs_mcp.api import ToolServerDescriptor
 T = TypeVar("T", bound=BaseModel)
 
 _NO_STRUCTURED_OUTPUT = "the stub backend writes no structured output"

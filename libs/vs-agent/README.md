@@ -19,8 +19,9 @@ The package adapts supported drivers behind a common client contract.
   binding consumers to a provider's event format.
 - `SessionStore` implementations control whether provider sessions can resume
   across turns or runs.
-- `ToolSpec`, `MCPServerSpec`, and the stdio helpers expose application tools to
-  agents without putting application workflow in the driver.
+- `MCPServerSpec` carries the tool servers that `vs_mcp` descriptors declare
+  (`ToolSpec`, `serve_stdio`, `expose_as_tools`) into an agent's tool transport,
+  without putting application workflow in the driver.
 
 ## Using the API
 

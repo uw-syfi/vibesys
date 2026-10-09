@@ -14,9 +14,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-from vs_agent.api import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, serve_stdio
 from vs_evaluation.agent_models import EvidenceKindsArgs, SubmitCall, WaitArgs, WaitCall
 from vs_evaluation.agent_wire import Offer, SocketClient
+from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, serve_stdio
 
 SERVER_NAME = "vs-evaluation"
 SUBMIT_TOOL = "submit_evaluation"

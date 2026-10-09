@@ -24,7 +24,7 @@ from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.multi.models import MultiState
-from vs_agent.api import register_tool
+from vs_mcp.api import register_tool
 from vs_project.api import (
     AgentRoleExecutionRecord,
     OrchestrationDescriptor,
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.api.store import RunStore
-    from vs_agent.api import ToolSpec
+    from vs_mcp.api import ToolSpec
 
 NOW = datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC)
 UNIQUE = UUID("12345678-1234-5678-1234-567812345678")
