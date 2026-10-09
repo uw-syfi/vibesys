@@ -16,6 +16,7 @@ resolution-markers = [
 [manifest]
 members = [
     "vibesys",
+    "vs-agent",
     "vs-async-ops",
     "vs-bench",
     "vs-core",
@@ -26,6 +27,7 @@ members = [
     "vs-mcp",
     "vs-project",
     "vs-prompts",
+    "vs-sandbox",
     "vs-slurm",
 ]
 
@@ -2898,6 +2900,29 @@ test = [
 ]
 
 [[package]]
+name = "vs-agent"
+version = "0.1.0"
+source = { editable = "libs/vs-agent" }
+dependencies = [
+    { name = "agentshim" },
+    { name = "pydantic" },
+    { name = "vs-mcp" },
+    { name = "vs-project" },
+    { name = "vs-prompts" },
+    { name = "vs-sandbox" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agentshim", specifier = ">=0.15.0,<0.16" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-mcp", editable = "libs/vs-mcp" },
+    { name = "vs-project", editable = "libs/vs-project" },
+    { name = "vs-prompts", editable = "libs/vs-prompts" },
+    { name = "vs-sandbox", editable = "libs/vs-sandbox" },
+]
+
+[[package]]
 name = "vs-async-ops"
 version = "0.1.0"
 source = { editable = "libs/vs-async-ops" }
@@ -3031,6 +3056,31 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "jinja2", specifier = ">=3.1" }]
+
+[[package]]
+name = "vs-sandbox"
+version = "0.1.0"
+source = { editable = "libs/vs-sandbox" }
+dependencies = [
+    { name = "huggingface-hub" },
+    { name = "modal" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "vs-evaluation" },
+    { name = "vs-project" },
+    { name = "vs-slurm" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "huggingface-hub" },
+    { name = "modal", specifier = ">=1.4.2" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pyyaml", specifier = ">=6" },
+    { name = "vs-evaluation", editable = "libs/vs-evaluation" },
+    { name = "vs-project", editable = "libs/vs-project" },
+    { name = "vs-slurm", editable = "libs/vs-slurm" },
+]
 
 [[package]]
 name = "vs-slurm"

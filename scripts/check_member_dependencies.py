@@ -32,7 +32,7 @@ import ast
 import re
 import sys
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.metadata import packages_distributions
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -50,6 +50,16 @@ _REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 def canonical_name(name: str) -> str:
     """Normalize a distribution name the way PEP 503 does."""
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def requirement_specifier(requirement: str) -> str:
+    """Return a requirement's version constraint in a comparable form."""
+    match = _REQUIREMENT_NAME.match(requirement)
+    if match is None:
+        message = f"not a valid requirement: {requirement!r}"
+        raise ValueError(message)
+    remainder = requirement[match.end() :].replace(" ", "")
+    return ",".join(sorted(remainder.split(",")))
 
 
 def requirement_name(requirement: str) -> str:
@@ -71,6 +81,7 @@ class Member:
     workspace_sources: frozenset[str]
     imports: frozenset[str]
     packages: frozenset[str]
+    specifiers: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -80,6 +91,7 @@ class Workspace:
     members: tuple[Member, ...]
     root_dependencies: frozenset[str]
     root_packages: frozenset[str]
+    root_specifiers: Mapping[str, str] = field(default_factory=dict)
 
 
 def distributions_for(import_name: str, installed: Mapping[str, Sequence[str]]) -> frozenset[str]:
@@ -144,6 +156,12 @@ def _check_member(
         "so the bundled wheel would not install it"
         for name in sorted(used_third_party - workspace.root_dependencies)
     )
+    failures.extend(
+        f"{where}: declares {name!r} as {member.specifiers[name]!r} but the root project "
+        f"declares {workspace.root_specifiers[name]!r}; keep one constraint"
+        for name in sorted(used_third_party & member.specifiers.keys() & workspace.root_specifiers.keys())
+        if member.specifiers[name] != workspace.root_specifiers[name]
+    )
     return failures
 
 
@@ -181,7 +199,11 @@ def load_workspace(repo_root: Path) -> Workspace:
     root_dependencies = frozenset(
         requirement_name(item) for item in root.get("project", {}).get("dependencies", [])
     )
-    return Workspace(members, root_dependencies, root_packages)
+    root_specifiers = {
+        requirement_name(item): requirement_specifier(item)
+        for item in root.get("project", {}).get("dependencies", [])
+    }
+    return Workspace(members, root_dependencies, root_packages, root_specifiers)
 
 
 def _load_member(repo_root: Path, directory: Path) -> Member:
@@ -200,6 +222,10 @@ def _load_member(repo_root: Path, directory: Path) -> Member:
             for name, spec in sources.items()
             if isinstance(spec, dict) and spec.get("workspace") is True
         ),
+        specifiers={
+            requirement_name(item): requirement_specifier(item)
+            for item in data["project"].get("dependencies", [])
+        },
         imports=imported_top_level_names(source_root),
         packages=packages,
     )
