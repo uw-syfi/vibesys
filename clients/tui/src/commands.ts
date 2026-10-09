@@ -188,7 +188,8 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
   {
     id: 'steer',
     name: '/steer',
-    description: 'Guide the running agent now if its provider supports it, else the next turn: /steer <message>',
+    description:
+      'Guide the running agent now if its provider supports it, else the next turn: /steer <message>',
     args: 'required',
     usage: '/steer <message>',
     surfaces: BOTH,
