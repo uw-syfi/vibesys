@@ -311,6 +311,9 @@ _OPS = st.lists(st.sampled_from(("snapshot", "inspect_only", "poll", "wait")), m
 # Each example replays a whole job lifecycle through the connector, one subprocess per
 # remote command, so a few generated cases run beside the explicit boundary examples.
 _PROPERTY = settings(max_examples=4, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+# Which remote command is lost decides which recovery branch runs, and only a wide
+# draw of (delay, position) reaches all of them.
+_FAULTS = settings(max_examples=6, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 
 
 async def _publishes_monotonically(spec: _WorldSpec, operations: list[str]) -> None:
@@ -352,6 +355,8 @@ async def _publishes_monotonically(spec: _WorldSpec, operations: list[str]) -> N
 
 @_worlds
 @_PROPERTY
+# Repeated read-only inspection after the job started publishes its observation.
+@example(operations=["poll", "inspect_only", "poll", "inspect_only", "poll", "inspect_only"])
 @given(operations=_OPS)
 def test_published_lifecycle_never_goes_backwards(spec: _WorldSpec, operations: list[str]) -> None:
     """Queueing, requeue and teardown readings in any interleaving never regress or error."""
@@ -596,13 +601,14 @@ async def _poll_with_dropped_command(spec: _WorldSpec, delay_s: float, position:
 
 
 @pytest.mark.parametrize("spec", _FAULT_WORLDS, ids=lambda spec: spec.label)
-@_PROPERTY
+@_FAULTS
 @example(delay_s=10.0, position=1)
 @example(delay_s=150.0, position=0)
 @example(delay_s=150.0, position=1)
 @example(delay_s=270.0, position=0)
 @example(delay_s=270.0, position=1)
 @example(delay_s=270.0, position=2)
+@example(delay_s=270.0, position=3)
 # The queue has forgotten the job (past MinJobAge), so accounting is the only source:
 # its one lost read must be retried like the queue's.
 @example(delay_s=290.0, position=2)
@@ -644,7 +650,7 @@ async def _cancel_with_dropped_command(spec: _WorldSpec, delay_s: float, positio
 
 
 @pytest.mark.parametrize("spec", _FAULT_WORLDS, ids=lambda spec: spec.label)
-@_PROPERTY
+@_FAULTS
 @example(delay_s=10.0, position=0)
 @example(delay_s=10.0, position=1)
 @example(delay_s=10.0, position=2)
