@@ -63,7 +63,12 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSessions
+    from vs_agent.api import (
+        AgentClientProtocol,
+        AgentEventSink,
+        AgentInvocationStore,
+        AgentSessions,
+    )
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import StateSlot
     from vs_runtime.api.infrastructure import RunControlChannel
@@ -292,6 +297,7 @@ class _RuntimeEffects:
     ) = None
     session_transport: AgentSessions | None = None
     invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None
+    agent_events: AgentEventSink = NULL_AGENT_EVENT_SINK
 
 
 @dataclass(frozen=True, slots=True)
@@ -338,7 +344,7 @@ def _runtime(
         session_store=lambda: None,
         control=control or create_run_control_channel(FakeRunControlEventSink()),
         lifecycle_events=effects.lifecycle,
-        agent_events=NULL_AGENT_EVENT_SINK,
+        agent_events=effects.agent_events,
         route_message=lambda message, steering: message + "".join(steering),
         blocking=BlockingOperations(),
         client_factory=effects.clients,

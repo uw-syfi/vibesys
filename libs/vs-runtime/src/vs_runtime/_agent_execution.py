@@ -20,6 +20,7 @@ from vs_agent.api import (
     AgentSpawnError,
     AgentTurnExecutor,
     AgentTurnRequest,
+    CapacityGated,
     ClientAgentSessions,
     Completed,
     InvalidResponse,
@@ -39,6 +40,7 @@ from vs_runtime._agent_lifecycle import (
     AgentExecutionStarted,
     AgentExecutionStatus,
 )
+from vs_runtime._capacity_gate import PausingCapacityGate
 from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
 
 if TYPE_CHECKING:
@@ -413,6 +415,8 @@ class RuntimeAgentExecution:
             except (OSError, ImportError) as error:
                 raise AgentSpawnError(configuration.spec.provider, str(error)) from error
             resources.callback(client.close)
+            if isinstance(client, CapacityGated):
+                client.set_capacity_gate(PausingCapacityGate(control, agent_events))
             return cls(
                 configuration,
                 scope,

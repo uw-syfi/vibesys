@@ -78,9 +78,33 @@ the event is resolved once, in `AgentRateLimit.is_exhausted`: the provider's own
 statement wins, otherwise usage at or past 100%. Unstated values stay `None`.
 The headless frontend prints a line only for an exhausted window.
 
-This is observation only. Pausing the run on an exhausted window and the
-fallback policy (#798) consume this event later; nothing here changes how a
-quota failure ends a turn.
+## Quota and rate-limit stops
+
+agentshim classifies why a turn failed (`FailureKind`); the AgentShim driver
+turns the two capacity cases into one typed error, `AgentQuotaError`
+(`provider`, `condition`, `detail`, `resets_at`):
+
+| `FailureKind` from agentshim | Also required | `QuotaCondition` |
+| --- | --- | --- |
+| `USAGE_LIMIT` | none | `QUOTA_EXHAUSTED` |
+| `TRANSIENT` (agentshim's own waits ran out) | the provider reported an exhausted window during the turn | `RATE_LIMITED` |
+
+An overload or server error with no exhausted window stays a plain failure, as
+do `AUTH`, `OTHER` and `SCHEMA`. `resets_at` is the latest reset among the
+exhausted windows the turn reported, else `None`.
+
+`AgentClient` hands the error to a `CapacityGate` when one is installed
+(`set_capacity_gate`, an optional `CapacityGated` capability) and sends the same
+turn again on the same live session when the gate returns; the gate raises to end
+the turn. Without a gate the error propagates. The run installs
+`PausingCapacityGate` (`vs_runtime`): it publishes the typed `quota_paused`
+event, requests the run's cooperative pause (so the server reports PAUSING, then
+PAUSED), and parks until the run resumes, then publishes `quota_resumed`. A stop
+request ends the wait. A run that waited and resumed has the same experiment
+state as one that never stopped, because the paused turn is the same invocation
+held in place. The `quota_paused` event is the operator notification: headless
+prints a `[quota]` line, and a consumer of the event stream (the event-hooks
+work in #787) can act on it.
 
 ## Operator steering
 

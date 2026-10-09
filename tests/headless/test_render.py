@@ -8,6 +8,8 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    QuotaPausedData,
+    QuotaResumedData,
     RateLimitUpdateData,
     RunConfiguredData,
     WorkspaceSnapshotData,
@@ -242,6 +244,34 @@ class TestRateLimitEvents:
             RateLimitUpdateData(provider="claude", window="five_hour", exhausted=False),
         )
         assert out == ""
+
+
+class TestQuotaEvents:
+    def test_a_quota_pause_names_the_provider_the_diagnostic_and_the_reset_time(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_PAUSED,
+            QuotaPausedData(
+                provider="claude",
+                condition="quota_exhausted",
+                detail="You've hit your limit",
+                resets_at=1_791_954_019,
+            ),
+        )
+        assert out == (
+            "[quota] claude quota exhausted: You've hit your limit; the run is paused "
+            "(capacity returns 2026-10-14 05:00 UTC)\n"
+        )
+
+    def test_sustained_rate_limiting_without_a_reset_time_omits_it(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_PAUSED,
+            QuotaPausedData(provider="codex", condition="rate_limited", detail="429"),
+        )
+        assert out == "[quota] codex rate limited: 429; the run is paused\n"
+
+    def test_a_resume_is_shown(self) -> None:
+        out = _render_event(CoreEventType.QUOTA_RESUMED, QuotaResumedData(provider="claude"))
+        assert out == "[quota] resumed on claude; sending the paused turn again\n"
 
 
 class TestToolEvents:

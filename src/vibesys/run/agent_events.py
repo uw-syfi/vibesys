@@ -13,6 +13,8 @@ from vibesys.events import (
     CoreEvent,
     CoreEventType,
     JsonResultPayload,
+    QuotaPausedData,
+    QuotaResumedData,
     RateLimitUpdateData,
     TodoItemData,
     TodoUpdateData,
@@ -24,7 +26,7 @@ from vibesys.events import (
 )
 
 if TYPE_CHECKING:
-    from vs_agent.api import AgentRateLimit
+    from vs_agent.api import AgentQuotaError, AgentRateLimit
 
 EventSink = Callable[[CoreEvent], object]
 
@@ -65,7 +67,9 @@ class CoreAgentEventSink:
         | ToolResultData
         | TodoUpdateData
         | UsageUpdateData
-        | RateLimitUpdateData,
+        | RateLimitUpdateData
+        | QuotaPausedData
+        | QuotaResumedData,
         *,
         agent_kind: str | None,
         round_label: str | None,
@@ -212,6 +216,45 @@ class CoreAgentEventSink:
                 window_minutes=rate_limit.window_minutes,
                 exhausted=rate_limit.is_exhausted,
             ),
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+        )
+
+    def quota_paused(
+        self,
+        error: AgentQuotaError,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Emit that a turn stopped on a provider capacity limit and the run paused."""
+        self._emit(
+            CoreEventType.QUOTA_PAUSED,
+            QuotaPausedData(
+                provider=error.provider,
+                condition=error.condition.value,
+                detail=error.detail,
+                resets_at=error.resets_at,
+            ),
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+        )
+
+    def quota_resumed(
+        self,
+        provider: str,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Emit that the paused turn is being sent again on the same provider."""
+        self._emit(
+            CoreEventType.QUOTA_RESUMED,
+            QuotaResumedData(provider=provider),
             agent_kind=agent_kind,
             round_label=round_label,
             invocation_id=invocation_id,

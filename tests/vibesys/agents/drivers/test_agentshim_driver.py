@@ -1388,7 +1388,7 @@ def test_a_transient_provider_error_is_retried(
 @pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
 @pytest.mark.parametrize(
     "kind",
-    [agentshim.FailureKind.USAGE_LIMIT, agentshim.FailureKind.AUTH, agentshim.FailureKind.OTHER],
+    [agentshim.FailureKind.AUTH, agentshim.FailureKind.OTHER],
 )
 def test_a_failure_that_waiting_cannot_fix_fails_fast(
     sandbox_builds: list[dict[str, Any]],

@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from vs_agent.contracts import AgentRateLimit
+    from vs_agent.contracts import AgentQuotaError, AgentRateLimit
     from vs_agent.events import (
         AgentOutputChannel,
         AgentStatusData,
@@ -101,6 +101,28 @@ class AgentEventSink(Protocol):
         """Publish one rate-limit window the provider reported."""
         ...
 
+    def quota_paused(
+        self,
+        error: AgentQuotaError,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Publish that a turn stopped on a provider capacity limit and the run paused."""
+        ...
+
+    def quota_resumed(
+        self,
+        provider: str,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Publish that the paused turn is being sent again on the same provider."""
+        ...
+
 
 class NullAgentEventSink:
     """No-op :class:`AgentEventSink` — the default when no sink is injected.
@@ -187,6 +209,28 @@ class NullAgentEventSink:
     ) -> None:
         """Ignore rate-limit reports when no event sink was injected."""
         del rate_limit, agent_kind, round_label, invocation_id
+
+    def quota_paused(
+        self,
+        error: AgentQuotaError,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Ignore quota pauses when no event sink was injected."""
+        del error, agent_kind, round_label, invocation_id
+
+    def quota_resumed(
+        self,
+        provider: str,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Ignore quota resumes when no event sink was injected."""
+        del provider, agent_kind, round_label, invocation_id
 
 
 NULL_AGENT_EVENT_SINK = NullAgentEventSink()

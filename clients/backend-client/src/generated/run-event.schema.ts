@@ -668,6 +668,8 @@ const runEventSchema: Record<string, unknown> = {
         "todo_update",
         "usage_update",
         "rate_limit_update",
+        "quota_paused",
+        "quota_resumed",
         "gate_started",
         "gate_finished",
         "workspace_snapshot",
@@ -1138,6 +1140,74 @@ const runEventSchema: Record<string, unknown> = {
         "phase"
       ],
       "title": "PhaseData",
+      "type": "object"
+    },
+    "QuotaPausedData": {
+      "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or\n``rate_limited`` (sustained rate limiting); ``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes.",
+      "properties": {
+        "kind": {
+          "const": "quota_paused",
+          "default": "quota_paused",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "condition": {
+          "enum": [
+            "quota_exhausted",
+            "rate_limited"
+          ],
+          "title": "Condition",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "resets_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resets At"
+        }
+      },
+      "required": [
+        "kind",
+        "provider",
+        "condition",
+        "detail"
+      ],
+      "title": "QuotaPausedData",
+      "type": "object"
+    },
+    "QuotaResumedData": {
+      "description": "A run paused on a capacity limit resumed on the same provider and sent the turn again.",
+      "properties": {
+        "kind": {
+          "const": "quota_resumed",
+          "default": "quota_resumed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "provider"
+      ],
+      "title": "QuotaResumedData",
       "type": "object"
     },
     "RateLimitUpdateData": {
@@ -2023,6 +2093,8 @@ const runEventSchema: Record<string, unknown> = {
               "judge_result": "#/$defs/JudgeResultData",
               "output": "#/$defs/OutputData",
               "phase": "#/$defs/PhaseData",
+              "quota_paused": "#/$defs/QuotaPausedData",
+              "quota_resumed": "#/$defs/QuotaResumedData",
               "rate_limit_update": "#/$defs/RateLimitUpdateData",
               "round_finished": "#/$defs/RoundFinishedData",
               "run_configured": "#/$defs/RunConfiguredData",
@@ -2118,6 +2190,12 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/RateLimitUpdateData"
+            },
+            {
+              "$ref": "#/$defs/QuotaPausedData"
+            },
+            {
+              "$ref": "#/$defs/QuotaResumedData"
             },
             {
               "$ref": "#/$defs/GateStartedData"
