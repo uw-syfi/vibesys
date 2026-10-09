@@ -78,9 +78,8 @@ def test_the_same_decision_is_judged_again_once_the_run_resumes() -> None:
     )
 
 
-@pytest.mark.parametrize("status", [core.RunStatus.CLOSING, core.RunStatus.TERMINAL])
-def test_a_draining_or_closed_run_refuses_for_good_and_records_it(status: core.RunStatus) -> None:
-    state = _with_status(status)
+def test_a_closed_run_refuses_for_good_and_records_it() -> None:
+    state = _with_status(core.RunStatus.TERMINAL)
 
     transition = core.step(
         state, core.DecisionSubmitted(decision=_proposal(state), expected_revision=0)
@@ -136,3 +135,17 @@ def test_a_new_stale_view_refusal_leaves_no_receipt_so_the_decision_can_be_propo
     assert isinstance(rejection, core.Rejected)
     assert rejection.code is core.RejectionCode.STALE_VIEW
     assert stale.state.run.receipts == ()
+
+
+def test_a_drain_still_takes_the_adoption_of_a_candidate() -> None:
+    state = _with_status(core.RunStatus.CLOSING)
+
+    transition = core.step(
+        state, core.DecisionSubmitted(decision=_proposal(state), expected_revision=0)
+    )
+
+    assert core.decision_gate(state) is core.DecisionGate.DRAINING
+    assert not any(
+        isinstance(event, core.Rejected) and event.code is core.RejectionCode.CLOSED_SCOPE
+        for event in transition.events
+    )
