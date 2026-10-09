@@ -30,6 +30,7 @@ from vs_core._step import (
     suspension_refusal,
     validate_terminal_inputs,
 )
+from vs_core._validation import DecisionGate, RejectionOutlook, decision_gate, rejection_outlook
 from vs_core._waits import (
     Producer,
     Wait,
@@ -548,6 +549,7 @@ __all__ = [
     "DecisionCompleted",
     "DecisionDependencyResolved",
     "DecisionFeedback",
+    "DecisionGate",
     "DecisionId",
     "DecisionReceipt",
     "DecisionSubmitted",
@@ -700,6 +702,7 @@ __all__ = [
     "ReissueProof",
     "Rejected",
     "RejectionCode",
+    "RejectionOutlook",
     "ReleaseDependency",
     "ReleaseDependencyBlocked",
     "ReleaseDependencyObserved",
@@ -835,6 +838,7 @@ __all__ = [
     "advance_intent",
     "advance_session",
     "attempt_view",
+    "decision_gate",
     "dependency_status",
     "drain_role",
     "evidence_view",
@@ -847,6 +851,7 @@ __all__ = [
     "phase_waits",
     "project",
     "recover",
+    "rejection_outlook",
     "schedule",
     "scheduling_view",
     "session_view",

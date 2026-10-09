@@ -6,6 +6,7 @@ Both are pure functions of the strategy state, the `RunView` and the static
 `DynamicConfig`: no clock, no I/O, no hidden counters.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from vibesys.orchestration.dynamic.strategy import _attempt_events as attempt_events
@@ -43,6 +44,7 @@ from vs_core.api import (
     OperationResult,
     Proposal,
     Rejected,
+    RejectionOutlook,
     ResumeAuthorized,
     RunEnded,
     RunView,
@@ -50,6 +52,7 @@ from vs_core.api import (
     StrategyEvent,
     TurnResult,
     TurnSuspended,
+    rejection_outlook,
 )
 
 
@@ -175,12 +178,14 @@ class DynamicStrategy:
         return attempt_events.on_blocked(state, event)
 
     def _rejected(self, state: DynamicStrategyState, event: Rejected) -> DynamicStrategyState:
-        detail = f"decision rejected: {event.code.value}: {event.detail}"
+        """Route a refused decision to the subject that proposed it, by whether it can be retried."""
         root = event.decision_id
         if state.planner.awaiting == root:
-            return planner.on_rejected(state, detail)
+            return _refused(state, event, planner.on_held, planner.on_rejected)
         if state.baseline.awaiting == root:
-            return baseline.on_rejected(state, detail)
+            return _refused(state, event, baseline.on_held, baseline.on_rejected)
+        if root == run.PROPOSAL:
+            return run.on_rejected(state, event)
         return attempt_events.on_rejected(state, event)
 
     def _operation(
@@ -201,3 +206,17 @@ class DynamicStrategy:
         ):
             return baseline.on_readings(state, view, outcome)
         return attempt_events.on_operation(state, view, event)
+
+
+def _refused(
+    state: DynamicStrategyState,
+    event: Rejected,
+    not_now: Callable[[DynamicStrategyState], DynamicStrategyState],
+    never: Callable[[DynamicStrategyState, str], DynamicStrategyState],
+) -> DynamicStrategyState:
+    """Apply ``not_now`` to a decision core refused for now, ``never`` to one it refused for good."""
+    match rejection_outlook(event.code):
+        case RejectionOutlook.NOT_NOW:
+            return not_now(state)
+        case RejectionOutlook.NEVER:
+            return never(state, f"decision rejected: {event.code.value}: {event.detail}")

@@ -39,10 +39,12 @@ from vs_core.api import (
     ControlId,
     ControlInput,
     CoreState,
+    DecisionGate,
     RecoveryPhase,
     RunControlEvent,
     RunResultProposal,
     RunStatus,
+    decision_gate,
     project,
 )
 from vs_runtime._core_loop import LeaseUnavailableError
@@ -392,7 +394,11 @@ class _Loop:
             self._shell.submit(ClockAdvanced(now_at=now), now_at=now)
             before = self._signature()
             refusal = await self._settle(now)
-            if refusal is None and self._core().intents.recovery.phase == RecoveryPhase.READY:
+            if (
+                refusal is None
+                and self._core().intents.recovery.phase == RecoveryPhase.READY
+                and decision_gate(self._core()) is not DecisionGate.HELD
+            ):
                 self._shell.decide(now_at=now)
                 refusal = await self._settle(now)
             if refusal is not None:
