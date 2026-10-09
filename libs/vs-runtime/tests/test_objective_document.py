@@ -8,11 +8,11 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_runtime.api.infrastructure import (
-    LocalEnvironment,
     RunEnvironmentPresentation,
     RunEnvironmentRequest,
     materialize_objective_document,
 )
+from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api.testing import FakeComputeBackend
 
 
@@ -117,9 +117,9 @@ def test_candidate_objective_verification_uses_run_root_and_requires_exact_text(
             objective_document=document,
         )
         presentation = RunEnvironmentPresentation(prompt_notes="")
-        with LocalEnvironment().prepare(request).open(presentation) as session:
+        with unconfined_host_environment().prepare(request).open(presentation) as session:
             assert session.view.paths.objective == str(document)
 
         document.write_text(objective + "modified")
         with pytest.raises(ValueError, match="does not match its committed document"):
-            LocalEnvironment().prepare(request).open(presentation)
+            unconfined_host_environment().prepare(request).open(presentation)

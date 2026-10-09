@@ -20,7 +20,6 @@ from vs_project.api.testing import FakeGitRepositories
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     AgentPaths,
-    LocalEnvironment,
     ProjectRunEffects,
     ProjectRunRequest,
     RunEnvironmentPresentation,
@@ -32,7 +31,7 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
 )
-from vs_runtime.api.testing import FakeAgentExecutionEnvironment
+from vs_runtime.api.testing import FakeAgentExecutionEnvironment, unconfined_host_environment
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 
@@ -245,7 +244,7 @@ def test_candidate_environment_uses_the_runs_verified_objective(
 
         def open_session(candidate: RunEnvironmentRequest) -> RunEnvironmentSession:
             session = (
-                LocalEnvironment()
+                unconfined_host_environment()
                 .prepare(candidate)
                 .open(RunEnvironmentPresentation(prompt_notes=""))
             )

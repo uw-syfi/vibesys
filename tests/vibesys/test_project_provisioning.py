@@ -16,7 +16,7 @@ from vibesys.run.project import (
 )
 from vibesys.run.workspace_policy import create_project_materializer
 from vs_project.api import Project
-from vs_runtime.api.infrastructure import LocalEnvironment
+from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 def _materializer(destination: Path) -> ProjectMaterializer:
     return create_project_materializer(
         destination,
-        environment=LocalEnvironment(),
+        environment=unconfined_host_environment(),
         backend=FakeComputeBackend(),
         log=lambda _message: None,
     )

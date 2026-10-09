@@ -52,18 +52,22 @@ Never rely on a provider flag for isolation. See
    `ComputeBackendImpl.make_sandbox(kind, ...)`, where `SandboxKind` is only
    `LOCAL` or `DOCKER`: where the framework's shell commands execute. Modal,
    SkyPilot, and Slurm are run environments, not kinds.
-2. **Remote editors.** Modal and SkyPilot start a local Docker editor with
-   `attach_accelerator=False` (CPU-only control plane). Heavy evaluation
-   dispatches through the candidate's `modal run` entrypoint or a SkyPilot job,
-   not through a command runner. Slurm keeps its editor on the host
-   (`LocalEnvironment`) and runs trusted gates remotely. The ephemeral
-   evaluator-tool builder also uses `attach_accelerator=False`.
+2. **Remote editors.** Modal, SkyPilot, Slurm and slurm-gpu start a local
+   Docker editor with `attach_accelerator=False` (a control plane without
+   devices). Heavy evaluation dispatches through the candidate's `modal run`
+   entrypoint, a SkyPilot job, or a Slurm job, not through a command runner.
+   The Slurm environments cannot give the container the cluster tools and
+   credentials, so a host-owned command broker runs the trusted gates (and, for
+   slurm-gpu, the agent's GPU jobs) and the container reaches it over a
+   bind-mounted Unix socket; the workspace is mounted at its host path so
+   directories mean the same thing on both sides. The ephemeral evaluator-tool
+   builder also uses `attach_accelerator=False`.
 3. **Project path policy.** `ProjectPathPolicy` lists read-only and hidden
    workspace-relative paths. It is validated once, then lowered by each
    confinement backend.
 4. **Agent session.** `AgentExecutionPolicy` carries the policy,
    `host_resources`, and `require_enforcement` into the driver. Run
-   entrypoints set `require_enforcement = not use_docker`: a host (Slurm, Metal) run
+   entrypoints set `require_enforcement = not use_docker`: a host (Metal) run
    must be confined or fail.
 5. **Confinement.** On the host the driver calls `build_host_sandbox` and gets
    `HostSandbox` (Linux, bubblewrap), `LandlockSandbox` (Linux, opt-in), or
@@ -93,11 +97,9 @@ allowlist (`session_env_allowlist`).
 | --- | --- | --- | --- |
 | Default (`docker`) | `DockerSandbox` | enforced (read-only re-mount) | enforced (empty mask mount) |
 | `--modal`, `--run-environment skypilot` | `DockerSandbox` editor container | enforced | enforced |
-| `--run-environment slurm`, Linux | bubblewrap (`HostSandbox`) | enforced | enforced |
-| `--run-environment slurm`, Linux, `VIBESYS_AGENT_SANDBOX=landlock` | `LandlockSandbox` | not enforced | not enforced |
-| `--run-environment slurm`, macOS | `SeatbeltSandbox` | enforced | enforced |
+| `--run-environment slurm` | `DockerSandbox` editor container | enforced | enforced |
 | Host-only backend (Metal), macOS | `SeatbeltSandbox` | enforced | enforced |
-| `--run-environment slurm-gpu` | `DockerSandbox` editor container; each brokered GPU job runs under host confinement as for `slurm` | enforced in the container; per host for jobs | enforced in the container; per host for jobs |
+| `--run-environment slurm-gpu` | `DockerSandbox` editor container; each brokered GPU job runs on a compute node under host confinement (bubblewrap on Linux, Seatbelt on macOS) | enforced in the container; per host for jobs | enforced in the container; per host for jobs |
 
 Reads are not uniformly hidden. Bubblewrap and Landlock deny all reads outside
 the project and declared resources. Seatbelt allows broad reads and denies the
@@ -106,16 +108,18 @@ macOS when full read confinement matters.
 
 ## Known limits
 
-- **`slurm` agents on the host.** Only `slurm` still edits on the host under the
-  mechanisms in the support matrix; it runs its trusted gates
-  (`vs_sandbox.slurm_command`) and profiler MCP server in the agent's sandbox
-  with the host Python. `slurm-gpu` already edits in Docker: its broker runs
-  GPU jobs under host confinement on compute nodes, where Docker is normally
-  unavailable, and runs the trusted gates for the container.
+- **Brokered Slurm work is not in a container.** The agent of `slurm` and
+  `slurm-gpu` runs in Docker, but a `slurm-gpu` GPU job runs on a compute node,
+  where Docker is normally unavailable, so the broker confines it with the host
+  sandbox (`HostJobConfinement`; the broker refuses to start where that cannot
+  be enforced). The trusted gates run unconfined on the host, as they do in
+  every other environment. The profiler server of `slurm` runs in the container
+  with the image's `python3` and `pydantic`, importing the Slurm adapter from the
+  read-only `libs` mount at its host path.
 - **Metal on macOS runs on the host.** Docker on macOS cannot expose Metal/MPS,
   so a backend that declares itself host-only (`backend_is_host_only`, today
   Metal) runs its agent in the `host` environment on macOS: the host path
-  `LocalEnvironment` provides, under Seatbelt with enforcement required. The
+  `HostEnvironment` provides, under Seatbelt with enforcement required. The
   choice derives from the backend, never from a flag (`--docker` and
   `--run-environment local` stay rejected), and a log line states why. If
   Seatbelt is unavailable the run fails with `SandboxUnavailableError`; there

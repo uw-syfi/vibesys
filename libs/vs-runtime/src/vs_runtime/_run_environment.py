@@ -27,15 +27,13 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 import shlex
 import sys
-import tempfile
 
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
 from collections.abc import Mapping  # noqa: TC003
 from contextlib import ExitStack
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from functools import partial
 from importlib import import_module
 from pathlib import Path
@@ -52,7 +50,6 @@ from vs_agent.api import (
 # lint-waiver: LW-014514 [TC001]; Pydantic resolves this dataclass field annotation at runtime
 from vs_project.api import RunResourceRequest  # noqa: TC001
 from vs_runtime import _boot_trace as boot_trace
-from vs_runtime._brokered_session import BrokeredRunEnvironmentSession
 from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_and_auth_files
 from vs_runtime._container_runtime_policy import (
     DOCKER_IN_DOCKER_NOTICE,
@@ -76,12 +73,12 @@ from vs_sandbox.api import (
     DeviceLease,
     EnvironmentBindMount,
     HostResource,
-    HostResourceAccess,
     ProjectPathPolicy,
     SandboxKind,
     SandboxLifecycleHooks,
     SandboxSession,
     SubprocessDockerCli,
+    build_host_sandbox,
     deduplicate_host_resources,
     evaluator_helpers,
     host_resource_for_mount,
@@ -109,23 +106,12 @@ from vs_sandbox.api.skypilot import (
     resolve_profile,
     stable_cluster_name,
 )
-from vs_sandbox.api.slurm import (
-    SlurmCapturePlan,
-    SlurmEvaluationPlan,
-    SlurmExecutionPolicy,
-    SlurmProcessBroker,
-    load_slurm_policy,
-    trusted_profile_command,
-    write_slurm_capture_plan,
-    write_slurm_evaluation_plan,
-)
 from vs_sandbox.api.symlink_mounts import (
     SymlinkMountScope,
     collect_symlink_mounts,
     find_mount_root,
     symlink_lifecycle_hooks,
 )
-from vs_slurm.api import SlurmConfig, SlurmSshTransport, load_slurm_config
 
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 """The runtime resource declaration's ``agent_path`` for the effective objective.
@@ -145,6 +131,7 @@ if TYPE_CHECKING:
         CommandRunner,
         ComputeBackendImpl,
         DockerCli,
+        WorkspaceSandbox,
     )
 
 
@@ -183,8 +170,8 @@ class RunEnvironmentView:
     share_agent_session: bool = False
     host_device_reselect: bool = True
     # Coarse environment label for diagnostics and adapter selection:
-    # ``"local"`` | ``"docker"`` | ``"modal"`` | ``"skypilot"``.
-    env_kind: str = "local"
+    # ``"host"`` | ``"docker"`` | ``"modal"`` | ``"skypilot"`` | ``"slurm"`` | ``"slurm-gpu"``.
+    env_kind: str = "host"
     # Where a profiler must execute to observe the production hot path. Prompt
     # templates branch on this capability rather than on a concrete provider.
     profile_execution: Literal["local", "remote"] = "local"
@@ -209,8 +196,8 @@ class RunEnvironmentPresentation:
 
 
 @dataclass(frozen=True)
-class LocalEnvironmentFacts:
-    """Presentation facts for host-local execution."""
+class HostEnvironmentFacts:
+    """Presentation facts for an agent confined on the host."""
 
 
 @dataclass(frozen=True)
@@ -259,7 +246,7 @@ class SlurmGpuEnvironmentFacts:
 
 
 RunEnvironmentPresentationFacts = (
-    LocalEnvironmentFacts
+    HostEnvironmentFacts
     | DockerEnvironmentFacts
     | SlurmEnvironmentFacts
     | SlurmGpuEnvironmentFacts
@@ -323,7 +310,7 @@ class _AgentPathSandbox(Protocol):
     """The one lookup ``AgentPaths`` construction needs from a started sandbox.
 
     Narrower than ``CommandRunner``: a host-only sandbox never
-    reaches this contract (``LocalEnvironment`` builds host paths directly),
+    reaches this contract (``HostEnvironment`` builds host paths directly),
     while every ``SandboxKind.DOCKER`` build
     (:class:`~vs_sandbox.docker_sandbox.DockerSandbox`) satisfies it.
     """
@@ -520,8 +507,15 @@ class _NoopWorkspaceRecovery:
         return False
 
 
-class LocalEnvironment(_NoopWorkspaceRecovery):
-    """Run agents directly on the host filesystem."""
+class HostEnvironment(_NoopWorkspaceRecovery):
+    """Run the agent on the host, refusing to start unless it is confined.
+
+    Selected for backends whose accelerator no container can reach (Metal on
+    macOS).  Confinement is the host sandbox with enforcement required, so an
+    unavailable sandbox raises ``SandboxUnavailableError`` and never degrades to
+    an unconfined agent.  The agent driver requires enforcement again when it
+    launches, because this environment is not containerized.
+    """
 
     isolated: bool = False
     materialize_local_model_weights: bool = True
@@ -530,15 +524,31 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
     backend_image: str | None = None
     requires_local_profiler_preflight = True
 
+    def __init__(
+        self,
+        build_sandbox: Callable[..., WorkspaceSandbox | None] = build_host_sandbox,
+    ) -> None:
+        """Take the host-sandbox builder, a seam for substituting the platform's."""
+        self._build_sandbox = build_sandbox
+
+    @classmethod
+    def from_options(cls, options: Mapping[str, object]) -> HostEnvironment:
+        """Build the environment; ``build_sandbox`` is the unrecorded injection seam."""
+        build_sandbox = options.get("build_sandbox")
+        if build_sandbox is None:
+            return cls()
+        return cls(cast("Callable[..., WorkspaceSandbox | None]", build_sandbox))
+
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
-        """Resolve the host-local presentation facts."""
-        reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="local")
-        return _PreparedRunEnvironment(LocalEnvironmentFacts(), partial(self._open, request))
+        """Fail with ``SandboxUnavailableError`` when host confinement is unavailable."""
+        reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="host")
+        self._build_sandbox(request.workspace, env={}, require_enforcement=True)
+        return _PreparedRunEnvironment(HostEnvironmentFacts(), partial(self._open, request))
 
     def _open(
         self, request: RunEnvironmentRequest, presentation: RunEnvironmentPresentation
     ) -> RunEnvironmentSession:
-        """Create a host-local sandbox and its agent path view."""
+        """Create a host sandbox and its agent path view."""
         del presentation
         objective_document = _materialize_effective_objective(request)
         sandbox = _make_host_sandbox(request)
@@ -607,210 +617,6 @@ def _host_evaluation_plan(request: RunEnvironmentRequest) -> TrustedEvaluationPl
             ),
         ),
     )
-
-
-def _slurm_service_command(policy: SlurmExecutionPolicy) -> tuple[str, ...]:
-    service = policy.remote_service()
-    return () if service is None else service.command
-
-
-class SlurmEnvironment(_NoopWorkspaceRecovery):
-    """Keep editing local while trusted gates and ROCprof run through Slurm."""
-
-    isolated = False
-    materialize_local_model_weights = False
-    default_profiler_id = "rocprof"
-    supported_profiler_ids: frozenset[str] | None = frozenset({"auto", "none", "rocprof"})
-    backend_image: str | None = None
-    requires_local_profiler_preflight = False
-
-    def __init__(self, config_path: Path) -> None:
-        self.config_path = config_path.expanduser()
-
-    @classmethod
-    def from_options(cls, options: Mapping[str, object]) -> SlurmEnvironment:
-        """Resolve only the external operator configuration path."""
-        value = options.get("config_path", "~/.config/vibesys/slurm.toml")
-        return cls(Path(str(value)))
-
-    def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
-        """Validate external policy before opening the local editor sandbox."""
-        reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="slurm")
-        config = load_slurm_config(self.config_path)
-        policy = load_slurm_policy(self.config_path)
-        return _PreparedRunEnvironment(
-            SlurmEnvironmentFacts(service_command=_slurm_service_command(policy)),
-            partial(self._open, request, config, policy),
-        )
-
-    def _open(
-        self,
-        request: RunEnvironmentRequest,
-        config: SlurmConfig,
-        policy: SlurmExecutionPolicy,
-        presentation: RunEnvironmentPresentation,
-    ) -> RunEnvironmentSession:
-        profiler_tree = request.profiler_support_name
-        if profiler_tree is not None and request.profiler_support_path is not None:
-            # Validate the trusted load before opening resources owned by the delegate.
-            trusted_profile_command(
-                config,
-                policy,
-                _command_argv(request.profile_command),
-                profiler_tree=profiler_tree,
-                workload_timeout_seconds=request.profile_timeout_seconds,
-            )
-        delegate = (
-            LocalEnvironment().prepare(request).open(RunEnvironmentPresentation(prompt_notes=""))
-        )
-        requirements = request.evaluator_requirements
-        remote = _prepare_evaluation_plan(
-            request,
-            requirements,
-            TrustedEvaluationCommandPaths(
-                source_project_root=request.workspace,
-                runtime_project_root=".",
-                python_executable=policy.remote_python,
-                runtime_package_root=(
-                    ".vibesys-evaluator-package" if requirements.package_root is not None else None
-                ),
-                runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
-            ),
-        )
-        support_paths = {
-            name: Path(path)
-            for name, path in (
-                (".vibesys-evaluator-package", requirements.package_root),
-                (".vibesys-evaluator-tools", requirements.tools_root),
-                (request.profiler_support_name, request.profiler_support_path),
-                *((name, path) for path, name in request.profiler_support_extra),
-            )
-            if name is not None and path is not None
-        }
-        cluster_state_root = request.log_dir / "slurm-cluster"
-        cluster_state_root.mkdir(parents=True, exist_ok=True)
-        evaluator_plan_path = request.log_dir / "slurm-evaluation-plan.json"
-        capture_plan_path = request.log_dir / "slurm-capture-plan.json"
-        raw_accuracy = _command_argv(remote.accuracy_command)
-        raw_benchmark = _command_argv(remote.benchmark_command)
-        raw_profile = _command_argv(remote.profile_command)
-        profile = policy.remote_argv(raw_profile) if raw_profile is not None else None
-        accuracy = policy.remote_argv(raw_accuracy) if raw_accuracy is not None else None
-        benchmark = policy.remote_argv(raw_benchmark) if raw_benchmark is not None else None
-        write_slurm_evaluation_plan(
-            evaluator_plan_path,
-            SlurmEvaluationPlan(
-                config_path=self.config_path,
-                cluster_state_root=cluster_state_root,
-                accuracy_command=accuracy,
-                benchmark_command=benchmark,
-                benchmark_output_argument=request.benchmark_output_argument,
-                support_paths=support_paths,
-                profile_command=(
-                    trusted_profile_command(
-                        config,
-                        policy,
-                        profile,
-                        profiler_tree=profiler_tree,
-                        workload_timeout_seconds=request.profile_timeout_seconds,
-                    )
-                    if profiler_tree is not None and profiler_tree in support_paths
-                    else None
-                ),
-            ),
-        )
-        write_slurm_capture_plan(
-            capture_plan_path,
-            SlurmCapturePlan(
-                cluster_state_root=cluster_state_root,
-                profile_command=profile,
-                profile_timeout_seconds=request.profile_timeout_seconds,
-                support_paths=support_paths,
-            ),
-        )
-        prefix = (
-            sys.executable,
-            "-m",
-            "vs_sandbox.slurm_command",
-            "--plan",
-            str(evaluator_plan_path),
-        )
-        broker: SlurmProcessBroker | None = None
-        broker_env: tuple[tuple[str, str], ...] = ()
-        broker_resources: tuple[HostResource, ...] = ()
-        if isinstance(config.transport, SlurmSshTransport):
-            broker = SlurmProcessBroker(
-                config,
-                Path(tempfile.gettempdir()) / f"vss-{secrets.token_hex(8)}.sock",
-                local_roots=(
-                    request.workspace,
-                    cluster_state_root,
-                    *request.run_owned_roots,
-                    *support_paths.values(),
-                ),
-            )
-            broker.start()
-            broker_env = (
-                ("VIBESYS_SLURM_BROKER_SOCKET", str(broker.socket_path)),
-                ("VIBESYS_SLURM_BROKER_TOKEN", broker.token),
-            )
-            broker_resources = (
-                HostResource(
-                    broker.socket_path,
-                    HostResourceAccess.READ_WRITE,
-                    "host-owned Slurm transport broker",
-                ),
-            )
-        delegate.view = replace(
-            delegate.view,
-            paths=replace(
-                delegate.view.paths,
-                accuracy_command=shlex.join((*prefix, "accuracy")) if accuracy else None,
-                benchmark_command=shlex.join((*prefix, "benchmark")) if benchmark else None,
-            ),
-            prompt_notes=presentation.prompt_notes,
-            env_kind="slurm",
-            profile_execution="remote",
-            supports_parallel_candidate_evaluation=True,
-            framework_setup_timeout_seconds=config.job_timeout_seconds,
-            profiler_mcp_env=(
-                ("VIBESYS_SLURM_CONFIG", str(self.config_path)),
-                ("VIBESYS_SLURM_EVALUATOR_PLAN", str(capture_plan_path)),
-                *broker_env,
-            ),
-            profiler_mcp_resources=(
-                HostResource(
-                    cluster_state_root,
-                    HostResourceAccess.READ_WRITE,
-                    "Slurm cluster operation state and transfers",
-                ),
-                HostResource(
-                    self.config_path,
-                    HostResourceAccess.READ_ONLY,
-                    "Slurm profiler configuration",
-                ),
-                HostResource(
-                    capture_plan_path,
-                    HostResourceAccess.READ_ONLY,
-                    "Slurm profiler plan",
-                ),
-                HostResource(
-                    request.framework_root / "libs",
-                    HostResourceAccess.READ_ONLY,
-                    "Slurm adapter libraries",
-                ),
-                *(
-                    HostResource(
-                        path,
-                        HostResourceAccess.READ_ONLY,
-                        f"Slurm support tree {name}",
-                    )
-                    for name, path in sorted(support_paths.items())
-                ),
-                *broker_resources,
-            ),
-        )
-        return BrokeredRunEnvironmentSession(delegate, broker) if broker is not None else delegate
 
 
 @dataclass(frozen=True)

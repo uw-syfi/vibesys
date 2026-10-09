@@ -2,21 +2,32 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from vs_runtime._run_environment import RunEnvironmentSession, RunEnvironmentView
     from vs_sandbox.api import CommandRunner
-    from vs_sandbox.api.slurm import HostCommandBroker, SlurmProcessBroker
+
+
+class HostBroker(Protocol):
+    """A host-side service, such as a command or transport broker, that a run owns."""
+
+    def close(self) -> None:
+        """Stop serving and release the broker's socket."""
+        ...
 
 
 @dataclass(slots=True)
 class BrokeredRunEnvironmentSession:
-    """Own an agent session and the host-side Slurm broker it reaches."""
+    """Own an agent session and the host-side brokers it reaches.
+
+    *brokers* are in construction order.
+    """
 
     delegate: RunEnvironmentSession
-    broker: SlurmProcessBroker | HostCommandBroker
+    brokers: tuple[HostBroker, ...]
     _closed: bool = False
 
     @property
@@ -45,10 +56,11 @@ class BrokeredRunEnvironmentSession:
         if self._closed:
             return
         self._closed = True
-        # Reverse construction order: the broker was started first, so it closes
-        # last. The editor stops first, which ends every connection it held and
-        # cancels the jobs those connections asked for.
-        try:
-            self.delegate.close()
-        finally:
-            self.broker.close()
+        # Reverse construction order: the brokers were started first, so they
+        # close last. The editor stops first, which ends every connection it held
+        # and cancels the jobs those connections asked for. Every close runs even
+        # when an earlier one fails.
+        with ExitStack() as stack:
+            for broker in self.brokers:
+                stack.callback(broker.close)
+            stack.callback(self.delegate.close)

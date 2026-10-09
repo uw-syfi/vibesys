@@ -28,9 +28,10 @@ import sys
 import threading
 from collections import defaultdict, deque
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
+from tests.support.docker_environment import host_container_backend
 from tests.support.fake_run_clock import FakeRunClock
 from tests.support.liveness import Budget, End, Journal, assert_live
 from tests.support.loop_invariants import RunRecords, check, terminal_event
@@ -53,7 +54,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     dynamic_operation_registry,
 )
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
-from vs_agent.api.testing import FakeAgentClient
+from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_core.api import RunEnvelope
 from vs_project.api import Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
@@ -466,7 +467,8 @@ class LoopInput:
 
         ``flags`` are long options without the dashes, underscores for hyphens:
         ``max_rounds=2`` is ``--max-rounds 2``. The run environment is the Fake Slurm
-        cluster unless ``run_environment`` says otherwise.
+        cluster unless ``run_environment`` says otherwise. Its agents run in containers
+        that execute on this host.
         """
         chosen: dict[str, float | str] = {
             "max_rounds": 1,
@@ -481,11 +483,20 @@ class LoopInput:
             "--profiler", "none",
             "--backend", "cpu",
         ]  # fmt: skip
-        if "run_environment" not in chosen:
+        slurm = "run_environment" not in chosen
+        if slurm:
             argv += ["--run-environment", "slurm", "--slurm-config", str(self.slurm_config)]
         for name, value in chosen.items():
             argv += [f"--{name.replace('_', '-')}", str(value)]
-        return build_run_request(parse_cli_invocation(argv))
+        request = build_run_request(parse_cli_invocation(argv))
+        if not slurm or request.run_environment is None:
+            return request
+        # The agent runs in a container; the image build is the only external process,
+        # so an in-memory runner stands in for it.
+        options = {**request.run_environment.options, "build_runner": FakeDockerBuildRunner()}
+        return request.model_copy(
+            update={"run_environment": replace(request.run_environment, options=options)}
+        )
 
 
 @dataclass
@@ -549,7 +560,7 @@ def run_request(  # noqa: PLR0913
     runs = launch.default_runs(
         LaunchSettings(
             agent_client_factory=client_factory or agents.client,
-            backend_factory=backend_factory,
+            backend_factory=backend_factory or host_container_backend,
             stop_timer=stop_timer or FakeStopTimer(),
             timing=None if clock is None else RunTiming(clock, PRODUCTION_LEASE_SECONDS),
             git_repository=IN_MEMORY_GIT.repository,

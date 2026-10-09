@@ -136,4 +136,4 @@ class SlurmGpuEnvironment(_NoopWorkspaceRecovery):
         except BaseException:
             commands.broker.close()
             raise
-        return BrokeredRunEnvironmentSession(session, commands.broker)
+        return BrokeredRunEnvironmentSession(session, (commands.broker,))

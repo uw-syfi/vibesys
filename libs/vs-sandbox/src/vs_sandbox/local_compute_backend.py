@@ -69,7 +69,7 @@ class LocalBackend:
 
     # -- ComputeBackendImpl protocol -----------------------------------------
 
-    def make_sandbox(  # noqa: PLR0913  # lint-waiver: LW-011112 [PLR0913]; LocalEnvironment calls this structural ComputeBackendImpl method with the shared named sandbox options; changing it would break backend dispatch parity.
+    def make_sandbox(  # noqa: PLR0913  # lint-waiver: LW-011112 [PLR0913]; HostEnvironment calls this structural ComputeBackendImpl method with the shared named sandbox options; changing it would break backend dispatch parity.
         self,
         kind: SandboxKind,
         *,
@@ -94,7 +94,7 @@ class LocalBackend:
         docker_sandbox = import_module("vs_sandbox.api").DockerSandbox
 
         # extra_init_commands is accepted for ComputeBackendImpl protocol
-        # parity (LocalEnvironment.open() passes it unconditionally) but never
+        # parity (HostEnvironment.open() passes it unconditionally) but never
         # used: neither the LOCAL sandbox nor the agent-image-based DOCKER
         # sandbox runs per-launch install commands.
         del attach_accelerator, ephemeral, extra_init_commands

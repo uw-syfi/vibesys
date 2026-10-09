@@ -9,19 +9,16 @@ the real broker socket.
 
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.docker_daemon import DaemonBackend, daemon_docker_config, daemon_engine
 
-from vibesys.constants import ComputeBackend
 from vibesys.run.environment import open_run_environment
 from vs_project.api import RunResourceRequest
 from vs_runtime.api.infrastructure import (
-    DockerEnvironmentConfig,
     DockerInDockerUnsupportedError,
     RunEnvironmentRequest,
     RunEnvironmentSpec,
@@ -29,14 +26,10 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
 )
 from vs_sandbox.api import DockerSandbox, SandboxKind
-from vs_sandbox.api.testing import FakeDockerEngine
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_sandbox.api import CommandRunner, HostResource
-
-_IMAGE_ID = "sha256:" + "d" * 64
 
 # Stands in for srun: records its argv, then runs what follows ``--``.
 _FAKE_SRUN = """\
@@ -49,67 +42,12 @@ os.execvp(command[0], command)
 _ACCURACY = 'print("accuracy ok")\n'
 
 
-class _BuildRunner:
-    """Answers ``docker build`` and ``docker image inspect`` without a daemon."""
-
-    def run(
-        self, argv: Sequence[str], *, cwd: Path, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
-        del cwd, timeout
-        return subprocess.CompletedProcess(
-            tuple(argv), 0, _IMAGE_ID if argv[1] == "image" else "", ""
-        )
-
-
 class _PassThroughConfinement:
     """Job confinement that runs the command as given (the fake srun is the cluster)."""
 
     def wrap(self, workspace: Path, argv: Sequence[str]) -> list[str]:
         del workspace
         return list(argv)
-
-
-class _Backend:
-    """A CUDA-looking backend whose Docker sandboxes talk to a :class:`FakeDockerEngine`."""
-
-    image = "base-image"
-    name = ComputeBackend.CUDA
-
-    def __init__(self, engine: FakeDockerEngine) -> None:
-        self.engine = engine
-        self.attach_accelerator: list[bool] = []
-        self.kinds: list[SandboxKind] = []
-
-    def make_sandbox(  # noqa: PLR0913  # lint-waiver: LW-954390 [PLR0913]; the method mirrors the backend construction contract it fakes.
-        self,
-        kind: SandboxKind,
-        *,
-        host_workspace: str,
-        docker_in_docker: bool = False,
-        container_image: str | None = None,
-        resources: Sequence[HostResource] = (),
-        same_path_workspace: bool = False,
-        extra_env: dict[str, str] | None = None,
-        attach_accelerator: bool = True,
-        **_other: object,
-    ) -> CommandRunner:
-        self.kinds.append(kind)
-        self.attach_accelerator.append(attach_accelerator)
-        return DockerSandbox(
-            host_workspace=host_workspace,
-            image=container_image or self.image,
-            resources=resources,
-            docker=self.engine,
-            docker_in_docker=docker_in_docker,
-            same_path_workspace=same_path_workspace,
-            env=extra_env,
-        )
-
-    def make_monitor(self, log_dir: Path) -> None:
-        del log_dir
-
-    def reselect_device(self) -> None:
-        return
 
 
 def _spec(tmp_path: Path, srun_log: Path) -> RunEnvironmentSpec:
@@ -135,7 +73,7 @@ scancel_command = ["{sys.executable}", "{fake}"]
 
 
 def _request(
-    tmp_path: Path, backend: _Backend, *, docker_in_docker: bool = False
+    tmp_path: Path, backend: DaemonBackend, *, docker_in_docker: bool = False
 ) -> RunEnvironmentRequest:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
@@ -157,17 +95,14 @@ def _request(
 
 
 def _open(tmp_path: Path, *, docker_in_docker: bool = False):  # noqa: ANN202  # lint-waiver: LW-954391 [ANN202]; the session type is the environment's public Protocol, named only by inference here.
-    (tmp_path / "engine").mkdir(exist_ok=True)
-    engine = FakeDockerEngine(
-        tmp_path / "engine", agent_ids=(os.getuid(), os.getgid()), runtimes=("runc", "sysbox-runc")
-    )
-    backend = _Backend(engine)
+    engine = daemon_engine(tmp_path)
+    backend = DaemonBackend(engine)
     srun_log = tmp_path / "srun.log"
     spec = _spec(tmp_path, srun_log)
     environment = SlurmGpuEnvironment(
         Path(str(spec.options["config_path"])),
         spec.resources,
-        docker=DockerEnvironmentConfig(docker=engine, build_runner=_BuildRunner()),
+        docker=daemon_docker_config(engine),
         job_confinement=_PassThroughConfinement(),
     )
     request = _request(tmp_path, backend, docker_in_docker=docker_in_docker)
