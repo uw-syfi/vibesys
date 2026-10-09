@@ -670,6 +670,7 @@ const runEventSchema: Record<string, unknown> = {
         "rate_limit_update",
         "quota_paused",
         "quota_resumed",
+        "quota_abandoned",
         "gate_started",
         "gate_finished",
         "workspace_snapshot",
@@ -1142,8 +1143,48 @@ const runEventSchema: Record<string, unknown> = {
       "title": "PhaseData",
       "type": "object"
     },
+    "QuotaAbandonedData": {
+      "description": "The quota policy ended a turn with the quota error instead of pausing or waiting longer.",
+      "properties": {
+        "kind": {
+          "const": "quota_abandoned",
+          "default": "quota_abandoned",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "condition": {
+          "enum": [
+            "quota_exhausted",
+            "rate_limited"
+          ],
+          "title": "Condition",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "provider",
+        "condition",
+        "detail",
+        "reason"
+      ],
+      "title": "QuotaAbandonedData",
+      "type": "object"
+    },
     "QuotaPausedData": {
-      "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or\n``rate_limited`` (sustained rate limiting); ``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes.",
+      "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or\n``rate_limited`` (sustained rate limiting); ``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes; ``resumes_at`` is the\nepoch second the run's quota policy resumes it by itself, ``None`` when only the\noperator can.",
       "properties": {
         "kind": {
           "const": "quota_paused",
@@ -1178,6 +1219,18 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Resets At"
+        },
+        "resumes_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resumes At"
         }
       },
       "required": [
@@ -1200,6 +1253,15 @@ const runEventSchema: Record<string, unknown> = {
         },
         "provider": {
           "title": "Provider",
+          "type": "string"
+        },
+        "reason": {
+          "default": "operator",
+          "enum": [
+            "operator",
+            "wait_elapsed"
+          ],
+          "title": "Reason",
           "type": "string"
         }
       },
@@ -2093,6 +2155,7 @@ const runEventSchema: Record<string, unknown> = {
               "judge_result": "#/$defs/JudgeResultData",
               "output": "#/$defs/OutputData",
               "phase": "#/$defs/PhaseData",
+              "quota_abandoned": "#/$defs/QuotaAbandonedData",
               "quota_paused": "#/$defs/QuotaPausedData",
               "quota_resumed": "#/$defs/QuotaResumedData",
               "rate_limit_update": "#/$defs/RateLimitUpdateData",
@@ -2196,6 +2259,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/QuotaResumedData"
+            },
+            {
+              "$ref": "#/$defs/QuotaAbandonedData"
             },
             {
               "$ref": "#/$defs/GateStartedData"

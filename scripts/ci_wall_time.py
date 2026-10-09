@@ -163,7 +163,9 @@ def render(report: Report, warn: float, error: float) -> tuple[str, str, int]:
 
 def load_jobs(path: Path) -> list[Job]:
     """Read newline-delimited job records, as `gh api --jq '.jobs[]'` prints them."""
-    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    records = [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     return [job for record in records if (job := job_from_record(record)) is not None]
 
 
@@ -172,7 +174,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("jobs_file", type=Path, help="newline-delimited job records")
     parser.add_argument("--warn", type=float, required=True, help="execution seconds to warn above")
-    parser.add_argument("--error", type=float, required=True, help="execution seconds to fail above")
+    parser.add_argument(
+        "--error", type=float, required=True, help="execution seconds to fail above"
+    )
     args = parser.parse_args(argv)
 
     report = analyze(load_jobs(args.jobs_file))

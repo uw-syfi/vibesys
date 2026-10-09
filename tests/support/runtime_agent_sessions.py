@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -42,6 +42,7 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     AgentExecutionScope,
     BlockingOperations,
+    CapacityHandling,
     TrustedAccuracyResult,
     TrustedBenchmarkResult,
     WorkspaceEvaluationSpec,
@@ -298,6 +299,7 @@ class _RuntimeEffects:
     session_transport: AgentSessions | None = None
     invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None
     agent_events: AgentEventSink = NULL_AGENT_EVENT_SINK
+    capacity: CapacityHandling = field(default_factory=CapacityHandling)
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,6 +347,7 @@ def _runtime(
         control=control or create_run_control_channel(FakeRunControlEventSink()),
         lifecycle_events=effects.lifecycle,
         agent_events=effects.agent_events,
+        capacity=effects.capacity,
         route_message=lambda message, steering: message + "".join(steering),
         blocking=BlockingOperations(),
         client_factory=effects.clients,

@@ -54,6 +54,7 @@ from vs_runtime.api import PollingEvaluationExecutor, RunCleanupError
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
+    CapacityHandling,
     RunHostComponents,
     WorkspaceResourceFactory,
     bounded_stop,
@@ -385,6 +386,7 @@ class _ProductHostFactory:
                 for tool_id, resolver in dict(self.agent_tool_bindings or {}).items()
             },
             log=resources.project_resources.logger.lprint,
+            capacity=CapacityHandling(self.request.config.agent.quota.to_policy()),
         )
 
     def _install_evaluation_service(

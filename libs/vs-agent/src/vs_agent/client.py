@@ -898,6 +898,7 @@ class AgentClient:
                 raise RuntimeError(msg)
             self._active_sessions.append(session)
         try:
+            stops = 0
             while True:
                 try:
                     return session.run_turn(turn, observer)
@@ -905,7 +906,8 @@ class AgentClient:
                     gate = self._capacity_gate
                     if gate is None:
                         raise
-                    gate.wait_for_capacity(error, turn, role=role)
+                    stops += 1
+                    gate.wait_for_capacity(error, turn, role=role, attempt=stops)
         finally:
             with self._active_lock:
                 self._active_sessions.remove(session)

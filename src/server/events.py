@@ -82,6 +82,7 @@ class EventType(StrEnum):
     RATE_LIMIT_UPDATE = "rate_limit_update"
     QUOTA_PAUSED = "quota_paused"
     QUOTA_RESUMED = "quota_resumed"
+    QUOTA_ABANDONED = "quota_abandoned"
     GATE_STARTED = "gate_started"
     GATE_FINISHED = "gate_finished"
     WORKSPACE_SNAPSHOT = "workspace_snapshot"
@@ -373,7 +374,9 @@ class QuotaPausedData(EventPayload):
     ``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or
     ``rate_limited`` (sustained rate limiting); ``detail`` is the provider's
     diagnostic and ``resets_at`` the epoch second the provider said capacity
-    returns, when it said. The run stays paused until it resumes.
+    returns, when it said. The run stays paused until it resumes; ``resumes_at`` is the
+    epoch second the run's quota policy resumes it by itself, ``None`` when only the
+    operator can.
     """
 
     kind: Literal["quota_paused"] = "quota_paused"
@@ -381,6 +384,7 @@ class QuotaPausedData(EventPayload):
     condition: Literal["quota_exhausted", "rate_limited"]
     detail: str
     resets_at: float | None = None
+    resumes_at: float | None = None
 
 
 class QuotaResumedData(EventPayload):
@@ -388,6 +392,17 @@ class QuotaResumedData(EventPayload):
 
     kind: Literal["quota_resumed"] = "quota_resumed"
     provider: str
+    reason: Literal["operator", "wait_elapsed"] = "operator"
+
+
+class QuotaAbandonedData(EventPayload):
+    """The quota policy ended a turn with the quota error instead of pausing or waiting longer."""
+
+    kind: Literal["quota_abandoned"] = "quota_abandoned"
+    provider: str
+    condition: Literal["quota_exhausted", "rate_limited"]
+    detail: str
+    reason: str
 
 
 class SubprocessOutputData(EventPayload):
@@ -542,6 +557,7 @@ EventData = Annotated[
     | RateLimitUpdateData
     | QuotaPausedData
     | QuotaResumedData
+    | QuotaAbandonedData
     | GateStartedData
     | GateFinishedData
     | WorkspaceSnapshotData

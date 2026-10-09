@@ -128,10 +128,15 @@ exhausted windows the turn reported, else `None`.
 (`set_capacity_gate`, an optional `CapacityGated` capability) and sends the same
 turn again on the same live session when the gate returns; the gate raises to end
 the turn. Without a gate the error propagates. The run installs
-`PausingCapacityGate` (`vs_runtime`): it publishes the typed `quota_paused`
-event, requests the run's cooperative pause (so the server reports PAUSING, then
-PAUSED), and parks until the run resumes, then publishes `quota_resumed`. A stop
-request ends the wait. A run that waited and resumed has the same experiment
+`PolicyCapacityGate` (`vs_runtime`), configured by `[agent.quota]`
+(`QuotaPolicy`, decided by the pure `decide_quota`). Under `pause` it publishes
+the typed `quota_paused` event, requests the run's cooperative pause (so the
+server reports PAUSING, then PAUSED), parks until the run resumes, then
+publishes `quota_resumed`. Under `wait` it parks for a bounded time (the
+provider's reset time plus a margin, else `retry_seconds`, cut to what is left of
+`wait_seconds`) and resumes the run itself. Under `fail`, or when the budget is
+spent or the reset lies beyond it, it publishes `quota_abandoned` and raises the
+quota error, so the turn fails as it did before. A stop request ends any wait. A run that waited and resumed has the same experiment
 state as one that never stopped, because the paused turn is the same invocation
 held in place. The `quota_paused` event is the operator notification: headless
 prints a `[quota]` line, and a consumer of the event stream (the event-hooks

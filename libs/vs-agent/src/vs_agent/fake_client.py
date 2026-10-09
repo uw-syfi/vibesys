@@ -736,6 +736,7 @@ class FakeAgentClient:
         self, kind: str, message: str, label: str | None, invocation_id: str | None
     ) -> None:
         """Raise the scripted failure; a quota limit waits at the gate and sends the turn again."""
+        stops = 0
         while True:
             try:
                 self._raise_scripted(kind)
@@ -743,10 +744,11 @@ class FakeAgentClient:
                 gate = self._capacity_gate
                 if gate is None:
                     raise
+                stops += 1
                 request = AgentTurnRequest(
                     message=message, label=label, invocation_id=invocation_id
                 )
-                gate.wait_for_capacity(error, request, role=kind)
+                gate.wait_for_capacity(error, request, role=kind, attempt=stops)
             else:
                 return
 

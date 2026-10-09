@@ -128,6 +128,16 @@ class RunControlChannel(Protocol):
         """Park while paused and land a stop that releases the wait."""
         ...
 
+    def wait_resumed(self, timeout: float) -> bool:
+        """Park like :meth:`wait_while_paused` for at most *timeout* seconds.
+
+        Returns True when something resumed the run, and False when the timeout
+        elapsed first. On a timeout the channel resumes the run itself, atomically,
+        so a stop request that arrives at the same moment is never cleared.
+        A stop request ends the wait by raising :class:`RunStopped`.
+        """
+        ...
+
     def raise_if_stopped(self) -> None:
         """Raise :class:`RunStopped` when a stop is pending."""
         ...
@@ -292,6 +302,22 @@ class RuntimeRunControlChannel:
             while self._paused and not self._stop_requested:
                 self._lock.wait()
         self.raise_if_stopped()
+
+    def wait_resumed(self, timeout: float) -> bool:
+        """Park for at most *timeout* seconds; resume the run itself if the timeout elapses."""
+        with self._lock:
+            should_emit_paused = self._paused and not self._stop_requested
+        if should_emit_paused:
+            self._emit(RunControlTransitionKind.PAUSED)
+        with self._lock:
+            self._lock.wait_for(lambda: not self._paused or self._stop_requested, timeout)
+            timed_out = self._paused and not self._stop_requested
+            if timed_out:
+                self._paused = False
+        if timed_out:
+            self._emit(RunControlTransitionKind.RESUMED)
+        self.raise_if_stopped()
+        return not timed_out
 
     def raise_if_stopped(self) -> None:
         """Land and raise a requested stop at the current boundary."""

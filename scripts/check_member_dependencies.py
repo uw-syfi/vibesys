@@ -159,7 +159,9 @@ def _check_member(
     failures.extend(
         f"{where}: declares {name!r} as {member.specifiers[name]!r} but the root project "
         f"declares {workspace.root_specifiers[name]!r}; keep one constraint"
-        for name in sorted(used_third_party & member.specifiers.keys() & workspace.root_specifiers.keys())
+        for name in sorted(
+            used_third_party & member.specifiers.keys() & workspace.root_specifiers.keys()
+        )
         if member.specifiers[name] != workspace.root_specifiers[name]
     )
     return failures
@@ -193,9 +195,15 @@ def load_workspace(repo_root: Path) -> Workspace:
     )
     members = tuple(_load_member(repo_root, directory) for directory in directories)
     root_source = repo_root / "src"
-    root_packages = frozenset(
-        path.name for path in root_source.iterdir() if path.is_dir() and not path.name.startswith(".")
-    ) if root_source.is_dir() else frozenset()
+    root_packages = (
+        frozenset(
+            path.name
+            for path in root_source.iterdir()
+            if path.is_dir() and not path.name.startswith(".")
+        )
+        if root_source.is_dir()
+        else frozenset()
+    )
     root_dependencies = frozenset(
         requirement_name(item) for item in root.get("project", {}).get("dependencies", [])
     )
@@ -216,7 +224,9 @@ def _load_member(repo_root: Path, directory: Path) -> Member:
     return Member(
         name=canonical_name(data["project"]["name"]),
         directory=directory.relative_to(repo_root).as_posix(),
-        dependencies=frozenset(requirement_name(item) for item in data["project"].get("dependencies", [])),
+        dependencies=frozenset(
+            requirement_name(item) for item in data["project"].get("dependencies", [])
+        ),
         workspace_sources=frozenset(
             canonical_name(name)
             for name, spec in sources.items()

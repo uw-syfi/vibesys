@@ -14,7 +14,7 @@ allowlist loader suffered from.
 
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -23,7 +23,7 @@ from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBack
 from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
 from vs_agent.api import validate_env_names
 from vs_runtime.api import AgentRoleId
-from vs_runtime.api.infrastructure import BundledResources
+from vs_runtime.api.infrastructure import BundledResources, QuotaAction, QuotaPolicy
 
 BUNDLED_RESOURCES = BundledResources(PROJECT_ROOT / "resources", package="vibesys")
 
@@ -102,6 +102,49 @@ class AgentRoleCfg(_Strict):
     )
 
 
+class QuotaCfg(_Strict):
+    """What the run does, unattended, when a provider has no capacity left.
+
+    ``pause`` (the default) pauses the run and waits for the operator. ``wait``
+    pauses it and resumes it by itself when capacity should have returned, using
+    the provider's reported reset time or ``retry_seconds`` when it gave none,
+    for at most ``wait_seconds`` per turn (no limit when omitted); once that
+    budget is spent the turn fails with the quota error. ``fail`` does not pause:
+    the turn fails with the quota error at once.
+    """
+
+    policy: Literal["pause", "wait", "fail"] = Field(
+        default="pause", description="pause | wait | fail."
+    )
+    wait_seconds: int | None = Field(
+        default=None,
+        strict=True,
+        gt=0,
+        description="Total seconds one turn may wait for capacity. Only for policy = 'wait'.",
+    )
+    retry_seconds: int = Field(
+        default=300,
+        strict=True,
+        gt=0,
+        description="Seconds between attempts when the provider gave no reset time.",
+    )
+
+    @model_validator(mode="after")
+    def _wait_budget_only_for_wait(self) -> Self:
+        if self.wait_seconds is not None and self.policy != "wait":
+            message = f"wait_seconds applies only to policy = 'wait', not {self.policy!r}"
+            raise ValueError(message)
+        return self
+
+    def to_policy(self) -> QuotaPolicy:
+        """The runtime policy this section declares."""
+        return QuotaPolicy(
+            action=QuotaAction(self.policy),
+            wait_seconds=self.wait_seconds,
+            retry_seconds=self.retry_seconds,
+        )
+
+
 class AgentCfg(_Strict):
     """Agent backend, provider, and role-specific model controls."""
 
@@ -147,6 +190,10 @@ class AgentCfg(_Strict):
         ),
     )
 
+    quota: QuotaCfg = Field(
+        default_factory=QuotaCfg,
+        description="[agent.quota] — unattended policy for a provider quota or rate-limit stop.",
+    )
     roles: dict[AgentRoleId, AgentRoleCfg] = Field(
         default_factory=dict,
         description=(

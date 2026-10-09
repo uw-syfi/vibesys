@@ -8,7 +8,7 @@ run-scoped semantic stream.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from vs_agent.contracts import AgentQuotaError, AgentRateLimit
@@ -18,6 +18,9 @@ if TYPE_CHECKING:
         TodoItemData,
         ToolResultPayload,
     )
+
+type QuotaResumeReason = Literal["operator", "wait_elapsed"]
+"""Who ended a quota pause: the operator, or the policy's wait running out."""
 
 
 @runtime_checkable
@@ -105,22 +108,39 @@ class AgentEventSink(Protocol):
         self,
         error: AgentQuotaError,
         *,
+        resumes_at: float | None = None,
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
-        """Publish that a turn stopped on a provider capacity limit and the run paused."""
+        """Publish that a turn stopped on a provider capacity limit and the run paused.
+
+        ``resumes_at`` is the epoch second the run resumes itself, when its policy does.
+        """
         ...
 
     def quota_resumed(
         self,
         provider: str,
         *,
+        reason: QuotaResumeReason = "operator",
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
         """Publish that the paused turn is being sent again on the same provider."""
+        ...
+
+    def quota_abandoned(
+        self,
+        error: AgentQuotaError,
+        *,
+        reason: str,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Publish that the quota policy ended the turn with the quota error instead of waiting."""
         ...
 
 
@@ -214,23 +234,37 @@ class NullAgentEventSink:
         self,
         error: AgentQuotaError,
         *,
+        resumes_at: float | None = None,
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
         """Ignore quota pauses when no event sink was injected."""
-        del error, agent_kind, round_label, invocation_id
+        del error, resumes_at, agent_kind, round_label, invocation_id
 
     def quota_resumed(
         self,
         provider: str,
         *,
+        reason: QuotaResumeReason = "operator",
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
         """Ignore quota resumes when no event sink was injected."""
-        del provider, agent_kind, round_label, invocation_id
+        del provider, reason, agent_kind, round_label, invocation_id
+
+    def quota_abandoned(
+        self,
+        error: AgentQuotaError,
+        *,
+        reason: str,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Ignore quota abandonment when no event sink was injected."""
+        del error, reason, agent_kind, round_label, invocation_id
 
 
 NULL_AGENT_EVENT_SINK = NullAgentEventSink()
