@@ -48,6 +48,25 @@ belongs here.
 New provider behavior therefore goes upstream, not into a VibeSys driver
 workaround.
 
+## Provider readiness
+
+A missing CLI or a logged-out account would otherwise surface as the first
+turn's failure. Before a role's first session, `AgentClient` asks a driver that
+implements `ReadinessProbe` to probe its provider with `probe_readiness(spec)`.
+The AgentShim driver calls `agentshim.probe_provider` on the executor, sandbox
+confinement and environment `create_session` builds for the same spec, so a
+container is probed where the agent will run. No model is called.
+
+| Probe result | Outcome |
+|---|---|
+| binary not found | `ProviderNotReadyError` (`BINARY_MISSING`), before any turn |
+| login `FAILED` | `ProviderNotReadyError` (`AUTH_FAILED`) with the provider's own fix text |
+| login `UNKNOWN` (Gemini, Copilot, opencode have no status command) | proceeds; the run log records `[readiness] ... login state unknown` |
+| ready | proceeds; passing is remembered per role, a failure is not |
+
+`ProviderNotReadyError` is permanent (`retryable = False`). A driver with no
+probe (Omnigent) is skipped, not guessed at.
+
 ## Provider session resume
 
 MCP session identity includes its command, arguments, stable environment, and

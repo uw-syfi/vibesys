@@ -131,4 +131,5 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
         driver_log=driver_log,
         session_store=session_store,
         event_sink=events,
+        check_readiness=True,
     )
