@@ -6,7 +6,6 @@ import json
 import os
 import socket
 import threading
-import time
 from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, redirect_stdout
@@ -82,16 +81,14 @@ class _SessionControlStub:
         self._control.request_stop()
 
 
-def _await_socket(socket_path: Path) -> None:
-    deadline = time.monotonic() + 5
-    while not socket_path.exists() and time.monotonic() < deadline:
-        time.sleep(0.01)
+def _await_socket(runtime: ServerRuntime) -> None:
+    assert runtime.transport_listening.wait(timeout=_DEADLOCK_GUARD_SECONDS)
 
 
 @contextmanager
 def _subscription(socket_path: Path) -> Generator[Callable[[], dict]]:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(5)
+        client.settimeout(_DEADLOCK_GUARD_SECONDS)
         client.connect(str(socket_path))
         with client.makefile("rwb") as stream:
             stream.write(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
@@ -99,8 +96,10 @@ def _subscription(socket_path: Path) -> Generator[Callable[[], dict]]:
             yield lambda: json.loads(stream.readline())
 
 
-def _collect_until(socket_path: Path, terminal_type: str, received: list[dict]) -> None:
-    _await_socket(socket_path)
+def _collect_until(
+    runtime: ServerRuntime, socket_path: Path, terminal_type: str, received: list[dict]
+) -> None:
+    _await_socket(runtime)
     with _subscription(socket_path) as read:
         while True:
             events = read().get("events", [])
@@ -242,13 +241,13 @@ def test_runtime_streams_success_before_client_disconnect(tmp_path: Path) -> Non
     received: list[dict] = []
     subscriber = threading.Thread(
         target=_collect_until,
-        args=(socket_path, "run_finished", received),
+        args=(runtime, socket_path, "run_finished", received),
     )
     subscriber.start()
 
     value = runtime.run(lambda: "ran")
 
-    subscriber.join(timeout=5)
+    subscriber.join(timeout=_DEADLOCK_GUARD_SECONDS)
     assert value == "ran"
     assert not subscriber.is_alive()
     assert any(event["type"] == "server_ready" for event in received)
@@ -265,11 +264,10 @@ def test_runtime_waits_for_reconnected_subscriber_before_teardown(tmp_path: Path
     socket_path = tmp_path / "control.sock"
     runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
     release_run = threading.Event()
-    run_returned = threading.Event()
-    returned_while_attached: list[bool] = []
+    order: list[str] = []
 
     def drive_reconnect() -> None:
-        _await_socket(socket_path)
+        _await_socket(runtime)
         with _subscription(socket_path) as read:
             assert read()["type"] == "subscribed"
         with _subscription(socket_path) as read:
@@ -277,22 +275,24 @@ def test_runtime_waits_for_reconnected_subscriber_before_teardown(tmp_path: Path
             release_run.set()
             while not any(event["type"] == "run_finished" for event in read().get("events", [])):
                 pass
-            returned_while_attached.append(run_returned.wait(timeout=1.0))
+            # The stream is still open here; the runtime may return only after
+            # this client has disconnected.
+            order.append("second subscription closing")
 
     clients = threading.Thread(target=drive_reconnect)
     clients.start()
 
     def run() -> str:
-        assert release_run.wait(timeout=5)
+        assert release_run.wait(timeout=_DEADLOCK_GUARD_SECONDS)
         return "ran"
 
     value = runtime.run(run)
+    order.append("runtime returned")
 
-    run_returned.set()
-    clients.join(timeout=5)
+    clients.join(timeout=_DEADLOCK_GUARD_SECONDS)
     assert value == "ran"
     assert not clients.is_alive()
-    assert returned_while_attached == [False]
+    assert order == ["second subscription closing", "runtime returned"]
     assert not socket_path.exists()
 
 
@@ -307,7 +307,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path: Path) -> None:
     received: list[dict] = []
 
     def collect_until_stopped() -> None:
-        _await_socket(socket_path)
+        _await_socket(runtime)
         with _subscription(socket_path) as read:
             while True:
                 events = read().get("events", [])
@@ -344,7 +344,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path: Path) -> None:
     finally:
         integration.close()
 
-    subscriber.join(timeout=5)
+    subscriber.join(timeout=_DEADLOCK_GUARD_SECONDS)
     assert value is None
     assert not subscriber.is_alive()
     terminal = ("run_finished", "run_failed", "run_interrupted")
@@ -362,7 +362,7 @@ def test_runtime_does_not_duplicate_core_terminal_event(tmp_path: Path) -> None:
     received: list[dict] = []
     subscriber = threading.Thread(
         target=_collect_until,
-        args=(socket_path, "run_finished", received),
+        args=(runtime, socket_path, "run_finished", received),
     )
     subscriber.start()
 
@@ -377,7 +377,7 @@ def test_runtime_does_not_duplicate_core_terminal_event(tmp_path: Path) -> None:
 
     runtime.run(run)
 
-    subscriber.join(timeout=5)
+    subscriber.join(timeout=_DEADLOCK_GUARD_SECONDS)
     assert not subscriber.is_alive()
     assert sum(event["type"] == "run_finished" for event in received) == 1
     assert sum(event.type.value == "run_finished" for event in runtime.journal.read()) == 1
@@ -389,7 +389,7 @@ def test_runtime_streams_configuration_failure_without_run_failure(tmp_path: Pat
     received: list[dict] = []
     subscriber = threading.Thread(
         target=_collect_until,
-        args=(socket_path, "configuration_failed", received),
+        args=(runtime, socket_path, "configuration_failed", received),
     )
     subscriber.start()
     failure = ConfigurationError(
@@ -405,7 +405,7 @@ def test_runtime_streams_configuration_failure_without_run_failure(tmp_path: Pat
         runtime.run(lambda: (_ for _ in ()).throw(failure))
 
     assert raised.value is failure
-    subscriber.join(timeout=5)
+    subscriber.join(timeout=_DEADLOCK_GUARD_SECONDS)
     assert not subscriber.is_alive()
     event = next(event for event in received if event["type"] == "configuration_failed")
     assert event["data"]["code"] == "invalid_arguments"

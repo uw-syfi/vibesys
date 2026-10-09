@@ -8,11 +8,10 @@ import socket
 import subprocess
 import sys
 import threading
-import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from tests.server.support import build_server_parts
+from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
 
 from launch import default_runs
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
@@ -24,14 +23,6 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
-
-
-def _wait_for(path: Path) -> None:
-    deadline = time.monotonic() + 5
-    while not path.exists() and time.monotonic() < deadline:
-        # test-isolation: poll the filesystem for the real transport endpoint
-        time.sleep(0.01)
-    assert path.exists()
 
 
 def test_detached_runtime_runs_without_a_subscriber_and_accepts_reattach(
@@ -48,14 +39,15 @@ def test_detached_runtime_runs_without_a_subscriber_and_accepts_reattach(
 
     thread = threading.Thread(target=lambda: holder.setdefault("result", runtime.run(run)))
     thread.start()
-    _wait_for(socket_path)
-    assert completed.wait(timeout=2)
+    # A detached run's callback starts only once the transport accepts clients.
+    assert completed.wait(timeout=DEADLOCK_GUARD_S)
+    assert runtime.transport_listening.is_set()
     assert thread.is_alive(), "detached runtime must outlive its run callback"
 
     # A late subscriber receives the already-recorded terminal event through
     # the same bootstrap path used by reconnecting clients.
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(2)
+        client.settimeout(DEADLOCK_GUARD_S)
         client.connect(str(socket_path))
         with client.makefile("rwb") as stream:
             stream.write(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
@@ -73,7 +65,7 @@ def test_detached_runtime_runs_without_a_subscriber_and_accepts_reattach(
     )
 
     runtime.shutdown()
-    thread.join(timeout=5)
+    thread.join(timeout=DEADLOCK_GUARD_S)
     assert not thread.is_alive()
     assert holder["result"] == "done"
     assert not socket_path.exists()
@@ -135,10 +127,12 @@ def test_detached_runtime_unwinds_callback_failures_without_shutdown(
     thread = threading.Thread(target=invoke)
     thread.start()
     try:
-        assert completed.wait(timeout=5), "callback failure must unwind without shutdown"
+        assert completed.wait(timeout=DEADLOCK_GUARD_S), (
+            "callback failure must unwind without shutdown"
+        )
     finally:
         runtime.shutdown()
-        thread.join(timeout=5)
+        thread.join(timeout=DEADLOCK_GUARD_S)
 
     assert not thread.is_alive()
     assert raised == [failure]

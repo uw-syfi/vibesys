@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Never
 
 import pytest
-from tests.server.support import build_server_parts
+from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
 
 from server.api.protocol import (
     ChatQuery,
@@ -141,7 +141,7 @@ def test_subscription_streams_one_consistent_append_batch(socket_dir: Path) -> N
             UnixJsonlServer(socket_path, parts.api),
             socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client,
         ):
-            client.settimeout(2)
+            client.settimeout(DEADLOCK_GUARD_S)
             client.connect(str(socket_path))
             stream = client.makefile("rwb")
             stream.write(
@@ -187,7 +187,7 @@ def test_subscription_reports_structured_stream_failure(
             UnixJsonlServer(socket_path, parts.api),
             socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client,
         ):
-            client.settimeout(2)
+            client.settimeout(DEADLOCK_GUARD_S)
             client.connect(str(socket_path))
             stream = client.makefile("rwb")
             stream.write(

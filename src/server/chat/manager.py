@@ -112,9 +112,15 @@ class ChatManager:
         journal: WireJournal,
         *,
         run_status: Callable[[], RunStatus],
+        drain_timeout_seconds: float = _CHAT_DRAIN_TIMEOUT_SECONDS,
     ) -> None:
-        """Initialize chat routing over the shared server condition and journal."""
+        """Initialize chat routing over the shared server condition and journal.
+
+        ``drain_timeout_seconds`` bounds how long closing the terminal resource
+        waits for an answer in flight before it defers the close.
+        """
         self._condition = condition
+        self._drain_timeout_seconds = drain_timeout_seconds
         self._journal = journal
         self._run_status = run_status
         self._chat_response_local = _ChatResponseLocal()
@@ -339,7 +345,7 @@ class ChatManager:
                 self._default_handler = None
             if resource is not None and not self._wait_locked(
                 lambda: self._active_default_calls > 0,
-                timeout=_CHAT_DRAIN_TIMEOUT_SECONDS,
+                timeout=self._drain_timeout_seconds,
             ):
                 self._retired_terminal_resource = resource
                 resource = None

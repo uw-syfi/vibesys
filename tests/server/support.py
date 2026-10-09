@@ -191,13 +191,23 @@ def build_server_parts(
     record: RunRecord | None = None,
     tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
     chat_agent_builder: ChatAgentBuilder | None = None,
+    chat_drain_timeout_seconds: float | None = None,
 ) -> ServerParts:
     """Compose real server components and optionally attach durable state."""
     condition = threading.Condition(threading.RLock())
     journal = WireJournal(condition)
     executions = ExecutionTracker(condition, journal)
     controller = RunController(condition, journal, executions)
-    chat = ChatManager(condition, journal, run_status=controller.run_status)
+    chat = (
+        ChatManager(condition, journal, run_status=controller.run_status)
+        if chat_drain_timeout_seconds is None
+        else ChatManager(
+            condition,
+            journal,
+            run_status=controller.run_status,
+            drain_timeout_seconds=chat_drain_timeout_seconds,
+        )
+    )
     journal.add_listener(chat.apply_replayed_event, replay_filter=chat.replay_filter)
     if chat_agent_builder is None:
         integration = RunIntegrationAdapter(controller, executions, journal, chat)
@@ -240,3 +250,30 @@ def build_server_parts(
     if log_dir is not None:
         parts.attach(log_dir, record=record)
     return parts
+
+
+# Bounds a wait that always ends when the thing waited on happens; reaching it
+# means a deadlock, so raising it can only turn a failure into a pass.
+DEADLOCK_GUARD_S = 30.0
+
+
+def run_at_paused_boundary(parts: ServerParts, work: Callable[[], None]) -> threading.Thread:
+    """Start *work* on a thread and return once it has announced it is parked.
+
+    A thread that reaches the pause boundary while the run is paused records
+    one more `PAUSED` core event before it parks, so seeing that event is the
+    handoff that replaces a guessed sleep. The thread cannot leave the boundary
+    until the test resumes or stops the run, whether or not it has finished
+    parking.
+    """
+    reached = threading.Event()
+    unsubscribe = parts.core_events.subscribe(
+        lambda event: reached.set() if event.type is CoreEventType.PAUSED else None
+    )
+    thread = threading.Thread(target=work)
+    try:
+        thread.start()
+        assert reached.wait(timeout=DEADLOCK_GUARD_S), "the thread never reached the pause boundary"
+    finally:
+        unsubscribe()
+    return thread

@@ -93,6 +93,9 @@ class ServerRuntime:
         self.detach = detach
         self.read_only_log = read_only_log
         self._shutdown = threading.Event()
+        # Set once the Unix socket accepts connections: how a same-process
+        # client learns it can dial without polling the filesystem.
+        self.transport_listening = threading.Event()
         self.condition = threading.Condition(threading.RLock())
         self.journal = WireJournal(self.condition)
         self.executions = ExecutionTracker(self.condition, self.journal)
@@ -177,6 +180,7 @@ class ServerRuntime:
                 transport = transports.enter_context(
                     UnixJsonlServer(self.socket_path, self.api, subscriptions)
                 )
+                self.transport_listening.set()
                 web_transport = (
                     transports.enter_context(
                         WebSocketGateway(
