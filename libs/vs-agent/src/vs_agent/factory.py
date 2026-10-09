@@ -114,7 +114,6 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
 
     return AgentClient(
         driver,
-        driver_name="agentshim",
         provider=provider,
         skills=skill_source_dirs,
         skill_selection=skill_selection,

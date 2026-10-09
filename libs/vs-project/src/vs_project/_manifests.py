@@ -107,10 +107,6 @@ class RunExecutionRecord(_CommittedManifest):
 
     model: PortableText
     agent_backend: PortableText
-    #: Read-only legacy field: runs created while a second agent driver existed
-    #: recorded it. New runs omit it. Only the surviving driver is accepted, so
-    #: a manifest naming a removed driver fails validation naming this key.
-    agent_driver: Literal["agentshim"] | None = None
     cli_provider: PortableText | None = None
     cli_timeout: Annotated[int, Field(gt=0)] | None = None
     compute_backend: PortableText
@@ -120,6 +116,24 @@ class RunExecutionRecord(_CommittedManifest):
     thinking_budget: Annotated[int, Field(ge=-1)] | None = None
     agent_roles: dict[Identifier, AgentRoleExecutionRecord]
     skills_dirs: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_agent_driver(cls, data: object) -> object:
+        """Load manifests written while an ``agent_driver`` key was recorded.
+
+        The key is retired: AgentShim is the only driver. A run that recorded
+        it (or null) loads without it; a run that recorded a removed driver is
+        rejected naming the key, as before. Every other unknown key is still
+        rejected by ``extra="forbid"``.
+        """
+        if not isinstance(data, dict) or "agent_driver" not in data:
+            return data
+        recorded = data["agent_driver"]
+        if recorded is not None and recorded != "agentshim":
+            message = f"agent_driver: {recorded!r} names a removed agent driver"
+            raise ValueError(message)
+        return {key: value for key, value in data.items() if key != "agent_driver"}
 
 
 class OrchestrationRunManifest(_CommittedManifest):

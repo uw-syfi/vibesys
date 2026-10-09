@@ -67,7 +67,6 @@ def _project_with_run(tmp_path: Path) -> tuple[Project, str]:
         execution=RunExecutionRecord(
             model="gpt-5",
             agent_backend="cli",
-            agent_driver="agentshim",
             cli_provider="codex",
             cli_timeout=1800,
             compute_backend="cpu",

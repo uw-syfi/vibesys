@@ -203,13 +203,11 @@ class AgentClient:
         require_host_sandbox: bool = False,
         containerized: bool = False,
         driver_log: AgentDiagnosticLog | None = None,
-        driver_name: str | None = None,
         session_store: SessionStore | None = None,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
     ) -> None:
         """Create a client that owns ``driver`` and every session it creates."""
         self._driver = driver
-        self._driver_name = driver_name
         self._sink = event_sink
         self._session_store: SessionStore = session_store or NullSessionStore()
         self._provider = provider
@@ -242,15 +240,6 @@ class AgentClient:
     def capabilities(self) -> AgentCapabilities:
         """Return the selected driver's factual capabilities."""
         return self._driver.capabilities
-
-    @property
-    def driver_name(self) -> str | None:
-        """Return the stable configured driver name (``"agentshim"``).
-
-        This is the application-configuration string, not the driver's Python
-        class name, so it stays stable across implementation refactors.
-        """
-        return self._driver_name
 
     @property
     def provider(self) -> str | None:

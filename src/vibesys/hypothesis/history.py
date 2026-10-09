@@ -22,6 +22,9 @@ The on-disk key ``reviewed`` predates it and is kept only so legacy records
 still load; ``RoundRecord.reviewed`` derives the boolean instead of storing a
 second copy that can disagree with the verdict.
 
+``implementer_driver`` was dropped from the schema; ``parse_round_record`` discards
+it from older records.
+
 ``perf_comparison`` records how the round's headline reading compared with
 its baseline. The framework decides that once, when the round is written,
 using the run's declared measurement tolerance; every later reader consumes
@@ -229,13 +232,12 @@ class RoundRecord:
     # ``perf_metric`` is non-None.
     perf_provenance: PerfProvenance | None = None
 
-    # Implementer attribution: which driver/provider/model produced this round
+    # Implementer attribution: which provider/model produced this round
     # attempt. The provider session ID itself is machine-local and never lives
     # on this portable record; ``vibesys.agents.session_store`` owns it, keyed
-    # by the round's hypothesis ID. These three fields describe the *latest*
+    # by the round's hypothesis ID. These two fields describe the *latest*
     # attempt at the round: a resumed run that re-attempts the same round
     # overwrites the manifest entry, so they are not an append-only audit log.
-    implementer_driver: str | None = None
     implementer_provider: str | None = None
     implementer_model: str | None = None
 
@@ -288,6 +290,11 @@ def parse_round_record(data: dict[str, Any]) -> RoundRecord:
     if "round_number" not in data and "round" in data:
         data = dict(data)
         data["round_number"] = data.pop("round")
+    if "implementer_driver" in data:
+        # Retired attribution key (always "agentshim" once Omnigent was
+        # removed): records written before it was dropped still load. Any other
+        # unknown key is still rejected by ``extra="forbid"``.
+        data = {key: value for key, value in data.items() if key != "implementer_driver"}
     return _ROUND_RECORD_ADAPTER.validate_python(data)
 
 

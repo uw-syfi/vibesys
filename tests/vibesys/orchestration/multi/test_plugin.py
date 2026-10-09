@@ -347,7 +347,6 @@ def test_official_evaluation_records_binding_and_selects_winner(tmp_path: Path) 
     assert record.official_evaluation
     assert record.perf_metric == 120.0
     assert record.perf_provenance == "framework"
-    assert record.implementer_driver == "fake"
     assert run.evaluation.accuracy_calls
     assert run.evaluation.benchmark_calls[0].objectives[0].name == "throughput"
     workspace = run.workspaces.root

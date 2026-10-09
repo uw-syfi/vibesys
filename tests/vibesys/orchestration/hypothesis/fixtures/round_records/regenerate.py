@@ -40,7 +40,6 @@ cases = {
         perf_delta_pct=12.5,
         perf_comparison=MetricComparison.BETTER,
         perf_provenance="framework",
-        implementer_driver="agentshim",
         implementer_provider="codex",
         implementer_model="gpt-5.6-sol",
         attempts=2,

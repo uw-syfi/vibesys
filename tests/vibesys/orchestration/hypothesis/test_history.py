@@ -69,7 +69,6 @@ def test_public_round_record_codec_round_trips_current_schema() -> None:
 
 def test_implementer_attribution_round_trips_and_defaults_to_none() -> None:
     bare = _record(1, "a" * 40)
-    assert bare.implementer_driver is None
     assert bare.implementer_provider is None
     assert bare.implementer_model is None
 
@@ -79,7 +78,6 @@ def test_implementer_attribution_round_trips_and_defaults_to_none() -> None:
         perf_metric=None,
         perf_unit=None,
         passed=True,
-        implementer_driver="agentshim",
         implementer_provider="codex",
         implementer_model="gpt-5.6-sol",
     )
@@ -93,11 +91,10 @@ def test_legacy_record_without_attribution_still_loads() -> None:
     # A record written before attribution existed has none of the new keys;
     # ``extra="forbid"`` rejects unknown keys, not missing defaulted ones.
     legacy = serialize_round_record(_record(1, "a" * 40))
-    for key in ("implementer_driver", "implementer_provider", "implementer_model"):
+    for key in ("implementer_provider", "implementer_model"):
         legacy.pop(key, None)
     restored = parse_round_record(legacy)
     assert restored.implementer_provider is None
-    assert restored.implementer_driver is None
 
 
 def test_parse_round_record_applies_declared_defaults() -> None:
@@ -429,7 +426,6 @@ def _golden_record(name: str) -> RoundRecord:
             perf_delta_pct=12.5,
             perf_comparison=MetricComparison.BETTER,
             perf_provenance="framework",
-            implementer_driver="agentshim",
             implementer_provider="codex",
             implementer_model="gpt-5.6-sol",
             attempts=2,
@@ -481,6 +477,36 @@ def test_sparse_legacy_record_decodes_to_pre_retirement_defaults() -> None:
     expected = json.loads((fixtures / "legacy.json").read_bytes())
 
     assert serialize_round_record(parse_round_record(legacy)) == expected
+
+
+_KNOWN_KEYS = frozenset(serialize_round_record(_record(1, "a" * 40))) | {
+    "round",
+    "round_number",
+    "implementer_driver",
+}
+
+
+def test_record_persisted_with_the_retired_implementer_driver_still_loads() -> None:
+    fixtures = Path(__file__).parent / "fixtures" / "round_records"
+    recorded = json.loads((fixtures / "recorded-with-implementer-driver.json").read_bytes())
+    current = json.loads((fixtures / "current.json").read_bytes())
+    assert recorded["implementer_driver"] == "agentshim"
+
+    restored = parse_round_record(recorded)
+
+    assert serialize_round_record(restored) == current
+    assert "implementer_driver" not in serialize_round_record(restored)
+
+
+@given(
+    driver=st.one_of(st.none(), st.text()),
+    unknown=st.text(min_size=1).filter(lambda k: k not in _KNOWN_KEYS),
+)
+def test_only_the_retired_driver_key_is_tolerated_on_load(driver: str | None, unknown: str) -> None:
+    base = serialize_round_record(_record(1, "a" * 40))
+    assert parse_round_record({**base, "implementer_driver": driver}) == parse_round_record(base)
+    with pytest.raises(ValidationError):
+        parse_round_record({**base, unknown: 1})
 
 
 @given(

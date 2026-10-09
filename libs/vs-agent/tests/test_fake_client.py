@@ -215,11 +215,11 @@ def test_fail_raises_exactly_times_then_resumes() -> None:
 
 
 def test_set_attribution_overrides_only_given_fields() -> None:
-    client = FakeAgentClient(driver_name="fake", provider="fake", model="fake-model")
+    client = FakeAgentClient(provider="fake", model="fake-model")
 
     client.set_attribution(provider="anthropic")
 
-    assert client.driver_name == "fake"
+    assert client.backend_name == "fake"
     assert client.provider == "anthropic"
     assert client.model_for_kind("judge") == "fake-model"
 

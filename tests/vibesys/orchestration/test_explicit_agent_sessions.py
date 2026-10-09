@@ -378,7 +378,6 @@ def test_named_session_identity_is_durable_and_binding_is_visible(tmp_path: Path
     )
     first = FakeAgentClient(
         backend_name="cli",
-        driver_name="agentshim",
         provider="codex",
         model="gpt-6-sol",
         capabilities=capabilities,
@@ -393,7 +392,6 @@ def test_named_session_identity_is_durable_and_binding_is_visible(tmp_path: Path
             member_id=member_id,
         )
         assert one.binding.backend == "cli"
-        assert one.binding.driver == "agentshim"
         assert one.binding.provider == "codex"
         assert one.binding.model == "gpt-6-sol"
         assert await one.turn("start") == "one"

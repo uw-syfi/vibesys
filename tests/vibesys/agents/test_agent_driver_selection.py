@@ -62,14 +62,13 @@ def _build(
 def test_agentshim_is_the_default_driver() -> None:
     client = _build(_config(backend="cli", cli_provider="codex"))
 
-    assert client.driver_name == "agentshim"
+    assert client.provider == "codex"
 
 
 @pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
 def test_default_driver_supports_all_agentshim_providers(provider: str) -> None:
     client = _build(_config(backend="cli", cli_provider=provider))
 
-    assert client.driver_name == "agentshim"
     assert client.provider == provider
 
 
@@ -82,7 +81,6 @@ def test_agentshim_docker_configuration_is_preserved() -> None:
         use_docker=True,
     )
 
-    assert client.driver_name == "agentshim"
     assert client.capabilities.container_execution
     assert not client.capabilities.host_path_grants
 
@@ -111,7 +109,6 @@ def test_agentshim_client_passes_model_and_log_dir(tmp_path: Path) -> None:
         log_dir=tmp_path,
     )
 
-    assert client.driver_name == "agentshim"
     assert client.model_for_kind("implementer") == "gpt-5"
     # A rejected attempt exercises factory logging without starting a provider CLI.
     client.close()

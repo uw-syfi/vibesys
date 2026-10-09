@@ -10,7 +10,9 @@ AgentShim is the only agent driver, so there is nothing to select. The former
 `driver = "omnigent"`, is rejected with an error naming `agent.driver`, and a
 run manifest that records `execution.agent_driver = "omnigent"` is rejected the
 same way. Manifests of earlier runs that recorded `agentshim` still load and
-resume; new manifests omit the field.
+resume, and round records that carry the retired `implementer_driver` key still
+load; the keys are dropped on read and new records omit them. Any other unknown
+key is still rejected.
 
 ## Where agentshim lives
 

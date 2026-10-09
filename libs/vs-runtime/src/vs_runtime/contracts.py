@@ -304,7 +304,6 @@ class AgentBinding(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     backend: str = Field(min_length=1)
-    driver: str | None = None
     provider: str | None = None
     model: str | None = None
     reasoning_effort: str | None = None

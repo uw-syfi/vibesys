@@ -57,7 +57,6 @@ class FakeSessionAgents(BuiltInSessionAgents):
 def _fake_client(*, spec: AgentSpec, events: AgentEventSink, **_kwargs: object) -> FakeAgentClient:
     client = FakeAgentClient(
         backend_name=spec.backend.value,
-        driver_name="agentshim",
         provider=spec.provider,
         model=spec.model,
         capabilities=AgentCapabilities(tool_servers=True, session_reuse=True),
