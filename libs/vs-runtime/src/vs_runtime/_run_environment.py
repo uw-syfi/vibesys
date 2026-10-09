@@ -1330,7 +1330,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         builds (:func:`~vs_agent.api.images.agent_image`), pushed to and
         pulled back from a registry (:func:`~vs_agent.api.images.ensure_pushed`),
         since this backend's Docker daemon is not guaranteed to already have
-        it locally the way the local ``--docker`` path's is. Nothing installs
+        it locally the way the local Docker path's is. Nothing installs
         anything at container start any more, including the Modal Python SDK
         an earlier revision ``pip install``ed here: that install already ran
         through ``extra_init_commands``, which ``DockerSandbox`` (the sandbox

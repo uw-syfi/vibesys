@@ -124,7 +124,7 @@ class TestCpuSandbox:
     ) -> None:
         """A caller that builds its own Docker sandbox without one still works.
 
-        ``DockerEnvironment.open()`` (the plain ``--docker`` path) always
+        ``DockerEnvironment.open()`` (the plain Docker path) always
         resolves an agent image and passes it as ``container_image``, so in
         practice this fallback is dead there; it still matters for Modal and
         SkyPilot's CPU-only local editor container, which builds no agent

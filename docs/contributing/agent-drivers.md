@@ -204,7 +204,7 @@ experiment chat is the caller that does this today
 
 ## Images
 
-A `--docker` run starts from two images, built by `vs_agent.api.images`:
+A Docker run starts from two images, built by `vs_agent.api.images`:
 
 - The **task image**, built from the task's own `Dockerfile` when it has one
   (`build_task_image`), or the backend's base image otherwise. It installs
@@ -254,7 +254,7 @@ is a Dockerfile gap, not something a running turn can patch around.
 
 ### Registry: GHCR by digest
 
-A local `--docker` run never contacts a registry: it runs the image
+A local Docker run never contacts a registry: it runs the image
 `agent_image` just built straight from the local Docker image store. Modal
 and SkyPilot runs do, because neither backend's Docker daemon can be assumed
 to already have the image locally, so their local editor container is
@@ -292,7 +292,7 @@ command's own runtime needs, not for running agent CLIs.
 
 ## Container execution
 
-`--docker` runs the provider CLI inside the role's editor container, through
+Docker runs the provider CLI inside the role's editor container, through
 the same path a host session runs. `create_session` looks up or builds a
 `vs_sandbox.WorkspaceSandbox`, wraps a plain `agentshim.HostCommandExecutor()`
 through `confine_to_sandbox`, and hands `agentshim.Agent` the sandbox's own

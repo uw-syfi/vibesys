@@ -100,20 +100,22 @@ allowlist (`session_env_allowlist`).
 
 Reads are not uniformly hidden. Bubblewrap and Landlock deny all reads outside
 the project and declared resources. Seatbelt allows broad reads and denies the
-project's ancestor trees and all writes outside the project; use `--docker` on
+project's ancestor trees and all writes outside the project; use the default Docker run environment on
 macOS when full read confinement matters.
 
 ## Known limits
 
-- **Slurm editor on the host.** Every environment except Slurm runs the agent in
-  Docker. Slurm still edits on the host, because its trusted gates
-  (`vs_sandbox.slurm_command`) and profiler MCP server execute in the agent's
-  sandbox with the host Python and a host-side transport broker. Moving that
-  editor into Docker needs a host-mediated gate bridge like SkyPilot's. Until
-  it exists, `LocalEnvironment` and the host confinement mechanisms stay.
+- **Slurm agents on the host.** Every environment except `slurm` and `slurm-gpu`
+  runs the agent in Docker. Both Slurm environments edit on the host under the
+  mechanisms in the support matrix. `slurm-gpu` is built for hosts that cannot
+  run Docker: its broker re-wraps each GPU command in the agent's host
+  confinement. `slurm` runs its trusted gates (`vs_sandbox.slurm_command`) and
+  profiler MCP server in the agent's sandbox with the host Python and a
+  host-side transport broker; moving that editor into Docker needs a
+  host-mediated gate bridge like SkyPilot's. Until then, `LocalEnvironment` and
+  the host confinement mechanisms stay.
 - **Metal.** Docker on macOS cannot expose Metal/MPS, so `--backend metal`
   cannot start its container; the host path that used to serve it is gone.
-
 - **Landlock** only adds rights, so it cannot carve a restriction out of the
   writable project. Read-only and hidden project paths are not enforced; each
   unenforced tier is logged at startup. Evaluator-input integrity is detected

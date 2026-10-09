@@ -120,7 +120,7 @@ class TestBuildAgentClient:
     def test_build_agent_client_rejects_unsupported_docker_provider(self) -> None:
         """A provider unknown to agentshim is rejected building the spec.
 
-        Previously this was only enforced for ``--docker``
+        Previously this was only enforced for Docker
         (``DOCKER_PROVIDER_ENV``). ``AgentSpec`` now validates every provider
         against ``agent_catalog()``, which agentshim resolves from the same
         shipped-provider list ``DOCKER_PROVIDER_ENV`` is built from, so any

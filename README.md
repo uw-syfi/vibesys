@@ -67,14 +67,15 @@ accuracy and performance results.
 
 ## Quickstart
 
-Install Python 3.12+, Git, and [uv](https://docs.astral.sh/uv/). Agents always
-run in a local Docker container, so Docker Engine must be reachable without
-`sudo` (add your user to the `docker` group). Tasks whose candidate is a
-container topology, such as the `microservices` examples, declare
-`docker_in_docker = true`: their container gets a Docker daemon of its own and
-needs the [Sysbox](https://github.com/nestybox/sysbox) runtime installed. Slurm
-runs still edit on the host and need `bubblewrap` on Linux (see the
-[CLI reference](docs/cli-flags.md)). Then install VibeSys:
+Install Python 3.12+, Git, and [uv](https://docs.astral.sh/uv/). Agents run in
+a local Docker container, so Docker Engine must be reachable without `sudo` (add
+your user to the `docker` group). Tasks whose candidate is a container topology,
+such as the `microservices` examples, declare `docker_in_docker = true`: their
+container gets a Docker daemon of its own and needs the
+[Sysbox](https://github.com/nestybox/sysbox) runtime installed. The `slurm` and
+`slurm-gpu` environments, built for cluster hosts, still run the agent on the
+host and need `bubblewrap` on Linux (see the [CLI reference](docs/cli-flags.md)).
+Then install VibeSys:
 
 ```bash
 uv tool install vibesys

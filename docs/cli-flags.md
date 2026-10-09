@@ -162,8 +162,9 @@ under Sysbox with a Docker daemon of its own and never mounts the host socket;
 a host without `sysbox-runc` fails early. See
 [Docker-in-Docker](running-vibesys.md#docker-in-docker).
 
-The host-sandbox variables below apply only to the Slurm editor, the one agent
-that still runs on the host. `VIBESYS_AGENT_SANDBOX` selects the Linux mechanism. `auto` (the default) and
+The host-sandbox variables below apply only to the Slurm environments (`slurm`
+and `slurm-gpu`), the only agents that still run on the host.
+`VIBESYS_AGENT_SANDBOX` selects the Linux mechanism. `auto` (the default) and
 `bwrap` both require bubblewrap. `landlock` opts in to a weaker backend for
 hosts that block unprivileged user namespaces, which is the common reason
 bubblewrap cannot run without root (for example Ubuntu's
