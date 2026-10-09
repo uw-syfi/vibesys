@@ -23,10 +23,10 @@ from tests.support.skeleton_world import (
     drive,
     open_skeleton_world,
 )
+from tests.support.world_git import GitKind
 
 from vs_core.api import IntentPhase, RunStatus
 from vs_faults.api import FaultGate, FaultPlan, HostCrashError
-from vs_project.api import run_git
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -82,14 +82,16 @@ async def simulate(
     plan: FaultPlan,
     strategy: SkeletonStrategy | None = None,
     gate: FaultGate | None = None,
+    git: GitKind = GitKind.FAKE,
 ) -> Simulation:
     """Run to a terminal state through every crash ``plan`` schedules, restarting each time.
 
     ``gate`` replaces the plan's own gate, for a crash kind the plan cannot express yet.
+    ``git`` picks the repository implementation; real Git is for the few end-to-end runs.
     """
     gate = gate or FaultGate(plan)
     cluster = CountingCluster()
-    with open_skeleton_world(root, strategy or SkeletonStrategy(), cluster) as world:
+    with open_skeleton_world(root, strategy or SkeletonStrategy(), cluster, git=git) as world:
         world.gate = gate
         now = 0.0
         crashes = 0
@@ -126,7 +128,7 @@ def _summary(
     return Summary(
         outcome=None if core.run.result is None else core.run.result.outcome,
         status=core.run.status,
-        adopted_tree=_adopted_tree(world.root, core),
+        adopted_tree=_adopted_tree(world, core),
         sbatch_calls=tuple(sorted(cluster.sbatch_calls.values())),
         agent_dispatches=tuple(sorted(dispatches.items())),
         crashes=crashes,
@@ -162,15 +164,14 @@ def _waiting(process: Process) -> str:
     )
 
 
-def _adopted_tree(root: Path, core: CoreState) -> str | None:
+def _adopted_tree(world: World, core: CoreState) -> str | None:
     """The tree of the adopted revision: commit hashes carry timestamps, trees do not."""
     adoption = core.settlement.adoption
     if adoption is None or adoption.observation is None or adoption.observation.revision is None:
         return None
     commit = adoption.observation.revision.revision_id.root
-    result = run_git(["rev-parse", f"{commit}^{{tree}}"], cwd=root)
-    assert result.returncode == 0, result.stderr
-    return result.stdout.decode().strip()
+    assert world.git is not None
+    return world.git.tree_of(commit)
 
 
 __all__ = ["CountingCluster", "Simulation", "Summary", "simulate"]

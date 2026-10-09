@@ -33,6 +33,7 @@ from vs_runtime.contracts import OrchestrationResumeDecision
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from vs_project.api import GitRepository, GitRepositoryFactory
     from vs_runtime._project_materialization import ProjectMaterializer
 
 type LogEmitter = Callable[[str, TextIO], None]
@@ -138,6 +139,18 @@ class ProjectRunEffects:
     git_events: GitTrackerEvents
     log_emit: LogEmitter
     on_log_ready: LogReady
+    git_repository: GitRepositoryFactory | None = None
+    """Builds the ``GitRepository`` of the project root and of every candidate worktree.
+
+    ``None`` runs the Git CLI; tests pass a Fake so a run needs no Git process.
+    """
+
+
+def _repository(effects: ProjectRunEffects, root: Path) -> GitRepository | None:
+    """The injected ``GitRepository`` for ``root``, or ``None`` for the default CLI one."""
+    if effects.git_repository is None:
+        return None
+    return effects.git_repository(root, effects.git_events)
 
 
 @dataclass(slots=True)
@@ -217,6 +230,7 @@ class ProjectRunResources:
                 workspace,
                 run_id=self._request.run_id,
                 events=self._effects.git_events,
+                repository=_repository(self._effects, workspace),
                 excluded_dirs=self._request.excluded_dirs,
                 excluded_files=self._request.excluded_files,
                 trusted_input_paths=self._request.trusted_input_paths,
@@ -341,6 +355,7 @@ def _assemble_project_run_resources(
             project.root,
             run_id=request.run_id,
             events=effects.git_events,
+            repository=_repository(effects, project.root),
             excluded_dirs=request.excluded_dirs,
             excluded_files=request.excluded_files,
             trusted_input_paths=request.trusted_input_paths,

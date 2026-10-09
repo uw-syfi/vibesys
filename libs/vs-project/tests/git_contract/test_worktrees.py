@@ -15,6 +15,20 @@ if TYPE_CHECKING:
     from tests.support.git_contract import Sandbox
 
 
+def test_clean_keeps_files_under_a_directory_that_replaced_a_tracked_file(
+    sandbox: Sandbox,
+) -> None:
+    sandbox.start({"a.txt": "1\n"})
+    sandbox.delete("a.txt")
+    sandbox.write("a.txt/inner.txt", "inner\n")
+
+    assert sandbox.repo.clean_untracked(include_ignored=False, protect="protected/")
+
+    assert (sandbox.root / "a.txt" / "inner.txt").exists()
+    sandbox.repo.restore_worktree("HEAD")
+    assert (sandbox.root / "a.txt").read_text(encoding="utf-8") == "1\n"
+
+
 def test_reset_index_unstages_everything_and_keeps_head_and_files(sandbox: Sandbox) -> None:
     head = sandbox.start({"a.txt": "1\n"})
     sandbox.write("a.txt", "2\n")

@@ -125,6 +125,17 @@ def test_commit_without_staged_changes_is_refused_unless_empty_is_allowed(
     assert sandbox.repo.recent_subjects(1)[0].subject == "marker"
 
 
+def test_commit_only_refuses_a_tracked_path_that_became_a_directory(sandbox: Sandbox) -> None:
+    baseline = sandbox.start({"a.txt": "1\n"})
+    sandbox.delete("a.txt")
+    sandbox.write("a.txt/inner.txt", "inner\n")
+
+    with pytest.raises(GitCommandError):
+        sandbox.repo.commit("only", only=["."])
+
+    assert sandbox.repo.head() == baseline
+
+
 def test_commit_only_takes_the_named_paths_and_keeps_other_staged_changes(
     sandbox: Sandbox,
 ) -> None:

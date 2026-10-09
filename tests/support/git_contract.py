@@ -21,6 +21,22 @@ type RepositoryFactory = Callable[[Path], GitRepository]
 """Build an implementation serving the repository whose worktree top is the path."""
 
 
+def twin(
+    sandbox: Sandbox, oracle_factory: RepositoryFactory, populate: Callable[[Sandbox], None]
+) -> Sandbox:
+    """A second project directory served by the oracle and built by the same ``populate``.
+
+    Comparison cases ask the implementation and the oracle the same question about two
+    identical directories, never about one, so they hold for an implementation whose
+    repository is not on disk.
+    """
+    root = sandbox.root.parent / "oracle"
+    root.mkdir()
+    other = Sandbox(root=root, factory=oracle_factory)
+    populate(other)
+    return other
+
+
 @dataclass
 class Sandbox:
     """One project directory served by the implementation under test."""

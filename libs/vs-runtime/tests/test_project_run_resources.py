@@ -17,6 +17,7 @@ from vs_project.api import (
     Project,
     RunEnvironmentRecord,
 )
+from vs_project.api.testing import FakeGitRepositories
 from vs_runtime.api import OrchestrationResumeDecision
 from vs_runtime.api.infrastructure import (
     ProjectMaterializer,
@@ -90,6 +91,10 @@ def _materializer(root: Path) -> ProjectMaterializer:
     )
 
 
+# In-memory Git: these cases test run resources, not the Git CLI. Directories are unique per test.
+_DISK = FakeGitRepositories()
+
+
 def _effects(events: list[str]) -> ProjectRunEffects:
     def emit(text: str, writer: TextIO) -> None:
         events.append(f"log:{text}")
@@ -101,6 +106,7 @@ def _effects(events: list[str]) -> ProjectRunEffects:
 
     return ProjectRunEffects(
         git_events=NullGitTrackerEvents(),
+        git_repository=_DISK.repository,
         log_emit=emit,
         on_log_ready=on_log_ready,
     )
