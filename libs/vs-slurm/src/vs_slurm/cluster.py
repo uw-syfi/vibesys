@@ -294,13 +294,29 @@ class SlurmCluster:
             return ClusterRejected(operation_id=operation_id, reason=record.rejected)
         if record.dispatched and record.payload_digest is None:
             return ClusterUnknown(operation_id=operation_id, reason="original payload unavailable")
-        if (
-            record.handle is not None
-            and job_handle(record.handle).job_id != "0"
-            and not record.cancelled
-        ):
-            return self._known_submission(record.operation_id, record.handle)
+        handle = record.handle
+        if handle is not None and job_handle(handle).job_id != "0":
+            record = self._with_remote_cancel(record, job_handle(handle).job_id)
+            if not record.cancelled:
+                return self._known_submission(record.operation_id, handle)
         return self._recover_submission(record)
+
+    def _with_remote_cancel(self, record: Operation, job_id: str) -> Operation:
+        """The record, marked cancelled if any cache of this operation recorded a cancel.
+
+        The local store is a cache. A cancel recorded through another one (another
+        process, or a state root since replaced) is visible only as the remote
+        marker, so a replay answered from this cache alone would call the job
+        settled where a replay through the cancelling cache must confirm it.
+        """
+        if record.cancelled:
+            return record
+        evidence = self._remote_evidence(record, job_id, None)
+        if evidence is None or not evidence.cancelled:
+            return record
+        cancelled = record.model_copy(update={"cancelled": True})
+        self._save(cancelled)
+        return cancelled
 
     def _known_submission(self, operation_id: str, handle: ClusterHandle) -> ClusterSubmitOutcome:
         try:

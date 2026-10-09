@@ -591,6 +591,9 @@ async def _poll_with_dropped_command(spec: _WorldSpec, delay_s: float, position:
 @example(delay_s=270.0, position=0)
 @example(delay_s=270.0, position=1)
 @example(delay_s=270.0, position=2)
+# The queue has forgotten the job (past MinJobAge), so accounting is the only source:
+# its one lost read must be retried like the queue's.
+@example(delay_s=290.0, position=2)
 @given(
     delay_s=st.floats(0, 330, allow_nan=False),
     position=st.integers(0, _FAULT_POSITIONS),
