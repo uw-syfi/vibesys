@@ -1158,17 +1158,18 @@ def _run_setup(
 
 
 def _stop_and_wait_grace(
-    proc: subprocess.Popen[bytes],
+    group: CaptureProcessGroup,
     lifecycle: Lifecycle,
     cancel_event: threading.Event | None,
     completion: TraceCompletion | None = None,
-    group: SubprocessCaptureProcessGroup | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> tuple[bool, bool]:
     result = stop_capture(
-        group or SubprocessCaptureProcessGroup(proc),
+        group,
         lifecycle,
         completion=completion,
         cancel_event=cancel_event,
+        monotonic=monotonic,
     )
     # A proved trace is successful even if bounded cleanup stops its runtime.
     return result.exited or result.trace_complete, result.escalated
@@ -1183,14 +1184,17 @@ def _run_with_load(  # noqa: PLR0913  # LW-910011; this function's parameters mi
     load_script: Path,
     cancel_event: threading.Event | None,
     completion: TraceCompletion | None,
-    group: SubprocessCaptureProcessGroup,
+    group: CaptureProcessGroup,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> _Outcome:
     ready, target_exited_early = _poll_ready(proc, lifecycle, start, ready_script, cancel_event)
     if target_exited_early:
         return _Outcome(CaptureStatus.TARGET_FAILED, proc.returncode, ready_achieved=False)
 
     if not ready:
-        _exited, escalated = _stop_and_wait_grace(proc, lifecycle, cancel_event, completion, group)
+        _exited, escalated = _stop_and_wait_grace(
+            group, lifecycle, cancel_event, completion, monotonic
+        )
         if cancel_event is not None and cancel_event.is_set():
             status = CaptureStatus.CANCELLED
         elif _remaining(start, lifecycle.timeout_s) <= 0:
@@ -1212,7 +1216,9 @@ def _run_with_load(  # noqa: PLR0913  # LW-910011; this function's parameters mi
     )
     load_window = {"ready": ready_stamp, "start": load_start_stamp, "end": _clock_stamps()}
     if load_cancelled or load_timed_out or load_rc != 0:
-        _exited, escalated = _stop_and_wait_grace(proc, lifecycle, cancel_event, completion, group)
+        _exited, escalated = _stop_and_wait_grace(
+            group, lifecycle, cancel_event, completion, monotonic
+        )
         status = (
             CaptureStatus.CANCELLED
             if load_cancelled
@@ -1230,7 +1236,7 @@ def _run_with_load(  # noqa: PLR0913  # LW-910011; this function's parameters mi
             load_window=load_window,
         )
 
-    exited, escalated = _stop_and_wait_grace(proc, lifecycle, cancel_event, completion, group)
+    exited, escalated = _stop_and_wait_grace(group, lifecycle, cancel_event, completion, monotonic)
     if cancel_event is not None and cancel_event.is_set():
         status = CaptureStatus.CANCELLED
     else:
@@ -1713,6 +1719,10 @@ def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirro
     meta: dict[str, Any],
     cancel_event: threading.Event | None = None,
     completion: TraceCompletion | None = None,
+    group_factory: Callable[[subprocess.Popen[bytes]], CaptureProcessGroup] = (
+        SubprocessCaptureProcessGroup
+    ),
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> CaptureResult:
     """Run one profiler-wrapped capture through its full lifecycle.
 
@@ -1746,6 +1756,12 @@ def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirro
     This is what lets an MCP tool wrapper honor a client-initiated
     cancellation without leaving a GPU process running (see
     ``resources/profilers/_common/mcp_async.py``).
+
+    *group_factory* and *monotonic* are the stop-phase seams: the factory
+    builds the owned process group from the started target, and *monotonic*
+    is the clock the stop grace deadline is measured on. Both default to the
+    real process tree and clock; tests inject scripted ones so the grace
+    outcome does not depend on host scheduling.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1812,7 +1828,7 @@ def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirro
             return _finish(outcome=outcome, **finish_kwargs)
 
     proc = _start_process(lifecycle, profiler_prefix, target_log_path, target_script)
-    group = SubprocessCaptureProcessGroup(proc)
+    group = group_factory(proc)
 
     if lifecycle.load_command is None:
         outcome = _run_no_load(proc, lifecycle, start, cancel_event)
@@ -1829,6 +1845,7 @@ def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirro
             cancel_event,
             completion,
             group,
+            monotonic,
         )
     outcome.setup_returncode = setup_returncode
     outcome.setup_tail = setup_tail
