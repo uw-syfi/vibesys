@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
@@ -23,6 +24,7 @@ from vs_project.api import (
     GitFaultSink,
     GitTracker,
     NullGitTrackerEvents,
+    StagingError,
 )
 
 if TYPE_CHECKING:
@@ -87,3 +89,46 @@ def test_snapshot_does_not_stage_framework_state(run_id: str, store_files: list[
             ]
             assert not leaked
         assert repository.read_blob("HEAD", "a.txt") == b"2\n"
+
+
+class _AlwaysUnreadable(CliGitRepository):
+    """Staging that keeps reporting an unreadable file, remembering each request."""
+
+    def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
+        super().__init__(root, faults=faults)
+        self.attempts: list[tuple[str, ...]] = []
+        self.failing = False
+
+    def stage_all(self, pathspecs: Sequence[str], *, force: bool = False) -> None:
+        if not self.failing:
+            super().stage_all(pathspecs, force=force)
+            return
+        self.attempts.append(tuple(pathspecs))
+        raise StagingError(["git", "add", "-A"], 128, "permission denied", ["secret.bin"])
+
+
+class _WarningLog(NullGitTrackerEvents):
+    def __init__(self) -> None:
+        self.summaries: list[str] = []
+
+    def warning(self, summary: str, *, detail: str | None = None) -> None:
+        self.summaries.append(summary if detail is None else f"{summary}: {detail}")
+
+
+def test_persistent_staging_failure_is_reported_with_the_same_scope() -> None:
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch).resolve()
+        (root / "a.txt").write_text("1\n")
+        events = _WarningLog()
+        repository = _AlwaysUnreadable(root, faults=events)
+        tracker = GitTracker(root, run_id="run", events=events, repository=repository)
+        tracker.init(existing=False)
+        (root / "a.txt").write_text("2\n")
+        repository.failing = True
+
+        with pytest.raises(StagingError):
+            tracker.snapshot("edit")
+
+        assert len(set(repository.attempts)) == 1
+        assert any(spec.startswith(f":(exclude){_STATE}") for spec in repository.attempts[0])
+        assert events.summaries
