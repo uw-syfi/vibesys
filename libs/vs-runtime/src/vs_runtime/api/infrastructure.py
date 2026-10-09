@@ -164,7 +164,6 @@ from vs_runtime._run_environment import (
     DockerEnvironment,
     DockerEnvironmentConfig,
     DockerEnvironmentFacts,
-    HostEnvironment,
     LocalEnvironment,
     LocalEnvironmentFacts,
     ModalEnvironmentFacts,
@@ -180,10 +179,13 @@ from vs_runtime._run_environment import (
     SlurmEnvironment,
     SlurmEnvironmentFacts,
     SlurmGpuEnvironmentFacts,
-    build_run_environment,
-    make_run_environment_spec,
     open_run_environment_resources,
     open_workspace_environment_resources,
+)
+from vs_runtime._run_environment_selection import (
+    HostEnvironment,
+    build_run_environment,
+    make_run_environment_spec,
     resolve_run_environment_spec,
     run_environment_record,
     validate_run_environment_profile,
