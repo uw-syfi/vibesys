@@ -8,8 +8,10 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import uuid
 from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -172,7 +174,7 @@ class FakeDockerEngine:
 
     def __init__(
         self,
-        state_dir: Path,
+        state_dir: Path | None = None,
         *,
         agent_ids: tuple[int, int] = (1000, 1000),
         runtimes: Sequence[str] = _DEFAULT_RUNTIMES,
@@ -182,7 +184,13 @@ class FakeDockerEngine:
 
         *runtimes* are the names ``docker info`` reports; *nested_daemons_start*
         says whether a daemon started inside a container ever becomes ready.
+        Without a *state_dir* the bookkeeping lives in a temporary directory
+        that goes with the engine.
         """
+        self._scratch: tempfile.TemporaryDirectory[str] | None = None
+        if state_dir is None:
+            self._scratch = tempfile.TemporaryDirectory()
+            state_dir = Path(self._scratch.name)
         self._state_dir = state_dir
         self._agent_ids = agent_ids
         self._runtimes = tuple(runtimes)
@@ -230,6 +238,8 @@ class FakeDockerEngine:
                 return self._exec(arguments, timeout_seconds)
             case "stop" | "rm":
                 return self._end(arguments)
+            case "ps":
+                return self._list(arguments)
             case "info":
                 runtimes = {name: {"path": name} for name in self._runtimes}
                 return subprocess.CompletedProcess(arguments, 0, json.dumps(runtimes) + "\n", "")
@@ -333,6 +343,24 @@ class FakeDockerEngine:
         if arguments[1] == "rm":
             del self._containers[identifier]
         return subprocess.CompletedProcess(arguments, 0, f"{identifier}\n", "")
+
+    def _list(self, arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        """``docker ps [-a] -q [--filter label=K=V]...``: the matching container ids."""
+        everything = any(
+            a.startswith("-") and not a.startswith("--") and "a" in a for a in arguments
+        )
+        wanted: dict[str, str] = {}
+        for flag, value in pairwise(arguments):
+            if flag == "--filter" and value.startswith("label="):
+                key, _, label = value.removeprefix("label=").partition("=")
+                wanted[key] = label
+        found = [
+            identifier
+            for identifier, container in self._containers.items()
+            if (everything or container.running)
+            and all(container.labels.get(key) == label for key, label in wanted.items())
+        ]
+        return subprocess.CompletedProcess(arguments, 0, "".join(f"{i}\n" for i in found), "")
 
     def _exec(
         self, arguments: tuple[str, ...], timeout_seconds: float

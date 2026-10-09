@@ -137,6 +137,7 @@ if TYPE_CHECKING:
     from vs_agent.cli_common import materialize_skills
     from vs_agent.client import AgentClient
     from vs_agent.factory import agent_driver_supports_tool_servers
+    from vs_agent.orphans import OrphanReapError, reap_orphaned_agents
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 __all__ = [
@@ -202,6 +203,7 @@ __all__ = [
     "MCPServerSpec",
     "NullAgentEventSink",
     "NullSessionStore",
+    "OrphanReapError",
     "Pending",
     "ProviderNotReadyError",
     "ProviderReadiness",
@@ -241,6 +243,7 @@ __all__ = [
     "inspect_invocation_journal",
     "materialize_skills",
     "parse_typed_response",
+    "reap_orphaned_agents",
     "session_env_allowlist",
     "session_environment",
     "task_agent_host_resources",
@@ -272,6 +275,17 @@ def __getattr__(name: str) -> object:
         )
 
         return agent_driver_supports_tool_servers
+    if name in {"OrphanReapError", "reap_orphaned_agents"}:
+        # The reaper builds agentshim confinements, and importing agentshim at
+        # module import would load it into every consumer of this package.
+        from vs_agent.orphans import (  # noqa: PLC0415  # lint-waiver: LW-482907 [PLC0415]; keep agentshim unloaded for consumers of vs_agent.api that never reap, like the other lazy names here.
+            OrphanReapError,
+            reap_orphaned_agents,
+        )
+
+        return {"OrphanReapError": OrphanReapError, "reap_orphaned_agents": reap_orphaned_agents}[
+            name
+        ]
     message = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(message)
 

@@ -79,6 +79,22 @@ into the container itself, so a confined session passes host paths through. The
 Codex rollout watchdog guards one-shot `codex exec --json` runs and is not part
 of a stream session.
 
+### Startup recovery
+
+A long-lived agent outlives a turn, so a host process that dies leaves agents
+running in the run's container. A resumed run holds the run's exclusive host
+lock, so the previous host is dead by then and every container labelled
+`vibesys.run-id=<run id>` is an orphan. `RunEnvironment.reap_orphans` (Docker
+environments; a no-op elsewhere) calls `vs_agent.reap_orphaned_agents` before the
+workspace is repaired or any journal turn is reconciled: for each labelled
+container it runs agentshim's `Confinement.reap()` (kills the marked agent
+processes), then `docker rm -f`. A failure raises `OrphanReapError` naming the
+container, and the resume stops: it must not run beside an agent that may still
+be writing. After the reap, in-flight turns in the journal are reconciled by the
+existing core semantics: a turn whose outcome is unknown is inspected and never
+dispatched again, and a conversation the provider lost is not silently replaced
+by a fresh one.
+
 ## Provider readiness
 
 A missing CLI or a logged-out account would otherwise surface as the first

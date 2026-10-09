@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.api.request import RunEnvironmentSpec
 from vs_agent.api.testing import FakeDockerBuildRunner
-from vs_sandbox.api.testing import HostExecutedContainerBackend
+from vs_sandbox.api.testing import FakeDockerEngine, HostExecutedContainerBackend
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -21,7 +21,9 @@ if TYPE_CHECKING:
 
 def fake_docker_environment() -> RunEnvironmentSpec:
     """Return a Docker environment spec whose image build is an in-memory fake."""
-    return RunEnvironmentSpec("docker", {"build_runner": FakeDockerBuildRunner()})
+    return RunEnvironmentSpec(
+        "docker", {"build_runner": FakeDockerBuildRunner(), "docker": FakeDockerEngine()}
+    )
 
 
 def host_container_backend(
