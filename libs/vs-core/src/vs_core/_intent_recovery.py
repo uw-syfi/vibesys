@@ -1163,22 +1163,17 @@ def _observe(
             if intent is not None and child_resource is not None
             else None
         )
+        # One fact, one path: any committed observation about the target re-resolves its
+        # check from the target's current resolution, whichever inspection delivered it
+        # (the check's own, a turn's InspectTurn from Sessions, or a continuation's).
+        # A child's check still names its own inspection: the child is a different resource.
         matches = (
             check.target == target
             and event.target is not None
             and (
-                child_resource is not None
-                or (intent is not None and _reports(intent, event.target))
-            )
-            and (
-                # A reissue proof is a durable fact about the target, whichever inspection
-                # carried it (the recovery check's own, or the turn's inspection by Sessions).
-                event.target.reissue is not None
-                or (
-                    check.inspection == event.observation.request_id
-                    if child_resource is None
-                    else expected_child == event.observation.request_id
-                )
+                intent is not None and _reports(intent, event.target)
+                if child_resource is None
+                else expected_child == event.observation.request_id
             )
         )
         resolution = (

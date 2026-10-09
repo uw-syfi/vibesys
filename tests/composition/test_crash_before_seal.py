@@ -43,12 +43,6 @@ class LostSealGate(FaultGate):
         return super().around(boundary, target, lost)
 
 
-_RECOVERY_CHECK_STALLS = (
-    "a turn whose reply seal was lost is inspected by InspectTurn, which never resolves "
-    "the recovery check; fixed in the next PR of the stack"
-)
-
-
 def _sealed_writes() -> list[object]:
     """Each sealed write of the straight run, named by the request kind that wrote it."""
     params = []
@@ -57,14 +51,7 @@ def _sealed_writes() -> list[object]:
         if crossing.boundary == Boundary.EXECUTOR_REQUEST:
             kind = crossing.target
         elif crossing.target == RECEIPT_SEALED:
-            marks = (
-                [pytest.mark.xfail(strict=True, reason=_RECOVERY_CHECK_STALLS)]
-                if kind == "dispatch_turn"
-                else []
-            )
-            params.append(
-                pytest.param(crossing, id=f"{kind}:sealed#{crossing.ordinal}", marks=marks)
-            )
+            params.append(pytest.param(crossing, id=f"{kind}:sealed#{crossing.ordinal}"))
     return params
 
 

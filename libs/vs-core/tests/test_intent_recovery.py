@@ -50,6 +50,7 @@ from vs_core.api import (
     InputId,
     InputRecord,
     InspectRequest,
+    InspectTurn,
     Intent,
     IntentBlocked,
     IntentPhase,
@@ -2103,3 +2104,78 @@ def test_a_second_inspection_of_a_request_already_reissued_changes_nothing() -> 
     once = step(dispatched.state, event)
     again = step(once.state, event)
     assert again.state.intents.intents == once.state.intents.intents
+
+
+def test_a_turns_own_inspection_resolves_its_recovery_check() -> None:
+    """One fact, one path: any inspection that commits the turn's end resolves its check.
+
+    After a restart the recovery check asks InspectRequest, but Sessions asks InspectTurn,
+    which proves the dispatch terminal under its own inspection id.
+    """
+    dispatch = turn_intent()
+    assert isinstance(dispatch.request, DispatchTurn)
+    inspect = InspectTurn(
+        request_id=RequestId(root="turn-inspect"),
+        scope=dispatch.request.scope,
+        deadline_at=100.0,
+        invocation=InvocationRef(
+            session_id=dispatch.request.turn.session.session_id,
+            invocation_id=dispatch.request.turn.invocation_id,
+            generation=0,
+        ),
+        dispatch=dispatch.request_id,
+    )
+    query = dispatch.model_copy(
+        update={
+            "request_id": inspect.request_id,
+            "request": inspect,
+            "lifecycle": LifecycleClass.QUERY,
+            "payload_digest": fixture_digest(inspect),
+            "phase": IntentPhase.DISPATCHED,
+        }
+    )
+    base = recovering_state(dispatch, query)
+    base = base.model_copy(
+        update={
+            "sessions": SessionsState(
+                invocations=(
+                    Invocation(
+                        invocation=inspect.invocation,
+                        scope=dispatch.request.scope,
+                        turn=dispatch.request.turn,
+                        phase=SessionPhase.EXECUTING,
+                    ),
+                )
+            )
+        }
+    )
+    started = step(reload(base), RecoveryStarted(epoch=1, now_at=11.0))
+
+    def turn_check(state: CoreState) -> str:
+        return next(
+            c.resolution for c in state.intents.recovery.checks if c.target == dispatch.request_id
+        )
+
+    assert turn_check(started.state) == "pending"
+    end = observed(
+        dispatch,
+        status=ObservationStatus.SUCCEEDED,
+        accepted=True,
+        terminal=True,
+        released=True,
+        children_complete=True,
+        resource_id=ResourceId(root="session-resource"),
+    )
+    answer = observed(
+        query,
+        status=ObservationStatus.SUCCEEDED,
+        accepted=True,
+        terminal=True,
+        released=True,
+        children_complete=True,
+    )
+    result = step(
+        started.state,
+        RequestObserved(observation=answer, target=TargetObservation(observation=end)),
+    )
+    assert turn_check(result.state) != "pending"
