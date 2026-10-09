@@ -132,7 +132,6 @@ def _client(provider: str, fake: FakeExecutor, home: Path) -> tuple[AgentClient,
     log = io.StringIO()
     client = AgentClient(
         _driver(provider, fake, home),
-        driver_name="agentshim",
         provider=provider,
         driver_log=AgentDiagnosticLog(log),
         check_readiness=True,
@@ -236,7 +235,7 @@ def test_a_failure_is_not_remembered_so_a_fixed_environment_is_rechecked(
         executor_factory=lambda: current[0],
         launcher_env=lambda: _launcher(home),
     )
-    client = AgentClient(driver, driver_name="agentshim", provider=provider, check_readiness=True)
+    client = AgentClient(driver, provider=provider, check_readiness=True)
 
     with pytest.raises(ProviderNotReadyError):
         _invoke(client, tmp_path)
