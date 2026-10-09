@@ -280,6 +280,23 @@ class TestGpuOperation:
         assert base64.b64decode(first["output"]) == b"started\n"
         assert cancelled
 
+    def test_closing_the_broker_cancels_running_jobs_and_waits_for_them(
+        self, tmp_path: Path, workspace: Path
+    ) -> None:
+        """A run that exits leaves no job behind: close() returns after the cancel was acted on."""
+        launcher = _RecordingLauncher(block=True)
+        with (
+            _serving(tmp_path, workspace, gpu=_gpu(launcher)) as broker,
+            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client,
+        ):
+            client.connect(str(broker.socket_path))
+            client.sendall(json.dumps(_gpu_call(broker, str(workspace))).encode() + b"\n")
+            with client.makefile("rb") as frames:
+                frames.readline()  # the job is running, and this connection stays open
+                broker.close()
+
+                assert launcher.cancelled.is_set()
+
     def test_an_operation_the_run_does_not_offer_is_refused_by_name(
         self, tmp_path: Path, workspace: Path
     ) -> None:

@@ -30,6 +30,7 @@ import secrets
 import socketserver
 import stat
 import threading
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -60,6 +61,8 @@ _MAX_FRAME_BYTES = 4 * 1024 * 1024
 # How often the serving loop checks for shutdown; bounds close() latency.
 _POLL_SECONDS = 0.05
 _MAX_RELAYED_FILE_BYTES = 8 * 1024 * 1024
+# How long close() waits for cancelled jobs to be torn down (their scancel round trips).
+_DRAIN_SECONDS = 60.0
 # The directory the framework's own benchmark result path names; see ``benchmark_output``.
 _FRAMEWORK_TMP = "/tmp"  # noqa: S108  # lint-waiver: LW-954393 [S108]; the fixed framework result directory, not a scratch choice.
 # Variables that would point the job at the agent host's devices or at the
@@ -270,6 +273,7 @@ class _Handler(socketserver.StreamRequestHandler):
             _send(self.connection, {"error": str(error)})
             return
         cancel = threading.Event()
+        owner.track(cancel)
         # A request sends nothing after its first line, so a readable socket
         # means the client went away: cancel the job, queued or running.
         threading.Thread(
@@ -298,6 +302,7 @@ class _Handler(socketserver.StreamRequestHandler):
             except OSError:
                 return
         finally:
+            owner.untrack()
             if job.relay is not None:
                 job.relay[0].unlink(missing_ok=True)
 
@@ -411,6 +416,8 @@ class HostCommandBroker:
         )
         self._server: _Server | None = None
         self._thread: threading.Thread | None = None
+        self._in_flight: dict[threading.Thread, threading.Event] = {}
+        self._in_flight_lock = threading.Lock()
         self._socket_identity: tuple[int, int] | None = None
 
     def start(self) -> None:
@@ -434,12 +441,13 @@ class HostCommandBroker:
             self._unlink_owned_socket()
             raise
 
-    def close(self) -> None:
+    def close(self, drain_seconds: float = _DRAIN_SECONDS) -> None:
         """Stop accepting requests and remove the socket exactly once.
 
-        In-flight requests are handled on daemon threads; a run that closes
-        its broker is ending, and its jobs end with the connections the
-        agent processes hold.
+        Jobs still running are cancelled, and ``close`` waits (up to
+        *drain_seconds*) for their handlers to finish, so the Slurm jobs they
+        asked for are cancelled before the run is gone rather than left to the
+        cluster's time limit.
         """
         server, self._server = self._server, None
         thread, self._thread = self._thread, None
@@ -449,7 +457,27 @@ class HostCommandBroker:
         server.server_close()
         if thread is not None:
             thread.join()
+        self._drain_in_flight(drain_seconds)
         self._unlink_owned_socket()
+
+    def track(self, cancel: threading.Event) -> None:
+        """Register the calling handler thread and its cancel event as in flight."""
+        with self._in_flight_lock:
+            self._in_flight[threading.current_thread()] = cancel
+
+    def untrack(self) -> None:
+        """Remove the calling handler thread from the in-flight set."""
+        with self._in_flight_lock:
+            self._in_flight.pop(threading.current_thread(), None)
+
+    def _drain_in_flight(self, drain_seconds: float) -> None:
+        with self._in_flight_lock:
+            running = dict(self._in_flight)
+        for cancel in running.values():
+            cancel.set()
+        deadline = time.monotonic() + drain_seconds
+        for handler in running:
+            handler.join(max(0.0, deadline - time.monotonic()))
 
     def _unlink_owned_socket(self) -> None:
         identity, self._socket_identity = self._socket_identity, None
