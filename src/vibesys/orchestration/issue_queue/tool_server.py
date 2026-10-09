@@ -1,18 +1,20 @@
-"""Fixed issue-board MCP server driven by plugin-owned policy state.
+"""Issue-board tool declarations driven by plugin-owned policy state.
 
-Product composition launches this module with stable workspace-relative store,
-policy, and tracker-config paths. The orchestration updates their contents, so
-role declarations and tool bindings remain fixed for each session.
+This module owns what the four issue-board tools accept and return. The process
+that serves them (argument parsing, reading the policy and tracker files,
+opening the tracker, speaking MCP) lives in
+``entrypoints.issue_board_tools_server``. Handlers reach the tracker and the
+creation policy only through an :class:`IssueBoardContext`, so each call reads
+the current contents the orchestration has written.
 """
 
 from __future__ import annotations
 
-import argparse
-from pathlib import Path
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
-from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel
 
-from vibesys.orchestration.issue_queue.models import IssueToolPolicy
 from vibesys.orchestration.issue_queue.prompts import (
     create_issue_result,
     invalid_status_result,
@@ -23,15 +25,53 @@ from vs_issue_tracker.api import (
     CreateIssuePolicy,
     IssueStatus,
     IssueTracker,
-    IssueTrackerConfig,
     IssueType,
     create_issue_under_policy,
-    open_issue_tracker,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-def _policy(path: Path) -> CreateIssuePolicy:
-    configured = IssueToolPolicy.model_validate_json(path.read_text(encoding="utf-8"))
+    from vibesys.orchestration.issue_queue.models import IssueToolPolicy
+
+
+@dataclass(frozen=True, slots=True)
+class IssueBoardContext:
+    """How a served tool reaches the issue board and the current creation policy."""
+
+    board: Callable[[], IssueTracker]
+    policy: Callable[[], IssueToolPolicy]
+
+
+@dataclass(frozen=True, slots=True)
+class IssueBoardTool:
+    """One tool: its name, description, argument schema and handler."""
+
+    name: str
+    description: str
+    input_schema: type[BaseModel]
+    handler: Callable[[Any], str]
+
+
+class _ListIssuesArgs(BaseModel):
+    status: str | None = None
+
+
+class _GetIssueArgs(BaseModel):
+    issue_id: int
+
+
+class _SearchIssuesArgs(BaseModel):
+    query: str
+
+
+class _CreateIssueArgs(BaseModel):
+    type: str
+    title: str
+    description: str
+
+
+def _create_policy(configured: IssueToolPolicy) -> CreateIssuePolicy:
     return CreateIssuePolicy(
         creator=configured.creator,
         iteration=configured.iteration,
@@ -40,68 +80,56 @@ def _policy(path: Path) -> CreateIssuePolicy:
     )
 
 
-def build_server(store_path: Path, policy_path: Path, tracker_config_path: Path) -> FastMCP:
-    """Expose issue queries and policy-checked creation over stdio."""
-    server = FastMCP("issue-board")
+def issue_board_tools(context: IssueBoardContext) -> tuple[IssueBoardTool, ...]:
+    """Declare issue queries and policy-checked creation over ``context``."""
 
-    def board() -> IssueTracker:
-        config = IssueTrackerConfig.model_validate_json(
-            tracker_config_path.read_text(encoding="utf-8")
-        )
-        return open_issue_tracker(
-            config.backend,
-            local_path=store_path,
-            repository=config.repository,
-        )
-
-    @server.tool()
-    def list_issues(status: str | None = None) -> str:
-        """List issues, optionally filtered by lifecycle status."""
+    def list_issues(args: _ListIssuesArgs) -> str:
         try:
-            selected = IssueStatus(status) if status else None
+            selected = IssueStatus(args.status) if args.status else None
         except ValueError:
-            return invalid_status_result(status or "")
-        return issue_list_result(board().list(status=selected), searched=False)
+            return invalid_status_result(args.status or "")
+        return issue_list_result(context.board().list(status=selected), searched=False)
 
-    @server.tool()
-    def get_issue(issue_id: int) -> str:
-        """Return the complete issue with its history."""
-        return issue_result(issue_id, board().get(issue_id))
+    def get_issue(args: _GetIssueArgs) -> str:
+        return issue_result(args.issue_id, context.board().get(args.issue_id))
 
-    @server.tool()
-    def search_issues(query: str) -> str:
-        """Find issues containing every comma-separated, case-insensitive term."""
-        return issue_list_result(board().search(query), searched=True)
+    def search_issues(args: _SearchIssuesArgs) -> str:
+        return issue_list_result(context.board().search(args.query), searched=True)
 
-    @server.tool()
-    def create_issue(
-        type: str,  # noqa: A002  # lint-waiver: LW-920438 [A002]; MCP schema uses the domain field name.
-        title: str,
-        description: str,
-    ) -> str:
-        """Create an issue when the current turn policy permits it."""
+    def create_issue(args: _CreateIssueArgs) -> str:
         return create_issue_result(
             create_issue_under_policy(
-                board(),
-                type_str=type,
-                title=title,
-                description=description,
-                policy=_policy(policy_path),
+                context.board(),
+                type_str=args.type,
+                title=args.title,
+                description=args.description,
+                policy=_create_policy(context.policy()),
             )
         )
 
-    return server
-
-
-def main(argv: list[str] | None = None) -> None:
-    """Run the fixed stdio server."""
-    parser = argparse.ArgumentParser(prog="vibesys-issue-board")
-    parser.add_argument("store_path", type=Path)
-    parser.add_argument("policy_path", type=Path)
-    parser.add_argument("tracker_config_path", type=Path)
-    args = parser.parse_args(argv)
-    build_server(args.store_path, args.policy_path, args.tracker_config_path).run(transport="stdio")
-
-
-if __name__ == "__main__":
-    main()
+    return (
+        IssueBoardTool(
+            "list_issues",
+            "List issues, optionally filtered by lifecycle status.",
+            _ListIssuesArgs,
+            list_issues,
+        ),
+        IssueBoardTool(
+            "get_issue",
+            "Return the complete issue with its history.",
+            _GetIssueArgs,
+            get_issue,
+        ),
+        IssueBoardTool(
+            "search_issues",
+            "Find issues containing every comma-separated, case-insensitive term.",
+            _SearchIssuesArgs,
+            search_issues,
+        ),
+        IssueBoardTool(
+            "create_issue",
+            "Create an issue when the current turn policy permits it.",
+            _CreateIssueArgs,
+            create_issue,
+        ),
+    )

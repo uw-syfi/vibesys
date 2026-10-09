@@ -76,7 +76,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vs_project", "vs_github", "vs_issue_tracker", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "headless", "launch", "vs_mcp"]
+depends_on = ["vs_project", "vs_github", "vs_issue_tracker", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.issue_queue", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "headless", "launch", "vs_mcp"]
 
 [[modules]]
 path = "headless"
@@ -173,6 +173,10 @@ depends_on = ["vibesys.orchestration.evolve"]
 [[modules]]
 path = "vibesys.api.hypothesis"
 depends_on = ["vibesys.hypothesis", "vibesys.hypothesis.readmodel"]
+
+[[modules]]
+path = "vibesys.api.issue_queue"
+depends_on = ["vibesys.orchestration.issue_queue"]
 
 [[modules]]
 path = "vibesys.api.metrics"
@@ -724,6 +728,10 @@ expose = ["AgentRunProjection", "CandidateDisposition", "HypothesisOutcome", "Hy
 from = ["vibesys.api.hypothesis"]
 
 [[interfaces]]
+expose = ["IssueBoardContext", "IssueBoardTool", "IssueToolPolicy", "issue_board_tools"]
+from = ["vibesys.api.issue_queue"]
+
+[[interfaces]]
 expose = ["MetricComparison", "MetricSpace", "Objective"]
 from = ["vibesys.api.metrics"]
 
@@ -764,7 +772,7 @@ expose = ["PLUGIN", "REGISTRATION", "resolve_openevolve_options"]
 from = ["vibesys.orchestration.evolve"]
 
 [[interfaces]]
-expose = ["IssueQueueOptions", "IssueQueueState", "PLUGIN", "REGISTRATION"]
+expose = ["IssueBoardContext", "IssueBoardTool", "IssueQueueOptions", "IssueQueueState", "IssueToolPolicy", "PLUGIN", "REGISTRATION", "issue_board_tools"]
 from = ["vibesys.orchestration.issue_queue"]
 
 [[interfaces]]
