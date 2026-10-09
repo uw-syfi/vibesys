@@ -283,6 +283,7 @@ class _EvaluationAdapter:
             evaluation = AccuracyEvaluation(
                 executed=result.executed,
                 feedback=self._accuracy_feedback(result),
+                failure_kind=result.failure_kind,
                 receipt=run.receipt if result.passed else None,
             )
         except asyncio.CancelledError:

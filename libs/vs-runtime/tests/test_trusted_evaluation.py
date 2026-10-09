@@ -8,6 +8,7 @@ from collections import deque
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from pydantic import ValidationError
 
 from vs_project.api import Project
 from vs_runtime.api import BenchmarkFailureKind
@@ -15,6 +16,8 @@ from vs_runtime.api.infrastructure import (
     ModelRequestReconciler,
     ProtocolBenchmarkContract,
     ScalarBenchmarkContract,
+    TrustedAccuracyResult,
+    TrustedBenchmarkResult,
     TrustedEvaluationExecutor,
     TrustedEvaluationPlan,
     create_model_request_reconciler,
@@ -471,3 +474,15 @@ def test_cancellation_drains_owned_accuracy_execution(tmp_path: Path) -> None:
         assert sandbox.completed.is_set()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("model", [TrustedAccuracyResult, TrustedBenchmarkResult])
+def test_a_trusted_result_names_whose_fault_a_failure_is_exactly_when_it_failed(
+    model: type[TrustedAccuracyResult] | type[TrustedBenchmarkResult],
+) -> None:
+    model(executed=True, passed=True)
+    model(executed=True, passed=False, failure_kind=BenchmarkFailureKind.WORKLOAD)
+    with pytest.raises(ValidationError, match="failure kind"):
+        model(executed=True, passed=False)
+    with pytest.raises(ValidationError, match="failure kind"):
+        model(executed=True, passed=True, failure_kind=BenchmarkFailureKind.INFRASTRUCTURE)

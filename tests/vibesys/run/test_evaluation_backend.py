@@ -319,7 +319,11 @@ async def test_failed_accuracy_reaches_the_agent_and_skips_the_benchmark(
     run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
     candidate = await run.workspaces.create_candidate()
     run.evaluation.script_accuracy(
-        AccuracyEvaluation(executed=True, feedback="server failed to start: model not found")
+        AccuracyEvaluation(
+            executed=True,
+            feedback="server failed to start: model not found",
+            failure_kind=BenchmarkFailureKind.WORKLOAD,
+        )
     )
     namespace = _namespace(tmp_path)
     backend = SemanticEvaluationBackend(run.evaluation, run.workspaces, namespace, _identity())
@@ -358,7 +362,11 @@ async def test_policy_reads_the_outcomes_agents_submitted_from_a_workspace(
     candidate = await run.workspaces.create_candidate(member_id="cache")
     other = await run.workspaces.create_candidate(member_id="other")
     run.evaluation.script_accuracy(
-        AccuracyEvaluation(executed=True, feedback="ValueError: length 22 exceeds capacity 21"),
+        AccuracyEvaluation(
+            executed=True,
+            feedback="ValueError: length 22 exceeds capacity 21",
+            failure_kind=BenchmarkFailureKind.WORKLOAD,
+        ),
         AccuracyEvaluation(executed=True),
     )
     namespace = _namespace(tmp_path)
@@ -466,10 +474,16 @@ async def test_the_await_reply_says_when_a_failure_repeats_the_previous_ones(
     run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
     candidate = await run.workspaces.create_candidate(member_id="cache")
     run.evaluation.script_accuracy(
-        AccuracyEvaluation(executed=True, feedback=_server_failure(21)),
-        AccuracyEvaluation(executed=True, feedback=_server_failure(30)),
+        AccuracyEvaluation(
+            executed=True, feedback=_server_failure(21), failure_kind=BenchmarkFailureKind.WORKLOAD
+        ),
+        AccuracyEvaluation(
+            executed=True, feedback=_server_failure(30), failure_kind=BenchmarkFailureKind.WORKLOAD
+        ),
         AccuracyEvaluation(executed=True),
-        AccuracyEvaluation(executed=True, feedback=_server_failure(21)),
+        AccuracyEvaluation(
+            executed=True, feedback=_server_failure(21), failure_kind=BenchmarkFailureKind.WORKLOAD
+        ),
     )
     namespace = _namespace(tmp_path)
     backend = SemanticEvaluationBackend(run.evaluation, run.workspaces, namespace, _identity())

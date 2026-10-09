@@ -49,6 +49,7 @@ from vs_runtime.api import (
     AgentRole,
     AgentToolBindingContext,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     CandidateWorkspace,
     MetricDirection,
     Run,
@@ -355,7 +356,11 @@ async def test_run_history_includes_a_joined_semantic_submission(
             observations=original.observations,
         )
         original.evaluation.script_accuracy(
-            AccuracyEvaluation(executed=True, feedback=None if passed else "accuracy mismatch")
+            AccuracyEvaluation(
+                executed=True,
+                feedback=None if passed else "accuracy mismatch",
+                failure_kind=None if passed else BenchmarkFailureKind.WORKLOAD,
+            )
         )
         submissions = []
         for workspace in (owner, requester):
@@ -534,7 +539,11 @@ async def test_requester_history_orders_joins_by_submission_instead_of_capture(
         )
         original.evaluation.script_accuracy(
             AccuracyEvaluation(executed=True),
-            AccuracyEvaluation(executed=True, feedback="changed candidate fails"),
+            AccuracyEvaluation(
+                executed=True,
+                feedback="changed candidate fails",
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
+            ),
         )
 
         async def submit(token: str) -> str:

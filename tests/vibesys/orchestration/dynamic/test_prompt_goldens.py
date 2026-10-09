@@ -44,6 +44,7 @@ from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
     AgentEvaluation,
+    BenchmarkFailureKind,
     RunFacts,
     StructuredResponseError,
 )
@@ -253,7 +254,9 @@ def test_trusted_evaluation_failure_feedback(tmp_path: Path, feedback: str) -> N
 
     def setup(run: FakeRun) -> None:
         run.evaluation.script_accuracy(
-            AccuracyEvaluation(executed=True, feedback=feedback),
+            AccuracyEvaluation(
+                executed=True, feedback=feedback, failure_kind=BenchmarkFailureKind.WORKLOAD
+            ),
             AccuracyEvaluation(executed=True),
         )
 

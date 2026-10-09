@@ -784,6 +784,11 @@ class AccuracyReceipt(BaseModel):
     revision: str = Field(min_length=1)
 
 
+# Whether a benchmark failure describes its workload or execution infrastructure. It is
+# the evidence's own failure kind, so the executor's claim reaches the evidence unconverted.
+BenchmarkFailureKind = EvidenceFailureKind
+
+
 class AccuracyEvaluation(BaseModel):
     """Semantic outcome of the trusted accuracy evaluation."""
 
@@ -791,17 +796,21 @@ class AccuracyEvaluation(BaseModel):
 
     executed: bool
     feedback: str | None = None
+    # Whose fault the failure is: present exactly when accuracy failed, with no default.
+    failure_kind: BenchmarkFailureKind | None = None
     receipt: AccuracyReceipt | None = None
+
+    @model_validator(mode="after")
+    def _failure_kind_exactly_when_failed(self) -> AccuracyEvaluation:
+        if (self.feedback is None) != (self.failure_kind is None):
+            message = "an accuracy outcome carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        return self
 
     @property
     def passed(self) -> bool:
         """Return whether policy may accept this accuracy outcome."""
         return self.feedback is None
-
-
-# Whether a benchmark failure describes its workload or execution infrastructure. It is
-# the evidence's own failure kind, so the executor's claim reaches the evidence unconverted.
-BenchmarkFailureKind = EvidenceFailureKind
 
 
 class BenchmarkEvaluation(BaseModel):

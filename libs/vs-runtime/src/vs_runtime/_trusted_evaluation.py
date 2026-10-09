@@ -194,9 +194,18 @@ class TrustedAccuracyResult(BaseModel):
     passed: bool
     output: str = ""
     failure: str | None = None
+    # Whose fault a failed command is: present exactly when it failed, with no default.
+    failure_kind: BenchmarkFailureKind | None = None
     stdout: str = ""
     stderr: str = ""
     provisioned_volumes: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _failure_kind_exactly_when_failed(self) -> TrustedAccuracyResult:
+        if self.passed != (self.failure_kind is None):
+            message = "a trusted accuracy result carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        return self
 
 
 class TrustedBenchmarkResult(BaseModel):
@@ -333,6 +342,7 @@ class RuntimeTrustedEvaluation:
                 passed=False,
                 output=failure,
                 failure=failure,
+                failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
             )
         if changed := self._git.trusted_input_changes():
             failure = "Evaluator-owned files were modified: " + ", ".join(changed)
@@ -342,6 +352,7 @@ class RuntimeTrustedEvaluation:
                 passed=False,
                 output=failure,
                 failure=failure,
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         if command is None:
             return TrustedAccuracyResult(
@@ -357,18 +368,29 @@ class RuntimeTrustedEvaluation:
         )
         output = execution_failure or result.output.strip()
         passed = execution_failure is None and result.exit_code == 0
+        mutated = False
         if changed := self._git.trusted_input_changes():
             mutation = "Evaluator-owned files changed during accuracy execution: " + ", ".join(
                 changed
             )
             output = f"{output}\n{mutation}".strip()
             passed = False
+            mutated = True
         return TrustedAccuracyResult(
             command=command,
             executed=True,
             passed=passed,
             output=output,
             failure=None if passed else output,
+            # The exit status is the accuracy command's own verdict, so it leaves an outcome
+            # whenever it reported one; a candidate that changed evaluator-owned files owns it.
+            failure_kind=(
+                None
+                if passed
+                else BenchmarkFailureKind.WORKLOAD
+                if mutated
+                else _command_failure_kind(RecordState.OUTCOME, result, execution_failure)
+            ),
             stdout=result.stdout,
             stderr=result.stderr,
             provisioned_volumes=volumes,
@@ -462,7 +484,7 @@ class RuntimeTrustedEvaluation:
                 failure_kind=(
                     None
                     if passed
-                    else _benchmark_failure_kind(record_state(framed), result, execution_failure)
+                    else _command_failure_kind(record_state(framed), result, execution_failure)
                 ),
                 failure_reason=decoded.reason,
                 stdout=result.stdout,
@@ -552,11 +574,12 @@ def record_state(framed: str) -> RecordState:
     return RecordState.OUTCOME
 
 
-def _benchmark_failure_kind(
+def _command_failure_kind(
     record: RecordState, result: CommandResult, execution_failure: str | None
 ) -> BenchmarkFailureKind:
-    """Whose fault a failed benchmark run is, by its exit status and its record.
+    """Whose fault a failed trusted command is, by its exit status and its record.
 
+    The one reading of a sandbox result for every trusted stage (accuracy and benchmark).
     A command that could not run, was cancelled, or timed out in the sandbox reported
     no exit status (negative or absent), which says nothing about the candidate.
     """

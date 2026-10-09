@@ -1530,6 +1530,10 @@ class EvidenceReusingEvaluation:
         revision = workspace.revision
         if revision is None:
             return await self._delegate.accuracy(workspace)
+        if accepted.outcome is not EvidenceOutcome.PASSED and accepted.failure_kind is None:
+            # Evidence recorded before failures were classified proves neither whose fault
+            # the failure was nor that the candidate failed: measure it again.
+            return await self._delegate.accuracy(workspace)
         feedback = (
             None
             if accepted.outcome is EvidenceOutcome.PASSED
@@ -1538,6 +1542,7 @@ class EvidenceReusingEvaluation:
         return AccuracyEvaluation(
             executed=False,
             feedback=feedback,
+            failure_kind=None if feedback is None else accepted.failure_kind,
             receipt=(
                 AccuracyReceipt(
                     run_id=self._run_id,

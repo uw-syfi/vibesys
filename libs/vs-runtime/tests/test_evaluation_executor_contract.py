@@ -36,6 +36,7 @@ from vs_evaluation.api import (
 )
 from vs_runtime.api import (
     AccuracyEvaluation,
+    BenchmarkFailureKind,
     PollingEvaluationExecutor,
     render_stage_failure,
 )
@@ -82,7 +83,11 @@ async def _local(root: Path, script: _Script) -> _World:
     evaluation = FakeEvaluation()
     if script is _Script.FAIL_ACCURACY:
         evaluation.accuracy_results.append(
-            AccuracyEvaluation(executed=True, feedback="accuracy mismatch")
+            AccuracyEvaluation(
+                executed=True,
+                feedback="accuracy mismatch",
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
+            )
         )
     else:
         evaluation.default_accuracy = AccuracyEvaluation(executed=True)

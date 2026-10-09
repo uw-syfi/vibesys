@@ -16,7 +16,7 @@ from hypothesis import strategies as st
 from vibesys.orchestration.evolve.models import EvolveOptions, EvolveState
 from vibesys.orchestration.evolve.plugin import PLUGIN
 from vs_core.api import DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
-from vs_runtime.api import BenchmarkEvaluation, BenchmarkFailureKind, RunFacts
+from vs_runtime.api import AccuracyEvaluation, BenchmarkEvaluation, BenchmarkFailureKind, RunFacts
 from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
@@ -132,3 +132,34 @@ def test_a_candidate_that_failed_on_its_own_account_is_admitted_as_failed(
 
     assert len(run.evaluation.benchmark_calls) == _SEED_AND_CHILD
     assert [individual.passed for individual in state.population.individuals] == [True, False]
+
+
+def test_a_candidate_whose_accuracy_is_lost_beyond_the_bound_takes_no_population_slot(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    root = tmp_path_factory.mktemp("evolve")
+
+    async def scenario() -> tuple[FakeRun, EvolveState]:
+        run = FakeRun(PLUGIN, project_root=root, facts=_FACTS, responder=_respond)
+        lost = AccuracyEvaluation(
+            executed=False,
+            feedback="node lost",
+            failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
+        )
+        # The seed's accuracy passes; the child's is lost until the bound.
+        run.evaluation.script_accuracy(
+            AccuracyEvaluation(executed=True), *[lost] * DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
+        )
+        run.evaluation.script_benchmark(_MEASURED)
+        try:
+            await PLUGIN.orchestrate(run, _OPTIONS)
+            state = await run.state.load(EvolveState)
+            assert state is not None
+            return run, state
+        finally:
+            await run.close()
+
+    run, state = asyncio.run(scenario())
+
+    assert len(run.evaluation.accuracy_calls) == 1 + DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
+    assert [individual.passed for individual in state.population.individuals] == [True]

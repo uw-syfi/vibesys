@@ -45,6 +45,7 @@ from vs_runtime.api import (
     BenchmarkObjective,
     CandidateFailed,
     EvaluationPassed,
+    EvaluationVerdict,
     InfrastructureFailed,
     MetricDirection,
     Run,
@@ -52,6 +53,7 @@ from vs_runtime.api import (
     RunStatus,
     RunStopped,
     SettlingMeasurement,
+    StageEvaluation,
     Workspace,
 )
 
@@ -123,6 +125,19 @@ async def _open_sessions(run: Run, workspace: Workspace) -> _Sessions:
         else None
     )
     return _Sessions(mutator=mutator, judge=judge, profiler=profiler)
+
+
+def _read_verdict(verdict: EvaluationVerdict[StageEvaluation]) -> tuple[bool, str | None]:
+    """Whether the candidate was measured, and the feedback of a failure it owns."""
+    match verdict:
+        case EvaluationPassed():
+            return True, None
+        case CandidateFailed(feedback=feedback):
+            return True, feedback
+        case InfrastructureFailed():
+            return False, None
+        case _:
+            assert_never(verdict)
 
 
 class _EvolveRun:
@@ -431,8 +446,15 @@ class _EvolveRun:
         feedback = verdict.feedback if verdict.verdict is Verdict.FAIL else None
         benchmark = None
         if feedback is None:
-            accuracy = await self.run.evaluation.accuracy(workspace)
-            feedback = accuracy.feedback
+            accuracy_settling = SettlingMeasurement()
+            accuracy_verdict = None
+            while accuracy_verdict is None:
+                accuracy = await self.run.evaluation.accuracy(workspace)
+                accuracy_verdict = accuracy_settling.observe(accuracy)
+            measured, feedback = _read_verdict(accuracy_verdict)
+            if not measured:
+                # The candidate was never measured: it earns no population slot.
+                return None
         if feedback is None and self.run.facts.benchmark_configured:
             settling = SettlingMeasurement()
             settled = None
@@ -441,16 +463,9 @@ class _EvolveRun:
                     workspace, objectives=self.objectives
                 )
                 settled = settling.observe(benchmark)
-            match settled:
-                case EvaluationPassed():
-                    pass
-                case CandidateFailed(feedback=failure):
-                    feedback = failure
-                case InfrastructureFailed():
-                    # The candidate was never measured: it earns no population slot.
-                    return None
-                case _:
-                    assert_never(settled)
+            measured, feedback = _read_verdict(settled)
+            if not measured:
+                return None
         if feedback is not None:
             return CandidateOutcome(
                 passed=False,

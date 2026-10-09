@@ -40,7 +40,6 @@ from vs_evaluation.api import (
 )
 from vs_runtime._evaluation_failure_text import render_evaluation_failure, render_stage_failure
 from vs_runtime._failure_classification import is_unsettled
-from vs_runtime.contracts import BenchmarkFailureKind
 
 if TYPE_CHECKING:
     from vs_runtime.contracts import CandidateWorkspace, Evaluation, Workspace, Workspaces
@@ -222,15 +221,16 @@ class PollingEvaluationExecutor:
     async def _evaluate(
         self, workspace: Workspace, stage: SemanticEvaluationStage, handle_id: str
     ) -> _SemanticStageObservation:
-        completed = True
         if stage.kind is EvidenceKind.ACCURACY:
             result = await self._evaluation.accuracy(workspace)
-            outcome = EvidenceOutcome.PASSED if result.passed else EvidenceOutcome.FAILED
+            completed = not is_unsettled(result.failure_kind)
+            outcome = (
+                EvidenceOutcome.PASSED if completed and result.passed else EvidenceOutcome.FAILED
+            )
             summary = result.feedback
             metrics: tuple[EvidenceMetric, ...] = ()
             partial = None
-            # A failed accuracy gate always describes the candidate.
-            kind: BenchmarkFailureKind | None = BenchmarkFailureKind.WORKLOAD
+            kind = result.failure_kind
         elif stage.kind is EvidenceKind.BENCHMARK:
             result = await self._evaluation.benchmark(workspace)
             completed = not is_unsettled(result.failure_kind)
@@ -279,11 +279,7 @@ class PollingEvaluationExecutor:
             semantic_summary=summary,
             metrics=metrics,
             partial_measurement=partial,
-            failure_kind=(
-                None
-                if outcome is EvidenceOutcome.PASSED
-                else (kind or BenchmarkFailureKind.WORKLOAD)
-            ),
+            failure_kind=None if outcome is EvidenceOutcome.PASSED else kind,
             accepted_round=0,
         )
         return _SemanticStageObservation(evidence=evidence, completed=completed)
