@@ -19,11 +19,15 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
 
-from vs_agent.api.images import agent_image
+from vs_agent.api.images import agent_image, build_task_image
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 ENABLE_ENV = "VIBESYS_E2E_DOCKER"
 
@@ -80,3 +84,48 @@ def test_cpu_agent_image_runs_every_shipped_cli_as_the_agent_user() -> None:
     assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
     output_lines = [line for line in result.stdout.splitlines() if line.strip()]
     assert output_lines[0] == "1000", output_lines
+
+
+def _task_dockerfile(tmp_path: Path) -> Path:
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        "ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nRUN echo task-layer > /task-marker\n",
+        encoding="utf-8",
+    )
+    return dockerfile
+
+
+@pytest.mark.skipif(
+    not _enabled() or shutil.which("docker") is None,
+    reason=f"set {ENABLE_ENV}=1 with docker on PATH to build the task and agent images",
+)
+@pytest.mark.parametrize("flow", ["task-dockerfile", "recorded-id"])
+def test_agent_layer_builds_on_a_task_image_end_to_end(tmp_path: Path, flow: str) -> None:
+    """The agent layer builds on a task image without contacting a registry.
+
+    Regression for #1520: BuildKit resolves ``FROM sha256:<id>`` as a registry
+    reference and fails on Docker 29's containerd image store. ``recorded-id``
+    is the headless entrypoint's flow (it builds the task image, records its
+    ID, and hands that ID to ``agent_image`` as the base).
+    """
+    dockerfile = _task_dockerfile(tmp_path)
+    if flow == "recorded-id":
+        task_id = build_task_image(
+            dockerfile, base_image="python:3.12-bookworm", timeout=_BUILD_TIMEOUT_S
+        )
+        image_id = agent_image(task_id, timeout=_BUILD_TIMEOUT_S)
+    else:
+        image_id = agent_image(
+            "python:3.12-bookworm", task_dockerfile=dockerfile, timeout=_BUILD_TIMEOUT_S
+        )
+
+    result = run_test_command(
+        ("docker", "run", "--rm", image_id, "cat", "/task-marker"),
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=_RUN_TIMEOUT_S,
+    )
+
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    assert result.stdout.strip() == "task-layer"
