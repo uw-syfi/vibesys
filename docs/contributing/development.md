@@ -147,7 +147,8 @@ completion, every offered capability served or withdrawn after `unsupported`,
 no MCP tool timeout, every run path a prompt names present at turn start, no
 evaluation submitted after a stop, the stop grace bound, no Slurm job left
 behind, and recorded token usage. Each run prints one summary line (wall time,
-tokens, cost) to `smoke-summary.txt` under `.logs/smoke-<timestamp>`. One run
+tokens, cost) to `smoke-summary.txt` under a fresh `vibesys-smoke-*` directory in `$TMPDIR` (or `/tmp`); set
+`VIBESYS_SMOKE_DIR` to choose another location outside the checkout. One run
 of both scenarios takes about 5 minutes and about $0.60 of Haiku tokens. It is
 opt-in (`VIBESYS_E2E_AGENTS=1`) and not in PR CI, because real agents are
 nondeterministic.
