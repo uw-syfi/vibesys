@@ -308,7 +308,9 @@ def _stack(
 
 
 _OPS = st.lists(st.sampled_from(("snapshot", "inspect_only", "poll", "wait")), max_size=30)
-_PROPERTY = settings(max_examples=12, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+# Each example replays a whole job lifecycle through the connector, one subprocess per
+# remote command, so a few generated cases run beside the explicit boundary examples.
+_PROPERTY = settings(max_examples=4, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 
 
 async def _publishes_monotonically(spec: _WorldSpec, operations: list[str]) -> None:

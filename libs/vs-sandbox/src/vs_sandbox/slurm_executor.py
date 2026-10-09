@@ -592,6 +592,12 @@ class SlurmEvaluationExecutor:
         results = await asyncio.gather(
             *(self.cancel(handle_id) for handle_id in active), return_exceptions=True
         )
+        # A cancel of an evaluation that already ended durably returns without touching
+        # its task, so a task still waiting for admission would outlive the executor.
+        leftover = tuple(task for task in self._tasks.values() if not task.done())
+        for task in leftover:
+            task.cancel()
+        await asyncio.gather(*leftover, return_exceptions=True)
         for result in results:
             if isinstance(result, BaseException):
                 raise result
