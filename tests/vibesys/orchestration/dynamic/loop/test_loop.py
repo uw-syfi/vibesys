@@ -5,15 +5,10 @@ from __future__ import annotations
 import json
 import os
 import re
-import tempfile
 import threading
-import unicodedata
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from hypothesis import example, given, settings
-from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.loop._harness import (
     PASS,
     AgentTransportError,
@@ -39,6 +34,7 @@ from vs_runtime.api import RuntimeContractError, StructuredResponseError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 _SCHEMA_ERRORS = (
     "Output does not match required schema: root: must have required property 'workstreams', "
@@ -90,31 +86,50 @@ def test_a_hypothesis_is_adopted_and_the_next_one_builds_on_it(tmp_path: Path) -
 
 
 def test_planner_mistakes_are_corrected_and_odd_ids_reach_trusted_rounds(tmp_path: Path) -> None:
+    """Ids and titles are agent output that becomes workspace names, refs, and state keys.
+
+    The plan accepts an id only in its one canonical spelling
+    (tests/vibesys/orchestration/dynamic/test_plan_ids.py covers the rejected
+    ones), and the id-to-workspace mapping is property-tested over arbitrary ids
+    in libs/vs-runtime/tests/test_workspace_identity_contract.py. This run
+    carries the awkward canonical ids through every trusted layer once.
+    """
     loop_input = LoopInput.create(tmp_path)
-    odd = ("H1", "KV.Cache_v2 / ../Ünïcode")
+    odd = ("H1", "0", "KV.Cache_v2 / ../Ünïcode")
     agents = (
         ScriptedAgents()
         # Continues a hypothesis that does not exist; the planner is corrected.
         .plan(
             portfolio(workstream("Q9", continue_hypothesis=True), workstream("Q10")),
-            portfolio(*(workstream(identifier) for identifier in odd)),
+            # A trailing space is not the id's canonical spelling.
+            portfolio(workstream("0 ")),
+            portfolio(
+                workstream(odd[0]),
+                workstream(odd[1], title="0 "),
+                workstream(odd[2], title="T" * 80),
+            ),
         )
         .implement(odd[0], edit_to(2, odd[0]))
         .judge(odd[0], PASS)
-        .implement(odd[1], edit_to(5, odd[1], ("benchmark",)))
+        .implement(odd[1], edit_to(3, odd[1]))
         .judge(odd[1], PASS)
+        .implement(odd[2], edit_to(5, odd[2], ("benchmark",)))
+        .judge(odd[2], PASS)
     )
 
-    run = run_loop(loop_input, agents, options(max_in_flight=2))
+    run = run_loop(loop_input, agents, options(max_in_flight=3))
 
     assert run.error is None
     assert run.succeeded is True
     assert agents.unscripted == []
     assert run.notes() == []
     planner = agents.prompts(ORCHESTRATOR.id)
-    assert len(planner) == 2
+    assert len(planner) == 3
     assert "Correction required" in planner[1]
     assert "'Q9' cannot be continued" in planner[1]
+    assert "Correction required" in planner[2]
+    assert "workstreams.0.implement.hypothesis_id" in planner[2]
+    assert "'0 ' is not a valid identifier" in planner[2]
     state = load_state(loop_input, run.run_id)
     assert {item.hypothesis_id for item in state.workstreams} == set(odd)
     assert all(item.phase is WorkstreamPhase.EVALUATED for item in state.workstreams)
@@ -296,56 +311,6 @@ def test_a_crashed_run_resumes_from_older_state_and_finishes(tmp_path: Path) -> 
     assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 3\n"
 
 
-# Hypothesis ids and titles are agent output that becomes workspace names,
-# Git refs, state namespaces, and prompt text. The plan accepts an id only in
-# its one canonical spelling (tests/vibesys/orchestration/dynamic/test_plan_ids.py
-# covers the rejected ones), so this generates canonical ids. Each example is a
-# whole run, so the example count stays small; the explicit examples are past
-# failures.
-_IDS = st.text(
-    st.characters(categories=("L", "M", "N", "P", "S"), include_characters=" "),
-    min_size=1,
-    max_size=128,
-).filter(lambda value: value == value.strip() and unicodedata.is_normalized("NFC", value))
-_TITLES = st.text(st.characters(exclude_categories=("Cs",)), min_size=1, max_size=80)
-
-
-# Each example runs a whole loop (hundreds of subprocesses), so a pull request
-# draws one generated example beside the pinned ``@example`` cases below. The
-# scheduled workflow (``.github/workflows/nightly.yml``) sets
-# ``VIBESYS_FULL_PROPERTIES=1`` and draws many more.
-_LOOP_EXAMPLES = 20 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 1
-
-
-@settings(max_examples=_LOOP_EXAMPLES)
-@given(identifier=_IDS, title=_TITLES)
-@example(identifier="H1", title="Prefix cache")
-@example(identifier="0", title="0 ")
-@example(identifier="KV.Cache_v2 / ../Ünïcode", title="T" * 80)
-def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
-    identifier: str, title: str
-) -> None:
-    with tempfile.TemporaryDirectory() as base:
-        loop_input = LoopInput.create(Path(base))
-        agents = (
-            ScriptedAgents()
-            .plan(portfolio(workstream(identifier, title=title)))
-            .implement(identifier, edit_to(2, identifier))
-            .judge(identifier, PASS)
-        )
-
-        run = run_loop(loop_input, agents, options())
-
-        assert run.error is None
-        assert run.succeeded is True
-        assert run.notes() == []
-        assert agents.unscripted == []
-        (item,) = load_state(loop_input, run.run_id).workstreams
-        assert item.hypothesis_id == identifier
-        assert item.phase is WorkstreamPhase.EVALUATED
-        assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 2\n"
-
-
 @pytest.mark.parametrize("schema_failures", [1, 2])
 def test_a_provider_schema_failure_is_corrected_instead_of_ending_the_run(
     tmp_path: Path, schema_failures: int
@@ -400,34 +365,6 @@ def test_a_planner_that_fails_its_schema_after_correction_ends_the_run_with_the_
     assert len(agents.prompts(ORCHESTRATOR.id)) == 4
 
 
-def test_a_plan_that_fails_validation_is_corrected_with_the_field_named_errors(
-    tmp_path: Path,
-) -> None:
-    """The correction names the offending field, as the production client reports it."""
-    loop_input = LoopInput.create(tmp_path)
-    trailing_space = portfolio(workstream("0 "))
-    agents = (
-        ScriptedAgents()
-        .plan(trailing_space, portfolio(workstream("0")))
-        .implement("0", edit_to(2, "0"))
-        .judge("0", PASS)
-    )
-
-    run = run_loop(loop_input, agents, options())
-
-    assert run.error is None
-    assert run.succeeded is True
-    assert agents.unscripted == []
-    planner = agents.prompts(ORCHESTRATOR.id)
-    assert len(planner) == 2
-    assert "Correction required" in planner[1]
-    assert "workstreams.0.implement.hypothesis_id" in planner[1]
-    assert "'0 ' is not a valid identifier" in planner[1]
-    state = load_state(loop_input, run.run_id)
-    assert [item.hypothesis_id for item in state.workstreams] == ["0"]
-    assert [item.phase for item in state.workstreams] == [WorkstreamPhase.EVALUATED]
-
-
 def test_long_agent_text_is_kept_whole_and_the_planner_history_stays_bounded(
     tmp_path: Path,
 ) -> None:
@@ -454,8 +391,7 @@ def test_long_agent_text_is_kept_whole_and_the_planner_history_stays_bounded(
         .plan(plan, portfolio(workstream("H2")))
         .implement("H1", long_result)
         .judge("H1", {"passed": True, "analysis": long, "feedback": long})
-        .implement("H2", edit_to(3, "H2"))
-        .judge("H2", PASS)
+        .implement("H2", implemented("H2", outcome="blocked"))
     )
 
     run = run_loop(loop_input, agents, options(max_rounds=2))
