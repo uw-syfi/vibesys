@@ -41,6 +41,12 @@ jobs:
       native_languages: ${{ steps.filter.outputs.native_languages }}
       pnpm_packages: ${{ steps.filter.outputs.pnpm_packages }}
       impact: ${{ steps.filter.outputs.impact }}
+      # The per-file test seconds the shards balance on, read once here so that
+      # every shard of a run sees the same record (a shard that read a newer
+      # cache entry than its siblings would break the partition of the suite).
+      # Empty when no run on main has recorded one yet; the shards then use the
+      # checked-in tests/support/shard_durations.json.
+      durations: ${{ steps.durations.outputs.durations }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,6 +64,31 @@ jobs:
           ./support/repoctl/repoctl validate
           ./support/repoctl/repoctl verify-policy --cases tests/repoctl/cases.toml
           ./support/repoctl/repoctl plan --github-event --github-output "$GITHUB_OUTPUT"
+
+      # Best effort: a missing, evicted or malformed cache entry only means the
+      # shards balance on the checked-in record, never that the run fails.
+      - name: Restore the latest shard durations recorded on main
+        id: durations-cache
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/shard-durations
+          key: shard-durations-no-exact-match
+          restore-keys: shard-durations-
+
+      - name: Hand the durations to the shards
+        id: durations
+        continue-on-error: true
+        env:
+          RESTORED_FROM: ${{ steps.durations-cache.outputs.cache-matched-key }}
+        run: |
+          file="$RUNNER_TEMP/shard-durations/shard_durations.json"
+          if [ -f "$file" ] && jq -e 'type == "object" and all(.[]; type == "number" and . >= 0)' "$file" > /dev/null; then
+            echo "durations=$(jq -c . "$file")" >> "$GITHUB_OUTPUT"
+            echo "Shards balance on the durations cached as $RESTORED_FROM."
+          else
+            echo "No usable cached durations; shards balance on the checked-in record."
+          fi
 
   # The two stdlib-only documentation checks, run on every pull request and
   # merge-queue entry. They used to run only in `python-checks` (skipped for a
@@ -401,6 +432,16 @@ jobs:
         with:
           go-version-file: support/repoctl/go.mod
 
+      # Written from the `changes` job's output, not restored per shard, so all
+      # shards of a run balance on the same record and still partition the suite.
+      - name: Use the shard durations recorded on main
+        if: needs.changes.outputs.durations != ''
+        env:
+          DURATIONS: ${{ needs.changes.outputs.durations }}
+        run: |
+          echo "$DURATIONS" > "$RUNNER_TEMP/shard_durations.json"
+          echo "VIBESYS_SHARD_DURATIONS=$RUNNER_TEMP/shard_durations.json" >> "$GITHUB_ENV"
+
       - name: Run Python tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
         env:
           VIBESYS_TEST_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
@@ -421,6 +462,51 @@ jobs:
         with:
           name: shard-durations-${{ matrix.shard }}
           path: shard-durations-${{ matrix.shard }}.json
+
+  # Keeps the shard balance current without a hand-edited record: a green run on
+  # main merges its shards' measured seconds into a cache entry, which the
+  # `changes` job of every later run restores. Off the critical path (it runs
+  # beside `coverage`), and advisory: its failure does not fail the run.
+  record-durations:
+    needs: [changes, test]
+    # A failed recording only leaves the previous cache entry in use.
+    continue-on-error: true
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Download measured test durations
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: shard-durations-*
+          path: measured-durations
+          merge-multiple: true
+
+      - name: Merge the shards' durations
+        run: |
+          uv run --no-sync python -m scripts.refresh_shard_durations measured-durations \
+            --output "$RUNNER_TEMP/shard-durations/shard_durations.json"
+
+      - name: Cache the merged durations for later runs
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/shard-durations
+          key: shard-durations-${{ github.sha }}
 
   # Combines the shards' coverage data, applies the repo-wide and per-module
   # floors, and checks patch coverage. Was part of the single `test` job, which
@@ -569,6 +655,7 @@ jobs:
       - validate-examples
       - agent-image
       - test
+      - record-durations
       - coverage
       - sandbox-linux
       - sandbox-macos
