@@ -63,6 +63,7 @@ from vs_agent.host_resource_declarations import (
     declare_provider_state_resources,
     task_agent_host_resources,
 )
+from vs_agent.orphans import OrphanReapError, reap_orphaned_agents
 from vs_agent.progress import AgentProgress, CandidateProgress, RoundProgress
 from vs_agent.provider_policy import (
     CLI_VERSIONS,
@@ -197,6 +198,7 @@ __all__ = [
     "MCPServerSpec",
     "NullAgentEventSink",
     "NullSessionStore",
+    "OrphanReapError",
     "Pending",
     "ProviderNotReadyError",
     "ProviderReadiness",
@@ -233,6 +235,7 @@ __all__ = [
     "inspect_invocation_journal",
     "materialize_skills",
     "parse_typed_response",
+    "reap_orphaned_agents",
     "session_env_allowlist",
     "session_environment",
     "task_agent_host_resources",

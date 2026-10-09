@@ -384,6 +384,11 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 workspace_files.create()
 
         if existing:
+            # The previous host is gone (the resume holds the run's host lock), so
+            # whatever agent it left running is an orphan: end it before anything
+            # touches the workspace or the journal's in-flight turns are reconciled.
+            with boot_trace.span("reap_orphans"):
+                environment.reap_orphans(run_id, log=buffered_logs.append)
             with boot_trace.span("workspace_repair"):
                 workspace_files.repair()
         project_excluded_dirs = set(workspace_files.excluded_dirs)

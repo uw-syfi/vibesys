@@ -21,12 +21,14 @@ from tests.vibesys.orchestration.plugin import EmptyOptions
 from entrypoints.run import supervise
 from headless import run as render_run
 from launch import LaunchSettings, default_runs
+from vibesys.api.request import RunEnvironmentSpec
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_catalog import OrchestrationRegistry
-from vibesys.run.contracts import RunRequest
+from vibesys.run.contracts import ResumeRef, RunRequest
+from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import OrchestrationPlugin, RunStatus
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
@@ -83,6 +85,14 @@ def _project(root: Path) -> None:
 
 
 @dataclass
+class _Resumed:
+    """A run resumed after its host died, and the host's Docker client."""
+
+    run_id: str
+    host_docker: FakeDockerEngine
+
+
+@dataclass
 class _Observed:
     """What the orchestration saw of the daemon while the run was live."""
 
@@ -111,13 +121,17 @@ def _execute(
     *,
     exit_path: str,
     ends_with: type[BaseException] | None = None,
+    resumed: _Resumed | None = None,
 ) -> tuple[FakeDockerEngine, _Observed]:
     # The container receives the provider credential, so the run needs one to open.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     root = tmp_path / "project"
-    _project(root)
+    resume = None if resumed is None else ResumeRef(run_id=resumed.run_id)
+    host_docker = None if resumed is None else resumed.host_docker
+    if resumed is None:
+        _project(root)
     state = tmp_path / "engine"
-    state.mkdir()
+    state.mkdir(exist_ok=True)
     engine = FakeDockerEngine(state)
     if exit_path == "start-lost":
         engine.runs_lost_after_creating([False])
@@ -156,7 +170,14 @@ def _execute(
         cli_provider="claude",
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
-        run_environment=fake_docker_environment(),
+        run_environment=(
+            fake_docker_environment()
+            if host_docker is None
+            else RunEnvironmentSpec(
+                "docker", {"build_runner": FakeDockerBuildRunner(), "docker": host_docker}
+            )
+        ),
+        resume=resume,
     )
     runs = default_runs(
         LaunchSettings(
@@ -167,7 +188,7 @@ def _execute(
     )
 
     async def execute() -> None:
-        handle = runs.start(request)
+        handle = runs.start(request) if resume is None else runs.resume(request)
         await supervise(handle, render_run(handle))
 
     with ending_context:
@@ -212,3 +233,28 @@ def test_every_container_of_a_run_carries_the_runs_id(
     assert [container.labels for container in observed.containers] == [
         {RUN_ID_LABEL: observed.run_id}
     ]
+
+
+def test_resuming_a_run_ends_the_containers_its_dead_host_left_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _engine, first = _execute(tmp_path, monkeypatch, exit_path="SIGINT")
+    host_docker = FakeDockerEngine()
+    own = _plant_container(host_docker, first.run_id)
+    other = _plant_container(host_docker, "some-other-run")
+
+    _execute(
+        tmp_path,
+        monkeypatch,
+        exit_path="SIGINT",
+        resumed=_Resumed(first.run_id, host_docker),
+    )
+
+    assert [c.container_id for c in host_docker.containers()] == [other]
+    assert ("docker", "rm", "-f", own) in host_docker.calls
+
+
+def _plant_container(engine: FakeDockerEngine, run_id: str) -> str:
+    label = f"{RUN_ID_LABEL}={run_id}"
+    result = engine.run(["docker", "run", "-d", "--label", label, "agent-image"], timeout_seconds=1)
+    return result.stdout.strip()
