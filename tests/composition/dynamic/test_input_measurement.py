@@ -12,6 +12,7 @@ from tests.composition.dynamic._harness import (
     ScriptedAgents,
     Turn,
     edit_to,
+    implemented,
     portfolio,
     resume_request,
     run_request,
@@ -20,7 +21,8 @@ from tests.composition.dynamic._harness import (
 )
 from tests.support.fake_run_clock import HostCrashedError
 
-from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
+from vibesys.api import RunStatus
+from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -40,38 +42,6 @@ def _script(agents: ScriptedAgents, first: int, last: int) -> ScriptedAgents:
         agents.plan(portfolio(workstream(identifier)))
         agents.implement(identifier, edit_to(number + 2, identifier)).judge(identifier, PASS)
     return agents
-
-
-@pytest.mark.parametrize("planning_calls", [1, 2])
-def test_permanent_input_failure_is_measured_once_and_told_to_the_planner(
-    tmp_path: Path, planning_calls: int
-) -> None:
-    loop_input = LoopInput.create(tmp_path)
-    _failing_input(loop_input)
-    agents = _script(ScriptedAgents(), 0, planning_calls)
-
-    run = run_request(loop_input.request(max_rounds=planning_calls), agents)
-
-    assert run.error is None
-    assert run.succeeded is True
-    assert agents.unscripted == []
-    prompts = agents.prompts(ORCHESTRATOR.id)
-    assert len(prompts) == planning_calls
-    assert all(_UNMEASURABLE in prompt for prompt in prompts)
-    records = CoreRecords(loop_input, run.run_id)
-    baseline = records.strategy["baseline"]
-    assert baseline["stage"] == "unmeasurable"
-    assert baseline["benchmark_passed"] is False
-    assert baseline["failure"] == "warmup stopped: 1/100 rounds"
-    assert baseline["attempts"] == 1
-    # The unmeasurable input has no baseline value, so the best candidate wins.
-    selection = records.selection
-    assert selection is not None
-    assert selection["kind"] == "retained_candidate"
-    last = records.strategy["hypotheses"][-1]["rounds"][-1]
-    assert selection["revision"] == last["candidate"]
-    # The input costs exactly one measurement however long the search runs.
-    assert loop_input.sbatch_count() == _candidate_jobs(planning_calls) + _input_jobs()
 
 
 def _input_jobs() -> int:
@@ -103,10 +73,17 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
     crashed = run_request(request, first, clock=clock)
     assert isinstance(crashed.error, HostCrashedError)
     assert loop_input.sbatch_count() == _input_jobs() + _candidate_jobs(1)
+    started_from: list[int] = []
+
+    def build_on_first(agent: Turn) -> dict[str, object]:
+        started_from.append(agent.value())
+        agent.set_value(3)
+        return implemented("H2")
+
     second = (
         ScriptedAgents()
         .plan(portfolio(workstream("H2", parent_hypothesis_id="H1")))
-        .implement("H2", edit_to(3, "H2"))
+        .implement("H2", build_on_first)
         .judge("H2", PASS)
     )
 
@@ -118,8 +95,26 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
     assert first.unscripted == second.unscripted == []
     # The resumed run measures only the new candidate, never the input again.
     assert loop_input.sbatch_count() == _input_jobs() + _candidate_jobs(2)
+    # Both planning calls, before and after the crash, are told the input is unmeasurable.
+    assert _UNMEASURABLE in first.prompts(ORCHESTRATOR.id)[0]
     assert _UNMEASURABLE in second.prompts(ORCHESTRATOR.id)[0]
-    assert CoreRecords(loop_input, crashed.run_id).strategy["baseline"]["attempts"] == 1
+    records = CoreRecords(loop_input, crashed.run_id)
+    baseline = records.strategy["baseline"]
+    assert baseline["stage"] == "unmeasurable"
+    assert baseline["benchmark_passed"] is False
+    assert baseline["failure"] == "warmup stopped: 1/100 rounds"
+    assert baseline["attempts"] == 1
+    # The unmeasurable input has no baseline value, so the best candidate wins.
+    assert resumed.status is RunStatus.COMPLETED
+    assert records.run["result"]["reason"].startswith("adopted: ")
+    selection = records.selection
+    assert selection is not None
+    assert selection["kind"] == "retained_candidate"
+    assert selection["revision"] == records.strategy["hypotheses"][-1]["rounds"][-1]["candidate"]
+    # H1's finished work is not redone, and H2 builds on it.
+    assert second.prompts(IMPLEMENTER.id, "H1") == []
+    assert started_from == [2]
+    assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 3\n"
 
 
 def _interrupt_input_evaluator(loop_input: LoopInput, tmp_path: Path, failures: int) -> Path:
