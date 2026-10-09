@@ -52,6 +52,7 @@ from vs_agent.api import (
     AgentSessionKey,
     AgentTurnTimeoutError,
     MCPServerSpec,
+    SessionResumeError,
     SessionScope,
 )
 from vs_agent.contracts import (
@@ -1381,7 +1382,7 @@ def test_a_transient_provider_error_is_retried(
     assert result.text == "ok"
     assert result.disposition is SessionDisposition.REUSABLE
     assert len(fake.requests) == 2
-    assert any("transient provider error" in line for line in logs)
+    assert any("retrying the turn in" in line for line in logs)
 
 
 @pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
@@ -1501,7 +1502,7 @@ def test_cancel_stops_a_turn_waiting_out_a_transient_error(
     def log(line: str) -> None:
         # Logged just before the wait, so this cancel lands before the backoff;
         # the hour-long delay would hang the test if cancel did not end it.
-        if "transient provider error" in line:
+        if "retrying the turn in" in line:
             sessions[0].cancel()
 
     session, fake = _session(
@@ -1670,6 +1671,52 @@ def test_a_heavy_codex_turn_retires_its_conversation(
     result = session.run_turn(AgentTurnRequest(message="one"))
 
     assert result.disposition is SessionDisposition.RESET_REQUIRED
+
+
+def test_a_reset_conversation_is_not_continued_by_a_strict_turn(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """agentshim RESET (renewal) reports RESET_REQUIRED and refuses a strict continuation."""
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path, "codex", scripted_turn("codex", text="ok", session_id="thread-1")
+    )
+    session.run_turn(AgentTurnRequest(message="one"))
+    retired = session.run_turn(AgentTurnRequest(message="two"))
+    assert retired.disposition is SessionDisposition.RESET_REQUIRED
+
+    with pytest.raises(SessionResumeError):
+        session.run_turn(AgentTurnRequest(message="three", expected_provider_session_id="thread-1"))
+
+    assert len(fake.requests) == 2
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_replaced_conversation_is_reported_and_not_resumed_again(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """agentshim REPLACED (resume refused, fresh retry) reports RESET_REQUIRED once."""
+    del sandbox_builds
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        if "session-1" in request.argv:
+            return scripted_resume_failure(provider, session_id="session-1")
+        return scripted_turn(provider, text="ok", session_id="session-2")
+
+    driver, fake = _driver(provider, run)
+    session = driver.create_session(_spec(tmp_path, provider=provider))
+    assert session.resume_provider_session("session-1") is True
+
+    replaced = session.run_turn(AgentTurnRequest(message="one"))
+    assert replaced.disposition is SessionDisposition.RESET_REQUIRED
+    assert replaced.provider_session_id == "session-2"
+
+    # The replacement conversation is the one later turns continue.
+    session.run_turn(AgentTurnRequest(message="two"))
+    assert "session-2" in fake.requests[-1].argv
 
 
 # ---------------------------------------------------------------------------
