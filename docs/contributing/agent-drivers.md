@@ -113,7 +113,11 @@ restarts:
   `claude --resume`). Only a resumed turn is retried, and only once, so a
   second failure is a real agent failure and propagates.
 
-A turn that merely raises is not a restart. Timeouts and cancellations say
+The library restarts silently, so the AgentShim session logs each one (a renewed
+thread, a replaced conversation, a dropped conversation) for the operator.
+
+A turn that merely raises is not a restart. Timeouts and cancellations (a cancelled turn raises
+`agentshim.TurnCancelledError` and keeps its conversation) say
 nothing about whether the conversation is still resumable, so the client keeps
 the checkpoint and only a driver-reported reset (or a refused adoption) clears
 it.

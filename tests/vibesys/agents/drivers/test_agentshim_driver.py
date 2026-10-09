@@ -1719,6 +1719,109 @@ def test_a_replaced_conversation_is_reported_and_not_resumed_again(
     assert "session-2" in fake.requests[-1].argv
 
 
+def test_a_renewed_codex_thread_is_logged(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """The library renews silently, so the driver must tell the operator."""
+    del sandbox_builds
+    logs: list[str] = []
+    session, _fake = _session(
+        tmp_path,
+        "codex",
+        scripted_turn("codex", text="ok", session_id="thread-1"),
+        log=logs.append,
+    )
+
+    session.run_turn(AgentTurnRequest(message="one"))
+    assert not any("renewing" in line for line in logs)
+    session.run_turn(AgentTurnRequest(message="two"))
+
+    assert any("renewing codex thread" in line for line in logs)
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_replaced_conversation_is_logged(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    logs: list[str] = []
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        if "session-1" in request.argv:
+            return scripted_resume_failure(provider, session_id="session-1")
+        return scripted_turn(provider, text="ok", session_id="session-2")
+
+    driver, _fake = _driver(provider, run, log=logs.append)
+    session = driver.create_session(_spec(tmp_path, provider=provider))
+    assert session.resume_provider_session("session-1") is True
+
+    session.run_turn(AgentTurnRequest(message="one"))
+
+    assert any("no longer available" in line for line in logs)
+
+
+def test_a_dropped_conversation_after_a_failed_resumed_turn_is_logged(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    del sandbox_builds
+    logs: list[str] = []
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        if "thread-1" in request.argv:
+            return FakeRun(returncode=1, stderr=["boom\n"])
+        return scripted_turn("codex", text="ok", session_id="thread-1")
+
+    session, _fake = _session(tmp_path, "codex", run, log=logs.append)
+    session.run_turn(AgentTurnRequest(message="one"))
+    with pytest.raises(agentshim.CliExitError):
+        session.run_turn(AgentTurnRequest(message="two"))
+
+    assert any("dropped the conversation" in line for line in logs)
+
+
+def test_a_cancelled_resumed_turn_raises_and_keeps_its_conversation(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """A stopped turn raises, but unlike a failure it does not cost the conversation."""
+    del sandbox_builds
+    reached = threading.Event()
+    cancelled = threading.Event()
+    holder: list[FakeExecutor] = []
+    turns: list[int] = []
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        del request
+        turns.append(len(turns))
+        if len(turns) == 2:  # the second turn is the one cancelled
+            reached.set()
+            # Hold the process open until cancel() reaches its handle, then
+            # exit the way a terminated process does.
+            deadline = time.monotonic() + 5
+            while not holder[0].handles[-1].terminated and time.monotonic() < deadline:
+                cancelled.wait(0.01)
+            return FakeRun(returncode=-15)
+        return scripted_turn("codex", text="ok", session_id="thread-1")
+
+    session, fake = _session(tmp_path, "codex", run)
+    holder.append(fake)
+    session.run_turn(AgentTurnRequest(message="one"))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        turn = pool.submit(session.run_turn, AgentTurnRequest(message="two"))
+        assert reached.wait(5)
+        session.cancel()
+        with pytest.raises(agentshim.TurnCancelledError):
+            turn.result(timeout=5)
+
+    session.run_turn(AgentTurnRequest(message="three"))
+    assert "thread-1" in fake.requests[2].argv
+
+
 # ---------------------------------------------------------------------------
 # Cancellation and lifecycle
 # ---------------------------------------------------------------------------

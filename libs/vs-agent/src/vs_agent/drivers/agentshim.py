@@ -469,6 +469,7 @@ class AgentShimSession:
         # RESET and REPLACED both say the conversation the caller was
         # continuing is gone (renewed, or restarted after a refused resume).
         restarted = turn.continuity is not agentshim.Continuity.CONTINUED
+        self._log_continuity(turn.continuity)
         return AgentTurnResult(
             text=_result_text(result),
             usage=_usage_from(
@@ -482,6 +483,20 @@ class AgentShimSession:
             ),
             skills=_skill_use(result.skills),
         )
+
+    def _log_continuity(self, continuity: agentshim.Continuity) -> None:
+        """Tell the operator when the library dropped the conversation behind a turn.
+
+        The library decides these restarts silently, so this is the only record
+        that history was lost.
+        """
+        name = self._profile.name
+        if continuity is agentshim.Continuity.RESET:
+            self._log(f"renewing {name} thread; durable workspace state remains authoritative.")
+        elif continuity is agentshim.Continuity.REPLACED:
+            self._log(
+                f"{name} session is no longer available; this turn ran in a fresh conversation."
+            )
 
     def cancel(self) -> None:
         """Stop an in-flight turn by terminating the provider process.
@@ -516,6 +531,7 @@ class AgentShimSession:
         with its validation errors. The library has already decided whether to
         retry by then, and keeps the conversation the correction turn continues.
         """
+        held = self._session.conversation_id
         ticket = self._session.prepare_turn(
             self._build_request(request),
             expect_conversation=expect_conversation,
@@ -530,6 +546,11 @@ class AgentShimSession:
         except agentshim.TurnFailedError as exc:
             if exc.kind is agentshim.FailureKind.SCHEMA:
                 raise AgentOutputSchemaError(exc.detail) from exc
+            if held is not None and self._session.conversation_id is None:
+                self._log(
+                    f"the resumed {self._profile.name} turn failed; dropped the conversation "
+                    "so the next turn starts fresh."
+                )
             raise
 
     def _build_request(self, request: AgentTurnRequest) -> agentshim.TurnRequest:
