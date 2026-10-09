@@ -2145,3 +2145,28 @@ def test_resume_of_a_run_recorded_with_the_local_environment_continues_in_docker
     args = parse_cli_invocation(["--resume", run_id]).args
 
     assert run_environment_spec_from_args(args).name == "docker"
+
+
+def test_resume_of_a_host_run_leaves_the_environment_to_be_derived_from_its_backend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "repository"
+    project.mkdir()
+    _write_repository_task(project, "latency")
+    run_id = "20260811-120000-22222222-agent"
+    _write_project_run(
+        project,
+        run_id,
+        configuration=_agent_configuration(run_environment=RunEnvironmentRecord(name="host")),
+        created_at=datetime(2026, 8, 11, 12, tzinfo=UTC),
+        options=_RunFixtureOptions(task_name="latency"),
+    )
+    monkeypatch.chdir(project)
+
+    args = parse_cli_invocation(["--resume", run_id]).args
+
+    assert args.run_environment is None
+    # Docker here is the pre-derivation default; the runtime turns it into the
+    # host environment for a host-only backend on macOS and rejects it elsewhere.
+    assert run_environment_spec_from_args(args).name == "docker"

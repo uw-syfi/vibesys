@@ -35,6 +35,9 @@ if TYPE_CHECKING:
 
 _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 
+HOST_ONLY_BACKENDS = frozenset({ComputeBackend.METAL})
+"""Backends whose accelerator no container can reach (the capability's one source)."""
+
 
 class LocalBackend:
     """No-device backend (Metal / CPU) — hardware hooks are no-ops."""
@@ -49,7 +52,7 @@ class LocalBackend:
     ) -> None:
         """Configure the Metal or CPU backend from its platform identity."""
         self.name = name
-        if name is ComputeBackend.METAL:
+        if name in HOST_ONLY_BACKENDS:
             self._unavailable_reason = (
                 "Docker on macOS can't access Metal/MPS, and Modal does not offer Apple GPUs"
             )

@@ -112,7 +112,9 @@ def _restore_run_environment_selection(
     if hasattr(args, "skypilot"):
         args.skypilot = recorded == "skypilot"
     if hasattr(args, "run_environment"):
-        args.run_environment = recorded
+        # A host run is derived from its backend, not selectable: leave the choice
+        # unset so the runtime re-derives it and rejects a changed backend or host.
+        args.run_environment = None if recorded == "host" else recorded
     return False
 
 

@@ -9,7 +9,7 @@ whichever is wrong in the same PR.
 
 | Term | Meaning | Code |
 | --- | --- | --- |
-| run environment | Where a run's evaluations execute: local Docker, Modal, SkyPilot, Slurm. The agent always runs in a local Docker container; Slurm's editor is the one exception (see Known limits). | `RunEnvironment` in `vs_runtime` |
+| run environment | Where a run's evaluations execute: local Docker, Modal, SkyPilot, Slurm, host. The agent always runs in a local Docker container; Slurm's editor and host-only backends on macOS (Metal) are the exceptions (see Known limits). | `RunEnvironment` in `vs_runtime` |
 | command runner | A handle that executes one shell command and returns a bounded result. It isolates nothing. | `CommandRunner`, `CommandResult`, `LocalShellRunner`, `DockerSandbox.execute` in `vs_sandbox` |
 | agent confinement | Restricting the agent CLI process: which paths it can read and write, and which it cannot see. "Sandbox" is reserved for this. | `WorkspaceSandbox` and `HostSandbox`, `LandlockSandbox`, `SeatbeltSandbox`, `DockerSandbox.wrap` |
 | candidate isolation | Per-workstream evaluation isolation: each candidate is evaluated in its own worktree or workspace so candidates cannot affect each other's results. | `_project_run.py`, `_trusted_evaluation.py` in `vs_runtime` |
@@ -63,7 +63,7 @@ Never rely on a provider flag for isolation. See
    confinement backend.
 4. **Agent session.** `AgentExecutionPolicy` carries the policy,
    `host_resources`, and `require_enforcement` into the driver. Run
-   entrypoints set `require_enforcement = not use_docker`: a host (Slurm) run
+   entrypoints set `require_enforcement = not use_docker`: a host (Slurm, Metal) run
    must be confined or fail.
 5. **Confinement.** On the host the driver calls `build_host_sandbox` and gets
    `HostSandbox` (Linux, bubblewrap), `LandlockSandbox` (Linux, opt-in), or
@@ -96,6 +96,7 @@ allowlist (`session_env_allowlist`).
 | `--run-environment slurm`, Linux | bubblewrap (`HostSandbox`) | enforced | enforced |
 | `--run-environment slurm`, Linux, `VIBESYS_AGENT_SANDBOX=landlock` | `LandlockSandbox` | not enforced | not enforced |
 | `--run-environment slurm`, macOS | `SeatbeltSandbox` | enforced | enforced |
+| Host-only backend (Metal), macOS | `SeatbeltSandbox` | enforced | enforced |
 | `--run-environment slurm-gpu` | host confinement as for `slurm`, per command re-wrapped by the broker | per host | per host |
 
 Reads are not uniformly hidden. Bubblewrap and Landlock deny all reads outside
@@ -114,8 +115,16 @@ macOS when full read confinement matters.
   host-side transport broker; moving that editor into Docker needs a
   host-mediated gate bridge like SkyPilot's. Until then, `LocalEnvironment` and
   the host confinement mechanisms stay.
-- **Metal.** Docker on macOS cannot expose Metal/MPS, so `--backend metal`
-  cannot start its container; the host path that used to serve it is gone.
+- **Metal on macOS runs on the host.** Docker on macOS cannot expose Metal/MPS,
+  so a backend that declares itself host-only (`backend_is_host_only`, today
+  Metal) runs its agent in the `host` environment on macOS: the host path
+  `LocalEnvironment` provides, under Seatbelt with enforcement required. The
+  choice derives from the backend, never from a flag (`--docker` and
+  `--run-environment local` stay rejected), and a log line states why. If
+  Seatbelt is unavailable the run fails with `SandboxUnavailableError`; there
+  is no unconfined fallback. The environment is recorded as `host`, and resume
+  keeps it (only the retired `local` record migrates to Docker). Metal on any
+  other platform still selects Docker and fails when its container starts.
 - **Landlock** only adds rights, so it cannot carve a restriction out of the
   writable project. Read-only and hidden project paths are not enforced; each
   unenforced tier is logged at startup. Evaluator-input integrity is detected
