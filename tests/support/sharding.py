@@ -172,6 +172,17 @@ def merge_durations(records: Iterable[Mapping[str, float]]) -> dict[str, float]:
     return {name: round(seconds, 2) for name, seconds in sorted(total.items())}
 
 
+def record_durations(measured: Mapping[str, float], previous: Path) -> dict[str, float]:
+    """The record to write: ``previous`` (from an earlier pytest run of this shard) updated by ``measured``.
+
+    A shard may run pytest more than once (the crash sweeps run apart from the rest); the
+    runs cover disjoint files, so the record is their union.
+    """
+    record: dict[str, float] = json.loads(previous.read_text()) if previous.exists() else {}
+    record.update({name: round(seconds, 2) for name, seconds in measured.items()})
+    return dict(sorted(record.items()))
+
+
 def _file_of(nodeid: str) -> str:
     return nodeid.split("::", 1)[0]
 
@@ -347,5 +358,6 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     path = session.config.getoption("--record-shard-durations")
     if path is None or hasattr(session.config, "workerinput"):
         return
-    rounded = {name: round(seconds, 2) for name, seconds in sorted(_measured.items())}
-    Path(path).write_text(json.dumps(rounded, indent=1) + "\n", encoding="utf-8")
+    Path(path).write_text(
+        json.dumps(record_durations(_measured, Path(path)), indent=1) + "\n", encoding="utf-8"
+    )

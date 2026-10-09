@@ -24,6 +24,7 @@ from tests.support.sharding import (
     order_test_indices,
     parse_shard,
     projected_shard_seconds,
+    record_durations,
     shard_loads,
 )
 
@@ -217,3 +218,18 @@ def test_the_checked_in_record_keeps_every_ci_shard_within_its_budget() -> None:
         f"projected slowest shard {max(projected):.0f}s exceeds {SHARD_BUDGET_SECONDS:.0f}s: "
         "add shards in .github/workflows/test.yml or refresh tests/support/shard_durations.json"
     )
+
+
+@given(first=_DURATIONS, second=_DURATIONS)
+def test_a_second_pytest_run_of_a_shard_adds_to_the_record_of_the_first(
+    first: dict[str, float], second: dict[str, float], tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    path = tmp_path_factory.mktemp("record") / "shard.json"
+    path.write_text(json.dumps(record_durations(first, path)))
+
+    record = record_durations(second, path)
+
+    assert set(record) == set(first) | set(second)
+    for name in set(first) | set(second):
+        expected = second[name] if name in second else first[name]
+        assert record[name] == pytest.approx(expected, abs=0.01)
