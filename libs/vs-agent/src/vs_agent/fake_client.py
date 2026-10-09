@@ -7,7 +7,7 @@ response it raises ``AgentOutputSchemaError``; every call is recorded as a
 :class:`FakeInvocation` for direct assertions.
 
 This module stays schema-agnostic (no ``vibesys`` core imports) and driver-
-agnostic (no ``agentshim``/``omnigent`` imports): callers enqueue already-
+agnostic (no ``agentshim`` imports): callers enqueue already-
 constructed response objects, and this module never runs an external agent.
 """
 

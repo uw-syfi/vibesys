@@ -591,9 +591,6 @@ def copied_definitions(
         if not isinstance(node, ast.ClassDef):
             continue
         name = f"{source.module}.{node.name}"
-        # Provider process state is a different domain from durable orchestration.
-        if name == "vs_agent.drivers._omnigent_lifecycle.LifecycleState":
-            continue
         if name in authorities or name in canonical:
             continue
         signature = fingerprint(node)

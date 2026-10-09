@@ -71,12 +71,6 @@
 {"path": "tests/vibesys/agents/drivers/test_agentshim_driver.py", "rule": "patch", "count": 4}
 {"path": "tests/vibesys/agents/drivers/test_agentshim_driver.py", "rule": "sleep", "count": 1}
 {"path": "tests/vibesys/agents/drivers/test_agentshim_driver.py", "rule": "timeout_verdict", "count": 1}
-{"path": "tests/vibesys/agents/drivers/test_omnigent_driver.py", "rule": "mock", "count": 4}
-{"path": "tests/vibesys/agents/drivers/test_omnigent_driver.py", "rule": "patch", "count": 46}
-{"path": "tests/vibesys/agents/drivers/test_omnigent_driver.py", "rule": "sleep", "count": 1}
-{"path": "tests/vibesys/agents/drivers/test_omnigent_driver.py", "rule": "timeout_verdict", "count": 4}
-{"path": "tests/vibesys/agents/drivers/test_omnigent_errors.py", "rule": "patch", "count": 17}
-{"path": "tests/vibesys/agents/drivers/test_omnigent_mcp.py", "rule": "patch", "count": 4}
 {"path": "tests/vibesys/agents/test_agent_client.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/agents/test_agent_driver_selection.py", "rule": "mock", "count": 5}
 {"path": "tests/vibesys/agents/test_agent_runners.py", "rule": "mock", "count": 11}

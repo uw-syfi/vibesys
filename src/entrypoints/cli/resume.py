@@ -48,7 +48,6 @@ _OPTION_TO_CLI = {
 _CONFIG_ONLY_OPTIONS = frozenset(
     {
         "model",
-        "agent_driver",
         "cli_timeout",
         "default_reasoning_effort",
         "metric_space",

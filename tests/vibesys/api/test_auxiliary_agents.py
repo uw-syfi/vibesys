@@ -269,10 +269,6 @@ def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
                     driver="agentshim",
                     providers=("claude", "codex", "gemini", "opencode"),
                 ),
-                AuxiliaryAgentDriver(
-                    driver="omnigent",
-                    providers=("claude", "codex"),
-                ),
             ),
             role_models=("gpt-worker",),
         )
@@ -301,9 +297,7 @@ def test_ready_projection_rejects_inconsistent_agent_defaults(tmp_path: Path) ->
             }
         )
     with pytest.raises(ValidationError, match="default auxiliary agent driver is unavailable"):
-        RunReady.model_validate(
-            payload | {"agent_drivers": [{"driver": "omnigent", "providers": ["claude", "codex"]}]}
-        )
+        RunReady.model_validate(payload | {"agent_drivers": []})
     with pytest.raises(ValidationError, match="does not support provider"):
         RunReady.model_validate(
             payload | {"agent_drivers": [{"driver": "agentshim", "providers": ["claude"]}]}
@@ -388,7 +382,7 @@ def test_auxiliary_launch_is_strict_and_rejects_duplicate_paths(tmp_path: Path) 
 
 @pytest.mark.parametrize(
     ("driver", "provider"),
-    [("omnigent", "gemini"), ("omnigent", "opencode"), ("agentshim", "unknown")],
+    [("agentshim", "unknown")],
 )
 def test_auxiliary_selection_rejected_before_environment_acquisition(
     tmp_path: Path,

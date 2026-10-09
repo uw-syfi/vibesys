@@ -6,8 +6,7 @@ the same provider-name literals were hand-copied across the AgentShim driver,
 ``cli_docker``, and the headless entrypoint's ``--cli-provider`` flag, and
 those copies could silently drift from each other. This test scans the
 source for a shipped-provider literal appearing anywhere it should instead be
-a reference to ``provider_policy`` (or, for the omnigent integration, to
-Omnigent's own provider registry), so a future edit that reintroduces one of
+a reference to ``provider_policy``, so a future edit that reintroduces one of
 these literals fails here instead of drifting quietly again.
 """
 
@@ -41,21 +40,12 @@ _ALLOWED_LITERALS_BY_PATH: dict[str, frozenset[str] | None] = {
     # test is guarding, both are expected to name providers directly.
     "libs/vs-agent/src/vs_agent/provider_policy.py": None,
     "libs/vs-agent/src/vs_agent/provider_profiles.py": None,
-    # Omnigent 0.10 supports exactly claude and codex and exposes no
-    # provider-name abstraction of its own; this driver and its package
-    # branch on Omnigent's own per-provider attributes (its executor
-    # registry, its MCP translation), not on a VibeSys provider decision, so
-    # routing them through vs_agent.provider_policy would misstate
-    # ownership.
-    "libs/vs-agent/src/vs_agent/drivers/omnigent.py": None,
     # docker_executor.py: the Codex rollout watchdog recognizes a resumed
     # `codex exec --json` process and rollout file by name. It is documented
     # provider-behaviour compensation that "stays in VibeSys until the
     # behaviour is verified fixed upstream" (docs/contributing/agent-drivers.md).
     "libs/vs-agent/src/vs_agent/docker_executor.py": frozenset({"codex"}),
 }
-
-_ALLOWED_DIR_PREFIXES = ("libs/vs-agent/src/vs_agent/omnigent/",)
 
 
 def _relative_posix(path: Path) -> str:
@@ -81,8 +71,6 @@ def _violations() -> list[str]:
     problems: list[str] = []
     for path in _iter_python_files():
         rel = _relative_posix(path)
-        if any(rel.startswith(prefix) for prefix in _ALLOWED_DIR_PREFIXES):
-            continue
         allowed = _ALLOWED_LITERALS_BY_PATH.get(rel, frozenset())
         if allowed is None:
             continue

@@ -5064,7 +5064,7 @@ describe('theming', () => {
           {
             id: 'thread-a',
             title: 'GPU stalls',
-            driver: 'omnigent',
+            driver: 'agentshim',
             provider: 'claude',
             model: 'opus',
           },
@@ -5128,7 +5128,6 @@ describe('theming', () => {
     expect(frame).toContain('Claude Code');
     expect(frame).toContain('custom model');
     expect(frame).not.toContain('agentshim');
-    expect(frame).not.toContain('omnigent');
 
     // The menu is anchored to the composer, not centred over the screen: its
     // rows sit in the chat column, directly above the message box.
@@ -5189,7 +5188,7 @@ describe('theming', () => {
           {
             id: 'thread-a',
             title: 'GPU stalls',
-            driver: 'omnigent',
+            driver: 'agentshim',
             provider: 'claude',
             model: 'opus',
           },
@@ -5208,7 +5207,7 @@ describe('theming', () => {
     expect(frame).toContain('Experiment chat');
     expect(frame).toContain('GPU stalls');
     expect(frame).toContain('Claude Code');
-    expect(frame).not.toContain('omnigent');
+    expect(frame).not.toContain('agentshim');
 
     // Anchored to the composer, above the message box, not centred on screen.
     const rows = frameRows(frame);
@@ -5239,7 +5238,7 @@ describe('theming', () => {
           {
             id: 'thread-a',
             title: 'GPU stalls',
-            driver: 'omnigent',
+            driver: 'agentshim',
             provider: 'claude',
             model: 'opus',
           },
@@ -8006,7 +8005,7 @@ describe('command palette', () => {
           {
             id: 'thread-a',
             title: 'GPU stalls',
-            driver: 'omnigent',
+            driver: 'agentshim',
             provider: 'claude',
             model: 'opus',
           },

@@ -5,14 +5,13 @@ progress and event-sink value types, provider/session policy, and generic
 subprocess-hosted tools. The agent execution composition
 (``AgentClient``, ``build_agent_client``, ``agent_driver_supports_tool_servers``)
 is exposed lazily via module ``__getattr__`` so importing :mod:`vs_agent.api`
-never pulls in ``agentshim`` or ``omnigent``.
+never pulls in ``agentshim``.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from vs_agent.catalog import DriverInfo, agent_catalog
 from vs_agent.cli_docker import (
     DOCKER_PROVIDER_ENV,
     auth_bind_mounts,
@@ -106,7 +105,7 @@ from vs_agent.sessions import (
 )
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink, NullAgentEventSink
 from vs_agent.skills import NULL_SKILL_SELECTION, SkillSelection
-from vs_agent.spec import AgentBackend, AgentSpec, Driver
+from vs_agent.spec import AgentBackend, AgentSpec
 from vs_agent.todos import todos_from_tool_call
 from vs_agent.tools import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, expose_as_tools
 
@@ -169,8 +168,6 @@ __all__ = [
     "ClientAgentSessions",
     "CommandResultPayload",
     "Completed",
-    "Driver",
-    "DriverInfo",
     "DurableSessionStore",
     "InvalidResponse",
     "InvocationConflictError",
@@ -194,7 +191,6 @@ __all__ = [
     "ToolServerDescriptor",
     "ToolSpec",
     "Unknown",
-    "agent_catalog",
     "agent_driver_supports_tool_servers",
     "auth_bind_mounts",
     "auth_copy_paths",

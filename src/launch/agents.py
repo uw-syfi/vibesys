@@ -73,7 +73,6 @@ class BuiltInSessionAgents:
         spec = agent_spec_from_config(
             resources.config,
             backend=resources.agent_backend,
-            driver=launch.driver,
             provider=launch.provider,
             model=launch.model,
         )
