@@ -23,6 +23,7 @@ from vs_sandbox.api.slurm import (
     load_slurm_policy,
     read_slurm_evaluation_plan,
 )
+from vs_sandbox.signal_relay import relay_signals
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
     ClusterCollected,
@@ -42,7 +43,6 @@ from vs_slurm.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
-    from types import FrameType
 
     from vs_slurm.api import (
         Cluster,
@@ -293,20 +293,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             # > with the worker thread instead of failing this command.
             outcome.append(error)
 
-    def request_cancel(_signal: int, _frame: FrameType | None) -> None:
-        cancel.set()
-
-    # The gate runs in a worker so the main thread only waits: a signal
-    # handler that sets the event can then never interrupt a thread holding
-    # the event's lock.
-    previous = {number: signal.signal(number, request_cancel) for number in _CANCEL_SIGNALS}
-    try:
+    # The gate runs in a worker so the main thread only waits. The relay sets
+    # the event from its own thread, so cancellation does not depend on which
+    # thread the kernel delivers the signal to.
+    with relay_signals(_CANCEL_SIGNALS, lambda _number: cancel.set()):
         worker = threading.Thread(target=gate, name="slurm-gate")
         worker.start()
         worker.join()
-    finally:
-        for number, handler in previous.items():
-            signal.signal(number, handler)
     result = outcome[0]
     if isinstance(result, int):
         return result

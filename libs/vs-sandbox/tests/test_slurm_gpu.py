@@ -6,13 +6,16 @@ import base64
 import json
 import os
 import re
+import signal
 import socket
+import subprocess
 import sys
 import threading
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.thread_signals import non_main_thread_ids, requires_tgkill, send_to_thread
 
 from vs_sandbox.api.slurm import (
     GPU_BROKER_SOCKET_ENV,
@@ -419,3 +422,50 @@ class TestClient:
         assert status == 7
         assert "--gres=gpu:8" in slurm_log.read_text()
         assert b"partition=main" in capsysbinary.readouterr().out
+
+
+@requires_tgkill
+@pytest.mark.parametrize("number", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP])
+def test_a_stop_signal_taken_by_the_cancel_watcher_thread_still_cancels_the_job(
+    tmp_path: Path, slurm_log: Path, number: signal.Signals
+) -> None:
+    # The kernel may deliver a process signal to any thread while CPython runs
+    # handlers on the main thread only, which is blocked reading srun's output.
+    # Aim the signal at the watcher thread to force that interleaving.
+    fake = tmp_path / "fake_slurm.py"
+    fake.write_text(FAKE_SLURM)
+    config = tmp_path / "slurm-gpu.toml"
+    config.write_text(
+        '[slurm_gpu]\npartitions = ["main"]\nmax_gpus = 8\nmax_time_minutes = 60\n'
+        f'srun_command = ["{sys.executable}", "{fake}"]\n'
+        f'scancel_command = ["{sys.executable}", "{fake}"]\n'
+    )
+    env: dict[str, str] = {**os.environ, "FAKE_SLURM_LOG": str(slurm_log)}
+    env.pop(GPU_BROKER_SOCKET_ENV, None)
+    argv: list[str] = [sys.executable, "-m", "vs_sandbox.slurm_gpu_client", "--config", str(config)]
+    client = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-731950 [S603]; the test runs the real client CLI with a fixed argv.
+        # > A real signal needs a real child process.
+        [*argv, "--", "sh", "-c", "echo job-running; exec sleep 600"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert client.stdout is not None
+        # The job's first output reaches the client only after its cancel
+        # watcher started, so the thread exists and the main thread is reading.
+        while "job-running" not in (line := client.stdout.readline()):
+            assert line, "the client ended before the job produced output"
+        watchers = non_main_thread_ids(client.pid)
+        assert watchers, "the client has no watcher thread"
+        for thread_id in watchers:
+            send_to_thread(client.pid, thread_id, number)
+        # A deadlock guard only: a client that never sees the signal waits for the job.
+        client.wait(timeout=60)
+    finally:
+        client.kill()
+        client.communicate()
+
+    assert client.returncode == 128 + number
+    assert any("--name=" in line and "--me" in line for line in slurm_log.read_text().splitlines())

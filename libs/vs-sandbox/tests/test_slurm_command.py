@@ -11,6 +11,7 @@ import threading
 from typing import TYPE_CHECKING, TypedDict
 
 import pytest
+from tests.support.thread_signals import non_main_thread_ids, requires_tgkill, send_to_thread
 
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, write_slurm_evaluation_plan
 
@@ -245,7 +246,8 @@ def test_cli_requires_explicit_writable_cluster_state(
     assert recorded_commands(state) == []
 
 
-def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
+def _start_gate_with_held_job(tmp_path: Path) -> tuple[subprocess.Popen[str], Path, str]:
+    """Run the real gate CLI against a held fake cluster; return it once the job is submitted."""
     state = executing_cluster(tmp_path / "cluster")
     (state / HOLD_FILE).touch()
     os.mkfifo(state / SUBMITTED_FILE)
@@ -283,6 +285,12 @@ def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
     job_id = (state / SUBMITTED_FILE).read_text(encoding="utf-8")
     assert job_id.isdigit()
 
+    return gate, state, job_id
+
+
+def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
+    gate, state, job_id = _start_gate_with_held_job(tmp_path)
+
     gate.send_signal(signal.SIGTERM)
     _, stderr = gate.communicate()
 
@@ -290,6 +298,31 @@ def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
     commands = recorded_commands(state)
     assert commands.count(f"scancel {job_id}") == 1
     assert commands[-1] == f"sacct -n -P -X -j {job_id} --format=State,ExitCode"
+
+
+@requires_tgkill
+@pytest.mark.parametrize("number", [signal.SIGTERM, signal.SIGINT])
+def test_a_cancel_signal_delivered_to_the_gate_worker_thread_still_cancels_the_job(
+    tmp_path: Path, number: signal.Signals
+) -> None:
+    # The kernel may hand a process-directed SIGTERM to any thread, and
+    # CPython runs the Python handler on the main thread only, which is blocked
+    # waiting for the gate worker. Deliver the signal to the worker explicitly
+    # so this interleaving is forced rather than left to scheduling.
+    gate, state, job_id = _start_gate_with_held_job(tmp_path)
+    worker_ids = non_main_thread_ids(gate.pid)
+    assert worker_ids, "the gate has no worker thread"
+
+    for thread_id in worker_ids:
+        send_to_thread(gate.pid, thread_id, number)
+    try:
+        # A deadlock guard only: a gate that never sees the signal waits forever.
+        _, stderr = gate.communicate(timeout=60)
+    finally:
+        gate.kill()
+
+    assert gate.returncode == 128 + signal.SIGTERM, stderr
+    assert recorded_commands(state).count(f"scancel {job_id}") == 1
 
 
 def test_an_in_process_sigterm_cancels_the_job_and_reports_it(
