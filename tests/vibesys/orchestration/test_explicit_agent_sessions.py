@@ -13,6 +13,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.slurm_environment import slurm_environment
+from tests.support.world_git import IN_MEMORY_GIT
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 import vibesys
@@ -166,7 +167,7 @@ def _run_with_clients(
     project_root = tmp_path / "project"
     _write_project(project_root, domain=configuration.domain)
     available = deque(clients)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(IN_MEMORY_GIT.repository)
 
     def create_client(**_kwargs: object) -> _RecordingClient | FakeAgentClient:
         return available.popleft()

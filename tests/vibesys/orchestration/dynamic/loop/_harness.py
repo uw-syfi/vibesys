@@ -30,7 +30,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import subprocess
 import sys
 import threading
 from collections import defaultdict, deque
@@ -39,6 +38,8 @@ from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
+
+from tests.support.world_git import IN_MEMORY_GIT
 
 from launch.testing import FakeStopTimer, create_session
 from vibesys.api import (
@@ -65,7 +66,7 @@ from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_evaluation.api import EvaluationAgentRole
 from vs_evaluation.api.tools import build_evaluation_tools
-from vs_project.api import Project
+from vs_project.api import GitRepositoryFactory, Project
 from vs_runtime.api import OrchestrationPlugin
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_sandbox.api import create_compute_backend
@@ -792,8 +793,12 @@ def run_loop(  # noqa: PLR0913
     on_session: Callable[[object], None] | None = None,
     stop_timer: FakeStopTimer | None = None,
     client_factory: Callable[..., AgentClientProtocol] | None = None,
+    git_repository: GitRepositoryFactory | None = IN_MEMORY_GIT.repository,
 ) -> LoopRun:
-    """Run the dynamic plugin to its end through the product session."""
+    """Run the dynamic plugin to its end through the product session.
+
+    Git is in memory unless ``git_repository`` is ``None``, which runs the Git CLI.
+    """
     bundle = load_input_bundle(loop_input.root)
     request = RunRequest(
         project_root=loop_input.root,
@@ -820,16 +825,21 @@ def run_loop(  # noqa: PLR0913
         on_session=on_session,
         stop_timer=stop_timer,
         client_factory=client_factory,
+        git_repository=git_repository,
     )
 
 
-def run_request(
+# lint-waiver: LW-731843 [PLR0913]; the keywords are independent optional test seams.
+# > A settings object adds a wrapper type every caller of the harness must build, and
+# > splitting the function duplicates the production host composition below.
+def run_request(  # noqa: PLR0913
     request: RunRequest,
     agents: AgentsSource,
     *,
     on_session: Callable[[object], None] | None = None,
     stop_timer: FakeStopTimer | None = None,
     client_factory: Callable[..., AgentClientProtocol] | None = None,
+    git_repository: GitRepositoryFactory | None = IN_MEMORY_GIT.repository,
 ) -> LoopRun:
     """Execute an already-built request through the same production composition."""
     events: list[CoreEvent] = []
@@ -855,6 +865,7 @@ def run_request(
             agent_client_factory=client_factory or scripted_client,
             backend_factory=create_compute_backend,
             stop_timer=stop_timer or FakeStopTimer(),
+            git_repository=git_repository,
         )
         if on_session is not None:
             on_session(session)
@@ -917,15 +928,6 @@ def commit_as_schema_v4(loop_input: LoopInput, run_id: str) -> None:
         if item["implementation"] is not None:
             item["implementation"]["validation_recipe_artifact"] = None
     path.write_text(json.dumps(data), encoding="utf-8")
-    for command in (
-        ("git", "add", "--force", "--", str(path)),
-        (
-            "git",
-            *("-c", "user.name=vibesys", "-c", "user.email=vibesys@localhost"),
-            *("commit", "--quiet", "-m", "dynamic: state written by schema version 4"),
-        ),
-    ):
-        # lint-waiver: LW-140004 [S603]; a fixed argv commits the fixture the way
-        # > an older VibeSys did. Committing through vs-project would write the
-        # > current schema, which is exactly what this fixture must avoid.
-        subprocess.run(command, cwd=loop_input.root, check=True, capture_output=True)  # noqa: S603
+    repository = IN_MEMORY_GIT.repository(loop_input.root)
+    repository.stage_all([path.relative_to(loop_input.root).as_posix()], force=True)
+    repository.commit("dynamic: state written by schema version 4")

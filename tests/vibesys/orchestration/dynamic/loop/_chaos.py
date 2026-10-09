@@ -414,6 +414,10 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
                     agents,
                     configured,
                     on_session=lambda session: setattr(agents, "session", session),
+                    # The sweep's fault indexes count Slurm calls whose interleaving depends on
+                    # how fast the run's other steps finish, so it keeps real Git's pace and
+                    # keeps the real implementation in the whole-loop coverage.
+                    git_repository=None,
                 )
             )
         # lint-waiver: LW-150012 [BLE001]; whatever escapes the session
