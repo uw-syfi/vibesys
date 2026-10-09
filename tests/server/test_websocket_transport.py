@@ -26,7 +26,7 @@ from urllib.request import urlopen
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.server.support import build_server_parts
+from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError, InvalidStatus
@@ -1051,13 +1051,13 @@ def test_gateway_timeout_retires_stalled_publication_before_immediate_retry(
     with ThreadPoolExecutor(max_workers=1) as starts:
         start = starts.submit(gateway.start)
         try:
-            assert startup.entered.wait(timeout=5)
+            assert startup.entered.wait(timeout=DEADLOCK_GUARD_S)
             startup.timeout.set()
             # A deadlock guard, not a verdict derived from elapsed time: the Fake
             # forced the readiness result while the worker remains stalled inside
             # listener publication.
             with pytest.raises(RuntimeError, match="Timed out starting WebSocket gateway"):
-                start.result(timeout=5)
+                start.result(timeout=DEADLOCK_GUARD_S)
             assert startup.release.is_set() is False
             assert WebInstanceClaim.is_held(instance_path) is False
             assert startup.old_port > 0
@@ -1075,7 +1075,7 @@ def test_gateway_timeout_retires_stalled_publication_before_immediate_retry(
         finally:
             startup.timeout.set()
             startup.release.set()
-            assert startup.publication_barrier_released.wait(timeout=5)
+            assert startup.publication_barrier_released.wait(timeout=DEADLOCK_GUARD_S)
             startup.join_first_worker()
             if retry_record is not None:
                 assert WebInstanceRecord.read(instance_path) == retry_record
@@ -1095,11 +1095,11 @@ def test_gateway_publication_uses_capability_rotated_while_its_record_was_staged
     with ThreadPoolExecutor(max_workers=1) as starts:
         start = starts.submit(gateway.start)
         try:
-            assert startup.entered.wait(timeout=5)
+            assert startup.entered.wait(timeout=DEADLOCK_GUARD_S)
             old_token = gateway.token
             rotated_token = gateway.rotate_capability(expected_token=old_token)
             startup.release.set()
-            start.result(timeout=5)
+            start.result(timeout=DEADLOCK_GUARD_S)
             record = WebInstanceRecord.read(instance_path)
             assert record is not None
             assert record.token == rotated_token
@@ -1224,7 +1224,7 @@ class _HalfOpenPeer:
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if receive_buffer is not None:
             self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, receive_buffer)
-        self._socket.settimeout(10)
+        self._socket.settimeout(DEADLOCK_GUARD_S)
         self._socket.connect(("127.0.0.1", gateway.bound_port))
         key = base64.b64encode(secrets.token_bytes(16)).decode()
         self._socket.sendall(
@@ -1291,24 +1291,24 @@ class _HalfOpenPeer:
         return opcode, self._take(length)
 
 
-def _reaped(wait: Callable[[], None], *, ceiling: float = 30.0) -> bool:
-    """Whether *wait* observes the last subscription ending.
+def _assert_reaped(wait: Callable[[], None], *, ceiling: float = 30.0) -> None:
+    """Assert that *wait* observes the last subscription ending.
 
-    The assertion is on the boolean, never on how long it took, but the
-    boolean is still a wall-clock comparison: the two socket callers below race
-    real timers inside ``websockets`` against this ceiling, and measured, their
-    verdict flips 3/3 between a 1.2s and a 1.5s ceiling. This helper is
-    therefore not a wall-clock-free construction, only one with a large margin.
-    Their docstrings say what that costs and why there is no seam to remove it.
-    The Fake-connection test needs none of this and takes no ceiling.
+    Expiry of *ceiling* only fails the test: a pass never depends on how long
+    the wait took, so raising the ceiling cannot turn a pass into a failure and
+    this is a deadlock guard, not a timing verdict. It is still not a
+    wall-clock-free construction: the two socket callers below race real timers
+    inside ``websockets`` against the ceiling, and measured, their pass flips
+    3/3 between a 1.2s and a 1.5s ceiling, so the ceiling is a large margin.
+    Their docstrings say why there is no seam to remove it. The Fake-connection
+    test needs none of this and takes no ceiling.
 
     The ceiling is deliberately far above the injected timeouts, because those
     are not the largest term under it. ``wait_for_subscriber_disconnect``
     reaches ``wait_for_none_active`` with its default settle window,
     ``RECONNECT_SETTLE_SECONDS`` (1.0s), which no caller here injects and which
     dominates both socket tests' elapsed time. 30s leaves room for that
-    constant to be retuned without silently eating the headroom, and lowering
-    it would widen the wall-clock exposure rather than narrow it.
+    constant to be retuned without silently eating the headroom.
     """
     observed = threading.Event()
 
@@ -1317,7 +1317,7 @@ def _reaped(wait: Callable[[], None], *, ceiling: float = 30.0) -> bool:
         observed.set()
 
     threading.Thread(target=run, name="reap-waiter", daemon=True).start()
-    return observed.wait(timeout=ceiling)
+    assert observed.wait(timeout=ceiling), "the last subscription was never reaped"
 
 
 def test_a_half_open_subscriber_is_reaped_by_the_keepalive_and_lets_the_run_finish(
@@ -1363,7 +1363,7 @@ def test_a_half_open_subscriber_is_reaped_by_the_keepalive_and_lets_the_run_fini
                 # ``wait_for_subscriber_disconnect`` is the exact call
                 # ``ServerRuntime`` makes to decide a non-detached run may
                 # finish, over the tracker both transports share.
-                assert _reaped(unix.wait_for_subscriber_disconnect)
+                _assert_reaped(unix.wait_for_subscriber_disconnect)
             finally:
                 peer.close()
     finally:
@@ -1423,7 +1423,7 @@ def test_a_subscriber_that_stops_draining_is_abandoned_at_the_write_deadline(
                 # The acknowledgement precedes the replay, so it arrives before
                 # the buffers fill; the replay behind it is what stalls.
                 assert peer.receive_text()["type"] == "subscribed"
-                assert _reaped(unix.wait_for_subscriber_disconnect)
+                _assert_reaped(unix.wait_for_subscriber_disconnect)
             finally:
                 peer.close()
     finally:
@@ -1503,7 +1503,7 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
         )
 
     assert connection.transport.aborts == 1
-    assert _reaped(lambda: tracker.wait_for_none_active(settle_seconds=0.0))
+    _assert_reaped(lambda: tracker.wait_for_none_active(settle_seconds=0.0))
     reported = [record for record in caplog.records if record.levelno >= logging.WARNING]
     assert len(reported) == 1
     assert str(gateway.limits.write_deadline_seconds) in reported[0].getMessage()

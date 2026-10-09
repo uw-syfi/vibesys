@@ -257,6 +257,72 @@ def build_server_parts(
 DEADLOCK_GUARD_S = 30.0
 
 
+class FakeSettleWindow:
+    """A `SettleWindow` whose window ends only when the test says so.
+
+    `wait_for` holds the tracker's condition until the predicate holds or
+    `elapse` ends the window. `await_window` blocks until the tracker has
+    opened the given window, so a test can order its steps against the
+    tracker's without sleeping.
+    """
+
+    def __init__(self) -> None:
+        """Start with no window opened."""
+        self._opened = 0
+        self._ended = 0
+        self._elapsed = False
+        self._condition: threading.Condition | None = None
+        self._window_opened = threading.Condition()
+
+    def wait_for(
+        self,
+        condition: threading.Condition,
+        predicate: Callable[[], bool],
+        seconds: float,
+    ) -> bool:
+        """Block until *predicate* holds or `elapse` ends this window."""
+        del seconds
+        self._condition = condition
+        with self._window_opened:
+            self._opened += 1
+            self._window_opened.notify_all()
+        condition.wait_for(lambda: predicate() or self._elapsed)
+        self._elapsed = False
+        held = predicate()
+        with self._window_opened:
+            self._ended += 1
+            self._window_opened.notify_all()
+        return held
+
+    @property
+    def windows_opened(self) -> int:
+        """How many settle windows the tracker has opened so far."""
+        with self._window_opened:
+            return self._opened
+
+    def await_window(self, number: int) -> None:
+        """Block until the tracker has opened its *number*-th window."""
+        with self._window_opened:
+            assert self._window_opened.wait_for(
+                lambda: self._opened >= number, timeout=DEADLOCK_GUARD_S
+            ), f"settle window {number} never opened"
+
+    def await_window_end(self, number: int) -> None:
+        """Block until the tracker's *number*-th window has ended, either way."""
+        with self._window_opened:
+            assert self._window_opened.wait_for(
+                lambda: self._ended >= number, timeout=DEADLOCK_GUARD_S
+            ), f"settle window {number} never ended"
+
+    def elapse(self) -> None:
+        """End the open window as if its seconds had passed."""
+        condition = self._condition
+        assert condition is not None, "no settle window has opened"
+        with condition:
+            self._elapsed = True
+            condition.notify_all()
+
+
 def run_at_paused_boundary(parts: ServerParts, work: Callable[[], None]) -> threading.Thread:
     """Start *work* on a thread and return once it has announced it is parked.
 
