@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -61,6 +61,81 @@ class AgentOutputSchemaError(RuntimeError):
         """Record the validation errors the provider reported last."""
         self.detail = detail
         super().__init__(f"agent output did not match the response schema: {detail}")
+
+
+class AuthStatus(StrEnum):
+    """Whether a provider CLI is logged in, as far as its own tooling can say."""
+
+    OK = "ok"
+    FAILED = "failed"
+    #: The CLI offers no cheap check, or the check could not run. Not a problem.
+    UNKNOWN = "unknown"
+
+
+class ReadinessProblem(StrEnum):
+    """Why a provider cannot start a turn."""
+
+    BINARY_MISSING = "binary_missing"
+    AUTH_FAILED = "auth_failed"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderReadiness:
+    """What a readiness probe found about one provider CLI, before any turn.
+
+    ``detail`` explains ``auth`` in words fit for an error message, including
+    the fix when it failed, or says the binary was not found.
+    """
+
+    provider: str
+    binary_found: bool
+    path: str | None
+    version: str | None
+    auth: AuthStatus
+    detail: str
+
+    @property
+    def problem(self) -> ReadinessProblem | None:
+        """Return what stops a turn from starting, or ``None`` when none is known."""
+        if not self.binary_found:
+            return ReadinessProblem.BINARY_MISSING
+        if self.auth is AuthStatus.FAILED:
+            return ReadinessProblem.AUTH_FAILED
+        return None
+
+
+_READINESS_FIXES = {
+    ReadinessProblem.BINARY_MISSING: (
+        "install the CLI where the agent runs (the sandbox image under --docker) or put it on PATH"
+    ),
+    ReadinessProblem.AUTH_FAILED: "log in to the CLI as the agent would run it",
+}
+
+
+class ProviderNotReadyError(RuntimeError):
+    """A provider CLI cannot start a turn: it is missing or not logged in.
+
+    Permanent: waiting or retrying cannot fix it, so it is not ``retryable``.
+    Raised before the first turn, so no agent work was lost. ``problem`` and
+    ``provider`` identify what to fix; the message names both, the diagnostic
+    and the fix.
+    """
+
+    retryable = False
+
+    def __init__(self, readiness: ProviderReadiness) -> None:
+        """Build the message from a readiness with a known problem."""
+        problem = readiness.problem
+        if problem is None:
+            message = "ProviderNotReadyError needs a readiness with a problem"
+            raise ValueError(message)
+        self.provider = readiness.provider
+        self.problem = problem
+        self.detail = readiness.detail
+        super().__init__(
+            f"{readiness.provider} agent is not ready ({problem.value}): {readiness.detail}. "
+            f"Fix: {_READINESS_FIXES[problem]}."
+        )
 
 
 class SessionDisposition(StrEnum):
@@ -307,6 +382,22 @@ class AgentDriver(Protocol):
 
     def close(self) -> None:
         """Release driver resources. Implementations must be idempotent."""
+        ...
+
+
+@runtime_checkable
+class ReadinessProbe(Protocol):
+    """An optional driver capability: check the provider CLI before any session exists.
+
+    A driver whose provider tooling has no such check does not implement it,
+    and callers skip the check rather than guess.
+    """
+
+    def probe_readiness(self, spec: AgentSessionSpec) -> ProviderReadiness:
+        """Probe the CLI *spec* would launch, through the same route as its session.
+
+        A missing binary is a result, not an exception. No model is called.
+        """
         ...
 
 
