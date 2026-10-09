@@ -8,7 +8,8 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import Any, TextIO
 
-from vs_agent._format import format_status_prefix
+from vs_agent._format import format_rate_limit, format_status_prefix
+from vs_agent.contracts import AgentRateLimit
 from vs_agent.events import AgentOutputChannel, AgentStatusData, ToolResultPayload
 from vs_agent.progress import AgentProgress
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
@@ -278,6 +279,20 @@ class AgentLogger:
         verbatim; only the channel differs from :meth:`on_thinking`.
         """
         self._publish_channel(text, "diagnostic")
+
+    def on_rate_limit(self, rate_limit: AgentRateLimit) -> None:
+        """Record one provider-reported rate-limit window and publish it as a typed event.
+
+        The run log gets a plain line so an operator tailing it sees an
+        exhausted window; frontends render the typed event their own way.
+        """
+        self._log_line(format_rate_limit(rate_limit))
+        self._sink.rate_limit_update(
+            rate_limit,
+            agent_kind=self._agent_kind,
+            round_label=self._round_label,
+            invocation_id=self._invocation_id,
+        )
 
     def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:
         """Record a provider tool call with normalized arguments."""

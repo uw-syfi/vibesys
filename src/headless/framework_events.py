@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from vibesys.api import (
     CoreEvent,
     EventStatus,
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    RateLimitUpdateData,
     RunConfiguredData,
     WorkspaceSnapshotData,
 )
@@ -30,6 +33,22 @@ def format_framework_event(event: CoreEvent) -> str | None:
     if isinstance(data, FrameworkWarningData):
         return _format_framework_warning(data)
     return None
+
+
+def format_rate_limit_event(event: CoreEvent) -> str | None:
+    """Return the terminal rendering of a rate-limit report, or None.
+
+    A window shows only once it is exhausted; routine reports stay in the run log.
+    """
+    data = event.data
+    if not isinstance(data, RateLimitUpdateData) or not data.exhausted:
+        return None
+    name = " ".join(part for part in (data.provider, data.limit, data.window) if part)
+    line = f"[rate-limit] {name or 'a provider'} window is exhausted"
+    if data.resets_at is not None:
+        reset = datetime.fromtimestamp(data.resets_at, tz=UTC)
+        line += f"; resets {reset:%Y-%m-%d %H:%M} UTC"
+    return line
 
 
 def _format_gate_started(data: GateStartedData) -> str:

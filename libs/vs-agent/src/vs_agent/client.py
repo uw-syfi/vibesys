@@ -113,9 +113,16 @@ def _publish_final_text(logger: AgentLogger, text: str) -> None:
 class _LoggerObserver:
     """Translate neutral driver events into VibeSys's application logger."""
 
-    def __init__(self, logger: AgentLogger, observer: AgentObserver | None = None) -> None:
+    def __init__(
+        self,
+        logger: AgentLogger,
+        observer: AgentObserver | None = None,
+        *,
+        provider: str | None = None,
+    ) -> None:
         self._logger = logger
         self._observer = observer
+        self._provider = provider
 
     def on_event(self, event: AgentEvent) -> None:
         """Render one normalized driver event and preserve the caller observer."""
@@ -153,6 +160,8 @@ class _LoggerObserver:
             )
         elif event.kind is AgentEventKind.USAGE and event.usage is not None:
             self._logger.update_usage(usage_dict(event.usage))
+        elif event.kind is AgentEventKind.RATE_LIMIT and event.rate_limit is not None:
+            self._logger.on_rate_limit(replace(event.rate_limit, provider=self._provider))
         elif event.kind is AgentEventKind.SKILL:
             self._logger.on_diagnostic(f"[skill] {event.text or 'unknown'}")
 
@@ -473,7 +482,7 @@ class AgentClient:
             channel="prompt",
         )
         result: AgentTurnResult | None = None
-        stream = _LoggerObserver(logger, observer)
+        stream = _LoggerObserver(logger, observer, provider=spec.provider)
         try:
             result = self._run(
                 session_spec=spec,

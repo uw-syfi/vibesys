@@ -155,6 +155,38 @@ class AgentEventKind(StrEnum):
     USAGE = "usage"
     SKILL = "skill"
     """The agent loaded a skill; ``text`` is its name."""
+    RATE_LIMIT = "rate_limit"
+    """The provider reported one rate-limit window; see ``AgentEvent.rate_limit``."""
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRateLimit:
+    """One rate-limit window as the provider just reported it.
+
+    A provider that reports several windows (a five-hour and a weekly one)
+    emits one value per window; a consumer reads the newest per
+    ``(limit, window)``. ``None`` means the provider did not state the value,
+    never zero. ``resets_at`` is epoch seconds.
+    """
+
+    provider: str | None = None
+    window: str | None = None
+    limit: str | None = None
+    used_fraction: float | None = None
+    resets_at: float | None = None
+    window_minutes: int | None = None
+    exhausted: bool | None = None
+
+    @property
+    def is_exhausted(self) -> bool:
+        """Whether the window has no capacity left.
+
+        The provider's own statement wins. Without one, a window used up to
+        or past 100% counts as exhausted; an unstated usage does not.
+        """
+        if self.exhausted is not None:
+            return self.exhausted
+        return self.used_fraction is not None and self.used_fraction >= 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,6 +285,7 @@ class AgentEvent:
     text: str | None = None
     payload: Mapping[str, object] = field(default_factory=dict)
     usage: AgentUsage | None = None
+    rate_limit: AgentRateLimit | None = None
 
 
 class AgentObserver(Protocol):

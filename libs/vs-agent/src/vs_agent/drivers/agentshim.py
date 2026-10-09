@@ -33,6 +33,7 @@ from vs_agent.contracts import (
     AgentEventKind,
     AgentObserver,
     AgentOutputSchemaError,
+    AgentRateLimit,
     AgentSession,
     AgentSessionSpec,
     AgentSkillUse,
@@ -345,7 +346,7 @@ def _translate(  # one arm per event type
             kind=AgentEventKind.USAGE,
             usage=_usage_from(event.usage, cost_usd=event.cost_usd),
         )
-    return _translate_skill(event) or _translate_plumbing(event)
+    return _translate_skill(event) or _translate_rate_limit(event) or _translate_plumbing(event)
 
 
 def _translate_skill(event: agentshim.AgentEvent) -> AgentEvent | None:
@@ -363,6 +364,23 @@ def _translate_skill(event: agentshim.AgentEvent) -> AgentEvent | None:
     if isinstance(event, agentshim.SkillsDiscovered):
         return _diagnostic(f"[skills offered] {', '.join(event.names) or '(none)'}")
     return None
+
+
+def _translate_rate_limit(event: agentshim.AgentEvent) -> AgentEvent | None:
+    """Translate the provider's report of one rate-limit window."""
+    if not isinstance(event, agentshim.RateLimitStatus):
+        return None
+    return AgentEvent(
+        kind=AgentEventKind.RATE_LIMIT,
+        rate_limit=AgentRateLimit(
+            window=event.window,
+            limit=event.limit,
+            used_fraction=event.used_fraction,
+            resets_at=event.resets_at,
+            window_minutes=event.window_minutes,
+            exhausted=event.exhausted,
+        ),
+    )
 
 
 def _translate_plumbing(event: agentshim.AgentEvent) -> AgentEvent | None:

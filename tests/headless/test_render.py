@@ -8,6 +8,7 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    RateLimitUpdateData,
     RunConfiguredData,
     WorkspaceSnapshotData,
 )
@@ -220,6 +221,27 @@ class TestFrameworkEvents:
 
         assert detailed == "[warn] profiler failed: boom\n"
         assert bare == "[warn] odd state\n"
+
+
+class TestRateLimitEvents:
+    def test_an_exhausted_window_is_shown_with_its_reset_time(self) -> None:
+        out = _render_event(
+            CoreEventType.RATE_LIMIT_UPDATE,
+            RateLimitUpdateData(
+                provider="claude", window="five_hour", resets_at=1_791_954_019, exhausted=True
+            ),
+        )
+        assert (
+            out
+            == "[rate-limit] claude five_hour window is exhausted; resets 2026-10-14 05:00 UTC\n"
+        )
+
+    def test_a_window_with_capacity_left_is_not_shown(self) -> None:
+        out = _render_event(
+            CoreEventType.RATE_LIMIT_UPDATE,
+            RateLimitUpdateData(provider="claude", window="five_hour", exhausted=False),
+        )
+        assert out == ""
 
 
 class TestToolEvents:

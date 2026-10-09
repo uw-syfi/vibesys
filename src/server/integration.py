@@ -57,6 +57,7 @@ _PRESENTATION_EVENTS = frozenset(
         EventType.TOOL_RESULT,
         EventType.TODO_UPDATE,
         EventType.USAGE_UPDATE,
+        EventType.RATE_LIMIT_UPDATE,
     }
 )
 _CORE_FAILURE_CONTEXTS: dict[EventType, tuple[DiagnosticScope, DiagnosticSeverity, str]] = {

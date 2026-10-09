@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from vs_agent.contracts import AgentRateLimit
     from vs_agent.events import (
         AgentOutputChannel,
         AgentStatusData,
@@ -89,6 +90,17 @@ class AgentEventSink(Protocol):
         """Publish token usage from the current model response."""
         ...
 
+    def rate_limit_update(
+        self,
+        rate_limit: AgentRateLimit,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Publish one rate-limit window the provider reported."""
+        ...
+
 
 class NullAgentEventSink:
     """No-op :class:`AgentEventSink` — the default when no sink is injected.
@@ -164,6 +176,17 @@ class NullAgentEventSink:
     ) -> None:
         """Ignore usage updates when no event sink was injected."""
         del input_tokens, context_window, model, agent_kind, round_label, invocation_id
+
+    def rate_limit_update(
+        self,
+        rate_limit: AgentRateLimit,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Ignore rate-limit reports when no event sink was injected."""
+        del rate_limit, agent_kind, round_label, invocation_id
 
 
 NULL_AGENT_EVENT_SINK = NullAgentEventSink()
