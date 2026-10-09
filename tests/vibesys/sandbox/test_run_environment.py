@@ -634,6 +634,75 @@ startup_timeout_seconds = 600
     assert "`benchmark`" in notes
 
 
+def test_slurm_gpu_environment_sends_every_gpu_process_to_slurm(tmp_path: Path) -> None:
+    config_path = tmp_path / "slurm-gpu.toml"
+    config_path.write_text(
+        """[slurm_gpu]
+partitions = ["main", "priority"]
+max_gpus = 8
+max_time_minutes = 120
+gate_time_minutes = 40
+""",
+        encoding="utf-8",
+    )
+    spec = RunEnvironmentSpec(
+        "slurm-gpu",
+        {"config_path": str(config_path)},
+        RunResourceRequest(accelerators_per_node=8, accelerator_backend="cuda"),
+    )
+
+    session = _open(
+        build_run_environment(spec),
+        _request(
+            tmp_path,
+            FakeBackend(),
+            accuracy_command="python accuracy.py --strict",
+            benchmark_command="python bench.py",
+        ),
+    )
+    view = session.view
+    agent_env = dict(view.agent_env)
+    launcher = Path(agent_env["VIBESYS_GPU"])
+    session.close()
+
+    gate = f"-m vs_sandbox.slurm_gpu_client --config {config_path} --gpus 8 --time 40 --"
+    assert view.env_kind == "slurm-gpu"
+    assert view.paths.accuracy_command is not None
+    assert view.paths.accuracy_command.endswith(f"{gate} python accuracy.py --strict")
+    assert (view.paths.benchmark_command or "").endswith(f"{gate} python bench.py")
+    assert agent_env["VIBESYS_AGENT_SANDBOX_GPUS"] == "none"
+    assert agent_env["CUDA_VISIBLE_DEVICES"] == ""
+    assert agent_env["VIBESYS_GPU_BROKER_TOKEN"]
+    assert launcher.stat().st_mode & 0o111
+    assert "vs_sandbox.slurm_gpu_client" in launcher.read_text()
+    assert {resource.path for resource in view.agent_host_resources} == {
+        Path(agent_env["VIBESYS_GPU_BROKER_SOCKET"]),
+        launcher.parent,
+    }
+    assert str(launcher) in view.prompt_notes
+    # Closing the session stops the broker.
+    assert not Path(agent_env["VIBESYS_GPU_BROKER_SOCKET"]).exists()
+    assert run_environment_record(spec).name == "slurm-gpu"
+
+
+def test_slurm_gpu_environment_rejects_gate_gpus_above_the_operator_limit(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "slurm-gpu.toml"
+    config_path.write_text(
+        '[slurm_gpu]\npartitions = ["main"]\nmax_gpus = 4\nmax_time_minutes = 60\n',
+        encoding="utf-8",
+    )
+    spec = RunEnvironmentSpec(
+        "slurm-gpu",
+        {"config_path": str(config_path)},
+        RunResourceRequest(accelerators_per_node=8, accelerator_backend="cuda"),
+    )
+
+    with pytest.raises(ValueError, match="operator limit of 4"):
+        _open(build_run_environment(spec), _request(tmp_path, FakeBackend()))
+
+
 def test_run_environment_record_rejects_an_unknown_environment() -> None:
     with pytest.raises(ValueError, match="unknown run environment"):
         run_environment_record(RunEnvironmentSpec("kubernetes"))

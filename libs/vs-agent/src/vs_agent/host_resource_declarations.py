@@ -394,3 +394,32 @@ def declare_agent_host_resources(
         DEFAULT_AGENT_HOST_RESOURCE_DECLARERS,
         additional=additional,
     )
+
+
+#: The declarers that describe the host's toolchains rather than one agent
+#: CLI: no provider binary, state, or credentials.
+COMMAND_HOST_RESOURCE_DECLARERS: tuple[HostResourceDeclarer, ...] = (
+    _python_runtime,
+    _path_toolchain,
+    declare_rust_toolchain_resources,
+    _shell_setup,
+    _operator_allowlist,
+)
+
+
+def declare_command_host_resources(
+    env: Mapping[str, str],
+    *,
+    additional: Iterable[HostResource] = (),
+) -> tuple[HostResource, ...]:
+    """Declare what a confined agent command needs, without any agent CLI's own state.
+
+    This is the agent's resource set minus its CLI binary, provider state, and
+    credentials, for confining a command the agent started somewhere else,
+    such as in a Slurm job.
+    """
+    return declare_resources(
+        HostResourceContext(env=env),
+        COMMAND_HOST_RESOURCE_DECLARERS,
+        additional=additional,
+    )

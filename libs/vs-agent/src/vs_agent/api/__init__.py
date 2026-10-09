@@ -47,6 +47,7 @@ from vs_agent.events import (
     ToolResultPayload,
 )
 from vs_agent.host_resource_declarations import (
+    declare_command_host_resources,
     declare_provider_state_resources,
     task_agent_host_resources,
 )
@@ -203,6 +204,7 @@ __all__ = [
     "build_agent_client",
     "cli_mcp_config_files",
     "cli_skill_dirs",
+    "declare_command_host_resources",
     "declare_provider_state_resources",
     "describe_validation_error",
     "expose_as_tools",

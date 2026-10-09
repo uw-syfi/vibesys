@@ -16,6 +16,7 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentSession,
     SkyPilotEnvironmentFacts,
     SlurmEnvironmentFacts,
+    SlurmGpuEnvironmentFacts,
 )
 
 _TEMPLATE_DIR = PROMPTS_DIR / "environments"
@@ -51,6 +52,17 @@ def open_run_environment(
                 read_only_paths=[
                     path.as_posix() for path in request.project_path_policy.read_only_paths
                 ],
+            ).strip()
+        )
+    elif isinstance(facts, SlurmGpuEnvironmentFacts):
+        presentation = RunEnvironmentPresentation(
+            prompt_notes=render_template(
+                "slurm_gpu/prompt_notes.j2",
+                template_dir=_TEMPLATE_DIR,
+                launcher=facts.launcher,
+                max_gpus=facts.max_gpus,
+                max_time_minutes=facts.max_time_minutes,
+                gate_gpus=facts.gate_gpus,
             ).strip()
         )
     elif isinstance(facts, SkyPilotEnvironmentFacts):

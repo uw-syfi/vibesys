@@ -53,6 +53,7 @@ from vs_agent.api import (
 )
 from vs_project.api import RunEnvironmentRecord, RunResourceRequest
 from vs_runtime import _boot_trace as boot_trace
+from vs_runtime._brokered_session import BrokeredRunEnvironmentSession
 from vs_runtime._container_runtime_policy import (
     DOCKER_IN_DOCKER_NOTICE,
     attaches_accelerator,
@@ -60,6 +61,7 @@ from vs_runtime._container_runtime_policy import (
 )
 from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
 from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._slurm_gpu_commands import gate_gpus, start_slurm_gpu_commands
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_TOOLS_ROOT,
@@ -112,8 +114,10 @@ from vs_sandbox.api.slurm import (
     SlurmCapturePlan,
     SlurmEvaluationPlan,
     SlurmExecutionPolicy,
+    SlurmGpuConfig,
     SlurmProcessBroker,
     configured_capture_lifecycle,
+    load_slurm_gpu_config,
     load_slurm_policy,
     trusted_profile_command,
     write_slurm_capture_plan,
@@ -127,13 +131,14 @@ from vs_sandbox.api.symlink_mounts import (
 )
 from vs_slurm.api import SlurmConfig, SlurmSshTransport, load_slurm_config
 
-_RunEnvironmentName = Literal["local", "docker", "modal", "skypilot", "slurm"]
+_RunEnvironmentName = Literal["local", "docker", "modal", "skypilot", "slurm", "slurm-gpu"]
 _RECORDED_ENVIRONMENT_NAMES: tuple[_RunEnvironmentName, ...] = (
     "local",
     "docker",
     "modal",
     "skypilot",
     "slurm",
+    "slurm-gpu",
 )
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 """The runtime resource declaration's ``agent_path`` for the effective objective.
@@ -202,6 +207,9 @@ class RunEnvironmentView:
     framework_setup_timeout_seconds: int = 0
     profiler_mcp_env: tuple[tuple[str, str], ...] = ()
     profiler_mcp_resources: tuple[HostResource, ...] = ()
+    # Variables and host resources every agent session of the run receives.
+    agent_env: tuple[tuple[str, str], ...] = ()
+    agent_host_resources: tuple[HostResource, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -252,10 +260,21 @@ class ModalEnvironmentFacts:
     runtime_container_path: str = "/opt/vibesys-runtime/environment.md"
 
 
+@dataclass(frozen=True)
+class SlurmGpuEnvironmentFacts:
+    """Presentation facts for a host agent whose GPU processes run as Slurm jobs."""
+
+    launcher: str
+    max_gpus: int
+    max_time_minutes: int
+    gate_gpus: int
+
+
 RunEnvironmentPresentationFacts = (
     LocalEnvironmentFacts
     | DockerEnvironmentFacts
     | SlurmEnvironmentFacts
+    | SlurmGpuEnvironmentFacts
     | SkyPilotEnvironmentFacts
     | ModalEnvironmentFacts
 )
@@ -341,46 +360,6 @@ class RunEnvironmentSession(Protocol):
     def close(self) -> None:
         """Stop resources owned by this run session."""
         ...
-
-
-@dataclass(slots=True)
-class _BrokeredRunEnvironmentSession:
-    """Own a local agent session and its host-side Slurm transport broker."""
-
-    delegate: RunEnvironmentSession
-    broker: SlurmProcessBroker
-    _closed: bool = False
-
-    @property
-    def sandbox(self) -> CommandRunner:
-        return self.delegate.sandbox
-
-    @sandbox.setter
-    def sandbox(self, value: CommandRunner) -> None:
-        self.delegate.sandbox = value
-
-    @property
-    def view(self) -> RunEnvironmentView:
-        return self.delegate.view
-
-    @view.setter
-    def view(self, value: RunEnvironmentView) -> None:
-        self.delegate.view = value
-
-    def __enter__(self) -> _BrokeredRunEnvironmentSession:
-        return self
-
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-        self.close()
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            self.broker.close()
-        finally:
-            self.delegate.close()
 
 
 class RunEnvironmentResources:
@@ -813,7 +792,67 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 *broker_resources,
             ),
         )
-        return _BrokeredRunEnvironmentSession(delegate, broker) if broker is not None else delegate
+        return BrokeredRunEnvironmentSession(delegate, broker) if broker is not None else delegate
+
+
+class SlurmGpuEnvironment(_NoopWorkspaceRecovery):
+    """Keep the agent on the submit host and run every GPU process as a Slurm job."""
+
+    isolated = False
+    materialize_local_model_weights = True
+    default_profiler_id = "nsys"
+    supported_profiler_ids: frozenset[str] | None = None
+    backend_image: str | None = None
+    requires_local_profiler_preflight = True
+
+    def __init__(self, config_path: Path, resources: RunResourceRequest | None = None) -> None:
+        self.config_path = config_path.expanduser()
+        self.resources = resources
+
+    def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
+        """Validate the operator limits before opening the local editor sandbox."""
+        config = load_slurm_gpu_config(self.config_path)
+        gpus = gate_gpus(config, self.resources)
+        facts = SlurmGpuEnvironmentFacts(
+            str(request.log_dir / "slurm-gpu" / "vibesys-gpu"),
+            config.max_gpus,
+            config.max_time_minutes,
+            gpus,
+        )
+        return _PreparedRunEnvironment(facts, partial(self._open, request, config, gpus))
+
+    def _open(
+        self,
+        request: RunEnvironmentRequest,
+        config: SlurmGpuConfig,
+        gpus: int,
+        presentation: RunEnvironmentPresentation,
+    ) -> RunEnvironmentSession:
+        delegate = LocalEnvironment().prepare(request).open(presentation)
+        commands = start_slurm_gpu_commands(
+            config,
+            self.config_path,
+            state_dir=request.log_dir / "slurm-gpu",
+            workspace=request.workspace,
+            worktree_roots=request.run_owned_roots,
+            project_path_policy=request.project_path_policy,
+            gpus=gpus,
+        )
+        paths = delegate.view.paths
+        delegate.view = replace(
+            delegate.view,
+            paths=replace(
+                paths,
+                accuracy_command=commands.gate_command(paths.accuracy_command),
+                benchmark_command=commands.gate_command(paths.benchmark_command),
+            ),
+            prompt_notes=presentation.prompt_notes,
+            env_kind="slurm-gpu",
+            host_device_reselect=False,
+            agent_env=commands.agent_env,
+            agent_host_resources=commands.agent_host_resources,
+        )
+        return BrokeredRunEnvironmentSession(delegate, commands.broker)
 
 
 @dataclass(frozen=True)
@@ -1550,6 +1589,8 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
         return SkyPilotEnvironment.from_options(spec.options, spec.resources)
     if spec.name == "slurm":
         return SlurmEnvironment.from_options(spec.options)
+    if spec.name == "slurm-gpu":
+        return SlurmGpuEnvironment(Path(str(spec.options["config_path"])), spec.resources)
     message = f"unknown run environment: {spec.name!r}"
     raise ValueError(message)
 

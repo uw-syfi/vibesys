@@ -70,7 +70,7 @@ class RunEnvironmentRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    name: Literal["local", "docker", "modal", "skypilot", "slurm"]
+    name: Literal["local", "docker", "modal", "skypilot", "slurm", "slurm-gpu"]
     image: PortableText | None = None
     gpu: PortableText | None = None
     model_volume: PortableText | None = None

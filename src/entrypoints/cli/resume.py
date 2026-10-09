@@ -96,7 +96,7 @@ def _restore_run_environment_selection(
     elif args.docker:
         requested = "docker"
     elif getattr(args, "slurm_config", None) is not None:
-        requested = "slurm"
+        requested = record.name if record.name == "slurm-gpu" else "slurm"
     else:
         requested = record.name
     explicit_environment = {
