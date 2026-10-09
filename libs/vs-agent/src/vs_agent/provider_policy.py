@@ -30,23 +30,7 @@ DEFAULT_CLI_PROVIDER = "codex"
 """The CLI provider selected when neither a flag nor config names one."""
 
 CODEX_PROVIDER = "codex"
-"""The provider name naming Codex itself, for call sites that need the name
-(to look up its ``agentshim`` profile, say) rather than a yes/no answer to
-:func:`is_codex`."""
-
-
-def is_codex(provider: str | None) -> bool:
-    """Whether *provider* is Codex (``None``, an unset provider, is not).
-
-    A few VibeSys behaviors are deliberately scoped to Codex alone: its
-    session turn/token/duration budget (``AgentShimSession`` retires the
-    thread rather than letting it run unbounded) and the containerized
-    rollout watchdog that compensates for a resumed ``codex exec --json``
-    that finishes its work but never exits. Naming the check here means a
-    driver branches on a documented VibeSys decision instead of repeating the
-    provider's literal name at each call site.
-    """
-    return provider == CODEX_PROVIDER
+"""The provider name naming Codex itself, to look up its ``agentshim`` profile."""
 
 
 # --- Docker container environment -------------------------------------------
