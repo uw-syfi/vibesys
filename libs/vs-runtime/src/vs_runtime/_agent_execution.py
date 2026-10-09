@@ -11,7 +11,7 @@ from datetime import timedelta
 from functools import partial
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from vs_agent.api import (
     AgentExecutionPolicy,
@@ -736,8 +736,8 @@ class RuntimeAgentExecution:
                 if configuration.response is not None:
                     # Keep malformed output observable; the caller owns reply
                     # validation and the transition for a malformed response.
-                    with suppress(ValidationError):
-                        result = configuration.response.model_validate_json(outcome.result.text)
+                    with suppress(AgentOutputSchemaError):
+                        result = outcome.parse(configuration.response)
             elif isinstance(outcome, (Unknown, InvalidResponse)):
                 detail = outcome.detail
         except BaseException as error:

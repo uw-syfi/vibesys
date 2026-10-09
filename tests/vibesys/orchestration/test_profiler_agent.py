@@ -419,7 +419,9 @@ def _continuation_transport(
 ) -> tuple[AgentClient, list[AgentTurnRequest]]:
     """Bind the public provider Fake to the runtime Fake's same session journal."""
     calls: list[AgentTurnRequest] = []
-    client = AgentClient(FakeDriver(answer=response.model_dump(), on_turn=calls.append))
+    # The resumed reply carries prose with braces on both sides, as an agent's does.
+    text = f"I replaced {{}} with a list.\n{response.model_dump_json()}\n}}"
+    client = AgentClient(FakeDriver(answer=text, on_turn=calls.append))
     key = AgentSessionKey(SessionScope.MEMBER, "profiler:conversation-1")
     spec = AgentSessionSpec(
         role=role.id,

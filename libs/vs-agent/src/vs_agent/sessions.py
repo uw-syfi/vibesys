@@ -24,6 +24,7 @@ from vs_agent.contracts import (
     SessionDisposition,
     session_spec_fingerprint,
 )
+from vs_agent.runner import parse_typed_response
 from vs_agent.session_errors import (
     InvocationConflictError,
     SessionConfigurationError,
@@ -83,6 +84,14 @@ class Completed(_InvocationObservation):
     invocation_id: str = Field(min_length=1)
     result: AgentTurnResult
     checkpoint: AgentSessionCheckpoint
+
+    def parse[T: BaseModel](self, response_cls: type[T]) -> T:
+        """The reply as *response_cls*, recovered from prose by ``parse_typed_response``.
+
+        Raises ``AgentOutputSchemaError`` when no JSON value in the text validates.
+        This is the only way completed agent text becomes a model.
+        """
+        return parse_typed_response(self.result.text, response_cls)
 
     @model_validator(mode="after")
     def _same_conversation(self) -> Completed:
