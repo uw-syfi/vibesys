@@ -282,10 +282,8 @@ class MultiSlotRoundTransactionCoordinator:
         pre_commit = self._git.current_sha()
         if pre_commit is None:
             raise RoundTransactionError.missing_head()
-        if candidate:
-            staged = self._git.run(["git", "diff", "--cached", "--quiet"], check=False)
-            if staged.returncode != 0:
-                raise RoundTransactionError.staged_index_changes()
+        if candidate and self._git.has_staged_changes():
+            raise RoundTransactionError.staged_index_changes()
         payloads = self._serialize_writes(writes)
         namespace_files = {
             item.relative_path.as_posix(): item.contents
@@ -379,10 +377,7 @@ class MultiSlotRoundTransactionCoordinator:
         return journal
 
     def _commit(self, journal: _MultiSlotJournal) -> CompletedRound:
-        ancestor = self._git.run(
-            ["git", "merge-base", "--is-ancestor", journal.pre_commit, "HEAD"], check=False
-        )
-        if ancestor.returncode != 0:
+        if not self._git.is_ancestor_of_head(journal.pre_commit):
             raise RoundTransactionError.history_moved(journal.pre_commit)
         self._apply_journal(journal)
         snapshot = self.namespace.snapshot()

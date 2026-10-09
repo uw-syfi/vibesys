@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,6 +13,9 @@ from tests.support import run_test_command
 from tests.support.run_execution import run_execution_record
 
 from vs_project.api import (
+    CliGitRepository,
+    GitCommandError,
+    GitFaultSink,
     GitTracker,
     LocalAtomicWriteEffects,
     NullGitTrackerEvents,
@@ -24,7 +26,7 @@ from vs_project.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
 _IDENTITY = {
@@ -151,17 +153,26 @@ def test_retain_worktree_reports_git_failure_in_candidate_worktree(tmp_path: Pat
         tracker.retain_worktree(worktree, "cand-1")
 
 
-def test_candidate_patch_requires_a_resolvable_baseline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    tracker = _initialized_tracker(tmp_path)
+class _RepositoryWithoutRoots(CliGitRepository):
+    """A repository whose history reports no parentless commit."""
+
+    def root_commit(self, revision: str) -> str | None:
+        del revision
+        return None
+
+
+def test_candidate_patch_requires_a_resolvable_baseline(tmp_path: Path) -> None:
+    (tmp_path / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    events = NullGitTrackerEvents()
+    tracker = GitTracker(
+        tmp_path,
+        run_id="guard-run",
+        events=events,
+        repository=_RepositoryWithoutRoots(tmp_path, faults=events),
+    )
+    tracker.init(existing=False)
     sha = tracker.current_sha()
     assert sha is not None
-
-    def no_roots(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
-
-    monkeypatch.setattr(tracker, "run", no_roots)
     with pytest.raises(
         ValueError, match=re.escape(f"cannot resolve workspace baseline for commit {sha}")
     ):
@@ -192,28 +203,38 @@ class _RecordingEvents(NullGitTrackerEvents):
         self.warnings.append((summary, detail))
 
 
-def test_checkout_tree_reports_failed_restore_of_preserved_memory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+class _RepositoryWhoseRestoreReplacesMemory(CliGitRepository):
+    """A repository whose worktree restore fails after replacing ``memory`` with a file."""
+
+    def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
+        super().__init__(root, faults=faults)
+        self._memory = root / "memory"
+
+    def restore_worktree(self, revision: str, exclude: Sequence[str] = ()) -> None:
+        # The rollback replaces the preserved directory with a file, so both
+        # the restore and the later re-application of memory fail.
+        del exclude
+        (self._memory / "notes.txt").unlink()
+        self._memory.rmdir()
+        self._memory.write_text("blocker\n", encoding="utf-8")
+        raise GitCommandError(["git", "restore", revision], 1, "restore failed")
+
+
+def test_checkout_tree_reports_failed_restore_of_preserved_memory(tmp_path: Path) -> None:
     (tmp_path / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
     events = _RecordingEvents()
-    tracker = GitTracker(tmp_path, run_id="guard-run", events=events)
+    tracker = GitTracker(
+        tmp_path,
+        run_id="guard-run",
+        events=events,
+        repository=_RepositoryWhoseRestoreReplacesMemory(tmp_path, faults=events),
+    )
     tracker.init(existing=False)
     sha = tracker.current_sha()
     assert sha is not None
     memory = tmp_path / "memory"
     memory.mkdir()
     (memory / "notes.txt").write_text("keep\n", encoding="utf-8")
-
-    def restore_fails(_cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        # The rollback replaces the preserved directory with a file, so both
-        # the restore command and the later re-application of memory fail.
-        (memory / "notes.txt").unlink()
-        memory.rmdir()
-        memory.write_text("blocker\n", encoding="utf-8")
-        raise subprocess.CalledProcessError(1, ["git", "restore"])
-
-    monkeypatch.setattr(tracker, "run", restore_fails)
 
     assert tracker.checkout_tree(sha, preserve_paths=["memory"]) is False
     messages = [message for message, _detail in events.warnings]
@@ -271,7 +292,7 @@ def test_checkout_tree_keeps_index_clean_when_restoring_an_earlier_revision(
     assert (tmp_path / "main.py").read_text(encoding="utf-8") == "VALUE = 2\n"
     assert not (tmp_path / "later.py").exists()
     assert (memory / "notes.txt").read_text(encoding="utf-8") == "keep across rollback\n"
-    assert tracker.run(["git", "diff", "--cached", "--quiet"], check=False).returncode == 0
+    assert not tracker.has_staged_changes()
 
 
 @pytest.mark.parametrize("bad", ["/abs/memory", "", "a/../../etc"])

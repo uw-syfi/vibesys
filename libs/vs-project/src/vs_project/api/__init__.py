@@ -7,6 +7,7 @@ errors describe its configuration, run state, Git integration, and task paths.
 Runs use one version 5 manifest containing an ``OrchestrationDescriptor``.
 """
 
+from vs_project._cli_git_repository import CliGitRepository
 from vs_project._git_events import GitTrackerEvents, NullGitTrackerEvents
 from vs_project._git_process import run_git
 from vs_project._git_remote import GitRemoteRepository
@@ -68,6 +69,21 @@ from vs_project._state_io import (
 )
 from vs_project._state_models import FakeStateModels, validate_state_namespace
 from vs_project._state_store import FakeStateStore, LocalStateStore
+from vs_project.api.git_repository import (
+    COMMIT_IDENTITY_EMAIL,
+    COMMIT_IDENTITY_NAME,
+    CommitSubject,
+    GitCommandError,
+    GitError,
+    GitFaultSink,
+    GitRepository,
+    GitTimeoutError,
+    PatchStyle,
+    Pathspec,
+    RepositoryLocation,
+    Revision,
+    StagingError,
+)
 from vs_project.api.state_models import StateModels
 from vs_project.api.state_store import (
     CommitFault,
@@ -88,6 +104,8 @@ from vs_project.errors import ProjectError, StateDocumentDamagedError
 from vs_project.project import Project
 
 __all__ = [
+    "COMMIT_IDENTITY_EMAIL",
+    "COMMIT_IDENTITY_NAME",
     "MAX_SOCKET_PATH_BYTES",
     "PROJECT_SCHEMA_VERSION",
     "RUN_SCHEMA_VERSION",
@@ -95,8 +113,10 @@ __all__ = [
     "AmbiguousTaskError",
     "AtomicWriteEffects",
     "AtomicWriteStream",
+    "CliGitRepository",
     "CommitFault",
     "CommitOutcome",
+    "CommitSubject",
     "Committed",
     "ConfigurationRoot",
     "Conflict",
@@ -104,10 +124,15 @@ __all__ = [
     "FakeStateModels",
     "FakeStateStore",
     "FrameworkSnapshotStatus",
+    "GitCommandError",
+    "GitError",
+    "GitFaultSink",
     "GitObjectId",
     "GitRemoteRepository",
+    "GitRepository",
     "GitSnapshotFile",
     "GitSnapshotPlan",
+    "GitTimeoutError",
     "GitTracker",
     "GitTrackerEvents",
     "InvalidTaskDefinitionError",
@@ -118,6 +143,8 @@ __all__ = [
     "ObservationFault",
     "OrchestrationDescriptor",
     "OrchestrationRunManifest",
+    "PatchStyle",
+    "Pathspec",
     "Project",
     "ProjectError",
     "ProjectGitIntegration",
@@ -128,11 +155,14 @@ __all__ = [
     "ProjectSandboxPaths",
     "ProjectStateError",
     "QuarantinedEnvelope",
+    "RepositoryLocation",
+    "Revision",
     "RunEnvironmentRecord",
     "RunExecutionRecord",
     "RunLogger",
     "RunResourceRequest",
     "SocketPathTooLongError",
+    "StagingError",
     "StateDocumentDamagedError",
     "StateFile",
     "StateModelNotFoundError",

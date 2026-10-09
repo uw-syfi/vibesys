@@ -297,13 +297,7 @@ class RuntimeWorkspaceResource:
         self._root_project.git.retain_candidate(reference, revision)
 
     def has_revision(self, revision: str) -> bool:
-        return (
-            self._root_project.git.run(
-                ["git", "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}"],
-                check=False,
-            ).returncode
-            == 0
-        )
+        return self._root_project.git.has_revision(revision)
 
     def matches_revision(self, revision: str) -> bool:
         """Return whether the workspace tree equals the revision.
@@ -317,16 +311,7 @@ class RuntimeWorkspaceResource:
 
     def find_snapshot(self, label: str) -> str | None:
         """Return the newest commit whose subject is exactly *label*, if any."""
-        log = self._project.git.run(
-            ["git", "log", "--max-count=500", "--format=%H%x1f%s"], check=False
-        )
-        if log.returncode != 0:
-            return None
-        for line in log.stdout.decode(errors="replace").splitlines():
-            commit, _, subject = line.partition("\x1f")
-            if subject == label:
-                return commit
-        return None
+        return self._project.git.find_snapshot(label)
 
     def pending_changes(self) -> list[str]:
         return self._project.git.pending_changes()
