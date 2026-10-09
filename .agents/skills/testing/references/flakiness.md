@@ -32,13 +32,38 @@ If a test involves threads, processes, subprocesses, async work, or time, run
 it 20 times in a row and once in parallel with other tests. The commands are in
 the per-language reference.
 
+## Zero tolerance: every flake gets fixed
+
+Seeing a flake, even in a test you did not write or in a CI rerun that "passed
+the second time", obliges you to fix it. Rerunning the job is not a fix.
+
+Put the fix in its own PR, not in the change you were working on, so it lands
+fast and unblocks everyone. Then rebase your current PR on top of it (or, if
+the fix has already merged, on the updated main). Do not carry the fix inside
+an unrelated PR, and do not wait on your PR to ship it. Root-cause it, then redesign the test so the
+source of nondeterminism is gone, not merely less likely. Leave the test and
+its neighbors better than you found them: sweep for the same pattern elsewhere
+and cover it with a property test where practical.
+
+Techniques that remove flakiness by construction: injected clock, sleeper, and
+RNG; Fakes and fault injection instead of real timeouts, networks, and
+processes; deterministic simulation (single-threaded Fake executor, virtual
+time); seeded property-based tests with a recorded seed; synchronizing on
+events, channels, or joins instead of sleeping or polling; order-independent
+assertions (sets, sorted lists); per-test temp directories, ports, and
+environment; scoped fixtures that own cleanup; pure functional-core tests over
+event sequences, with no clocks at all.
+
 ## Diagnosing a flake
 
 1. Reproduce with repeated and parallel runs, or find the failing run's seed
-   and ordering.
+   and ordering. Under CI load, also try `-n auto` and shuffled order.
 2. Name the nondeterminism source from the table.
 3. Remove the source with an injected interface, a Fake, or a synchronization
    point. Do not mask it with a sleep or retry.
+4. Prove it: the repeated and parallel runs from the previous section pass,
+   and a test that would have caught the flaky behavior now fails
+   deterministically when the bug is reintroduced.
 
 A sleep that is the actual subject of an opt-in real-contract test needs a
 `test-isolation: <reason>` comment. Where a language has a test-isolation
