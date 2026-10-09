@@ -136,7 +136,17 @@ publishes `quota_resumed`. Under `wait` it parks for a bounded time (the
 provider's reset time plus a margin, else `retry_seconds`, cut to what is left of
 `wait_seconds`) and resumes the run itself. Under `fail`, or when the budget is
 spent or the reset lies beyond it, it publishes `quota_abandoned` and raises the
-quota error, so the turn fails as it did before. A stop request ends any wait. A run that waited and resumed has the same experiment
+quota error, so the turn fails as it did before. A stop request ends any wait.
+
+Under `fallback`, or when an operator resumes a paused run with the fallback
+(`command.resume` with `fallback: true`, `RunControlChannel.resume_with_fallback`),
+the gate records the replaced provider in the run's `ProviderFallback` and publishes
+`provider_switched`. The turn in flight ends with the quota error, because a
+session cannot change provider. `RuntimeWorkspaceAgentSessions.create_session` applies
+the substitution to the configuration it resolves, so the next session of a role is a
+fresh conversation on the fallback provider and model (per-role model and
+reasoning-effort overrides named the old provider's models and are dropped). A
+session still open on the replaced provider abandons its next capacity stop at once. A run that waited and resumed has the same experiment
 state as one that never stopped, because the paused turn is the same invocation
 held in place. The `quota_paused` event is the operator notification: headless
 prints a `[quota]` line, and a consumer of the event stream (the event-hooks

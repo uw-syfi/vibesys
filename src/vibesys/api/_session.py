@@ -384,6 +384,10 @@ class _LocalRunSession:
         """Request the run acquire the write lease and continue from checkpoint."""
         self._integration.control.resume()
 
+    def resume_with_fallback(self) -> None:
+        """Resume the run and switch a quota-paused run to its configured fallback."""
+        self._integration.control.resume_with_fallback()
+
     def stop(self) -> None:
         """Request the run terminate."""
         self._integration.control.request_stop()

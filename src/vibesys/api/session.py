@@ -45,6 +45,13 @@ class RunControl(Protocol):
         """Request the run acquire the write lease and continue from checkpoint."""
         ...
 
+    def resume_with_fallback(self) -> None:
+        """Resume, and switch a run paused on a provider capacity limit to its fallback.
+
+        A run with no configured fallback resumes as `resume` does.
+        """
+        ...
+
     def stop(self) -> None:
         """Request the run terminate."""
         ...

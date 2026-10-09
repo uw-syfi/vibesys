@@ -27,9 +27,17 @@ name = "gpt-5.4"
 #                     for at most wait_seconds per turn (no limit when omitted);
 #                     after that the turn fails with the quota error.
 #   policy = "fail"   do not pause: the turn fails with the quota error at once.
-# policy = "wait"
-# wait_seconds = 21600       # positive integer seconds; only with policy = "wait"
+#   policy = "fallback"  wait like "wait" (not at all without wait_seconds), then switch the
+#                     run to fallback_provider / fallback_model. The turn in flight ends with
+#                     the quota error (a session cannot change provider, and a hypothesis is
+#                     never continued on another model); sessions opened afterwards are fresh
+#                     conversations on the fallback, and the switch is journaled.
+# Any policy may name a fallback; an operator can then resume a paused run with it.
+# policy = "fallback"
+# wait_seconds = 14400       # positive integer seconds; only with "wait" or "fallback"
 # retry_seconds = 300        # seconds between attempts when no reset time is known
+# fallback_provider = "codex"   # claude | codex | gemini | opencode; not the run's own provider
+# fallback_model = "gpt-5.4"    # needs fallback_provider, and the reverse
 
 # [evaluation]
 # Added to declared stage execution budgets to bound evaluation suspension.

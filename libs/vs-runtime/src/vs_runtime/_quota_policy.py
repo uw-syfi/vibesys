@@ -11,6 +11,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vs_runtime._fallback import FallbackTarget
 
 #: Seconds added to a provider's reset time before the turn is sent again, so a
 #: request does not race the provider's own clock for the reopened window.
@@ -29,29 +33,41 @@ class QuotaAction(StrEnum):
     """Pause the run, then resume it by itself when capacity should have returned."""
     FAIL = "fail"
     """Do not pause: the turn fails with the quota error."""
+    FALLBACK = "fallback"
+    """Wait as ``WAIT`` does, then switch to the fallback provider instead of failing."""
 
 
 @dataclass(frozen=True, slots=True)
 class QuotaPolicy:
     """The unattended behavior for a capacity limit.
 
-    ``wait_seconds`` bounds the total time one turn may spend waiting (``None``
-    waits as long as it takes) and applies to ``WAIT`` only. ``retry_seconds``
-    is the interval between attempts when the provider reported no reset time.
+    ``wait_seconds`` bounds the total time one turn may spend waiting and applies
+    to ``WAIT`` (``None`` waits as long as it takes) and ``FALLBACK`` (``None``
+    does not wait: the switch is immediate). ``retry_seconds`` is the interval
+    between attempts when the provider reported no reset time. ``fallback`` is
+    where ``FALLBACK`` switches to and where an operator may send a paused run;
+    any action may carry one, and ``FALLBACK`` requires it.
     """
 
     action: QuotaAction = QuotaAction.PAUSE
     wait_seconds: float | None = None
     retry_seconds: float = DEFAULT_RETRY_SECONDS
+    fallback: FallbackTarget | None = None
 
     def __post_init__(self) -> None:
         """Reject values no decision can use."""
         if not math.isfinite(self.retry_seconds) or self.retry_seconds <= 0:
             message = f"retry_seconds must be a positive number, got {self.retry_seconds!r}"
             raise ValueError(message)
+        if self.action is QuotaAction.FALLBACK and self.fallback is None:
+            message = "the fallback action needs a fallback provider and model"
+            raise ValueError(message)
         if self.wait_seconds is not None:
-            if self.action is not QuotaAction.WAIT:
-                message = f"wait_seconds applies only to the wait action, not {self.action.value}"
+            if self.action not in (QuotaAction.WAIT, QuotaAction.FALLBACK):
+                message = (
+                    f"wait_seconds applies only to the wait and fallback actions, "
+                    f"not {self.action.value}"
+                )
                 raise ValueError(message)
             if not math.isfinite(self.wait_seconds) or self.wait_seconds <= 0:
                 message = f"wait_seconds must be a positive number, got {self.wait_seconds!r}"
@@ -80,7 +96,14 @@ class GiveUp:
     reason: str
 
 
-type QuotaDecision = Hold | WaitFor | GiveUp
+@dataclass(frozen=True, slots=True)
+class Switch:
+    """Do not wait any longer: switch to the fallback provider."""
+
+    reason: str
+
+
+type QuotaDecision = Hold | WaitFor | GiveUp | Switch
 
 
 def decide_quota(
@@ -97,13 +120,17 @@ def decide_quota(
         return Hold()
     if policy.action is QuotaAction.FAIL:
         return GiveUp("the quota policy is fail")
-    remaining = None if policy.wait_seconds is None else policy.wait_seconds - waited
+    budget = policy.wait_seconds
+    if policy.action is QuotaAction.FALLBACK and budget is None:
+        budget = 0.0
+    remaining = None if budget is None else budget - waited
+    end = Switch if policy.action is QuotaAction.FALLBACK else GiveUp
     if remaining is not None and remaining <= 0:
-        return GiveUp(f"waited {waited:g}s for capacity, the whole budget")
+        return end(f"waited {waited:g}s for capacity, the whole budget")
     if resets_at is not None and resets_at + RESET_MARGIN_SECONDS > now:
         wanted = resets_at + RESET_MARGIN_SECONDS - now
         if remaining is not None and wanted > remaining:
-            return GiveUp(f"capacity returns in {wanted:g}s, past the {remaining:g}s still allowed")
+            return end(f"capacity returns in {wanted:g}s, past the {remaining:g}s still allowed")
         return WaitFor(wanted)
     wanted = policy.retry_seconds
     return WaitFor(wanted if remaining is None else min(wanted, remaining))

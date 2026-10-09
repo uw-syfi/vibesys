@@ -8,6 +8,7 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    ProviderSwitchedData,
     QuotaAbandonedData,
     QuotaPausedData,
     QuotaResumedData,
@@ -306,6 +307,39 @@ class TestQuotaEvents:
             ),
         )
         assert out == "[quota] codex rate limited: 429; the quota policy is fail\n"
+
+
+class TestProviderSwitch:
+    def test_a_pause_names_the_fallback_an_operator_may_choose(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_PAUSED,
+            QuotaPausedData(
+                provider="claude",
+                condition="quota_exhausted",
+                detail="limit",
+                fallback_provider="codex",
+                fallback_model="gpt-5",
+            ),
+        )
+        assert out == (
+            "[quota] claude quota exhausted: limit; the run is paused; fallback: codex (gpt-5)\n"
+        )
+
+    def test_a_switch_names_both_providers_the_model_and_who_chose_it(self) -> None:
+        out = _render_event(
+            CoreEventType.PROVIDER_SWITCHED,
+            ProviderSwitchedData(
+                from_provider="claude",
+                to_provider="codex",
+                to_model="gpt-5",
+                reason="policy",
+                detail="waited 3600s for capacity, the whole budget",
+            ),
+        )
+        assert out == (
+            "[quota] switched from claude to codex (gpt-5) by the policy; new sessions start "
+            "there (waited 3600s for capacity, the whole budget)\n"
+        )
 
 
 class TestToolEvents:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -95,6 +95,50 @@ class AgentQuotaError(RuntimeError):
         self.detail = detail
         self.resets_at = resets_at
         super().__init__(f"{provider} {condition.value.replace('_', ' ')}: {detail}")
+
+
+type QuotaResumeReason = Literal["operator", "wait_elapsed"]
+"""Who ended a quota pause: the operator, or the policy's wait running out."""
+
+type ProviderSwitchReason = Literal["policy", "operator"]
+"""Who switched the run to its fallback provider: the quota policy, or the operator."""
+
+
+@dataclass(frozen=True, slots=True)
+class Attribution:
+    """Which agent, round and invocation an event belongs to; ``None`` when unknown."""
+
+    agent_kind: str | None = None
+    round_label: str | None = None
+    invocation_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class QuotaPlan:
+    """What happens next to a run paused on a capacity limit.
+
+    ``policy`` names the run's unattended quota policy (``pause``, ``wait``, ``fail`` or
+    ``fallback``).
+    ``resumes_at`` is the epoch second the run resumes itself, when its policy
+    does; ``fallback_provider`` and ``fallback_model`` name where an operator may
+    resume it instead, when a fallback is configured.
+    """
+
+    policy: str = "pause"
+    resumes_at: float | None = None
+    fallback_provider: str | None = None
+    fallback_model: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderSwitch:
+    """A run's switch from one provider to its fallback, and why."""
+
+    from_provider: str
+    to_provider: str
+    to_model: str
+    reason: ProviderSwitchReason
+    detail: str
 
 
 class CapacityGate(Protocol):
