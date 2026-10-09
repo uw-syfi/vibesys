@@ -13,10 +13,13 @@ graft libs/vs-evaluator-protocol/src
 graft libs/vs-github/src
 graft libs/vs-issue-tracker/src
 graft libs/vs-core/src
-include libs/vs-core/pyproject.toml
-include libs/vs-core/README.md
 graft libs/vs-project/src
 graft libs/vs-sandbox/src
+
+# Workspace members carry their own metadata; the sdist keeps it so the
+# `[tool.uv.workspace] members` globs still resolve when unpacked.
+include libs/*/pyproject.toml
+include libs/*/README.md
 
 # The custom EggInfo command adds Git-tracked files from the client workspace's
 # root, scripts, and declared packages. A broad graft would also publish ignored

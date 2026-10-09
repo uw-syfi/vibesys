@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=70.1", "wheel>=0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-issue-tracker"
+version = "0.1.0"
+description = "Issue-tracking and progress-log contracts with local and GitHub implementations"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2", "vs-github"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vs_issue_tracker = ["py.typed"]
+
+[tool.uv.sources]
+vs-github = { workspace = true }

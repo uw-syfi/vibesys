@@ -16,8 +16,15 @@ resolution-markers = [
 [manifest]
 members = [
     "vibesys",
+    "vs-async-ops",
     "vs-bench",
     "vs-core",
+    "vs-evaluator-protocol",
+    "vs-github",
+    "vs-issue-tracker",
+    "vs-project",
+    "vs-prompts",
+    "vs-slurm",
 ]
 
 [[package]]
@@ -3661,6 +3668,17 @@ test = [
 ]
 
 [[package]]
+name = "vs-async-ops"
+version = "0.1.0"
+source = { editable = "libs/vs-async-ops" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+
+[[package]]
 name = "vs-bench"
 version = "0.1.0"
 source = { editable = "sdk/vs-bench" }
@@ -3688,6 +3706,70 @@ provides-extras = ["dev"]
 name = "vs-core"
 version = "0.1.0"
 source = { editable = "libs/vs-core" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+
+[[package]]
+name = "vs-evaluator-protocol"
+version = "0.1.0"
+source = { editable = "libs/vs-evaluator-protocol" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+
+[[package]]
+name = "vs-github"
+version = "0.1.0"
+source = { editable = "libs/vs-github" }
+
+[[package]]
+name = "vs-issue-tracker"
+version = "0.1.0"
+source = { editable = "libs/vs-issue-tracker" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "vs-github" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-github", editable = "libs/vs-github" },
+]
+
+[[package]]
+name = "vs-project"
+version = "0.1.0"
+source = { editable = "libs/vs-project" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+
+[[package]]
+name = "vs-prompts"
+version = "0.1.0"
+source = { editable = "libs/vs-prompts" }
+dependencies = [
+    { name = "jinja2" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "jinja2", specifier = ">=3.1" }]
+
+[[package]]
+name = "vs-slurm"
+version = "0.1.0"
+source = { editable = "libs/vs-slurm" }
 dependencies = [
     { name = "pydantic" },
 ]
