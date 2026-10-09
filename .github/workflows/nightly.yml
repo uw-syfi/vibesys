@@ -42,3 +42,42 @@ jobs:
       # tests/vibesys/orchestration/dynamic/loop/test_chaos.py).
       - name: Sweep the dynamic-loop chaos harness over more seeds
         run: ./scripts/chaos_dynamic_loop.sh 200 1000 2
+
+  # `CI` selects the derandomized `ci` profile, so the job above replays the
+  # same examples every night. This job runs only the property tests under the
+  # randomized `nightly` profile (conftest.py), so each night explores new
+  # inputs. It runs beside the job above, so the workflow's wall time stays
+  # that of the longer job. Tests that pin their own `max_examples` keep it.
+  deep-properties:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      # A failure prints its `@reproduce_failure` blob (print_blob); the
+      # artifact uploaded below holds the failing examples for replay.
+      - name: Run the property tests under the nightly profile
+        env:
+          HYPOTHESIS_PROFILE: nightly
+          VIBESYS_FULL_PROPERTIES: '1'
+        run: uv run python -m pytest -m hypothesis -n auto --dist loadgroup --no-cov -q
+
+      - name: Keep the failing examples
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hypothesis-examples
+          path: .hypothesis/examples
+          if-no-files-found: ignore
