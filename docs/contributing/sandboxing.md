@@ -97,7 +97,7 @@ allowlist (`session_env_allowlist`).
 | `--run-environment slurm`, Linux, `VIBESYS_AGENT_SANDBOX=landlock` | `LandlockSandbox` | not enforced | not enforced |
 | `--run-environment slurm`, macOS | `SeatbeltSandbox` | enforced | enforced |
 | Host-only backend (Metal), macOS | `SeatbeltSandbox` | enforced | enforced |
-| `--run-environment slurm-gpu` | host confinement as for `slurm`, per command re-wrapped by the broker | per host | per host |
+| `--run-environment slurm-gpu` | `DockerSandbox` editor container; each brokered GPU job runs under host confinement as for `slurm` | enforced in the container; per host for jobs | enforced in the container; per host for jobs |
 
 Reads are not uniformly hidden. Bubblewrap and Landlock deny all reads outside
 the project and declared resources. Seatbelt allows broad reads and denies the
@@ -106,15 +106,12 @@ macOS when full read confinement matters.
 
 ## Known limits
 
-- **Slurm agents on the host.** Every environment except `slurm` and `slurm-gpu`
-  runs the agent in Docker. Both Slurm environments edit on the host under the
-  mechanisms in the support matrix. `slurm-gpu` is built for hosts that cannot
-  run Docker: its broker re-wraps each GPU command in the agent's host
-  confinement. `slurm` runs its trusted gates (`vs_sandbox.slurm_command`) and
-  profiler MCP server in the agent's sandbox with the host Python and a
-  host-side transport broker; moving that editor into Docker needs a
-  host-mediated gate bridge like SkyPilot's. Until then, `LocalEnvironment` and
-  the host confinement mechanisms stay.
+- **`slurm` agents on the host.** Only `slurm` still edits on the host under the
+  mechanisms in the support matrix; it runs its trusted gates
+  (`vs_sandbox.slurm_command`) and profiler MCP server in the agent's sandbox
+  with the host Python. `slurm-gpu` already edits in Docker: its broker runs
+  GPU jobs under host confinement on compute nodes, where Docker is normally
+  unavailable, and runs the trusted gates for the container.
 - **Metal on macOS runs on the host.** Docker on macOS cannot expose Metal/MPS,
   so a backend that declares itself host-only (`backend_is_host_only`, today
   Metal) runs its agent in the `host` environment on macOS: the host path

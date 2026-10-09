@@ -8,15 +8,15 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from vs_runtime._run_environment import RunEnvironmentSession, RunEnvironmentView
     from vs_sandbox.api import CommandRunner
-    from vs_sandbox.api.slurm import SlurmGpuBroker, SlurmProcessBroker
+    from vs_sandbox.api.slurm import HostCommandBroker, SlurmProcessBroker
 
 
 @dataclass(slots=True)
 class BrokeredRunEnvironmentSession:
-    """Own a local agent session and the host-side Slurm broker it reaches."""
+    """Own an agent session and the host-side Slurm broker it reaches."""
 
     delegate: RunEnvironmentSession
-    broker: SlurmProcessBroker | SlurmGpuBroker
+    broker: SlurmProcessBroker | HostCommandBroker
     _closed: bool = False
 
     @property
@@ -45,7 +45,10 @@ class BrokeredRunEnvironmentSession:
         if self._closed:
             return
         self._closed = True
+        # Reverse construction order: the broker was started first, so it closes
+        # last. The editor stops first, which ends every connection it held and
+        # cancels the jobs those connections asked for.
         try:
-            self.broker.close()
-        finally:
             self.delegate.close()
+        finally:
+            self.broker.close()

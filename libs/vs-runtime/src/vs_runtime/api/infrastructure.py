@@ -233,6 +233,7 @@ from vs_runtime._skills import (
     offered_skill_facts,
     resolve_skill_resources,
 )
+from vs_runtime._slurm_gpu_environment import SlurmGpuEnvironment
 from vs_runtime._state import CommittedStateObserver, create_state
 from vs_runtime._trusted_evaluation import (
     ProtocolBenchmarkContract,
@@ -586,6 +587,7 @@ __all__ = [
     "SkyPilotEnvironmentFacts",
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
+    "SlurmGpuEnvironment",
     "SlurmGpuEnvironmentFacts",
     "StageFailureText",
     "SteerTarget",

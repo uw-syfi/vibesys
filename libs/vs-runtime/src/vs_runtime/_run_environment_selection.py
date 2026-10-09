@@ -22,9 +22,9 @@ from vs_runtime._run_environment import (
     RunEnvironmentSpec,
     SkyPilotEnvironment,
     SlurmEnvironment,
-    SlurmGpuEnvironment,
     _PreparedRunEnvironment,
 )
+from vs_runtime._slurm_gpu_environment import SlurmGpuEnvironment
 from vs_sandbox.api import backend_is_host_only, build_host_sandbox
 from vs_sandbox.api.slurm import configured_capture_lifecycle, load_slurm_policy
 from vs_slurm.api import load_slurm_config
