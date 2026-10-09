@@ -26,6 +26,7 @@ from vs_sandbox.api.slurm import (
     COMMAND_BROKER_SOCKET_ENV,
     COMMAND_BROKER_TOKEN_ENV,
     HOST_COMMAND_CLIENT,
+    BenchmarkOutputKind,
     GateKind,
     Gates,
     GpuCommand,
@@ -34,10 +35,10 @@ from vs_sandbox.api.slurm import (
     HostCommandBroker,
     RunRoots,
     SlurmGpuConfig,
+    classify_benchmark_output,
 )
 
 # test-isolation: main is the CLI entry point and is intentionally absent from the library API.
-from vs_sandbox.benchmark_output import BenchmarkOutputKind, classify_benchmark_output
 from vs_sandbox.host_command_client import main as client_main
 
 if TYPE_CHECKING:
