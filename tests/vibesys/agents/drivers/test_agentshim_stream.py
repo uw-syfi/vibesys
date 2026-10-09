@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 import agentshim
@@ -20,10 +21,12 @@ from agentshim.testing import (
     ClaudePeerTurn,
     ClaudeStreamPeers,
     CodexScript,
+    FakeClock,
     FakeExecutor,
     Hang,
     ReportRateLimits,
     Say,
+    SequentialIds,
     scripted_turn,
 )
 from tests.support.fake_docker_sandbox import FakeDockerSandbox
@@ -34,6 +37,7 @@ from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnRequest,
+    AgentTurnTimeoutError,
     SteerableSession,
     SteerOutcome,
 )
@@ -87,6 +91,13 @@ def _awaiting_steer(provider: str) -> Callable[[SpawnRequest], FakePeer]:
     return CodexScript().turn(AwaitSteer(then=(Say("STEERED"),))).peer
 
 
+def _hanging(provider: str) -> Callable[[SpawnRequest], FakePeer]:
+    """A process that takes the turn and never answers."""
+    if provider == "claude":
+        return ClaudeStreamPeers([ClaudePeerTurn(stall=True)]).build
+    return CodexScript().turn(Hang()).peer
+
+
 def test_every_stream_provider_has_a_script() -> None:
     assert STREAM_PROVIDERS == ("claude", "codex")
 
@@ -116,6 +127,8 @@ def _driver(
         executor_factory=lambda: executor,
         launcher_env=dict,
         transient_retry_delays=(),
+        clock=FakeClock(),
+        ids=SequentialIds(),
     )
 
 
@@ -249,3 +262,20 @@ def test_a_rate_limit_report_reaches_the_observer_while_the_turn_still_runs(
     worker.join()
 
     assert isinstance(failures[0], agentshim.TurnCancelledError)
+
+
+@pytest.mark.parametrize("provider", STREAM_PROVIDERS)
+def test_a_hung_turn_ends_in_the_typed_timeout_the_run_understands(
+    tmp_path: Path, provider: str
+) -> None:
+    """A long-lived process raises agentshim's `TurnTimeoutError`, not the one-shot subclass."""
+    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    executor = FakeExecutor([], peers=_hanging(provider))
+    session = _driver(provider, executor, sandbox).create_session(
+        _container_spec(tmp_path, provider)
+    )
+
+    with pytest.raises(AgentTurnTimeoutError) as raised:
+        session.run_turn(AgentTurnRequest(message="work", timeout=timedelta(seconds=5)))
+
+    assert raised.value.timeout_seconds == 5.0

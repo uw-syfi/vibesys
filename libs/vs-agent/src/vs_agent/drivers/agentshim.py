@@ -661,7 +661,9 @@ class AgentShimSession:
             return self._session.run(ticket)
         except (OSError, ImportError, agentshim.CliNotFoundError) as exc:
             raise AgentSpawnError(self._profile.name, str(exc)) from exc
-        except agentshim.CliTimeoutError as exc:
+        except agentshim.TurnTimeoutError as exc:
+            # A one-shot process reports the budget as `CliTimeoutError`; a
+            # long-lived one raises its parent, `TurnTimeoutError`.
             raise AgentTurnTimeoutError(exc.timeout) from exc
         except agentshim.TurnFailedError as exc:
             if exc.kind is agentshim.FailureKind.SCHEMA:
@@ -872,6 +874,8 @@ class AgentShimDriver:
         env_passthrough: Sequence[str] = (),
         launcher_env: Callable[[], Mapping[str, str]] = agentshim.interactive_env,
         transport: agentshim.TransportKind | None = None,
+        clock: agentshim.Clock | None = None,
+        ids: agentshim.IdAllocator | None = None,
     ) -> None:
         """Configure one provider; ``executor_factory`` replaces the base executor.
 
@@ -903,6 +907,10 @@ class AgentShimDriver:
         mode's budget: a container check crosses a ``docker exec`` and is given
         four times as long as a host one.
 
+        ``clock`` and ``ids`` replace agentshim's wall clock and random turn ids,
+        so a test measures turn timeouts and retry waits on a fake clock and
+        names turns reproducibly; production leaves them ``None``.
+
         ``transient_retry_delays`` are the waits before each retry of a turn
         that failed on a transient provider error; see
         :data:`TRANSIENT_RETRY_DELAYS_S`.
@@ -933,6 +941,8 @@ class AgentShimDriver:
         self._dropped_names_lock = threading.Lock()
         self._launcher_env = launcher_env
         self._transport = transport
+        self._clock = clock
+        self._ids = ids
         self._sessions: WeakSet[AgentShimSession] = WeakSet()
         self._closed = False
 
@@ -1083,6 +1093,8 @@ class AgentShimDriver:
             env=None if launch.confinement is not None else launch.env,
             log=self._log,
             check_timeout=self._check_timeout,
+            clock=self._clock,
+            ids=self._ids,
         )
         skill_scope = _skill_scope(agent.profile)
         if skill_scope is not agentshim.SkillScope.PROJECT:
