@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=70.1", "wheel>=0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-faults"
+version = "0.1.0"
+description = "Seeded, declarative fault injection at VibeSys boundary interfaces"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2",
+    "vs-agent",
+    "vs-mcp",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vs_faults = ["py.typed"]
+
+[tool.uv.sources]
+vs-agent = { workspace = true }
+vs-mcp = { workspace = true }

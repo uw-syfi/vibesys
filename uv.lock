@@ -22,11 +22,13 @@ members = [
     "vs-core",
     "vs-evaluation",
     "vs-evaluator-protocol",
+    "vs-faults",
     "vs-github",
     "vs-issue-tracker",
     "vs-mcp",
     "vs-project",
     "vs-prompts",
+    "vs-runtime",
     "vs-sandbox",
     "vs-slurm",
 ]
@@ -3001,6 +3003,23 @@ dependencies = [
 requires-dist = [{ name = "pydantic", specifier = ">=2" }]
 
 [[package]]
+name = "vs-faults"
+version = "0.1.0"
+source = { editable = "libs/vs-faults" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "vs-agent" },
+    { name = "vs-mcp" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-agent", editable = "libs/vs-agent" },
+    { name = "vs-mcp", editable = "libs/vs-mcp" },
+]
+
+[[package]]
 name = "vs-github"
 version = "0.1.0"
 source = { editable = "libs/vs-github" }
@@ -3056,6 +3075,43 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "jinja2", specifier = ">=3.1" }]
+
+[[package]]
+name = "vs-runtime"
+version = "0.1.0"
+source = { editable = "libs/vs-runtime" }
+dependencies = [
+    { name = "jinja2" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "vs-agent" },
+    { name = "vs-async-ops" },
+    { name = "vs-core" },
+    { name = "vs-evaluation" },
+    { name = "vs-evaluator-protocol" },
+    { name = "vs-mcp" },
+    { name = "vs-project" },
+    { name = "vs-prompts" },
+    { name = "vs-sandbox" },
+    { name = "vs-slurm" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jinja2", specifier = ">=3.1" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pyyaml", specifier = ">=6" },
+    { name = "vs-agent", editable = "libs/vs-agent" },
+    { name = "vs-async-ops", editable = "libs/vs-async-ops" },
+    { name = "vs-core", editable = "libs/vs-core" },
+    { name = "vs-evaluation", editable = "libs/vs-evaluation" },
+    { name = "vs-evaluator-protocol", editable = "libs/vs-evaluator-protocol" },
+    { name = "vs-mcp", editable = "libs/vs-mcp" },
+    { name = "vs-project", editable = "libs/vs-project" },
+    { name = "vs-prompts", editable = "libs/vs-prompts" },
+    { name = "vs-sandbox", editable = "libs/vs-sandbox" },
+    { name = "vs-slurm", editable = "libs/vs-slurm" },
+]
 
 [[package]]
 name = "vs-sandbox"
