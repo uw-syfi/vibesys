@@ -32,6 +32,7 @@ from vs_agent.contracts import (
     AgentEvent,
     AgentEventKind,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentSession,
     AgentSessionSpec,
     AgentTurnRequest,
@@ -145,7 +146,10 @@ class FakeCancels:
 class FakeTurnScript:
     """Per-turn replies and an optional successful-turn renewal threshold."""
 
-    answers: tuple[BaseModel | Mapping[str, object] | str | AgentOutputSchemaError | None, ...]
+    answers: tuple[
+        BaseModel | Mapping[str, object] | str | AgentOutputSchemaError | AgentQuotaError | None,
+        ...,
+    ]
     reset_after_turn: int | None = None
 
     def __post_init__(self) -> None:
@@ -224,7 +228,7 @@ class FakeSession:
             with self._state_lock:
                 self._provider_session_id = provider_session_id
             answer = self._answers[min(self._invocations, len(self._answers)) - 1]
-            if isinstance(answer, AgentOutputSchemaError):
+            if isinstance(answer, (AgentOutputSchemaError, AgentQuotaError)):
                 raise answer
             self._successful_turns += 1
             resets = (

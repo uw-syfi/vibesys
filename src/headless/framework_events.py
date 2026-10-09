@@ -10,6 +10,8 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    QuotaPausedData,
+    QuotaResumedData,
     RateLimitUpdateData,
     RunConfiguredData,
     WorkspaceSnapshotData,
@@ -48,6 +50,21 @@ def format_rate_limit_event(event: CoreEvent) -> str | None:
     if data.resets_at is not None:
         reset = datetime.fromtimestamp(data.resets_at, tz=UTC)
         line += f"; resets {reset:%Y-%m-%d %H:%M} UTC"
+    return line
+
+
+def format_quota_event(event: CoreEvent) -> str | None:
+    """Return the terminal rendering of a quota pause or its resume, or None."""
+    data = event.data
+    if isinstance(data, QuotaResumedData):
+        return f"[quota] resumed on {data.provider}; sending the paused turn again"
+    if not isinstance(data, QuotaPausedData):
+        return None
+    what = "quota exhausted" if data.condition == "quota_exhausted" else "rate limited"
+    line = f"[quota] {data.provider} {what}: {data.detail}; the run is paused"
+    if data.resets_at is not None:
+        reset = datetime.fromtimestamp(data.resets_at, tz=UTC)
+        line += f" (capacity returns {reset:%Y-%m-%d %H:%M} UTC)"
     return line
 
 

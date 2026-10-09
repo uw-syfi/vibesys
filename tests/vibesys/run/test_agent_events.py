@@ -10,6 +10,8 @@ from vibesys.events import (
     CommandResultPayload,
     CoreEventType,
     JsonResultPayload,
+    QuotaPausedData,
+    QuotaResumedData,
     RateLimitUpdateData,
     TodoItemData,
     TodoUpdateData,
@@ -18,7 +20,7 @@ from vibesys.events import (
     UsageUpdateData,
 )
 from vibesys.run import CoreAgentEventSink, EventJournal
-from vs_agent.api import AgentEventSink, AgentRateLimit
+from vs_agent.api import AgentEventSink, AgentQuotaError, AgentRateLimit, QuotaCondition
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -166,3 +168,25 @@ def test_a_rate_limit_report_is_recorded_with_its_resolved_exhaustion(tmp_path: 
         resets_at=1.5e9,
         exhausted=True,
     )
+
+
+def test_a_quota_pause_and_its_resume_are_recorded_with_the_provider_diagnostic(
+    tmp_path: Path,
+) -> None:
+    journal, sink = _attached_sink(tmp_path, "run-1")
+
+    sink.quota_paused(
+        AgentQuotaError("claude", QuotaCondition.RATE_LIMITED, "429 too many", 1.5e9),
+        agent_kind="implementer",
+        round_label="round-2",
+        invocation_id="invocation-7",
+    )
+    sink.quota_resumed("claude", agent_kind="implementer", invocation_id="invocation-7")
+
+    paused, resumed = journal.read()
+    assert (paused.type, resumed.type) == (CoreEventType.QUOTA_PAUSED, CoreEventType.QUOTA_RESUMED)
+    assert paused.execution_id == "invocation-7"
+    assert paused.data == QuotaPausedData(
+        provider="claude", condition="rate_limited", detail="429 too many", resets_at=1.5e9
+    )
+    assert resumed.data == QuotaResumedData(provider="claude")

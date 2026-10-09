@@ -34,6 +34,7 @@ from vs_agent.contracts import (
     AgentEventKind,
     AgentObserver,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentRateLimit,
     AgentSession,
     AgentSessionSpec,
@@ -46,6 +47,7 @@ from vs_agent.contracts import (
     AuthStatus,
     MCPServerSpec,
     ProviderReadiness,
+    QuotaCondition,
     SessionDisposition,
     SteerOutcome,
 )
@@ -478,6 +480,8 @@ class _AgentShimEventHandler:
         self.observer: AgentObserver | None = None
         #: Whether the turn in flight asked for a response schema.
         self.structured = False
+        #: Windows the provider reported exhausted during the turn in flight.
+        self.exhausted: list[agentshim.RateLimitStatus] = []
         self._steers = steers
 
     def on_event(self, event: agentshim.AgentEvent) -> None:
@@ -486,6 +490,8 @@ class _AgentShimEventHandler:
             self._steers.consumed(event.text)
         elif isinstance(event, agentshim.SteerRejected):
             self._steers.rejected(event.text)
+        elif isinstance(event, agentshim.RateLimitStatus) and event.exhausted:
+            self.exhausted.append(event)
         observer = self.observer
         if observer is None:
             return
@@ -542,6 +548,7 @@ class AgentShimSession:
         expected = request.expected_provider_session_id
         self._event_handler.observer = observer
         self._event_handler.structured = request.output_schema is not None
+        self._event_handler.exhausted = []
         try:
             if expected is None:
                 turn = self._run(request, expect_conversation=None)
@@ -668,12 +675,41 @@ class AgentShimSession:
         except agentshim.TurnFailedError as exc:
             if exc.kind is agentshim.FailureKind.SCHEMA:
                 raise AgentOutputSchemaError(exc.detail) from exc
+            quota = self._quota_error(exc)
+            if quota is not None:
+                raise quota from exc
             if held is not None and self._session.conversation_id is None:
                 self._log(
                     f"the resumed {self._profile.name} turn failed; dropped the conversation "
                     "so the next turn starts fresh."
                 )
             raise
+
+    def _quota_error(self, exc: agentshim.TurnFailedError) -> AgentQuotaError | None:
+        """Classify a failed turn as a capacity limit, or ``None`` when it is not one.
+
+        agentshim classifies a usage or spend limit as ``USAGE_LIMIT`` and has
+        already waited out the transient failures it can. A ``TRANSIENT``
+        failure that outlasted those waits is sustained rate limiting only when
+        the provider also reported an exhausted window during the turn: a
+        server error or an overload names no capacity limit and stays a plain
+        failure. The reset time is the latest of the exhausted windows, since
+        capacity returns only when every one of them has reopened.
+        """
+        exhausted = self._event_handler.exhausted
+        if exc.kind is agentshim.FailureKind.USAGE_LIMIT:
+            condition = QuotaCondition.QUOTA_EXHAUSTED
+        elif exc.kind is agentshim.FailureKind.TRANSIENT and exhausted:
+            condition = QuotaCondition.RATE_LIMITED
+        else:
+            return None
+        resets = [window.resets_at for window in exhausted if window.resets_at is not None]
+        return AgentQuotaError(
+            self._profile.name,
+            condition,
+            exc.detail or str(exc),
+            max(resets) if resets else None,
+        )
 
     def _build_request(self, request: AgentTurnRequest) -> agentshim.TurnRequest:
         """Translate one VibeSys turn into the library's request."""

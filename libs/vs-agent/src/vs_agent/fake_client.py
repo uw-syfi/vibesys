@@ -28,7 +28,9 @@ from vs_agent.contracts import (
     AgentEvent,
     AgentEventKind,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentSkillUse,
+    AgentTurnRequest,
     AgentTurnResult,
     AgentUsage,
     SteerOutcome,
@@ -45,7 +47,7 @@ from vs_mcp.api import StdioServerDescriptor
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_agent.contracts import AgentObserver, AgentSessionSpec, AgentTurnRequest
+    from vs_agent.contracts import AgentObserver, AgentSessionSpec, CapacityGate
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
     from vs_agent.skills import SkillSelection
@@ -233,6 +235,7 @@ class FakeAgentClient:
         self._turns_in_flight = 0
         self._steer_lock = threading.Lock()
 
+        self._capacity_gate: CapacityGate | None = None
         self._closed = False
         self.cancel_count = 0
         self.cancelled_sessions: list[AgentSessionKey] = []
@@ -504,7 +507,7 @@ class FakeAgentClient:
         self._write_usage(
             session_spec.role, turn.label, session_spec.model, session_spec.reasoning_effort
         )
-        self._maybe_raise(session_spec.role)
+        self._maybe_raise(session_spec.role, turn.message, turn.label, turn.invocation_id)
         self._update_session(reuse_session=True, session_key=session_key)
         if session_key is not None:
             self._raw_fingerprints[session_key] = fingerprint
@@ -626,7 +629,7 @@ class FakeAgentClient:
             session_key=session_key,
         )
         self._write_usage(kind, round_label, self.model_for_kind(kind), None)
-        self._maybe_raise(kind)
+        self._maybe_raise(kind, user_prompt, round_label, invocation_id)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
         return self._resolve_response(kind, invocation, response_cls)
@@ -664,7 +667,7 @@ class FakeAgentClient:
             session_key=session_key,
         )
         self._write_usage(kind, round_label, self.model_for_kind(kind), None)
-        self._maybe_raise(kind)
+        self._maybe_raise(kind, user_prompt, round_label, invocation_id)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
         return self._resolve_text(kind, invocation)
@@ -725,7 +728,29 @@ class FakeAgentClient:
             skills=AgentSkillUse(),
         )
 
-    def _maybe_raise(self, kind: str) -> None:
+    def set_capacity_gate(self, gate: CapacityGate) -> None:
+        """Route a scripted ``AgentQuotaError`` through ``gate``, as the real client does."""
+        self._capacity_gate = gate
+
+    def _maybe_raise(
+        self, kind: str, message: str, label: str | None, invocation_id: str | None
+    ) -> None:
+        """Raise the scripted failure; a quota limit waits at the gate and sends the turn again."""
+        while True:
+            try:
+                self._raise_scripted(kind)
+            except AgentQuotaError as error:
+                gate = self._capacity_gate
+                if gate is None:
+                    raise
+                request = AgentTurnRequest(
+                    message=message, label=label, invocation_id=invocation_id
+                )
+                gate.wait_for_capacity(error, request, role=kind)
+            else:
+                return
+
+    def _raise_scripted(self, kind: str) -> None:
         state = self._failures.get(kind)
         if state is None:
             return

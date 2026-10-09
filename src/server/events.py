@@ -80,6 +80,8 @@ class EventType(StrEnum):
     TODO_UPDATE = "todo_update"
     USAGE_UPDATE = "usage_update"
     RATE_LIMIT_UPDATE = "rate_limit_update"
+    QUOTA_PAUSED = "quota_paused"
+    QUOTA_RESUMED = "quota_resumed"
     GATE_STARTED = "gate_started"
     GATE_FINISHED = "gate_finished"
     WORKSPACE_SNAPSHOT = "workspace_snapshot"
@@ -365,6 +367,29 @@ class RateLimitUpdateData(EventPayload):
     exhausted: bool
 
 
+class QuotaPausedData(EventPayload):
+    """A turn stopped on a provider capacity limit and the run paused for it.
+
+    ``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or
+    ``rate_limited`` (sustained rate limiting); ``detail`` is the provider's
+    diagnostic and ``resets_at`` the epoch second the provider said capacity
+    returns, when it said. The run stays paused until it resumes.
+    """
+
+    kind: Literal["quota_paused"] = "quota_paused"
+    provider: str
+    condition: Literal["quota_exhausted", "rate_limited"]
+    detail: str
+    resets_at: float | None = None
+
+
+class QuotaResumedData(EventPayload):
+    """A run paused on a capacity limit resumed on the same provider and sent the turn again."""
+
+    kind: Literal["quota_resumed"] = "quota_resumed"
+    provider: str
+
+
 class SubprocessOutputData(EventPayload):
     """Captured output from a managed subprocess."""
 
@@ -515,6 +540,8 @@ EventData = Annotated[
     | TodoUpdateData
     | UsageUpdateData
     | RateLimitUpdateData
+    | QuotaPausedData
+    | QuotaResumedData
     | GateStartedData
     | GateFinishedData
     | WorkspaceSnapshotData

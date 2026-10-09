@@ -19,6 +19,7 @@ from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentObserver,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentSession,
     AgentSessionSpec,
     AgentSkillUse,
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
+    from vs_agent.contracts import CapacityGate
     from vs_agent.events import AgentOutputChannel
     from vs_agent.progress import AgentProgress
     from vs_agent.sink import AgentEventSink
@@ -259,6 +261,7 @@ class AgentClient:
         self._cancelled = False
         self._active_lock = threading.Lock()
         self._active_sessions: list[AgentSession] = []
+        self._capacity_gate: CapacityGate | None = None
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -547,6 +550,10 @@ class AgentClient:
                 self._run_log_file,
             )
 
+    def set_capacity_gate(self, gate: CapacityGate) -> None:
+        """Hand every later provider capacity limit to ``gate`` instead of failing the turn."""
+        self._capacity_gate = gate
+
     def run(
         self,
         *,
@@ -601,7 +608,7 @@ class AgentClient:
             self._sessions[session_key] = cached
 
         try:
-            result = self._run_session(cached.session, turn, observer)
+            result = self._run_session(cached.session, turn, observer, role=session_spec.role)
         except AgentOutputSchemaError:
             # The driver kept the conversation that produced the invalid
             # output, so the session stays live: the caller's correction turn
@@ -859,7 +866,7 @@ class AgentClient:
         session = self._create_session(session_spec)
         turn_error: BaseException | None = None
         try:
-            return self._run_session(session, turn, observer)
+            return self._run_session(session, turn, observer, role=session_spec.role)
         except BaseException as error:
             turn_error = error
             raise
@@ -876,15 +883,29 @@ class AgentClient:
         session: AgentSession,
         turn: AgentTurnRequest,
         observer: AgentObserver | None,
+        *,
+        role: str,
     ) -> AgentTurnResult:
-        """Publish a turn before running it so cross-thread cancellation cannot miss it."""
+        """Publish a turn before running it so cross-thread cancellation cannot miss it.
+
+        A turn that stops on a provider capacity limit goes to the capacity
+        gate, when one is installed, and is sent again on the same live
+        session once the gate returns; the gate raises to end the turn.
+        """
         with self._active_lock:
             if self._cancelled:
                 msg = "agent client is cancelled"
                 raise RuntimeError(msg)
             self._active_sessions.append(session)
         try:
-            return session.run_turn(turn, observer)
+            while True:
+                try:
+                    return session.run_turn(turn, observer)
+                except AgentQuotaError as error:
+                    gate = self._capacity_gate
+                    if gate is None:
+                        raise
+                    gate.wait_for_capacity(error, turn, role=role)
         finally:
             with self._active_lock:
                 self._active_sessions.remove(session)

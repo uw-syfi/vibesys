@@ -63,6 +63,66 @@ class AgentOutputSchemaError(RuntimeError):
         super().__init__(f"agent output did not match the response schema: {detail}")
 
 
+class QuotaCondition(StrEnum):
+    """Which kind of capacity limit stopped a provider turn."""
+
+    QUOTA_EXHAUSTED = "quota_exhausted"
+    """A usage quota, spend limit or billing limit: retrying now cannot succeed."""
+    RATE_LIMITED = "rate_limited"
+    """Sustained rate limiting: the provider's retries ran out while a window was exhausted."""
+
+
+class AgentQuotaError(RuntimeError):
+    """A turn failed because the provider has no capacity left, not because the work failed.
+
+    Raised instead of a provider exit error so a caller can pause and wait for
+    capacity instead of treating the turn as failed. The conversation is intact
+    and the same turn may be sent again once capacity returns. ``resets_at`` is
+    epoch seconds when the provider reported when the exhausted window reopens,
+    else ``None``.
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        condition: QuotaCondition,
+        detail: str,
+        resets_at: float | None = None,
+    ) -> None:
+        """Record the provider, the condition, its diagnostic and the reset time."""
+        self.provider = provider
+        self.condition = condition
+        self.detail = detail
+        self.resets_at = resets_at
+        super().__init__(f"{provider} {condition.value.replace('_', ' ')}: {detail}")
+
+
+class CapacityGate(Protocol):
+    """The caller's policy for a turn that stopped on a provider capacity limit.
+
+    The client calls :meth:`wait_for_capacity` with the failure and returns
+    only when the same turn should be sent again on the same conversation. It
+    raises to end the turn instead, and the raised error replaces the quota
+    error. The call may block for hours, so a gate owns its own cancellation:
+    a stop request must end the wait by raising.
+    """
+
+    def wait_for_capacity(
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str
+    ) -> None:
+        """Block until ``turn`` may be sent again, or raise to give up."""
+        ...
+
+
+@runtime_checkable
+class CapacityGated(Protocol):
+    """An optional client capability: capacity limits go to an installed gate."""
+
+    def set_capacity_gate(self, gate: CapacityGate) -> None:
+        """Route every later capacity limit through ``gate``."""
+        ...
+
+
 class AuthStatus(StrEnum):
     """Whether a provider CLI is logged in, as far as its own tooling can say."""
 
