@@ -28,6 +28,7 @@ from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     MetricDirection,
     RunFacts,
     RunStatus,
@@ -194,7 +195,9 @@ def test_evaluation_failure_feedback_drives_a_correction_attempt(
         else:
             run.evaluation.script_benchmark(
                 INPUT_BASELINE,
-                BenchmarkEvaluation(executed=True, feedback=feedback),
+                BenchmarkEvaluation(
+                    executed=True, feedback=feedback, failure_kind=BenchmarkFailureKind.WORKLOAD
+                ),
                 BenchmarkEvaluation(
                     executed=True,
                     metric_name="throughput",

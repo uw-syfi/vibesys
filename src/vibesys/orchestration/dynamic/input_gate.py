@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from vibesys.metrics import Measurement, MetricComparison
 from vibesys.orchestration.dynamic.models import (
@@ -12,7 +12,15 @@ from vibesys.orchestration.dynamic.models import (
     EvaluationResult,
     InputMeasurementAttempts,
 )
-from vs_runtime.api import BenchmarkFailureKind, BenchmarkObjective, MetricDirection, Run
+from vs_runtime.api import (
+    BenchmarkObjective,
+    CandidateFailed,
+    EvaluationPassed,
+    InfrastructureFailed,
+    MetricDirection,
+    Run,
+    verdict_of,
+)
 
 _MAX_INPUT_MEASUREMENT_ATTEMPTS = 3
 
@@ -115,14 +123,20 @@ class InputGate:
             # > before any candidate work, for a measurement that can be retried.
             self.run.observations.note(f"dynamic input baseline measurement failed: {error}")
             return
-        if not benchmark.passed and benchmark.failure_kind is not BenchmarkFailureKind.WORKLOAD:
-            # Missing classification, including old cached evidence, is not a
-            # verdict on the input. Retry conservatively within the same bound.
-            self.run.observations.note(
-                f"dynamic input baseline benchmark did not run or failed in infrastructure: "
-                f"{benchmark.feedback}"
-            )
-            return
+        verdict = verdict_of(benchmark)
+        match verdict:
+            case InfrastructureFailed(feedback=feedback):
+                # The machinery's failure is not a verdict on the input. Retry within the
+                # same bound.
+                self.run.observations.note(
+                    f"dynamic input baseline benchmark did not run or failed in infrastructure: "
+                    f"{feedback}"
+                )
+                return
+            case EvaluationPassed() | CandidateFailed():
+                pass
+            case _:
+                assert_never(verdict)
         async with self._lock:
             self.state.baseline = EvaluationResult(
                 revision=revision,

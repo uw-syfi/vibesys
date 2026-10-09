@@ -168,7 +168,11 @@ def test_input_benchmark_that_did_not_run_is_measured_again(tmp_path: Path) -> N
     async def scenario() -> tuple[FakeRun, DynamicState | None]:
         run = baseline_run(tmp_path, script)
         run.evaluation.script_benchmark(
-            BenchmarkEvaluation(executed=False, feedback="Slurm job failed to start"),
+            BenchmarkEvaluation(
+                executed=False,
+                feedback="Slurm job failed to start",
+                failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
+            ),
             throughput(12.0),
             throughput(10.0),
             throughput(15.0),

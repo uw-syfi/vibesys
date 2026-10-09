@@ -104,6 +104,7 @@ from vs_core.types.attempts import (
     WorkspaceRequest,
 )
 from vs_core.types.common import (
+    DEFAULT_MAX_MEASUREMENT_SUBMISSIONS,
     Area,
     ArtifactId,
     ArtifactRef,
@@ -446,6 +447,7 @@ from vs_core.types.strategy import (
 
 __all__ = [
     "AMBIGUOUS_SUBMISSION_LIMIT",
+    "DEFAULT_MAX_MEASUREMENT_SUBMISSIONS",
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",

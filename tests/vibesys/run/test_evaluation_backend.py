@@ -83,6 +83,7 @@ from vs_runtime.api import (
     AgentEvaluationStatus,
     AgentToolBindingContext,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     BenchmarkObjective,
     CandidateProfileStatus,
     MetricDirection,
@@ -405,6 +406,7 @@ async def test_recorded_evidence_reports_each_stage_outcome_not_a_pass(
         BenchmarkEvaluation(
             executed=True,
             feedback="warmup timed out at 16.3 requests/s; 79.7 needed",
+            failure_kind=BenchmarkFailureKind.WORKLOAD,
             metric_name="throughput",
             metric_value=16.3,
             metric_direction=MetricDirection.MAXIMIZE,
@@ -520,6 +522,7 @@ def _warmup_stop(rate: float) -> BenchmarkEvaluation:
     return BenchmarkEvaluation(
         executed=True,
         feedback=f"warmup sub-run stopped: {rate} output tokens/s achieved",
+        failure_kind=BenchmarkFailureKind.WORKLOAD,
         partial_measurement=PartialMeasurement(
             name="warmup_output_tokens_per_s",
             value=rate,

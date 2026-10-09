@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from vs_evaluator_protocol.api import (
     ErrorRecord,
@@ -209,6 +209,7 @@ class TrustedBenchmarkResult(BaseModel):
     passed: bool
     output: str = ""
     failure: str | None = None
+    # Whose fault a failed run is: present exactly when the run failed, with no default.
     failure_kind: BenchmarkFailureKind | None = None
     # The validated evaluator error record's message, without transport framing.
     failure_reason: str | None = None
@@ -219,6 +220,13 @@ class TrustedBenchmarkResult(BaseModel):
     # What a failed run measured before it stopped, as its evaluator reported it.
     partial_measurement: PartialMeasurement | None = None
     provisioned_volumes: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _failure_kind_exactly_when_failed(self) -> TrustedBenchmarkResult:
+        if self.passed != (self.failure_kind is None):
+            message = "a trusted benchmark result carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        return self
 
 
 class TrustedEvaluationExecutor(Protocol):

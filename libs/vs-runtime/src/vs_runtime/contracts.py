@@ -811,7 +811,7 @@ class BenchmarkEvaluation(BaseModel):
 
     executed: bool
     feedback: str | None = None
-    # Absent for older or reused evidence that did not retain failure provenance.
+    # Whose fault the failure is: present exactly when the benchmark failed, with no default.
     failure_kind: BenchmarkFailureKind | None = None
     metric_name: str | None = None
     metric_value: FiniteFloat | None = None
@@ -823,9 +823,12 @@ class BenchmarkEvaluation(BaseModel):
     partial_measurement: PartialMeasurement | None = None
 
     @model_validator(mode="after")
-    def _partial_only_when_failed(self) -> BenchmarkEvaluation:
+    def _failure_facts_only_when_failed(self) -> BenchmarkEvaluation:
         if self.partial_measurement is not None and self.feedback is None:
             message = "only a failed benchmark carries a partial measurement"
+            raise ValueError(message)
+        if (self.feedback is None) != (self.failure_kind is None):
+            message = "a benchmark carries a failure kind exactly when it failed"
             raise ValueError(message)
         return self
 

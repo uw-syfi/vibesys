@@ -1563,6 +1563,10 @@ class EvidenceReusingEvaluation:
         row = {metric.name: metric.value for metric in accepted.metrics}
         if objectives and objectives[0].name not in row:
             return await self._delegate.benchmark(workspace, objectives=objectives)
+        if accepted.outcome is not EvidenceOutcome.PASSED and accepted.failure_kind is None:
+            # Evidence recorded before failures were classified proves neither whose fault
+            # the failure was nor that the candidate failed: measure it again.
+            return await self._delegate.benchmark(workspace, objectives=objectives)
         headline = objectives[0].name if objectives else next(iter(row), None)
         metric = next((item for item in accepted.metrics if item.name == headline), None)
         feedback = (
@@ -1580,6 +1584,7 @@ class EvidenceReusingEvaluation:
         return BenchmarkEvaluation(
             executed=False,
             feedback=feedback,
+            failure_kind=None if feedback is None else accepted.failure_kind,
             metric_name=headline,
             metric_value=metric.value if metric is not None else None,
             metric_direction=direction,

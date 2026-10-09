@@ -494,6 +494,10 @@ class PoolCapacity(Value):
     capacity: int = Field(ge=1)
 
 
+# How many times one measurement is submitted in all, unless the run says otherwise.
+DEFAULT_MAX_MEASUREMENT_SUBMISSIONS = 3
+
+
 class Limits(Value):
     """Run bounds; Scheduling enforces capacities before acquiring an episode."""
 
@@ -503,7 +507,7 @@ class Limits(Value):
     pool_capacities: tuple[PoolCapacity, ...] = ()
     max_retries: Count = 0
     max_refunds: Count = 0
-    max_measurement_submissions: Count = 3
+    max_measurement_submissions: Count = DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
     queue_allowance: Seconds = 900.0
     cancellation_bound: Seconds = 60.0
     reconciliation_bound: Seconds = 60.0

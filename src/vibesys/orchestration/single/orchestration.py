@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from vibesys.constants import DomainName
 from vibesys.domains.base import DomainRole
@@ -11,6 +11,7 @@ from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.hypothesis import (
     AgentAttribution,
+    AttemptDecision,
     AttemptState,
     Continue,
     Finished,
@@ -56,9 +57,13 @@ from vibesys.profile_focus import (
 )
 from vs_runtime.api import (
     BenchmarkObjective,
+    CandidateFailed,
+    EvaluationPassed,
+    InfrastructureFailed,
     MetricDirection,
     Run,
     RunStatus,
+    SettlingMeasurement,
     Workspace,
 )
 
@@ -361,7 +366,7 @@ class _SingleRun:
                 self.files.note_evaluation_deferred(self.round_number, retry)
                 return
             selected.attempt.official_reason = official_reason
-            if await self._official_evaluation(selected):
+            if await self._official_evaluation(selected) is AttemptDecision.FINISH:
                 return
 
     async def _checkpoint_hypothesis(self, selected: _SelectedRound) -> None:
@@ -376,7 +381,8 @@ class _SingleRun:
             label=(f"{self.label_prefix}: checkpoint hypothesis {selected.plan.hypothesis_id}"),
         )
 
-    async def _official_evaluation(self, selected: _SelectedRound) -> bool:
+    async def _official_evaluation(self, selected: _SelectedRound) -> AttemptDecision:
+        """Measure the candidate; ``FINISH`` ends the round's attempts, ``RETRY`` spends another."""
         revision = await self.workspace.snapshot(
             f"round-{self.round_number}-attempt-{selected.attempt.retry}-evaluation"
         )
@@ -386,11 +392,15 @@ class _SingleRun:
         self.state = self.state.model_copy(update={"accuracy_receipt": accuracy.receipt}, deep=True)
         if not accuracy.passed:
             await self._evaluation_failed(selected, accuracy.feedback or "accuracy failed")
-            return False
-        benchmark = await self.run.evaluation.benchmark(
-            self.workspace,
-            objectives=_benchmark_objectives(self.options),
-        )
+            return AttemptDecision.RETRY
+        settling = SettlingMeasurement()
+        verdict = None
+        while verdict is None:
+            benchmark = await self.run.evaluation.benchmark(
+                self.workspace,
+                objectives=_benchmark_objectives(self.options),
+            )
+            verdict = settling.observe(benchmark)
         selected.attempt.framework_benchmark = FrameworkBenchmarkOutcome(
             feedback=benchmark.feedback,
             metric_name=benchmark.metric_name,
@@ -402,14 +412,21 @@ class _SingleRun:
             row=benchmark.row,
         )
         selected.attempt.framework_perf_metric = benchmark.metric_value
-        if not benchmark.passed:
-            await self._evaluation_failed(selected, benchmark.feedback or "benchmark failed")
-            return False
-        selected.attempt.passed = True
-        self.files.note_evaluation_passed(
-            self.round_number, selected.attempt.retry, selected.official_reason
-        )
-        return True
+        match verdict:
+            case EvaluationPassed():
+                selected.attempt.passed = True
+                self.files.note_evaluation_passed(
+                    self.round_number, selected.attempt.retry, selected.official_reason
+                )
+                return AttemptDecision.FINISH
+            case CandidateFailed():
+                await self._evaluation_failed(selected, benchmark.feedback or "benchmark failed")
+                return AttemptDecision.RETRY
+            case InfrastructureFailed(feedback=feedback):
+                self._note_unmeasured(selected, feedback)
+                return AttemptDecision.FINISH
+            case _:
+                assert_never(verdict)
 
     async def _evaluation_failed(self, selected: _SelectedRound, feedback: str) -> None:
         selected.attempt.feedback = feedback
@@ -421,6 +438,17 @@ class _SingleRun:
         hypothesis.feedback = feedback
         self.files.note_evaluation_failed(self.round_number, selected.attempt.retry, feedback)
         await self._checkpoint_hypothesis(selected)
+
+    def _note_unmeasured(self, selected: _SelectedRound, feedback: str) -> None:
+        """End the attempts of a round whose benchmark kept failing in infrastructure.
+
+        The candidate was never measured, so it is not charged another paid attempt and the
+        machinery's error is not given to the implementer as something to repair.
+        """
+        message = f"the benchmark could not be measured (infrastructure failure): {feedback}"
+        selected.attempt.feedback = message
+        self.files.note_evaluation_failed(self.round_number, selected.attempt.retry, message)
+        self.run.observations.warning(f"[single-agent] {message}")
 
     async def _close_round(self, selected: _SelectedRound) -> None:
         attempt = selected.attempt
