@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
 # How long ``wait_for_none_active`` lingers after the count reaches zero
 # before declaring the server subscriber-free. A dropped client redials on a
@@ -20,6 +20,42 @@ if TYPE_CHECKING:
 RECONNECT_SETTLE_SECONDS = 1.0
 
 
+class SettleWindow(Protocol):
+    """How a disconnect waiter lets its settle window elapse.
+
+    The tracker asks whether a reconnect arrives inside the window; the
+    implementation decides when the window ends. Production ends it after real
+    seconds, so a test substitutes an implementation whose window ends when the
+    test says so.
+    """
+
+    def wait_for(
+        self,
+        condition: threading.Condition,
+        predicate: Callable[[], bool],
+        seconds: float,
+    ) -> bool:
+        """Wait on *condition* (held by the caller) for *predicate*, for one window.
+
+        Returns the value of *predicate* when the wait ends: True when it held
+        before the window elapsed, False when the window elapsed first.
+        """
+        ...
+
+
+class ThreadingSettleWindow:
+    """A settle window that lasts real seconds."""
+
+    def wait_for(
+        self,
+        condition: threading.Condition,
+        predicate: Callable[[], bool],
+        seconds: float,
+    ) -> bool:
+        """Wait up to *seconds* for *predicate* on *condition*."""
+        return condition.wait_for(predicate, timeout=seconds)
+
+
 class SubscriptionTracker:
     """Count active event subscriptions across handler threads.
 
@@ -30,8 +66,9 @@ class SubscriptionTracker:
     whether any client has ever subscribed, and never resets.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, settle: SettleWindow | None = None) -> None:
         """Initialize subscription lifetime tracking and its condition lock."""
+        self._settle = settle or ThreadingSettleWindow()
         self._ever_subscribed = threading.Event()
         self._condition = threading.Condition()
         self._active = 0
@@ -69,5 +106,7 @@ class SubscriptionTracker:
         with self._condition:
             while True:
                 self._condition.wait_for(lambda: self._active == 0)
-                if not self._condition.wait_for(lambda: self._active > 0, timeout=settle_seconds):
+                if not self._settle.wait_for(
+                    self._condition, lambda: self._active > 0, settle_seconds
+                ):
                     return

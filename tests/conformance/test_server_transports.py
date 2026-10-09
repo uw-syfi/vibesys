@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pytest
 from tests.conformance.frame_matching import assert_frame_matches
-from tests.server.support import ServerParts, build_server_parts
+from tests.server.support import (
+    DEADLOCK_GUARD_S,
+    FakeSettleWindow,
+    ServerParts,
+    build_server_parts,
+)
 from websockets.sync.client import ClientConnection, connect
 
 from server.transport.subscriptions import SubscriptionTracker
@@ -43,7 +48,7 @@ class _Connection(Protocol):
 class _UnixConnection:
     def __init__(self, path: Path) -> None:
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._socket.settimeout(2)
+        self._socket.settimeout(DEADLOCK_GUARD_S)
         self._socket.connect(str(path))
         self._stream = self._socket.makefile("rwb")
         self._closed = False
@@ -80,7 +85,7 @@ class _WebSocketConnection:
         self._connection.send(json.dumps(frame))
 
     def receive(self) -> dict[str, Any]:
-        payload = self._connection.recv(timeout=2)
+        payload = self._connection.recv(timeout=DEADLOCK_GUARD_S)
         assert isinstance(payload, str), "WebSocket transport returned a binary frame"
         return cast("dict[str, Any]", json.loads(payload))
 
@@ -316,24 +321,27 @@ def test_a_backlog_published_between_checkpoints_arrives_as_coalesced_batches(
         parts.close()
 
 
-def test_dual_transport_subscriptions_have_independent_floors_and_teardown(
-    tmp_path: Path,
-    socket_dir: Path,
-) -> None:
-    scenario = _scenario("dual-transport-independent-subscriptions")
-    parts = _parts_with_history(tmp_path)
-    tracker = SubscriptionTracker()
-    socket_path = socket_dir / "dual.sock"
+def _disconnect_waiter(tracker: SubscriptionTracker) -> tuple[threading.Thread, threading.Event]:
+    """A not-yet-started thread that waits for no stream, and the event it sets on return."""
     settled = threading.Event()
 
     def wait_for_disconnect() -> None:
         tracker.wait_for_none_active(settle_seconds=0.1)
         settled.set()
 
-    waiter = threading.Thread(
-        target=wait_for_disconnect,
-        daemon=True,
-    )
+    return threading.Thread(target=wait_for_disconnect, daemon=True), settled
+
+
+def test_dual_transport_subscriptions_have_independent_floors_and_teardown(
+    tmp_path: Path,
+    socket_dir: Path,
+) -> None:
+    scenario = _scenario("dual-transport-independent-subscriptions")
+    parts = _parts_with_history(tmp_path)
+    settle = FakeSettleWindow()
+    tracker = SubscriptionTracker(settle)
+    socket_path = socket_dir / "dual.sock"
+    waiter, settled = _disconnect_waiter(tracker)
 
     try:
         with (
@@ -364,16 +372,20 @@ def test_dual_transport_subscriptions_have_independent_floors_and_teardown(
                 assert browser_batch["through_sequence"] == latest
 
                 waiter.start()
-                assert not settled.wait(timeout=0.1)
                 connections["terminal"].close()
                 parts.journal.publish_output("stdout", "browser remains live")
                 live = connections["browser"].receive()
                 assert live["type"] == "event_batch"
                 assert live["through_sequence"] == latest + 1
-                assert not settled.wait(timeout=0.2)
+                # The browser stream is still active, so the waiter has no
+                # stream-free moment to settle on and has opened no window.
+                assert not settled.is_set()
+                assert settle.windows_opened == 0
 
                 connections["browser"].close()
-                assert settled.wait(timeout=2)
+                settle.await_window(1)
+                settle.elapse()
+                assert settled.wait(timeout=DEADLOCK_GUARD_S)
             finally:
                 for connection in connections.values():
                     connection.close()
@@ -381,5 +393,5 @@ def test_dual_transport_subscriptions_have_independent_floors_and_teardown(
     finally:
         parts.close()
         if waiter.is_alive():
-            waiter.join(timeout=2)
+            waiter.join(timeout=DEADLOCK_GUARD_S)
         assert not waiter.is_alive()
