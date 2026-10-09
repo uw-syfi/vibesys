@@ -29,6 +29,13 @@ Guidelines:
 - When the library finds a failure, pin the failing input as an explicit
   example so the regression runs deterministically forever after, and fix the
   code.
+- Two tiers run the same properties. The PR tier (`ci` profile) is
+  derandomized and draws 25 examples, for speed. The nightly workflow runs the
+  `nightly` profile: randomized, 100 examples, with `print_blob` so a failure
+  prints a `@reproduce_failure` line; pin it with `@example(...)`.
+- A test whose misses are costly (rare branches, expensive-to-find states)
+  should pin its own `@settings(max_examples=...)`; the profile count is only a
+  default for tests that do not.
 - Use a plain example test for a named scenario, a documented regression, or a
   single illustrative case. Do not write a table of hand-picked inputs where a
   generator would cover the space.
