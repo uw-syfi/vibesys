@@ -3978,50 +3978,8 @@
   {
     "path": "src/vibesys/orchestration/issue_queue/tool_server.py",
     "symbol": "<module>",
-    "rule": "banned-import",
-    "subject": "argparse",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/issue_queue/tool_server.py",
-    "symbol": "<module>",
-    "rule": "banned-import",
-    "subject": "mcp.server.fastmcp",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/issue_queue/tool_server.py",
-    "symbol": "<module>",
-    "rule": "banned-import",
-    "subject": "pathlib",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/issue_queue/tool_server.py",
-    "symbol": "<module>",
-    "rule": "builtin",
-    "subject": "__name__",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/issue_queue/tool_server.py",
-    "symbol": "<module>",
     "rule": "io-import",
     "subject": "vs_issue_tracker.api",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/issue_queue/tool_server.py",
-    "symbol": "build_server.board",
-    "rule": "effect-path",
-    "subject": "vs_issue_tracker.api.IssueTrackerConfig.model_validate_json",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/issue_queue/tool_server.py",
-    "symbol": "main",
-    "rule": "effect-path",
-    "subject": "argparse.ArgumentParser",
     "occurrence": 1
   },
   {

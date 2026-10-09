@@ -15,9 +15,9 @@ import pytest
 from pydantic import BaseModel
 from tests.vibesys.golden.helpers import assert_exact_text
 
+from entrypoints.issue_board_tools_server import build_server
 from vibesys.orchestration.issue_queue.artifacts import append_progress, render_all, render_issue
 from vibesys.orchestration.issue_queue.models import IssueToolPolicy
-from vibesys.orchestration.issue_queue.tool_server import build_server
 from vs_issue_tracker.api import (
     FileProgressLog,
     Issue,

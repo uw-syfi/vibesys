@@ -41,7 +41,7 @@ def _issue_board_tool(
     return (
         expose_as_tools(
             name="vibesys-issue-board",
-            entrypoint_module="vibesys.orchestration.issue_queue.tool_server",
+            entrypoint_module="entrypoints.issue_board_tools_server",
             entrypoint_args=(
                 "issues.json",
                 ".vibesys/issue-tool-policy.json",

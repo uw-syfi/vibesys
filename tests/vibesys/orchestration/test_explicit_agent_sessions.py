@@ -744,7 +744,7 @@ def test_issue_board_binding_uses_fixed_workspace_relative_spec(tmp_path: Path) 
             command="python",
             args=(
                 "-m",
-                "vibesys.orchestration.issue_queue.tool_server",
+                "entrypoints.issue_board_tools_server",
                 "issues.json",
                 ".vibesys/issue-tool-policy.json",
                 ".vibesys/issue-tracker.json",
