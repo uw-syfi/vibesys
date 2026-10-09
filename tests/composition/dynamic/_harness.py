@@ -35,7 +35,6 @@ from tests.support.docker_environment import host_container_backend
 from tests.support.fake_run_clock import FakeRunClock
 from tests.support.liveness import Budget, End, Journal, assert_live
 from tests.support.loop_invariants import RunRecords, check, terminal_event
-from tests.support.world_git import IN_MEMORY_GIT
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
@@ -563,7 +562,9 @@ def run_request(  # noqa: PLR0913
             backend_factory=backend_factory or host_container_backend,
             stop_timer=stop_timer or FakeStopTimer(),
             timing=None if clock is None else RunTiming(clock, PRODUCTION_LEASE_SECONDS),
-            git_repository=IN_MEMORY_GIT.repository,
+            # The agent's container mounts the repository's `.git` read-only, so the
+            # repository must exist on disk: these runs use the product's real Git.
+            git_repository=None,
         )
     )
     events: list[CoreEvent] = []
