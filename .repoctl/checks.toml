@@ -139,7 +139,7 @@ timeout_seconds = 1200
 env = { VIBESYS_E2E_DOCKER = "1" }
 commands = [
   ["docker", "info", "--format", "{{.ServerVersion}}"],
-  ["uv", "run", "pytest", "tests/e2e/test_agent_image_e2e.py", "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "-v", "-s", "--no-cov"],
+  ["uv", "run", "pytest", "tests/e2e/test_agent_image_e2e.py", "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "tests/e2e/test_credential_sharing_e2e.py", "-v", "-s", "--no-cov"],
 ]
 
 [[check_groups]]

@@ -4,6 +4,8 @@ from pathlib import Path
 
 import agentshim
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from tests.support import provider_profiles as fake_profiles
 
 from vs_agent import cli_docker
@@ -196,6 +198,97 @@ class TestAuthImport:
         assert cli_docker.auth_copy_paths("fixture") == [
             ("/opt/vibesys-auth/1", "/home/agent/.codex/config.toml"),
         ]
+
+
+_LEAVES = (".codex/auth.json", ".codex/config.toml", ".claude.json", ".gemini/settings.json")
+
+
+class TestCredentialFilesAreShared:
+    """Credential files are mounted writable in place; settings stay read-only copies."""
+
+    @settings(max_examples=40, deadline=None)
+    @given(
+        credentials=st.sets(st.sampled_from(_LEAVES)),
+        present=st.sets(st.sampled_from(_LEAVES)),
+    )
+    def test_splits_mounts_and_copies_by_credential_membership(
+        self,
+        tmp_path_factory: pytest.TempPathFactory,
+        credentials: set[str],
+        present: set[str],
+    ) -> None:
+        home = tmp_path_factory.mktemp("home")
+        for leaf in present:
+            (home / leaf).parent.mkdir(parents=True, exist_ok=True)
+            (home / leaf).write_text("{}")
+        profile = fake_profiles.profile(
+            "fixture",
+            state_dirs=(".codex", ".claude.json", ".gemini"),
+            auth_files=_LEAVES,
+            credential_files=tuple(leaf for leaf in _LEAVES if leaf in credentials),
+        )
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setenv("HOME", str(home))
+            fake_profiles.install(monkeypatch, {"fixture": profile})
+            mounts = cli_docker.auth_bind_mounts("fixture")
+            copies = cli_docker.auth_copy_paths("fixture")
+
+        expected_mounts = []
+        expected_copies = []
+        for index, leaf in enumerate(_LEAVES):
+            if leaf not in present:
+                continue
+            if leaf in credentials:
+                expected_mounts.append((str(home / leaf), f"/home/agent/{leaf}", False))
+            else:
+                expected_mounts.append((str(home / leaf), f"/opt/vibesys-auth/{index}", True))
+                expected_copies.append((f"/opt/vibesys-auth/{index}", f"/home/agent/{leaf}"))
+        assert mounts == expected_mounts
+        assert copies == expected_copies
+
+    def test_never_mounts_a_state_directory_writable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".codex").mkdir()
+        (tmp_path / ".codex" / "auth.json").write_text("{}")
+        (tmp_path / ".codex" / "history.jsonl").write_text("")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        fake_profiles.install(
+            monkeypatch,
+            {
+                "fixture": fake_profiles.profile(
+                    "fixture",
+                    state_dirs=(".codex",),
+                    auth_files=(".codex/auth.json",),
+                    credential_files=(".codex/auth.json",),
+                )
+            },
+        )
+
+        writable = [mount for mount in cli_docker.auth_bind_mounts("fixture") if not mount[2]]
+
+        assert writable == [
+            (str(tmp_path / ".codex" / "auth.json"), "/home/agent/.codex/auth.json", False)
+        ]
+
+    @pytest.mark.parametrize("provider", _SHIPPED)
+    def test_every_shipped_provider_shares_exactly_its_declared_credentials(
+        self, provider: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        profile = agentshim.get_provider(provider).profile
+        for leaf in profile.auth_files:
+            (tmp_path / leaf).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / leaf).write_text("{}")
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        writable = {mount[1] for mount in cli_docker.auth_bind_mounts(provider) if not mount[2]}
+
+        assert profile.credential_files
+        assert writable == {f"/home/agent/{leaf}" for leaf in profile.credential_files}
+        assert not any(
+            destination.endswith(tuple(profile.credential_files))
+            for _, destination in cli_docker.auth_copy_paths(provider)
+        )
 
 
 class TestAuthEnvVars:

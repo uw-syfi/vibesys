@@ -36,6 +36,7 @@ class _ProfileOptions(TypedDict, total=False):
     container_env: Mapping[str, str] | None
     state_root_env: str | None
     auth_files: tuple[str, ...]
+    credential_files: tuple[str, ...]
     mcp_config_file: str | None
 
 
@@ -64,6 +65,7 @@ def profile(name: str, **options: Unpack[_ProfileOptions]) -> ProviderProfile:
         container_env=container_env if container_env is not None else {},
         state_root_env=options.get("state_root_env"),
         auth_files=options.get("auth_files", ()),
+        credential_files=options.get("credential_files", ()),
         mcp_config_file=options.get("mcp_config_file"),
     )
 

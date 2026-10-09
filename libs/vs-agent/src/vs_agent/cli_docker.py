@@ -41,27 +41,40 @@ class DockerAuthPath:
 
     host_path: Path
     container_path: str
+    #: Whether the file holds refreshable login credentials. Those are shared
+    #: with the container writable; everything else is copied read-only.
+    credential: bool = False
 
 
 def auth_paths(provider: str) -> list[DockerAuthPath]:
     """Return the provider state files to stage into a container, in order.
 
-    Authentication and user configuration are mounted read-only under
+    Settings and user configuration are mounted read-only under
     ``/opt/vibesys-auth`` and copied into the container's ephemeral writable
-    layer before the CLI starts. Which home-relative paths those are comes
-    straight from ``ProviderProfile.auth_files`` (agentshim 0.6.1+): each
+    layer before the CLI starts. Login credentials are instead mounted
+    read-write at their final path: a CLI refreshes its OAuth tokens during a
+    run, and a refresh that stays in the throwaway copy leaves the host login
+    holding a refresh token the provider has already rotated. Which
+    home-relative paths there are comes straight from
+    ``ProviderProfile.auth_files`` (agentshim 0.6.1+), and which of them are
+    credentials from ``ProviderProfile.credential_files`` (0.15.3+): each
     entry is either a state directory's leaf file or a state entry that is
-    itself a single file, and is staged at the same relative path under
-    the agent image's HOME. A state directory the profile does not list a
-    leaf for contributes nothing.
+    itself a single file, at the same relative path under the agent image's
+    HOME. A state directory the profile does not list a leaf for contributes
+    nothing.
 
     Raises:
         ValueError: if agentshim does not register *provider*.
     """
     home = Path.home()
+    profile = provider_profiles.provider_profile(provider)
     return [
-        DockerAuthPath(home / auth_file, f"{AGENT_HOME}/{auth_file}")
-        for auth_file in provider_profiles.provider_profile(provider).auth_files
+        DockerAuthPath(
+            home / auth_file,
+            f"{AGENT_HOME}/{auth_file}",
+            credential=auth_file in profile.credential_files,
+        )
+        for auth_file in profile.auth_files
     ]
 
 
@@ -103,17 +116,26 @@ def auth_env_passthrough(provider: str) -> dict[str, str]:
 
 
 def auth_bind_mounts(provider: str) -> list[tuple[str, str, bool]]:
-    """Return read-only staging mounts for existing provider state."""
+    """Return the ``(host, container, read_only)`` mounts for existing provider state.
+
+    Settings are staged read-only under ``/opt/vibesys-auth``. A credential
+    file is mounted read-write at its final path in the agent home, as a
+    single file and never through its directory: ``~/.claude`` and ``~/.codex``
+    also hold history and sessions that must stay in the container.
+
+    A CLI that refreshes its login either rewrites the file in place or, like
+    Claude Code, writes a temporary file and renames it over the target. The
+    rename fails with ``EBUSY`` on a mounted file, and every CLI that renames
+    falls back to rewriting in place, which reaches the host file.
+    """
     out: list[tuple[str, str, bool]] = []
     for index, spec in enumerate(auth_paths(provider)):
-        if spec.host_path.exists():
-            out.append(
-                (
-                    str(spec.host_path),
-                    f"/opt/vibesys-auth/{index}",
-                    True,
-                )
-            )
+        if not spec.host_path.exists():
+            continue
+        if spec.credential:
+            out.append((str(spec.host_path), spec.container_path, False))
+        else:
+            out.append((str(spec.host_path), f"/opt/vibesys-auth/{index}", True))
     return out
 
 
@@ -123,10 +145,11 @@ def auth_copy_paths(provider: str) -> list[tuple[str, str]]:
     Handed straight to ``DockerSandbox(auth_files=...)``, which copies each
     pair in as a start-time step rather than running shell commands through
     ``extra_init_commands``. Indexing matches :func:`auth_bind_mounts`: entry
-    *i*'s staging mount is ``/opt/vibesys-auth/{i}``.
+    *i*'s staging mount is ``/opt/vibesys-auth/{i}``. Credential files are not
+    copied: they are mounted writable at their final path instead.
     """
     return [
         (f"/opt/vibesys-auth/{index}", spec.container_path)
         for index, spec in enumerate(auth_paths(provider))
-        if spec.host_path.exists()
+        if spec.host_path.exists() and not spec.credential
     ]

@@ -554,6 +554,7 @@ class DockerSandbox(WorkspaceSandbox):
         self._save_metadata()
 
         self._remap_agent_user(container_id)
+        self._own_writable_mount_parents(container_id)
         self._copy_auth_files(container_id)
         if self._docker_in_docker:
             start_nested_daemon(self._docker, container_id)
@@ -624,8 +625,34 @@ class DockerSandbox(WorkspaceSandbox):
         )
         self._run_as_root(container_id, script, what="agent user id remap")
 
+    def _own_writable_mount_parents(self, container_id: str) -> None:
+        """Give the agent the directories Docker created above writable mounts in HOME.
+
+        Docker creates the missing parents of a mount destination as root. A
+        CLI keeps its sessions and caches next to a credential file that was
+        mounted writable into ``~/.codex``, and a root-owned ``~/.codex``
+        would refuse them. Only the directories are chowned, never the mounted
+        path: that is the host's file.
+        """
+        directories: list[str] = []
+        for _, container_path, readonly in self._bind_mounts:
+            if readonly or not Path(container_path).is_relative_to(AGENT_HOME):
+                continue
+            for parent in Path(container_path).parents:
+                if parent == Path(AGENT_HOME):
+                    break
+                if str(parent) not in directories:
+                    directories.append(str(parent))
+        if directories:
+            quoted = " ".join(shlex.quote(directory) for directory in directories)
+            self._run_as_root(
+                container_id,
+                f"chown {_AGENT_USER}:{_AGENT_USER} {quoted}",
+                what="writable mount parent ownership",
+            )
+
     def _copy_auth_files(self, container_id: str) -> None:
-        """Copy staged provider credentials into the agent's writable HOME.
+        """Copy staged provider settings into the agent's writable HOME.
 
         Copying from the read-only staging mount into the agent's own
         writable layer, rather than mounting the destination itself, keeps
@@ -634,13 +661,22 @@ class DockerSandbox(WorkspaceSandbox):
         # Every directory created on the way to the destination must belong to
         # the agent too: a CLI writes sessions and caches next to its auth
         # file, and a root-owned ``~/.codex`` would refuse them. The trailing
-        # chown covers the whole path below HOME, not just the copied file.
+        # chown covers the whole path below HOME, not just the copied file,
+        # but skips anything mounted from the host: a writable credential file
+        # is the host's file, and its ownership is not ours to change.
         for source, destination in self._auth_files:
             top = _first_component_below(AGENT_HOME, destination)
+            mounted = sorted(
+                container_path
+                for _, container_path, _ in self._bind_mounts
+                if Path(container_path).is_relative_to(top)
+            )
+            skip = "".join(f" ! -path {shlex.quote(path)}" for path in mounted)
             script = (
                 f"mkdir -p {shlex.quote(str(Path(destination).parent))} && "
                 f"cp -a {shlex.quote(source)} {shlex.quote(destination)} && "
-                f"chown -R {_AGENT_USER}:{_AGENT_USER} {shlex.quote(top)}"
+                f"find {shlex.quote(top)} -xdev{skip} "
+                f"-exec chown -h {_AGENT_USER}:{_AGENT_USER} {{}} +"
             )
             self._run_as_root(container_id, script, what=f"auth file copy to {destination}")
 

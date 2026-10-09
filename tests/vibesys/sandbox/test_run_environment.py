@@ -222,6 +222,7 @@ _CLI_PROFILES = {
         "claude",
         state_dirs=(".claude", ".claude.json", ".config/claude"),
         auth_files=(".claude/.credentials.json", ".claude.json"),
+        credential_files=(".claude/.credentials.json",),
         auth_env_vars=(
             "ANTHROPIC_AUTH_TOKEN",
             "ANTHROPIC_API_KEY",
@@ -234,6 +235,7 @@ _CLI_PROFILES = {
         "codex",
         state_dirs=(".codex", ".config/codex"),
         auth_files=(".codex/auth.json",),
+        credential_files=(".codex/auth.json",),
         auth_env_vars=("OPENAI_API_KEY", "OPENAI_BASE_URL"),
         container_install=("install-codex",),
     ),
@@ -1372,7 +1374,8 @@ def test_cli_container_env_and_setup_agree_on_the_container_environment(
     provider, resolved_env = resolved
     assert provider == "codex"
     assert env == resolved_env
-    assert auth_files == [("/opt/vibesys-auth/0", "/home/agent/.codex/auth.json")]
+    # A credential file is mounted writable at its final path, not copied.
+    assert auth_files == []
 
 
 def test_cli_container_env_is_none_for_a_non_cli_agent_backend(tmp_path: Path) -> None:
@@ -1382,25 +1385,32 @@ def test_cli_container_env_is_none_for_a_non_cli_agent_backend(tmp_path: Path) -
     assert _cli_container_env(request) is None
 
 
-def test_docker_environment_copies_cli_auth_from_readonly_staging(
+def test_docker_environment_shares_credentials_writable_and_copies_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     home = tmp_path / "synthetic-home"
-    auth_file = home / ".codex" / "auth.json"
-    auth_file.parent.mkdir(parents=True)
-    auth_file.write_text('{"synthetic": true}\n')
+    credentials = home / ".claude" / ".credentials.json"
+    credentials.parent.mkdir(parents=True)
+    credentials.write_text('{"synthetic": true}\n')
+    settings_file = home / ".claude.json"
+    settings_file.write_text('{"synthetic": true}\n')
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
 
-    _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+    _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="claude"))
 
     kwargs = backend.calls[0][1]
-    assert (str(auth_file), "/opt/vibesys-auth/0", True) in _as_mount_tuples(kwargs["resources"])
-    # The plain Docker path copies staged auth files into the agent HOME as a
-    # start-time DockerSandbox step, not via extra_init_commands.
+    mounts = _as_mount_tuples(kwargs["resources"])
+    # The credential file is the host's file at its final path, writable, so a
+    # token refresh in the container reaches the host login.
+    assert (str(credentials), "/home/agent/.claude/.credentials.json", False) in mounts
+    # Settings are staged read-only and copied as a start-time DockerSandbox
+    # step, not via extra_init_commands.
+    assert (str(settings_file), "/opt/vibesys-auth/1", True) in mounts
+    assert not any(container == "/opt/vibesys-auth/0" for _, container, _ in mounts)
     assert "extra_init_commands" not in kwargs
-    assert kwargs["auth_files"] == [("/opt/vibesys-auth/0", "/home/agent/.codex/auth.json")]
+    assert kwargs["auth_files"] == [("/opt/vibesys-auth/1", "/home/agent/.claude.json")]
 
 
 def test_docker_environment_forwards_host_cli_auth_environment(
@@ -2276,20 +2286,25 @@ remote_artifact_root = "/remote/vibesys"
         env_name: {r.agent_path: r for r in backend.calls[0][1]["resources"]}
         for env_name, backend in backends.items()
     }
-    common_agent_paths = {
-        "/opt/vibesys-runtime/objective.md",
-        "/opt/vibesys-evaluator-package",
-        "/opt/vibesys",
-        "/opt/vibesys-auth/0",
+    credential_path = "/home/agent/.codex/auth.json"
+    # The login credential is the one common mount shared writable: a token
+    # refresh in the container must reach the host login.
+    common_access = {
+        "/opt/vibesys-runtime/objective.md": HostResourceAccess.READ_ONLY,
+        "/opt/vibesys-evaluator-package": HostResourceAccess.READ_ONLY,
+        "/opt/vibesys": HostResourceAccess.READ_ONLY,
+        credential_path: HostResourceAccess.READ_WRITE,
     }
-    for agent_path in common_agent_paths:
+    for agent_path, expected in common_access.items():
         by_env = {env_name: mounts[agent_path] for env_name, mounts in resources_by_env.items()}
         accesses = {resource.access for resource in by_env.values()}
-        assert accesses == {HostResourceAccess.READ_ONLY}, (agent_path, by_env)
+        assert accesses == {expected}, (agent_path, by_env)
 
     # (c) Nothing outside the workspace-related mounts each plan legitimately
-    # marks writable (SkyPilot's caller-state bridge) is READ_WRITE.
+    # marks writable (SkyPilot's caller-state bridge, the shared login) is
+    # READ_WRITE.
     legitimately_writable = {
+        credential_path,
         "/opt/vibesys-skypilot/bridge.sock",
         "/opt/vibesys-skypilot/caller-state",
     }
