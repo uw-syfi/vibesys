@@ -63,7 +63,8 @@ class RunEnvironmentRecord(BaseModel):
 
     ``name`` selects the environment; ``"local"`` is the retired host agent
     environment, kept readable so earlier runs load and are migrated to
-    ``"docker"`` on resume. The remaining fields carry that
+    ``"docker"`` on resume. ``"host"`` is the agent confined on the host by
+    Seatbelt, derived for backends no container can reach; resume keeps it. The remaining fields carry that
     environment's operator-selected options and stay ``None`` when they do not
     apply. ``config_path`` records only where external operator configuration
     lives. Its contents and credentials remain outside the project. Values a
@@ -72,7 +73,7 @@ class RunEnvironmentRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    name: Literal["local", "docker", "modal", "skypilot", "slurm", "slurm-gpu"]
+    name: Literal["local", "docker", "host", "modal", "skypilot", "slurm", "slurm-gpu"]
     image: PortableText | None = None
     gpu: PortableText | None = None
     model_volume: PortableText | None = None

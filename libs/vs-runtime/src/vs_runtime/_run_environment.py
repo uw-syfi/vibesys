@@ -80,6 +80,8 @@ from vs_sandbox.api import (
     SandboxLifecycleHooks,
     SandboxSession,
     SubprocessDockerCli,
+    backend_is_host_only,
+    build_host_sandbox,
     deduplicate_host_resources,
     evaluator_helpers,
     host_resource_for_mount,
@@ -128,9 +130,10 @@ from vs_sandbox.api.symlink_mounts import (
 )
 from vs_slurm.api import SlurmConfig, SlurmSshTransport, load_slurm_config
 
-_RunEnvironmentName = Literal["docker", "modal", "skypilot", "slurm", "slurm-gpu"]
+_RunEnvironmentName = Literal["docker", "host", "modal", "skypilot", "slurm", "slurm-gpu"]
 _RECORDED_ENVIRONMENT_NAMES: tuple[_RunEnvironmentName, ...] = (
     "docker",
+    "host",
     "modal",
     "skypilot",
     "slurm",
@@ -150,7 +153,13 @@ if TYPE_CHECKING:
 
     from vs_agent.api.images import DockerBuildRunner
     from vs_project.api import StateNamespace
-    from vs_sandbox.api import CommandRunner, ComputeBackendImpl, DockerCli
+    from vs_sandbox.api import (
+        CommandRunner,
+        ComputeBackend,
+        ComputeBackendImpl,
+        DockerCli,
+        WorkspaceSandbox,
+    )
 
 
 @dataclass(frozen=True)
@@ -585,6 +594,52 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
                 ),
             ),
         )
+
+
+class HostEnvironment(LocalEnvironment):
+    """Run the agent on the host, refusing to start unless it is confined.
+
+    Selected for backends whose accelerator no container can reach (Metal on
+    macOS).  Confinement is the host sandbox with enforcement required, so an
+    unavailable sandbox raises ``SandboxUnavailableError`` and never degrades to
+    an unconfined agent.  The agent driver requires enforcement again when it
+    launches, because this environment is not containerized.
+    """
+
+    def __init__(
+        self,
+        build_sandbox: Callable[..., WorkspaceSandbox | None] = build_host_sandbox,
+    ) -> None:
+        """Take the host-sandbox builder, a seam for substituting the platform's."""
+        self._build_sandbox = build_sandbox
+
+    def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
+        """Fail with ``SandboxUnavailableError`` when host confinement is unavailable."""
+        self._build_sandbox(request.workspace, env={}, require_enforcement=True)
+        return super().prepare(request)
+
+
+def resolve_run_environment_spec(
+    spec: RunEnvironmentSpec,
+    backend: ComputeBackend,
+    *,
+    platform: str,
+    log: Callable[[str], None],
+) -> RunEnvironmentSpec:
+    """Select the host environment for a backend containers cannot serve.
+
+    The default Docker selection becomes ``host`` exactly when the backend
+    declares itself host-only and ``platform`` (a ``sys.platform`` value) is
+    macOS, where Seatbelt can confine it.  The choice follows from the backend
+    alone, never from a flag, and every other spec is returned unchanged.
+    """
+    if spec.name != "docker" or platform != "darwin" or not backend_is_host_only(backend):
+        return spec
+    log(
+        f"[environment] the {backend.value} backend cannot be reached from Docker; "
+        "running the agent on the host under Seatbelt"
+    )
+    return replace(spec, name="host", options={})
 
 
 def _slurm_service_command(policy: SlurmExecutionPolicy) -> tuple[str, ...]:
@@ -1592,6 +1647,8 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
         raise ValueError(message)
     if spec.name == "docker":
         return DockerEnvironment.from_options(spec.options)
+    if spec.name == "host":
+        return HostEnvironment()
     if spec.name == "modal":
         return ModalEnvironment.from_options(spec.options)
     if spec.name == "skypilot":

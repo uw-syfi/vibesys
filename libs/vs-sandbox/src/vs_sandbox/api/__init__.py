@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         ContentionMonitor,
         Device,
         SandboxKind,
+        backend_is_host_only,
         create_compute_backend,
         register_compute_backend,
     )
@@ -127,6 +128,7 @@ __all__ = [
     "SystemAcceleratorDiscovery",
     "TrainiumBackend",
     "WorkspaceSandbox",
+    "backend_is_host_only",
     "build_host_sandbox",
     "create_compute_backend",
     "declare_resources",
@@ -156,6 +158,7 @@ _LAZY_EXPORTS = {
     "ContentionMonitor": ("compute_backends", "ContentionMonitor"),
     "Device": ("compute_backends", "Device"),
     "SandboxKind": ("compute_backends", "SandboxKind"),
+    "backend_is_host_only": ("compute_backends", "backend_is_host_only"),
     "create_compute_backend": ("compute_backends", "create_compute_backend"),
     "register_compute_backend": ("compute_backends", "register_compute_backend"),
     "ContainerRuntimeUnavailableError": (
