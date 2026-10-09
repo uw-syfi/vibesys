@@ -16,9 +16,11 @@ from vs_agent.api import (
     SHIPPED_PROVIDERS,
     AgentClient,
     AgentSpec,
+    ProviderNotReadyError,
     agent_driver_supports_tool_servers,
     build_agent_client,
 )
+from vs_sandbox.api import SANDBOX_DISABLE_ENV
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -141,3 +143,31 @@ def test_agent_env_passthrough_reaches_the_spec_and_bad_names_are_rejected_at_lo
 
     with pytest.raises(ValueError, match=r"agent\.env_passthrough.*'HF-TOKEN'"):
         _config(env_passthrough=["HF-TOKEN"])
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+def test_built_client_reports_a_missing_provider_cli_before_its_first_turn(
+    provider: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The composed client probes readiness by default.
+
+    The run's PATH holds no provider CLI, so the probe (not a turn) must fail
+    with the typed error that names the provider.
+    """
+    empty_bin = tmp_path / "bin"
+    empty_bin.mkdir()
+    monkeypatch.setenv("PATH", str(empty_bin))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv(SANDBOX_DISABLE_ENV, "off")
+    client = _build(_config(backend="cli", cli_provider=provider))
+
+    with pytest.raises(ProviderNotReadyError) as raised:
+        client.invoke_text(
+            kind="implementer",
+            workspace=tmp_path,
+            system_prompt="sys",
+            user_prompt="go",
+            round_label="r1",
+        )
+
+    assert provider in str(raised.value)
