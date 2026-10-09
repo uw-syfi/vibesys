@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import json
 import math
@@ -81,6 +83,64 @@ def _framed_result_command(output_path: str) -> str:
         f" && cat {shlex.quote(output_path)}"
         f" && printf '\\n{_BENCHMARK_END_MARKER}\\n'"
     )
+
+
+# A result file larger than the sandbox's output cap is read back in chunks.
+# Each chunk is base64 so a multibyte character never splits across reads; at
+# 48,000 bytes it encodes to 64,000 characters, under the 100,000-character
+# local and container caps. The total stays bounded for evaluator output.
+_RESULT_CHUNK_BYTES = 48_000
+_MAX_RESULT_BYTES = 64 * 1024 * 1024
+
+
+def _framed(text: str) -> str:
+    return f"\n{_BENCHMARK_MARKER}\n{text}\n{_BENCHMARK_END_MARKER}\n"
+
+
+def _read_result_file(sandbox: CommandRunner, output_path: str) -> tuple[str, str | None]:
+    """Return the framed result file and, when it cannot be read whole, why.
+
+    The file is printed in one command when it fits the sandbox's output cap,
+    and otherwise read back in bounded chunks. A file that cannot be read
+    whole returns the truncated framing with a reason naming its size.
+    """
+    whole = sandbox.execute(_framed_result_command(output_path))
+    if not whole.truncated:
+        return whole.output, None
+    path = shlex.quote(output_path)
+    try:
+        size = int(sandbox.execute(f"wc -c < {path}").output.strip())
+    except ValueError:
+        return whole.output, "benchmark result file size could not be read"
+    if size > _MAX_RESULT_BYTES:
+        return whole.output, (
+            f"benchmark result file is {size} bytes, over the {_MAX_RESULT_BYTES}-byte "
+            "limit for trusted results"
+        )
+    data = _read_chunks(sandbox, path, size)
+    if data is None:
+        return whole.output, (
+            f"benchmark result file is {size} bytes and could not be read back "
+            f"in {_RESULT_CHUNK_BYTES}-byte chunks"
+        )
+    return _framed(data.decode("utf-8", errors="replace")), None
+
+
+def _read_chunks(sandbox: CommandRunner, path: str, size: int) -> bytes | None:
+    """Read ``size`` bytes of a quoted path in base64 chunks, or ``None`` on any gap."""
+    data = bytearray()
+    for offset in range(0, size, _RESULT_CHUNK_BYTES):
+        chunk = sandbox.execute(
+            f"tail -c +{offset + 1} {path} | head -c {_RESULT_CHUNK_BYTES} | base64 | tr -d '\\n'"
+        )
+        if chunk.exit_code != 0 or chunk.truncated:
+            return None
+        try:
+            data += base64.b64decode(chunk.output.strip(), validate=True)
+        except binascii.Error:
+            return None
+    # A file that changed size while being read is not one consistent result.
+    return bytes(data) if len(data) == size else None
 
 
 class ScalarBenchmarkContract(BaseModel):
@@ -455,14 +515,15 @@ class RuntimeTrustedEvaluation:
             decoded = _Decoded(output=execution_failure or result.output.strip(), passed=False)
             framed = decoded.output
             if execution_failure is None:
+                problem = None
                 if result.truncated:
                     # The sandbox keeps only the head of long output, which
                     # drops the framed result appended after the evaluator's
                     # own logs. Read the result file on its own instead.
-                    framed = self._sandbox.execute(_framed_result_command(output_path)).output
+                    framed, problem = _read_result_file(self._sandbox, output_path)
                 decoded = _decode_framed(
                     framed,
-                    decoded.output,
+                    decoded.output if problem is None else f"{decoded.output}\n{problem}",
                     contract,
                     required_metrics,
                     exited_cleanly=result.exit_code == 0,
