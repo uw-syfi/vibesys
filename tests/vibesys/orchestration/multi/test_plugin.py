@@ -187,7 +187,7 @@ def test_round_uses_fresh_policy_sessions_and_named_implementer(tmp_path: Path) 
 
     status, run = _run(tmp_path, script)
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     assert run.control.checkpoints == 1
     assert [role for role, _history, _message in script.calls] == [
         DESIGNER.id,
@@ -223,7 +223,7 @@ def test_failed_judge_retries_same_implementer_context_with_fresh_judge(
 
     status, run = _run(tmp_path, script)
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     implementer_calls = [call for call in script.calls if call[0] == IMPLEMENTER.id]
     assert [len(history) for _role, history, _message in implementer_calls] == [0, 1]
     assert "batch boundary is unchecked" in implementer_calls[1][2]
@@ -258,7 +258,7 @@ def test_invalid_plan_correction_continues_in_planning_session(tmp_path: Path) -
 
     status, run = _run(tmp_path, script)
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     designer_calls = [call for call in script.calls if call[0] == DESIGNER.id]
     assert [len(history) for _role, history, _message in designer_calls] == [0, 0, 1]
     assert "never reuse an identifier" in designer_calls[2][2]
@@ -385,7 +385,7 @@ def test_judge_approved_local_validation_failure_retries_with_report(
 
     status, run = _run(tmp_path, script, configure=configure)
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     assert [call.recipe_artifact for call in run.evaluation.local_validation_calls] == [
         "checks/recipe.json",
         "checks/recipe.json",
@@ -421,7 +421,7 @@ def test_profiler_is_fresh_and_bounded_to_round_evidence(tmp_path: Path) -> None
         ),
     )
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     profiler_sessions = [
         session for session in run.agents.sessions if session.role.id == PROFILER.id
     ]
@@ -495,7 +495,7 @@ def test_paid_attempt_is_not_replayed_after_interrupted_turn(tmp_path: Path) -> 
                 member_id="H-01",
                 turn_number=1,
             )
-            assert await PLUGIN.orchestrate(run, _options()) is RunStatus.SUCCEEDED
+            assert await PLUGIN.orchestrate(run, _options()) is RunStatus.FAILED  # nothing measured
             return run, script
         finally:
             await run.close()
@@ -547,7 +547,7 @@ def test_interrupted_final_paid_attempt_closes_its_round_and_the_run_continues(
 
     status, script, state = asyncio.run(scenario())
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     assert [role for role, _history, _message in script.calls] == [
         DESIGNER.id,
         DESIGNER.id,
@@ -615,7 +615,9 @@ def test_resume_runs_the_same_implementer_attempts_as_an_uninterrupted_run(
     base_status, base_turns, _ = implementer_calls(None, tmp_path / "base")
     status, turns, state = implementer_calls(crash_at, tmp_path / "crashed")
 
-    assert (status, turns) == (base_status, base_turns) == (RunStatus.SUCCEEDED, budget)
+    assert (
+        (status, turns) == (base_status, base_turns) == (RunStatus.FAILED, budget)
+    )  # nothing measured
     assert state.last_paid_attempt is None
     assert [(record.round_number, record.passed) for record in state.search.rounds] == [(1, False)]
 
@@ -644,7 +646,7 @@ def test_failed_implementer_turn_feeds_a_durable_framework_reason_to_the_retry(
             with pytest.raises(RuntimeError, match="agent disconnected"):
                 await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
             resumed = await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
-            assert resumed is RunStatus.SUCCEEDED
+            assert resumed is RunStatus.FAILED  # nothing measured
             return script
         finally:
             await run.close()
@@ -671,7 +673,7 @@ def test_rollback_uses_recorded_parent_and_closes_sessions(tmp_path: Path) -> No
 
     status, run = _run(tmp_path, script, options=_options(max_rounds=2))
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     state = asyncio.run(run.state.load(MultiState))
     assert state is not None
     first, _second = state.search.rounds
@@ -727,7 +729,7 @@ def test_designer_prompts_point_at_notices_the_progress_entry_contains(
         options=_options(max_rounds=final_round, max_retries_per_round=1),
     )
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     entry = (tmp_path / "progress" / f"round-{final_round:04d}.md").read_text()
     final_prompts = [message for role, _, message in script.calls if role == DESIGNER.id][2:]
     assert len(final_prompts) == 2

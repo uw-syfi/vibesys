@@ -14,8 +14,7 @@ has a trusted, measured result to use:
   was found, so there is nothing to keep (failure).
 """
 
-from enum import StrEnum
-
+from vibesys.hypothesis import RunEnding
 from vibesys.orchestration.dynamic.strategy import _context as context
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._draft import Draft, run_scope
@@ -39,14 +38,6 @@ from vs_core.api import (
     Stop,
     TrustedBaseline,
 )
-
-
-class RunEnding(StrEnum):
-    """How a finished run ends; the leading words of the result reason."""
-
-    ADOPTED = "adopted"
-    NO_IMPROVEMENT = "no improvement"
-    NO_TRUSTED_RESULT = "no trusted result"
 
 
 def _reason(ending: RunEnding, detail: str) -> str:

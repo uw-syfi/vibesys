@@ -182,7 +182,7 @@ def test_plain_pass_golden_through_explicit_plugin(tmp_path: Path) -> None:
         options_override=options(max_rounds=1, interface="inprocess"),
     )
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     _assert_golden(
         strategy=_STRATEGY,
         scenario="pass",
@@ -212,7 +212,7 @@ def test_plain_retry_then_pass_golden_through_explicit_plugin(tmp_path: Path) ->
         options_override=options(max_rounds=1, interface="inprocess"),
     )
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     _assert_golden(
         strategy=_STRATEGY,
         scenario="retry_then_pass",
@@ -237,7 +237,7 @@ def test_plain_timeout_golden_through_explicit_plugin(tmp_path: Path) -> None:
         ),
     )
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     _assert_golden(
         strategy=_STRATEGY,
         scenario="timeout",
@@ -260,7 +260,7 @@ def test_plain_gate_golden_through_explicit_plugin(tmp_path: Path) -> None:
         options_override=options(max_rounds=1, interface="inprocess"),
     )
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     _assert_golden(
         strategy=_STRATEGY,
         scenario="gate",
@@ -283,7 +283,7 @@ def test_profile_single_pass_golden_through_explicit_plugin(tmp_path: Path) -> N
         options_override=profile_options(),
     )
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     _assert_golden(
         strategy="profile_single_plugin",
         scenario="pass",
@@ -314,7 +314,7 @@ def test_profile_single_retry_golden_through_explicit_plugin(tmp_path: Path) -> 
         options_override=profile_options(),
     )
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     _assert_golden(
         strategy="profile_single_plugin",
         scenario="retry_then_pass",
@@ -337,7 +337,7 @@ def test_profile_single_gate_golden_through_explicit_plugin(tmp_path: Path) -> N
         options_override=profile_options(),
     )
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     _assert_golden(
         strategy="profile_single_plugin",
         scenario="gate",
@@ -361,7 +361,7 @@ def test_profile_single_timeout_golden_through_explicit_plugin(tmp_path: Path) -
         options_override=profile_options(),
     )
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     _assert_golden(
         strategy="profile_single_plugin",
         scenario="timeout",

@@ -155,7 +155,7 @@ def test_multi_round_search_checkpoints_paid_turns_and_policy_files(tmp_path: Pa
 
     status, run = _run(tmp_path, script)
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     assert run.control.checkpoints == 2
     state = asyncio.run(run.state.load(SingleState))
     assert state is not None
@@ -258,7 +258,7 @@ def test_failed_review_retries_in_one_named_session(tmp_path: Path) -> None:
 
     status, run = _run(tmp_path, script, options=_options(max_rounds=1))
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     implementer_calls = [call for call in script.calls if call[0] == IMPLEMENTER.id]
     assert [len(history) for _role, history, _message in implementer_calls] == [0, 1]
     assert "accuracy regressed" in implementer_calls[1][2]
@@ -327,7 +327,9 @@ def test_paid_attempt_is_not_repeated_after_interrupted_turn(tmp_path: Path) -> 
                 member_id="H-01",
                 turn_number=1,
             )
-            assert await PLUGIN.orchestrate(run, _options(max_rounds=1)) is RunStatus.SUCCEEDED
+            assert (
+                await PLUGIN.orchestrate(run, _options(max_rounds=1)) is RunStatus.FAILED
+            )  # nothing measured
             assert all(session.closed for session in run.agents.sessions)
             return run, script
         finally:
@@ -378,7 +380,7 @@ def test_interrupted_final_paid_attempt_closes_its_round_and_the_run_continues(
 
     status, script, state = asyncio.run(scenario())
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     assert [role for role, _history, _message in script.calls] == [
         DESIGNER.id,
         IMPLEMENTER.id,
@@ -442,7 +444,9 @@ def test_resume_runs_the_same_implementer_attempts_as_an_uninterrupted_run(
     base_status, base_turns, _ = implementer_calls(None, tmp_path / "base")
     status, turns, state = implementer_calls(crash_at, tmp_path / "crashed")
 
-    assert (status, turns) == (base_status, base_turns) == (RunStatus.SUCCEEDED, budget)
+    assert (
+        (status, turns) == (base_status, base_turns) == (RunStatus.FAILED, budget)
+    )  # nothing measured
     assert state.last_paid_attempt is None
     assert [(record.round_number, record.passed) for record in state.search.rounds] == [(1, False)]
 
@@ -457,7 +461,7 @@ def test_rollback_uses_recorded_parent_and_sessions_close(tmp_path: Path) -> Non
 
     status, run = _run(tmp_path, script)
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     state = asyncio.run(run.state.load(SingleState))
     assert state is not None
     first, _second = state.search.rounds
@@ -474,7 +478,9 @@ def test_no_trusted_winner_restores_baseline(tmp_path: Path) -> None:
 
     status, run = _run(tmp_path, script, options=_options(max_rounds=1, max_retries_per_round=1))
 
-    assert status is RunStatus.SUCCEEDED
+    # A run whose only round failed review measured nothing: it did not complete.
+    assert status is RunStatus.FAILED
+    assert any("no trusted measurement" in call.message for call in run.observations.calls)
     workspace = run.workspaces.root
     assert isinstance(workspace, FakeWorkspace)
     assert workspace.retained == {}
@@ -503,7 +509,7 @@ def test_selected_profiler_support_name_and_agent_metric_provenance(tmp_path: Pa
         ),
     )
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     implementer_prompt = next(
         message for role, _history, message in script.calls if role == IMPLEMENTER.id
     )
@@ -522,7 +528,7 @@ def test_plugin_ignores_legacy_memory_files_and_writes_canonical_tree(tmp_path: 
 
     status, _host = _run(tmp_path, script, options=_options(max_rounds=1))
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     assert (tmp_path / "roadmap" / "index.md").is_file()
     assert (tmp_path / "progress" / "round-0001.md").is_file()
     assert (tmp_path / "progress" / "plans" / "round-0001.json").is_file()
@@ -564,7 +570,7 @@ def test_designer_prompt_points_at_notices_the_progress_entry_contains(
         options=_options(max_rounds=final_round, max_retries_per_round=1),
     )
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     entry = (tmp_path / "progress" / f"round-{final_round:04d}.md").read_text()
     designer_prompts = [message for role, _, message in script.calls if role == DESIGNER.id]
     assert len(designer_prompts) == 2
@@ -593,7 +599,7 @@ def test_designer_prompt_points_at_profile_evidence_the_progress_entry_contains(
 
     status, _ = _run(tmp_path, script, options=_options(max_rounds=2, max_retries_per_round=1))
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     designer_prompts = [message for role, _, message in script.calls if role == DESIGNER.id]
     first, second = (" ".join(prompt.split()) for prompt in designer_prompts)
     entry = (tmp_path / "progress" / "round-0002.md").read_text()

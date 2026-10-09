@@ -116,7 +116,9 @@ def _run(path: Path, script: _Script, *, options: BaseModel | None = None) -> Fa
             supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
         )
         try:
-            assert await PLUGIN.orchestrate(run, options or _options()) is RunStatus.SUCCEEDED
+            assert (
+                await PLUGIN.orchestrate(run, options or _options()) is RunStatus.FAILED
+            )  # nothing measured
             return run
         finally:
             await run.close()

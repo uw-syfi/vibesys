@@ -31,6 +31,7 @@ from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATO
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     MetricDirection,
     Run,
     RunFacts,
@@ -736,6 +737,50 @@ def test_repeated_stage_failures_are_bounded(tmp_path: Path) -> None:
     assert state.workstreams[0].phase.value == "failed"
     assert state.workstreams[0].budget.spent == 3
     assert state.winner_revision is None
+
+
+def test_run_whose_input_and_candidates_were_never_measured_does_not_complete(
+    tmp_path: Path,
+) -> None:
+    """With no trusted reading of the input and no adopted candidate, nothing is kept."""
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        if role.id == ORCHESTRATOR.id:
+            return portfolio("doomed")
+        return implementation("doomed")
+
+    async def scenario() -> RunStatus:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
+            },
+        )
+        run.evaluation.script_root_benchmark(
+            BenchmarkEvaluation(
+                executed=True,
+                feedback="the input does not run the workload",
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
+            )
+        )
+        run.evaluation.script_benchmark(*(EvaluationTransportError() for _ in range(3)))
+        options = dynamic_options(max_rounds=1, max_in_flight=1, max_retries_per_round=3)
+        return await PLUGIN.orchestrate(run, options)
+
+    assert asyncio.run(scenario()) is RunStatus.FAILED
 
 
 def test_freed_slot_is_refilled_while_a_slow_sibling_still_runs(tmp_path: Path) -> None:

@@ -209,7 +209,7 @@ def test_persisted_restart_does_not_repeat_completed_multi_stages(
         resume_run_id=interrupted_id,
     )
 
-    assert baseline_status is resumed_status is RunStatus.SUCCEEDED
+    assert baseline_status is resumed_status is RunStatus.FAILED  # nothing measured
     assert resumed_id == interrupted_id
     assert _state_summary(resumed_workspace, resumed_id) == baseline_summary
     resumed_state = load_state(resumed_workspace, resumed_id)
@@ -240,7 +240,7 @@ def test_judge_write_is_reverted_before_the_next_attempt(tmp_path: Path) -> None
 
     status, _run_id, workspace = execute(input_root, clients)
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     assert not (workspace / stray_path).exists()
     assert [call.kind for client in clients for call in client.calls].count("judge") == 2
 
@@ -280,7 +280,7 @@ def test_failed_rollback_restore_warns_and_continues(tmp_path: Path) -> None:
     )
 
     state = load_state(workspace, run_id)
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     assert state is not None
     hypothesis = state.search.by_id("H-02")
     assert hypothesis is not None

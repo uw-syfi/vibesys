@@ -92,7 +92,7 @@ def _orchestrate(path: Path, script: _Script, facts: RunFacts | None = None) -> 
                     "official_eval_every": 10,
                 }
             )
-            assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+            assert await PLUGIN.orchestrate(run, options) is RunStatus.FAILED  # nothing measured
         finally:
             await run.close()
 

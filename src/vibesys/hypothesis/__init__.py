@@ -24,6 +24,7 @@ from vibesys.hypothesis.attempts import (
     recorded_judge_verdict,
 )
 from vibesys.hypothesis.config import HypothesisConfig
+from vibesys.hypothesis.ending import RunEnding, derive_ending, ending_of, has_trusted_reading
 from vibesys.hypothesis.history import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -148,6 +149,7 @@ __all__ = [
     "RollbackTarget",
     "RoundHistory",
     "RoundRecord",
+    "RunEnding",
     "SingleAgentReply",
     "SkillResourceSelection",
     "StartedHypothesis",
@@ -155,7 +157,10 @@ __all__ = [
     "WorkspaceCheckpoint",
     "attempt_was_reviewed",
     "build_round_record",
+    "derive_ending",
     "derive_hypothesis_title",
+    "ending_of",
+    "has_trusted_reading",
     "normalize_hypothesis_title",
     "parse_round_record",
     "recorded_judge_verdict",

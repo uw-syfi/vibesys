@@ -688,10 +688,24 @@
   },
   {
     "agent_kind": null,
+    "data": {
+      "detail": null,
+      "kind": "framework_warning",
+      "source": "loop",
+      "source_label": null,
+      "summary": "no trusted measurement was recorded, so the run has no result to keep"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "framework_warning"
+  },
+  {
+    "agent_kind": null,
     "data": null,
     "round_label": null,
-    "status": "completed",
+    "status": "failed",
     "text": "",
-    "type": "run_finished"
+    "type": "run_failed"
   }
 ]

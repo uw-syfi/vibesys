@@ -157,7 +157,7 @@ def test_persisted_restart_matches_uninterrupted_single_trajectory(
         resume_run_id=interrupted_run.run_id,
     )
 
-    assert baseline_status is resumed_status is RunStatus.SUCCEEDED
+    assert baseline_status is resumed_status is RunStatus.FAILED  # nothing measured
     assert resumed_id == interrupted_run.run_id
     assert _state_summary(resumed_workspace, resumed_id) == baseline_summary
     assert (baseline_workspace / "queue.py").read_text(encoding="utf-8") == "VALUE = 1\n"
@@ -240,7 +240,7 @@ def test_corrupt_rollback_target_warns_and_commits_the_next_round(tmp_path: Path
     )
 
     state = load_state(workspace, run_id)
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     assert state is not None
     assert len(state.search.rounds) == 2
     second = state.search.by_id("H-02")
@@ -293,7 +293,7 @@ def test_successful_rollback_restores_the_selected_revision(tmp_path: Path) -> N
     )
 
     state = load_state(workspace, run_id)
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     assert state is not None
     hypothesis = state.search.by_id("H-02")
     assert hypothesis is not None
