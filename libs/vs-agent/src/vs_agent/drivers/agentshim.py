@@ -52,13 +52,12 @@ from vs_agent.contracts import (
     SteerOutcome,
 )
 from vs_agent.docker_confinement import DockerContainerConfinement
-from vs_agent.docker_executor import CodexRolloutWatchdogExecutor
 from vs_agent.events import CommandResultPayload
 from vs_agent.host_resource_declarations import (
     declare_agent_host_resources,
     prepare_provider_state,
 )
-from vs_agent.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS
+from vs_agent.provider_policy import SHIPPED_PROVIDERS
 from vs_agent.session_environment import (
     dropped_launcher_names,
     session_environment,
@@ -1040,9 +1039,7 @@ class AgentShimDriver:
 
         Every session takes the same route: look up or build the sandbox for
         this role, confine a fresh executor to it, and hand the library the
-        sandbox's own environment. A container session additionally runs
-        through the Codex rollout watchdog, which no-ops for every other
-        provider and every non-``exec --json`` command.
+        sandbox's own environment.
         """
         if self._closed:
             message = "agent driver is closed"
@@ -1068,8 +1065,7 @@ class AgentShimDriver:
         if transport is agentshim.TransportKind.STREAM and in_container:
             # agentshim confines the long-lived process itself, so it can mark
             # it for `reap` and map the working directory, MCP commands and
-            # schema directory the way the container sees them. A rollout
-            # watchdog guards one-shot `codex exec` runs; no such run exists.
+            # schema directory the way the container sees them.
             confinement = DockerContainerConfinement(
                 self._docker_sandbox_for(spec), runner=self._executor_factory()
             )
@@ -1085,13 +1081,6 @@ class AgentShimDriver:
         executor: agentshim.CommandExecutor = self._executor_factory()
         if sandbox is not None:
             executor = confine_to_sandbox(executor, sandbox, find_binary=find_binary)
-        if in_container:
-            executor = CodexRolloutWatchdogExecutor(
-                executor,
-                self._container_id_resolver(spec),
-                rollout_sessions_root=_codex_rollout_sessions_root(sandbox),
-                log=self._log,
-            )
         env = sandbox.env if sandbox is not None else host_env
         return _Launch(
             executor=executor,
@@ -1272,19 +1261,6 @@ class AgentShimDriver:
             raise ValueError(message)
         return sandbox
 
-    def _container_id_resolver(self, spec: AgentSessionSpec) -> Callable[[], str]:
-        """Return the sandbox's current container ID, read at every call.
-
-        Read through the sandbox rather than captured, because a GPU reselect
-        replaces the container and nothing should then have to rebuild the
-        executor or the cleanup hook.
-        """
-
-        def resolve() -> str:
-            return str(self._docker_sandbox_for(spec).container_id)
-
-        return resolve
-
     def close(self) -> None:
         """Close every session created by this driver, idempotently."""
         if self._closed:
@@ -1293,16 +1269,3 @@ class AgentShimDriver:
         for session in self._sessions:
             session.close()
         self._sessions.clear()
-
-
-def _codex_rollout_sessions_root(sandbox: _ConfinableSandbox | None) -> str:
-    """Return the sessions directory a resumed Codex thread writes its rollout to.
-
-    Derived from the sandbox's own ``HOME`` and the Codex provider's state
-    directory convention, never a hardcoded ``/root`` or ``/home/agent``: the
-    watchdog only ever polls a container sandbox, but the value is computed
-    generically so nothing here has to know that in advance.
-    """
-    home = "" if sandbox is None else sandbox.env.get("HOME", "")
-    state_dir = agentshim.get_provider(CODEX_PROVIDER).profile.state_dirs[0]
-    return f"{home}/{state_dir}/sessions"

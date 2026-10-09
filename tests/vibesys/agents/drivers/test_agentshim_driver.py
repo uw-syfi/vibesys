@@ -44,7 +44,6 @@ from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
 from vibesys.events import CommandResultPayload
 from vibesys.orchestration.multi.contracts import ImplementerResponse, JudgeResponse
-from vs_agent import docker_executor
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
     AgentClient,
@@ -771,83 +770,6 @@ def test_the_binary_check_budget_is_a_driver_option(
     driver.create_session(_container_spec(tmp_path, provider))
 
     assert fake.requests[0].timeout == 5
-
-
-def _watchdog_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
-    """Record the argv of every command a container session sends to the watchdog.
-
-    The watchdog wraps the ``docker exec`` transport rather than replacing it,
-    so what it sees is the command agentshim built, before the transform. An
-    empty list means the session never had one.
-    """
-    watched: list[tuple[str, ...]] = []
-
-    class _Recording(docker_executor.CodexRolloutWatchdogExecutor):
-        def run(
-            self,
-            request: agentshim.CommandRequest,
-            sink: agentshim.CommandStreamSink,
-        ) -> agentshim.CommandResult:
-            watched.append(tuple(request.argv))
-            return super().run(request, sink)
-
-    monkeypatch.setattr(subject, "CodexRolloutWatchdogExecutor", _Recording)
-    return watched
-
-
-@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
-def test_every_container_session_runs_its_turns_through_the_watchdog(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    provider: str,
-) -> None:
-    """The watchdog wraps unconditionally: it only ever acts on a resumed Codex
-    JSON run, so wrapping every provider's container session costs nothing for
-    the rest and needs no per-provider branch in the driver."""
-    watched = _watchdog_spy(monkeypatch)
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
-    driver, _fake = _driver(
-        provider, scripted_turn(provider, text="ok"), docker_sandboxes={"implementer": sandbox}
-    )
-    session = driver.create_session(_container_spec(tmp_path, provider))
-
-    session.run_turn(AgentTurnRequest(message="Do it"))
-
-    assert watched, "the container session's turn did not go through the watchdog"
-
-
-def test_the_watchdog_rollout_root_comes_from_the_sandbox_home(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """No ``/root`` or ``/home/agent`` literal: it is read off the sandbox."""
-    captured: dict[str, str] = {}
-    real = docker_executor.CodexRolloutWatchdogExecutor
-
-    def _spy(
-        inner: agentshim.CommandExecutor,
-        container_id_resolver: Callable[[], str],
-        *,
-        rollout_sessions_root: str,
-        log: Callable[[str], None],
-    ) -> object:
-        captured["rollout_sessions_root"] = rollout_sessions_root
-        return real(
-            inner,
-            container_id_resolver,
-            rollout_sessions_root=rollout_sessions_root,
-            log=log,
-        )
-
-    monkeypatch.setattr(subject, "CodexRolloutWatchdogExecutor", _spy)
-    sandbox = FakeDockerSandbox(workspace=tmp_path, home="/home/somebody-else")
-    driver, _fake = _driver(
-        "codex", scripted_turn("codex", text="ok"), docker_sandboxes={"implementer": sandbox}
-    )
-
-    driver.create_session(_container_spec(tmp_path, "codex"))
-
-    assert captured["rollout_sessions_root"] == "/home/somebody-else/.codex/sessions"
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
