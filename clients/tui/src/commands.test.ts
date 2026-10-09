@@ -107,6 +107,23 @@ describe('parseCommand', () => {
   });
 });
 
+describe('/resume fallback', () => {
+  it('resumes on the fallback only for the exact word, on both surfaces', () => {
+    const resumeWithFallback = {
+      kind: 'request',
+      request: {type: 'command.resume', fallback: true},
+    } as const;
+    expect(onCommand('/resume fallback')).toEqual(resumeWithFallback);
+    expect(onChat('/resume fallback')).toEqual(resumeWithFallback);
+  });
+
+  it('rejects any other argument with the registry usage and sends nothing', () => {
+    for (const text of ['/resume now', '/resume fallbacks', '/resume Fallback', '/resume 1']) {
+      expect(onCommand(text)).toEqual({kind: 'error', error: 'Usage: /resume [fallback]'});
+    }
+  });
+});
+
 describe('argument-contract enforcement', () => {
   it('rejects trailing text on no-argument commands on the command bar', () => {
     // Before the registry refactor exact-match parsers rejected these; a
@@ -114,7 +131,6 @@ describe('argument-contract enforcement', () => {
     expect(onCommand('/pause typo')).toEqual({kind: 'error', error: 'Usage: /pause'});
     expect(onCommand('/perf extra')).toEqual({kind: 'error', error: 'Usage: /perf'});
     expect(onCommand('/help ignored')).toEqual({kind: 'error', error: 'Usage: /help'});
-    expect(onCommand('/resume now')).toEqual({kind: 'error', error: 'Usage: /resume'});
     expect(onCommand('/stop now')).toEqual({kind: 'error', error: 'Usage: /stop'});
     expect(onCommand('/design later')).toEqual({kind: 'error', error: 'Usage: /design'});
   });

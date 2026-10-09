@@ -2560,3 +2560,66 @@ function diagnosticEvent(
     },
   };
 }
+
+describe('quota state', () => {
+  const pausedEvent = (sequence: number): RunEvent =>
+    fixtureEvent(sequence, 'quota_paused', {
+      data: {
+        kind: 'quota_paused',
+        provider: 'claude',
+        condition: 'rate_limited',
+        detail: 'too many requests',
+        resets_at: 100,
+        resumes_at: 105,
+        policy: 'wait',
+        fallback_provider: 'codex',
+        fallback_model: 'gpt-5.4',
+      },
+    });
+
+  it('starts with no quota fact', () => {
+    expect(initialCoreState().quota).toEqual({sequence: 0, pause: null});
+  });
+
+  it('records a pause with the provider diagnostic, reset times and fallback', () => {
+    const state = reduceEvent(initialCoreState(), pausedEvent(1));
+    expect(state.quota).toEqual({
+      sequence: 1,
+      pause: {
+        provider: 'claude',
+        condition: 'rate_limited',
+        detail: 'too many requests',
+        resetsAt: 100,
+        resumesAt: 105,
+        policy: 'wait',
+        fallback: {provider: 'codex', model: 'gpt-5.4'},
+      },
+    });
+  });
+
+  it('settles on resumed, abandoned and switched, each at its own sequence', () => {
+    const settle = {
+      quota_resumed: {kind: 'quota_resumed', provider: 'claude'},
+      quota_abandoned: {
+        kind: 'quota_abandoned',
+        provider: 'claude',
+        condition: 'rate_limited',
+        detail: 'too many requests',
+        reason: 'wait budget spent',
+      },
+      provider_switched: {
+        kind: 'provider_switched',
+        from_provider: 'claude',
+        to_provider: 'codex',
+        to_model: 'gpt-5.4',
+        reason: 'policy',
+        detail: 'too many requests',
+      },
+    } as const;
+    for (const [type, data] of Object.entries(settle)) {
+      let state = reduceEvent(initialCoreState(), pausedEvent(1));
+      state = reduceEvent(state, fixtureEvent(2, type as RunEvent['type'], {data}));
+      expect(state.quota).toEqual({sequence: 2, pause: null});
+    }
+  });
+});
