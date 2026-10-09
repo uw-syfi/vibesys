@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 
     from vs_project.api import GitRepository
 
+REQUIRES_ON_DISK_REPOSITORY = True
+"""This module shares one repository with plain ``git``; see ``conftest.ON_DISK``."""
+
 _PATHS = ("a.txt", "b.txt", "dir/c.txt")
 _TEXTS = ("one\n", "two\n", "three\n")
 _AGENT_IDENTITY = ["-c", "user.name=agent", "-c", "user.email=agent@example.invalid"]

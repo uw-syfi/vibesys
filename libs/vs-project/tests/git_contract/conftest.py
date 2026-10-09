@@ -15,6 +15,7 @@ import pytest
 from tests.support.git_contract import Sandbox
 
 from vs_project.api import CliGitRepository, NullGitTrackerEvents, Pygit2GitRepository
+from vs_project.api.testing import FakeGitRepositories
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,15 +36,30 @@ def _pygit2(root: Path) -> GitRepository:
 IMPLEMENTATIONS: dict[str, RepositoryFactory] = {
     "cli": _cli,
     "pygit2": _pygit2,
+    "fake": FakeGitRepositories(),
 }
 
 _ORACLE: RepositoryFactory = _cli
 """The reference the property-based cases compare every implementation to."""
 
+ON_DISK: frozenset[str] = frozenset({"cli", "pygit2"})
+"""Implementations whose repository is a real ``.git`` on disk, which plain ``git`` can share.
 
-@pytest.fixture(scope="session", params=list(IMPLEMENTATIONS.values()), ids=list(IMPLEMENTATIONS))
-def factory(request: pytest.FixtureRequest) -> RepositoryFactory:
-    return request.param
+A module that sets ``REQUIRES_ON_DISK_REPOSITORY = True`` tests that capability (an agent
+running ``git`` in the tracked workspace, lock files) and runs only against these. Every
+other module runs against every implementation.
+"""
+
+
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    """Run each case against every implementation that has what its module needs."""
+    if "factory" not in metafunc.fixturenames:
+        return
+    needs_disk = getattr(metafunc.module, "REQUIRES_ON_DISK_REPOSITORY", False)
+    names = [name for name in IMPLEMENTATIONS if not needs_disk or name in ON_DISK]
+    metafunc.parametrize(
+        "factory", [IMPLEMENTATIONS[name] for name in names], ids=names, scope="session"
+    )
 
 
 @pytest.fixture(scope="session")
