@@ -89,26 +89,23 @@ async def _changed_candidate_revision(scenario: EvaluationScenario, label: str) 
     return revision
 
 
+# The Slurm producer runs a real shell per scenario, so each example is far
+# costlier than a direct one. The stage set is drawn by ``scenario_specs``; the
+# examples pin every outcome and every single-stage set once instead of
+# crossing the two.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("producer", tuple(Producer))
-@pytest.mark.parametrize(
-    "kinds",
-    [
-        (EvidenceKind.ACCURACY,),
-        (EvidenceKind.BENCHMARK,),
-        (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK),
-    ],
-)
-@settings(max_examples=12)
+@settings(max_examples=8)
 @example(spec=ScenarioSpec(outcome=ScenarioOutcome.PASS))
 @example(spec=ScenarioSpec(outcome=ScenarioOutcome.CORRECTNESS_FAIL))
 @example(spec=ScenarioSpec(outcome=ScenarioOutcome.INFRA_FAIL))
 @example(spec=ScenarioSpec(outcome=ScenarioOutcome.TIMEOUT))
+@example(spec=ScenarioSpec(kinds=(EvidenceKind.ACCURACY,)))
+@example(spec=ScenarioSpec(kinds=(EvidenceKind.BENCHMARK,)))
 @given(spec=scenario_specs())
 async def test_producer_identity_and_public_projection_contract(
-    producer: Producer, kinds: tuple[EvidenceKind, ...], spec: ScenarioSpec
+    producer: Producer, spec: ScenarioSpec
 ) -> None:
-    spec = replace(spec, kinds=kinds)
     with TemporaryDirectory(prefix="evidence-contract-") as directory:
         async with build_scenario(Path(directory), spec, producer) as scenario:
             record = scenario.record
@@ -168,7 +165,7 @@ async def test_producer_identity_and_public_projection_contract(
 
 
 @pytest.mark.asyncio
-@settings(max_examples=12)
+@settings(max_examples=6)
 @example(spec=ScenarioSpec(outcome=ScenarioOutcome.PASS))
 @example(spec=ScenarioSpec(outcome=ScenarioOutcome.CORRECTNESS_FAIL))
 @example(
@@ -215,7 +212,7 @@ async def test_direct_and_slurm_producers_agree_on_shared_semantics(spec: Scenar
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("producer", tuple(Producer))
-@settings(max_examples=8)
+@settings(max_examples=5)
 @given(
     spec=scenario_specs(outcomes=(ScenarioOutcome.PASS,)),
     same_handle=st.booleans(),
@@ -251,7 +248,7 @@ async def test_replay_preserves_attribution_and_distinct_handles_do_not_alias(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("producer", tuple(Producer))
-@settings(max_examples=6)
+@settings(max_examples=3)
 @example(padding=18_000)
 @given(padding=st.integers(min_value=16_370, max_value=32_768))
 async def test_long_diagnostics_keep_the_evaluator_cause_as_trusted_failed_evidence(
@@ -417,7 +414,7 @@ async def test_cancellation_preserves_completed_stage_evidence(metric: float) ->
 
 
 @pytest.mark.asyncio
-@settings(max_examples=12)
+@settings(max_examples=8)
 @example(spec=ScenarioSpec(outcome=ScenarioOutcome.PASS, scheduler_failed=True))
 @example(
     spec=ScenarioSpec(

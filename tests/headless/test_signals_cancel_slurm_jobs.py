@@ -59,16 +59,29 @@ def _write_input(base: Path, transport: str) -> tuple[Path, Path, Path]:
     return cluster, config, project
 
 
-@pytest.mark.parametrize("transport", ["connector", "ssh"])
-@pytest.mark.parametrize("closed_stdout", [False, True], ids=["stdout", "closed-stdout"])
+# Each case boots a real headless process, so the three axes (signal sequence,
+# transport, whether the terminal's pipe reader died too) are covered pairwise
+# rather than crossed: every pair of values from two axes appears in some case.
 @pytest.mark.parametrize(
-    "signals",
+    ("signals", "transport", "closed_stdout"),
     [
-        (signal.SIGTERM,),
-        (signal.SIGHUP,),
-        (signal.SIGINT, signal.SIGTERM),
+        pytest.param((signal.SIGTERM,), "connector", False, id="sigterm-stdout-connector"),
+        pytest.param((signal.SIGTERM,), "ssh", True, id="sigterm-closed-stdout-ssh"),
+        pytest.param((signal.SIGHUP,), "connector", True, id="sighup-closed-stdout-connector"),
+        pytest.param((signal.SIGHUP,), "ssh", False, id="sighup-stdout-ssh"),
+        pytest.param(
+            (signal.SIGINT, signal.SIGTERM),
+            "connector",
+            True,
+            id="sigint-then-sigterm-closed-stdout-connector",
+        ),
+        pytest.param(
+            (signal.SIGINT, signal.SIGTERM),
+            "ssh",
+            False,
+            id="sigint-then-sigterm-stdout-ssh",
+        ),
     ],
-    ids=["sigterm", "sighup", "sigint-then-sigterm"],
 )
 def test_a_signal_that_ends_the_run_cancels_its_slurm_job(
     tmp_path: Path, signals: tuple[signal.Signals, ...], transport: str, *, closed_stdout: bool
