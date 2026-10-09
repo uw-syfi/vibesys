@@ -128,9 +128,8 @@ from vs_sandbox.api.symlink_mounts import (
 )
 from vs_slurm.api import SlurmConfig, SlurmSshTransport, load_slurm_config
 
-_RunEnvironmentName = Literal["local", "docker", "modal", "skypilot", "slurm", "slurm-gpu"]
+_RunEnvironmentName = Literal["docker", "modal", "skypilot", "slurm", "slurm-gpu"]
 _RECORDED_ENVIRONMENT_NAMES: tuple[_RunEnvironmentName, ...] = (
-    "local",
     "docker",
     "modal",
     "skypilot",
@@ -162,7 +161,7 @@ class RunEnvironmentSpec:
     concrete environment selected by ``name``.
     """
 
-    name: str = "local"
+    name: str = "docker"
     options: Mapping[str, object] = field(default_factory=dict)
     resources: RunResourceRequest | None = None
 
@@ -883,9 +882,18 @@ class DockerEnvironment:
 
     @classmethod
     def from_options(cls, options: Mapping[str, object]) -> DockerEnvironment:
-        """Build Docker environment configuration from CLI options."""
+        """Build Docker configuration from CLI options.
+
+        ``build_runner`` is the unrecorded injection seam for the agent image build.
+        """
         image = options.get("image")
-        return cls(DockerEnvironmentConfig(image=str(image) if image else None))
+        build_runner = options.get("build_runner")
+        return cls(
+            DockerEnvironmentConfig(
+                image=str(image) if image else None,
+                build_runner=cast("DockerBuildRunner | None", build_runner),
+            )
+        )
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve Docker presentation facts."""
@@ -1322,7 +1330,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         builds (:func:`~vs_agent.api.images.agent_image`), pushed to and
         pulled back from a registry (:func:`~vs_agent.api.images.ensure_pushed`),
         since this backend's Docker daemon is not guaranteed to already have
-        it locally the way the local ``--docker`` path's is. Nothing installs
+        it locally the way the local Docker path's is. Nothing installs
         anything at container start any more, including the Modal Python SDK
         an earlier revision ``pip install``ed here: that install already ran
         through ``extra_init_commands``, which ``DockerSandbox`` (the sandbox
@@ -1577,7 +1585,11 @@ def _recorded_option(spec: RunEnvironmentSpec, key: str) -> str | None:
 def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
     """Construct the implementation selected by a run environment spec."""
     if spec.name == "local":
-        return LocalEnvironment()
+        message = (
+            "the local agent environment was removed: agents always run in Docker "
+            "(use the docker run environment)"
+        )
+        raise ValueError(message)
     if spec.name == "docker":
         return DockerEnvironment.from_options(spec.options)
     if spec.name == "modal":
@@ -1611,7 +1623,6 @@ def validate_run_environment_profile(
 
 def make_run_environment_spec(  # noqa: PLR0913  # lint-waiver: LW-009086 [PLR0913]; the compatibility builder accepts each independent CLI environment option.
     *,
-    use_docker: bool = False,
     docker_image: str | None = None,
     use_modal: bool = False,
     modal_gpu: str = "H100!",
@@ -1633,8 +1644,8 @@ def make_run_environment_spec(  # noqa: PLR0913  # lint-waiver: LW-009086 [PLR09
     ``@app.function(timeout=...)`` / ``@app.cls(container_idle_timeout=...)``
     decorators instead.
     """
-    if sum((use_docker, use_modal, use_skypilot)) > 1:
-        message = "--docker, --modal, and --skypilot are mutually exclusive"
+    if sum((use_modal, use_skypilot)) > 1:
+        message = "--modal and --skypilot are mutually exclusive"
         raise ValueError(message)
     if use_skypilot:
         if not cluster_profile:
@@ -1667,11 +1678,7 @@ def make_run_environment_spec(  # noqa: PLR0913  # lint-waiver: LW-009086 [PLR09
             options=options,
             resources=resources,
         )
-    if use_docker:
-        return RunEnvironmentSpec(
-            name="docker", options={"image": docker_image}, resources=resources
-        )
-    return RunEnvironmentSpec(resources=resources)
+    return RunEnvironmentSpec(name="docker", options={"image": docker_image}, resources=resources)
 
 
 def _modal_app_name(run_id: str, fallback: str) -> str:

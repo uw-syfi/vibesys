@@ -459,7 +459,7 @@ def _durable_session_slot(tmp_path: Path) -> StateSlot[AgentSessionState]:
         trusted_input_baseline="a" * 40,
         branch="vibesys/run-1",
         vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
     )

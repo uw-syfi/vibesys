@@ -61,7 +61,9 @@ class RunResourceRequest(BaseModel):
 class RunEnvironmentRecord(BaseModel):
     """Runtime environment a run executes in, recorded for faithful resume.
 
-    ``name`` selects the environment; the remaining fields carry that
+    ``name`` selects the environment; ``"local"`` is the retired host agent
+    environment, kept readable so earlier runs load and are migrated to
+    ``"docker"`` on resume. The remaining fields carry that
     environment's operator-selected options and stay ``None`` when they do not
     apply. ``config_path`` records only where external operator configuration
     lives. Its contents and credentials remain outside the project. Values a

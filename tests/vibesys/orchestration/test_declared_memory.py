@@ -19,6 +19,10 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.docker_environment import (
+    fake_docker_environment,
+    host_container_backend,
+)
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.api import (
@@ -28,7 +32,7 @@ from vibesys.api import (
     ProfilerKind,
     RunRequest,
 )
-from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
+from vibesys.api.request import load_input_bundle
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 
@@ -60,7 +64,7 @@ def _request(project_root: Path) -> RunRequest:
         input_bundle=load_input_bundle(project_root),
         objective="Improve the queue.",
         exp_name="team-demo",
-        run_environment=RunEnvironmentSpec("local"),
+        run_environment=fake_docker_environment(),
         agent_backend="stub",
         cli_provider="claude",
         profiler_kind=ProfilerKind.NONE,
@@ -77,6 +81,7 @@ def _run_restore(request: RunRequest, code: str, memory: str) -> None:
             request,
             integration,
             plugin=_PLUGIN,
+            backend_factory=host_container_backend,
         ) as run:
             root = run.workspaces.root
             (root.path / "code.py").write_text("VALUE = 1\n")

@@ -73,7 +73,7 @@ def _request(
         task_name=task_name,
         existing=existing,
         framework_version="1.2.3",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=descriptor or _descriptor(),
         state=ProjectStateDeclaration("policy", _PolicyState),
@@ -419,3 +419,71 @@ def test_project_run_request_uses_canonical_project_root(tmp_path: Path) -> None
     ) as resources:
         assert resources.project.root == Project.open(root).root
         assert resources.git.history_root == resources.project.root
+
+
+def _local_environment_run(root: Path, events: list[str]) -> ProjectRunEffects:
+    """Create a run the way an earlier release recorded it: with the host environment."""
+    _write_project(root)
+    effects = _effects(events)
+    local = replace(_request(root), run_environment=RunEnvironmentRecord(name="local"))
+    with open_project_run_resources(local, effects=effects, resolve_resume=_unexpected_resume):
+        pass
+    return effects
+
+
+def test_resume_migrates_a_run_recorded_with_the_local_environment_to_docker(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    events: list[str] = []
+    effects = _local_environment_run(root, events)
+    shown: list[RunEnvironmentRecord] = []
+
+    def resume(recorded: OrchestrationRunManifest) -> OrchestrationResumeDecision:
+        shown.append(recorded.run_environment)
+        return OrchestrationResumeDecision(descriptor=None)
+
+    with open_project_run_resources(
+        _request(root, existing=True), effects=effects, resolve_resume=resume
+    ) as resources:
+        persisted = resources.project.state.load_run(_RUN_ID).run_environment
+
+    assert shown == [RunEnvironmentRecord(name="docker")]
+    assert persisted == RunEnvironmentRecord(name="docker")
+    assert any(
+        "[resume]" in event and "'local'" in event and "'docker'" in event for event in events
+    )
+
+
+def test_a_migrated_run_resumes_again_without_another_migration(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    events: list[str] = []
+    effects = _local_environment_run(root, events)
+    for _ in range(2):
+        with open_project_run_resources(
+            _request(root, existing=True),
+            effects=effects,
+            resolve_resume=lambda _recorded: OrchestrationResumeDecision(descriptor=None),
+        ):
+            pass
+
+    assert sum("[resume]" in event for event in events) == 1
+
+
+def test_resume_of_a_docker_run_logs_no_migration(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+    events: list[str] = []
+    effects = _effects(events)
+    with open_project_run_resources(
+        _request(root), effects=effects, resolve_resume=_unexpected_resume
+    ):
+        pass
+    with open_project_run_resources(
+        _request(root, existing=True),
+        effects=effects,
+        resolve_resume=lambda _recorded: OrchestrationResumeDecision(descriptor=None),
+    ):
+        pass
+
+    assert not any("[resume]" in event for event in events)

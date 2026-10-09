@@ -30,7 +30,9 @@ from vs_runtime._run_environment import (
 )
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageRequirement,
+    LocalEnvironment,
     ResolvedEvaluatorPackage,
+    RunEnvironment,
     RunEnvironmentPresentation,
     RunEnvironmentRequest,
     RunEnvironmentSession,
@@ -312,10 +314,9 @@ def _synthetic_cli_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_cli_compatibility_flags_keep_options_scoped_to_selected_environment() -> None:
-    assert make_run_environment_spec().options == {}
-    assert make_run_environment_spec(use_docker=True, docker_image="editor").options == {
-        "image": "editor"
-    }
+    assert make_run_environment_spec().name == "docker"
+    assert make_run_environment_spec().options == {"image": None}
+    assert make_run_environment_spec(docker_image="editor").options == {"image": "editor"}
 
     remote = make_run_environment_spec(
         use_modal=True,
@@ -360,7 +361,7 @@ def test_skypilot_selection_requires_profile_and_resources() -> None:
         make_run_environment_spec(use_skypilot=True, cluster_profile="gpu")
     with pytest.raises(ValueError, match="mutually exclusive"):
         make_run_environment_spec(
-            use_docker=True,
+            use_modal=True,
             use_skypilot=True,
             cluster_profile="gpu",
             resources=resources,
@@ -368,9 +369,11 @@ def test_skypilot_selection_requires_profile_and_resources() -> None:
 
 
 def test_run_environment_record_captures_operator_selected_options() -> None:
-    assert run_environment_record(make_run_environment_spec()) == RunEnvironmentRecord(name="local")
+    assert run_environment_record(make_run_environment_spec()) == RunEnvironmentRecord(
+        name="docker"
+    )
     assert run_environment_record(
-        make_run_environment_spec(use_docker=True, docker_image="editor")
+        make_run_environment_spec(docker_image="editor")
     ) == RunEnvironmentRecord(name="docker", image="editor")
     assert run_environment_record(
         make_run_environment_spec(
@@ -395,7 +398,7 @@ def test_run_environment_record_captures_operator_selected_options() -> None:
         cpus_per_node=192,
     )
     assert run_environment_record(RunEnvironmentSpec(resources=resources)) == RunEnvironmentRecord(
-        name="local", resources=resources
+        name="docker", resources=resources
     )
     assert run_environment_record(
         RunEnvironmentSpec("slurm", {"config_path": "/operator/slurm.toml"})
@@ -703,6 +706,13 @@ def test_slurm_gpu_environment_rejects_gate_gpus_above_the_operator_limit(
         _open(build_run_environment(spec), _request(tmp_path, FakeBackend()))
 
 
+def test_the_retired_local_environment_can_be_neither_built_nor_recorded() -> None:
+    with pytest.raises(ValueError, match="agents always run in Docker"):
+        build_run_environment(RunEnvironmentSpec("local"))
+    with pytest.raises(ValueError, match="unknown run environment"):
+        run_environment_record(RunEnvironmentSpec("local"))
+
+
 def test_run_environment_record_rejects_an_unknown_environment() -> None:
     with pytest.raises(ValueError, match="unknown run environment"):
         run_environment_record(RunEnvironmentSpec("kubernetes"))
@@ -714,7 +724,7 @@ def _modal_runtime_document(tmp_path: Path) -> str:
 
 def test_local_environment_opens_local_sandbox_with_host_paths(tmp_path: Path) -> None:
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     session = _open(
         env,
@@ -738,7 +748,7 @@ def test_local_environment_materializes_effective_objective_outside_workspace(
     tmp_path: Path,
 ) -> None:
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
     effective = "Optimize the service.\n\n## Operator constraints\n\n- BF16 only\n"
 
     session = _open(env, _request(tmp_path, backend, objective=effective))
@@ -838,7 +848,7 @@ def test_local_environment_prepares_and_translates_evaluator_tool(
 ) -> None:
     backend = FakeBackend()
     backend.sandbox.execute.return_value = MagicMock(exit_code=0, output="", truncated=False)
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
     package = resolve_evaluator_package(
         EvaluatorPackageRequirement(
             name="vibesys-evaluator-request-factory",
@@ -898,7 +908,7 @@ def test_local_environment_rejects_evaluator_tools_root_inside_workspace(
     tmp_path: Path,
 ) -> None:
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
     package = resolve_evaluator_package(
         EvaluatorPackageRequirement(
             name="vibesys-evaluator-request-factory",
@@ -1044,7 +1054,7 @@ def test_environment_quotes_project_root_after_token_expansion(tmp_path: Path) -
     backend = FakeBackend()
     workspace = tmp_path / "candidate's; touch injected"
     workspace.mkdir()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     request = _request(
         tmp_path,
@@ -1067,7 +1077,7 @@ def test_environment_quotes_project_root_after_token_expansion(tmp_path: Path) -
 
 def test_local_environment_resolves_python_token_to_running_interpreter(tmp_path: Path) -> None:
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     session = _open(
         env,
@@ -1116,7 +1126,7 @@ def test_environment_quotes_nested_shell_paths(tmp_path: Path) -> None:
     workspace.mkdir()
     vibesys_project = Project.open(NESTED_SHELL_PROJECT)
     bundle = load_project_task(vibesys_project, vibesys_project.select_task("nested-shell"))
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     session = _open(
         env,
@@ -1155,7 +1165,7 @@ def test_environment_rejects_semantic_tokens_in_nested_shell_source(
     nested: str,
 ) -> None:
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     with pytest.raises(ValueError, match="positional arguments"):
         _open(
@@ -1182,7 +1192,7 @@ def test_environment_rejects_semantic_tokens_in_top_level_executable_source(
     command: list[str],
 ) -> None:
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     with pytest.raises(ValueError, match="positional arguments"):
         _open(
@@ -1245,7 +1255,7 @@ def test_local_environment_objective_defaults_to_the_bare_workspace_relative_nam
 ) -> None:
     """The host answer for an unset objective is identity: no lookup, no rewrite."""
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     session = _open(env, _request(tmp_path, backend))
 
@@ -2289,11 +2299,16 @@ remote_artifact_root = "/remote/vibesys"
                 assert agent_path in legitimately_writable, (env_name, agent_path)
 
 
-@pytest.mark.parametrize("environment_name", ["local", "modal"])
+@pytest.mark.parametrize(
+    "env",
+    [
+        pytest.param(LocalEnvironment(), id="local"),
+        pytest.param(build_run_environment(RunEnvironmentSpec("modal")), id="modal"),
+    ],
+)
 def test_environments_without_a_sandbox_workspace_cannot_remove_children(
-    tmp_path: Path, environment_name: str
+    tmp_path: Path, env: RunEnvironment
 ) -> None:
-    env = build_run_environment(RunEnvironmentSpec(environment_name))
 
     assert env.remove_workspace_child(tmp_path, "child", backend=FakeBackend()) is False
 

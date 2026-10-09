@@ -68,6 +68,7 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
     from vs_runtime.api.infrastructure import StopTimer
+    from vs_sandbox.api import ComputeBackendImpl
 
 # Simulated seconds one run may wait; a healthy scenario needs a small fraction of it.
 SIMULATED_BUDGET_S = 120.0
@@ -531,6 +532,7 @@ def run_request(  # noqa: PLR0913
     stop_timer: StopTimer | None = None,
     client_factory: Callable[..., AgentClientProtocol] | None = None,
     clock: FakeRunClock | None = None,
+    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
 ) -> LoopRun:
     """Execute a built request through the production host composition.
 
@@ -546,6 +548,7 @@ def run_request(  # noqa: PLR0913
     runs = launch.default_runs(
         LaunchSettings(
             agent_client_factory=client_factory or agents.client,
+            backend_factory=backend_factory,
             stop_timer=stop_timer or FakeStopTimer(),
             timing=None if clock is None else RunTiming(clock, PRODUCTION_LEASE_SECONDS),
         )

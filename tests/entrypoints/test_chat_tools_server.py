@@ -63,7 +63,7 @@ def _project_with_run(tmp_path: Path) -> tuple[Project, str]:
         "Queue SPSC",
         branch="vibesys/queue",
         vibesys_version="0.2.0",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=RunExecutionRecord(
             model="gpt-5",
             agent_backend="cli",

@@ -106,7 +106,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                         task_name=None,
                         existing=False,
                         framework_version="1.2.3",
-                        run_environment=RunEnvironmentRecord(name="local"),
+                        run_environment=RunEnvironmentRecord(name="docker"),
                         execution=run_execution_record(),
                         orchestration=OrchestrationDescriptor(
                             id="test-policy", config_version=1, options={}

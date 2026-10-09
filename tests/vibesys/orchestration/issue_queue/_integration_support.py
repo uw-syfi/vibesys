@@ -6,6 +6,8 @@ import asyncio
 from collections import deque
 from typing import TYPE_CHECKING
 
+from tests.support.docker_environment import fake_docker_environment
+
 from launch.testing import create_session
 from vibesys.api import (
     ComputeBackend,
@@ -95,6 +97,7 @@ def execute(
         options=selected.model_dump(mode="json"),
     )
     request = RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=project_root,
         orchestration=descriptor,
         config=Config.model_validate({"model": {"name": "issue-queue-plugin-test"}}),

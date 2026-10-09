@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from tests.support.docker_environment import fake_docker_environment
+
 from vibesys.api import ComputeBackend, Config, ProfilerKind, RunRequest
 from vibesys.api.request import load_input_bundle
 from vibesys.dynamic_core import ResolvedRun
@@ -52,6 +54,7 @@ def run_request(
 ) -> RunRequest:
     write_project(root)
     return RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=root,
         orchestration=OrchestrationDescriptor(
             id=PLUGIN.id,

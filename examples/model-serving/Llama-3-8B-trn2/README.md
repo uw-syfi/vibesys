@@ -11,7 +11,7 @@ Use:
 ```bash
 vibesys --runs-dir /work/vibesys-runs --local \
   --input examples/model-serving/Llama-3-8B-trn2 \
-  --backend trainium --docker
+  --backend trainium
 ```
 
 The Neuron DLC container selects the `neuron-explorer` profiler automatically.

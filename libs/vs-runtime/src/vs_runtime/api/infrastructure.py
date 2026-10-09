@@ -150,6 +150,7 @@ from vs_runtime._project_run import (
     ProjectStateDeclaration,
     open_project_run_resources,
 )
+from vs_runtime._recorded_environment import migrate_recorded_run_environment
 from vs_runtime._run_control import (
     RunControlChannel,
     RunControlEventSink,
@@ -602,6 +603,7 @@ __all__ = [
     "make_run_environment_spec",
     "materialize_input_project",
     "materialize_objective_document",
+    "migrate_recorded_run_environment",
     "offered_skill_facts",
     "open_agent_execution_environment",
     "open_managed_conversation",

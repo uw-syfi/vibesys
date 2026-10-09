@@ -100,7 +100,7 @@ def _project(root: Path, tracker: GitTracker) -> Project:
             branch=tracker.project_branch,
             vibesys_version="test",
             trusted_input_baseline=tracker.trusted_input_baseline,
-            run_environment=RunEnvironmentRecord(name="local"),
+            run_environment=RunEnvironmentRecord(name="docker"),
             execution=run_execution_record(),
             orchestration=OrchestrationDescriptor(id="guard", config_version=1, options={}),
         )

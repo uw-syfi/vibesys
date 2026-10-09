@@ -12,7 +12,7 @@ class DockerInDockerUnsupportedError(ValueError):
         return cls(
             f"the task declares [environment] docker_in_docker = true, which only the Docker "
             f"run environment can provide (a sandbox container with its own Docker daemon "
-            f"under Sysbox); the {environment} run environment cannot. Run it with --docker "
+            f"under Sysbox); the {environment} run environment cannot. Run it with the default Docker run environment "
             f"on a host with Sysbox."
         )
 

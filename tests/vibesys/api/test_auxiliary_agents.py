@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
+from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.run_execution import run_execution_record
 
 from launch import LaunchSettings, create_session, default_runs
@@ -22,7 +23,7 @@ from vibesys.api import (
     RunReady,
     RunRequest,
 )
-from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
+from vibesys.api.request import load_input_bundle
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.plugin_catalog import OrchestrationRegistry
@@ -33,7 +34,6 @@ from vs_runtime.api import OrchestrationPlugin, Run
 from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import LocalEnvironmentFacts, RunEnvironmentPresentation
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
-from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -128,7 +128,10 @@ async def _run_stub(host: Run, options: BaseModel) -> PluginRunStatus:
 
 @pytest.fixture(params=[False, True], ids=["built-in", "fake"])
 def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
-    return LaunchSettings(agents=FakeSessionAgents()) if request.param else LaunchSettings()
+    return LaunchSettings(
+        agents=FakeSessionAgents() if request.param else None,
+        backend_factory=host_container_backend,
+    )
 
 
 def _request(tmp_path: Path) -> tuple[RunRequest, OrchestrationRegistry]:
@@ -144,6 +147,7 @@ def _request(tmp_path: Path) -> tuple[RunRequest, OrchestrationRegistry]:
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
     )
     request = RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=input_root,
         input_bundle=load_input_bundle(input_root),
         orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={}),
@@ -183,7 +187,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
             run_id="run-1",
             branch="vibesys/run-1",
             vibesys_version="test",
-            run_environment=RunEnvironmentRecord(name="local"),
+            run_environment=RunEnvironmentRecord(name="docker"),
             execution=run_execution_record(),
             orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={}),
             trusted_input_baseline="0" * 40,
@@ -383,7 +387,7 @@ def test_independent_auxiliary_scope_survives_session_close(
     """The transferred scope owns conversations beyond run completion."""
     request, registry = _request(tmp_path)
     request = request.model_copy(
-        update={"backend": ComputeBackend.CPU, "run_environment": RunEnvironmentSpec("local")}
+        update={"backend": ComputeBackend.CPU, "run_environment": fake_docker_environment()}
     )
     evidence = tmp_path / "evidence"
     evidence.mkdir()
@@ -391,7 +395,7 @@ def test_independent_auxiliary_scope_survives_session_close(
     async def execute() -> None:
         settings = LaunchSettings(
             registry=registry,
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            backend_factory=host_container_backend,
             agents=agent_settings.agents,
         )
         handle = default_runs(settings).start(request)

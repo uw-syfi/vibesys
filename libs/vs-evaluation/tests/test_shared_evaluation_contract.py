@@ -484,7 +484,7 @@ def persistence(
         trusted_input_baseline="a" * 40,
         branch="test/legacy-access",
         vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=RunExecutionRecord(
             model="test",
             agent_backend="fake",

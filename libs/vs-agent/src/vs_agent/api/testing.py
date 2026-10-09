@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from vs_agent.drivers.agentshim import AgentShimDriver
 from vs_agent.drivers.fake import FakeDriver, FakeTurnScript
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
+from vs_agent.fake_docker_build_runner import FakeDockerBuildRunner
 from vs_agent.sessions import AgentInvocationState, ClientAgentSessions
 
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ __all__ = [
     "FakeAgentClient",
     "FakeAgentInvocationStore",
     "FakeAgentSessions",
+    "FakeDockerBuildRunner",
     "FakeDriver",
     "FakeInvocation",
     "FakeTurnScript",

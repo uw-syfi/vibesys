@@ -125,7 +125,6 @@ def test_run_environment_spec_uses_task_modal_entrypoint(tmp_path: Path) -> None
         manifest.write('\n[environment.modal]\nentrypoint = "deploy/service.py"\n')
     args = argparse.Namespace(
         input_bundle=load_input_bundle(project),
-        docker=False,
         docker_image=None,
         modal=True,
         modal_gpu="H100!",
@@ -191,7 +190,7 @@ def test_cli_rejects_slurm_config_with_another_environment(tmp_path: Path) -> No
 def test_cli_rejects_mixed_generic_and_compatibility_environment_flags(tmp_path: Path) -> None:
     project = _write_input_project(tmp_path)
     with pytest.raises(ValueError, match="cannot be combined"):
-        parse_cli_invocation(["--input", str(project), "--run-environment", "local", "--modal"])
+        parse_cli_invocation(["--input", str(project), "--run-environment", "docker", "--modal"])
 
 
 class _CommonConfiguration(TypedDict):
@@ -205,7 +204,8 @@ class _CommonConfiguration(TypedDict):
     default_reasoning_effort: str
 
 
-_LOCAL_ENVIRONMENT = RunEnvironmentRecord(name="local")
+_DOCKER_ENVIRONMENT = RunEnvironmentRecord(name="docker")
+_RETIRED_LOCAL_ENVIRONMENT = RunEnvironmentRecord(name="local")
 _MODAL_ENVIRONMENT = RunEnvironmentRecord(
     name="modal",
     gpu="A100-80GB",
@@ -255,7 +255,7 @@ def _execution_record(
 @dataclass(frozen=True)
 class _RecordedRun:
     orchestration: OrchestrationDescriptor
-    run_environment: RunEnvironmentRecord = _LOCAL_ENVIRONMENT
+    run_environment: RunEnvironmentRecord = _DOCKER_ENVIRONMENT
 
     @property
     def execution(self) -> RunExecutionRecord:
@@ -286,7 +286,7 @@ def _agent_configuration(
     )
     return _RecordedRun(
         agent_descriptor(options, orchestration_id=orchestration_id),
-        run_environment or _LOCAL_ENVIRONMENT,
+        run_environment or _DOCKER_ENVIRONMENT,
     )
 
 
@@ -486,7 +486,7 @@ def test_repository_native_project_selects_a_named_task(tmp_path: Path) -> None:
     assert invocation.args.input_bundle.task_root == selected.resolve()
 
 
-@pytest.mark.parametrize("environment_flag", [[], ["--docker"], ["--run-environment", "docker"]])
+@pytest.mark.parametrize("environment_flag", [[], ["--run-environment", "docker"]])
 def test_task_dockerfile_selects_docker_without_building_during_validation(
     environment_flag: list[str],
     tmp_path: Path,
@@ -571,7 +571,6 @@ def test_each_outer_loop_builds_the_task_image_once(
 @pytest.mark.parametrize(
     "flags",
     [
-        ["--run-environment", "local"],
         ["--modal"],
         ["--skypilot"],
         ["--docker-image", "custom:latest"],
@@ -600,7 +599,7 @@ def _declare_docker_in_docker(task: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("environment_flag", [[], ["--docker"], ["--run-environment", "docker"]])
+@pytest.mark.parametrize("environment_flag", [[], ["--run-environment", "docker"]])
 def test_docker_in_docker_task_selects_docker(environment_flag: list[str], tmp_path: Path) -> None:
     project = tmp_path / "repository"
     project.mkdir()
@@ -616,7 +615,7 @@ def test_docker_in_docker_task_selects_docker(environment_flag: list[str], tmp_p
 
 @pytest.mark.parametrize(
     "flags",
-    [["--run-environment", "local"], ["--modal"], ["--skypilot"], ["--docker-image", "custom:1"]],
+    [["--modal"], ["--skypilot"], ["--docker-image", "custom:1"]],
 )
 def test_docker_in_docker_task_rejects_conflicting_environment_flags_naming_the_key(
     flags: list[str], tmp_path: Path
@@ -796,7 +795,7 @@ def test_profiler_validation_uses_the_selected_environment(
         Mock(return_value=frozenset({ProfilerKind.TORCH, ProfilerKind.NONE})),
     )
 
-    with pytest.raises(ConfigurationError, match="run environment 'local'"):
+    with pytest.raises(ConfigurationError, match="run environment 'docker'"):
         parse_cli_invocation(["--input", str(project), "--profiler", "nsys"])
 
 
@@ -1048,7 +1047,7 @@ def test_repository_resume_restores_the_recorded_task(
     assert invocation.args.input_bundle.task_root == selected.resolve()
 
 
-def test_repository_resume_keeps_a_recorded_local_environment_despite_task_dockerfile(
+def test_repository_resume_migrates_a_recorded_local_environment_to_docker_without_building(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1060,7 +1059,7 @@ def test_repository_resume_keeps_a_recorded_local_environment_despite_task_docke
     _write_project_run(
         project,
         run_id,
-        configuration=_agent_configuration(run_environment=_LOCAL_ENVIRONMENT),
+        configuration=_agent_configuration(run_environment=_RETIRED_LOCAL_ENVIRONMENT),
         created_at=datetime(2026, 8, 11, 12, tzinfo=UTC),
         options=_RunFixtureOptions(task_name="latency"),
     )
@@ -1070,7 +1069,8 @@ def test_repository_resume_keeps_a_recorded_local_environment_despite_task_docke
     with patch("entrypoints.cli.environment.build_task_image") as build:
         spec = run_environment_spec_from_args(args, build_task_docker_image=True)
 
-    assert spec.name == "local"
+    assert spec.name == "docker"
+    assert spec.options["image"] is None
     build.assert_not_called()
 
 
@@ -1790,7 +1790,6 @@ def test_fresh_run_records_the_selected_run_environment(tmp_path: Path) -> None:
     project = _write_input_project(tmp_path)
     args = argparse.Namespace(
         input_bundle=load_input_bundle(project),
-        docker=False,
         docker_image=None,
         modal=True,
         modal_gpu="A100-80GB",
@@ -1812,7 +1811,6 @@ def test_resume_without_run_environment_flags_restores_the_recorded_environment(
     args = parse_cli_invocation(["--resume", run_id]).args
 
     assert args.modal is True
-    assert args.docker is False
     assert args.modal_gpu == "A100-80GB"
     assert args.modal_model_volume == "weights"
     assert args.modal_app == "run-app"
@@ -1872,7 +1870,7 @@ def test_resume_with_matching_run_environment_flags_is_accepted(
 @pytest.mark.parametrize(
     ("flags", "field"),
     [
-        (["--docker"], "run_environment"),
+        (["--run-environment", "docker"], "run_environment"),
         (["--modal", "--modal-gpu", "H100!"], "run_environment.gpu"),
     ],
 )
@@ -2093,3 +2091,57 @@ def test_non_microservice_task_is_unaffected_by_trace_arguments(tmp_path: Path) 
 
     invocation = parse_cli_invocation(["--input", str(project)])
     assert invocation.args.profiler is ProfilerKind.AUTO
+
+
+def test_docker_flag_is_rejected_with_a_message_naming_the_replacement(tmp_path: Path) -> None:
+    project = _write_input_project(tmp_path)
+
+    with pytest.raises(ConfigurationError, match=r"--docker was removed.*always run"):
+        parse_cli_invocation(["--input", str(project), "--docker"])
+
+
+@pytest.mark.parametrize("extra", [[], ["--docker-image", "custom:1"], ["--modal"]])
+def test_docker_flag_is_rejected_whatever_else_is_given(tmp_path: Path, extra: list[str]) -> None:
+    project = _write_input_project(tmp_path)
+
+    with pytest.raises(ConfigurationError, match="--docker was removed"):
+        parse_cli_invocation(["--input", str(project), *extra, "--docker"])
+
+
+def test_run_environment_local_is_rejected_with_a_message_naming_the_replacement(
+    tmp_path: Path,
+) -> None:
+    project = _write_input_project(tmp_path)
+
+    with pytest.raises(ConfigurationError, match=r"--run-environment local was removed"):
+        parse_cli_invocation(["--input", str(project), "--run-environment", "local"])
+
+
+def test_a_launch_without_environment_flags_runs_the_agent_in_docker(tmp_path: Path) -> None:
+    project = _write_input_project(tmp_path)
+
+    args = parse_cli_invocation(["--input", str(project)]).args
+
+    assert run_environment_spec_from_args(args).name == "docker"
+
+
+def test_resume_of_a_run_recorded_with_the_local_environment_continues_in_docker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "repository"
+    project.mkdir()
+    _write_repository_task(project, "latency")
+    run_id = "20260811-120000-11111111-agent"
+    _write_project_run(
+        project,
+        run_id,
+        configuration=_agent_configuration(run_environment=_RETIRED_LOCAL_ENVIRONMENT),
+        created_at=datetime(2026, 8, 11, 12, tzinfo=UTC),
+        options=_RunFixtureOptions(task_name="latency"),
+    )
+    monkeypatch.chdir(project)
+
+    args = parse_cli_invocation(["--resume", run_id]).args
+
+    assert run_environment_spec_from_args(args).name == "docker"

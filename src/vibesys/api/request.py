@@ -37,6 +37,7 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentSpec,
     build_run_environment,
     make_run_environment_spec,
+    migrate_recorded_run_environment,
     run_environment_record,
 )
 
@@ -73,6 +74,7 @@ __all__ = [
     "load_objectives",
     "load_project_task",
     "make_run_environment_spec",
+    "migrate_recorded_run_environment",
     "repository_name_from_experiment",
     "resolve_skill_source_dirs",
     "run_environment_record",

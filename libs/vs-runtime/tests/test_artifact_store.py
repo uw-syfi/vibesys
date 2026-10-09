@@ -44,7 +44,7 @@ def _store(root: Path, run_id: str = "run-1") -> ArtifactStore:
             vibesys_version="0.1.0",
             trusted_input_baseline="a" * 40,
             now=now,
-            run_environment=RunEnvironmentRecord(name="local"),
+            run_environment=RunEnvironmentRecord(name="docker"),
             execution=RunExecutionRecord(
                 model="test-model",
                 agent_backend="test-backend",

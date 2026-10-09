@@ -423,7 +423,7 @@ def _run_docker(
 # ---------------------------------------------------------------------------
 # Registry push and verification.
 #
-# A local ``--docker`` run never calls any of the functions below: it runs
+# A local Docker run never calls any of the functions below: it runs
 # the image ``agent_image`` just built directly from the local Docker image
 # store. Only a remote backend (Modal, SkyPilot) needs the image pulled from
 # somewhere else, so only those callers push. A push is keyed by the local

@@ -109,7 +109,7 @@ class LocalBackend:
                 raise ValueError(_exception_message_2)
             return docker_sandbox(
                 host_workspace=host_workspace,
-                # ``DockerEnvironment.open()`` (the plain --docker path)
+                # ``DockerEnvironment.open()`` (the plain Docker path)
                 # always resolves and passes an agent image, so this only
                 # falls back to the backend's own base image for a caller
                 # that builds its own Docker sandbox without one — Modal and

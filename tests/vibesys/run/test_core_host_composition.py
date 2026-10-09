@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import pytest
+from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.fake_run_clock import FakeRunClock
 from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
 from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
@@ -141,6 +142,7 @@ def _write_project(root: Path) -> None:
 
 def _request(project_root: Path) -> RunRequest:
     return RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id="core-test", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "core-test"}}),
@@ -175,6 +177,7 @@ def _open(
                 options=EmptyOptions(),
                 timing=RunTiming(FakeRunClock(), 60.0),
                 agent_client_factory=client_factory,
+                backend_factory=host_container_backend,
                 invocation_store_factory=(
                     (lambda _state, _key: FakeAgentInvocationStore()) if journal else None
                 ),

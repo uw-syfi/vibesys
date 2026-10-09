@@ -85,7 +85,8 @@ Several flags look independent, but they combine into one execution contract:
 | Search loop | `--outer-loop` | Which outer-loop policy runs: `agent`, `profile-guided`, `plain`, or `evolve`. |
 | Evaluation interface | `--interface` | Agent loop only. Whether evaluator-owned code invokes the candidate directly or communicates with a service. |
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, `rocm`, or `cpu`. |
-| Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, or a Docker container (the same container whether launched directly or via `--modal`/SkyPilot). |
+| Agent environment | none (always Docker) | Where the agent runs: a local Docker container, for every run. `--docker` was removed and is rejected. |
+| Evaluation environment | `--run-environment`, `--modal`, `--skypilot`, `--slurm-config` | Where evaluation runs: the local container (default), Modal, SkyPilot, or Slurm. These never move the agent out of its local container. |
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `rocprof`, `torch`, `neuron`, `otel`, `macos_cpu`, `linux_cpu`, or `auto`. |
 | Domain | `[agent].domain` in `vibesys.input.toml` | Problem-space package used by the agent and evolve loops, such as `llm-serving`, `microservices`, or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
@@ -155,13 +156,14 @@ or reflogs.
 
 A task whose candidate is a container topology (`docker compose`, kind)
 declares `[environment] docker_in_docker = true`. Like a task `Dockerfile`, the
-key automatically selects the Docker environment (explicit `--docker` is
-harmless); `--run-environment local`, `--modal`, `--skypilot`, Slurm, and
-`--docker-image` conflict with it and the error names the key. The sandbox runs
+key selects the local Docker evaluation environment; `--modal`, `--skypilot`,
+Slurm, and `--docker-image` conflict with it and the error names the key. The sandbox runs
 under Sysbox with a Docker daemon of its own and never mounts the host socket;
 a host without `sysbox-runc` fails early. See
 [Docker-in-Docker](running-vibesys.md#docker-in-docker).
 
+The host-sandbox variables below apply only to the Slurm environments (`slurm`
+and `slurm-gpu`), the only agents that still run on the host.
 `VIBESYS_AGENT_SANDBOX` selects the Linux mechanism. `auto` (the default) and
 `bwrap` both require bubblewrap. `landlock` opts in to a weaker backend for
 hosts that block unprivileged user namespaces, which is the common reason
@@ -379,24 +381,32 @@ prompts and input-owned candidate-contract documentation.
 
 | Backend | Intended target | Sandbox support | Device handling | Default profiler behavior |
 | --- | --- | --- | --- | --- |
-| `cuda` | NVIDIA GPU serving systems and kernel-writing tasks. | Local, Docker, Modal. | Selects/reselects a GPU and can monitor contention. | Serving uses `nsys` locally/in Docker and `torch` on Modal; kernel-writing uses `ncu` where supported by the run environment. |
-| `rocm` | AMD GPU serving systems. | Local, Docker, SkyPilot. | Selects a visible ROCm device locally; a SkyPilot profile declares remote capacity. | Local/Docker use `rocprof`; SkyPilot uses `none` (only `auto`/`none` are supported there). |
-| `metal` | Apple Silicon / MPS targets. | Local only. | No device selection or monitor. | Local `auto` resolves through the local runtime default. |
-| `trainium` | AWS Trainium / NeuronCore targets. | Local and Docker; Modal unsupported. | Forwards `/dev/neuron*` in Docker; no per-device selection. | `auto` resolves to `neuron`. |
-| `cpu` | CPU-only service/data-structure targets. | Local and Docker. | No device selection or monitor. | Generic workloads on Linux select `linux_cpu`; macOS selects `macos_cpu`; other systems select no profiler. |
+| `cuda` | NVIDIA GPU serving systems and kernel-writing tasks. | Docker, Modal. | Selects/reselects a GPU and can monitor contention. | Serving uses `nsys` in Docker and `torch` on Modal; kernel-writing uses `ncu` where supported by the run environment. |
+| `rocm` | AMD GPU serving systems. | Docker, SkyPilot, Slurm. | Selects a visible ROCm device locally; a SkyPilot profile declares remote capacity. | Docker uses `rocprof`; SkyPilot uses `none` (only `auto`/`none` are supported there). |
+| `metal` | Apple Silicon / MPS targets. | None: Docker on macOS cannot expose Metal/MPS, and agents no longer run on the host. A Metal run fails when the container is created, before agent work starts. | No device selection or monitor. | n/a |
+| `trainium` | AWS Trainium / NeuronCore targets. | Docker; Modal unsupported. | Forwards `/dev/neuron*` in Docker; no per-device selection. | `auto` resolves to `neuron`. |
+| `cpu` | CPU-only service/data-structure targets. | Docker. | No device selection or monitor. | Generic workloads on Linux select `linux_cpu`; macOS selects `macos_cpu`; other systems select no profiler. |
 
 When a backend rejects a runtime environment, it should fail before agent work
 starts with an actionable error.
 
 ## Runtime Environment
 
-| Flags | Environment | Notes |
+Agents always run in a local Docker container. The flags below only choose where
+evaluation runs.
+
+| Flags | Evaluation runs | Notes |
 | --- | --- | --- |
-| neither `--docker` nor `--modal` | Local host. | Requires bubblewrap on Linux or Seatbelt on macOS. Enforces the project path policy. `VIBESYS_AGENT_SANDBOX=landlock` trades the nested read-only and hidden tiers for a backend that runs without user namespaces. |
-| `--docker` | Docker container. | Re-mounts read-only project paths read-only and overlays hidden paths with empty masks. Backend controls GPU/device passthrough. |
-| `--modal` | Local Docker editor container; GPU-bound work dispatches through the candidate's own `modal run`. | Mutually exclusive with `--docker`. Same overlays as `--docker`. |
-| `--run-environment skypilot` | Local CPU editor with SkyPilot evaluators. | Requires portable task resources and an operator-owned cluster profile. Same overlays as `--docker`. See [Remote Slurm execution](remote-slurm-execution.md). |
-| `--run-environment slurm-gpu` | Agent on the Slurm submit host; GPU commands run as `srun` jobs. | The agent sandbox has no GPUs and uses `vibesys-gpu --gpus N --time MIN -- CMD`. `--slurm-config` names the operator limits. See [GPU commands through Slurm](slurm-gpu-commands.md). |
+| none, or `--run-environment docker` | In the local agent container. | Re-mounts read-only project paths read-only and overlays hidden paths with empty masks. Backend controls GPU/device passthrough. |
+| `--modal` | On Modal: GPU-bound work dispatches through the candidate's own `modal run` from a local CPU Docker editor. | Mutually exclusive with `--skypilot`. Same overlays as the default. |
+| `--run-environment skypilot` | On a SkyPilot cluster, from a local CPU Docker editor. | Requires portable task resources and an operator-owned cluster profile. Same overlays as the default. See [Remote Slurm execution](remote-slurm-execution.md). |
+| `--run-environment slurm`, or `--slurm-config` | On a Slurm cluster. | The editor still runs on the host under the host sandbox; see [Sandboxing](contributing/sandboxing.md#known-limits). |
+| `--run-environment slurm-gpu` | Agent on the Slurm submit host (under the host sandbox); GPU commands run as `srun` jobs. | The agent sandbox has no GPUs and uses `vibesys-gpu --gpus N --time MIN -- CMD`. `--slurm-config` names the operator limits. See [GPU commands through Slurm](slurm-gpu-commands.md). |
+
+`--docker` and `--run-environment local` were removed. Both are rejected with an
+error instead of being ignored, because neither selects anything any more. A run
+recorded with the local environment before their removal continues in Docker when
+resumed: the run log says so and the run record is rewritten to `docker`.
 
 A repository-native task may provide
 `.vibesys/tasks/<task>/Dockerfile`. Its presence (or `docker_in_docker = true`,
@@ -404,15 +414,15 @@ below) automatically selects the
 Docker environment, builds with the task directory as its complete context,
 and uses the resulting immutable image ID. No manifest field or pre-build step
 is required. Explicit alternative environments and `--docker-image` conflict
-with this convention; explicit `--docker` is harmless. Root Dockerfiles in
+with this convention. Root Dockerfiles in
 legacy bundles remain candidate files and are not auto-detected.
 
-`--docker-image` overrides the backend's default container image when Docker or
-Modal is active, and the local CPU editor image for SkyPilot.
+`--docker-image` overrides the backend's default agent container image, including
+the local CPU editor image for Modal and SkyPilot.
 
 The selected environment and its options (`--docker-image`, `--modal-gpu`,
 `--modal-model-volume`, `--modal-app`) are recorded in the run configuration.
-`--docker` and `--modal` are boolean flags, so an omitted flag cannot be told
+`--modal` is a boolean flag, so an omitted flag cannot be told
 apart from an explicit "off": on resume the recorded environment is therefore
 authoritative. Omitting the runtime-environment flags restores it, and passing
 a flag that contradicts the recording is rejected like any other immutable
@@ -795,7 +805,7 @@ Docker CUDA run:
 
 ```bash
 vibesys --runs-dir /work/vibesys-runs --local \
-  --outer-loop agent --backend cuda --docker ...
+  --outer-loop agent --backend cuda ...
 ```
 
 Modal GPU run:
@@ -830,8 +840,7 @@ vibesys --runs-dir /work/vibesys-runs --local \
   --outer-loop agent --backend cpu --interface service ...
 ```
 
-CPU runs support local execution and Docker; use local execution unless you
-specifically need the container boundary.
+CPU runs use the default Docker agent environment.
 
 ## Maintenance Rule
 

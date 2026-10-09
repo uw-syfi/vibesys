@@ -418,7 +418,7 @@ class LandlockSandbox(WorkspaceSandbox):
                     f"project {workspace} sits inside {resolved}, which the Landlock "
                     "backend must grant write access to. Landlock rules cannot subtract, "
                     "so the project would be effectively unconfined. Move the project "
-                    "outside that tree, or use bubblewrap or --docker."
+                    "outside that tree, or use bubblewrap or the default Docker environment."
                 )
                 raise SandboxUnavailableError(message)
         return landlock.policy_for(
@@ -478,7 +478,7 @@ class SeatbeltSandbox(WorkspaceSandbox):
 
     This is a weaker guarantee than the Linux bubblewrap backend, which hides the
     entire host outside the project: on macOS, reads of unrelated host files
-    outside the denied ancestor trees are still permitted. Use ``--docker`` on macOS
+    outside the denied ancestor trees are still permitted. Use the default Docker run environment on macOS
     if full read-confinement is required.
     """
 
@@ -690,7 +690,7 @@ def build(  # noqa: PLR0913  # lint-waiver: LW-010194 [PLR0913]; Preserve build'
 
     message = (
         f"[hostsandbox] no host confinement backend for {sys.platform!r}; agent "
-        "runs unconfined. Use --docker for an externally sandboxed run."
+        "runs unconfined. Use the default Docker run environment for an externally sandboxed run."
     )
     return _unavailable(message, require_enforcement=require_enforcement, log=_log)
 
@@ -774,7 +774,7 @@ def _build_linux(
         )
         message = (
             f"[hostsandbox] {reason}; agent runs unconfined. Install bubblewrap, "
-            f"use --docker for an externally sandboxed run, or set "
+            f"use the default Docker run environment for an externally sandboxed run, or set "
             f"{DISABLE_ENV}={LinuxBackend.LANDLOCK} to accept the weaker "
             f"Landlock backend (it cannot enforce read-only or hidden project paths)."
         )
@@ -825,7 +825,7 @@ def _build_macos(
     if not sandbox_exec:
         message = (
             "[hostsandbox] 'sandbox-exec' not found; agent runs unconfined. "
-            "Use --docker for an externally sandboxed run."
+            "Use the default Docker run environment for an externally sandboxed run."
         )
         return _unavailable(
             message,
