@@ -20,6 +20,7 @@ from vibesys.hypothesis import OrchestratorPlan
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
+from vs_core.api import DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
@@ -199,4 +200,57 @@ def test_an_infrastructure_accuracy_failure_is_measured_again_without_a_paid_att
     assert len(implementer) == 1
     assert len(run.evaluation.accuracy_calls) == 2
     assert len(run.evaluation.benchmark_calls) == 1
+    assert not any(cause in message for message in implementer)
+
+
+@settings(max_examples=4)
+@given(
+    retries=st.integers(min_value=2, max_value=3),
+    stage=st.sampled_from(("accuracy", "benchmark")),
+)
+def test_a_stage_lost_beyond_the_bound_ends_the_round_without_repair_feedback(
+    tmp_path_factory: pytest.TempPathFactory, retries: int, stage: str
+) -> None:
+    script = _Script()
+    root = tmp_path_factory.mktemp("single")
+    cause = "node lost: the allocation ended before the stage reported"
+    lost = DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
+    kind = BenchmarkFailureKind.INFRASTRUCTURE
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=root,
+            facts=_FACTS,
+            responder=script.respond,
+            supported_agent_capabilities=_CAPABILITIES,
+        )
+        if stage == "accuracy":
+            gone = AccuracyEvaluation(executed=False, feedback=cause, failure_kind=kind)
+            run.evaluation.script_accuracy(*[gone] * lost)
+        else:
+            run.evaluation.script_benchmark(
+                *[BenchmarkEvaluation(executed=False, feedback=cause, failure_kind=kind)] * lost
+            )
+        try:
+            options = PLUGIN.options.model_validate(
+                {
+                    "interface": "service",
+                    "max_rounds": 1,
+                    "max_retries_per_round": retries,
+                    "judge_every": 1,
+                    "official_eval_every": 1,
+                }
+            )
+            await PLUGIN.orchestrate(run, options)
+            return run
+        finally:
+            await run.close()
+
+    run = asyncio.run(scenario())
+
+    implementer = [message for role, message in script.calls if role == IMPLEMENTER.id]
+    calls = run.evaluation.accuracy_calls if stage == "accuracy" else run.evaluation.benchmark_calls
+    assert len(implementer) == 1
+    assert len(calls) == lost
     assert not any(cause in message for message in implementer)

@@ -24,6 +24,7 @@ from vibesys.orchestration.multi.contracts import (
 from vibesys.orchestration.review import Verdict
 from vs_core.api import DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
 from vs_runtime.api import (
+    AccuracyEvaluation,
     AgentCapability,
     BenchmarkEvaluation,
     BenchmarkFailureKind,
@@ -169,3 +170,56 @@ def test_a_benchmark_lost_beyond_the_bound_ends_the_round_without_repair_feedbac
     assert len(implementer) == 1
     assert len(run.evaluation.benchmark_calls) == DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
     assert not any(_CAUSE in message for message in implementer)
+
+
+@settings(max_examples=3)
+@given(
+    retries=st.integers(min_value=2, max_value=3),
+    lost=st.integers(min_value=1, max_value=DEFAULT_MAX_MEASUREMENT_SUBMISSIONS),
+)
+def test_a_lost_accuracy_is_measured_again_then_ends_the_round_unmeasured(
+    tmp_path_factory: pytest.TempPathFactory, retries: int, lost: int
+) -> None:
+    script = _Script()
+    root = tmp_path_factory.mktemp("multi")
+    gone = AccuracyEvaluation(
+        executed=False, feedback=_CAUSE, failure_kind=BenchmarkFailureKind.INFRASTRUCTURE
+    )
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=root,
+            facts=_FACTS,
+            responder=script.respond,
+            supported_agent_capabilities=_CAPABILITIES,
+            supported_extra_tools=("profiler",),
+        )
+        run.evaluation.script_accuracy(*[gone] * lost, AccuracyEvaluation(executed=True))
+        run.evaluation.script_benchmark(_MEASURED)
+        try:
+            options = PLUGIN.options.model_validate(
+                {
+                    "interface": "service",
+                    "max_rounds": 1,
+                    "max_retries_per_round": retries,
+                    "judge_every": 1,
+                    "official_eval_every": 1,
+                }
+            )
+            await PLUGIN.orchestrate(run, options)
+            return run
+        finally:
+            await run.close()
+
+    run = asyncio.run(scenario())
+
+    implementer = [message for role, message in script.calls if role == IMPLEMENTER.id]
+    assert len(implementer) == 1
+    assert not any(_CAUSE in message for message in implementer)
+    if lost < DEFAULT_MAX_MEASUREMENT_SUBMISSIONS:
+        assert len(run.evaluation.accuracy_calls) == lost + 1
+        assert len(run.evaluation.benchmark_calls) == 1
+    else:
+        assert len(run.evaluation.accuracy_calls) == DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
+        assert run.evaluation.benchmark_calls == []
