@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, cast
 import agentshim
 import pytest
 from agentshim.testing import (
+    AwaitSteer,
     ClaudePeerTurn,
     ClaudeStreamPeers,
     CodexScript,
@@ -33,6 +34,8 @@ from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnRequest,
+    SteerableSession,
+    SteerOutcome,
 )
 from vs_agent.drivers import agentshim as subject
 
@@ -73,6 +76,15 @@ def _reporting_rate_limits(provider: str) -> Callable[[SpawnRequest], FakePeer]:
 
 #: Providers whose fake can keep a turn running after it reported a window.
 STALLING = {"codex": lambda: CodexScript().turn(ReportRateLimits(), Hang()).peer}
+
+
+def _awaiting_steer(provider: str) -> Callable[[SpawnRequest], FakePeer]:
+    """A process whose turn waits for an operator message, then answers STEERED."""
+    if provider == "claude":
+        return ClaudeStreamPeers(
+            [ClaudePeerTurn(stall=True, injects_steer=True), ClaudePeerTurn(text="STEERED")]
+        ).build
+    return CodexScript().turn(AwaitSteer(then=(Say("STEERED"),))).peer
 
 
 def test_every_stream_provider_has_a_script() -> None:
@@ -159,6 +171,38 @@ def test_providers_without_a_stream_transport_stay_one_process_per_turn(
     assert executor.spawns == []
     turns = [r for r in executor.requests if "--help" not in r.argv]
     assert len(turns) == 2
+
+
+class _SteerWhenRunning:
+    """Offer a steer on the turn's own thread at each event, until one is taken."""
+
+    def __init__(self, session: SteerableSession, text: str) -> None:
+        self._session = session
+        self._text = text
+        self.outcomes: list[SteerOutcome] = []
+
+    def on_event(self, event: AgentEvent) -> None:
+        del event
+        if SteerOutcome.DELIVERED not in self.outcomes:
+            self.outcomes.append(self._session.steer(self._text, on_rejected=lambda: None))
+
+
+@pytest.mark.parametrize("provider", STREAM_PROVIDERS)
+def test_a_steer_is_delivered_to_the_running_container_turn(tmp_path: Path, provider: str) -> None:
+    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    executor = FakeExecutor([], peers=_awaiting_steer(provider))
+    session = _driver(provider, executor, sandbox).create_session(
+        _container_spec(tmp_path, provider)
+    )
+    assert isinstance(session, SteerableSession)
+    steerer = _SteerWhenRunning(session, "instead, say STEERED")
+
+    result = session.run_turn(AgentTurnRequest(message="work"), steerer)
+
+    assert steerer.outcomes[-1] is SteerOutcome.DELIVERED
+    # Only "the turn is not live yet" may come before the delivery.
+    assert set(steerer.outcomes[:-1]) <= {SteerOutcome.NO_RUNNING_TURN}
+    assert result.text == "STEERED"
 
 
 @pytest.mark.parametrize("provider", STREAM_PROVIDERS)
