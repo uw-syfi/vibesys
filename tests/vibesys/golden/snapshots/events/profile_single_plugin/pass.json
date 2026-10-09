@@ -128,7 +128,6 @@
         "tool": null
       },
       "attempt": null,
-      "driver": "fake",
       "kind": "agent_execution_started",
       "model": null,
       "provider": "fake",
@@ -300,7 +299,6 @@
         "tool": null
       },
       "attempt": null,
-      "driver": "fake",
       "kind": "agent_execution_started",
       "model": null,
       "provider": "fake",

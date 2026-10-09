@@ -189,10 +189,10 @@ describe('diagnostic entry roles', () => {
   it('keeps provider lifecycle chatter in the muted narration role', () => {
     expect(diagnostic('[codex thread 01a0 started]\n[codex turn started]')).toBe('analysis');
     expect(diagnostic('[codex stderr] compiling 42 crates')).toBe('analysis');
-    expect(diagnostic('driver: agentshim, provider: codex, model: gpt-5.6')).toBe('analysis');
+    expect(diagnostic('provider: codex, model: gpt-5.6')).toBe('analysis');
   });
 
-  it('promotes a driver error marker to the failure role', () => {
+  it('promotes a provider error marker to the failure role', () => {
     expect(diagnostic('[codex error] stream disconnected')).toBe('failure');
     expect(diagnostic('[claude error] rate limited')).toBe('failure');
     // A marker anywhere in a glued block still counts.

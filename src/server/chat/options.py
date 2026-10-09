@@ -1,21 +1,16 @@
 """Server-owned enumeration of the chat agent selections a run offers.
 
 Clients render what this module produces and enumerate nothing themselves.
-The agent *driver* is deliberately absent from the result: which driver backs
-a run is a deployment detail, so every chat thread inherits the run's, and the
-options describe only the CLI providers that driver supports plus the models
-worth suggesting under each.
+The options describe the CLI providers the run supports plus the models worth
+suggesting under each.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-
-if TYPE_CHECKING:
-    from vibesys.api import AgentDriver, AuxiliaryAgentDriver
 
 ChatModelSource = Literal["run", "role", "suggested"]
 
@@ -80,32 +75,22 @@ class ChatRunSettings:
     its operator already trusts for this workspace.
     """
 
-    driver: AgentDriver
     provider: str
     model: str
-    agent_drivers: tuple[AuxiliaryAgentDriver, ...]
+    agent_providers: tuple[str, ...]
     role_models: tuple[str, ...] = field(default=())
-
-    def providers_for(self, driver: AgentDriver) -> tuple[str, ...]:
-        """Return the snapshotted providers for one available driver."""
-        choice = next((item for item in self.agent_drivers if item.driver == driver), None)
-        if choice is None:
-            message = f"auxiliary agent driver is unavailable: {driver!r}"
-            raise ValueError(message)
-        return choice.providers
 
 
 def build_chat_options(settings: ChatRunSettings) -> ChatOptions:
     """Enumerate the providers and model suggestions this run's chat offers.
 
-    Only the run's configured driver is considered, so a client never has to
-    know that drivers exist. The run's own model is always present and is the
+    The run's own model is always present and is the
     single option marked ``default``.
     """
     return ChatOptions(
         providers=[
             ChatProviderOptions(provider=provider, models=_models_for(provider, settings))
-            for provider in settings.providers_for(settings.driver)
+            for provider in settings.agent_providers
         ]
     )
 

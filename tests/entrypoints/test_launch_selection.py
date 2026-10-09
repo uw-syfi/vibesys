@@ -143,7 +143,6 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
                 AuxiliaryAgentLaunch(
                     role="chat",
                     member_id="falsey-selection",
-                    driver="agentshim",
                     provider="codex",
                     model="gpt-test",
                     system_prompt="Inspect the recorded run.",

@@ -2939,7 +2939,7 @@ describe('OpenTUI presentation', () => {
             id: 'banner',
             kind: 'diagnostic',
             label: 'implementer · round 1',
-            content: 'driver: agentshim, provider: codex, model: gpt-5.6',
+            content: 'provider: codex, model: gpt-5.6',
           },
           {
             id: 'failure',
@@ -2955,7 +2955,7 @@ describe('OpenTUI presentation', () => {
 
     const frame = await testRenderer.waitForFrame(value => value.includes('[codex error]'));
     expect(frame).toContain('[codex turn started]');
-    expect(frame).toContain('driver: agentshim');
+    expect(frame).toContain('provider: codex, model: gpt-5.6');
     // Header housing, agents pane, transcript frame, and the command bar. The
     // two quiet diagnostics draw no border at all, so they add nothing to the
     // count, and the one card the error diagnostic still earns no longer adds
@@ -5064,7 +5064,6 @@ describe('theming', () => {
           {
             id: 'thread-a',
             title: 'GPU stalls',
-            driver: 'agentshim',
             provider: 'claude',
             model: 'opus',
           },
@@ -5120,8 +5119,7 @@ describe('theming', () => {
     testRenderer.mockInput.pressEnter();
     const frame = await testRenderer.waitForFrame(value => value.includes('Harness and model'));
 
-    // Grouped by harness, showing exactly what the backend reported. The
-    // driver behind the run is never named.
+    // Grouped by harness, showing exactly what the backend reported.
     expect(frame).toContain('Codex');
     expect(frame).toContain('gpt-run');
     expect(frame).toContain('run default');
@@ -5188,7 +5186,6 @@ describe('theming', () => {
           {
             id: 'thread-a',
             title: 'GPU stalls',
-            driver: 'agentshim',
             provider: 'claude',
             model: 'opus',
           },
@@ -5203,7 +5200,7 @@ describe('theming', () => {
     testRenderer.mockInput.pressEnter();
     const frame = await testRenderer.waitForFrame(value => value.includes('Chat threads'));
     // The implicit default is named by the client; a created thread shows the
-    // backend-owned title beside its harness and model. Not its driver.
+    // backend-owned title beside its harness and model.
     expect(frame).toContain('Experiment chat');
     expect(frame).toContain('GPU stalls');
     expect(frame).toContain('Claude Code');
@@ -5238,7 +5235,6 @@ describe('theming', () => {
           {
             id: 'thread-a',
             title: 'GPU stalls',
-            driver: 'agentshim',
             provider: 'claude',
             model: 'opus',
           },
@@ -8005,7 +8001,6 @@ describe('command palette', () => {
           {
             id: 'thread-a',
             title: 'GPU stalls',
-            driver: 'agentshim',
             provider: 'claude',
             model: 'opus',
           },

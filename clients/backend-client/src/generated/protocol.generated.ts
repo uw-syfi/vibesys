@@ -57,7 +57,6 @@ export type RequestId6 = string;
 export type ClientId6 = string;
 export type Timestamp6 = string;
 export type Type6 = "query.chat_thread_create";
-export type Driver = "agentshim" | null;
 export type Provider = string | null;
 export type Model = string | null;
 export type Title = string | null;
@@ -153,7 +152,6 @@ export type Effect = "none";
 export type ThreadId1 = string | null;
 export type ThreadId2 = string;
 export type Title1 = string;
-export type Driver1 = string;
 export type Provider1 = string;
 export type Model1 = string;
 export type Provider2 = string;
@@ -213,7 +211,6 @@ export type Kind = "agent_execution_activity_changed";
 export type Mode2 = "thinking" | "responding" | "tool" | "waiting";
 export type Summary1 = string;
 export type Tool = string | null;
-export type Driver2 = string | null;
 export type Provider3 = string | null;
 export type Model3 = string | null;
 export type ActiveExecutions = ActiveAgentExecution[];
@@ -313,7 +310,6 @@ export type InvocationId1 = string | null;
 export type Kind2 = "chat_thread_created";
 export type ThreadId3 = string;
 export type Title2 = string;
-export type Driver3 = string;
 export type Provider4 = string;
 export type Model4 = string;
 export type CreatedAt = string;
@@ -327,7 +323,6 @@ export type Stage1 = string;
 export type Attempt1 = number | null;
 export type SystemPrompt1 = string;
 export type UserPrompt1 = string;
-export type Driver4 = string | null;
 export type Provider5 = string | null;
 export type Model5 = string | null;
 export type Kind6 = "agent_execution_finished";
@@ -679,11 +674,8 @@ export interface ChatQuery {
 /**
  * Create a new experiment-chat thread with its own agent selection.
  *
- * Omitted fields resolve to the run's configured driver, provider, and
- * model. The response carries the resolved settings and thread identity.
- * ``driver`` exists for completeness and stays validated when supplied, but
- * which driver backs a run is a deployment detail: clients omit it so every
- * thread inherits the run's.
+ * Omitted fields resolve to the run's configured provider and model. The
+ * response carries the resolved settings and thread identity.
  */
 export interface ChatThreadCreateQuery {
   protocol_version?: ProtocolVersion6;
@@ -691,7 +683,6 @@ export interface ChatThreadCreateQuery {
   client_id?: ClientId6;
   timestamp?: Timestamp6;
   type: Type6;
-  driver?: Driver;
   provider?: Provider;
   model?: Model;
   title?: Title;
@@ -887,7 +878,6 @@ export interface ChatResult {
 export interface ChatThreadInfo {
   thread_id: ThreadId2;
   title?: Title1;
-  driver: Driver1;
   provider: Provider1;
   model: Model1;
 }
@@ -949,7 +939,6 @@ export interface ActiveAgentExecution {
   assignment: Assignment;
   started_at: StartedAt;
   activity: AgentExecutionActivityData;
-  driver?: Driver2;
   provider?: Provider3;
   model?: Model3;
 }
@@ -1006,7 +995,6 @@ export interface ChatThreadCreatedData {
   kind: Kind2;
   thread_id: ThreadId3;
   title?: Title2;
-  driver: Driver3;
   provider: Provider4;
   model: Model4;
   created_at: CreatedAt;
@@ -1043,7 +1031,6 @@ export interface AgentExecutionStartedData {
   system_prompt?: SystemPrompt1;
   user_prompt?: UserPrompt1;
   activity: AgentExecutionActivityData;
-  driver?: Driver4;
   provider?: Provider5;
   model?: Model5;
   [k: string]: unknown;

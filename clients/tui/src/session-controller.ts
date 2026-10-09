@@ -711,8 +711,8 @@ export class SocketSessionController implements SessionController {
   }
 
   /**
-   * Asks the backend for a new thread and switches to it. No driver is sent:
-   * the run's driver is a deployment detail the backend owns. The response's
+   * Asks the backend for a new thread and switches to it. The backend
+   * resolves anything omitted from the run's own settings. The response's
    * replayed events carry the authoritative thread record.
    */
   async #createChatThread(settings: ChatThreadSettings | null): Promise<void> {

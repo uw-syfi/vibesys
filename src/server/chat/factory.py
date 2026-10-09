@@ -23,7 +23,7 @@ from server.chat.session import (
 )
 from server.events import ChatThreadCreatedData
 from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.api import AgentDriver, AuxiliaryAgentLaunch, AuxiliaryReadableInput
+from vibesys.api import AuxiliaryAgentLaunch, AuxiliaryReadableInput
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -83,7 +83,6 @@ def build_chat_agent(
         AuxiliaryAgentLaunch(
             role="chat",
             member_id=request.instance_id or DEFAULT_CHAT_THREAD,
-            driver=selection.driver,
             provider=selection.provider,
             model=selection.model,
             system_prompt=experiment_chat_system_prompt(state_path),
@@ -119,10 +118,9 @@ class ExperimentChatFactory:
         self._executions = executions
         self._chat_state_dir = attachment.chat_state_dir
         self._defaults = ChatRunSettings(
-            driver=attachment.agent_defaults.driver,
             provider=attachment.agent_defaults.provider,
             model=attachment.agent_defaults.model,
-            agent_drivers=attachment.agent_drivers,
+            agent_providers=attachment.agent_providers,
             role_models=attachment.agent_defaults.role_models,
         )
         self._session = session
@@ -143,7 +141,6 @@ class ExperimentChatFactory:
         default = self._build_session(
             None,
             AgentSelection(
-                driver=self._defaults.driver,
                 provider=self._defaults.provider,
                 model=self._defaults.model,
             ),
@@ -182,12 +179,10 @@ class ExperimentChatFactory:
     def _create_thread(
         self,
         thread_id: str,
-        driver: str | None,
         provider: str | None,
         model: str | None,
     ) -> ChatThreadHandle:
         selection = self._resolve_selection(
-            driver=driver,
             provider=provider,
             model=model,
         )
@@ -195,7 +190,6 @@ class ExperimentChatFactory:
         return ChatThreadHandle(
             spec=ChatThreadCreatedData(
                 thread_id=thread_id,
-                driver=selection.driver,
                 provider=selection.provider,
                 model=selection.model,
                 created_at=datetime.now(UTC),
@@ -207,23 +201,20 @@ class ExperimentChatFactory:
     def _resolve_selection(
         self,
         *,
-        driver: str | None,
         provider: str | None,
         model: str | None,
     ) -> AgentSelection:
         """Resolve one chat thread's agent choice against the attached run."""
-        resolved_driver = _agent_driver(driver or self._defaults.driver)
         resolved_provider = provider or self._defaults.provider
         resolved_model = model or self._defaults.model
-        supported = self._defaults.providers_for(resolved_driver)
+        supported = self._defaults.agent_providers
         if resolved_provider not in supported:
             message = (
-                f"agent driver {resolved_driver!r} does not support provider "
-                f"{resolved_provider!r}; supported providers: {', '.join(supported)}"
+                f"agent provider {resolved_provider!r} is not supported; "
+                f"supported providers: {', '.join(supported)}"
             )
             raise ValueError(message)
         return AgentSelection(
-            driver=resolved_driver,
             provider=resolved_provider,
             model=resolved_model,
         )
@@ -259,7 +250,6 @@ class ExperimentChatFactory:
                     # does not claim.
                     chat_thread_id=thread_id,
                     state_dir=state_dir,
-                    driver=selection.driver,
                     provider=selection.provider,
                     model=selection.model,
                     fallback=self._fallback,
@@ -286,11 +276,3 @@ class ExperimentChatFactory:
 
 def _factory_closed_error() -> RuntimeError:
     return RuntimeError("Experiment chat factory is closed")
-
-
-def _agent_driver(value: str) -> AgentDriver:
-    """Validate a wire-supplied driver against the public closed set."""
-    if value != "agentshim":
-        message = f"auxiliary agent driver is unavailable: {value!r}"
-        raise ValueError(message)
-    return value

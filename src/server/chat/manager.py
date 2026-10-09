@@ -63,7 +63,7 @@ class ChatThreadHandle:
     close: Callable[[], None] = _noop_thread_close
 
 
-ChatThreadFactory = Callable[[str, str | None, str | None, str | None], ChatThreadHandle]
+ChatThreadFactory = Callable[[str, str | None, str | None], ChatThreadHandle]
 
 
 @dataclass(frozen=True)
@@ -222,7 +222,6 @@ class ChatManager:
     def create_thread(
         self,
         *,
-        driver: str | None = None,
         provider: str | None = None,
         model: str | None = None,
         title: str | None = None,
@@ -238,7 +237,7 @@ class ChatManager:
                 message
             )
         try:
-            handle = factory(uuid.uuid4().hex, driver, provider, model)
+            handle = factory(uuid.uuid4().hex, provider, model)
             spec = handle.spec
             if title is not None and title.strip():
                 spec = spec.model_copy(update={"title": title.strip()})
@@ -443,7 +442,7 @@ class ChatManager:
                 message = "experiment chat restoration ownership changed"
                 raise RuntimeError(message)
         try:
-            handle = factory(thread_id, spec.driver, spec.provider, spec.model)
+            handle = factory(thread_id, spec.provider, spec.model)
         except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010249 [BLE001]; cancellation must also wake waiters before it is propagated.
             self._finish_thread_restoration(thread_id, restoration, error=exc)
             return

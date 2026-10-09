@@ -13,14 +13,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.api import AgentDriver, AuxiliaryAgentDriver
-
 
 @dataclass(frozen=True, slots=True)
 class AgentSelection:
     """Resolved agent choice owned by an optional server surface."""
 
-    driver: AgentDriver
     provider: str
     model: str
     role_models: tuple[str, ...] = ()
@@ -36,7 +33,7 @@ class RunAttachment:
 
     chat_state_dir: Path
     agent_defaults: AgentSelection
-    agent_drivers: tuple[AuxiliaryAgentDriver, ...]
+    agent_providers: tuple[str, ...]
 
 
 __all__ = ["AgentSelection", "RunAttachment"]

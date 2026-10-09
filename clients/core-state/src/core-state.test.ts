@@ -168,7 +168,6 @@ describe('core state projection', () => {
         {
           thread_id: 'thread-a',
           title: 'Ring buffer sizing',
-          driver: 'agentshim',
           provider: 'anthropic',
           model: 'opus',
         },
@@ -176,11 +175,10 @@ describe('core state projection', () => {
     } satisfies RunSnapshot);
 
     expect(state.chatThreads).toEqual([
-      {id: DEFAULT_CHAT_THREAD_ID, title: '', driver: null, provider: null, model: null},
+      {id: DEFAULT_CHAT_THREAD_ID, title: '', provider: null, model: null},
       {
         id: 'thread-a',
         title: 'Ring buffer sizing',
-        driver: 'agentshim',
         provider: 'anthropic',
         model: 'opus',
       },
@@ -198,9 +196,7 @@ describe('core state projection', () => {
       run_id: 'run',
       status: 'running',
       sequence: 4,
-      chat_threads: [
-        {thread_id: 'thread-a', title: '', driver: 'agentshim', provider: 'codex', model: 'gpt-5'},
-      ],
+      chat_threads: [{thread_id: 'thread-a', title: '', provider: 'codex', model: 'gpt-5'}],
     } satisfies RunSnapshot);
 
     expect(state.status).toBe(current.status);
@@ -229,14 +225,12 @@ describe('core state projection', () => {
         {
           thread_id: 'thread-a',
           title: '',
-          driver: 'agentshim',
           provider: 'anthropic',
           model: 'opus',
         },
         {
           thread_id: 'thread-b',
           title: 'Projected',
-          driver: 'agentshim',
           provider: 'codex',
           model: 'gpt-5',
         },
@@ -244,18 +238,16 @@ describe('core state projection', () => {
     } satisfies RunSnapshot);
 
     expect(state.chatThreads).toEqual([
-      {id: DEFAULT_CHAT_THREAD_ID, title: '', driver: null, provider: null, model: null},
+      {id: DEFAULT_CHAT_THREAD_ID, title: '', provider: null, model: null},
       {
         id: 'thread-a',
         title: 'Replayed title',
-        driver: 'agentshim',
         provider: 'anthropic',
         model: 'opus',
       },
       {
         id: 'thread-b',
         title: 'Projected',
-        driver: 'agentshim',
         provider: 'codex',
         model: 'gpt-5',
       },
@@ -583,14 +575,12 @@ describe('core state projection', () => {
       initialCoreState(),
       executionEvent(1, 'agent_execution_started', 'first', {
         ...startedData('Implement the queue'),
-        driver: 'agentshim',
         provider: 'codex',
         model: 'gpt-5.1-codex-max',
       }),
     );
 
     expect(state.activeExecutions['first']).toMatchObject({
-      driver: 'agentshim',
       provider: 'codex',
       model: 'gpt-5.1-codex-max',
     });
@@ -603,7 +593,6 @@ describe('core state projection', () => {
     );
 
     expect(state.activeExecutions['first']).toMatchObject({
-      driver: null,
       provider: null,
       model: null,
     });
@@ -621,15 +610,12 @@ describe('core state projection', () => {
       sequence: 1,
       agent_kind: 'judge',
       round_label: 'round-2-judge',
-      active_executions: [
-        checkpoint('exec-1', {driver: 'agentshim', provider: 'codex', model: 'gpt-5.1-codex-max'}),
-      ],
+      active_executions: [checkpoint('exec-1', {provider: 'codex', model: 'gpt-5.1-codex-max'})],
     } satisfies RunSnapshot;
 
     const state = reduceSnapshot(initialCoreState(), snapshot);
 
     expect(state.activeExecutions['exec-1']).toMatchObject({
-      driver: 'agentshim',
       provider: 'codex',
       model: 'gpt-5.1-codex-max',
     });
@@ -639,7 +625,6 @@ describe('core state projection', () => {
     const state = reconcileActiveExecutions(initialCoreState(), [checkpoint('exec-1')]);
 
     expect(state.activeExecutions['exec-1']).toMatchObject({
-      driver: null,
       provider: null,
       model: null,
     });
@@ -843,10 +828,9 @@ describe('core state projection', () => {
 
     expect(state.chatThreads.map(thread => thread.id)).toEqual(['default', 'thread-a', 'thread-b']);
     // The implicit default carries no backend title; consumers name it.
-    expect(state.chatThreads[0]).toMatchObject({title: '', driver: null, provider: null});
+    expect(state.chatThreads[0]).toMatchObject({title: '', provider: null});
     expect(state.chatThreads[1]).toMatchObject({
       title: '',
-      driver: 'agentshim',
       provider: 'claude',
       model: 'opus',
     });
@@ -1528,7 +1512,6 @@ describe('a re-bootstrapped stream', () => {
         {
           thread_id: 'thread-a',
           title: 'Ring buffer sizing',
-          driver: 'agentshim',
           provider: 'anthropic',
           model: 'opus',
         },
@@ -1553,7 +1536,6 @@ describe('a re-bootstrapped stream', () => {
         {
           thread_id: 'old-thread',
           title: 'Old run discussion',
-          driver: 'agentshim',
           provider: 'anthropic',
           model: 'opus',
         },
@@ -1656,11 +1638,11 @@ describe('chunk gluing per channel', () => {
 
   it('does not double the separator when a chunk already ends a line', () => {
     const state = reduceEventBatch(initialCoreState(), [
-      channelEvent(1, 'diagnostic', 'driver: agentshim\n'),
+      channelEvent(1, 'diagnostic', 'provider: codex\n'),
       channelEvent(2, 'diagnostic', '--- input ---'),
     ]);
 
-    expect(state.transcript[0]?.content).toBe('driver: agentshim\n--- input ---');
+    expect(state.transcript[0]?.content).toBe('provider: codex\n--- input ---');
   });
 
   it('still concatenates analysis chunks raw, because they are stream fragments', () => {
@@ -2375,7 +2357,6 @@ function threadCreatedEvent(sequence: number, threadId: string, provider: string
       kind: 'chat_thread_created',
       thread_id: threadId,
       title: '',
-      driver: 'agentshim',
       provider,
       model: 'opus',
       created_at: timestamp(sequence),

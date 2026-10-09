@@ -201,9 +201,8 @@ export function canonicalJournalEvents(records: RunEventRecord[]): RunEventRecor
           summary: initialActivitySummary(agentKind),
           tool: null,
         },
-        // A legacy journal records no driver, provider, or model anywhere, and
+        // A legacy journal records no provider or model anywhere, and
         // the adapter invents none. The client renders each as absent.
-        driver: null,
         provider: null,
         model: null,
       };

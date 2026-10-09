@@ -132,7 +132,12 @@ class AsyncOperationState(StrEnum):
 
 
 class EventPayload(BaseModel):
-    """Immutable base for structured core event payloads."""
+    """Immutable base for structured core event payloads.
+
+    Payloads ignore keys they do not declare, so core events recorded before
+    the retired ``driver`` attribution was removed still load. ``CoreEvent``
+    itself rejects unknown keys.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -171,7 +176,6 @@ class AgentExecutionStartedData(EventPayload):
     system_prompt: str = ""
     user_prompt: str = ""
     activity: AgentExecutionActivityData
-    driver: str | None = None
     provider: str | None = None
     model: str | None = None
 

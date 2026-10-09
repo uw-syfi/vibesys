@@ -37,7 +37,6 @@ export interface ActiveAgentExecution {
   readonly assignment: string;
   readonly startedAt: string;
   readonly activity: Readonly<{mode: AgentExecutionMode; summary: string; tool?: string | null}>;
-  readonly driver?: string | null;
   readonly provider?: string | null;
   readonly model?: string | null;
 }
@@ -87,7 +86,6 @@ export interface ChatThread {
   readonly id: string;
   /** Backend-owned title; empty until the server has derived or been given one. */
   readonly title: string;
-  readonly driver: string | null;
   readonly provider: string | null;
   readonly model: string | null;
 }
@@ -282,9 +280,7 @@ export function initialCoreState(): CoreState {
     chatTranscripts: {[DEFAULT_CHAT_THREAD_ID]: []},
     // The default thread has no backend record, so it has no backend-owned
     // title either. Naming it is the consumer's job.
-    chatThreads: [
-      {id: DEFAULT_CHAT_THREAD_ID, title: '', driver: null, provider: null, model: null},
-    ],
+    chatThreads: [{id: DEFAULT_CHAT_THREAD_ID, title: '', provider: null, model: null}],
     todos: [],
     usage: null,
     benchmarks: [],
@@ -352,7 +348,6 @@ export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreSta
       upsertChatThread(current, {
         id: thread.thread_id,
         title: thread.title ?? '',
-        driver: thread.driver,
         provider: thread.provider,
         model: thread.model,
       }),
@@ -738,7 +733,6 @@ function mergeChatThreadsPrefix(
     merged[at] = {
       id: thread.id,
       title: thread.title || existing.title,
-      driver: thread.driver ?? existing.driver,
       provider: thread.provider ?? existing.provider,
       model: thread.model ?? existing.model,
     };
@@ -1243,7 +1237,6 @@ function activeExecutionFromCheckpoint(
       summary: execution.activity.summary,
       tool: execution.activity.tool ?? null,
     },
-    driver: execution.driver ?? null,
     provider: execution.provider ?? null,
     model: execution.model ?? null,
   };
@@ -1273,7 +1266,6 @@ function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState 
             summary: data.activity.summary,
             tool: data.activity.tool ?? null,
           },
-          driver: data.driver ?? null,
           provider: data.provider ?? null,
           model: data.model ?? null,
         },
@@ -1370,7 +1362,6 @@ function applyChatEvent(
     return upsertChatThread(state, {
       id: data.thread_id,
       title: data.title ?? '',
-      driver: data.driver,
       provider: data.provider,
       model: data.model,
     });
@@ -1418,7 +1409,7 @@ function setChatThreadTitle(state: CoreState, threadId: string, title: string): 
     // A titled turn for a thread whose creation event is missing from the
     // replay window still names a thread the operator can select.
     return setChatThreadTitle(
-      upsertChatThread(state, {id: threadId, title: '', driver: null, provider: null, model: null}),
+      upsertChatThread(state, {id: threadId, title: '', provider: null, model: null}),
       threadId,
       title,
     );

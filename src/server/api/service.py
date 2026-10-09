@@ -271,7 +271,6 @@ class RunApi:
             raise RunReadOnlyError
         sequence = self._journal.latest_sequence
         spec = self._chat.create_thread(
-            driver=request.driver,
             provider=request.provider,
             model=request.model,
             title=request.title,
@@ -281,7 +280,6 @@ class RunApi:
             chat_thread=ChatThreadInfo(
                 thread_id=spec.thread_id,
                 title=spec.title,
-                driver=spec.driver,
                 provider=spec.provider,
                 model=spec.model,
             ),
@@ -317,7 +315,6 @@ class RunApi:
                     ChatThreadInfo(
                         thread_id=spec.thread_id,
                         title=spec.title,
-                        driver=spec.driver,
                         provider=spec.provider,
                         model=spec.model,
                     )

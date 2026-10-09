@@ -612,7 +612,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 project_resources=project_resources,
                 environment_resources=environment_resources,
                 agent_backend=resolved_backend,
-                driver="agentshim",
                 provider=resolved_cli_provider,
                 model=model_name,
                 role_models=tuple(
