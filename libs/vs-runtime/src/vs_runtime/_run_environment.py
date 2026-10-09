@@ -47,6 +47,9 @@ from vs_agent.api import (
     auth_bind_mounts,
     auth_copy_paths,
 )
+
+# lint-waiver: LW-014514 [TC001]; Pydantic resolves this dataclass field annotation at runtime
+from vs_project.api import RunResourceRequest  # noqa: TC001
 from vs_runtime import _boot_trace as boot_trace
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession
 from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_and_auth_files
@@ -139,7 +142,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_agent.api.images import DockerBuildRunner
-    from vs_project.api import RunResourceRequest, StateNamespace
+    from vs_project.api import StateNamespace
     from vs_sandbox.api import (
         CommandRunner,
         ComputeBackendImpl,
