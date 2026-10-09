@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import concurrent.futures
 import threading
-import time
 from typing import TYPE_CHECKING
 
-from tests.server.support import build_server_parts
+from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 from server.chat.manager import ChatAnswer, TerminalChatResource
 
@@ -56,34 +53,32 @@ def test_terminal_cleanup_waits_for_in_flight_answer(tmp_path: Path) -> None:
     parts.chat.enable_terminal_retention()
     handler_started = threading.Event()
     release_handler = threading.Event()
-    cleanup_finished = threading.Event()
+    order: list[str] = []
 
     def handler(_question: str) -> ChatAnswer:
         handler_started.set()
         release_handler.wait()
+        order.append("answer finished")
         return ChatAnswer(text="finished answer", invocation_id="exec-1")
 
     assert parts.chat.retain_terminal_resource(
-        TerminalChatResource(handler=handler, close=cleanup_finished.set)
+        TerminalChatResource(handler=handler, close=lambda: order.append("resource closed"))
     )
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         answer = pool.submit(parts.chat.chat, "what happened?")
-        assert handler_started.wait(timeout=2)
+        assert handler_started.wait(timeout=DEADLOCK_GUARD_S)
         cleanup = pool.submit(parts.chat.close_terminal_resource)
-        assert not cleanup_finished.wait(timeout=0.05)
-        assert not cleanup.done()
         release_handler.set()
-        assert answer.result(timeout=2) == "finished answer"
-        cleanup.result(timeout=2)
+        assert answer.result(timeout=DEADLOCK_GUARD_S) == "finished answer"
+        cleanup.result(timeout=DEADLOCK_GUARD_S)
 
-    assert cleanup_finished.is_set()
+    # The resource closes only after the answer that was using it is done.
+    assert order == ["answer finished", "resource closed"]
 
 
-def test_terminal_cleanup_bounds_wait_and_defers_close(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("server.chat.manager._CHAT_DRAIN_TIMEOUT_SECONDS", 0.01)
-    parts = build_server_parts(tmp_path)
+def test_terminal_cleanup_bounds_wait_and_defers_close(tmp_path: Path) -> None:
+    # A zero drain bound: the cleanup gives up on the in-flight answer at once.
+    parts = build_server_parts(tmp_path, chat_drain_timeout_seconds=0.0)
     parts.chat.enable_terminal_retention()
     handler_started = threading.Event()
     release_handler = threading.Event()
@@ -99,11 +94,10 @@ def test_terminal_cleanup_bounds_wait_and_defers_close(
     )
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         answer = pool.submit(parts.chat.chat, "what happened?")
-        assert handler_started.wait(timeout=2)
-        started = time.monotonic()
+        assert handler_started.wait(timeout=DEADLOCK_GUARD_S)
+        # Returns without the answer finishing, and leaves the resource open.
         parts.chat.close_terminal_resource()
-        assert time.monotonic() - started < 0.5
         assert not resource_closed.is_set()
         release_handler.set()
-        assert answer.result(timeout=2) == "late answer"
-        assert resource_closed.wait(timeout=2)
+        assert answer.result(timeout=DEADLOCK_GUARD_S) == "late answer"
+        assert resource_closed.wait(timeout=DEADLOCK_GUARD_S)

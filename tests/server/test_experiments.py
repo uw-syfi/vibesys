@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 import pytest
 from pydantic import ValidationError
-from tests.server.support import agent_descriptor, build_server_parts, run_record
+from tests.server.support import (
+    DEADLOCK_GUARD_S,
+    agent_descriptor,
+    build_server_parts,
+    run_record,
+)
 from tests.support.run_execution import run_execution_record
 
 from server.api.experiments import (
@@ -748,13 +753,13 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
         load_count += 1
         state = original_load(current_store)
         loaded.set()
-        assert release.wait(timeout=5)
+        assert release.wait(timeout=DEADLOCK_GUARD_S)
         return state
 
     monkeypatch.setattr(StateSlot, "load_optional", delayed_load)
     with ThreadPoolExecutor(max_workers=1) as executor:
         response_future = executor.submit(parts.api.execute, ExperimentQuery())
-        assert loaded.wait(timeout=5)
+        assert loaded.wait(timeout=DEADLOCK_GUARD_S)
         changed = initial.clone()
         changed.experiment_revision = 2
         changed.hypotheses[0].last_experiment_revision = 2
@@ -769,7 +774,7 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
             data=ExperimentsChangedData(reason="round_persisted", revision=2),
         )
         release.set()
-        response = response_future.result(timeout=5)
+        response = response_future.result(timeout=DEADLOCK_GUARD_S)
 
     assert load_count == 1
     assert response.experiment_update is not None

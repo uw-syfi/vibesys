@@ -8,7 +8,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from tests.server.support import ServerParts, auxiliary_agent_providers, build_server_parts
+from tests.server.support import (
+    DEADLOCK_GUARD_S,
+    ServerParts,
+    auxiliary_agent_providers,
+    build_server_parts,
+)
 
 from server.chat.factory import (
     ChatAgentBuilder,
@@ -64,7 +69,7 @@ def test_concurrent_restore_is_single_flight(tmp_path: Path) -> None:
     ) -> ChatThreadHandle:
         calls.append(thread_id)
         construction_started.set()
-        assert release_construction.wait(timeout=2)
+        assert release_construction.wait(timeout=DEADLOCK_GUARD_S)
         return ChatThreadHandle(
             spec=spec,
             handler=lambda question: ChatAnswer(
@@ -75,13 +80,13 @@ def test_concurrent_restore_is_single_flight(tmp_path: Path) -> None:
     parts.chat.set_thread_factory(factory)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(parts.chat.chat, "first", spec.thread_id)
-        assert construction_started.wait(timeout=2)
+        assert construction_started.wait(timeout=DEADLOCK_GUARD_S)
         second = pool.submit(parts.chat.chat, "second", spec.thread_id)
         _wait_for_active_calls(parts, 2)
         release_construction.set()
 
-        assert first.result(timeout=2) == "answer: first"
-        assert second.result(timeout=2) == "answer: second"
+        assert first.result(timeout=DEADLOCK_GUARD_S) == "answer: first"
+        assert second.result(timeout=DEADLOCK_GUARD_S) == "answer: second"
 
     assert calls == [spec.thread_id]
 
@@ -108,18 +113,18 @@ def test_concurrent_restore_shares_factory_failure(tmp_path: Path) -> None:
         nonlocal calls
         calls += 1
         construction_started.set()
-        assert release_construction.wait(timeout=2)
+        assert release_construction.wait(timeout=DEADLOCK_GUARD_S)
         raise _RestoreFailureError
 
     parts.chat.set_thread_factory(factory)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(parts.chat.chat, "first", spec.thread_id)
-        assert construction_started.wait(timeout=2)
+        assert construction_started.wait(timeout=DEADLOCK_GUARD_S)
         second = pool.submit(parts.chat.chat, "second", spec.thread_id)
         _wait_for_active_calls(parts, 2)
         release_construction.set()
-        first_answer = first.result(timeout=2)
-        second_answer = second.result(timeout=2)
+        first_answer = first.result(timeout=DEADLOCK_GUARD_S)
+        second_answer = second.result(timeout=DEADLOCK_GUARD_S)
 
     assert first_answer == second_answer
     assert "_RestoreFailureError: restore failed" in first_answer
@@ -145,20 +150,20 @@ def test_restore_cancellation_wakes_every_waiter(tmp_path: Path) -> None:
         nonlocal calls
         calls += 1
         construction_started.set()
-        assert release_construction.wait(timeout=2)
+        assert release_construction.wait(timeout=DEADLOCK_GUARD_S)
         raise _RestoreCancelled
 
     parts.chat.set_thread_factory(factory)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(parts.chat.chat, "first", spec.thread_id)
-        assert construction_started.wait(timeout=2)
+        assert construction_started.wait(timeout=DEADLOCK_GUARD_S)
         second = pool.submit(parts.chat.chat, "second", spec.thread_id)
         _wait_for_active_calls(parts, 2)
         release_construction.set()
         with pytest.raises(_RestoreCancelled):
-            first.result(timeout=2)
+            first.result(timeout=DEADLOCK_GUARD_S)
         with pytest.raises(_RestoreCancelled):
-            second.result(timeout=2)
+            second.result(timeout=DEADLOCK_GUARD_S)
 
     _wait_for_active_calls(parts, 0)
     assert calls == 1
@@ -176,7 +181,7 @@ def test_thread_turns_serialize_and_shutdown_drains_queued_borrowers(tmp_path: P
         invocations.append(question)
         if question == "first":
             first_started.set()
-            assert release_first.wait(timeout=2)
+            assert release_first.wait(timeout=DEADLOCK_GUARD_S)
         assert not resource_closed.is_set()
         return ChatAnswer(text=f"answer: {question}", invocation_id=f"exec-{question}")
 
@@ -205,19 +210,20 @@ def test_thread_turns_serialize_and_shutdown_drains_queued_borrowers(tmp_path: P
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         first = pool.submit(parts.chat.chat, "first", spec.thread_id)
-        assert first_started.wait(timeout=2)
+        assert first_started.wait(timeout=DEADLOCK_GUARD_S)
         second = pool.submit(parts.chat.chat, "second", spec.thread_id)
         _wait_for_active_calls(parts, 2)
         closing = pool.submit(shutdown)
 
+        # The second turn is queued behind the first, which is still running.
         assert invocations == ["first"]
-        assert not resource_closed.wait(timeout=0.05)
-        assert not closing.done()
+        # Closing before both turns finish would trip the handler's own check
+        # that the resource is still open, so no timed negative wait is needed.
         release_first.set()
 
-        assert first.result(timeout=2) == "answer: first"
-        assert second.result(timeout=2) == "answer: second"
-        closing.result(timeout=2)
+        assert first.result(timeout=DEADLOCK_GUARD_S) == "answer: first"
+        assert second.result(timeout=DEADLOCK_GUARD_S) == "answer: second"
+        closing.result(timeout=DEADLOCK_GUARD_S)
 
     assert invocations == ["first", "second"]
     assert resource_closed.is_set()
@@ -248,13 +254,13 @@ def test_restoration_finishing_during_shutdown_is_closed_without_invocation(
         _model: str | None,
     ) -> ChatThreadHandle:
         construction_started.set()
-        assert release_construction.wait(timeout=2)
+        assert release_construction.wait(timeout=DEADLOCK_GUARD_S)
         return ChatThreadHandle(spec=spec, handler=handler, close=close)
 
     parts.chat.set_thread_factory(factory)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         answer = pool.submit(parts.chat.chat, "question", spec.thread_id)
-        assert construction_started.wait(timeout=2)
+        assert construction_started.wait(timeout=DEADLOCK_GUARD_S)
         closing = pool.submit(parts.chat.clear_threads_and_drain)
         with parts.condition:
             assert parts.condition.wait_for(
@@ -263,8 +269,8 @@ def test_restoration_finishing_during_shutdown_is_closed_without_invocation(
             )
         release_construction.set()
 
-        assert "cannot answer right now" in answer.result(timeout=2)
-        closing.result(timeout=2)
+        assert "cannot answer right now" in answer.result(timeout=DEADLOCK_GUARD_S)
+        closing.result(timeout=DEADLOCK_GUARD_S)
 
     assert invocations == 0
     assert resource_closed == 1
@@ -288,7 +294,7 @@ def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
         model: str | None,
     ) -> ChatThreadHandle:
         construction_started.set()
-        assert release_construction.wait(timeout=2)
+        assert release_construction.wait(timeout=DEADLOCK_GUARD_S)
         return ChatThreadHandle(
             spec=ChatThreadCreatedData(
                 thread_id=thread_id,
@@ -303,7 +309,7 @@ def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
     parts.chat.set_thread_factory(factory)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         creation = pool.submit(parts.chat.create_thread)
-        assert construction_started.wait(timeout=2)
+        assert construction_started.wait(timeout=DEADLOCK_GUARD_S)
         closing = pool.submit(parts.chat.clear_threads_and_drain)
         with parts.condition:
             assert parts.condition.wait_for(
@@ -313,8 +319,8 @@ def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
         release_construction.set()
 
         with pytest.raises(RuntimeError, match="cannot answer right now"):
-            creation.result(timeout=2)
-        closing.result(timeout=2)
+            creation.result(timeout=DEADLOCK_GUARD_S)
+        closing.result(timeout=DEADLOCK_GUARD_S)
 
     assert parts.chat.threads() == []
     assert resource_closed == 1
@@ -370,18 +376,18 @@ def test_factory_closes_session_finishing_after_close_once(tmp_path: Path) -> No
 
     def build_agent(request: ChatAgentBuildRequest) -> FakeManagedAgent:
         construction_started.set()
-        assert release_construction.wait(timeout=2)
+        assert release_construction.wait(timeout=DEADLOCK_GUARD_S)
         del request
         return FakeManagedAgent()
 
     factory = _factory_for_test(parts, tmp_path, build_agent)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         construction = pool.submit(factory.start)
-        assert construction_started.wait(timeout=2)
-        pool.submit(factory.close).result(timeout=2)
+        assert construction_started.wait(timeout=DEADLOCK_GUARD_S)
+        pool.submit(factory.close).result(timeout=DEADLOCK_GUARD_S)
         release_construction.set()
         with pytest.raises(RuntimeError, match="factory is closed"):
-            construction.result(timeout=2)
+            construction.result(timeout=DEADLOCK_GUARD_S)
 
     factory.close()
     with pytest.raises(RuntimeError, match="factory is closed"):

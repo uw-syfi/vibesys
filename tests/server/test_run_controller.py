@@ -1,11 +1,14 @@
 """Pause, stop, steering, and terminal-state tests for the run controller."""
 
-import threading
-import time
 from pathlib import Path
 
 import pytest
-from tests.server.support import ServerParts, build_server_parts
+from tests.server.support import (
+    DEADLOCK_GUARD_S,
+    ServerParts,
+    build_server_parts,
+    run_at_paused_boundary,
+)
 
 from server.api.protocol import PauseCommand, ResumeCommand, SteerCommand, StopCommand
 from server.events import (
@@ -71,14 +74,12 @@ def test_pause_takes_effect_at_next_safe_point(tmp_path: Path) -> None:
     parts.controller.after_agent("implementer", "round 1", execution_id=execution.execution_id)
 
     result: list[str] = []
-    waiter = threading.Thread(
-        target=lambda: result.append(_enter_boundary(parts, "judge", "round 1", "prompt"))
+    waiter = run_at_paused_boundary(
+        parts, lambda: result.append(_enter_boundary(parts, "judge", "round 1", "prompt"))
     )
-    waiter.start()
-    time.sleep(0.02)
-    assert waiter.is_alive()
+    assert result == []  # a paused boundary cannot be passed
     parts.control.resume()
-    waiter.join(timeout=1)
+    waiter.join(timeout=DEADLOCK_GUARD_S)
     assert result == ["prompt"]
 
 
@@ -144,14 +145,12 @@ def test_steering_queued_while_paused_applies_on_resume(tmp_path: Path) -> None:
     parts.controller.after_agent("implementer", "round 1", execution_id=execution.execution_id)
 
     result: list[str] = []
-    waiter = threading.Thread(
-        target=lambda: result.append(_enter_boundary(parts, "judge", "round 1", "Review"))
+    waiter = run_at_paused_boundary(
+        parts, lambda: result.append(_enter_boundary(parts, "judge", "round 1", "Review"))
     )
-    waiter.start()
-    time.sleep(0.02)
     parts.control.queue_steer("check for reward hacking")
     parts.control.resume()
-    waiter.join(timeout=1)
+    waiter.join(timeout=DEADLOCK_GUARD_S)
 
     assert len(result) == 1
     assert "Review" in result[0]
@@ -365,14 +364,12 @@ def test_stop_releases_the_pause_wait_and_ends_the_run(tmp_path: Path) -> None:
         except RunStopped as error:
             raised.append(error)
 
-    waiter = threading.Thread(target=wait_at_boundary)
-    waiter.start()
-    time.sleep(0.02)
-    assert waiter.is_alive()
+    waiter = run_at_paused_boundary(parts, wait_at_boundary)
+    assert raised == []  # a paused boundary cannot be passed
 
     parts.control.request_stop()
 
-    waiter.join(timeout=1)
+    waiter.join(timeout=DEADLOCK_GUARD_S)
     assert not waiter.is_alive()
     assert [type(error) for error in raised] == [RunStopped]
     assert parts.api.snapshot().status is RunStatus.STOPPED
