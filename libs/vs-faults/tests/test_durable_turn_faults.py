@@ -7,7 +7,7 @@ covers ``invoke`` is not a pass-through there, and its faults never fire there.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict
@@ -20,9 +20,17 @@ from vs_agent.api import (
     AgentTurnRequest,
     Completed,
     SessionScope,
+    SteerOutcome,
 )
 from vs_agent.api.testing import FakeAgentClient, FakeAgentSessions
-from vs_faults.api import AgentFault, Boundary, FaultPlan, FaultRule, FaultyAgentClient
+from vs_faults.api import (
+    AgentCrashError,
+    AgentFault,
+    Boundary,
+    FaultPlan,
+    FaultRule,
+    FaultyAgentClient,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -75,3 +83,41 @@ def test_an_agent_fault_fires_on_a_durable_turn(tmp_path: Path, fault: AgentFaul
     _durable_turn(client, tmp_path)
 
     assert client.injected == [(_KIND, 1, fault)]
+
+
+@pytest.mark.parametrize("outcome", list(SteerOutcome))
+def test_a_steer_reaches_the_inner_client_during_a_faulted_turn(
+    outcome: SteerOutcome, tmp_path: Path
+) -> None:
+    """Steering is not a fault boundary: the wrapper answers as the inner client does."""
+    inner = _inner().set_steering(outcome)
+    plan = FaultPlan(
+        seed=0, rules=(FaultRule(boundary=Boundary.AGENT_TURN, fault=AgentFault.CRASH, at=1),)
+    )
+    wrapped = FaultyAgentClient(inner, plan)
+    answers: list[SteerOutcome] = []
+    inner.on_invoke(
+        lambda _call: answers.append(wrapped.steer("go left", on_rejected=lambda: None))
+    )
+
+    with pytest.raises(AgentCrashError):
+        wrapped.invoke(
+            kind=_KIND,
+            workspace=tmp_path,
+            system_prompt="s",
+            user_prompt="u",
+            response_cls=_Reply,
+            round_label="r1",
+        )
+
+    assert answers == [outcome]
+    assert inner.steers == (["go left"] if outcome is SteerOutcome.DELIVERED else [])
+
+
+def test_a_steer_is_unsupported_when_the_inner_client_takes_none() -> None:
+    class _NoSteer:
+        """A client without the optional steering capability."""
+
+    wrapped = FaultyAgentClient(cast("Any", _NoSteer()), FaultPlan(seed=0))
+
+    assert wrapped.steer("x", on_rejected=lambda: None) is SteerOutcome.UNSUPPORTED

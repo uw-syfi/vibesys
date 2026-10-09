@@ -42,6 +42,9 @@ from vs_agent.contracts import (
     ReadinessProbe,
     ReadinessProblem,
     SessionDisposition,
+    SteerableAgentClient,
+    SteerableSession,
+    SteerOutcome,
 )
 from vs_agent.events import (
     AgentOutputChannel,
@@ -195,6 +198,9 @@ __all__ = [
     "SessionScope",
     "SessionStore",
     "SkillSelection",
+    "SteerOutcome",
+    "SteerableAgentClient",
+    "SteerableSession",
     "TodoItemData",
     "ToolResultPayload",
     "Unknown",

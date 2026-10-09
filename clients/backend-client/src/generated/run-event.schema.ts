@@ -625,6 +625,7 @@ const runEventSchema: Record<string, unknown> = {
         "answered",
         "pending",
         "consumed",
+        "delivered",
         "completed",
         "failed",
         "cancelled",

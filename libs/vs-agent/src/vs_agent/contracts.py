@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from datetime import timedelta
     from pathlib import Path
     from typing import TextIO
@@ -415,6 +415,41 @@ class AgentDriver(Protocol):
 
     def close(self) -> None:
         """Release driver resources. Implementations must be idempotent."""
+        ...
+
+
+class SteerOutcome(StrEnum):
+    """What became of a message offered to a running turn."""
+
+    DELIVERED = "delivered"
+    """The provider accepted it into the running turn."""
+    UNSUPPORTED = "unsupported"
+    """This driver, provider or transport cannot take a message mid-turn."""
+    NO_RUNNING_TURN = "no_running_turn"
+    """No turn could take it right now: none is running, or it is starting or finishing."""
+
+
+@runtime_checkable
+class SteerableSession(Protocol):
+    """An optional session capability: accept a message while a turn runs."""
+
+    def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
+        """Offer *text* to the turn running now. Thread-safe; never queues.
+
+        ``DELIVERED`` means the provider holds the message. If it later
+        refuses it (the turn is unaffected), *on_rejected* is called once, on
+        the thread running the turn, so the caller can deliver the text another
+        way. It is never called for any other outcome.
+        """
+        ...
+
+
+@runtime_checkable
+class SteerableAgentClient(Protocol):
+    """An optional client capability: offer a message to the turn running now."""
+
+    def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
+        """Offer *text* to the in-flight turn; see :meth:`SteerableSession.steer`."""
         ...
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from enum import StrEnum
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -20,6 +21,7 @@ class RunControlTransitionKind(StrEnum):
     RESUMED = "resumed"
     STOP_REQUESTED = "stop_requested"
     STEER_CONSUMED = "steer_consumed"
+    STEER_DELIVERED = "steer_delivered"
     PAUSED = "paused"
     STOPPED = "stopped"
 
@@ -44,11 +46,56 @@ class RunControlEventSink(Protocol):
         ...
 
 
+class SteerTarget(Protocol):
+    """An agent turn in flight that may take an operator message before it ends."""
+
+    @property
+    def agent_kind(self) -> str:
+        """Name the agent running the turn."""
+        ...
+
+    @property
+    def round_label(self) -> str:
+        """Name the round the turn belongs to."""
+        ...
+
+    @property
+    def execution_id(self) -> str | None:
+        """Name the execution the turn runs as."""
+        ...
+
+    def offer_steer(self, text: str, on_rejected: Callable[[], None]) -> bool:
+        """Offer *text* to the turn now; ``True`` when the provider took it.
+
+        When the provider takes it and refuses it later, *on_rejected* is
+        called once so the channel can queue the text for the next boundary.
+        """
+        ...
+
+
 class RunControlChannel(Protocol):
     """Cooperative control mailbox shared by callers and the run thread."""
 
     def queue_steer(self, text: str) -> None:
-        """Queue steering for the next invocation boundary."""
+        """Queue steering; deliver it now to a turn in flight that can take it.
+
+        The queue is the single source of truth. A message is drained at the
+        next invocation boundary (:meth:`take_pending_steer`) unless an attached
+        target takes it first, in which case it leaves the queue and the
+        channel records ``STEER_DELIVERED``.
+        """
+        ...
+
+    def attach_steer_target(self, target: SteerTarget) -> Callable[[], None]:
+        """Let *target* take queued steering until the returned detach is called.
+
+        With several targets attached the one whose turn began first is offered
+        the message; a message a target declines stays queued.
+        """
+        ...
+
+    def requeue_steer(self, text: str) -> None:
+        """Put a message a provider refused back at the head of the queue."""
         ...
 
     def request_pause(self) -> None:
@@ -114,15 +161,57 @@ class RuntimeRunControlChannel:
         self._events = events
         self._lock = threading.Condition(threading.Lock())
         self._pending_steer: list[str] = []
+        self._steer_targets: list[SteerTarget] = []
         self._paused = False
         self._stop_requested = False
         self._stop_listeners: list[Callable[[], object]] = []
 
     def queue_steer(self, text: str) -> None:
-        """Queue free-text steering for the next invocation boundary."""
+        """Queue free-text steering, delivering it now when a running turn can take it."""
         with self._lock:
             self._pending_steer.append(text)
         self._emit(RunControlTransitionKind.STEER_QUEUED, text=text)
+        self._offer_pending_steer()
+
+    def attach_steer_target(self, target: SteerTarget) -> Callable[[], None]:
+        """Let *target* take queued steering until the returned detach is called."""
+        with self._lock:
+            self._steer_targets.append(target)
+
+        def detach() -> None:
+            with self._lock:
+                if target in self._steer_targets:
+                    self._steer_targets.remove(target)
+
+        return detach
+
+    def requeue_steer(self, text: str) -> None:
+        """Queue a refused message again, ahead of newer ones, for the next boundary."""
+        with self._lock:
+            self._pending_steer.insert(0, text)
+        self._emit(RunControlTransitionKind.STEER_QUEUED, text=text)
+
+    def _offer_pending_steer(self) -> None:
+        """Hand queued messages, oldest first, to the oldest target until one is declined."""
+        while True:
+            with self._lock:
+                if not self._steer_targets or not self._pending_steer:
+                    return
+                target = self._steer_targets[0]
+                text = self._pending_steer.pop(0)
+            if not target.offer_steer(text, partial(self.requeue_steer, text)):
+                with self._lock:
+                    self._pending_steer.insert(0, text)
+                return
+            self._events(
+                RunControlTransition(
+                    kind=RunControlTransitionKind.STEER_DELIVERED,
+                    text=text,
+                    agent_kind=target.agent_kind,
+                    round_label=target.round_label,
+                    execution_id=target.execution_id,
+                )
+            )
 
     def request_pause(self) -> None:
         """Request that the run park at its next cooperative boundary."""
@@ -224,4 +313,5 @@ __all__ = [
     "RunControlTransitionKind",
     "RunStopped",
     "RuntimeRunControlChannel",
+    "SteerTarget",
 ]

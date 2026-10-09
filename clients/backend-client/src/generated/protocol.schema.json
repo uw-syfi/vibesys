@@ -1356,6 +1356,7 @@
         "answered",
         "pending",
         "consumed",
+        "delivered",
         "completed",
         "failed",
         "cancelled",

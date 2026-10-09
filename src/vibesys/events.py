@@ -60,7 +60,7 @@ class CoreEventType(StrEnum):
     # Run-control transitions (see `vs_runtime.api.infrastructure.RunControlChannel`):
     # request-time events (`*_REQUESTED`, `STEER_QUEUED`, `RESUMED`) come from
     # `RunControl` callers; boundary-consume-time events (`PAUSED`, `STOPPED`,
-    # `STEER_CONSUMED`) come from the run boundary or an agent turn. A server
+    # `STEER_CONSUMED`, `STEER_DELIVERED`) come from the run boundary or an agent turn. A server
     # projects both onto its own status machine
     # and CONTROL journal; there is no frontend-visible wire event for them.
     STEER_QUEUED = "steer_queued"
@@ -68,6 +68,7 @@ class CoreEventType(StrEnum):
     RESUMED = "resumed"
     STOP_REQUESTED = "stop_requested"
     STEER_CONSUMED = "steer_consumed"
+    STEER_DELIVERED = "steer_delivered"
     PAUSED = "paused"
     STOPPED = "stopped"
 

@@ -296,6 +296,20 @@ class RunController:
                 execution_id=execution_id,
             )
 
+    def record_steer_delivered(
+        self, *, agent_kind: str | None, round_label: str | None, execution_id: str | None
+    ) -> None:
+        """Journal that queued steering was delivered into an invocation still running."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL,
+                "/steer",
+                status=EventStatus.DELIVERED,
+                agent_kind=agent_kind,
+                round_label=round_label,
+                execution_id=execution_id,
+            )
+
     def status(self) -> str:
         """Return a compact human-readable run status."""
         with self._condition:

@@ -30,6 +30,8 @@ from vs_agent.contracts import (
     ProviderNotReadyError,
     ReadinessProbe,
     SessionDisposition,
+    SteerableSession,
+    SteerOutcome,
     session_spec_fingerprint,
 )
 from vs_agent.events import CommandResultPayload, JsonResultPayload
@@ -43,7 +45,7 @@ from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.usage_records import USAGE_FILE, append_usage_record, usage_dict
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
     from typing import TextIO
 
@@ -816,6 +818,23 @@ class AgentClient:
             active = tuple(self._active_sessions)
         for session in active:
             session.cancel()
+
+    def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
+        """Offer *text* to the turn running now, on a driver that can take it mid-turn.
+
+        An execution runs one turn at a time, so there is at most one target;
+        with several in flight the newest is offered the message. A driver or
+        provider without mid-turn input reports ``UNSUPPORTED`` and is never
+        asked; nothing is queued here, so the caller keeps its own fallback.
+        """
+        with self._active_lock:
+            active = tuple(self._active_sessions)
+        if not active:
+            return SteerOutcome.NO_RUNNING_TURN
+        session = active[-1]
+        if not isinstance(session, SteerableSession):
+            return SteerOutcome.UNSUPPORTED
+        return session.steer(text, on_rejected=on_rejected)
 
     def cancel_session(self, key: AgentSessionKey) -> None:
         """Stop the in-flight turn of one keyed conversation, keeping its checkpoint.
