@@ -41,6 +41,7 @@ from tests.support.session_world import (
     open_host,
 )
 from tests.support.workspace_world import WorkspaceEnv, open_workspace_env
+from tests.support.world_git import WorldGit, world_git
 
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_core.api import (
@@ -83,7 +84,7 @@ from vs_core.api import (
     WorkspaceMode,
     WorkspacePlan,
 )
-from vs_project.api import Project, run_git
+from vs_project.api import Project
 from vs_runtime.api.core import (
     ContinuationBinding,
     ExecutionResult,
@@ -411,14 +412,12 @@ class _WorkspacesWorld:
     def _root(self) -> Path:
         return self.env.hosts[0].root.path
 
-    def _git(self, *args: str) -> str:
-        result = run_git(list(args), cwd=self._root)
-        assert result.returncode == 0, result.stderr
-        return result.stdout.decode().strip()
+    @property
+    def _git(self) -> WorldGit:
+        return world_git(self._root, self.env.git_disk)
 
     def _candidate(self) -> Path:
-        paths = [Path(line.split()[0]) for line in self._git("worktree", "list").splitlines()]
-        (candidate,) = [path for path in paths if path != self._root.resolve()]
+        (candidate,) = [path for path in self._git.worktrees() if path != self._root.resolve()]
         return candidate
 
     async def _seed(self, request: RequestBase) -> ExecutionResult:
@@ -503,11 +502,8 @@ class _WorkspacesWorld:
 
     def effects(self) -> int:
         """Worktrees, commits and refs, plus one once the adopted content is in the root."""
-        worktrees = len(self._git("worktree", "list").splitlines())
-        commits = int(self._git("rev-list", "--all", "--count"))
-        refs = len(self._git("for-each-ref", "--count=1000").splitlines())
         adopted = (self._root / "candidate.py").read_text(encoding="utf-8") == "VALUE = 2\n"
-        return worktrees + commits + refs + int(adopted)
+        return self._git.effects() + int(adopted)
 
 
 class _WorkspacesCase:

@@ -16,6 +16,7 @@ from vs_project.api import (
     OrchestrationDescriptor,
     RunEnvironmentRecord,
 )
+from vs_project.api.testing import FakeGitRepositories
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     AgentPaths,
@@ -80,6 +81,10 @@ def _project_request(root: Path) -> ProjectRunRequest:
     )
 
 
+# In-memory Git: these cases test run resources, not the Git CLI. Directories are unique per test.
+_DISK = FakeGitRepositories()
+
+
 def _effects() -> ProjectRunEffects:
     def emit(text: str, writer: TextIO) -> None:
         writer.write(text + "\n")
@@ -87,6 +92,7 @@ def _effects() -> ProjectRunEffects:
 
     return ProjectRunEffects(
         git_events=NullGitTrackerEvents(),
+        git_repository=_DISK.repository,
         log_emit=emit,
         on_log_ready=lambda _path: None,
     )

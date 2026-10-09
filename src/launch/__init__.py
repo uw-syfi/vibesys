@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from vibesys.api.contracts import EventSink
     from vibesys.api.wiring import SessionAgents
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSessionKey
-    from vs_project.api import Project
+    from vs_project.api import GitRepositoryFactory, Project
     from vs_runtime.api.infrastructure import RunState, StopTimer
     from vs_sandbox.api import ComputeBackendImpl
 
@@ -59,6 +59,8 @@ class LaunchSettings:
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore] | None = (
         None
     )
+    git_repository: GitRepositoryFactory | None = None
+    """Builds the run's ``GitRepository`` implementations; ``None`` runs the Git CLI."""
 
 
 def create_session(
@@ -103,6 +105,7 @@ def create_session(
                 else selected.invocation_store_factory
             ),
             agent_tool_bindings=AGENT_TOOL_BINDINGS,
+            git_repository=selected.git_repository,
             agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),
         ),
     )

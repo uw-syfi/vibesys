@@ -933,7 +933,7 @@ expose = ["InProcessRuns", "TaskRunHandle"]
 
 [[modules]]
 path = "vibesys.api.assembly"
-depends_on = ["vibesys.api.auxiliary", "vibesys.run", "vs_agent", "vs_runtime", "vs_sandbox", "vs_mcp"]
+depends_on = ["vibesys.api.auxiliary", "vibesys.run", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox", "vs_mcp"]
 
 [[interfaces]]
 from = ["vibesys.api.assembly"]

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
         AgentSessionKey,
     )
     from vs_mcp.api import ToolServerDescriptor
+    from vs_project.api import GitRepositoryFactory
     from vs_runtime.api import AgentToolBindingContext
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment, StopTimer
@@ -70,6 +71,8 @@ class SessionImplementations:
         Mapping[str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]]
         | None
     ) = None
+    git_repository: GitRepositoryFactory | None = None
+    """Builds the run's ``GitRepository`` implementations; ``None`` runs the Git CLI."""
 
 
 __all__ = ["SessionAgents", "SessionImplementations"]

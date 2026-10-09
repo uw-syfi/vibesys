@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from vibesys.api import OrchestrationRegistry, RunRequest, RunSession
     from vibesys.api.contracts import EventSink
     from vs_agent.api import AgentClientProtocol, AgentEventSink, AgentSpec
+    from vs_project.api import GitRepositoryFactory
     from vs_runtime.api.infrastructure import StopTimer
     from vs_sandbox.api import ComputeBackendImpl
 
@@ -33,12 +34,19 @@ def create_session(  # noqa: PLR0913
     agent_client_factory: Callable[..., AgentClientProtocol],
     backend_factory: Callable[..., ComputeBackendImpl],
     stop_timer: StopTimer = asyncio.sleep,
+    git_repository: GitRepositoryFactory | None = None,
 ) -> RunSession:
     """Execute real built-in wiring with caller-owned Fake implementations."""
     return _create_session(
         request,
         sink=sink,
-        settings=LaunchSettings(registry, agent_client_factory, backend_factory, stop_timer),
+        settings=LaunchSettings(
+            registry,
+            agent_client_factory,
+            backend_factory,
+            stop_timer,
+            git_repository=git_repository,
+        ),
     )
 
 
