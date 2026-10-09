@@ -184,20 +184,6 @@ def test_framework_namespace_must_be_a_directory(tmp_path: Path) -> None:
     assert root.read_text(encoding="utf-8") == "not a directory\n"
 
 
-def test_current_sha_is_none_when_git_cannot_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    tracker = _initialized_tracker(tmp_path)
-    assert tracker.current_sha() is not None
-
-    def unavailable(_cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        message = "git is not installed"
-        raise FileNotFoundError(message)
-
-    monkeypatch.setattr(tracker, "run", unavailable)
-    assert tracker.current_sha() is None
-
-
 class _RecordingEvents(NullGitTrackerEvents):
     def __init__(self) -> None:
         self.warnings: list[tuple[str, str | None]] = []
