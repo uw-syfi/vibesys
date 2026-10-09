@@ -39,19 +39,33 @@ def symlink_lifecycle_hooks(
     return [_SymlinkLifecycleHooks(commands)]
 
 
+@dataclass(frozen=True, slots=True)
+class SymlinkMountScope:
+    """Where symlink mounts land and which links to leave alone.
+
+    *workspace_root* is where the sandbox mounts the workspace; ancestor
+    mounts that preserve nested links live under its ``_mounts`` directory.
+    *skip* names links an environment mount already provides.
+    """
+
+    workspace_root: str = "/workspace"
+    skip: frozenset[str] = frozenset()
+
+
 def collect_symlink_mounts(
     scan_dir: Path,
     container_prefix: str,
     *,
     bind_mounts: list[tuple[str, str, bool]],
     symlinks: list[tuple[str, str]],
-    skip: set[str] | None = None,
+    scope: SymlinkMountScope | None = None,
 ) -> None:
     """Append mounts and links required for external symlinks in a directory."""
+    scope = scope or SymlinkMountScope()
     for child in scan_dir.iterdir():
         if not child.is_symlink():
             continue
-        if skip and child.name in skip:
+        if child.name in scope.skip:
             continue
         target = child.resolve()
         try:
@@ -66,7 +80,7 @@ def collect_symlink_mounts(
             bind_mounts.append((str(host_path), f"{container_prefix}/{child.name}", True))
         else:
             rel = target.relative_to(host_path)
-            ancestor_mount = f"/workspace/_mounts/{child.name}"
+            ancestor_mount = f"{scope.workspace_root}/_mounts/{child.name}"
             bind_mounts.append((str(host_path), ancestor_mount, True))
             symlinks.append((f"{container_prefix}/{child.name}", f"{ancestor_mount}/{rel}"))
 
@@ -95,4 +109,9 @@ def find_mount_root(target: Path) -> Path:
     return root
 
 
-__all__ = ["collect_symlink_mounts", "find_mount_root", "symlink_lifecycle_hooks"]
+__all__ = [
+    "SymlinkMountScope",
+    "collect_symlink_mounts",
+    "find_mount_root",
+    "symlink_lifecycle_hooks",
+]

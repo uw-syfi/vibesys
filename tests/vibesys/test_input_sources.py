@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _write_bundle(project_root: Path, manifest_blocks: str = "") -> Path:
+def _write_bundle(project_root: Path, manifest_blocks: str = "", domain: str = "generic") -> Path:
     bundle = project_root / "examples" / "data-structures" / "queue-spsc"
     bundle.mkdir(parents=True)
     (bundle / "OBJECTIVE.md").write_text("Build a queue.\n")
@@ -31,7 +31,7 @@ def _write_bundle(project_root: Path, manifest_blocks: str = "") -> Path:
 version = 1
 
 [agent]
-domain = "generic"
+domain = "{domain}"
 
 [accuracy]
 command = ["accuracy-checker"]
@@ -200,6 +200,44 @@ def test_manifest_rejects_unknown_modal_environment_keys(tmp_path: Path) -> None
     (bundle / "service.py").write_text("app = object()\n")
 
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        load_input_bundle(bundle)
+
+
+def test_manifest_without_docker_in_docker_declares_none(tmp_path: Path) -> None:
+    bundle = _write_bundle(tmp_path / "project", domain="microservices")
+
+    assert load_input_bundle(bundle).docker_in_docker is False
+
+
+def test_manifest_declares_docker_in_docker(tmp_path: Path) -> None:
+    bundle = _write_bundle(
+        tmp_path / "project", "[environment]\ndocker_in_docker = true", domain="microservices"
+    )
+
+    assert load_input_bundle(bundle).docker_in_docker is True
+
+
+@pytest.mark.parametrize("value", ['"true"', '"yes"', "1", '""'])
+def test_manifest_rejects_a_non_boolean_docker_in_docker(tmp_path: Path, value: str) -> None:
+    bundle = _write_bundle(
+        tmp_path / "project",
+        f"[environment]\ndocker_in_docker = {value}",
+        domain="microservices",
+    )
+
+    with pytest.raises(ValueError, match="docker_in_docker"):
+        load_input_bundle(bundle)
+
+
+@pytest.mark.parametrize(
+    "key", ["container_runtime", "docker-in-docker", "dind", "docker_in_dockr"]
+)
+def test_manifest_rejects_unknown_environment_keys_naming_the_key(tmp_path: Path, key: str) -> None:
+    bundle = _write_bundle(
+        tmp_path / "project", f"[environment]\n{key} = true", domain="microservices"
+    )
+
+    with pytest.raises(ValueError, match=key):
         load_input_bundle(bundle)
 
 

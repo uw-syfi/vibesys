@@ -44,7 +44,7 @@ def _requested_environment(
     )
 
 
-def _task_dockerfile_conflicts(
+def _task_docker_conflicts(
     requested: str, selected: str | None, explicit: frozenset[str]
 ) -> list[str]:
     conflicts: list[str] = []
@@ -88,15 +88,19 @@ def run_environment_spec_from_args(
         raise ValueError(_exception_message)
 
     dockerfile_path = bundle.dockerfile_path if bundle is not None else None
+    docker_in_docker = bundle is not None and bundle.docker_in_docker
     resuming = getattr(args, "resume", None) is not None
     requested_environment = _requested_environment(args, selected, slurm_config)
-    if dockerfile_path is not None and not resuming:
-        conflicts = _task_dockerfile_conflicts(requested_environment, selected, explicit)
+    if (dockerfile_path is not None or docker_in_docker) and not resuming:
+        conflicts = _task_docker_conflicts(requested_environment, selected, explicit)
         if conflicts:
             joined = ", ".join(conflicts)
-            _exception_message_2 = (
-                f"task Dockerfile {dockerfile_path} cannot be combined with {joined}"
+            declared = (
+                f"task Dockerfile {dockerfile_path}"
+                if dockerfile_path is not None
+                else "task key [environment] docker_in_docker = true"
             )
+            _exception_message_2 = f"{declared} cannot be combined with {joined}"
             raise ValueError(_exception_message_2)
         requested_environment = "docker"
 

@@ -348,81 +348,13 @@ class TestShippedProfileState:
         assert "config.toml" not in by_name
 
 
-class TestContainerRuntimeResources:
-    """Microservice candidates are container topologies the agent must drive."""
-
-    def test_docker_socket_is_declared_writable(self) -> None:
-        declarations = host_resource_declarations.container_runtime_resources({})
-
-        writable = {
-            resource.path
-            for resource in declarations
-            if resource.access is HostResourceAccess.READ_WRITE
-        }
-        assert Path("/var/run/docker.sock") in writable
-
-    def test_custom_unix_docker_host_is_declared(self) -> None:
-        declarations = host_resource_declarations.container_runtime_resources(
-            {"DOCKER_HOST": "unix:///run/user/1000/docker.sock"}
-        )
-
-        paths = {resource.path for resource in declarations}
-        assert Path("/run/user/1000/docker.sock") in paths
-
-    def test_tcp_docker_host_declares_no_extra_path(self) -> None:
-        declarations = host_resource_declarations.container_runtime_resources(
-            {"DOCKER_HOST": "tcp://127.0.0.1:2375"}
-        )
-
-        assert {resource.path for resource in declarations} == {Path("/var/run/docker.sock")}
-
-
-class TestTaskScratchDir:
-    """Container bind sources resolve in the daemon's namespace, not the agent's.
-
-    The scratch path therefore has to name the same directory inside and
-    outside confinement, so it is a fixed host path rather than anything
-    derived from the sandbox's private ``/tmp``.
-    """
-
-    def test_scratch_dir_follows_the_task_naming_convention(self) -> None:
-        scratch_dir = host_resource_declarations.task_scratch_dir("hotel-reservation")
-        assert scratch_dir.parent == host_resource_declarations.TASK_SCRATCH_ROOT
-        assert scratch_dir.name == "vibesys-hotel-reservation"
-
-
 class TestTaskAgentHostResources:
-    """Reaching the Docker socket is root-equivalent, so the widening is scoped."""
+    """Only evaluator inputs are imported; no task widens to the Docker socket."""
 
-    @pytest.fixture(autouse=True)
-    def _scratch_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Keep the declaration's mkdir side effect inside the test's tmp dir."""
-        monkeypatch.setattr(host_resource_declarations, "TASK_SCRATCH_ROOT", tmp_path)
-
-    def test_container_topology_declares_socket_and_scratch(self, tmp_path: Path) -> None:
-        declarations = host_resource_declarations.task_agent_host_resources(
-            container_topology=True,
-            cli_sandboxed=False,
-            task_name="hotel-reservation",
-            evaluator_package_root=None,
-            env={},
-        )
-
-        scratch = tmp_path / "vibesys-hotel-reservation"
-        resources = {resource.path: resource.access for resource in declarations}
-        assert resources[Path("/var/run/docker.sock")] is HostResourceAccess.READ_WRITE
-        assert resources[scratch] is HostResourceAccess.READ_WRITE
-        # The benchmark writes captures here, so it must exist before the run.
-        assert scratch.is_dir()
-
-    def test_other_domains_declare_nothing_extra(self) -> None:
+    def test_nothing_is_declared_without_evaluator_inputs(self) -> None:
         assert (
             host_resource_declarations.task_agent_host_resources(
-                container_topology=False,
-                cli_sandboxed=False,
-                task_name="latency",
-                evaluator_package_root=None,
-                env={},
+                cli_sandboxed=False, evaluator_package_root=None
             )
             == ()
         )
@@ -430,36 +362,18 @@ class TestTaskAgentHostResources:
     def test_container_backend_owns_its_own_exposure(self, tmp_path: Path) -> None:
         assert (
             host_resource_declarations.task_agent_host_resources(
-                container_topology=True,
-                cli_sandboxed=True,
-                task_name="hotel-reservation",
-                evaluator_package_root=tmp_path / "evaluator",
-                env={},
+                cli_sandboxed=True, evaluator_package_root=tmp_path / "evaluator"
             )
             == ()
         )
 
-    def test_scratch_is_skipped_without_a_named_task(self) -> None:
-        declarations = host_resource_declarations.task_agent_host_resources(
-            container_topology=True,
-            cli_sandboxed=False,
-            task_name=None,
-            evaluator_package_root=None,
-            env={},
-        )
-
-        assert {resource.path for resource in declarations} == {Path("/var/run/docker.sock")}
-
-    def test_evaluator_package_is_read_only_and_domain_independent(self, tmp_path: Path) -> None:
+    def test_evaluator_package_is_read_only(self, tmp_path: Path) -> None:
         package_root = tmp_path / "evaluator"
         tools_root = tmp_path / "operator-tools" / "request-factory" / "digest"
         declarations = host_resource_declarations.task_agent_host_resources(
-            container_topology=False,
             cli_sandboxed=False,
-            task_name=None,
             evaluator_package_root=package_root,
             evaluator_tool_roots=(tools_root,),
-            env={},
         )
 
         # Read-only: the evaluator is trusted, integrity-checked input no role

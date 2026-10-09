@@ -54,8 +54,13 @@ from vs_agent.mcp_server import register_tool, serve_stdio
 from vs_agent.progress import AgentProgress, CandidateProgress, RoundProgress
 from vs_agent.provider_policy import (
     CLI_VERSIONS,
+    CONTAINER_RUNTIME_TOOLCHAIN,
     DEFAULT_CLI_PROVIDER,
+    DOCKER_COMPOSE_VERSION,
+    DOCKER_ENGINE_VERSION,
     GO_TOOLCHAIN_VERSION,
+    KIND_VERSION,
+    KUBECTL_VERSION,
     NODE_VERSION,
     RUST_TOOLCHAIN_VERSION,
     SHIPPED_PROVIDERS,
@@ -117,9 +122,14 @@ if TYPE_CHECKING:
 __all__ = [
     "BASE_ENV_ALLOWLIST",
     "CLI_VERSIONS",
+    "CONTAINER_RUNTIME_TOOLCHAIN",
     "DEFAULT_CLI_PROVIDER",
+    "DOCKER_COMPOSE_VERSION",
+    "DOCKER_ENGINE_VERSION",
     "DOCKER_PROVIDER_ENV",
     "GO_TOOLCHAIN_VERSION",
+    "KIND_VERSION",
+    "KUBECTL_VERSION",
     "NODE_VERSION",
     "NULL_AGENT_EVENT_SINK",
     "NULL_SKILL_SELECTION",

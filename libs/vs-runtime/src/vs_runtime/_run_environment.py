@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from vs_agent.api import (
+    CONTAINER_RUNTIME_TOOLCHAIN,
     DOCKER_PROVIDER_ENV,
     AgentBackend,
     auth_bind_mounts,
@@ -52,6 +53,11 @@ from vs_agent.api import (
 )
 from vs_project.api import RunEnvironmentRecord, RunResourceRequest
 from vs_runtime import _boot_trace as boot_trace
+from vs_runtime._container_runtime_policy import (
+    DOCKER_IN_DOCKER_NOTICE,
+    attaches_accelerator,
+    reject_docker_in_docker,
+)
 from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
 from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
@@ -74,11 +80,14 @@ from vs_sandbox.api import (
     SandboxKind,
     SandboxLifecycleHooks,
     SandboxSession,
+    SubprocessDockerCli,
     deduplicate_host_resources,
     evaluator_helpers,
     host_resource_for_mount,
+    require_sysbox_runtime,
     start_sandbox,
     stop_sandbox,
+    workspace_container_root,
 )
 from vs_sandbox.api.docker_workspace import (
     DockerWorkspaceRepairError,
@@ -111,6 +120,7 @@ from vs_sandbox.api.slurm import (
     write_slurm_evaluation_plan,
 )
 from vs_sandbox.api.symlink_mounts import (
+    SymlinkMountScope,
     collect_symlink_mounts,
     find_mount_root,
     symlink_lifecycle_hooks,
@@ -137,8 +147,9 @@ source of truth an environment consults."""
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vs_agent.api.images import DockerBuildRunner
     from vs_project.api import StateNamespace
-    from vs_sandbox.api import CommandRunner, ComputeBackendImpl
+    from vs_sandbox.api import CommandRunner, ComputeBackendImpl, DockerCli
 
 
 @dataclass(frozen=True)
@@ -294,6 +305,11 @@ class RunEnvironmentRequest:
     #: Root of the run's dedicated agent CLI homes; ``None`` when the run has
     #: no machine-local state (agents then keep the provider's default home).
     agent_homes_dir: Path | None = None
+    #: The task declared ``[environment] docker_in_docker = true``: its
+    #: candidate is a container topology, so only the Docker environment can
+    #: run it (a sandbox container with a Docker daemon of its own under
+    #: Sysbox). Every other environment rejects the request.
+    docker_in_docker: bool = False
 
 
 class _AgentPathSandbox(Protocol):
@@ -537,6 +553,7 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve the host-local presentation facts."""
+        reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="local")
         return _PreparedRunEnvironment(LocalEnvironmentFacts(), partial(self._open, request))
 
     def _open(
@@ -621,6 +638,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Validate external policy before opening the local editor sandbox."""
+        reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="slurm")
         config = load_slurm_config(self.config_path)
         policy = load_slurm_policy(self.config_path)
         return _PreparedRunEnvironment(
@@ -800,9 +818,17 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
 
 @dataclass(frozen=True)
 class DockerEnvironmentConfig:
-    """Optional image override for the Docker run environment."""
+    """Optional image override and Docker CLI seam for the Docker run environment.
+
+    ``docker`` is the CLI the environment probes the host daemon with (before
+    any image build, for a task that needs a container runtime) and
+    ``build_runner`` is what runs the agent image's ``docker build``; ``None``
+    is the real ``docker`` binary for both.
+    """
 
     image: str | None = None
+    docker: DockerCli | None = None
+    build_runner: DockerBuildRunner | None = None
 
 
 class DockerEnvironment:
@@ -835,13 +861,23 @@ class DockerEnvironment:
         """Start the Docker sandbox and resolve candidate-facing paths."""
         image_helpers = import_module("vs_agent.api.images")
         requirements = request.evaluator_requirements
+        log: Callable[[str], None] = request.log or (lambda _: None)
+        toolchains: set[str] = set(evaluator_agent_toolchains(requirements))
+        if request.docker_in_docker:
+            # Fail before the image build when the host has no Sysbox; nothing
+            # falls back to the host socket.
+            require_sysbox_runtime(self.config.docker or SubprocessDockerCli())
+            toolchains.add(CONTAINER_RUNTIME_TOOLCHAIN)
+            log(DOCKER_IN_DOCKER_NOTICE)
         # The task image, when a task has a Dockerfile, is built by the
         # headless entrypoint and arrives here as the backend image; only the
         # agent layer is applied on top of it.
         container_image = image_helpers.agent_image(
             _docker_backend_image(request),
-            toolchains=evaluator_agent_toolchains(requirements),
+            toolchains=toolchains,
+            command_runner=self.config.build_runner,
         )
+        workspace_root = _workspace_root(request)
         resources, docker_symlinks = _container_mount_plan(request)
         resources += list(
             prepare_docker_evaluator_resources(
@@ -858,7 +894,7 @@ class DockerEnvironment:
         if resolved_cli is not None:
             provider, cli_provider_env = resolved_cli
             auth_files = auth_copy_paths(provider)
-        cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
+        cli_provider_env.setdefault("UV_CACHE_DIR", f"{workspace_root}/.cache/uv")
         # The agent image's baked toolchain root is read-only (agent.Dockerfile
         # chmods /opt/cargo a+rX, deliberately: an agent cannot apt/cargo
         # install mid-round). A Cargo invocation that needs a crate the image
@@ -867,7 +903,7 @@ class DockerEnvironment:
         # CARGO_HOME is redirected onto the writable, bind-mounted workspace.
         # This is unrelated to which crates a candidate build needs: one with
         # no external dependencies never touches the registry at all.
-        cli_provider_env.setdefault("CARGO_HOME", "/workspace/.cache/cargo")
+        cli_provider_env.setdefault("CARGO_HOME", f"{workspace_root}/.cache/cargo")
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
         resources = deduplicate_host_resources(resources)
@@ -883,8 +919,9 @@ class DockerEnvironment:
             auth_files=auth_files,
             lifecycle_hooks=lifecycle_hooks,
             container_image=container_image,
+            docker_in_docker=request.docker_in_docker,
+            attach_accelerator=attaches_accelerator(docker_in_docker=request.docker_in_docker),
         )
-        log: Callable[[str], None] = request.log or (lambda _: None)
         log(f"[docker] starting container with image {container_image}")
         return SandboxSession.start(
             sandbox=sandbox,
@@ -1014,6 +1051,7 @@ class SkyPilotEnvironment(DockerEnvironment):
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve and validate SkyPilot resources without starting them."""
+        reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="skypilot")
         if self.config.resources is None:
             message = "SkyPilot requires portable run resources"
             raise ValueError(message)
@@ -1211,6 +1249,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve Modal presentation facts without starting resources."""
+        reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="modal")
         app_name = _modal_app_name(request.run_id, fallback=self.config.app)
         facts = ModalEnvironmentFacts(
             gpu=self.config.gpu,
@@ -1648,7 +1687,7 @@ def _isolated_paths(
         requirements,
         TrustedEvaluationCommandPaths(
             source_project_root=request.workspace,
-            runtime_project_root="/workspace",
+            runtime_project_root=_workspace_root(request),
             python_executable="python3",
             runtime_package_root=(
                 sandbox.agent_path(requirements.package_root)
@@ -1734,10 +1773,12 @@ def _container_mount_plan(
     bind_mounts: list[tuple[str, str, bool]] = []
     symlinks: list[tuple[str, str]] = []
     ref_dir = request.ref_dir
+    root = _workspace_root(request)
 
-    skip_environment_mount_symlinks = {
-        mount.host_path.name for mount in request.environment_bind_mounts
-    }
+    mount_scope = SymlinkMountScope(
+        workspace_root=root,
+        skip=frozenset(mount.host_path.name for mount in request.environment_bind_mounts),
+    )
 
     if ref_dir is not None:
         reference_container_path = _reference_container_path(request)
@@ -1746,7 +1787,7 @@ def _container_mount_plan(
             reference_container_path,
             bind_mounts=bind_mounts,
             symlinks=symlinks,
-            skip=skip_environment_mount_symlinks,
+            scope=mount_scope,
         )
         if ref_dir.parent != ref_dir:
             collect_symlink_mounts(
@@ -1754,7 +1795,7 @@ def _container_mount_plan(
                 str(Path(reference_container_path).parent),
                 bind_mounts=bind_mounts,
                 symlinks=symlinks,
-                skip=skip_environment_mount_symlinks,
+                scope=mount_scope,
             )
 
     objective_document = _materialize_effective_objective(request)
@@ -1770,7 +1811,7 @@ def _container_mount_plan(
         else:
             rel = resolved.relative_to(host_path)
             mount_name = mount.container_path.strip("/").replace("/", "_") or "environment_mount"
-            ancestor_mount = f"/workspace/_mounts/{mount_name}"
+            ancestor_mount = f"{root}/_mounts/{mount_name}"
             bind_mounts.append((str(host_path), ancestor_mount, mount.read_only))
             symlinks.append((mount.container_path, f"{ancestor_mount}/{rel}"))
 
@@ -1778,12 +1819,12 @@ def _container_mount_plan(
         bind_mounts.append(
             (
                 request.profiler_support_path,
-                f"/workspace/{request.profiler_support_name}",
+                f"{root}/{request.profiler_support_name}",
                 True,
             )
         )
         bind_mounts.extend(
-            (extra_path, f"/workspace/{extra_name}", True)
+            (extra_path, f"{root}/{extra_name}", True)
             for extra_path, extra_name in request.profiler_support_extra
         )
 
@@ -1805,6 +1846,7 @@ def _container_mount_plan(
             request.project_path_policy,
             request.workspace,
             mask_root=request.log_dir / "sandbox-hidden",
+            container_root=root,
         )
     )
 
@@ -1824,20 +1866,29 @@ def _container_mount_plan(
     return resources, symlinks
 
 
+def _workspace_root(request: RunEnvironmentRequest) -> str:
+    """Return where the request's Docker sandbox mounts the workspace."""
+    return workspace_container_root(
+        str(request.workspace), docker_in_docker=request.docker_in_docker
+    )
+
+
 def _reference_container_path(request: RunEnvironmentRequest) -> str:
     """Return the reference path inside an isolated workspace.
 
     Normal project references retain their repository-relative location. An
-    external reference directory uses the legacy ``/workspace/reference``
-    location while its external symlink targets are mounted separately.
+    external reference directory uses the legacy ``reference`` location under
+    the workspace root while its external symlink targets are mounted
+    separately.
     """
+    root = _workspace_root(request)
     if request.ref_dir is None:
-        return "/workspace/reference"
+        return f"{root}/reference"
     try:
         relative = request.ref_dir.resolve().relative_to(request.workspace.resolve())
     except ValueError:
-        return "/workspace/reference"
-    return f"/workspace/{relative.as_posix()}"
+        return f"{root}/reference"
+    return f"{root}/{relative.as_posix()}"
 
 
 def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, str]] | None:

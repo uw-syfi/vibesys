@@ -16,6 +16,12 @@ from typing import TYPE_CHECKING, override
 
 from vs_project.api import atomic_write_bytes
 from vs_sandbox.command_execution import execute_command
+from vs_sandbox.container_runtime import (
+    SYSBOX_DOCKER_RUNTIME,
+    require_sysbox_runtime,
+    start_nested_daemon,
+    workspace_container_root,
+)
 from vs_sandbox.docker_cli import (
     EXEC_MARKER_ENV,
     SIGNAL_EXEC_SCRIPT,
@@ -219,8 +225,6 @@ class DockerSandbox(WorkspaceSandbox):
     fields off ``self`` and raise), reverting to identity comparison.
     """
 
-    _CONTAINER_ROOT = "/workspace"
-
     __eq__ = object.__eq__
     __hash__ = object.__hash__
 
@@ -251,11 +255,14 @@ class DockerSandbox(WorkspaceSandbox):
         auth_files: list[tuple[str, str]] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
         docker: DockerCli | None = None,
+        docker_in_docker: bool = False,
     ) -> None:
         """Initialize Docker sandbox configuration.
 
         Args:
-            host_workspace: Host path to mount as /workspace in the container.
+            host_workspace: Host path to mount in the container: at
+                ``/workspace``, or at its own host path when *docker_in_docker*
+                is set.
             image: Docker image to use (caller must supply; backends provide
                 their own default).
             gpus: GPU device spec for --gpus flag, or None to skip --gpus
@@ -315,8 +322,27 @@ class DockerSandbox(WorkspaceSandbox):
                 They run again after every container recreation.
             docker: The ``docker`` CLI to run commands through; defaults to
                 the real binary on ``PATH``. Tests pass a fake daemon.
+            docker_in_docker: Run the container under the Sysbox runtime with a
+                Docker daemon of its own inside it (see
+                :mod:`vs_sandbox.container_runtime`), mounting the workspace at
+                its host path. :meth:`start` raises
+                ``ContainerRuntimeUnavailableError`` when the host has no
+                Sysbox; nothing falls back to the host socket. Sysbox cannot
+                forward accelerators, so combining it with *gpus* or
+                *devices* is rejected here.
         """
+        if docker_in_docker and (gpus is not None or devices):
+            message = (
+                "the Sysbox container runtime cannot forward accelerators; "
+                "drop gpus/devices for a docker_in_docker task"
+            )
+            raise ValueError(message)
         self._host_workspace = host_workspace
+        self._docker_in_docker = docker_in_docker
+        #: Where the workspace is mounted in the container.
+        self._container_root = workspace_container_root(
+            host_workspace, docker_in_docker=docker_in_docker
+        )
         self._image = image
         self._gpus = gpus
         self._devices: list[str] = list(devices or [])
@@ -331,7 +357,7 @@ class DockerSandbox(WorkspaceSandbox):
         self._resources: tuple[HostResource, ...] = tuple(resources)
         self._bind_mounts = list(bind_mounts or []) + _bind_mounts_for_resources(self._resources)
         self._agent_path_map: tuple[tuple[str, str], ...] = _agent_path_map(
-            host_workspace, self._CONTAINER_ROOT, self._resources
+            host_workspace, self._container_root, self._resources
         )
         #: The container's own PATH, read once via :attr:`env` and cached for
         #: the sandbox's lifetime; ``None`` until first read.
@@ -404,8 +430,9 @@ class DockerSandbox(WorkspaceSandbox):
             "--name",
             self._container_name,
             "-v",
-            f"{self._host_workspace}:/workspace",
+            f"{self._host_workspace}:{self._container_root}",
         ]
+        cmd.extend(self._container_runtime_arguments())
         if self._auto_remove:
             # Auto-remove the container (and its overlay, which can hold many GB
             # of compiled artifacts) whenever it goes away — including when the
@@ -440,7 +467,7 @@ class DockerSandbox(WorkspaceSandbox):
         cmd.extend(
             [
                 "--workdir",
-                "/workspace",
+                self._container_root,
                 self._image,
                 "sleep",
                 "infinity",
@@ -448,8 +475,14 @@ class DockerSandbox(WorkspaceSandbox):
         )
         return cmd
 
+    def _container_runtime_arguments(self) -> list[str]:
+        """Return the ``docker run`` flags a docker-in-docker sandbox adds."""
+        return ["--runtime", SYSBOX_DOCKER_RUNTIME] if self._docker_in_docker else []
+
     def start(self) -> None:
         """Start the Docker container."""
+        if self._docker_in_docker:
+            require_sysbox_runtime(self._docker)
         self._container_name = f"vibesys-{uuid.uuid4().hex[:12]}"
         cmd = self._start_command()
 
@@ -499,7 +532,7 @@ class DockerSandbox(WorkspaceSandbox):
             raise RuntimeError(message)
 
         # Save metadata for vibesys-shell to reconstruct the environment
-        self._metadata = {
+        self._metadata: dict[str, object] = {
             "image": self._image,
             "gpus": self._gpus,
             "devices": list(self._devices),
@@ -513,10 +546,17 @@ class DockerSandbox(WorkspaceSandbox):
             "env": _non_secret_env(self._env),
             "symlink_commands": [],
         }
+        if self._docker_in_docker:
+            # Only a docker-in-docker sandbox records these; an ordinary
+            # sandbox's metadata file stays exactly as it was.
+            self._metadata["docker_in_docker"] = True
+            self._metadata["container_root"] = self._container_root
         self._save_metadata()
 
         self._remap_agent_user(container_id)
         self._copy_auth_files(container_id)
+        if self._docker_in_docker:
+            start_nested_daemon(self._docker, container_id)
 
         self._lifecycle.before_ready(self)
 
@@ -672,7 +712,15 @@ class DockerSandbox(WorkspaceSandbox):
             _live_containers.pop(container_id, None)
 
     def restart_with_gpus(self, gpus: str | None) -> None:
-        """Restart the container with a new Docker GPU selection."""
+        """Restart the container with a new Docker GPU selection.
+
+        A Sysbox sandbox never had an accelerator (it cannot forward one), so
+        a reselection has nothing to move: restarting it would only discard
+        the run's nested daemon state, and attaching *gpus* would break the
+        runtime the constructor refuses to combine with them.
+        """
+        if self._docker_in_docker:
+            return
         self.stop()
         self._gpus = gpus
         self.start()
@@ -769,7 +817,7 @@ class DockerSandbox(WorkspaceSandbox):
         """
         if self._container_id is None:
             raise DockerSandboxNotStartedError.operation_before_start()
-        workdir = self.agent_path(cwd) if cwd is not None else self._CONTAINER_ROOT
+        workdir = self.agent_path(cwd) if cwd is not None else self._container_root
         env_flags = [flag for key, value in self._env.items() for flag in ("-e", f"{key}={value}")]
         return ["docker", "exec", "-i", "-w", workdir, *env_flags, self._container_id, *argv]
 
@@ -799,7 +847,7 @@ class DockerSandbox(WorkspaceSandbox):
             "-e",
             f"{EXEC_MARKER_ENV}={exec_id}",
             "-w",
-            "/workspace",
+            self._container_root,
             container_id,
             "bash",
             "-c",

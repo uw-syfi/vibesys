@@ -9,7 +9,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.constants import DomainName
@@ -324,6 +332,11 @@ class EnvironmentInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     modal: ModalEnvironmentInput | None = None
+    #: The task's candidate is a container topology (``docker compose``, kind):
+    #: it must run in the Docker environment, whose sandbox container gets a
+    #: Docker daemon of its own under Sysbox. Selecting that environment is
+    #: automatic, like a task-owned Dockerfile.
+    docker_in_docker: StrictBool = False
 
 
 class InputManifest(BaseModel):
@@ -449,6 +462,8 @@ def _append_accuracy(lines: list[str], manifest: InputManifest) -> None:
 
 
 def _append_environment_and_resources(lines: list[str], manifest: InputManifest) -> None:
+    if manifest.environment is not None and manifest.environment.docker_in_docker:
+        lines.extend(["", "[environment]", "docker_in_docker = true"])
     if manifest.environment is not None and manifest.environment.modal is not None:
         lines.extend(
             [
@@ -637,6 +652,12 @@ class InputBundle(BaseModel):
         """
         arguments = set(self.resolved_benchmark_command)
         return {"--telemetry-output", "--trace-graph-json"} <= arguments
+
+    @property
+    def docker_in_docker(self) -> bool:
+        """Return whether the task declared that its candidate needs a Docker daemon."""
+        environment = self.manifest.environment
+        return environment is not None and environment.docker_in_docker
 
     @property
     def modal_entrypoint(self) -> str | None:

@@ -239,6 +239,14 @@ is opt-in from the task Dockerfile's side. A task Dockerfile with its own
 `examples/data-structures/repositories/queue-rs/.vibesys/tasks/verus-mpmc-open/`
 is one) ignores the unused build arg and keeps its own base.
 
+A task that declares `[environment] docker_in_docker = true` adds the `container-runtime`
+toolchain to the agent layer (a Docker engine, the compose plugin, kind, and
+kubectl, pinned in `provider_policy` and applied through the same build-arg
+mechanism). `DockerSandbox` starts such a container under Sysbox with a
+`dockerd` of its own and mounts the workspace at its host path (there is no
+host-socket mode); see `vs_sandbox.container_runtime` and "Docker-in-Docker" in
+`docs/running-vibesys.md`.
+
 The agent layer installs with `apt-get`, so every task Dockerfile and every
 backend base image must be Debian- or Ubuntu-derived; every current backend
 base and task Dockerfile already is. Because setup happens once, at build

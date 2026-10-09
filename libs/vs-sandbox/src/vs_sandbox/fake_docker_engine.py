@@ -13,6 +13,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vs_sandbox.container_runtime import (
+    NESTED_DAEMON_LOG,
+    NESTED_DAEMON_READY_SCRIPT,
+    NESTED_DAEMON_START_SCRIPT,
+)
 from vs_sandbox.docker_cli import EXEC_MARKER_ENV, SIGNAL_EXEC_SCRIPT
 from vs_sandbox.process_execution import shell_exit_status, start_process_group
 
@@ -58,13 +63,17 @@ _FLAGS_WITH_VALUE = frozenset({"-e", "-w", "-u", "--env", "--workdir", "--user"}
 _FLAGS = frozenset({"-i", "-t", "-it", "-d"})
 _AGENT_IDENTITY_SCRIPT = "id -u agent && id -g agent"
 _DAEMON_ERROR_EXIT = 1
+_RUN_ERROR_EXIT = 125
+_DEFAULT_RUNTIMES = ("runc",)
 
 
 @dataclass(slots=True)
 class _Container:
     mounts: dict[str, Path]
     workdir: str
+    runtime: str | None = None
     running: bool = True
+    nested_daemon_started: bool = False
     markers: list[str] = field(default_factory=list)
 
 
@@ -128,12 +137,32 @@ class FakeDockerEngine:
     and the relative paths of the working directory resolve), users, images,
     and process isolation (``exec -u root`` setup scripts are recorded, not run). The real-daemon variant of the sandbox contract
     (``VIBESYS_E2E_DOCKER=1``) is the check on these approximations.
+
+    Runtimes and nested daemons are modelled at the level a sandbox observes:
+    ``docker info`` lists the runtimes the daemon registers, ``docker run
+    --runtime X`` fails the way the daemon does for an unregistered ``X``, and
+    a container's inner daemon answers its readiness check exactly when the
+    sandbox started it with the daemon-start script and the engine was built
+    to let nested daemons start.
     """
 
-    def __init__(self, state_dir: Path, *, agent_ids: tuple[int, int] = (1000, 1000)) -> None:
-        """Keep exec bookkeeping in *state_dir*; the ``agent`` user has *agent_ids*."""
+    def __init__(
+        self,
+        state_dir: Path,
+        *,
+        agent_ids: tuple[int, int] = (1000, 1000),
+        runtimes: Sequence[str] = _DEFAULT_RUNTIMES,
+        nested_daemons_start: bool = True,
+    ) -> None:
+        """Keep exec bookkeeping in *state_dir*; the ``agent`` user has *agent_ids*.
+
+        *runtimes* are the names ``docker info`` reports; *nested_daemons_start*
+        says whether a daemon started inside a container ever becomes ready.
+        """
         self._state_dir = state_dir
         self._agent_ids = agent_ids
+        self._runtimes = tuple(runtimes)
+        self._nested_daemons_start = nested_daemons_start
         self._containers: dict[str, _Container] = {}
         self.calls: list[tuple[str, ...]] = []
 
@@ -150,6 +179,9 @@ class FakeDockerEngine:
                 return self._exec(arguments, timeout_seconds)
             case "stop" | "rm":
                 return self._end(arguments)
+            case "info":
+                runtimes = {name: {"path": name} for name in self._runtimes}
+                return subprocess.CompletedProcess(arguments, 0, json.dumps(runtimes) + "\n", "")
             case other:
                 message = f"FakeDockerEngine does not model `docker {other}`"
                 raise AssertionError(message)
@@ -202,14 +234,22 @@ class FakeDockerEngine:
     def _create(self, arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         mounts: dict[str, Path] = {}
         workdir = "/"
+        runtime: str | None = None
         for index, argument in enumerate(arguments):
             if argument == "-v":
                 host, container, *_ = arguments[index + 1].split(":")
                 mounts[container] = Path(host)
             elif argument == "--workdir":
                 workdir = arguments[index + 1]
+            elif argument == "--runtime":
+                runtime = arguments[index + 1]
+        if runtime is not None and runtime not in self._runtimes:
+            stderr = (
+                f"docker: Error response from daemon: unknown or invalid runtime name: {runtime}.\n"
+            )
+            return subprocess.CompletedProcess(arguments, _RUN_ERROR_EXIT, "", stderr)
         identifier = f"fake{len(self._containers):04d}{uuid.uuid4().hex[:8]}"
-        self._containers[identifier] = _Container(mounts, workdir)
+        self._containers[identifier] = _Container(mounts, workdir, runtime)
         return subprocess.CompletedProcess(arguments, 0, f"{identifier}\n", "")
 
     def _end(self, arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
@@ -231,6 +271,9 @@ class FakeDockerEngine:
         container = self._containers.get(request.container)
         if container is None or not container.running:
             return self._no_such_container(arguments, request.container)
+        nested = self._nested_daemon_exec(container, request, arguments)
+        if nested is not None:
+            return nested
         if request.user == "root":
             # Image user administration (usermod, chown) is recorded in
             # `calls` but not run: this fake has no users.
@@ -255,12 +298,40 @@ class FakeDockerEngine:
             arguments, shell_exit_status(completed.returncode), completed.stdout, completed.stderr
         )
 
+    def _nested_daemon_exec(
+        self, container: _Container, request: _Exec, arguments: tuple[str, ...]
+    ) -> subprocess.CompletedProcess[str] | None:
+        """Answer the sandbox's nested-daemon start and readiness scripts, else ``None``."""
+        if request.user != "root" or request.program[:2] != ("sh", "-c"):
+            return None
+        if request.program[2:] == (NESTED_DAEMON_START_SCRIPT,):
+            container.nested_daemon_started = self._nested_daemons_start
+            return subprocess.CompletedProcess(arguments, 0, "", "")
+        if request.program[2:3] == (NESTED_DAEMON_READY_SCRIPT,):
+            if container.nested_daemon_started:
+                return subprocess.CompletedProcess(arguments, 0, "", "")
+            stderr = (
+                f"nested Docker daemon not ready after {request.program[4]}s\n"
+                f"(see {NESTED_DAEMON_LOG})\n"
+            )
+            return subprocess.CompletedProcess(arguments, _DAEMON_ERROR_EXIT, "", stderr)
+        return None
+
     def _signal_marker(self, marker: str, number: signal.Signals) -> None:
         pidfile = self._pidfile(marker)
         if not pidfile.exists():
             return
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(int(pidfile.read_text()), number)
+
+    def runtime_of(self, container_id: str) -> str | None:
+        """Return the ``--runtime`` *container_id* was created with, if any."""
+        return self._containers[container_id].runtime
+
+    def nested_daemon_running(self, container_id: str) -> bool:
+        """Report whether a daemon started inside *container_id* is up."""
+        container = self._containers.get(container_id)
+        return container is not None and container.running and container.nested_daemon_started
 
     @staticmethod
     def _no_such_container(

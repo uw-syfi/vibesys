@@ -329,6 +329,13 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     build_args += ["--build-arg", f"TOOLCHAINS={' '.join(sorted(set(toolchains)))}"]
     build_args += ["--build-arg", f"RUST_VERSION={provider_policy.RUST_TOOLCHAIN_VERSION}"]
     build_args += ["--build-arg", f"GO_VERSION={provider_policy.GO_TOOLCHAIN_VERSION}"]
+    build_args += ["--build-arg", f"DOCKER_ENGINE_VERSION={provider_policy.DOCKER_ENGINE_VERSION}"]
+    build_args += [
+        "--build-arg",
+        f"DOCKER_COMPOSE_VERSION={provider_policy.DOCKER_COMPOSE_VERSION}",
+    ]
+    build_args += ["--build-arg", f"KIND_VERSION={provider_policy.KIND_VERSION}"]
+    build_args += ["--build-arg", f"KUBECTL_VERSION={provider_policy.KUBECTL_VERSION}"]
     build_args += ["--build-arg", f"PIP_EXTRAS={' '.join(sorted(set(pip_extras)))}"]
 
     target = _BuildTarget(

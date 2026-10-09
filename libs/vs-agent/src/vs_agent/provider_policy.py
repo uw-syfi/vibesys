@@ -161,6 +161,25 @@ RUST_TOOLCHAIN_VERSION = "1.92.0"
 now, so this is the only Rust toolchain version an editor container carries.
 """
 
+CONTAINER_RUNTIME_TOOLCHAIN = "container-runtime"
+"""Toolchain name that adds a Docker engine, the compose plugin, kind, and
+kubectl to the agent image, for tasks whose candidate is a container topology.
+Opt-in like ``rust`` and ``go``; the versions below are its build args."""
+
+DOCKER_ENGINE_VERSION = "27.5.1"
+"""Static Docker engine release (dockerd, containerd, runc, docker CLI) for the
+``container-runtime`` toolchain; the daemon inside a Sysbox sandbox container."""
+
+DOCKER_COMPOSE_VERSION = "2.32.4"
+"""Docker Compose plugin release for the ``container-runtime`` toolchain."""
+
+KIND_VERSION = "0.26.0"
+"""kind release for the ``container-runtime`` toolchain (Kubernetes-in-Docker
+tasks create their cluster on the sandbox's own daemon)."""
+
+KUBECTL_VERSION = "1.32.1"
+"""kubectl release for the ``container-runtime`` toolchain."""
+
 GO_TOOLCHAIN_VERSION = "1.23.12"
 """Go toolchain pin for an agent image's optional ``go`` toolchain layer.
 

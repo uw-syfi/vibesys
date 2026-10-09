@@ -9,6 +9,7 @@ import pytest
 
 from vs_sandbox.api import BeforeReadyContext, CommandResult
 from vs_sandbox.api.symlink_mounts import (
+    SymlinkMountScope,
     collect_symlink_mounts,
     find_mount_root,
     symlink_lifecycle_hooks,
@@ -108,7 +109,7 @@ def test_collect_ignores_internal_and_explicitly_skipped_symlinks(tmp_path: Path
         "/workspace/reference",
         bind_mounts=mounts,
         symlinks=links,
-        skip={"skip-me"},
+        scope=SymlinkMountScope(skip=frozenset({"skip-me"})),
     )
 
     assert mounts == []

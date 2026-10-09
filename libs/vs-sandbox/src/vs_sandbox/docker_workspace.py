@@ -39,13 +39,14 @@ def docker_project_path_resources(
     workspace: Path,
     *,
     mask_root: Path,
+    container_root: str = "/workspace",
 ) -> tuple[HostResource, ...]:
     """Lower project visibility policy to Docker overlay resources.
 
     Read-only project paths are mounted over Docker's writable workspace.
     Hidden paths are overlaid with empty operator-owned files or directories
     below *mask_root*, preserving whether each hidden target is a file or a
-    directory.
+    directory. *container_root* is where the sandbox mounts the workspace.
     """
     resolved = policy.resolve(workspace)
     resolved_workspace = workspace.resolve()
@@ -54,7 +55,7 @@ def docker_project_path_resources(
             protected.path,
             HostResourceAccess.READ_ONLY,
             "container mount",
-            f"/workspace/{protected.path.relative_to(resolved_workspace).as_posix()}",
+            f"{container_root}/{protected.path.relative_to(resolved_workspace).as_posix()}",
         )
         for protected in resolved.read_only_paths
     ]
@@ -71,7 +72,7 @@ def docker_project_path_resources(
                 mask,
                 HostResourceAccess.READ_ONLY,
                 "container mount",
-                f"/workspace/{hidden.path.relative_to(resolved_workspace).as_posix()}",
+                f"{container_root}/{hidden.path.relative_to(resolved_workspace).as_posix()}",
             )
         )
     return tuple(resources)

@@ -153,15 +153,14 @@ outside the project. A run is
 rejected when a root `.env*` file or `agent.toml` is recoverable from Git refs
 or reflogs.
 
-Local runs in the `microservices` domain import two extra host resources,
-because a microservice candidate is a container topology rather than a process
-the agent can start on its own: the Docker control socket, and the task scratch
-directory `/tmp/vibesys-<task>`. The scratch directory is shared with the host
-rather than masked by the sandbox's private `/tmp`, because Docker resolves a
-bind-mount source in the daemon's namespace, so a capture directory only works
-when the path names the same directory inside and outside confinement. Access
-to the Docker socket is equivalent to root on the host, so it is granted only
-for this domain; use `--docker` to confine the workload to a container instead.
+A task whose candidate is a container topology (`docker compose`, kind)
+declares `[environment] docker_in_docker = true`. Like a task `Dockerfile`, the
+key automatically selects the Docker environment (explicit `--docker` is
+harmless); `--run-environment local`, `--modal`, `--skypilot`, Slurm, and
+`--docker-image` conflict with it and the error names the key. The sandbox runs
+under Sysbox with a Docker daemon of its own and never mounts the host socket;
+a host without `sysbox-runc` fails early. See
+[Docker-in-Docker](running-vibesys.md#docker-in-docker).
 
 `VIBESYS_AGENT_SANDBOX` selects the Linux mechanism. `auto` (the default) and
 `bwrap` both require bubblewrap. `landlock` opts in to a weaker backend for
@@ -399,7 +398,8 @@ starts with an actionable error.
 | `--run-environment skypilot` | Local CPU editor with SkyPilot evaluators. | Requires portable task resources and an operator-owned cluster profile. Same overlays as `--docker`. See [Remote Slurm execution](remote-slurm-execution.md). |
 
 A repository-native task may provide
-`.vibesys/tasks/<task>/Dockerfile`. Its presence automatically selects the
+`.vibesys/tasks/<task>/Dockerfile`. Its presence (or `docker_in_docker = true`,
+below) automatically selects the
 Docker environment, builds with the task directory as its complete context,
 and uses the resulting immutable image ID. No manifest field or pre-build step
 is required. Explicit alternative environments and `--docker-image` conflict

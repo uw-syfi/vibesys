@@ -56,6 +56,7 @@ from vs_runtime._checkpoint import (
     RoundRecoveryOutcome,
     RoundTransactionError,
 )
+from vs_runtime._container_runtime_policy import DockerInDockerUnsupportedError
 from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
 from vs_runtime._evaluator_packages import (
     PACKAGE_ROOT_TOKEN,
@@ -159,6 +160,8 @@ from vs_runtime._run_control import (
 )
 from vs_runtime._run_environment import (
     AgentPaths,
+    DockerEnvironment,
+    DockerEnvironmentConfig,
     DockerEnvironmentFacts,
     LocalEnvironment,
     LocalEnvironmentFacts,
@@ -451,7 +454,10 @@ __all__ = [
     "CommandExecutionResult",
     "CommittedStateObserver",
     "CompletedRound",
+    "DockerEnvironment",
+    "DockerEnvironmentConfig",
     "DockerEnvironmentFacts",
+    "DockerInDockerUnsupportedError",
     "DurableEventJournal",
     "EvaluatorPackageError",
     "EvaluatorPackageMetadata",

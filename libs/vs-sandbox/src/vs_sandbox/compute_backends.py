@@ -89,6 +89,7 @@ class ComputeBackendImpl(Protocol):
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
+        docker_in_docker: bool = False,
     ) -> CommandRunner:
         """Construct (do not start) a sandbox configured for this backend.
 
