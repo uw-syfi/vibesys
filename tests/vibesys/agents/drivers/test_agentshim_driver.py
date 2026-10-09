@@ -1801,8 +1801,9 @@ def test_a_cancelled_resumed_turn_raises_and_keeps_its_conversation(
             reached.set()
             # Hold the process open until cancel() reaches its handle, then
             # exit the way a terminated process does.
-            deadline = time.monotonic() + 5
-            while not holder[0].handles[-1].terminated and time.monotonic() < deadline:
+            for _ in range(500):
+                if holder[0].handles[-1].terminated:
+                    break
                 cancelled.wait(0.01)
             return FakeRun(returncode=-15)
         return scripted_turn("codex", text="ok", session_id="thread-1")
