@@ -356,12 +356,30 @@ def test_published_lifecycle_never_goes_backwards(spec: _WorldSpec, operations: 
     asyncio.run(_publishes_monotonically(spec, operations))
 
 
+_NOT_YET_RUNNING = frozenset({EvaluationState.QUEUED, EvaluationState.STARTING})
+
+
+async def _until_recorded_running(coordinator: EvaluationCoordinator, handle_id: str) -> None:
+    """Return once the executor holds the accepted job's identity.
+
+    The Fake's ``accepted`` event fires inside ``submit``, before the executor has
+    recorded the job, so acting on it races the executor's bookkeeping. The
+    executor publishes RUNNING after recording; this yields the event loop, not
+    the clock, until it has.
+    """
+    while True:
+        record = await coordinator.inspect_snapshot(handle_id)
+        if record is not None and record.state not in _NOT_YET_RUNNING:
+            return
+        await asyncio.sleep(0)
+
+
 async def _stopped_after(spec: _WorldSpec, delay_s: float) -> None:
     with tempfile.TemporaryDirectory() as raw:
         world = spec.build(Path(raw))
         executor, coordinator = _stack(world)
         handle = await coordinator.submit(_request())
-        await asyncio.to_thread(world.cluster.accepted.wait)
+        await _until_recorded_running(coordinator, handle.id)
         world.clock.advance(delay_s)
         record = await coordinator.cancel(handle.id)
         # A job that ended before the stop is a success; every other stop is CANCELED.
@@ -433,7 +451,7 @@ async def test_a_stop_beyond_the_confirmation_bound_is_canceling_and_later_confi
     world = spec.build(tmp_path)
     executor, coordinator = _stack(world)
     handle = await coordinator.submit(_request())
-    await asyncio.to_thread(world.cluster.accepted.wait)
+    await _until_recorded_running(coordinator, handle.id)
     record = await coordinator.cancel(handle.id)
     assert record.state is EvaluationState.CANCELING
     assert record.cancel_requested
@@ -452,7 +470,7 @@ async def _finish_time(spec: _WorldSpec) -> tuple[float, float]:
         world = spec.build(Path(raw))
         executor, coordinator = _stack(world)
         handle = await coordinator.submit(_request())
-        await asyncio.to_thread(world.cluster.accepted.wait)
+        await _until_recorded_running(coordinator, handle.id)
         submitted_at = world.clock.now()
         for _ in range(10_000):
             record = await coordinator.snapshot(handle.id)
@@ -492,7 +510,7 @@ async def _stages_reported_while_running(spec: _WorldSpec) -> list[str]:
 
         submitter, coordinator = _stack(world, pause=park)
         handle = await coordinator.submit(_request())
-        await asyncio.to_thread(world.cluster.accepted.wait)
+        await _until_recorded_running(coordinator, handle.id)
         reader = _executor(world)
         seen: list[str] = []
         try:

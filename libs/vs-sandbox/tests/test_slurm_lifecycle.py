@@ -234,17 +234,20 @@ def test_published_lifecycle_never_decreases_for_any_scheduler_timeline(
     )
 
 
+_NOT_YET_RUNNING = frozenset({EvaluationState.QUEUED, EvaluationState.STARTING})
+
+
 async def _until_recorded_running(coordinator: EvaluationCoordinator, handle_id: str) -> None:
     """Return once the executor holds the accepted job's identity.
 
     The Fake's ``accepted`` event fires inside ``submit``, before the executor has
     recorded the job, so a stop sent on it races the executor's own bookkeeping
-    (one scancel or two). The executor publishes RUNNING after recording; this
+    (one scancel or two). The executor publishes RUNNING after recording (a failure ends the wait too); this
     yields the event loop, not the clock, until it has.
     """
     while True:
         record = await coordinator.inspect_snapshot(handle_id)
-        if record is not None and record.state is EvaluationState.RUNNING:
+        if record is not None and record.state not in _NOT_YET_RUNNING:
             return
         await asyncio.sleep(0)
 
