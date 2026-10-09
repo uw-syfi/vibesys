@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._git_process import git_environment, run_git
+from vs_project._head_reader import Commit, Unborn, locate_git_dir, read_head
 from vs_project.project import Project
 
 if TYPE_CHECKING:
@@ -606,7 +607,19 @@ class GitTracker:
             self._events.snapshot_recorded(label, commit=None)
 
     def current_sha(self) -> str | None:
-        """Return the HEAD commit sha, or ``None`` if it cannot be resolved."""
+        """Return the HEAD commit sha, or ``None`` if it cannot be resolved.
+
+        Never cached: it reads the repository files on each call (no process
+        spawn for the plain layout), so commits made by anyone, including an
+        agent's own ``git commit``, are observed immediately.
+        """
+        git_dir = self._git_dir or locate_git_dir(self.root)
+        if git_dir is not None:
+            state = read_head(git_dir)
+            if isinstance(state, Commit):
+                return state.sha
+            if isinstance(state, Unborn):
+                return None
         try:
             result = self.run(["git", "rev-parse", "HEAD"], check=False)
             if result.returncode != 0:
