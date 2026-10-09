@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import socket
 import sys
 import threading
@@ -204,19 +205,25 @@ class TestLauncher:
     ) -> None:
         cancel = threading.Event()
         cancel.set()
+        output = bytearray()
         SlurmGpuLauncher(_config(tmp_path), windows=_no_windows).run(
             GpuJobRequest(gpus=1, time_minutes=5),
             GpuCommand(argv=("sleep", "60"), cwd=tmp_path, env=dict(os.environ)),
-            write=lambda _chunk: None,
+            write=output.extend,
             cancel=cancel,
         )
-        srun_args, scancel_args = slurm_log.read_text().splitlines()[:2]
-        job_name = next(
-            part.strip("'") for part in srun_args.split(", ") if "--job-name=" in part
-        ).removeprefix("--job-name=")
+        # The launcher announces the job name before it starts srun, and cancel is
+        # synchronous, so both facts are settled when run returns. srun may be
+        # stopped before it logs anything, so the log's line order is not asserted.
+        match = re.search(r"job-name=(\S+)", output.decode())
+        assert match is not None
+        job_name = match.group(1)
 
-        assert f"--name={job_name}" in scancel_args
-        assert "--me" in scancel_args
+        scancel_lines = [
+            line for line in slurm_log.read_text().splitlines() if f"--name={job_name}" in line
+        ]
+        assert len(scancel_lines) == 1
+        assert "--me" in scancel_lines[0]
 
 
 class _RecordingLauncher:
