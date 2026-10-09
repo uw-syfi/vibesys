@@ -43,10 +43,14 @@ def sandbox_tmp_path() -> Iterator[Path]:
 # the code: a newly found counterexample cannot fail an unrelated PR. `explore`
 # is the randomized, larger run for finding new bugs; select it by hand with
 # `HYPOTHESIS_PROFILE=explore`.
+# `dev` and `ci` run 25 examples, not Hypothesis's 100. Branch coverage of the
+# libraries is unchanged at 25 (measured for `vs-core`), while the property
+# suites that do not set their own `max_examples` run about 3x faster; a test
+# that needs a deeper search states it with `@settings(max_examples=...)`.
 # Every profile states `derandomize` explicitly: an unset option resolves from
 # whichever profile is loaded, so `explore` would otherwise inherit `ci`'s.
-settings.register_profile("dev", deadline=None, derandomize=False)
-settings.register_profile("ci", deadline=None, derandomize=True, print_blob=True)
+settings.register_profile("dev", deadline=None, derandomize=False, max_examples=25)
+settings.register_profile("ci", deadline=None, derandomize=True, print_blob=True, max_examples=25)
 settings.register_profile(
     "explore", deadline=None, derandomize=False, max_examples=500, print_blob=True
 )
