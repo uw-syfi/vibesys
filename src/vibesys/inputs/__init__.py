@@ -26,6 +26,13 @@ from vibesys.inputs._manifest import (
     render_input_manifest,
 )
 from vibesys.inputs._objective import with_operator_constraints
+from vibesys.inputs._objectives import (
+    OBJECTIVES_NAME,
+    ObjectiveAxisInput,
+    ObjectivesInput,
+    ParetoInput,
+    load_objectives,
+)
 from vibesys.inputs._synthesis import (
     EVALUATOR_SRC_DIRNAME,
     InputSynthesisError,
@@ -36,6 +43,7 @@ from vibesys.inputs._synthesis import (
 __all__ = [
     "EVALUATOR_SRC_DIRNAME",
     "MANIFEST_NAME",
+    "OBJECTIVES_NAME",
     "PROTOCOL_OUTPUT_FLAG",
     "AgentInput",
     "BenchmarkCommand",
@@ -47,12 +55,16 @@ __all__ = [
     "InputManifest",
     "InputSynthesisError",
     "ModalEnvironmentInput",
+    "ObjectiveAxisInput",
+    "ObjectivesInput",
+    "ParetoInput",
     "ProfileGuidedInput",
     "SynthesizedInputSpec",
     "WorkspaceInput",
     "WorkspaceSource",
     "benchmark_output_argument",
     "load_input_bundle",
+    "load_objectives",
     "load_project_task",
     "render_input_manifest",
     "synthesize_input_bundle",

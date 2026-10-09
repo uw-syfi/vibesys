@@ -79,6 +79,8 @@ def test_reconcile_trims_ids_and_deduplicates_by_first_occurrence(tmp_path: Path
         (["org/foo"], "entry 0 is not an object"),
         ([{"revision": "abc"}], "needs a non-empty string"),
         ([{"id": "org/foo", "revision": 3}], 'entry 0 "revision" must be a string'),
+        ([{"id": "org/foo", "revison": "abc"}], 'entry 0 has unknown key "revison"'),
+        ([{"model_id": "org/foo", "extra": 1}], 'unknown key "extra"'),
     ],
 )
 def test_reconcile_rejects_malformed_manifest(
