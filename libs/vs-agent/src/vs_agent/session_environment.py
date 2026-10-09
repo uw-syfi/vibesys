@@ -64,8 +64,6 @@ BASE_ENV_ALLOWLIST: frozenset[str] = frozenset(
         "CUDA_VISIBLE_DEVICES",
         "HIP_VISIBLE_DEVICES",
         "ROCR_VISIBLE_DEVICES",
-        # The container runtime an agent may drive (see container_runtime_resources).
-        "DOCKER_HOST",
         # VibeSys's own sandbox controls, read from the session environment.
         ALLOW_ENV,
         SANDBOX_DISABLE_ENV,

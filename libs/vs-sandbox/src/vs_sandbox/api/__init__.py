@@ -27,9 +27,15 @@ if TYPE_CHECKING:
         create_compute_backend,
         register_compute_backend,
     )
+    from vs_sandbox.container_runtime import (
+        ContainerRuntimeUnavailableError,
+        NestedDaemonError,
+        require_sysbox_runtime,
+        workspace_container_root,
+    )
     from vs_sandbox.cuda_backend import CudaBackend
     from vs_sandbox.device_lease import DeviceLease
-    from vs_sandbox.docker_cli import DockerCli
+    from vs_sandbox.docker_cli import DockerCli, SubprocessDockerCli
     from vs_sandbox.docker_sandbox import AGENT_HOME, DockerSandbox
     from vs_sandbox.execution import CommandResult, CommandRunner
     from vs_sandbox.gpu_monitor import (
@@ -85,6 +91,7 @@ __all__ = [
     "CommandRunner",
     "ComputeBackend",
     "ComputeBackendImpl",
+    "ContainerRuntimeUnavailableError",
     "ContentionMonitor",
     "CudaBackend",
     "Device",
@@ -103,6 +110,7 @@ __all__ = [
     "LinuxBackend",
     "LocalBackend",
     "LocalShellRunner",
+    "NestedDaemonError",
     "ProjectPathPolicy",
     "ProjectPathPolicyError",
     "RocmBackend",
@@ -113,6 +121,7 @@ __all__ = [
     "SandboxSession",
     "SandboxUnavailableError",
     "SeatbeltSandbox",
+    "SubprocessDockerCli",
     "SystemAcceleratorDiscovery",
     "TrainiumBackend",
     "WorkspaceSandbox",
@@ -127,8 +136,10 @@ __all__ = [
     "pick_gpu",
     "query_gpu_info",
     "register_compute_backend",
+    "require_sysbox_runtime",
     "start_sandbox",
     "stop_sandbox",
+    "workspace_container_root",
 ]
 
 _LAZY_EXPORTS = {
@@ -145,6 +156,13 @@ _LAZY_EXPORTS = {
     "SandboxKind": ("compute_backends", "SandboxKind"),
     "create_compute_backend": ("compute_backends", "create_compute_backend"),
     "register_compute_backend": ("compute_backends", "register_compute_backend"),
+    "ContainerRuntimeUnavailableError": (
+        "container_runtime",
+        "ContainerRuntimeUnavailableError",
+    ),
+    "NestedDaemonError": ("container_runtime", "NestedDaemonError"),
+    "require_sysbox_runtime": ("container_runtime", "require_sysbox_runtime"),
+    "workspace_container_root": ("container_runtime", "workspace_container_root"),
     "CudaBackend": ("cuda_backend", "CudaBackend"),
     "DeviceLease": ("device_lease", "DeviceLease"),
     "GpuContentionMonitor": ("gpu_monitor", "GpuContentionMonitor"),
@@ -157,6 +175,7 @@ _LAZY_EXPORTS = {
     "TrainiumBackend": ("trainium_backend", "TrainiumBackend"),
     "AGENT_HOME": ("docker_sandbox", "AGENT_HOME"),
     "DockerCli": ("docker_cli", "DockerCli"),
+    "SubprocessDockerCli": ("docker_cli", "SubprocessDockerCli"),
     "DockerSandbox": ("docker_sandbox", "DockerSandbox"),
     "CommandRunner": ("execution", "CommandRunner"),
     "CommandResult": ("execution", "CommandResult"),

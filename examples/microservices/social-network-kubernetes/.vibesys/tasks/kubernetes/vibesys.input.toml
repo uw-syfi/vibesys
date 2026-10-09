@@ -3,6 +3,9 @@ version = 1
 [agent]
 domain = "microservices"
 
+[environment]
+docker_in_docker = true
+
 [evaluator]
 name = "vibesys-evaluator-microservice"
 version = "0.1.0"

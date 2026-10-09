@@ -328,65 +328,21 @@ def _provider_state(ctx: HostResourceContext) -> Iterable[HostResource]:
     return declare_provider_state_resources(ctx.env, profile=profile)
 
 
-#: Conventional host scratch root for a repository-native task. Container
-#: workloads bind-mount capture directories from here, and Docker resolves a
-#: bind source in the daemon's namespace rather than the agent's, so the path
-#: only works when it names the same directory inside and outside confinement.
-TASK_SCRATCH_ROOT = Path("/tmp")  # noqa: S108  # lint-waiver: LW-010108 [S108]; container workloads require this shared host scratch path in both mount namespaces.
-
-
-def task_scratch_dir(task_name: str) -> Path:
-    """Return the host scratch directory shared with a task's containers."""
-    return TASK_SCRATCH_ROOT / f"vibesys-{task_name}"
-
-
-def container_runtime_resources(env: Mapping[str, str] | None = None) -> tuple[HostResource, ...]:
-    """Declare the Docker control socket for tasks that orchestrate containers.
-
-    A microservice benchmark *is* a container topology: without the socket the
-    agent cannot build, start, or profile the system it is optimizing, and the
-    round-one routing check concludes the candidate does not run. The default
-    Linux confinement exposes no ``/var/run``, so the socket has to be imported
-    deliberately.
-
-    This is a real widening. Access to the daemon is equivalent to root on the
-    host, so it is declared only for the domain that needs it rather than for
-    every local agent. Run with ``--docker`` when the workload should be
-    confined to a container instead.
-    """
-    env = env if env is not None else os.environ
-    paths = [Path("/var/run/docker.sock")]
-    host = env.get("DOCKER_HOST", "")
-    if host.startswith("unix://"):
-        paths.append(Path(host.removeprefix("unix://")))
-    return _resources(
-        paths,
-        access=HostResourceAccess.READ_WRITE,
-        purpose="Docker control socket",
-    )
-
-
-def task_agent_host_resources(  # noqa: PLR0913  # lint-waiver: LW-011101 [PLR0913]; preserve the public keyword options that independently declare task agent host resource access.
+def task_agent_host_resources(
     *,
-    container_topology: bool,
     cli_sandboxed: bool,
-    task_name: str | None,
     evaluator_package_root: Path | None,
     evaluator_tool_roots: tuple[Path, ...] = (),
-    env: Mapping[str, str] | None = None,
 ) -> tuple[HostResource, ...]:
     """Declare the extra host resources a repository-native task's agent needs.
 
-    Two independent widenings, both host-only. A container topology needs the
-    Docker socket and a scratch directory that names the same path inside and
-    outside confinement, because Docker resolves a bind-mount source in the
-    daemon's namespace rather than the agent's. Separately, a packaged
-    benchmark command may name ``${PACKAGE_ROOT}`` and preinstalled evaluator
-    tools. Those resources live outside the workspace, so without importing
-    them the command dies on a missing directory and the Profiler returns no
-    evidence at all. Imports are read-only because evaluator packages and
-    selected content-addressed tool installations are integrity-checked input
-    no role may edit. The writable tool-cache parent remains operator-only.
+    A packaged benchmark command may name ``${PACKAGE_ROOT}`` and preinstalled
+    evaluator tools. Those resources live outside the workspace, so without
+    importing them the command dies on a missing directory and the Profiler
+    returns no evidence at all. Imports are read-only because evaluator
+    packages and selected content-addressed tool installations are
+    integrity-checked input no role may edit. The writable tool-cache parent
+    remains operator-only.
 
     Container backends run the agent inside their own image and own resource
     exposure themselves, so a sandboxed run declares nothing here.
@@ -394,15 +350,6 @@ def task_agent_host_resources(  # noqa: PLR0913  # lint-waiver: LW-011101 [PLR09
     if cli_sandboxed:
         return ()
     resources: tuple[HostResource, ...] = ()
-    if container_topology:
-        resources = container_runtime_resources(env)
-        if task_name is not None:
-            scratch = task_scratch_dir(task_name)
-            scratch.mkdir(parents=True, exist_ok=True)
-            resources = (
-                *resources,
-                HostResource(scratch, HostResourceAccess.READ_WRITE, "task container scratch"),
-            )
     if evaluator_package_root is not None:
         resources = (
             *resources,

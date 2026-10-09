@@ -17,7 +17,6 @@ from vibesys.config import BUNDLED_RESOURCES, as_config
 from vibesys.constants import (
     PROJECT_ROOT,
     ComputeBackend,
-    DomainName,
 )
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import (
@@ -205,7 +204,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     existing = request.resume is not None
     orchestration_descriptor = request.orchestration
     orchestration_resume = resume_policy or exact_resume_descriptor
-    profiler_domain = bundle.domain
     skills_dirs = request.skills_dirs
     run_environment = request.run_environment
     backend = request.backend
@@ -576,6 +574,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 framework_root=PROJECT_ROOT,
                 project_path_policy=project_path_policy,
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
+                docker_in_docker=bundle.docker_in_docker,
             )
         environment_resources = open_run_environment_resources(
             run_environment_request,
@@ -588,9 +587,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         # resources the default confinement withholds. Other domains keep the
         # narrower default set.
         agent_host_resources = task_agent_host_resources(
-            container_topology=profiler_domain is DomainName.MICROSERVICES,
             cli_sandboxed=session.view.cli_sandboxed,
-            task_name=task_name,
             evaluator_package_root=evaluator_package_root,
             evaluator_tool_roots=evaluator_tool_roots,
         )

@@ -593,6 +593,45 @@ def test_fresh_task_dockerfile_rejects_conflicting_environment_flags(
         parse_cli_invocation(["--project", str(project), "--task", "latency", *flags])
 
 
+def _declare_docker_in_docker(task: Path) -> None:
+    manifest = task / "vibesys.input.toml"
+    manifest.write_text(
+        manifest.read_text().replace(
+            '[agent]\ndomain = "generic"\n',
+            '[agent]\ndomain = "generic"\n\n[environment]\ndocker_in_docker = true\n',
+        )
+    )
+
+
+@pytest.mark.parametrize("environment_flag", [[], ["--docker"], ["--run-environment", "docker"]])
+def test_docker_in_docker_task_selects_docker(environment_flag: list[str], tmp_path: Path) -> None:
+    project = tmp_path / "repository"
+    project.mkdir()
+    _declare_docker_in_docker(_write_repository_task(project, "latency"))
+
+    invocation = parse_cli_invocation(
+        ["--project", str(project), "--task", "latency", *environment_flag]
+    )
+
+    assert invocation.args.input_bundle.docker_in_docker is True
+    assert run_environment_spec_from_args(invocation.args).name == "docker"
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [["--run-environment", "local"], ["--modal"], ["--skypilot"], ["--docker-image", "custom:1"]],
+)
+def test_docker_in_docker_task_rejects_conflicting_environment_flags_naming_the_key(
+    flags: list[str], tmp_path: Path
+) -> None:
+    project = tmp_path / "repository"
+    project.mkdir()
+    _declare_docker_in_docker(_write_repository_task(project, "latency"))
+
+    with pytest.raises(ValueError, match="docker_in_docker"):
+        parse_cli_invocation(["--project", str(project), "--task", "latency", *flags])
+
+
 def test_repository_native_project_implicitly_selects_its_only_task(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

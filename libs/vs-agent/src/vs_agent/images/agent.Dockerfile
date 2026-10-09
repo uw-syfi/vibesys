@@ -15,10 +15,16 @@ ARG CLAUDE_VERSION
 ARG CODEX_VERSION
 ARG GEMINI_VERSION
 ARG OPENCODE_VERSION
-# Space-separated subset of "rust go". Empty skips both toolchains.
+# Space-separated subset of "rust go container-runtime". Empty skips all of them.
 ARG TOOLCHAINS=""
 ARG RUST_VERSION
 ARG GO_VERSION
+# Versions of the "container-runtime" toolchain: a Docker engine (dockerd and
+# the docker CLI), the compose plugin, kind, and kubectl.
+ARG DOCKER_ENGINE_VERSION
+ARG DOCKER_COMPOSE_VERSION
+ARG KIND_VERSION
+ARG KUBECTL_VERSION
 # Space-separated extra pip requirements an execution environment needs in
 # the editor container (the Modal environment adds the `modal` client so a
 # candidate's `modal run` works). Empty installs nothing extra.
@@ -129,6 +135,49 @@ RUN set -eux; \
         *) ;; \
     esac
 
+# Container-topology tasks (compose or kind candidates) run their own Docker
+# daemon inside the sandbox container, started at container start by
+# `vs_sandbox` under the Sysbox runtime. Only the tools land here: static
+# engine binaries (no apt repository key to manage), the compose plugin, kind,
+# and kubectl. Opt-in like the language toolchains, so ordinary tasks' images
+# do not grow. The `docker` group owns the daemon socket; the agent joins it
+# below, once the agent user exists.
+RUN set -eux; \
+    case " ${TOOLCHAINS} " in \
+        *" container-runtime "*) \
+            arch="$(dpkg --print-architecture)"; \
+            case "${arch}" in \
+                amd64) docker_arch=x86_64; compose_arch=x86_64; go_arch=amd64 ;; \
+                arm64) docker_arch=aarch64; compose_arch=aarch64; go_arch=arm64 ;; \
+                *) echo "unsupported architecture for the container runtime: ${arch}" >&2; exit 1 ;; \
+            esac; \
+            apt-get update -qq; \
+            apt-get install -y -qq --no-install-recommends \
+                iptables e2fsprogs pigz xz-utils procps kmod; \
+            rm -rf /var/lib/apt/lists/*; \
+            curl -fsSL --retry 5 --retry-delay 5 -o /tmp/docker.tgz \
+                "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_ENGINE_VERSION}.tgz"; \
+            tar -xzf /tmp/docker.tgz -C /usr/local/bin --strip-components=1; \
+            rm -f /tmp/docker.tgz; \
+            mkdir -p /usr/local/lib/docker/cli-plugins; \
+            curl -fsSL --retry 5 --retry-delay 5 \
+                -o /usr/local/lib/docker/cli-plugins/docker-compose \
+                "https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_VERSION}/docker-compose-linux-${compose_arch}"; \
+            chmod +x /usr/local/lib/docker/cli-plugins/docker-compose; \
+            curl -fsSL --retry 5 --retry-delay 5 -o /usr/local/bin/kind \
+                "https://kind.sigs.k8s.io/dl/v${KIND_VERSION}/kind-linux-${go_arch}"; \
+            curl -fsSL --retry 5 --retry-delay 5 -o /usr/local/bin/kubectl \
+                "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${go_arch}/kubectl"; \
+            chmod +x /usr/local/bin/kind /usr/local/bin/kubectl; \
+            docker --version; \
+            docker compose version; \
+            kind version; \
+            kubectl version --client; \
+            groupadd --force docker; \
+            ;; \
+        *) ;; \
+    esac
+
 # The sandbox remaps this uid to the host uid at container start, so what
 # matters here is the fixed uid (1000), not the name. Reuse a base image's
 # existing uid-1000 account by renaming it instead of failing on a collision.
@@ -141,6 +190,12 @@ RUN set -eux; \
     else \
         useradd --create-home --uid 1000 --shell /bin/bash agent; \
     fi
+
+RUN set -eux; \
+    case " ${TOOLCHAINS} " in \
+        *" container-runtime "*) usermod -aG docker agent ;; \
+        *) ;; \
+    esac
 
 RUN mkdir -p /workspace && chown agent /workspace
 

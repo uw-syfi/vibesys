@@ -133,16 +133,42 @@ a Docker Compose topology the agent must build, start, and trace. Such a task
 needs Docker Engine reachable without `sudo` and, when its benchmark shells out
 to Go helpers, a Go toolchain on `PATH`.
 
-A local run in this domain therefore imports two domain-specific host resources
-the default confinement withholds: the Docker control socket, and the task
-scratch directory `/tmp/vibesys-<task>`. The scratch directory is shared with the host
-rather than masked by the sandbox's private `/tmp`, because Docker resolves a
-bind-mount source in the daemon's namespace, not the agent's, so a capture
-directory only resolves when the path names the same directory inside and
-outside confinement. Sharing it also makes the benchmark's telemetry artifacts
-durable and readable by the profiler in later rounds. Reaching the Docker
-socket is equivalent to root on the host, so this widening is scoped to this
-domain; use `--docker` to confine the workload to a container instead.
+A `microservices` task therefore opts in to a Docker daemon of its own with
+`docker_in_docker = true`:
+
+```toml
+[environment]
+docker_in_docker = true
+```
+
+The key selects the Docker run environment automatically, exactly like a
+task-owned `Dockerfile` (explicit `--docker` is harmless). A host run, Modal,
+SkyPilot, Slurm, or `--run-environment local` with the key is an error that
+names it. Without the key a task gets no container runtime at all: VibeSys
+never mounts or imports the host's Docker socket.
+
+### Docker-in-Docker
+
+The agent container runs under the Sysbox runtime (`docker run --runtime
+sysbox-runc`, never `--privileged`) and VibeSys starts `dockerd` inside it
+before the first turn, waiting until `docker info` answers. The agent can
+`docker compose up --build` or create kind clusters inside the sandbox. The
+daemon's images, containers, and volumes live in the sandbox container and
+disappear with it, and trusted evaluator commands run in the same container, so
+they use the same daemon. The sandbox is CPU-only: Sysbox cannot forward
+accelerators.
+
+The workspace is mounted at the same path inside the container as on the host
+(not at `/workspace`), so a compose file's relative or absolute bind sources
+mean the same directory to the agent and to the daemon; `/tmp` is the
+sandbox's own. The agent image gains the Docker engine, the compose plugin,
+kind, and kubectl only for these tasks (the `container-runtime` toolchain;
+versions are pinned in `vs_agent.provider_policy`), so ordinary tasks' images
+do not grow.
+
+If the host's Docker daemon does not register the `sysbox-runc` runtime, the
+run fails before building any image, naming the missing runtime and the key.
+There is no fallback to the host socket or to a plain container.
 
 A benchmark command that names both `--telemetry-output` and
 `--trace-graph-json` declares that the task provisions instrumentation and a

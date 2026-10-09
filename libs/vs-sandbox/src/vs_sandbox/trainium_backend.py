@@ -114,6 +114,7 @@ class TrainiumBackend:
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
+        docker_in_docker: bool = False,
     ) -> CommandRunner:
         """Create a local or Trainium-enabled Docker sandbox."""
         # Deferred: importing DockerSandbox registers process-wide signal and
@@ -187,6 +188,7 @@ class TrainiumBackend:
                 log_path=log_path,
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
+                docker_in_docker=docker_in_docker,
             )
 
         message = f"Unknown sandbox kind: {kind!r}"

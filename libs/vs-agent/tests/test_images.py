@@ -16,7 +16,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_agent.api import CLI_VERSIONS, GO_TOOLCHAIN_VERSION, NODE_VERSION, RUST_TOOLCHAIN_VERSION
+from vs_agent.api import (
+    CLI_VERSIONS,
+    CONTAINER_RUNTIME_TOOLCHAIN,
+    DOCKER_COMPOSE_VERSION,
+    DOCKER_ENGINE_VERSION,
+    GO_TOOLCHAIN_VERSION,
+    KIND_VERSION,
+    KUBECTL_VERSION,
+    NODE_VERSION,
+    RUST_TOOLCHAIN_VERSION,
+)
 from vs_agent.api.images import agent_image
 
 if TYPE_CHECKING:
@@ -72,6 +82,20 @@ def _expected_version_args() -> tuple[str, ...]:
     return tuple(args)
 
 
+def _expected_container_runtime_args() -> tuple[str, ...]:
+    """The container-runtime build args, read from :mod:`vs_agent.api` like the builder does."""
+    return (
+        "--build-arg",
+        f"DOCKER_ENGINE_VERSION={DOCKER_ENGINE_VERSION}",
+        "--build-arg",
+        f"DOCKER_COMPOSE_VERSION={DOCKER_COMPOSE_VERSION}",
+        "--build-arg",
+        f"KIND_VERSION={KIND_VERSION}",
+        "--build-arg",
+        f"KUBECTL_VERSION={KUBECTL_VERSION}",
+    )
+
+
 def test_agent_image_base_only_argv() -> None:
     """No task Dockerfile: one build, directly on the base image."""
     runner = _FakeRunner()
@@ -100,6 +124,7 @@ def test_agent_image_base_only_argv() -> None:
         f"RUST_VERSION={RUST_TOOLCHAIN_VERSION}",
         "--build-arg",
         f"GO_VERSION={GO_TOOLCHAIN_VERSION}",
+        *_expected_container_runtime_args(),
         "--build-arg",
         "PIP_EXTRAS=",
         str(_AGENT_IMAGE_DIR),
@@ -180,6 +205,7 @@ def test_agent_image_chains_task_image_as_base(tmp_path: Path) -> None:
         f"RUST_VERSION={RUST_TOOLCHAIN_VERSION}",
         "--build-arg",
         f"GO_VERSION={GO_TOOLCHAIN_VERSION}",
+        *_expected_container_runtime_args(),
         "--build-arg",
         "PIP_EXTRAS=",
         str(_AGENT_IMAGE_DIR),
@@ -258,3 +284,26 @@ def test_pip_extras_are_rendered_sorted_and_deduplicated() -> None:
 
     build_argv, _cwd, _timeout = runner.calls[0]
     assert "PIP_EXTRAS=b modal>=0.66" in build_argv
+
+
+def test_container_runtime_toolchain_is_opt_in_and_pinned_outside_the_dockerfile() -> None:
+    """The container-runtime layer is selected by toolchain name, never by default,
+    and its versions arrive as build args from the agent API like every other pin."""
+    ordinary = _FakeRunner()
+    agent_image("python:3.12-bookworm", command_runner=ordinary)
+    topology = _FakeRunner()
+    agent_image(
+        "python:3.12-bookworm",
+        toolchains={CONTAINER_RUNTIME_TOOLCHAIN, "go"},
+        command_runner=topology,
+    )
+
+    ordinary_argv = ordinary.calls[0][0]
+    topology_argv = topology.calls[0][0]
+    assert "TOOLCHAINS=" in ordinary_argv
+    assert "TOOLCHAINS=container-runtime go" in topology_argv
+    assert set(_expected_container_runtime_args()) <= set(topology_argv)
+    dockerfile = _AGENT_DOCKERFILE.read_text(encoding="utf-8")
+    assert f'*" {CONTAINER_RUNTIME_TOOLCHAIN} "*' in dockerfile
+    for version in (DOCKER_ENGINE_VERSION, DOCKER_COMPOSE_VERSION, KIND_VERSION, KUBECTL_VERSION):
+        assert version not in dockerfile
