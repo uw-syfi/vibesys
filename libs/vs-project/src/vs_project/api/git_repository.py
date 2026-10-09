@@ -8,8 +8,9 @@ changed. The tracker asks for semantic operations ("is ``a`` an ancestor of
 so an implementation is free to run the Git CLI, call a library, or keep the
 repository in memory.
 
-Implementations: ``CliGitRepository`` (the reference, runs ``git``). The
-contract suite in ``libs/vs-project/tests/git_contract`` runs every case against
+Implementations: ``CliGitRepository`` (the reference, runs ``git``) and
+``Pygit2GitRepository`` (libgit2 in process for the portable operations, the
+CLI for the rest). The contract suite in ``libs/vs-project/tests/git_contract`` runs every case against
 every registered implementation; its CLI run is the oracle for the rest.
 
 Conventions
@@ -200,7 +201,10 @@ class GitRepository(Protocol):
         ...
 
     def is_valid_ref_name(self, name: str) -> bool:
-        """Whether the full ref name ``name`` is legal (portable)."""
+        """Whether the full ref name ``name`` is legal (portable).
+
+        A name that starts with ``-`` is never legal.
+        """
         ...
 
     # -- reading history -----------------------------------------------------
@@ -214,7 +218,10 @@ class GitRepository(Protocol):
         ...
 
     def current_branch(self) -> str | None:
-        """The branch ``HEAD`` names, or ``None`` when detached (portable)."""
+        """The branch ``HEAD`` names, or ``None`` when detached (portable).
+
+        A tag that shares the branch's name does not change the answer.
+        """
         ...
 
     def branch_exists(self, branch: str) -> bool:
@@ -266,7 +273,10 @@ class GitRepository(Protocol):
         ...
 
     def read_blob(self, revision: Revision, path: str) -> bytes | None:
-        """The bytes of ``path`` in ``revision``'s tree, or ``None`` when absent (portable)."""
+        """The bytes of the file ``path`` in ``revision``'s tree (portable).
+
+        ``None`` when absent, or when ``path`` names a directory.
+        """
         ...
 
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
@@ -320,7 +330,8 @@ class GitRepository(Protocol):
     def tracked_changes_since_head(self, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
         """Sorted tracked paths under ``pathspecs`` whose content differs from ``HEAD``.
 
-        Index and worktree both count. Raises ``GitCommandError`` (portable).
+        Index and worktree both count; names are reported as they are, unquoted.
+        Raises ``GitCommandError`` (portable).
         """
         ...
 
@@ -392,7 +403,10 @@ class GitRepository(Protocol):
     # -- restoring the worktree ----------------------------------------------
 
     def reset_index(self) -> None:
-        """Set the index to ``HEAD``; ``HEAD`` and the worktree stay (portable)."""
+        """Set the index to ``HEAD``; ``HEAD`` and the worktree stay.
+
+        Raises ``GitCommandError`` when ``HEAD`` is unborn (portable).
+        """
         ...
 
     def clean_untracked(self, *, include_ignored: bool, protect: Pathspec) -> bool:

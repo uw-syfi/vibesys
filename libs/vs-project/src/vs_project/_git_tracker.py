@@ -9,8 +9,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vs_project._cli_git_repository import CliGitRepository
 from vs_project._framework_writes import FRAMEWORK_WRITES
+from vs_project._git_backend import open_git_repository
 from vs_project.api.git_repository import GitCommandError, GitError, PatchStyle, StagingError
 from vs_project.project import Project
 
@@ -57,9 +57,9 @@ class GitTracker:
 
     The tracker holds policy only (what to snapshot, exclude, protect, and how a
     checkpoint is validated); every Git operation goes through ``repository``, a
-    :class:`~vs_project.api.git_repository.GitRepository`. It defaults to
-    ``CliGitRepository`` over ``root``, which reports operational faults to
-    ``events``.
+    :class:`~vs_project.api.git_repository.GitRepository`. Unless one is
+    injected, ``open_git_repository`` picks the implementation over ``root``
+    (see ``_git_backend``); it reports operational faults to ``events``.
     """
 
     # Compiled-accelerator artifacts an agent may emit into the workspace.
@@ -126,7 +126,7 @@ class GitTracker:
             self.root
         ).state.git_integration(run_id)
         self._git: GitRepository = (
-            repository if repository is not None else CliGitRepository(self.root, faults=events)
+            repository if repository is not None else open_git_repository(self.root, faults=events)
         )
         self._work_tree: Path | None = None
 
