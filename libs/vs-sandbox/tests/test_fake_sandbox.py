@@ -6,6 +6,8 @@ file covers scripting and call-recording, which only a fake has.
 
 from __future__ import annotations
 
+import threading
+
 from vs_sandbox.api import CommandResult
 from vs_sandbox.api.testing import FakeCommandRunner
 
@@ -60,3 +62,50 @@ def test_invalid_commands_are_not_recorded() -> None:
 
 def test_two_instances_have_distinct_ids() -> None:
     assert FakeCommandRunner().id != FakeCommandRunner().id
+
+
+class _ObservedCancel(threading.Event):
+    """A cancel event that records whether the fake was hanging when waited on.
+
+    The fake waits on the event only once its command is blocked, so the
+    recorded value is the fake's state at the moment a real cancel could land.
+    A single-threaded stand-in for the interleaving "cancel arrives while the
+    command is running".
+    """
+
+    def __init__(self, runner: FakeCommandRunner) -> None:
+        super().__init__()
+        self._runner = runner
+        self.hanging_when_waited_on: bool | None = None
+
+    def wait(self, timeout: float | None = None) -> bool:
+        del timeout
+        self.hanging_when_waited_on = self._runner.hanging
+        self.set()
+        return True
+
+
+def test_a_hang_reports_it_is_running_before_it_waits_for_a_cancel() -> None:
+    sandbox = FakeCommandRunner()
+    sandbox.script_hang("hang", stdout="partial-out", stderr="partial-err")
+    cancel = _ObservedCancel(sandbox)
+
+    result = sandbox.execute("hang", cancel=cancel)
+
+    assert cancel.hanging_when_waited_on is True
+    assert result.cancelled
+    assert result.stdout == "partial-out"
+    sandbox.wait_until_hanging()
+
+
+def test_a_cancel_set_before_the_call_never_starts_the_hang() -> None:
+    sandbox = FakeCommandRunner()
+    sandbox.script_hang("hang", stdout="partial-out", stderr="partial-err")
+    cancel = threading.Event()
+    cancel.set()
+
+    result = sandbox.execute("hang", cancel=cancel)
+
+    assert result.cancelled
+    assert result.stdout == ""
+    assert not sandbox.hanging
