@@ -602,7 +602,7 @@
  "tests/vibesys/orchestration/issue_queue/test_persistence.py": 9.4,
  "tests/vibesys/orchestration/issue_queue/test_plugin.py": 0.52,
  "tests/vibesys/orchestration/issue_queue/test_prompt_goldens.py": 0.02,
- "tests/vibesys/orchestration/issue_queue/test_tool_server.py": 0.06,
+ "tests/entrypoints/test_issue_board_tools_server.py": 0.06,
  "tests/vibesys/orchestration/multi/test_contracts.py": 1.21,
  "tests/vibesys/orchestration/multi/test_goldens.py": 0.42,
  "tests/vibesys/orchestration/multi/test_infrastructure_failure.py": 0.25,

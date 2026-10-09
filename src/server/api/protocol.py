@@ -14,7 +14,6 @@ from server.events import RunEvent
 from server.execution import ActiveAgentExecution
 from server.run_lifecycle import RunStatus
 from server.settings import InteractiveSetupDefaults
-from vibesys.api import AgentDriver
 from vibesys.api.hypothesis import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -94,15 +93,11 @@ class ChatQuery(Request):
 class ChatThreadCreateQuery(Request):
     """Create a new experiment-chat thread with its own agent selection.
 
-    Omitted fields resolve to the run's configured driver, provider, and
-    model. The response carries the resolved settings and thread identity.
-    ``driver`` exists for completeness and stays validated when supplied, but
-    which driver backs a run is a deployment detail: clients omit it so every
-    thread inherits the run's.
+    Omitted fields resolve to the run's configured provider and model. The
+    response carries the resolved settings and thread identity.
     """
 
     type: Literal["query.chat_thread_create"] = "query.chat_thread_create"
-    driver: AgentDriver | None = None
     provider: str | None = None
     model: str | None = None
     # Without a title the server derives one from the thread's first message.
@@ -239,7 +234,6 @@ class ChatThreadInfo(ProtocolModel):
 
     thread_id: str
     title: str = ""
-    driver: str
     provider: str
     model: str
 

@@ -42,7 +42,6 @@ class ExperimentChatDependencies:
     #: output lands in the same transcript as the terminal answer event.
     chat_thread_id: str | None
     state_dir: Path
-    driver: str
     provider: str
     model: str
     fallback: Callable[[str], str]
@@ -62,7 +61,6 @@ class ExperimentChatSession:
         self._agent = dependencies.agent
         self._chat_thread_id = dependencies.chat_thread_id
         self._state_dir = dependencies.state_dir
-        self._driver = dependencies.driver
         self._provider = dependencies.provider
         self._model = dependencies.model
         self._fallback = dependencies.fallback
@@ -94,7 +92,6 @@ class ExperimentChatSession:
                 round_label="experiment-chat",
                 user_prompt=question,
                 participates_in_run_control=False,
-                driver=self._driver,
                 provider=self._provider,
                 model=self._model,
             ),

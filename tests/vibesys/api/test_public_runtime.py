@@ -7,6 +7,10 @@ from collections.abc import Callable, Iterator, Mapping
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.docker_environment import (
+    fake_docker_environment,
+    host_container_backend,
+)
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.api import (
@@ -16,7 +20,7 @@ from vibesys.api import (
     ProfilerKind,
     RunRequest,
 )
-from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
+from vibesys.api.request import load_input_bundle
 from vibesys.events import (
     AgentOutputChunkData,
     CoreEventType,
@@ -101,7 +105,7 @@ def _request(project_root: Path) -> RunRequest:
         input_bundle=load_input_bundle(project_root),
         objective="Improve the queue.",
         exp_name="team-demo",
-        run_environment=RunEnvironmentSpec("local"),
+        run_environment=fake_docker_environment(),
         agent_backend="stub",
         cli_provider="claude",
         profiler_kind=ProfilerKind.NONE,
@@ -116,7 +120,10 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
 
     async def exercise() -> None:
         async with open_product_run_host(
-            _request(project_root), integration, plugin=_PLUGIN
+            _request(project_root),
+            integration,
+            plugin=_PLUGIN,
+            backend_factory=host_container_backend,
         ) as ctx:
             root = ctx.workspaces.root
             original = root.revision
@@ -147,7 +154,10 @@ def test_product_observations_log_once_and_publish_typed_warnings(tmp_path: Path
 
     async def exercise() -> None:
         async with open_product_run_host(
-            _request(project_root), integration, plugin=_PLUGIN
+            _request(project_root),
+            integration,
+            plugin=_PLUGIN,
+            backend_factory=host_container_backend,
         ) as run:
             assert not hasattr(run, "log")
             assert not hasattr(run, "close")

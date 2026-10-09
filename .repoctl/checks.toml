@@ -30,7 +30,7 @@ commands = [
   ["uv", "run", "python", "scripts/check_purity.py", "--base-ref", "origin/main"],
   ["uv", "run", "python", "scripts/check_test_isolation.py"],
   ["uv", "run", "python", "scripts/check_contract_sot.py", "--base-ref", "origin/main"],
-  ["uv", "run", "tach", "check"],
+  ["uv", "run", "python", "scripts/check_tach.py"],
   ["uv", "run", "python", "scripts/check_member_dependencies.py"],
   ["uv", "run", "python", "scripts/check_tach_graph.py", "--check"],
   ["python3", "scripts/check_doc_links.py"],
@@ -139,7 +139,7 @@ timeout_seconds = 1200
 env = { VIBESYS_E2E_DOCKER = "1" }
 commands = [
   ["docker", "info", "--format", "{{.ServerVersion}}"],
-  ["uv", "run", "pytest", "tests/e2e/test_agent_image_e2e.py", "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "-v", "-s", "--no-cov"],
+  ["uv", "run", "pytest", "tests/e2e/test_agent_image_e2e.py", "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "tests/e2e/test_credential_sharing_e2e.py", "-v", "-s", "--no-cov"],
 ]
 
 [[check_groups]]
@@ -201,9 +201,13 @@ directory = "."
 timeout_seconds = 600
 commands = [
   ["uv", "run", "--no-sync", "coverage", "combine", "coverage-data"],
-  ["uv", "run", "--no-sync", "coverage", "report", "--fail-under=75"],
-  ["uv", "run", "--no-sync", "coverage", "xml"],
-  ["uv", "run", "--no-sync", "coverage", "json"],
+  # The three read the combined data and write different outputs; each spends most of its
+  # ~8 s re-analyzing every source file, so running them together takes one's time, not three's.
+  # The shell waits for all of them and fails if any did.
+  [
+    "bash", "-c",
+    'uv run --no-sync coverage report --fail-under=75 & a=$!; uv run --no-sync coverage xml & b=$!; uv run --no-sync coverage json & c=$!; s=0; for p in $a $b $c; do wait $p || s=1; done; exit $s',
+  ],
   ["uv", "run", "--no-sync", "python", "scripts/check_coverage_floor.py", "coverage.json"],
 ]
 

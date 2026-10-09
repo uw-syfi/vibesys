@@ -15,17 +15,14 @@ call is recorded for direct assertions.
 
 from __future__ import annotations
 
+import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from vs_sandbox.command_execution import rejected_result, result_of, validate_timeout
 from vs_sandbox.execution import CommandResult
 from vs_sandbox.process_execution import ProcessOutcome, ProcessStop
-
-if TYPE_CHECKING:
-    import threading
 
 #: Result an unscripted command receives when no other default was set.
 DEFAULT_RESULT = CommandResult(output="", exit_code=0, stdout="", stderr="")
@@ -62,6 +59,7 @@ class FakeCommandRunner:
     max_output_chars: int = _DEFAULT_MAX_OUTPUT_CHARS
     calls: list[FakeExecution] = field(default_factory=list)
     _scripted: dict[str, CommandResult | ProcessOutcome | _Hang] = field(default_factory=dict)
+    _hanging: threading.Event = field(default_factory=threading.Event, repr=False)
 
     @property
     def id(self) -> str:
@@ -95,6 +93,25 @@ class FakeCommandRunner:
         """
         self._scripted[command] = _Hang(stdout, stderr)
 
+    @property
+    def hanging(self) -> bool:
+        """Whether a scripted hang has started (or its waiters were released)."""
+        return self._hanging.is_set()
+
+    def wait_until_hanging(self) -> None:
+        """Block until a scripted hang has started and is waiting to be stopped.
+
+        A cancel set after this returns reaches a command that already wrote its
+        partial output, as in a real process. A cancel set before the call
+        reaches a command that never started, so it returns empty output and
+        never marks the hang as started.
+        """
+        self._hanging.wait()
+
+    def release_hanging_waiters(self) -> None:
+        """Unblock :meth:`wait_until_hanging` for a caller whose hang can no longer start."""
+        self._hanging.set()
+
     def execute(
         self,
         command: str,
@@ -122,6 +139,7 @@ class FakeCommandRunner:
             outcome = ProcessOutcome("", "", _SIGTERM_STATUS, ProcessStop.CANCELLED)
         elif isinstance(scripted, _Hang):
             stop = ProcessStop.TIMEOUT
+            self._hanging.set()
             if cancel is not None:
                 cancel.wait()
                 stop = ProcessStop.CANCELLED

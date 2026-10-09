@@ -50,9 +50,16 @@ class SubprocessDockerCli:
     def run(
         self, argv: Sequence[str], *, timeout_seconds: float
     ) -> subprocess.CompletedProcess[str]:
-        """Run *argv* with ``subprocess.run``."""
+        """Run *argv* with ``subprocess.run``, in a session of its own.
+
+        Ctrl-C signals the terminal's whole foreground process group. A
+        lifecycle command (``run``, ``stop``, ``rm``) that shared it would die
+        mid-flight and leave its container running or half-created, so the
+        run's own teardown, not the terminal, decides when these end.
+        """
         return subprocess.run(  # noqa: S603  # lint-waiver: LW-731011 [S603]; internally assembled docker argv runs without a shell.
             list(argv),
+            start_new_session=True,
             capture_output=True,
             text=True,
             check=False,

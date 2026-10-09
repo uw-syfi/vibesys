@@ -201,7 +201,7 @@ def _env(
         task_name=None,
         existing=False,
         framework_version="1.2.3",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="test-policy", config_version=1, options={}),
     )
@@ -894,14 +894,19 @@ def test_dispatch_table_routes_every_workspace_role_request_to_the_executor(
 _COMMIT = st.text(alphabet="0123456789abcdef", min_size=40, max_size=40)
 
 
+# Each example opens one workspace and tries several forgeries against it, because opening
+# the workspace costs far more than a rejected request.
 @settings(
-    max_examples=25,
+    max_examples=6,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
-@given(commit=_COMMIT, digest=st.text(min_size=1, max_size=20))
+@given(
+    commits=st.lists(_COMMIT, min_size=1, max_size=3),
+    digests=st.lists(st.text(min_size=1, max_size=20), min_size=1, max_size=3),
+)
 def test_no_forged_revision_changes_a_workspace(
-    tmp_path_factory: pytest.TempPathFactory, commit: str, digest: str
+    tmp_path_factory: pytest.TempPathFactory, commits: list[str], digests: list[str]
 ) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
@@ -911,35 +916,33 @@ def test_no_forged_revision_changes_a_workspace(
         known = ensure.plan.base
         path = _candidate_path(workspaces)
         before = (path / "candidate.py").read_text(encoding="utf-8")
-        commits = _commits(workspaces)
+        known_commits = _commits(workspaces)
         forged = (
-            RevisionRef(revision_id=RevisionId(root=commit), digest=f"git-commit:{commit}"),
-            RevisionRef(revision_id=known.revision_id, digest=digest),
+            *(
+                RevisionRef(revision_id=RevisionId(root=commit), digest=f"git-commit:{commit}")
+                for commit in commits
+            ),
+            *(RevisionRef(revision_id=known.revision_id, digest=digest) for digest in digests),
         )
         for index, revision in enumerate(forged):
             if revision == known:
                 continue
-            for number, request in enumerate(
-                (
-                    RestoreRevision(
-                        **_common(attempt, f"r-{index}"),
-                        attempt=attempt,
-                        revision=revision,
-                    ),
-                    RetainRevision(
-                        **_common(attempt, f"t-{index}"),
-                        attempt=attempt,
-                        revision=revision,
-                        retention="wip",
-                    ),
-                )
+            for request in (
+                RestoreRevision(
+                    **_common(attempt, f"r-{index}"), attempt=attempt, revision=revision
+                ),
+                RetainRevision(
+                    **_common(attempt, f"t-{index}"),
+                    attempt=attempt,
+                    revision=revision,
+                    retention="wip",
+                ),
             ):
-                del number
                 result = await _run(executor, request)
                 assert result.observation.observation.status is ObservationStatus.REJECTED
                 assert result.observation.revision is None
         assert (path / "candidate.py").read_text(encoding="utf-8") == before
-        assert _commits(workspaces) == commits
+        assert _commits(workspaces) == known_commits
 
     tmp_path = tmp_path_factory.mktemp("forged")
     with _workspaces(tmp_path) as workspaces:

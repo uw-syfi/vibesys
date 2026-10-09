@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 from weakref import WeakSet
@@ -33,6 +33,7 @@ from vs_agent.contracts import (
     AgentEventKind,
     AgentObserver,
     AgentOutputSchemaError,
+    AgentRateLimit,
     AgentSession,
     AgentSessionSpec,
     AgentSkillUse,
@@ -41,7 +42,9 @@ from vs_agent.contracts import (
     AgentTurnResult,
     AgentTurnTimeoutError,
     AgentUsage,
+    AuthStatus,
     MCPServerSpec,
+    ProviderReadiness,
     SessionDisposition,
 )
 from vs_agent.docker_executor import CodexRolloutWatchdogExecutor
@@ -343,7 +346,7 @@ def _translate(  # one arm per event type
             kind=AgentEventKind.USAGE,
             usage=_usage_from(event.usage, cost_usd=event.cost_usd),
         )
-    return _translate_skill(event) or _translate_plumbing(event)
+    return _translate_skill(event) or _translate_rate_limit(event) or _translate_plumbing(event)
 
 
 def _translate_skill(event: agentshim.AgentEvent) -> AgentEvent | None:
@@ -361,6 +364,23 @@ def _translate_skill(event: agentshim.AgentEvent) -> AgentEvent | None:
     if isinstance(event, agentshim.SkillsDiscovered):
         return _diagnostic(f"[skills offered] {', '.join(event.names) or '(none)'}")
     return None
+
+
+def _translate_rate_limit(event: agentshim.AgentEvent) -> AgentEvent | None:
+    """Translate the provider's report of one rate-limit window."""
+    if not isinstance(event, agentshim.RateLimitStatus):
+        return None
+    return AgentEvent(
+        kind=AgentEventKind.RATE_LIMIT,
+        rate_limit=AgentRateLimit(
+            window=event.window,
+            limit=event.limit,
+            used_fraction=event.used_fraction,
+            resets_at=event.resets_at,
+            window_minutes=event.window_minutes,
+            exhausted=event.exhausted,
+        ),
+    )
 
 
 def _translate_plumbing(event: agentshim.AgentEvent) -> AgentEvent | None:
@@ -698,6 +718,35 @@ def _without_stale_pwd(env: Mapping[str, str]) -> dict[str, str]:
     return {key: value for key, value in env.items() if key != "PWD"}
 
 
+@dataclass(frozen=True, slots=True)
+class _Launch:
+    """What one session (or readiness probe) runs the provider CLI with."""
+
+    executor: agentshim.CommandExecutor
+    env: Mapping[str, str]
+    sandbox: _ConfinableSandbox | None
+    config_scope: agentshim.ConfigScope
+
+
+_AUTH_STATUS = {
+    agentshim.AuthState.KNOWN_OK: AuthStatus.OK,
+    agentshim.AuthState.FAILED: AuthStatus.FAILED,
+    agentshim.AuthState.UNKNOWN: AuthStatus.UNKNOWN,
+}
+
+
+def _readiness_from(status: agentshim.ProviderStatus) -> ProviderReadiness:
+    """Translate the library's probe result into the neutral readiness contract."""
+    return ProviderReadiness(
+        provider=status.provider,
+        binary_found=status.binary_found,
+        path=status.path,
+        version=status.version,
+        auth=_AUTH_STATUS[status.auth],
+        detail=status.auth_detail,
+    )
+
+
 class AgentShimDriver:
     """Create AgentShim sessions and translate VibeSys execution policy."""
 
@@ -802,8 +851,29 @@ class AgentShimDriver:
         except (OSError, ImportError, agentshim.CliNotFoundError, agentshim.CliCheckError) as exc:
             raise AgentSpawnError(spec.provider, str(exc)) from exc
 
-    def _create_session(self, spec: AgentSessionSpec) -> AgentSession:
-        """Create one configured AgentShim conversation.
+    def probe_readiness(self, spec: AgentSessionSpec) -> ProviderReadiness:
+        """Report whether the CLI *spec* would launch is installed and logged in.
+
+        The probe runs on the executor, confinement and environment
+        :meth:`create_session` builds for the same *spec* (one code path,
+        :meth:`_launch_for`), so a container or sandbox is probed where the
+        agent would run. No model is called. A missing binary is a result,
+        not an exception; the caller decides what a problem means.
+        """
+        try:
+            launch = self._launch_for(spec)
+        except (OSError, ImportError) as exc:
+            raise AgentSpawnError(spec.provider, str(exc)) from exc
+        status = agentshim.probe_provider(
+            spec.provider,
+            executor=launch.executor,
+            env=launch.env,
+            timeout=self._check_timeout,
+        )
+        return _readiness_from(status)
+
+    def _launch_for(self, spec: AgentSessionSpec) -> _Launch:
+        """Validate *spec* and build the executor, environment and sandbox it runs with.
 
         Every session takes the same route: look up or build the sandbox for
         this role, confine a fresh executor to it, and hand the library the
@@ -829,7 +899,6 @@ class AgentShimDriver:
 
         provider = agentshim.get_provider(spec.provider)
         config_scope = self._config_scope_for(provider.profile)
-        event_handler = _AgentShimEventHandler()
         sandbox, find_binary, host_env = self._sandbox_for(spec, config_scope)
 
         executor: agentshim.CommandExecutor = self._executor_factory()
@@ -842,17 +911,24 @@ class AgentShimDriver:
                 rollout_sessions_root=_codex_rollout_sessions_root(sandbox),
                 log=self._log,
             )
-
         env = sandbox.env if sandbox is not None else host_env
+        return _Launch(executor=executor, env=env, sandbox=sandbox, config_scope=config_scope)
+
+    def _create_session(self, spec: AgentSessionSpec) -> AgentSession:
+        """Create one configured AgentShim conversation."""
+        launch = self._launch_for(spec)
+        sandbox = launch.sandbox
+        config_scope = launch.config_scope
+        event_handler = _AgentShimEventHandler()
         agent = agentshim.Agent(
             spec.provider,
             model=spec.model,
-            executor=executor,
+            executor=launch.executor,
             permissions=agentshim.NativePermissions.bypass(),
             approvals=agentshim.ApprovalPolicy.DENY,
             retry=agentshim.RetryPolicy(delays=self._transient_retry_delays),
             event_handlers=[event_handler],
-            env=env,
+            env=launch.env,
             log=self._log,
             check_timeout=self._check_timeout,
         )

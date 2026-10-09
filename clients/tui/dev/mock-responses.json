@@ -42,7 +42,6 @@
     "chat_thread": {
       "thread_id": "mock-thread",
       "title": "mock",
-      "driver": "mock",
       "provider": "mock",
       "model": "mock"
     }

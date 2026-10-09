@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
+from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.run_execution import run_execution_record
 
 from launch import LaunchSettings, create_session, default_runs
 from launch.agents import BuiltInSessionAgents
 from launch.testing import FakeSessionAgents
 from vibesys.api import (
-    AuxiliaryAgentDriver,
     AuxiliaryAgentLaunch,
     AuxiliaryAgents,
     AuxiliaryReadableInput,
@@ -23,7 +23,7 @@ from vibesys.api import (
     RunReady,
     RunRequest,
 )
-from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
+from vibesys.api.request import load_input_bundle
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.plugin_catalog import OrchestrationRegistry
@@ -34,7 +34,6 @@ from vs_runtime.api import OrchestrationPlugin, Run
 from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import LocalEnvironmentFacts, RunEnvironmentPresentation
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
-from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -129,7 +128,10 @@ async def _run_stub(host: Run, options: BaseModel) -> PluginRunStatus:
 
 @pytest.fixture(params=[False, True], ids=["built-in", "fake"])
 def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
-    return LaunchSettings(agents=FakeSessionAgents()) if request.param else LaunchSettings()
+    return LaunchSettings(
+        agents=FakeSessionAgents() if request.param else None,
+        backend_factory=host_container_backend,
+    )
 
 
 def _request(tmp_path: Path) -> tuple[RunRequest, OrchestrationRegistry]:
@@ -145,6 +147,7 @@ def _request(tmp_path: Path) -> tuple[RunRequest, OrchestrationRegistry]:
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
     )
     request = RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=input_root,
         input_bundle=load_input_bundle(input_root),
         orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={}),
@@ -184,7 +187,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
             run_id="run-1",
             branch="vibesys/run-1",
             vibesys_version="test",
-            run_environment=RunEnvironmentRecord(name="local"),
+            run_environment=RunEnvironmentRecord(name="docker"),
             execution=run_execution_record(),
             orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={}),
             trusted_input_baseline="0" * 40,
@@ -205,7 +208,6 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
             _EnvironmentResources(environment_request, shared_session, environment),
         ),
         agent_backend="stub",
-        driver="agentshim",
         provider="codex",
         model="gpt-test",
         role_models=("gpt-worker",),
@@ -225,7 +227,6 @@ def _launch(readable_path: Path) -> AuxiliaryAgentLaunch:
     return AuxiliaryAgentLaunch(
         role="chat",
         member_id="thread-1",
-        driver="agentshim",
         provider="codex",
         model="gpt-test",
         system_prompt="Investigate read-only evidence.",
@@ -238,14 +239,6 @@ def _launch(readable_path: Path) -> AuxiliaryAgentLaunch:
             ),
         ),
     )
-
-
-@pytest.mark.parametrize("providers", [(), ("codex", "codex"), ("",)])
-def test_auxiliary_agent_driver_rejects_ambiguous_provider_facts(
-    providers: tuple[str, ...],
-) -> None:
-    with pytest.raises(ValidationError, match="provider"):
-        AuxiliaryAgentDriver(driver="agentshim", providers=providers)
 
 
 def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
@@ -261,15 +254,9 @@ def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
             record=observed[0].record,
             log_directory=tmp_path / "logs",
             frontend_state_directory=observed[0].frontend_state_directory,
-            agent_driver="agentshim",
             agent_provider="codex",
             agent_model="gpt-test",
-            agent_drivers=(
-                AuxiliaryAgentDriver(
-                    driver="agentshim",
-                    providers=("claude", "codex", "gemini", "opencode"),
-                ),
-            ),
+            agent_providers=("claude", "codex", "gemini", "opencode"),
             role_models=("gpt-worker",),
         )
     ]
@@ -286,22 +273,14 @@ def test_ready_projection_rejects_inconsistent_agent_defaults(tmp_path: Path) ->
     session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-101220 [SLF001]; exercise the private composition input and validate its public projection contract.
     payload = observed[0].model_dump()
 
-    with pytest.raises(ValidationError, match="drivers must be unique"):
-        RunReady.model_validate(
-            payload
-            | {
-                "agent_drivers": [
-                    {"driver": "agentshim", "providers": ["codex"]},
-                    {"driver": "agentshim", "providers": ["claude"]},
-                ]
-            }
-        )
-    with pytest.raises(ValidationError, match="default auxiliary agent driver is unavailable"):
-        RunReady.model_validate(payload | {"agent_drivers": []})
-    with pytest.raises(ValidationError, match="does not support provider"):
-        RunReady.model_validate(
-            payload | {"agent_drivers": [{"driver": "agentshim", "providers": ["claude"]}]}
-        )
+    for providers, message in (
+        (["codex", "codex"], "must be unique"),
+        ([], "at least one provider"),
+        ([""], "must not be empty"),
+        (["claude"], "is not supported"),
+    ):
+        with pytest.raises(ValidationError, match=message):
+            RunReady.model_validate(payload | {"agent_providers": providers})
 
 
 def test_managed_agent_hides_environment_and_owns_cleanup(
@@ -380,23 +359,18 @@ def test_auxiliary_launch_is_strict_and_rejects_duplicate_paths(tmp_path: Path) 
         )
 
 
-@pytest.mark.parametrize(
-    ("driver", "provider"),
-    [("agentshim", "unknown")],
-)
 def test_auxiliary_selection_rejected_before_environment_acquisition(
     tmp_path: Path,
     agent_settings: LaunchSettings,
-    driver: str,
-    provider: str,
 ) -> None:
     """Every implementation rejects invalid selection before provisioning."""
     environment = _Environment()
     resources = _resources(tmp_path, environment)
     evidence = tmp_path / "evidence"
     evidence.mkdir()
+    provider = "unknown"
     launch = AuxiliaryAgentLaunch.model_validate(
-        _launch(evidence).model_dump() | {"driver": driver, "provider": provider}
+        _launch(evidence).model_dump() | {"provider": provider}
     )
     agents = agent_settings.agents or BuiltInSessionAgents()
 
@@ -413,7 +387,7 @@ def test_independent_auxiliary_scope_survives_session_close(
     """The transferred scope owns conversations beyond run completion."""
     request, registry = _request(tmp_path)
     request = request.model_copy(
-        update={"backend": ComputeBackend.CPU, "run_environment": RunEnvironmentSpec("local")}
+        update={"backend": ComputeBackend.CPU, "run_environment": fake_docker_environment()}
     )
     evidence = tmp_path / "evidence"
     evidence.mkdir()
@@ -421,7 +395,7 @@ def test_independent_auxiliary_scope_survives_session_close(
     async def execute() -> None:
         settings = LaunchSettings(
             registry=registry,
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            backend_factory=host_container_backend,
             agents=agent_settings.agents,
         )
         handle = default_runs(settings).start(request)

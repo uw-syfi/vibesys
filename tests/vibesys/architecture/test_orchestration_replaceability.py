@@ -27,6 +27,7 @@ _ORCHESTRATION = _SRC / "orchestration"
 _ALLOWED_EXTERNAL_POLICY_IMPORTS = {
     "api/evolve.py",
     "api/catalog.py",
+    "api/issue_queue.py",
     "dynamic_core.py",
     "dynamic_roles.py",
 }

@@ -139,11 +139,6 @@ class FaultyAgentClient:
         return self._inner.capabilities
 
     @property
-    def driver_name(self) -> str | None:
-        """Return the inner client's driver."""
-        return self._inner.driver_name
-
-    @property
     def provider(self) -> str | None:
         """Return the inner client's provider."""
         return self._inner.provider

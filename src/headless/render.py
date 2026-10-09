@@ -13,7 +13,7 @@ import sys
 from typing import TextIO
 
 from headless.format import format_status_prefix
-from headless.framework_events import format_framework_event
+from headless.framework_events import format_framework_event, format_rate_limit_event
 from vibesys.api import (
     AgentOutputChunkData,
     CoreEvent,
@@ -131,7 +131,7 @@ class HeadlessRenderer:
         elif isinstance(data, TodoUpdateData):
             self._break_line()
             self._todo_display.update(data.todos)
-        elif (framework_line := format_framework_event(event)) is not None:
+        elif framework_line := format_framework_event(event) or format_rate_limit_event(event):
             self._render_line(framework_line)
         # Other event types (usage updates, lifecycle) carry no direct
         # terminal output; status readings surface through chunk prefixes.

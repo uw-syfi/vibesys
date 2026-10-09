@@ -28,7 +28,7 @@ class RunEnvironmentSelectionError(ValueError):
     @classmethod
     def slurm_conflict(cls) -> RunEnvironmentSelectionError:
         """Describe a Slurm config paired with a compatibility selector."""
-        return cls("--slurm-config cannot be combined with --docker, --modal, or --skypilot")
+        return cls("--slurm-config cannot be combined with --modal or --skypilot")
 
 
 def _requested_environment(
@@ -38,9 +38,8 @@ def _requested_environment(
         selected
         or ("skypilot" if getattr(args, "skypilot", False) else None)
         or ("modal" if args.modal else None)
-        or ("docker" if args.docker else None)
         or ("slurm" if slurm_config is not None else None)
-        or "local"
+        or "docker"
     )
 
 
@@ -48,9 +47,7 @@ def _task_docker_conflicts(
     requested: str, selected: str | None, explicit: frozenset[str]
 ) -> list[str]:
     conflicts: list[str] = []
-    if requested == "local" and "run_environment" in explicit:
-        conflicts.append("--run-environment local")
-    elif requested in {"modal", "skypilot", "slurm", "slurm-gpu"}:
+    if requested in {"modal", "skypilot", "slurm", "slurm-gpu"}:
         conflicts.append(
             f"--run-environment {requested}"
             if selected
@@ -70,11 +67,10 @@ def run_environment_spec_from_args(
     bundle = getattr(args, "input_bundle", None)
     selected = getattr(args, "run_environment", None)
     explicit = getattr(args, "explicit_cli_dests", frozenset())
-    if "run_environment" in explicit and {"docker", "modal", "skypilot"} & explicit:
-        message = "--run-environment cannot be combined with --docker, --modal, or --skypilot"
+    if "run_environment" in explicit and {"modal", "skypilot"} & explicit:
+        message = "--run-environment cannot be combined with --modal or --skypilot"
         raise ValueError(message)
     compatibility_selections = (
-        args.docker,
         args.modal,
         getattr(args, "skypilot", False),
     )
@@ -84,7 +80,7 @@ def run_environment_spec_from_args(
     if slurm_config is not None and any(compatibility_selections):
         raise RunEnvironmentSelectionError.slurm_conflict()
     if sum(compatibility_selections) > 1:
-        _exception_message = "--docker, --modal, and --skypilot are mutually exclusive"
+        _exception_message = "--modal and --skypilot are mutually exclusive"
         raise ValueError(_exception_message)
 
     dockerfile_path = bundle.dockerfile_path if bundle is not None else None
@@ -102,13 +98,16 @@ def run_environment_spec_from_args(
             )
             _exception_message_2 = f"{declared} cannot be combined with {joined}"
             raise ValueError(_exception_message_2)
-        requested_environment = "docker"
 
     task_image = None
+    # A resumed run with no recorded image (such as one migrated from the retired
+    # host environment) keeps it: building one would contradict the record.
+    keeps_recorded_image = resuming and args.docker_image is None
     if (
         dockerfile_path is not None
         and requested_environment == "docker"
         and build_task_docker_image
+        and not keeps_recorded_image
     ):
         task_image = build_task_image(dockerfile_path)
 
@@ -133,7 +132,6 @@ def run_environment_spec_from_args(
         )
 
     return make_run_environment_spec(
-        use_docker=requested_environment == "docker",
         docker_image=task_image or args.docker_image,
         use_modal=requested_environment == "modal",
         modal_gpu=args.modal_gpu,

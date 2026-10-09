@@ -65,7 +65,6 @@ def _invoke_plan(
     event_sink = NULL_AGENT_EVENT_SINK if events is None else CoreAgentEventSink(events.append)
     client = AgentClient(
         driver,
-        driver_name="mock",
         provider="mock",
         model_name="mock-model",
         event_sink=event_sink,

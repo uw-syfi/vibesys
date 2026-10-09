@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import tempfile
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import example, given, settings
-from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.loop._harness import (
     PASS,
     LoopInput,
@@ -35,6 +31,8 @@ from vs_agent.api import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vs_agent.api import (
         AgentCapabilities,
         AgentObserver,
@@ -255,12 +253,18 @@ def _run_wait_sequence(base: Path, *, failed_attempts: int, correct_wait: bool) 
     assert item.evaluation.metric_value == 2.0
 
 
-@pytest.mark.parametrize("correct_wait", [False, True], ids=["plain", "corrected"])
+# The retirement boundary falls after one more turn per rejected candidate and per
+# corrected wait, so the cases span no rejection, a rejection, and a correction.
+@pytest.mark.parametrize(
+    ("failed_attempts", "correct_wait"),
+    [(0, False), (1, False), (1, True)],
+    ids=["unrejected", "plain", "corrected"],
+)
 def test_valid_wait_resumes_after_provider_budget_boundary(
-    tmp_path: Path, *, correct_wait: bool
+    tmp_path: Path, *, failed_attempts: int, correct_wait: bool
 ) -> None:
     """r24b provider waits could lose their checkpoint before host acceptance."""
-    _run_wait_sequence(tmp_path, failed_attempts=1, correct_wait=correct_wait)
+    _run_wait_sequence(tmp_path, failed_attempts=failed_attempts, correct_wait=correct_wait)
 
 
 def test_wait_correction_after_resumed_turn_keeps_checkpoint(tmp_path: Path) -> None:
@@ -317,15 +321,3 @@ def test_wait_correction_after_resumed_turn_keeps_checkpoint(tmp_path: Path) -> 
         if request.expected_provider_session_id is not None:
             assert request.expected_provider_session_id == result.provider_session_id
     assert len(records) == 4
-
-
-@settings(max_examples=6)
-@example(failed_attempts=0, correct_wait=False)
-@given(failed_attempts=st.integers(min_value=0, max_value=2), correct_wait=st.booleans())
-def test_wait_resume_keeps_identity_across_invocation_sequences(
-    *, failed_attempts: int, correct_wait: bool
-) -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        _run_wait_sequence(
-            Path(directory), failed_attempts=failed_attempts, correct_wait=correct_wait
-        )

@@ -7,8 +7,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
+from tests.support.docker_environment import (
+    fake_docker_environment,
+    host_container_backend,
+)
 
-from launch import create_session
+from launch import LaunchSettings, create_session
 from vibesys.api import PluginProjection, RunStopped
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
@@ -89,6 +93,7 @@ def _write_project(root: Path) -> None:
 
 def _request(project_root: Path) -> RunRequest:
     return RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id=PLUGIN.id, config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "state-probe"}}),
@@ -112,7 +117,12 @@ def test_plugin_state_is_deep_copied_persisted_and_published(tmp_path: Path) -> 
     )
 
     async def exercise() -> str:
-        async with open_product_run_host(_request(project_root), integration, plugin=PLUGIN) as run:
+        async with open_product_run_host(
+            _request(project_root),
+            integration,
+            plugin=PLUGIN,
+            backend_factory=host_container_backend,
+        ) as run:
             assert await run.state.load(_State) is None
             original = _State(values=[1])
             await run.state.commit(original, label="state only")
@@ -151,7 +161,12 @@ def test_observer_failure_is_after_durability_and_restart_can_commit(tmp_path: P
         raise _ProjectionError
 
     async def first_commit() -> str:
-        session = create_session(_request(project_root), sink=_discard_event, registry=registry)
+        session = create_session(
+            _request(project_root),
+            sink=_discard_event,
+            registry=registry,
+            settings=LaunchSettings(backend_factory=host_container_backend),
+        )
         session.on_committed_view(fail_observer)
         session.start()
         try:
@@ -165,7 +180,12 @@ def test_observer_failure_is_after_durability_and_restart_can_commit(tmp_path: P
         request = _request(project_root).model_copy(
             update={"resume": ResumeRef(run_id=run_id), "exp_name": None}
         )
-        session = create_session(request, sink=_discard_event, registry=registry)
+        session = create_session(
+            request,
+            sink=_discard_event,
+            registry=registry,
+            settings=LaunchSettings(backend_factory=host_container_backend),
+        )
         session.start()
         try:
             result = await session.await_result()
@@ -189,7 +209,12 @@ def test_public_session_composes_a_registered_plugin_with_typed_state(tmp_path: 
     _write_project(project_root)
     registry = OrchestrationRegistry()
     registry.register(REGISTRATION)
-    session = create_session(_request(project_root), sink=_discard_event, registry=registry)
+    session = create_session(
+        _request(project_root),
+        sink=_discard_event,
+        registry=registry,
+        settings=LaunchSettings(backend_factory=host_container_backend),
+    )
     session.start()
 
     result = asyncio.run(session.await_result())
@@ -212,7 +237,12 @@ def test_state_only_excludes_candidate_edits_and_workspace_commit_includes_them(
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(_request(project_root), integration, plugin=PLUGIN) as run:
+        async with open_product_run_host(
+            _request(project_root),
+            integration,
+            plugin=PLUGIN,
+            backend_factory=host_container_backend,
+        ) as run:
             root = run.workspaces.root
             (root.path / "queue.py").write_text("VALUE = 2\n")
             await run.state.commit(_State(values=[1]), label="state only")
@@ -234,7 +264,12 @@ def test_workspace_restore_leaves_candidate_checkpoint_index_clean(tmp_path: Pat
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(_request(project_root), integration, plugin=PLUGIN) as run:
+        async with open_product_run_host(
+            _request(project_root),
+            integration,
+            plugin=PLUGIN,
+            backend_factory=host_container_backend,
+        ) as run:
             root = run.workspaces.root
             candidate_file = root.path / "queue.py"
             candidate_file.write_text("VALUE = 2\n")
@@ -269,7 +304,12 @@ def test_real_state_adapter_rejects_wrong_models_and_non_root_workspaces(tmp_pat
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(_request(project_root), integration, plugin=PLUGIN) as run:
+        async with open_product_run_host(
+            _request(project_root),
+            integration,
+            plugin=PLUGIN,
+            backend_factory=host_container_backend,
+        ) as run:
             with pytest.raises(StateModelError, match="requires _State, got _OtherState"):
                 await run.state.load(_OtherState)
             with pytest.raises(StateModelError, match="requires _State, got _ChildState"):
@@ -300,7 +340,9 @@ def test_run_context_rejects_a_plugin_other_than_the_selected_orchestration(
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(request, integration, plugin=PLUGIN):
+        async with open_product_run_host(
+            request, integration, plugin=PLUGIN, backend_factory=host_container_backend
+        ):
             pytest.fail("mismatched plugin was accepted")
 
     try:
@@ -316,7 +358,12 @@ def test_real_control_checkpoint_lands_a_pending_stop(tmp_path: Path) -> None:
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(_request(project_root), integration, plugin=PLUGIN) as run:
+        async with open_product_run_host(
+            _request(project_root),
+            integration,
+            plugin=PLUGIN,
+            backend_factory=host_container_backend,
+        ) as run:
             await run.control.checkpoint()
             integration.control.request_stop()
             with pytest.raises(RunStopped):
@@ -334,10 +381,15 @@ def test_real_run_facts_map_prepared_input_and_environment_once(tmp_path: Path) 
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(_request(project_root), integration, plugin=PLUGIN) as run:
+        async with open_product_run_host(
+            _request(project_root),
+            integration,
+            plugin=PLUGIN,
+            backend_factory=host_container_backend,
+        ) as run:
             facts = run.facts
             assert facts.domain_id == "generic"
-            assert facts.environment_notes == ""
+            assert "Commands run inside the active execution environment" in facts.environment_notes
             assert facts.profile_execution is ProfileExecution.LOCAL
             assert str(project_root) in facts.objective_location
             assert facts.reference_location == "."

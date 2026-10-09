@@ -70,14 +70,14 @@ runtime and is never part of the image build context.
 
 Task Dockerfiles are intentionally convention-based: they require no manifest
 field or image-build command. A task Dockerfile cannot be combined with another
-image source or a different run environment. `--docker` and
-`--run-environment docker` are redundant but accepted. Legacy root input
+image source or a different run environment. `--run-environment docker` is
+redundant but accepted. Legacy root input
 bundles do not opt in through a root `Dockerfile`, because that file commonly
 belongs to the candidate application.
 
-All outer loops use this model. Local, Docker, and Modal execution change where
-commands run, not the task layout. Task
-commands always start in the repository root. `.vibesys` is mounted read-only
+All outer loops use this model. The agent always runs in a local Docker
+container. Modal, SkyPilot, and Slurm change where evaluation runs, not the task
+layout. Task commands always start in the repository root. `.vibesys` is mounted read-only
 for coding agents. Machine-local state is outside their workspace.
 
 Modal tasks may set a project-relative deployment file. Omit this block to use
@@ -142,8 +142,7 @@ docker_in_docker = true
 ```
 
 The key selects the Docker run environment automatically, exactly like a
-task-owned `Dockerfile` (explicit `--docker` is harmless). A host run, Modal,
-SkyPilot, Slurm, or `--run-environment local` with the key is an error that
+task-owned `Dockerfile`. Modal, SkyPilot, or Slurm with the key is an error that
 names it. Without the key a task gets no container runtime at all: VibeSys
 never mounts or imports the host's Docker socket.
 

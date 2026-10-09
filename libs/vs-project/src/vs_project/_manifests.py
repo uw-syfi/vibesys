@@ -61,7 +61,10 @@ class RunResourceRequest(BaseModel):
 class RunEnvironmentRecord(BaseModel):
     """Runtime environment a run executes in, recorded for faithful resume.
 
-    ``name`` selects the environment; the remaining fields carry that
+    ``name`` selects the environment; ``"local"`` is the retired host agent
+    environment, kept readable so earlier runs load and are migrated to
+    ``"docker"`` on resume. ``"host"`` is the agent confined on the host by
+    Seatbelt, derived for backends no container can reach; resume keeps it. The remaining fields carry that
     environment's operator-selected options and stay ``None`` when they do not
     apply. ``config_path`` records only where external operator configuration
     lives. Its contents and credentials remain outside the project. Values a
@@ -70,7 +73,7 @@ class RunEnvironmentRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    name: Literal["local", "docker", "modal", "skypilot", "slurm", "slurm-gpu"]
+    name: Literal["local", "docker", "host", "modal", "skypilot", "slurm", "slurm-gpu"]
     image: PortableText | None = None
     gpu: PortableText | None = None
     model_volume: PortableText | None = None
@@ -107,10 +110,6 @@ class RunExecutionRecord(_CommittedManifest):
 
     model: PortableText
     agent_backend: PortableText
-    #: Read-only legacy field: runs created while a second agent driver existed
-    #: recorded it. New runs omit it. Only the surviving driver is accepted, so
-    #: a manifest naming a removed driver fails validation naming this key.
-    agent_driver: Literal["agentshim"] | None = None
     cli_provider: PortableText | None = None
     cli_timeout: Annotated[int, Field(gt=0)] | None = None
     compute_backend: PortableText
@@ -120,6 +119,24 @@ class RunExecutionRecord(_CommittedManifest):
     thinking_budget: Annotated[int, Field(ge=-1)] | None = None
     agent_roles: dict[Identifier, AgentRoleExecutionRecord]
     skills_dirs: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_agent_driver(cls, data: object) -> object:
+        """Load manifests written while an ``agent_driver`` key was recorded.
+
+        The key is retired: AgentShim is the only driver. A run that recorded
+        it (or null) loads without it; a run that recorded a removed driver is
+        rejected naming the key, as before. Every other unknown key is still
+        rejected by ``extra="forbid"``.
+        """
+        if not isinstance(data, dict) or "agent_driver" not in data:
+            return data
+        recorded = data["agent_driver"]
+        if recorded is not None and recorded != "agentshim":
+            message = f"agent_driver: {recorded!r} names a removed agent driver"
+            raise ValueError(message)
+        return {key: value for key, value in data.items() if key != "agent_driver"}
 
 
 class OrchestrationRunManifest(_CommittedManifest):

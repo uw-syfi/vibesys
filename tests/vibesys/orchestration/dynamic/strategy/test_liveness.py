@@ -112,10 +112,12 @@ _ANSWERED_MEASUREMENTS = [
 _ANSWERED_TURNS = [Turn.REPLIES, Turn.UNPARSABLE]
 
 
-@settings(max_examples=40, deadline=None, derandomize=True, database=None)
+# A run asks for at most two measurements (the input, then one candidate) and four turns, so
+# longer lists would only repeat runs.
+@settings(max_examples=15, deadline=None, derandomize=True, database=None)
 @given(
-    measurements=st.lists(st.sampled_from(_ANSWERED_MEASUREMENTS), max_size=5),
-    turns=st.lists(st.sampled_from(_ANSWERED_TURNS), max_size=5),
+    measurements=st.lists(st.sampled_from(_ANSWERED_MEASUREMENTS), max_size=2),
+    turns=st.lists(st.sampled_from(_ANSWERED_TURNS), max_size=4),
 )
 def test_every_sequence_of_answered_outcomes_ends_the_run_live(
     measurements: list[Measurement], turns: list[Turn]

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=70.1", "wheel>=0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-agent"
+version = "0.1.0"
+description = "Agent sessions, drivers, skills and structured turns"
+requires-python = ">=3.12"
+dependencies = [
+    "agentshim>=0.15.3,<0.16",
+    "pydantic>=2",
+    "vs-mcp",
+    "vs-project",
+    "vs-prompts",
+    "vs-sandbox",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vs_agent = ["py.typed", "images/*.Dockerfile"]
+
+[tool.uv.sources]
+vs-mcp = { workspace = true }
+vs-project = { workspace = true }
+vs-prompts = { workspace = true }
+vs-sandbox = { workspace = true }

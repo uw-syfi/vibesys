@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, cast
 
+from entrypoints.issue_board_tools_server import build_server
 from vibesys.orchestration.issue_queue.models import IssueToolPolicy
-from vibesys.orchestration.issue_queue.tool_server import build_server
 from vs_issue_tracker.api import IssueBoard, IssueStatus, IssueTrackerConfig
 
 if TYPE_CHECKING:

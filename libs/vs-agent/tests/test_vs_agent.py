@@ -29,8 +29,8 @@ def test_session_key_parse_rejects_missing_scope_prefix() -> None:
 
 
 def test_agent_selection_is_a_pure_equality_comparable_value() -> None:
-    first = AgentSelection(driver="agentshim", provider="codex", model="gpt-test")
-    second = AgentSelection(driver="agentshim", provider="codex", model="gpt-test")
+    first = AgentSelection(provider="codex", model="gpt-test")
+    second = AgentSelection(provider="codex", model="gpt-test")
 
     assert first == second
     assert first.role_models == ()

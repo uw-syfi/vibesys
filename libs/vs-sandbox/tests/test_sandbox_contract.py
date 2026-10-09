@@ -205,10 +205,12 @@ class _FakeHarness:
         return key
 
     def wait_until_running(self) -> None:
-        """A scripted hang is running as soon as it is called."""
+        """Block until the scripted hang has started, so a cancel cannot precede it."""
+        self.sandbox.wait_until_hanging()
 
     def release_waiter(self) -> None:
-        """Nothing waits."""
+        """Unblock :meth:`wait_until_running` for a command that ended without hanging."""
+        self.sandbox.release_hanging_waiters()
 
     def processes_gone(self) -> bool:
         """The fake starts no processes."""

@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.docker_environment import fake_docker_environment, host_container_backend
 
-from launch import create_session
+from launch import LaunchSettings, create_session
 from vibesys.api import (
     ComputeBackend,
     Config,
@@ -16,7 +17,7 @@ from vibesys.api import (
     ProfilerKind,
     RunRequest,
 )
-from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
+from vibesys.api.request import load_input_bundle
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,7 +39,7 @@ def _request(root: Path, domain: str) -> RunRequest:
         config=Config.model_validate({"model": {"name": "test"}}),
         exp_name="fail-fast",
         profiler_kind=ProfilerKind.NONE,
-        run_environment=RunEnvironmentSpec("docker"),
+        run_environment=fake_docker_environment(),
     )
 
 
@@ -78,7 +79,9 @@ def test_incompatible_profiler_is_rejected_at_session_construction(
         events.append(event)
 
     with pytest.raises(ConfigurationError) as raised:
-        create_session(request, sink=record)
+        create_session(
+            request, sink=record, settings=LaunchSettings(backend_factory=host_container_backend)
+        )
     assert raised.value.diagnostic.code == "profiler_incompatible"
     assert "--profiler" in str(raised.value)
     assert profiler.value in str(raised.value)
@@ -127,7 +130,9 @@ def test_collection_in_repository_fails_before_session_start(
         events.append(event)
 
     with pytest.raises(ConfigurationError, match="--runs-dir") as raised:
-        create_session(request, sink=record)
+        create_session(
+            request, sink=record, settings=LaunchSettings(backend_factory=host_container_backend)
+        )
     assert raised.value.diagnostic.code == "invalid_runs_dir"
     assert str(containing) in str(raised.value)
     assert not events

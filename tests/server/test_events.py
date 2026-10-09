@@ -17,6 +17,7 @@ from server.events import (
     GateKind,
     GateStartedData,
     JsonResultPayload,
+    RateLimitUpdateData,
     RoundFinishedData,
     RunConfiguredData,
     RunEvent,
@@ -122,6 +123,18 @@ class TestNewEventDataRoundTrip:
         restored = _round_trip(event)
         assert isinstance(restored.data, UsageUpdateData)
         assert restored.data.input_tokens == 5_000
+
+    def test_rate_limit_update(self) -> None:
+        event = make_event(
+            EventType.RATE_LIMIT_UPDATE,
+            data=RateLimitUpdateData(
+                provider="claude", window="five_hour", used_fraction=0.5, exhausted=False
+            ),
+        )
+        restored = _round_trip(event)
+        assert isinstance(restored.data, RateLimitUpdateData)
+        assert restored.data.window == "five_hour"
+        assert restored.data.resets_at is None
 
     def test_agent_output_chunk_status_is_optional_and_round_trips(self) -> None:
         bare = make_event(

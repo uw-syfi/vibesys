@@ -16,6 +16,7 @@ from vs_project.api import (
     OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
+    run_git,
 )
 from vs_runtime.api.infrastructure import (
     MultiSlotRoundTransaction,
@@ -64,7 +65,7 @@ def _project(tmp_path: Path) -> tuple[Project, GitTracker, MultiSlotRoundTransac
         run_id=_RUN_ID,
         branch=tracker.project_branch,
         vibesys_version="0.1.0",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="multi-agent", config_version=1, options={}),
         trusted_input_baseline=tracker.trusted_input_baseline,
@@ -89,6 +90,12 @@ def _load_state(project: Project) -> _AgentState | None:
     return _state_slot(project).load_optional()
 
 
+def _git(tracker: GitTracker, *args: str) -> bytes:
+    result = run_git(list(args), cwd=tracker.root)
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
 def test_complete_commits_candidate_and_exact_typed_agent_state(tmp_path: Path) -> None:
     project, tracker, coordinator = _project(tmp_path)
     state = _state(active="hypothesis-1", rounds=(1,))
@@ -98,10 +105,10 @@ def test_complete_commits_candidate_and_exact_typed_agent_state(tmp_path: Path) 
     completed = transaction.complete()
 
     assert completed.checkpoint == tracker.current_sha()
-    assert tracker.run(["git", "show", "HEAD:main.py"]).stdout == b"VALUE = 2\n"
+    assert _git(tracker, "show", "HEAD:main.py") == b"VALUE = 2\n"
     assert _load_state(project) == state
     assert (
-        tracker.run(["git", "show", f"HEAD:.vibesys/state/runs/{_RUN_ID}/agent/state.json"]).stdout
+        _git(tracker, "show", f"HEAD:.vibesys/state/runs/{_RUN_ID}/agent/state.json")
         == _state_slot(project)
         .snapshot_transition(_state_slot(project).transition(state))
         .files[0]
@@ -123,9 +130,7 @@ def test_generic_transaction_commits_a_policy_owned_state_slot(tmp_path: Path) -
     assert state_slot.load_optional() == state
     assert _state_slot(project).load_optional() is None
     assert (
-        tracker.run(
-            ["git", "show", f"HEAD:.vibesys/state/runs/{_RUN_ID}/team-search/state.json"]
-        ).stdout
+        _git(tracker, "show", f"HEAD:.vibesys/state/runs/{_RUN_ID}/team-search/state.json")
         == state_slot.snapshot_transition(state_slot.transition(state)).files[0].contents
     )
 
@@ -139,7 +144,7 @@ def test_recovery_rolls_prepared_state_and_candidate_forward(tmp_path: Path) -> 
 
     assert restarted.recover() is RoundRecoveryOutcome.COMMITTED
     assert _load_state(project) == _AgentState(completed_rounds=(1,))
-    assert tracker.run(["git", "show", "HEAD:main.py"]).stdout == b"VALUE = 2\n"
+    assert _git(tracker, "show", "HEAD:main.py") == b"VALUE = 2\n"
     assert restarted.recover() is RoundRecoveryOutcome.NO_TRANSACTION
 
 
@@ -207,12 +212,12 @@ def test_snapshot_failure_remains_recoverable(tmp_path: Path) -> None:
 def test_begin_rejects_staged_changes_without_leaving_a_transaction(tmp_path: Path) -> None:
     _project_data, tracker, coordinator = _project(tmp_path)
     (tmp_path / "main.py").write_text("VALUE = 2\n", encoding="utf-8")
-    tracker.run(["git", "add", "--", "main.py"])
+    _git(tracker, "add", "--", "main.py")
 
     with pytest.raises(RoundTransactionError, match="index has staged changes"):
         coordinator.begin(1, writes={"state.json": _state(active=None, rounds=(1,))})
 
-    tracker.run(["git", "reset", "--quiet", "HEAD", "--", "."])
+    _git(tracker, "reset", "--quiet", "HEAD", "--", ".")
     assert coordinator.recover() is RoundRecoveryOutcome.NO_TRANSACTION
 
 

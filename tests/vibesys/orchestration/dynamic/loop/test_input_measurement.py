@@ -32,10 +32,12 @@ def _failing_input(loop_input: LoopInput) -> None:
     (loop_input.root / "queue.py").write_text("VALUE = 1\nREQUIRED = 100\n", encoding="utf-8")
 
 
-@pytest.mark.parametrize("planning_calls", [3, 5])
 def test_permanent_input_failure_is_measured_once_and_told_to_the_planner(
-    tmp_path: Path, planning_calls: int
+    tmp_path: Path,
 ) -> None:
+    # Three planning calls: one measures the input, and the two after it show the
+    # measurement is neither repeated nor forgotten however many calls follow.
+    planning_calls = 3
     loop_input = LoopInput.create(tmp_path)
     _failing_input(loop_input)
     agents = ScriptedAgents()
@@ -99,24 +101,28 @@ def test_permanent_input_failure_survives_resume(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("failures", [1, 5])
-def test_transient_input_failure_is_retried_within_its_bound(tmp_path: Path, failures: int) -> None:
+# A planning call retries an unmeasured input; the third attempt spends the bound.
+# One round beyond the last attempt shows that no further attempt follows it.
+@pytest.mark.parametrize(("failures", "rounds"), [(1, 3), (5, 4)])
+def test_transient_input_failure_is_retried_within_its_bound(
+    tmp_path: Path, failures: int, rounds: int
+) -> None:
     loop_input = LoopInput.create(tmp_path)
     counter = _interrupt_input_evaluator(loop_input, tmp_path, failures)
     agents = ScriptedAgents()
-    for number in range(5):
+    for number in range(rounds):
         identifier = f"H{number}"
         agents.plan(portfolio(workstream(identifier)))
         agents.implement(identifier, edit_to(number + 2, identifier)).judge(identifier, PASS)
 
-    run = run_loop(loop_input, agents, options(max_rounds=5))
+    run = run_loop(loop_input, agents, options(max_rounds=rounds))
 
     assert run.error is None
     assert run.succeeded is True
     assert agents.unscripted == []
     attempts = min(failures + 1, 3)
     assert int(counter.read_text(encoding="utf-8")) == attempts
-    assert _jobs(loop_input) == 10 + attempts
+    assert _jobs(loop_input) == 2 * rounds + attempts
     state = load_state(loop_input, run.run_id)
     if failures == 1:
         assert state.baseline is not None
@@ -151,7 +157,7 @@ def _interrupt_input_evaluator(loop_input: LoopInput, tmp_path: Path, failures: 
 def test_transient_submission_bound_survives_resume(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     counter = _interrupt_input_evaluator(loop_input, tmp_path, 100)
-    configured = options(max_rounds=5)
+    configured = options(max_rounds=4)
     first = ScriptedAgents()
     for number in range(3):
         identifier = f"H{number}"
@@ -164,7 +170,7 @@ def test_transient_submission_bound_survives_resume(tmp_path: Path) -> None:
     assert int(counter.read_text(encoding="utf-8")) == 3
     assert load_state(loop_input, crashed.run_id).winner_revision is None
     second = ScriptedAgents()
-    for number in range(3, 5):
+    for number in range(3, 4):
         identifier = f"H{number}"
         second.plan(portfolio(workstream(identifier)))
         second.implement(identifier, edit_to(number + 2, identifier)).judge(identifier, PASS)
@@ -175,4 +181,5 @@ def test_transient_submission_bound_survives_resume(tmp_path: Path) -> None:
     assert resumed.succeeded is True
     assert first.unscripted == second.unscripted == []
     assert int(counter.read_text(encoding="utf-8")) == 3
-    assert _jobs(loop_input) == 13
+    # Three rounds of two jobs and the three input attempts, then the resumed round's two.
+    assert _jobs(loop_input) == 11

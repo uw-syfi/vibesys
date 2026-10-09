@@ -11,10 +11,13 @@ from __future__ import annotations
 import importlib.resources
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vs_agent.api import (
     CLI_VERSIONS,
@@ -139,8 +142,8 @@ def test_agent_image_base_only_argv() -> None:
 
 
 def test_agent_image_chains_task_image_as_base(tmp_path: Path) -> None:
-    """A task Dockerfile is built first; its image ID becomes BASE_IMAGE for
-    the agent layer, and BASE_IMAGE is also forwarded into the task build so
+    """A task Dockerfile is built first; its unique local tag becomes BASE_IMAGE
+    for the agent layer (BuildKit cannot resolve a bare image ID), and BASE_IMAGE is also forwarded into the task build so
     a task Dockerfile may declare ``ARG BASE_IMAGE`` / ``FROM ${BASE_IMAGE}``.
     """
     task_root = tmp_path / "task"
@@ -197,7 +200,7 @@ def test_agent_image_chains_task_image_as_base(tmp_path: Path) -> None:
         "--file",
         str(_AGENT_DOCKERFILE),
         "--build-arg",
-        f"BASE_IMAGE={_TASK_IMAGE_ID}",
+        f"BASE_IMAGE={task_tag}",
         *_expected_version_args(),
         "--build-arg",
         "TOOLCHAINS=",
@@ -307,3 +310,63 @@ def test_container_runtime_toolchain_is_opt_in_and_pinned_outside_the_dockerfile
     assert f'*" {CONTAINER_RUNTIME_TOOLCHAIN} "*' in dockerfile
     for version in (DOCKER_ENGINE_VERSION, DOCKER_COMPOSE_VERSION, KIND_VERSION, KUBECTL_VERSION):
         assert version not in dockerfile
+
+
+_BARE_ID = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def _base_image_arg(build_argv: Sequence[str]) -> str:
+    return next(
+        arg.removeprefix("BASE_IMAGE=") for arg in build_argv if arg.startswith("BASE_IMAGE=")
+    )
+
+
+def _agent_build_argv(runner: _FakeRunner) -> Sequence[str]:
+    return next(
+        argv
+        for argv, _cwd, _timeout in runner.calls
+        if argv[1] == "build" and any(a.startswith("vibesys-agent-build:") for a in argv)
+    )
+
+
+@given(
+    base_image=st.one_of(
+        st.from_regex(r"sha256:[0-9a-f]{64}", fullmatch=True),
+        st.sampled_from(["python:3.12-bookworm", "ubuntu:24.04", "ghcr.io/x/y@sha256:" + "c" * 64]),
+    ),
+    flow=st.sampled_from(["base-only", "task-dockerfile"]),
+)
+def test_agent_base_image_is_never_a_bare_image_id(base_image: str, flow: str) -> None:
+    """BuildKit resolves ``FROM sha256:<id>`` as a registry reference and fails
+    (#1520), so the agent layer's BASE_IMAGE is a tag for every input."""
+    with tempfile.TemporaryDirectory() as tmp:
+        task_dockerfile = None
+        if flow == "task-dockerfile":
+            task_dockerfile = Path(tmp) / "Dockerfile"
+            task_dockerfile.write_text("ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n", encoding="utf-8")
+        runner = _FakeRunner()
+
+        agent_image(base_image, task_dockerfile=task_dockerfile, command_runner=runner)
+
+        for argv, _cwd, _timeout in runner.calls:
+            if argv[1] == "build":
+                assert _BARE_ID.fullmatch(_base_image_arg(argv)) is None
+        agent_base = _base_image_arg(_agent_build_argv(runner))
+        if task_dockerfile is not None:
+            assert agent_base.startswith("vibesys-task-build:")
+        elif _BARE_ID.fullmatch(base_image):
+            tag_calls = [argv for argv, _c, _t in runner.calls if argv[1] == "tag"]
+            assert tag_calls == [("docker", "tag", base_image, agent_base)]
+        else:
+            assert agent_base == base_image
+
+
+def test_agent_image_tags_a_bare_base_image_id_before_building() -> None:
+    """The entrypoint records the task image by ID; the agent layer tags it."""
+    runner = _FakeRunner()
+
+    agent_image(_TASK_IMAGE_ID, command_runner=runner)
+
+    tag = "vibesys-base:" + "a" * 64
+    assert runner.calls[0][0] == ("docker", "tag", _TASK_IMAGE_ID, tag)
+    assert _base_image_arg(runner.calls[1][0]) == tag

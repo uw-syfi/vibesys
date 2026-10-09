@@ -147,7 +147,6 @@ class FakeAgentClient:
         self,
         *,
         backend_name: str = "fake",
-        driver_name: str | None = "fake",
         provider: str | None = "fake",
         model: str | None = None,
         session_reuse: bool = False,
@@ -170,7 +169,6 @@ class FakeAgentClient:
         # Instance attribute shadows the class default so a test can report a
         # different backend (e.g. "cli") without subclassing.
         self.backend_name = backend_name
-        self._driver_name = driver_name
         self._provider = provider
         self._model = model
         self._capabilities = (
@@ -216,11 +214,6 @@ class FakeAgentClient:
     def capabilities(self) -> AgentCapabilities:
         """Report the configured capability set (see ``capabilities`` ctor arg)."""
         return self._capabilities
-
-    @property
-    def driver_name(self) -> str | None:
-        """Return the configured driver name (default ``"fake"``)."""
-        return self._driver_name
 
     @property
     def provider(self) -> str | None:
@@ -333,13 +326,10 @@ class FakeAgentClient:
     def set_attribution(
         self,
         *,
-        driver_name: str | None = None,
         provider: str | None = None,
         model: str | None = None,
     ) -> Self:
         """Override attribution props; only the given (non-``None``) fields change."""
-        if driver_name is not None:
-            self._driver_name = driver_name
         if provider is not None:
             self._provider = provider
         if model is not None:

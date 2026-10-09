@@ -382,7 +382,7 @@ class TestAuthFileCopy:
         assert cmd[:4] == ["docker", "exec", "-u", "root"]
         cmd_str = " ".join(cmd)
         assert "cp -a /opt/vibesys-auth/0 /home/agent/.claude.json" in cmd_str
-        assert "chown -R agent:agent /home/agent/.claude.json" in cmd_str
+        assert "find /home/agent/.claude.json -xdev -exec chown -h agent:agent" in cmd_str
 
     @patch("subprocess.run")
     def test_no_auth_files_by_default(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
@@ -1128,6 +1128,72 @@ class TestAutoRemove:
         )
         sandbox.start()
         assert "--rm" not in mock_run.call_args_list[0][0][0]
+
+
+class TestWritableCredentialMounts:
+    """A credential mounted writable into HOME is the host's file, not ours to chown."""
+
+    @staticmethod
+    def _root_scripts(engine: FakeDockerEngine) -> list[str]:
+        return [
+            call[-1]
+            for call in engine.calls
+            if call[1] == "exec" and call[2:4] == ("-u", "root") and call[-2] == "-c"
+        ]
+
+    def _start(
+        self,
+        tmp_path: Path,
+        bind_mounts: list[tuple[str, str, bool]],
+        auth_files: list[tuple[str, str]] | None = None,
+    ) -> FakeDockerEngine:
+        (tmp_path / "engine").mkdir()
+        engine = FakeDockerEngine(tmp_path / "engine")
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="test-image",
+            # The engine's agent already has these ids, so no remap script runs
+            # and the host user's uid cannot change which scripts are recorded.
+            agent_uid=1000,
+            agent_gid=1000,
+            docker=engine,
+            bind_mounts=bind_mounts,
+            auth_files=auth_files,
+        )
+        sandbox.start()
+        sandbox.stop()
+        return engine
+
+    def test_mounts_the_file_writable_and_hands_its_parent_directory_to_the_agent(
+        self, tmp_path: Path
+    ) -> None:
+        credential = tmp_path / "auth.json"
+        credential.write_text("{}")
+
+        engine = self._start(tmp_path, [(str(credential), "/home/agent/.codex/auth.json", False)])
+
+        run = next(call for call in engine.calls if call[1] == "run")
+        assert f"{credential}:/home/agent/.codex/auth.json" in run
+        assert "chown agent:agent /home/agent/.codex" in self._root_scripts(engine)
+
+    def test_never_recurses_a_chown_into_a_mounted_credential(self, tmp_path: Path) -> None:
+        credential = tmp_path / "auth.json"
+        credential.write_text("{}")
+
+        engine = self._start(
+            tmp_path,
+            [(str(credential), "/home/agent/.codex/auth.json", False)],
+            auth_files=[("/opt/vibesys-auth/0", "/home/agent/.codex/config.toml")],
+        )
+
+        copy = next(script for script in self._root_scripts(engine) if "cp -a" in script)
+        assert "! -path /home/agent/.codex/auth.json" in copy
+        assert "chown -R" not in copy
+
+    def test_read_only_mounts_need_no_ownership_step(self, tmp_path: Path) -> None:
+        engine = self._start(tmp_path, [(str(tmp_path), "/home/agent/.codex/config.toml", True)])
+
+        assert not any("chown" in script for script in self._root_scripts(engine))
 
 
 class TestAuthCopyOwnership:

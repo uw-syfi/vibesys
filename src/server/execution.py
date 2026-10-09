@@ -58,7 +58,6 @@ class AgentExecutionRequest:
     system_prompt: str = ""
     participates_in_run_control: bool = True
     emit_lifecycle: bool = True
-    driver: str | None = None
     provider: str | None = None
     model: str | None = None
 
@@ -76,7 +75,6 @@ class ActiveAgentExecution(BaseModel):
     assignment: str
     started_at: datetime
     activity: AgentExecutionActivityData
-    driver: str | None = None
     provider: str | None = None
     model: str | None = None
 
@@ -204,7 +202,6 @@ class ExecutionTracker:
             assignment=request.user_prompt,
             started_at=datetime.now(UTC),
             activity=activity,
-            driver=request.driver,
             provider=request.provider,
             model=request.model,
         )
@@ -221,7 +218,6 @@ class ExecutionTracker:
                     system_prompt=request.system_prompt,
                     user_prompt=request.user_prompt,
                     activity=activity,
-                    driver=request.driver,
                     provider=request.provider,
                     model=request.model,
                 ),
@@ -373,7 +369,6 @@ class ExecutionTracker:
             assignment=data.user_prompt,
             started_at=event.timestamp,
             activity=activity,
-            driver=data.driver,
             provider=data.provider,
             model=data.model,
         )

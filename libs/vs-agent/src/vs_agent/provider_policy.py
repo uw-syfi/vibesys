@@ -57,7 +57,7 @@ DOCKER_PROVIDER_ENV: dict[str, dict[str, str]] = {
 }
 """Per-provider environment variables to set inside the container.
 
-Used as the canonical "supported with --docker" registry: providers absent
+Used as the canonical "supported in Docker" registry: providers absent
 from this dict are rejected up front in ``build_agent_client``.
 """
 

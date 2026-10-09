@@ -29,6 +29,41 @@ def _parse_profiler_kind(value: str) -> ProfilerKind:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+_REMOVED_DOCKER_FLAG_MESSAGE = (
+    "--docker was removed: agents always run in a local Docker container. "
+    "Drop the flag; use --modal, --skypilot, or --slurm-config to choose where "
+    "evaluation runs."
+)
+
+
+class _RemovedDockerFlag(argparse.Action):
+    """Reject the retired ``--docker`` flag with a message naming its replacement.
+
+    The flag stays registered so argparse neither abbreviates it to
+    ``--docker-image`` nor reports it as an unrecognized argument.
+    """
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: str | None = None,
+    ) -> None:
+        del namespace, values, option_string
+        parser.error(_REMOVED_DOCKER_FLAG_MESSAGE)
+
+
+def _run_environment_name(value: str) -> str:
+    if value == "local":
+        message = (
+            "--run-environment local was removed: agents always run in a local "
+            "Docker container; omit the flag or pick docker, modal, skypilot, or slurm"
+        )
+        raise argparse.ArgumentTypeError(message)
+    return value
+
+
 def _parse_runs_dir(value: str) -> Path:
     if not value.strip():
         message = "must not be empty"
@@ -306,11 +341,13 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--run-environment",
-        choices=("local", "docker", "modal", "skypilot", "slurm", "slurm-gpu"),
+        type=_run_environment_name,
+        choices=("docker", "modal", "skypilot", "slurm", "slurm-gpu"),
         default=None,
         help=(
-            "Select where trusted work runs. SkyPilot and Modal keep the agent "
-            "in a local CPU-only Docker editor."
+            "Select where evaluation runs; the default is docker. Agents always run "
+            "in a local Docker container. SkyPilot and Modal keep the agent in a "
+            "local CPU-only Docker editor and dispatch evaluation remotely."
         ),
     )
     parser.add_argument(
@@ -325,19 +362,17 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--docker",
-        action="store_true",
-        help=(
-            "Run agent operations inside a Docker container. On --resume the "
-            "recorded runtime environment is restored when no runtime-environment "
-            "flag is given, and a flag that contradicts the recording is rejected."
-        ),
+        action=_RemovedDockerFlag,
+        nargs=0,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--docker-image",
         type=str,
         default=None,
         help=(
-            "Docker image to use (with --docker or --modal).  Defaults to the "
+            "Docker image the agent runs in.  Defaults to the "
             "image the selected --backend prefers (cuda → nvcr.io/nvidia/pytorch:25.04-py3)."
         ),
     )
@@ -348,7 +383,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
             "Use Modal for remote GPU dispatch. The agent (codex) still runs "
             "locally inside a Docker container for editing; GPU-bound code "
             "the implementer writes (decorated with `@app.cls` / `@app.function`) "
-            "is dispatched via `modal run`. Mutually exclusive with --docker. "
+            "is dispatched via `modal run`. "
             "On --resume the recorded runtime environment is restored when no "
             "runtime-environment flag is given, and a flag that contradicts the "
             "recording is rejected."

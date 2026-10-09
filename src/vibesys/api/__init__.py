@@ -14,8 +14,6 @@ private home modules.
 from __future__ import annotations
 
 from vibesys.api.auxiliary import (
-    AgentDriver,
-    AuxiliaryAgentDriver,
     AuxiliaryAgentLaunch,
     AuxiliaryAgents,
     AuxiliaryReadableInput,
@@ -68,6 +66,7 @@ from vibesys.events import (
     GateFinishedData,
     GateStartedData,
     JsonResultPayload,
+    RateLimitUpdateData,
     RunConfiguredData,
     RunFailedData,
     TodoItemData,
@@ -87,7 +86,6 @@ from vs_runtime.api.infrastructure import RunStopped
 __all__ = [
     "KNOWN_COMPUTE_BACKENDS",
     "AgentBackend",
-    "AgentDriver",
     "AgentExecutionStartedData",
     "AgentOutputChannel",
     "AgentOutputChunkData",
@@ -96,7 +94,6 @@ __all__ = [
     "AsyncOperationKind",
     "AsyncOperationLifecycleData",
     "AsyncOperationState",
-    "AuxiliaryAgentDriver",
     "AuxiliaryAgentLaunch",
     "AuxiliaryAgents",
     "AuxiliaryReadableInput",
@@ -119,6 +116,7 @@ __all__ = [
     "OrchestrationRegistry",
     "PluginProjection",
     "ProfilerKind",
+    "RateLimitUpdateData",
     "RepositoryVisibility",
     "ResumeRef",
     "RunConfiguredData",

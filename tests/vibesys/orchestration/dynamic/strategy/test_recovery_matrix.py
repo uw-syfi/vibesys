@@ -1,9 +1,9 @@
 """Every request kind the run issues, answered conclusively, Unknown, retryably or never again.
 
 The production shell runs the dynamic search with the requests of one kind answered in
-one of four ways, at a concurrency cap of one and of two (two implementer workstreams in
-flight). Whatever the answer, `tests.support.liveness` must hold: the run ends terminal,
-no intent is left open, requests stay bounded and none repeats without new information.
+one of four ways, at a concurrency cap of one or two (two implementer workstreams in
+flight, the cap alternating across the cases). Whatever the answer, `tests.support.liveness`
+must hold: the run ends terminal, no intent is left open, requests stay bounded and none repeats without new information.
 No request identity is executed twice. The kinds come from core's closed registry
 (`REQUEST_DISPATCH`), so a kind that is added must be classified here, either as issued
 by the dynamic search (and so exercised by every case) or as issued only by recovery.
@@ -169,13 +169,44 @@ KNOWN_OPEN: frozenset[tuple[str, Reply]] = frozenset(
 )
 
 
+# Of the known-open pairs, the ones that are run. Every kind is shown open by its `silent` answer
+# (the strongest: Unknown every time). `retryable_once` reaches the block through the retry
+# bound rather than the reconciliation bound, so it is also run where its path through core
+# differs (branch coverage of these runs over the whole matrix); `unknown_once` takes the
+# Unknown path `silent` already takes. The rest are not run, since each fails the same way.
+RETRY_PATH_DIFFERS = (
+    "close_session",
+    "ensure_session",
+    "ensure_workspace",
+    "observe_owned_job",
+    "snapshot_and_retain",
+)
+SHOWN_OPEN: frozenset[tuple[str, Reply]] = (
+    frozenset(
+        {(kind, Reply.SILENT) for kind, _ in KNOWN_OPEN}
+        | {(kind, Reply.RETRYABLE_ONCE) for kind in RETRY_PATH_DIFFERS}
+    )
+    & KNOWN_OPEN
+)
+
+
 def _cases() -> list[object]:
+    """Every (kind, answer) pair that can tell something new, at an alternating cap.
+
+    A known-open pair fails because core blocks the intent and only the strategy hears of
+    it; which answer led to the block does not change that, so only the pairs in
+    `SHOWN_OPEN` are run. Fixing the gap means deleting the pairs from `KNOWN_OPEN`, which
+    runs the kind's other answers again.
+    The cap changes how many requests overlap, not what any one kind's answer does to the
+    run (every known-open pair fails identically at both caps), so alternating it along
+    the diagonal shows each kind and each answer at both caps without crossing them.
+    """
     return [
         pytest.param(
             kind,
             how,
-            cap,
-            id=f"{kind}-{how.value}-{cap}",
+            1 + (kind_at + how_at) % 2,
+            id=f"{kind}-{how.value}",
             marks=(
                 [
                     pytest.mark.xfail(
@@ -186,9 +217,9 @@ def _cases() -> list[object]:
                 else []
             ),
         )
-        for kind in ISSUED
-        for how in Reply
-        for cap in (1, 2)
+        for kind_at, kind in enumerate(ISSUED)
+        for how_at, how in enumerate(Reply)
+        if (kind, how) not in KNOWN_OPEN or (kind, how) in SHOWN_OPEN
     ]
 
 

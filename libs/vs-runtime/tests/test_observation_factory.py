@@ -54,7 +54,7 @@ def _namespace(tmp_path: Path) -> StateNamespace:
         "Observations",
         branch="vibesys/observations",
         vibesys_version="0.2.0",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="team-search", config_version=1, options={}),
         trusted_input_baseline="a" * 40,

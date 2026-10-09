@@ -16,9 +16,11 @@ from vs_agent.api import (
     SHIPPED_PROVIDERS,
     AgentClient,
     AgentSpec,
+    ProviderNotReadyError,
     agent_driver_supports_tool_servers,
     build_agent_client,
 )
+from vs_sandbox.api import SANDBOX_DISABLE_ENV
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -62,14 +64,13 @@ def _build(
 def test_agentshim_is_the_default_driver() -> None:
     client = _build(_config(backend="cli", cli_provider="codex"))
 
-    assert client.driver_name == "agentshim"
+    assert client.provider == "codex"
 
 
 @pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
 def test_default_driver_supports_all_agentshim_providers(provider: str) -> None:
     client = _build(_config(backend="cli", cli_provider=provider))
 
-    assert client.driver_name == "agentshim"
     assert client.provider == provider
 
 
@@ -82,7 +83,6 @@ def test_agentshim_docker_configuration_is_preserved() -> None:
         use_docker=True,
     )
 
-    assert client.driver_name == "agentshim"
     assert client.capabilities.container_execution
     assert not client.capabilities.host_path_grants
 
@@ -111,7 +111,6 @@ def test_agentshim_client_passes_model_and_log_dir(tmp_path: Path) -> None:
         log_dir=tmp_path,
     )
 
-    assert client.driver_name == "agentshim"
     assert client.model_for_kind("implementer") == "gpt-5"
     # A rejected attempt exercises factory logging without starting a provider CLI.
     client.close()
@@ -144,3 +143,31 @@ def test_agent_env_passthrough_reaches_the_spec_and_bad_names_are_rejected_at_lo
 
     with pytest.raises(ValueError, match=r"agent\.env_passthrough.*'HF-TOKEN'"):
         _config(env_passthrough=["HF-TOKEN"])
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+def test_built_client_reports_a_missing_provider_cli_before_its_first_turn(
+    provider: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The composed client probes readiness by default.
+
+    The run's PATH holds no provider CLI, so the probe (not a turn) must fail
+    with the typed error that names the provider.
+    """
+    empty_bin = tmp_path / "bin"
+    empty_bin.mkdir()
+    monkeypatch.setenv("PATH", str(empty_bin))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv(SANDBOX_DISABLE_ENV, "off")
+    client = _build(_config(backend="cli", cli_provider=provider))
+
+    with pytest.raises(ProviderNotReadyError) as raised:
+        client.invoke_text(
+            kind="implementer",
+            workspace=tmp_path,
+            system_prompt="sys",
+            user_prompt="go",
+            round_label="r1",
+        )
+
+    assert provider in str(raised.value)

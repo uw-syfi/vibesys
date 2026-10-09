@@ -6,6 +6,8 @@ import asyncio
 from collections import deque
 from typing import TYPE_CHECKING
 
+from tests.support.docker_environment import fake_docker_environment
+
 from launch.testing import create_session
 from vibesys.api import (
     ComputeBackend,
@@ -91,6 +93,7 @@ def execute(
     bundle = load_input_bundle(project_root)
     selected = configured or options()
     request = RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=project_root,
         orchestration=OrchestrationDescriptor(
             id=PLUGIN.id,

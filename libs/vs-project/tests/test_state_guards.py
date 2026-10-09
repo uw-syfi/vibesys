@@ -62,7 +62,7 @@ def _new_manifest(
         "Queue SPSC",
         branch=branch,
         vibesys_version="0.2.0",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=_descriptor(),
         trusted_input_baseline="a" * 40,

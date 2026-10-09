@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -16,7 +15,9 @@ from entrypoints.cli.remote import _is_remote_project
 from launch import validate_descriptor
 from vibesys.api import ComputeBackend, ProfilerKind
 from vibesys.api.profilers import coerce_profiler_kind
+from vibesys.api.request import migrate_recorded_run_environment
 from vs_project.api import (
+    GitError,
     GitTracker,
     NullGitTrackerEvents,
     OrchestrationRunManifest,
@@ -83,8 +84,11 @@ def _restore_run_environment_selection(
     explicit: frozenset[str],
 ) -> bool | None:
     """Restore the recorded environment selection or report a CLI mismatch."""
-    if not hasattr(args, "docker") or not hasattr(args, "modal"):
+    if not hasattr(args, "modal"):
         return None
+    # A run recorded with the retired host environment continues in Docker; the
+    # runtime rewrites the record and logs the migration when it opens the run.
+    recorded = migrate_recorded_run_environment(record).name
     skypilot = bool(getattr(args, "skypilot", False))
     if "run_environment" in explicit:
         requested = getattr(args, "run_environment", None)
@@ -92,27 +96,25 @@ def _restore_run_environment_selection(
         requested = "skypilot"
     elif args.modal:
         requested = "modal"
-    elif args.docker:
-        requested = "docker"
     elif getattr(args, "slurm_config", None) is not None:
         requested = record.name if record.name == "slurm-gpu" else "slurm"
     else:
-        requested = record.name
+        requested = recorded
     explicit_environment = {
-        "docker",
         "modal",
         "skypilot",
         "run_environment",
         "slurm_config",
     } & explicit
     if explicit_environment:
-        return requested != record.name
-    args.docker = record.name == "docker"
-    args.modal = record.name == "modal"
+        return requested != recorded
+    args.modal = recorded == "modal"
     if hasattr(args, "skypilot"):
-        args.skypilot = record.name == "skypilot"
+        args.skypilot = recorded == "skypilot"
     if hasattr(args, "run_environment"):
-        args.run_environment = record.name
+        # A host run is derived from its backend, not selectable: leave the choice
+        # unset so the runtime re-derives it and rejects a changed backend or host.
+        args.run_environment = None if recorded == "host" else recorded
     return False
 
 
@@ -282,7 +284,7 @@ def _switch_project_resume_branch(project_root: Path, run_id: str) -> None:
     tracker = GitTracker(project_root, events=NullGitTrackerEvents(), run_id=run_id)
     try:
         tracker.init(existing=True)
-    except (subprocess.SubprocessError, ValueError) as exc:
+    except (GitError, ValueError) as exc:
         _configuration_error(
             f"Cannot resume project run {run_id!r}: {exc}",
             code="resume_not_found",

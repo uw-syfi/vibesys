@@ -150,6 +150,7 @@ from vs_runtime._project_run import (
     ProjectStateDeclaration,
     open_project_run_resources,
 )
+from vs_runtime._recorded_environment import migrate_recorded_run_environment
 from vs_runtime._run_control import (
     RunControlChannel,
     RunControlEventSink,
@@ -178,10 +179,14 @@ from vs_runtime._run_environment import (
     SlurmEnvironment,
     SlurmEnvironmentFacts,
     SlurmGpuEnvironmentFacts,
-    build_run_environment,
-    make_run_environment_spec,
     open_run_environment_resources,
     open_workspace_environment_resources,
+)
+from vs_runtime._run_environment_selection import (
+    HostEnvironment,
+    build_run_environment,
+    make_run_environment_spec,
+    resolve_run_environment_spec,
     run_environment_record,
     validate_run_environment_profile,
 )
@@ -469,6 +474,7 @@ __all__ = [
     "FreshProjectError",
     "FreshProjectErrorKind",
     "GitSourceMaterialization",
+    "HostEnvironment",
     "InputDependency",
     "InputProjectError",
     "InputProjectMaterialization",
@@ -602,6 +608,7 @@ __all__ = [
     "make_run_environment_spec",
     "materialize_input_project",
     "materialize_objective_document",
+    "migrate_recorded_run_environment",
     "offered_skill_facts",
     "open_agent_execution_environment",
     "open_managed_conversation",
@@ -622,6 +629,7 @@ __all__ = [
     "resolve_bundled_tree",
     "resolve_evaluator_package",
     "resolve_packaged_tree",
+    "resolve_run_environment_spec",
     "resolve_sdk_source",
     "resolve_skill_resources",
     "run_environment_record",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -63,6 +63,81 @@ class AgentOutputSchemaError(RuntimeError):
         super().__init__(f"agent output did not match the response schema: {detail}")
 
 
+class AuthStatus(StrEnum):
+    """Whether a provider CLI is logged in, as far as its own tooling can say."""
+
+    OK = "ok"
+    FAILED = "failed"
+    #: The CLI offers no cheap check, or the check could not run. Not a problem.
+    UNKNOWN = "unknown"
+
+
+class ReadinessProblem(StrEnum):
+    """Why a provider cannot start a turn."""
+
+    BINARY_MISSING = "binary_missing"
+    AUTH_FAILED = "auth_failed"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderReadiness:
+    """What a readiness probe found about one provider CLI, before any turn.
+
+    ``detail`` explains ``auth`` in words fit for an error message, including
+    the fix when it failed, or says the binary was not found.
+    """
+
+    provider: str
+    binary_found: bool
+    path: str | None
+    version: str | None
+    auth: AuthStatus
+    detail: str
+
+    @property
+    def problem(self) -> ReadinessProblem | None:
+        """Return what stops a turn from starting, or ``None`` when none is known."""
+        if not self.binary_found:
+            return ReadinessProblem.BINARY_MISSING
+        if self.auth is AuthStatus.FAILED:
+            return ReadinessProblem.AUTH_FAILED
+        return None
+
+
+_READINESS_FIXES = {
+    ReadinessProblem.BINARY_MISSING: (
+        "install the CLI where the agent runs (the sandbox image under --docker) or put it on PATH"
+    ),
+    ReadinessProblem.AUTH_FAILED: "log in to the CLI as the agent would run it",
+}
+
+
+class ProviderNotReadyError(RuntimeError):
+    """A provider CLI cannot start a turn: it is missing or not logged in.
+
+    Permanent: waiting or retrying cannot fix it, so it is not ``retryable``.
+    Raised before the first turn, so no agent work was lost. ``problem`` and
+    ``provider`` identify what to fix; the message names both, the diagnostic
+    and the fix.
+    """
+
+    retryable = False
+
+    def __init__(self, readiness: ProviderReadiness) -> None:
+        """Build the message from a readiness with a known problem."""
+        problem = readiness.problem
+        if problem is None:
+            message = "ProviderNotReadyError needs a readiness with a problem"
+            raise ValueError(message)
+        self.provider = readiness.provider
+        self.problem = problem
+        self.detail = readiness.detail
+        super().__init__(
+            f"{readiness.provider} agent is not ready ({problem.value}): {readiness.detail}. "
+            f"Fix: {_READINESS_FIXES[problem]}."
+        )
+
+
 class SessionDisposition(StrEnum):
     """Whether a session remains safe to use after a turn."""
 
@@ -80,6 +155,38 @@ class AgentEventKind(StrEnum):
     USAGE = "usage"
     SKILL = "skill"
     """The agent loaded a skill; ``text`` is its name."""
+    RATE_LIMIT = "rate_limit"
+    """The provider reported one rate-limit window; see ``AgentEvent.rate_limit``."""
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRateLimit:
+    """One rate-limit window as the provider just reported it.
+
+    A provider that reports several windows (a five-hour and a weekly one)
+    emits one value per window; a consumer reads the newest per
+    ``(limit, window)``. ``None`` means the provider did not state the value,
+    never zero. ``resets_at`` is epoch seconds.
+    """
+
+    provider: str | None = None
+    window: str | None = None
+    limit: str | None = None
+    used_fraction: float | None = None
+    resets_at: float | None = None
+    window_minutes: int | None = None
+    exhausted: bool | None = None
+
+    @property
+    def is_exhausted(self) -> bool:
+        """Whether the window has no capacity left.
+
+        The provider's own statement wins. Without one, a window used up to
+        or past 100% counts as exhausted; an unstated usage does not.
+        """
+        if self.exhausted is not None:
+            return self.exhausted
+        return self.used_fraction is not None and self.used_fraction >= 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +285,7 @@ class AgentEvent:
     text: str | None = None
     payload: Mapping[str, object] = field(default_factory=dict)
     usage: AgentUsage | None = None
+    rate_limit: AgentRateLimit | None = None
 
 
 class AgentObserver(Protocol):
@@ -310,13 +418,29 @@ class AgentDriver(Protocol):
         ...
 
 
+@runtime_checkable
+class ReadinessProbe(Protocol):
+    """An optional driver capability: check the provider CLI before any session exists.
+
+    A driver whose provider tooling has no such check does not implement it,
+    and callers skip the check rather than guess.
+    """
+
+    def probe_readiness(self, spec: AgentSessionSpec) -> ProviderReadiness:
+        """Probe the CLI *spec* would launch, through the same route as its session.
+
+        A missing binary is a result, not an exception. No model is called.
+        """
+        ...
+
+
 class AgentClientProtocol(Protocol):
     """The agent-service surface the run context and every loop depend on.
 
     Each backend supplies one implementation: the CLI
     :class:`~vs_agent.client.AgentClient`, the deterministic stub, and
     the plain loop's tracker wrapper. Attribution
-    (``backend_name``, ``driver_name``, ``provider``, ``model_for_kind``) is
+    (``backend_name``, ``provider``, ``model_for_kind``) is
     part of this contract because the loop stamps it onto every round record,
     so a consumer never has to probe an implementation for it.
     """
@@ -329,11 +453,6 @@ class AgentClientProtocol(Protocol):
     @property
     def capabilities(self) -> AgentCapabilities:
         """Return the features this client's execution system can enforce."""
-        ...
-
-    @property
-    def driver_name(self) -> str | None:
-        """Return the stable configured driver name, or ``None`` when unnamed."""
         ...
 
     @property

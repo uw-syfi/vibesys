@@ -10,7 +10,9 @@ AgentShim is the only agent driver, so there is nothing to select. The former
 `driver = "omnigent"`, is rejected with an error naming `agent.driver`, and a
 run manifest that records `execution.agent_driver = "omnigent"` is rejected the
 same way. Manifests of earlier runs that recorded `agentshim` still load and
-resume; new manifests omit the field.
+resume, and round records that carry the retired `implementer_driver` key still
+load; the keys are dropped on read and new records omit them. Any other unknown
+key is still rejected.
 
 ## Where agentshim lives
 
@@ -45,6 +47,40 @@ belongs here.
 
 New provider behavior therefore goes upstream, not into a VibeSys driver
 workaround.
+
+## Provider readiness
+
+A missing CLI or a logged-out account would otherwise surface as the first
+turn's failure. Before a role's first session, `AgentClient` asks a driver that
+implements `ReadinessProbe` to probe its provider with `probe_readiness(spec)`.
+The AgentShim driver calls `agentshim.probe_provider` on the executor, sandbox
+confinement and environment `create_session` builds for the same spec, so a
+container is probed where the agent will run. No model is called.
+
+| Probe result | Outcome |
+|---|---|
+| binary not found | `ProviderNotReadyError` (`BINARY_MISSING`), before any turn |
+| login `FAILED` | `ProviderNotReadyError` (`AUTH_FAILED`) with the provider's own fix text |
+| login `UNKNOWN` (Gemini, Copilot, opencode have no status command) | proceeds; the run log records `[readiness] ... login state unknown` |
+| ready | proceeds; passing is remembered per role, a failure is not |
+
+`ProviderNotReadyError` is permanent (`retryable = False`). A driver with no
+probe (Omnigent) is skipped, not guessed at.
+
+## Rate-limit reports
+
+A provider that reports its rate-limit windows (Claude Code's `rate_limit_event`,
+Codex's `account/rateLimits/updated`) reaches VibeSys as one `AgentRateLimit`
+per window, carried by an `AgentEventKind.RATE_LIMIT` driver event. `AgentLogger`
+writes a plain `[rate limit]` line to the run log and publishes the typed
+`rate_limit_update` event (`RateLimitUpdateData`) for frontends. `exhausted` on
+the event is resolved once, in `AgentRateLimit.is_exhausted`: the provider's own
+statement wins, otherwise usage at or past 100%. Unstated values stay `None`.
+The headless frontend prints a line only for an exhausted window.
+
+This is observation only. Pausing the run on an exhausted window and the
+fallback policy (#798) consume this event later; nothing here changes how a
+quota failure ends a turn.
 
 ## Provider session resume
 
@@ -204,7 +240,7 @@ experiment chat is the caller that does this today
 
 ## Images
 
-A `--docker` run starts from two images, built by `vs_agent.api.images`:
+A Docker run starts from two images, built by `vs_agent.api.images`:
 
 - The **task image**, built from the task's own `Dockerfile` when it has one
   (`build_task_image`), or the backend's base image otherwise. It installs
@@ -254,7 +290,7 @@ is a Dockerfile gap, not something a running turn can patch around.
 
 ### Registry: GHCR by digest
 
-A local `--docker` run never contacts a registry: it runs the image
+A local Docker run never contacts a registry: it runs the image
 `agent_image` just built straight from the local Docker image store. Modal
 and SkyPilot runs do, because neither backend's Docker daemon can be assumed
 to already have the image locally, so their local editor container is
@@ -292,7 +328,7 @@ command's own runtime needs, not for running agent CLIs.
 
 ## Container execution
 
-`--docker` runs the provider CLI inside the role's editor container, through
+Docker runs the provider CLI inside the role's editor container, through
 the same path a host session runs. `create_session` looks up or builds a
 `vs_sandbox.WorkspaceSandbox`, wraps a plain `agentshim.HostCommandExecutor()`
 through `confine_to_sandbox`, and hands `agentshim.Agent` the sandbox's own

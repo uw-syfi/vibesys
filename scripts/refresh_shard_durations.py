@@ -5,7 +5,11 @@ Every test shard uploads a ``shard-durations-I`` artifact. Download one run's
 artifacts (a green run on main is the usual source) and merge them:
 
     gh run download RUN_ID --pattern 'shard-durations-*' --dir /tmp/durations
-    uv run python scripts/refresh_shard_durations.py /tmp/durations
+    uv run python -m scripts.refresh_shard_durations /tmp/durations
+
+CI runs it with ``--output`` on every push to main to build the record that later
+runs read (see ``.github/workflows/test.yml``); without it, the checked-in
+cold-start record is rewritten.
 """
 
 from __future__ import annotations
@@ -22,13 +26,17 @@ def main(argv: list[str]) -> int:
     """Merge every ``shard-durations-*.json`` under the given directory."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("directory", type=Path, help="where the shard artifacts were downloaded")
+    parser.add_argument(
+        "--output", type=Path, default=DEFAULT_DURATIONS, help="where to write the merged record"
+    )
     args = parser.parse_args(argv)
     files = sorted(args.directory.rglob("*.json"))
     if not files:
         sys.stderr.write(f"no shard duration files under {args.directory}\n")
         return 1
     merged = merge_durations(json.loads(path.read_text()) for path in files)
-    DEFAULT_DURATIONS.write_text(json.dumps(merged, indent=1) + "\n", encoding="utf-8")
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(merged, indent=1) + "\n", encoding="utf-8")
     sys.stdout.write(f"merged {len(files)} shard records, {len(merged)} test files\n")
     return 0
 

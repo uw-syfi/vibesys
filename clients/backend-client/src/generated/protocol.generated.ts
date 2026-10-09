@@ -57,7 +57,6 @@ export type RequestId6 = string;
 export type ClientId6 = string;
 export type Timestamp6 = string;
 export type Type6 = "query.chat_thread_create";
-export type Driver = "agentshim" | null;
 export type Provider = string | null;
 export type Model = string | null;
 export type Title = string | null;
@@ -153,7 +152,6 @@ export type Effect = "none";
 export type ThreadId1 = string | null;
 export type ThreadId2 = string;
 export type Title1 = string;
-export type Driver1 = string;
 export type Provider1 = string;
 export type Model1 = string;
 export type Provider2 = string;
@@ -213,7 +211,6 @@ export type Kind = "agent_execution_activity_changed";
 export type Mode2 = "thinking" | "responding" | "tool" | "waiting";
 export type Summary1 = string;
 export type Tool = string | null;
-export type Driver2 = string | null;
 export type Provider3 = string | null;
 export type Model3 = string | null;
 export type ActiveExecutions = ActiveAgentExecution[];
@@ -256,6 +253,7 @@ export type EventType =
   | "tool_result"
   | "todo_update"
   | "usage_update"
+  | "rate_limit_update"
   | "gate_started"
   | "gate_finished"
   | "workspace_snapshot"
@@ -299,6 +297,7 @@ export type Data =
       | ToolResultData
       | TodoUpdateData
       | UsageUpdateData
+      | RateLimitUpdateData
       | GateStartedData
       | GateFinishedData
       | WorkspaceSnapshotData
@@ -313,7 +312,6 @@ export type InvocationId1 = string | null;
 export type Kind2 = "chat_thread_created";
 export type ThreadId3 = string;
 export type Title2 = string;
-export type Driver3 = string;
 export type Provider4 = string;
 export type Model4 = string;
 export type CreatedAt = string;
@@ -327,7 +325,6 @@ export type Stage1 = string;
 export type Attempt1 = number | null;
 export type SystemPrompt1 = string;
 export type UserPrompt1 = string;
-export type Driver4 = string | null;
 export type Provider5 = string | null;
 export type Model5 = string | null;
 export type Kind6 = "agent_execution_finished";
@@ -423,7 +420,15 @@ export type Kind26 = "usage_update";
 export type InputTokens1 = number;
 export type ContextWindow1 = number | null;
 export type Model6 = string | null;
-export type Kind27 = "gate_started";
+export type Kind27 = "rate_limit_update";
+export type Provider6 = string | null;
+export type Window = string | null;
+export type Limit = string | null;
+export type UsedFraction = number | null;
+export type ResetsAt = number | null;
+export type WindowMinutes = number | null;
+export type Exhausted = boolean;
+export type Kind28 = "gate_started";
 /**
  * Closed set of framework-owned gates a candidate passes through.
  */
@@ -435,7 +440,7 @@ export type Command = string | null;
  */
 export type FrameworkSource = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel = string | null;
-export type Kind28 = "gate_finished";
+export type Kind29 = "gate_finished";
 export type Recipe1 = string | null;
 export type Reused = boolean;
 export type Metric1 = string | null;
@@ -447,7 +452,7 @@ export type OutputTail = string | null;
  */
 export type FrameworkSource1 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel1 = string | null;
-export type Kind29 = "workspace_snapshot";
+export type Kind30 = "workspace_snapshot";
 export type Label = string;
 export type Commit = string | null;
 export type Baseline = string | null;
@@ -456,7 +461,7 @@ export type ExcludedPaths = string[];
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource2 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind30 = "run_configured";
+export type Kind31 = "run_configured";
 export type RunLogPath = string;
 export type ProjectRoot = string;
 export type Model7 = string | null;
@@ -468,7 +473,7 @@ export type ParetoObjectives = string | null;
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource3 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind31 = "framework_warning";
+export type Kind32 = "framework_warning";
 export type Summary2 = string;
 export type Detail1 = string | null;
 /**
@@ -679,11 +684,8 @@ export interface ChatQuery {
 /**
  * Create a new experiment-chat thread with its own agent selection.
  *
- * Omitted fields resolve to the run's configured driver, provider, and
- * model. The response carries the resolved settings and thread identity.
- * ``driver`` exists for completeness and stays validated when supplied, but
- * which driver backs a run is a deployment detail: clients omit it so every
- * thread inherits the run's.
+ * Omitted fields resolve to the run's configured provider and model. The
+ * response carries the resolved settings and thread identity.
  */
 export interface ChatThreadCreateQuery {
   protocol_version?: ProtocolVersion6;
@@ -691,7 +693,6 @@ export interface ChatThreadCreateQuery {
   client_id?: ClientId6;
   timestamp?: Timestamp6;
   type: Type6;
-  driver?: Driver;
   provider?: Provider;
   model?: Model;
   title?: Title;
@@ -887,7 +888,6 @@ export interface ChatResult {
 export interface ChatThreadInfo {
   thread_id: ThreadId2;
   title?: Title1;
-  driver: Driver1;
   provider: Provider1;
   model: Model1;
 }
@@ -949,7 +949,6 @@ export interface ActiveAgentExecution {
   assignment: Assignment;
   started_at: StartedAt;
   activity: AgentExecutionActivityData;
-  driver?: Driver2;
   provider?: Provider3;
   model?: Model3;
 }
@@ -1006,7 +1005,6 @@ export interface ChatThreadCreatedData {
   kind: Kind2;
   thread_id: ThreadId3;
   title?: Title2;
-  driver: Driver3;
   provider: Provider4;
   model: Model4;
   created_at: CreatedAt;
@@ -1043,7 +1041,6 @@ export interface AgentExecutionStartedData {
   system_prompt?: SystemPrompt1;
   user_prompt?: UserPrompt1;
   activity: AgentExecutionActivityData;
-  driver?: Driver4;
   provider?: Provider5;
   model?: Model5;
   [k: string]: unknown;
@@ -1305,10 +1302,28 @@ export interface UsageUpdateData {
   [k: string]: unknown;
 }
 /**
+ * One rate-limit window a provider reported, as semantic data.
+ *
+ * ``exhausted`` is the resolved fact (the provider's own statement, else
+ * usage at or past 100%); the other fields are what the provider stated,
+ * ``None`` when it did not state them. ``resets_at`` is epoch seconds.
+ */
+export interface RateLimitUpdateData {
+  kind: Kind27;
+  provider?: Provider6;
+  window?: Window;
+  limit?: Limit;
+  used_fraction?: UsedFraction;
+  resets_at?: ResetsAt;
+  window_minutes?: WindowMinutes;
+  exhausted: Exhausted;
+  [k: string]: unknown;
+}
+/**
  * One framework gate began evaluating the current candidate.
  */
 export interface GateStartedData {
-  kind: Kind27;
+  kind: Kind28;
   gate: GateKind;
   recipe?: Recipe;
   command?: Command;
@@ -1325,7 +1340,7 @@ export interface GateStartedData {
  * output on failure.
  */
 export interface GateFinishedData {
-  kind: Kind28;
+  kind: Kind29;
   gate: GateKind;
   recipe?: Recipe1;
   reused?: Reused;
@@ -1346,7 +1361,7 @@ export interface GateFinishedData {
  * change carries ``excluded_paths``.
  */
 export interface WorkspaceSnapshotData {
-  kind: Kind29;
+  kind: Kind30;
   label?: Label;
   commit?: Commit;
   baseline?: Baseline;
@@ -1358,7 +1373,7 @@ export interface WorkspaceSnapshotData {
  * One per run: the resolved configuration a loop starts with.
  */
 export interface RunConfiguredData {
-  kind: Kind30;
+  kind: Kind31;
   run_log_path: RunLogPath;
   project_root: ProjectRoot;
   model?: Model7;
@@ -1376,7 +1391,7 @@ export interface RunConfiguredData {
  * ``diagnostic`` field so diagnostic-oriented clients need no new handling.
  */
 export interface FrameworkWarningData {
-  kind: Kind31;
+  kind: Kind32;
   summary: Summary2;
   detail?: Detail1;
   source?: FrameworkSource4;

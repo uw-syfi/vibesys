@@ -176,7 +176,7 @@ def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: 
         trusted_input_baseline="a" * 40,
         branch="vibesys/run-1",
         vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
     )
@@ -197,7 +197,6 @@ def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: 
             driver,
             provider="fake",
             model_name="fake-model",
-            driver_name="fake",
             session_store=store,
         )
 
@@ -272,7 +271,6 @@ def test_member_keyed_candidate_resumes_its_provider_session_from_a_new_revision
             driver,
             provider="fake",
             model_name="fake-model",
-            driver_name="fake",
             session_store=cast("SessionStore | None", kwargs["session_store"]),
         )
         clients.append(client)
@@ -1082,7 +1080,7 @@ def state_project(tmp_path_factory: pytest.TempPathFactory) -> tuple[Project, st
         "members",
         branch="vibesys/members",
         vibesys_version="0.2.0",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="multi-agent", config_version=1, options={}),
         trusted_input_baseline="a" * 40,

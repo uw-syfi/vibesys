@@ -34,6 +34,10 @@ _DEFAULT_VERIFY_TIMEOUT_SECONDS = 60.0
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 _DIAGNOSTIC_LIMIT = 1000
 _TASK_IMAGE_REPOSITORY = "vibesys-task-build"
+#: Repository of the local tag that names a bare image ID so BuildKit can
+#: resolve it in a ``FROM`` line. Keyed by the full ID, so re-tagging is a
+#: no-op and the agent layer's cache key stays stable.
+_BASE_IMAGE_REPOSITORY = "vibesys-base"
 _AGENT_IMAGE_REPOSITORY = "vibesys-agent-build"
 
 #: Where a pushed agent image lives. GHCR because the repository is on GitHub
@@ -97,6 +101,16 @@ class TaskImageBuildError(RuntimeError):
         """Describe Docker returning a value that is not an immutable image ID."""
         return cls(
             f"Docker returned an invalid runnable {image_label} ID for {dockerfile}: {displayed!r}"
+        )
+
+    @classmethod
+    def base_tag_failed(
+        cls, image_id: str, tag: str, returncode: int, details: str
+    ) -> TaskImageBuildError:
+        """Describe Docker failing to give a base image ID a resolvable local tag."""
+        return cls(
+            f"Could not tag base image {image_id} as {tag} "
+            f"(exit {returncode}): {details[:_DIAGNOSTIC_LIMIT]}"
         )
 
     @classmethod
@@ -194,6 +208,19 @@ class _BuildTarget:
     image_label: str
 
 
+@dataclass(frozen=True)
+class _BuiltImage:
+    """A built image: its unique local tag and its immutable ID.
+
+    The tag is what a later ``FROM`` or ``--build-arg`` must name, because
+    BuildKit resolves ``sha256:<id>`` as a registry reference and fails. The ID
+    is what gets recorded for reproducibility.
+    """
+
+    tag: str
+    image_id: str
+
+
 class DockerBuildRunner(Protocol):
     """Injectable process boundary for a Docker image build."""
 
@@ -257,25 +284,67 @@ def build_task_image(
     unused build arg, so this is safe to pass unconditionally from a caller
     that does not know whether the task Dockerfile uses it.
     """
+    dockerfile = _validated_task_dockerfile(dockerfile_path, timeout)
+    runner = command_runner or SubprocessDockerBuildRunner()
+    return _build_task_image(
+        dockerfile, base_image=base_image, runner=runner, timeout=timeout
+    ).image_id
+
+
+def _validated_task_dockerfile(dockerfile_path: Path, timeout: float) -> Path:
+    """Return the task Dockerfile's absolute path, or raise if it is unusable."""
     # Keep the lexical parent as the build context. Resolving the Dockerfile
     # itself could silently widen the context to a symlink target elsewhere.
     dockerfile = dockerfile_path.expanduser().absolute()
-    root = dockerfile.parent
     if not dockerfile.is_file() or dockerfile.is_symlink():
         raise TaskImageBuildError.dockerfile_not_regular(dockerfile)
     if timeout <= 0:
         message = "task image build timeout must be positive"
         raise ValueError(message)
+    return dockerfile
 
-    runner = command_runner or SubprocessDockerBuildRunner()
+
+def _build_task_image(
+    dockerfile: Path,
+    *,
+    base_image: str | None,
+    runner: DockerBuildRunner,
+    timeout: float,
+) -> _BuiltImage:
+    """Build a validated task Dockerfile and return its tag and immutable ID."""
     extra_build_args = ("--build-arg", f"BASE_IMAGE={base_image}") if base_image is not None else ()
     target = _BuildTarget(
         dockerfile=dockerfile,
-        context=root,
+        context=dockerfile.parent,
         image_repository=_TASK_IMAGE_REPOSITORY,
         image_label="task image",
     )
     return _build_and_inspect(target, extra_build_args, runner=runner, timeout=timeout)
+
+
+def _resolvable_base(base_image: str, *, runner: DockerBuildRunner, timeout: float) -> str:
+    """Return a reference to *base_image* that BuildKit resolves locally.
+
+    A bare ``sha256:`` image ID (what the headless entrypoint records for a
+    task image) is tagged ``vibesys-base:<id>`` first. Any other reference
+    already names a tag or digest and is returned unchanged.
+    """
+    if _IMAGE_ID.fullmatch(base_image) is None:
+        return base_image
+    tag = f"{_BASE_IMAGE_REPOSITORY}:{base_image.removeprefix('sha256:')}"
+    target = _BuildTarget(
+        dockerfile=_AGENT_DOCKERFILE,
+        context=_AGENT_IMAGE_DIR,
+        image_repository=_BASE_IMAGE_REPOSITORY,
+        image_label="base image",
+    )
+    result = _run_docker(
+        runner, ("docker", "tag", base_image, tag), timeout=timeout, action="tagging", target=target
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "docker tag failed").strip()
+        raise TaskImageBuildError.base_tag_failed(base_image, tag, result.returncode, detail)
+    return tag
 
 
 def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task image, toolchains, pip extras, injected runner, and timeout independently affect build layers or execution; callers use this public builder directly.
@@ -292,11 +361,13 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     ``pip_extras`` are extra pip requirements an execution environment needs
     inside the editor container (sorted and deduplicated like ``toolchains``).
 
-    When ``task_dockerfile`` is given, the task image is built first (via
-    :func:`build_task_image`, with ``base_image`` passed through so the task
-    Dockerfile may ``FROM ${BASE_IMAGE}``) and the agent layer is built on top
-    of the resulting image ID. Otherwise the agent layer is built directly on
-    ``base_image``.
+    When ``task_dockerfile`` is given, the task image is built first (as
+    :func:`build_task_image` does, with ``base_image`` passed through so the
+    task Dockerfile may ``FROM ${BASE_IMAGE}``) and the agent layer is built on
+    top of it by its unique local tag. Otherwise the agent layer is built
+    directly on ``base_image``. BuildKit cannot resolve a bare ``sha256:`` ID
+    in ``FROM``, so an ID ``base_image`` is given a local tag first; the
+    ``BASE_IMAGE`` build arg is never a bare ID.
 
     CLI and toolchain versions come from :mod:`vs_agent.provider_policy`
     and are passed as build args, so a version bump changes this module's
@@ -311,16 +382,16 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
         raise ValueError(message)
 
     runner = command_runner or SubprocessDockerBuildRunner()
-    base = (
-        build_task_image(
-            task_dockerfile,
-            base_image=base_image,
-            command_runner=runner,
+    if task_dockerfile is not None:
+        dockerfile = _validated_task_dockerfile(task_dockerfile, timeout)
+        base = _build_task_image(
+            dockerfile,
+            base_image=_resolvable_base(base_image, runner=runner, timeout=timeout),
+            runner=runner,
             timeout=timeout,
-        )
-        if task_dockerfile is not None
-        else base_image
-    )
+        ).tag
+    else:
+        base = _resolvable_base(base_image, runner=runner, timeout=timeout)
 
     build_args: list[str] = ["--build-arg", f"BASE_IMAGE={base}"]
     build_args += ["--build-arg", f"NODE_VERSION={provider_policy.NODE_VERSION}"]
@@ -344,7 +415,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
         image_repository=_AGENT_IMAGE_REPOSITORY,
         image_label="agent image",
     )
-    return _build_and_inspect(target, tuple(build_args), runner=runner, timeout=timeout)
+    return _build_and_inspect(target, tuple(build_args), runner=runner, timeout=timeout).image_id
 
 
 def _build_and_inspect(
@@ -353,7 +424,7 @@ def _build_and_inspect(
     *,
     runner: DockerBuildRunner,
     timeout: float,
-) -> str:
+) -> _BuiltImage:
     """Build one Dockerfile to a unique tag and resolve its immutable ID."""
     image_tag = f"{target.image_repository}:{uuid.uuid4().hex}"
     build_argv = (
@@ -401,7 +472,7 @@ def _build_and_inspect(
             target.dockerfile,
             displayed,
         )
-    return image_id
+    return _BuiltImage(tag=image_tag, image_id=image_id)
 
 
 def _run_docker(
@@ -423,7 +494,7 @@ def _run_docker(
 # ---------------------------------------------------------------------------
 # Registry push and verification.
 #
-# A local ``--docker`` run never calls any of the functions below: it runs
+# A local Docker run never calls any of the functions below: it runs
 # the image ``agent_image`` just built directly from the local Docker image
 # store. Only a remote backend (Modal, SkyPilot) needs the image pulled from
 # somewhere else, so only those callers push. A push is keyed by the local

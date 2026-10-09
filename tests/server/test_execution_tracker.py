@@ -64,19 +64,18 @@ def test_explicit_executions_are_independent_and_finish_idempotently(tmp_path: P
     [
         (
             AgentSelection(
-                driver="agentshim",
                 provider="codex",
                 model="gpt-5.1-codex-max",
             ),
-            ("agentshim", "codex", "gpt-5.1-codex-max"),
+            ("codex", "gpt-5.1-codex-max"),
         ),
-        (None, (None, None, None)),
+        (None, (None, None)),
     ],
 )
 def test_execution_identity_is_recorded_in_events_and_checkpoints(
     tmp_path: Path,
     selection: AgentSelection | None,
-    expected: tuple[str | None, str | None, str | None],
+    expected: tuple[str | None, str | None],
 ) -> None:
     parts = build_server_parts(tmp_path)
     parts.start_execution(
@@ -90,11 +89,11 @@ def test_execution_identity_is_recorded_in_events_and_checkpoints(
         event for event in parts.journal.read() if event.type is EventType.AGENT_EXECUTION_STARTED
     )
     assert isinstance(started.data, AgentExecutionStartedData)
-    assert (started.data.driver, started.data.provider, started.data.model) == expected
+    assert (started.data.provider, started.data.model) == expected
     active = parts.api.snapshot().active_executions
-    assert (active[0].driver, active[0].provider, active[0].model) == expected
+    assert (active[0].provider, active[0].model) == expected
     checkpointed = parts.api.subscription_checkpoint(0).active_executions
-    assert (checkpointed[0].driver, checkpointed[0].provider, checkpointed[0].model) == expected
+    assert (checkpointed[0].provider, checkpointed[0].model) == expected
 
 
 def test_activity_tracks_todos_and_parallel_tools(tmp_path: Path) -> None:

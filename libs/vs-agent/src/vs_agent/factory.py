@@ -94,7 +94,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
 
         if provider not in DOCKER_PROVIDER_ENV:
             message = (
-                f"--cli-provider {provider!r} is not yet supported with --docker; "
+                f"--cli-provider {provider!r} is not yet supported in Docker; "
                 f"supported: {sorted(DOCKER_PROVIDER_ENV)}"
             )
             raise SystemExit(message)
@@ -114,7 +114,6 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
 
     return AgentClient(
         driver,
-        driver_name="agentshim",
         provider=provider,
         skills=skill_source_dirs,
         skill_selection=skill_selection,
@@ -132,4 +131,5 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
         driver_log=driver_log,
         session_store=session_store,
         event_sink=events,
+        check_readiness=True,
     )

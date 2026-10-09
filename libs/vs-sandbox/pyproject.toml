@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=70.1", "wheel>=0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-sandbox"
+version = "0.1.0"
+description = "Workspace sandboxes and host command executors"
+requires-python = ">=3.12"
+dependencies = [
+    "huggingface_hub",
+    "modal>=1.4.2",
+    "pydantic>=2",
+    "pyyaml>=6",
+    "vs-evaluation",
+    "vs-project",
+    "vs-slurm",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vs_sandbox = ["py.typed"]
+
+[tool.uv.sources]
+vs-evaluation = { workspace = true }
+vs-project = { workspace = true }
+vs-slurm = { workspace = true }

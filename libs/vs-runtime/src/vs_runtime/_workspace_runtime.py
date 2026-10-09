@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import shlex
-import subprocess
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from vs_project.api import GitError
 from vs_runtime._local_validation import (
     LocalValidationEvents,
     check_recipe_artifact_path,
@@ -323,7 +323,7 @@ class RuntimeWorkspaceEvaluation:
             try:
                 left_patch = await self._blocking_patch(resource, left)
                 right_patch = await self._blocking_patch(resource, right)
-            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+            except (OSError, RuntimeError, ValueError, GitError) as error:
                 message = "accuracy receipt revision is unavailable in this workspace"
                 raise RuntimeContractError(message) from error
         return left_patch == right_patch

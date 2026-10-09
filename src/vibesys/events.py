@@ -49,6 +49,7 @@ class CoreEventType(StrEnum):
     TOOL_RESULT = "tool_result"
     TODO_UPDATE = "todo_update"
     USAGE_UPDATE = "usage_update"
+    RATE_LIMIT_UPDATE = "rate_limit_update"
     GATE_STARTED = "gate_started"
     GATE_FINISHED = "gate_finished"
     WORKSPACE_SNAPSHOT = "workspace_snapshot"
@@ -132,7 +133,12 @@ class AsyncOperationState(StrEnum):
 
 
 class EventPayload(BaseModel):
-    """Immutable base for structured core event payloads."""
+    """Immutable base for structured core event payloads.
+
+    Payloads ignore keys they do not declare, so core events recorded before
+    the retired ``driver`` attribution was removed still load. ``CoreEvent``
+    itself rejects unknown keys.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -171,7 +177,6 @@ class AgentExecutionStartedData(EventPayload):
     system_prompt: str = ""
     user_prompt: str = ""
     activity: AgentExecutionActivityData
-    driver: str | None = None
     provider: str | None = None
     model: str | None = None
 
@@ -298,6 +303,24 @@ class UsageUpdateData(EventPayload):
     input_tokens: int
     context_window: int | None = None
     model: str | None = None
+
+
+class RateLimitUpdateData(EventPayload):
+    """One rate-limit window a provider reported, as semantic data.
+
+    ``exhausted`` is the resolved fact (the provider's own statement, else
+    usage at or past 100%); the other fields are what the provider stated,
+    ``None`` when it did not state them. ``resets_at`` is epoch seconds.
+    """
+
+    kind: Literal["rate_limit_update"] = "rate_limit_update"
+    provider: str | None = None
+    window: str | None = None
+    limit: str | None = None
+    used_fraction: float | None = None
+    resets_at: float | None = None
+    window_minutes: int | None = None
+    exhausted: bool
 
 
 class SubprocessOutputData(EventPayload):
@@ -455,6 +478,7 @@ CoreEventData = Annotated[
     | ToolResultData
     | TodoUpdateData
     | UsageUpdateData
+    | RateLimitUpdateData
     | GateStartedData
     | GateFinishedData
     | WorkspaceSnapshotData

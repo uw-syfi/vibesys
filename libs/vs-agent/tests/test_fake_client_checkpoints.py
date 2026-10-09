@@ -39,7 +39,7 @@ def _checkpoint_store(tmp_path: Path) -> DurableSessionStore:
         branch="test",
         vibesys_version="test",
         trusted_input_baseline="a" * 40,
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=RunExecutionRecord(
             model="test",
             agent_backend="stub",

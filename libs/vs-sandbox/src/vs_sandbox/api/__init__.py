@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         ContentionMonitor,
         Device,
         SandboxKind,
+        backend_is_host_only,
         create_compute_backend,
         register_compute_backend,
     )
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
     from vs_sandbox.cuda_backend import CudaBackend
     from vs_sandbox.device_lease import DeviceLease
     from vs_sandbox.docker_cli import DockerCli, SubprocessDockerCli
-    from vs_sandbox.docker_sandbox import AGENT_HOME, DockerSandbox
+    from vs_sandbox.docker_sandbox import AGENT_HOME, RUN_ID_LABEL, DockerSandbox
     from vs_sandbox.execution import CommandResult, CommandRunner
     from vs_sandbox.gpu_monitor import (
         GpuContentionMonitor,
@@ -84,6 +85,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AGENT_HOME",
+    "RUN_ID_LABEL",
     "SANDBOX_DISABLE_ENV",
     "SANDBOX_GPU_DEVICES_ENV",
     "AcceleratorDiscovery",
@@ -127,6 +129,7 @@ __all__ = [
     "SystemAcceleratorDiscovery",
     "TrainiumBackend",
     "WorkspaceSandbox",
+    "backend_is_host_only",
     "build_host_sandbox",
     "create_compute_backend",
     "declare_resources",
@@ -156,6 +159,7 @@ _LAZY_EXPORTS = {
     "ContentionMonitor": ("compute_backends", "ContentionMonitor"),
     "Device": ("compute_backends", "Device"),
     "SandboxKind": ("compute_backends", "SandboxKind"),
+    "backend_is_host_only": ("compute_backends", "backend_is_host_only"),
     "create_compute_backend": ("compute_backends", "create_compute_backend"),
     "register_compute_backend": ("compute_backends", "register_compute_backend"),
     "ContainerRuntimeUnavailableError": (
@@ -176,6 +180,7 @@ _LAZY_EXPORTS = {
     "RocmBackend": ("rocm_backend", "RocmBackend"),
     "TrainiumBackend": ("trainium_backend", "TrainiumBackend"),
     "AGENT_HOME": ("docker_sandbox", "AGENT_HOME"),
+    "RUN_ID_LABEL": ("docker_sandbox", "RUN_ID_LABEL"),
     "DockerCli": ("docker_cli", "DockerCli"),
     "SubprocessDockerCli": ("docker_cli", "SubprocessDockerCli"),
     "DockerSandbox": ("docker_sandbox", "DockerSandbox"),

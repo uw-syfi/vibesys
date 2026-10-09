@@ -35,6 +35,9 @@ if TYPE_CHECKING:
 
 _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 
+HOST_ONLY_BACKENDS = frozenset({ComputeBackend.METAL})
+"""Backends whose accelerator no container can reach (the capability's one source)."""
+
 
 class LocalBackend:
     """No-device backend (Metal / CPU) — hardware hooks are no-ops."""
@@ -49,7 +52,7 @@ class LocalBackend:
     ) -> None:
         """Configure the Metal or CPU backend from its platform identity."""
         self.name = name
-        if name is ComputeBackend.METAL:
+        if name in HOST_ONLY_BACKENDS:
             self._unavailable_reason = (
                 "Docker on macOS can't access Metal/MPS, and Modal does not offer Apple GPUs"
             )
@@ -82,6 +85,7 @@ class LocalBackend:
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
         docker_in_docker: bool = False,
+        run_id: str | None = None,
     ) -> CommandRunner:
         """Create a local or supported Docker sandbox for this backend."""
         # Deferred: importing DockerSandbox registers process-wide signal and
@@ -109,7 +113,7 @@ class LocalBackend:
                 raise ValueError(_exception_message_2)
             return docker_sandbox(
                 host_workspace=host_workspace,
-                # ``DockerEnvironment.open()`` (the plain --docker path)
+                # ``DockerEnvironment.open()`` (the plain Docker path)
                 # always resolves and passes an agent image, so this only
                 # falls back to the backend's own base image for a caller
                 # that builds its own Docker sandbox without one — Modal and
@@ -125,6 +129,7 @@ class LocalBackend:
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
                 docker_in_docker=docker_in_docker,
+                run_id=run_id,
             )
         if kind is SandboxKind.DOCKER:
             _exception_message = f"{self.name.value} backend only supports local execution; SandboxKind.{kind.name} is unavailable ({self._unavailable_reason})."

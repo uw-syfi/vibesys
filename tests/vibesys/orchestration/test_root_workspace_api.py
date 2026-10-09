@@ -6,6 +6,10 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.docker_environment import (
+    fake_docker_environment,
+    host_container_backend,
+)
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
@@ -37,6 +41,7 @@ def _write_project(root: Path) -> None:
 
 def _request(project_root: Path) -> RunRequest:
     return RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id="workspace", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "workspace"}}),
@@ -60,6 +65,7 @@ def test_root_workspace_revision_restore_and_retention_contract(tmp_path: Path) 
             _request(project_root),
             integration,
             plugin=_PLUGIN,
+            backend_factory=host_container_backend,
         ) as ctx:
             assert ctx.facts.objective == "Improve the queue."
             workspace = ctx.workspaces.root

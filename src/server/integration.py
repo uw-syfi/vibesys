@@ -57,6 +57,7 @@ _PRESENTATION_EVENTS = frozenset(
         EventType.TOOL_RESULT,
         EventType.TODO_UPDATE,
         EventType.USAGE_UPDATE,
+        EventType.RATE_LIMIT_UPDATE,
     }
 )
 _CORE_FAILURE_CONTEXTS: dict[EventType, tuple[DiagnosticScope, DiagnosticSeverity, str]] = {
@@ -244,12 +245,11 @@ class RunIntegrationAdapter:
         attachment = RunAttachment(
             chat_state_dir=ready.frontend_state_directory / "chat",
             agent_defaults=AgentSelection(
-                driver=ready.agent_driver,
                 provider=ready.agent_provider,
                 model=ready.agent_model,
                 role_models=ready.role_models,
             ),
-            agent_drivers=ready.agent_drivers,
+            agent_providers=ready.agent_providers,
         )
         auxiliary_agents = session.open_auxiliary_agents()
         self._auxiliary_scopes.callback(auxiliary_agents.close)

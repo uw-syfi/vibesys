@@ -67,12 +67,14 @@ loadgroup`; the `serial` marker is a last resort for a host-wide resource.
 
 CI splits the suite across sixteen runners (`VIBESYS_TEST_SHARD=I/16` or
 `--shard=I/16`, balanced by `tests/support/shard_durations.json`). Whole files
-are placed by recorded seconds; a file over 90 s has its tests spread over the
+are placed by recorded seconds; a file over 1.1x the mean shard load has its tests spread over the
 shards. A test must not depend on running beside another test of its file or
 module. Each shard warns when it overruns its budget or runs a file the record
-underestimates; then run `scripts/refresh_shard_durations.py` on the
-`shard-durations-*` artifacts of a green run. A stale file only unbalances the
-shards. Slow generated checks (Hypothesis examples, chaos seeds)
+underestimates. Every green run on main caches its measured seconds and later
+runs balance on that cache (`$VIBESYS_SHARD_DURATIONS`), so the record
+maintains itself; the checked-in file is only the cold start, refreshed with
+`python -m scripts.refresh_shard_durations` on a run's `shard-durations-*`
+artifacts. A stale file only unbalances the shards. Slow generated checks (Hypothesis examples, chaos seeds)
 run reduced in pull requests and at full strength in
 `.github/workflows/nightly.yml`.
 

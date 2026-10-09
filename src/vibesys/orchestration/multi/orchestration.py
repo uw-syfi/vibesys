@@ -664,9 +664,7 @@ class _MultiRun:
                 accuracy_configured=self.run.facts.accuracy_configured,
                 candidate_commit=candidate_revision,
                 implementer=(
-                    AgentAttribution(
-                        binding.backend, binding.driver, binding.provider, binding.model
-                    )
+                    AgentAttribution(binding.backend, binding.provider, binding.model)
                     if binding
                     else None
                 ),

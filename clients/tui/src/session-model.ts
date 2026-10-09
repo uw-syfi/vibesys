@@ -503,9 +503,7 @@ function deriveActiveChat(state: SessionState): SessionState {
 /**
  * What the chat surfaces call one thread. Titles are backend-owned and arrive
  * through events; an untitled created thread reads as its harness and model.
- * The agent driver never appears: which driver backs a run is a deployment
- * detail, and every thread inherits the run's.
- */
+ *  */
 export function chatThreadLabel(
   state: SessionState,
   threadId: string = state.activeChatThreadId,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tomllib
 from collections import Counter
 from pathlib import Path
@@ -13,28 +14,31 @@ from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.sharding import (
     DEFAULT_DURATIONS,
-    HEAVY_SECONDS,
+    HEAVY_SHARE,
     SHARD_BUDGET_SECONDS,
     assign_heavy_items,
     assign_shards,
     discover_test_files,
     drift_report,
+    heavy_threshold,
     is_heavy,
     merge_durations,
     order_test_indices,
+    parse_durations,
     parse_shard,
     projected_shard_seconds,
+    read_durations,
     record_durations,
     shard_loads,
 )
+
+pytest_plugins = ["pytester"]
 
 _REPO = Path(__file__).resolve().parents[2]
 
 _NAMES = st.text(alphabet="abcdefgh/_.", min_size=1, max_size=12)
 _DURATIONS = st.dictionaries(_NAMES, st.floats(min_value=0, max_value=500), max_size=30)
-_WHOLE_DURATIONS = st.dictionaries(
-    _NAMES, st.floats(min_value=0, max_value=HEAVY_SECONDS), max_size=30
-)
+_WHOLE_DURATIONS = st.dictionaries(_NAMES, st.floats(min_value=0, max_value=500), max_size=30)
 _FILES = st.lists(_NAMES, min_size=1, max_size=40)
 _COUNTS = st.integers(min_value=1, max_value=6)
 
@@ -85,7 +89,7 @@ def test_every_file_lands_in_exactly_one_valid_shard(
 ) -> None:
     assignment = assign_shards(files, durations, count)
 
-    assert set(assignment) == set(files)
+    assert set(assignment) == {name for name in files if not is_heavy(name, durations, count)}
     assert all(1 <= shard <= count for shard in assignment.values())
 
 
@@ -104,7 +108,7 @@ def test_the_heaviest_shard_exceeds_the_mean_by_less_than_one_file(
     files: list[str], durations: dict[str, float], count: int
 ) -> None:
     assignment = assign_shards(files, durations, count)
-    unique = set(files)
+    unique = {name for name in files if not is_heavy(name, durations, count)}
     known = [durations[name] for name in unique if name in durations]
     fallback = sum(known) / len(known) if known else 1.0
     weights = {name: durations.get(name, fallback) for name in unique}
@@ -112,7 +116,9 @@ def test_the_heaviest_shard_exceeds_the_mean_by_less_than_one_file(
     for name, shard in assignment.items():
         loads[shard - 1] += weights[name]
 
-    assert max(loads) <= sum(weights.values()) / count + max(weights.values()) + 1e-6
+    assert max(loads, default=0.0) <= (
+        sum(weights.values()) / count + max(weights.values(), default=0.0) + 1e-6
+    )
 
 
 @given(count=_COUNTS, data=st.data())
@@ -141,17 +147,21 @@ def test_every_test_runs_in_exactly_one_shard_whether_or_not_its_file_is_heavy(
     for name, total in counts.items():
         owners = (
             [spread[name, index] for index in range(total)]
-            if is_heavy(name, durations)
+            if is_heavy(name, durations, count)
             else [whole[name]]
         )
         assert all(1 <= owner <= count for owner in owners)
-    assert set(whole) == {name for name in counts if not is_heavy(name, durations)}
-    assert {name for name, _ in spread} == {name for name in counts if is_heavy(name, durations)}
-    assert len(spread) == sum(total for name, total in counts.items() if is_heavy(name, durations))
+    assert set(whole) == {name for name in counts if not is_heavy(name, durations, count)}
+    assert {name for name, _ in spread} == {
+        name for name in counts if is_heavy(name, durations, count)
+    }
+    assert len(spread) == sum(
+        total for name, total in counts.items() if is_heavy(name, durations, count)
+    )
 
 
 def test_a_heavy_file_is_spread_over_every_shard_instead_of_filling_one() -> None:
-    durations = {"sweep.py": 10 * HEAVY_SECONDS, "small.py": 1.0}
+    durations = {"sweep.py": 1000.0, "small.py": 1.0}
     whole, loads = shard_loads(["sweep.py", "small.py"], durations, 4)
     spread, final = assign_heavy_items({"sweep.py": 40}, durations, loads)
 
@@ -233,3 +243,86 @@ def test_a_second_pytest_run_of_a_shard_adds_to_the_record_of_the_first(
     for name in set(first) | set(second):
         expected = second[name] if name in second else first[name]
         assert record[name] == pytest.approx(expected, abs=0.01)
+
+
+@given(durations=_DURATIONS)
+def test_a_written_record_reads_back_unchanged(
+    durations: dict[str, float], tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    path = tmp_path_factory.mktemp("record") / "durations.json"
+    path.write_text(json.dumps(durations))
+
+    assert read_durations(path) == durations
+
+
+@pytest.mark.parametrize(
+    ("text", "culprit"),
+    [
+        ("", "not valid JSON"),
+        ("[1, 2]", "JSON object"),
+        ('{"tests/a.py": "3"}', "tests/a.py"),
+        ('{"tests/a.py": -1}', "tests/a.py"),
+        ('{"tests/a.py": true}', "tests/a.py"),
+        ('{"tests/a.py": NaN}', "tests/a.py"),
+        ('{"tests/a.py": null}', "tests/a.py"),
+    ],
+)
+def test_a_malformed_record_is_rejected_naming_its_source_and_key(text: str, culprit: str) -> None:
+    with pytest.raises(ValueError, match="cache-record") as raised:
+        parse_durations(text, "cache-record")
+
+    assert culprit in str(raised.value)
+
+
+@given(first=_DURATIONS, second=_DURATIONS, counts=_ITEM_COUNTS, count=_COUNTS)
+def test_a_refreshed_record_still_gives_every_test_exactly_one_owner(
+    first: dict[str, float], second: dict[str, float], counts: dict[str, int], count: int
+) -> None:
+    """Shards that read a newer record than the checked-in one still cover each test once."""
+    for written in (first, second):
+        record = parse_durations(json.dumps(written), "record")
+        whole, loads = shard_loads(counts, record, count)
+        spread, _ = assign_heavy_items(counts, record, loads)
+
+        for name, total in counts.items():
+            if is_heavy(name, record, count):
+                assert {spread[name, index] for index in range(total)} <= set(range(1, count + 1))
+                assert name not in whole
+            else:
+                assert whole[name] in range(1, count + 1)
+                assert (name, 0) not in spread
+
+
+@given(durations=_DURATIONS, count=_COUNTS)
+def test_a_file_is_spread_only_when_it_outweighs_a_shard(
+    durations: dict[str, float], count: int
+) -> None:
+    mean_shard = sum(durations.values()) / count
+
+    for name, seconds in durations.items():
+        assert is_heavy(name, durations, count) == (seconds > HEAVY_SHARE * mean_shard)
+    assert heavy_threshold(durations, count) == pytest.approx(HEAVY_SHARE * mean_shard)
+
+
+def test_a_shard_that_owns_no_test_under_the_given_path_passes(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = Path(__file__).parents[2]
+    monkeypatch.setenv(
+        "PYTHONPATH", os.pathsep.join((str(repository), os.environ.get("PYTHONPATH", "")))
+    )
+    monkeypatch.setenv("PYTEST_ADDOPTS", "")
+    pytester.makeconftest((repository / "conftest.py").read_text(encoding="utf-8"))
+    pytester.makepyfile(test_only="def test_only(): pass")
+    durations = pytester.path / "durations.json"
+    durations.write_text(json.dumps({"test_only.py": 1.0}))
+
+    results = [
+        pytester.runpytest_subprocess(
+            "-n", "2", "--shard", f"{index}/2", "--shard-durations", str(durations), "test_only.py"
+        )
+        for index in (1, 2)
+    ]
+
+    assert [result.ret for result in results] == [0, 0]
+    assert sorted(result.parseoutcomes().get("passed", 0) for result in results) == [0, 1]

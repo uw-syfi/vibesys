@@ -30,7 +30,9 @@ from vs_runtime._run_environment import (
 )
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageRequirement,
+    LocalEnvironment,
     ResolvedEvaluatorPackage,
+    RunEnvironment,
     RunEnvironmentPresentation,
     RunEnvironmentRequest,
     RunEnvironmentSession,
@@ -220,6 +222,7 @@ _CLI_PROFILES = {
         "claude",
         state_dirs=(".claude", ".claude.json", ".config/claude"),
         auth_files=(".claude/.credentials.json", ".claude.json"),
+        credential_files=(".claude/.credentials.json",),
         auth_env_vars=(
             "ANTHROPIC_AUTH_TOKEN",
             "ANTHROPIC_API_KEY",
@@ -232,6 +235,7 @@ _CLI_PROFILES = {
         "codex",
         state_dirs=(".codex", ".config/codex"),
         auth_files=(".codex/auth.json",),
+        credential_files=(".codex/auth.json",),
         auth_env_vars=("OPENAI_API_KEY", "OPENAI_BASE_URL"),
         container_install=("install-codex",),
     ),
@@ -312,10 +316,9 @@ def _synthetic_cli_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_cli_compatibility_flags_keep_options_scoped_to_selected_environment() -> None:
-    assert make_run_environment_spec().options == {}
-    assert make_run_environment_spec(use_docker=True, docker_image="editor").options == {
-        "image": "editor"
-    }
+    assert make_run_environment_spec().name == "docker"
+    assert make_run_environment_spec().options == {"image": None}
+    assert make_run_environment_spec(docker_image="editor").options == {"image": "editor"}
 
     remote = make_run_environment_spec(
         use_modal=True,
@@ -360,7 +363,7 @@ def test_skypilot_selection_requires_profile_and_resources() -> None:
         make_run_environment_spec(use_skypilot=True, cluster_profile="gpu")
     with pytest.raises(ValueError, match="mutually exclusive"):
         make_run_environment_spec(
-            use_docker=True,
+            use_modal=True,
             use_skypilot=True,
             cluster_profile="gpu",
             resources=resources,
@@ -368,9 +371,11 @@ def test_skypilot_selection_requires_profile_and_resources() -> None:
 
 
 def test_run_environment_record_captures_operator_selected_options() -> None:
-    assert run_environment_record(make_run_environment_spec()) == RunEnvironmentRecord(name="local")
+    assert run_environment_record(make_run_environment_spec()) == RunEnvironmentRecord(
+        name="docker"
+    )
     assert run_environment_record(
-        make_run_environment_spec(use_docker=True, docker_image="editor")
+        make_run_environment_spec(docker_image="editor")
     ) == RunEnvironmentRecord(name="docker", image="editor")
     assert run_environment_record(
         make_run_environment_spec(
@@ -395,7 +400,7 @@ def test_run_environment_record_captures_operator_selected_options() -> None:
         cpus_per_node=192,
     )
     assert run_environment_record(RunEnvironmentSpec(resources=resources)) == RunEnvironmentRecord(
-        name="local", resources=resources
+        name="docker", resources=resources
     )
     assert run_environment_record(
         RunEnvironmentSpec("slurm", {"config_path": "/operator/slurm.toml"})
@@ -703,6 +708,13 @@ def test_slurm_gpu_environment_rejects_gate_gpus_above_the_operator_limit(
         _open(build_run_environment(spec), _request(tmp_path, FakeBackend()))
 
 
+def test_the_retired_local_environment_can_be_neither_built_nor_recorded() -> None:
+    with pytest.raises(ValueError, match="agents always run in Docker"):
+        build_run_environment(RunEnvironmentSpec("local"))
+    with pytest.raises(ValueError, match="unknown run environment"):
+        run_environment_record(RunEnvironmentSpec("local"))
+
+
 def test_run_environment_record_rejects_an_unknown_environment() -> None:
     with pytest.raises(ValueError, match="unknown run environment"):
         run_environment_record(RunEnvironmentSpec("kubernetes"))
@@ -714,7 +726,7 @@ def _modal_runtime_document(tmp_path: Path) -> str:
 
 def test_local_environment_opens_local_sandbox_with_host_paths(tmp_path: Path) -> None:
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     session = _open(
         env,
@@ -738,7 +750,7 @@ def test_local_environment_materializes_effective_objective_outside_workspace(
     tmp_path: Path,
 ) -> None:
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
     effective = "Optimize the service.\n\n## Operator constraints\n\n- BF16 only\n"
 
     session = _open(env, _request(tmp_path, backend, objective=effective))
@@ -838,7 +850,7 @@ def test_local_environment_prepares_and_translates_evaluator_tool(
 ) -> None:
     backend = FakeBackend()
     backend.sandbox.execute.return_value = MagicMock(exit_code=0, output="", truncated=False)
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
     package = resolve_evaluator_package(
         EvaluatorPackageRequirement(
             name="vibesys-evaluator-request-factory",
@@ -898,7 +910,7 @@ def test_local_environment_rejects_evaluator_tools_root_inside_workspace(
     tmp_path: Path,
 ) -> None:
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
     package = resolve_evaluator_package(
         EvaluatorPackageRequirement(
             name="vibesys-evaluator-request-factory",
@@ -1044,7 +1056,7 @@ def test_environment_quotes_project_root_after_token_expansion(tmp_path: Path) -
     backend = FakeBackend()
     workspace = tmp_path / "candidate's; touch injected"
     workspace.mkdir()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     request = _request(
         tmp_path,
@@ -1067,7 +1079,7 @@ def test_environment_quotes_project_root_after_token_expansion(tmp_path: Path) -
 
 def test_local_environment_resolves_python_token_to_running_interpreter(tmp_path: Path) -> None:
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     session = _open(
         env,
@@ -1116,7 +1128,7 @@ def test_environment_quotes_nested_shell_paths(tmp_path: Path) -> None:
     workspace.mkdir()
     vibesys_project = Project.open(NESTED_SHELL_PROJECT)
     bundle = load_project_task(vibesys_project, vibesys_project.select_task("nested-shell"))
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     session = _open(
         env,
@@ -1155,7 +1167,7 @@ def test_environment_rejects_semantic_tokens_in_nested_shell_source(
     nested: str,
 ) -> None:
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     with pytest.raises(ValueError, match="positional arguments"):
         _open(
@@ -1182,7 +1194,7 @@ def test_environment_rejects_semantic_tokens_in_top_level_executable_source(
     command: list[str],
 ) -> None:
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     with pytest.raises(ValueError, match="positional arguments"):
         _open(
@@ -1245,7 +1257,7 @@ def test_local_environment_objective_defaults_to_the_bare_workspace_relative_nam
 ) -> None:
     """The host answer for an unset objective is identity: no lookup, no rewrite."""
     backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("local"))
+    env = LocalEnvironment()
 
     session = _open(env, _request(tmp_path, backend))
 
@@ -1362,7 +1374,8 @@ def test_cli_container_env_and_setup_agree_on_the_container_environment(
     provider, resolved_env = resolved
     assert provider == "codex"
     assert env == resolved_env
-    assert auth_files == [("/opt/vibesys-auth/0", "/home/agent/.codex/auth.json")]
+    # A credential file is mounted writable at its final path, not copied.
+    assert auth_files == []
 
 
 def test_cli_container_env_is_none_for_a_non_cli_agent_backend(tmp_path: Path) -> None:
@@ -1372,25 +1385,32 @@ def test_cli_container_env_is_none_for_a_non_cli_agent_backend(tmp_path: Path) -
     assert _cli_container_env(request) is None
 
 
-def test_docker_environment_copies_cli_auth_from_readonly_staging(
+def test_docker_environment_shares_credentials_writable_and_copies_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     home = tmp_path / "synthetic-home"
-    auth_file = home / ".codex" / "auth.json"
-    auth_file.parent.mkdir(parents=True)
-    auth_file.write_text('{"synthetic": true}\n')
+    credentials = home / ".claude" / ".credentials.json"
+    credentials.parent.mkdir(parents=True)
+    credentials.write_text('{"synthetic": true}\n')
+    settings_file = home / ".claude.json"
+    settings_file.write_text('{"synthetic": true}\n')
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
 
-    _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+    _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="claude"))
 
     kwargs = backend.calls[0][1]
-    assert (str(auth_file), "/opt/vibesys-auth/0", True) in _as_mount_tuples(kwargs["resources"])
-    # The plain Docker path copies staged auth files into the agent HOME as a
-    # start-time DockerSandbox step, not via extra_init_commands.
+    mounts = _as_mount_tuples(kwargs["resources"])
+    # The credential file is the host's file at its final path, writable, so a
+    # token refresh in the container reaches the host login.
+    assert (str(credentials), "/home/agent/.claude/.credentials.json", False) in mounts
+    # Settings are staged read-only and copied as a start-time DockerSandbox
+    # step, not via extra_init_commands.
+    assert (str(settings_file), "/opt/vibesys-auth/1", True) in mounts
+    assert not any(container == "/opt/vibesys-auth/0" for _, container, _ in mounts)
     assert "extra_init_commands" not in kwargs
-    assert kwargs["auth_files"] == [("/opt/vibesys-auth/0", "/home/agent/.codex/auth.json")]
+    assert kwargs["auth_files"] == [("/opt/vibesys-auth/1", "/home/agent/.claude.json")]
 
 
 def test_docker_environment_forwards_host_cli_auth_environment(
@@ -2266,20 +2286,25 @@ remote_artifact_root = "/remote/vibesys"
         env_name: {r.agent_path: r for r in backend.calls[0][1]["resources"]}
         for env_name, backend in backends.items()
     }
-    common_agent_paths = {
-        "/opt/vibesys-runtime/objective.md",
-        "/opt/vibesys-evaluator-package",
-        "/opt/vibesys",
-        "/opt/vibesys-auth/0",
+    credential_path = "/home/agent/.codex/auth.json"
+    # The login credential is the one common mount shared writable: a token
+    # refresh in the container must reach the host login.
+    common_access = {
+        "/opt/vibesys-runtime/objective.md": HostResourceAccess.READ_ONLY,
+        "/opt/vibesys-evaluator-package": HostResourceAccess.READ_ONLY,
+        "/opt/vibesys": HostResourceAccess.READ_ONLY,
+        credential_path: HostResourceAccess.READ_WRITE,
     }
-    for agent_path in common_agent_paths:
+    for agent_path, expected in common_access.items():
         by_env = {env_name: mounts[agent_path] for env_name, mounts in resources_by_env.items()}
         accesses = {resource.access for resource in by_env.values()}
-        assert accesses == {HostResourceAccess.READ_ONLY}, (agent_path, by_env)
+        assert accesses == {expected}, (agent_path, by_env)
 
     # (c) Nothing outside the workspace-related mounts each plan legitimately
-    # marks writable (SkyPilot's caller-state bridge) is READ_WRITE.
+    # marks writable (SkyPilot's caller-state bridge, the shared login) is
+    # READ_WRITE.
     legitimately_writable = {
+        credential_path,
         "/opt/vibesys-skypilot/bridge.sock",
         "/opt/vibesys-skypilot/caller-state",
     }
@@ -2289,11 +2314,16 @@ remote_artifact_root = "/remote/vibesys"
                 assert agent_path in legitimately_writable, (env_name, agent_path)
 
 
-@pytest.mark.parametrize("environment_name", ["local", "modal"])
+@pytest.mark.parametrize(
+    "env",
+    [
+        pytest.param(LocalEnvironment(), id="local"),
+        pytest.param(build_run_environment(RunEnvironmentSpec("modal")), id="modal"),
+    ],
+)
 def test_environments_without_a_sandbox_workspace_cannot_remove_children(
-    tmp_path: Path, environment_name: str
+    tmp_path: Path, env: RunEnvironment
 ) -> None:
-    env = build_run_environment(RunEnvironmentSpec(environment_name))
 
     assert env.remove_workspace_child(tmp_path, "child", backend=FakeBackend()) is False
 

@@ -11,41 +11,12 @@ from vs_agent.api.images import (
     TaskImageBuildError,
     build_task_image,
 )
+from vs_agent.api.testing import FakeDockerBuildRunner
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from pathlib import Path
 
 _IMAGE_ID = "sha256:" + "a" * 64
-
-
-class FakeDockerBuildRunner:
-    def __init__(
-        self,
-        *,
-        build_result: subprocess.CompletedProcess[str] | BaseException | None = None,
-        inspect_result: subprocess.CompletedProcess[str] | BaseException | None = None,
-        image_id: str = _IMAGE_ID,
-    ) -> None:
-        self.build_result = build_result or subprocess.CompletedProcess(("docker",), 0, "", "")
-        self.inspect_result = inspect_result or subprocess.CompletedProcess(
-            ("docker",), 0, image_id, ""
-        )
-        self.calls: list[tuple[tuple[str, ...], Path, float]] = []
-
-    def run(
-        self,
-        argv: Sequence[str],
-        *,
-        cwd: Path,
-        timeout: float,
-    ) -> subprocess.CompletedProcess[str]:
-        normalized = tuple(argv)
-        self.calls.append((normalized, cwd, timeout))
-        result = self.build_result if normalized[1] == "build" else self.inspect_result
-        if isinstance(result, BaseException):
-            raise result
-        return result
 
 
 def _task(tmp_path: Path) -> Path:

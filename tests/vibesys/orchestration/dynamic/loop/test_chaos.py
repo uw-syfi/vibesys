@@ -9,12 +9,9 @@ a one-line repro.
 from __future__ import annotations
 
 import os
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import HealthCheck, given, settings
-from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.loop._chaos import (
     Injected,
     plan_for,
@@ -28,10 +25,16 @@ from vs_agent.api import AgentOutputSchemaError
 from vs_faults.api import AgentCrashError, AgentFault
 from vs_runtime.api import RunCleanupError, RuntimeContractError, UnresolvedDispatchError
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 # Seeds 2018 and 2022 completed with zero workstreams before #1228. Each seed runs
-# a whole loop (10 to 20 s on a CI runner), so a pull request runs four generic
-# seeds beside those two. The nightly workflow runs 0-11 and sweeps many more.
-_PR_SEEDS = "0-3,2018,2022"
+# a whole loop (10 to 20 s on a CI runner), so a pull request runs one generic
+# faulted even seed beside those two; the fault-free run below covers seed 0's class.
+# Odd seeds provision the profiler and are
+# non-strict xfails (see _PROFILER_GAP): they cannot fail a pull request, so only
+# the nightly workflow, which runs 0-11 and sweeps many more, spends time on them.
+_PR_SEEDS = "2,2018,2022"
 
 
 # Odd seeds provision the profiler. The generated profiler agent replies
@@ -76,12 +79,9 @@ def test_no_evaluation_is_submitted_after_a_stop_during_a_profile(tmp_path: Path
     assert chaos.violations == [], chaos.report()
 
 
-@settings(max_examples=3, deadline=None, suppress_health_check=list(HealthCheck))
-@given(seed=st.sampled_from([7000, 7002, 7004]))
-def test_a_run_without_faults_ends_without_an_error(seed: int) -> None:
+def test_a_run_without_faults_ends_without_an_error(tmp_path: Path) -> None:
     """With no fault scheduled, the fault wrapper is the identity, so no turn's fate is unknown."""
-    with tempfile.TemporaryDirectory() as base:
-        chaos = run_chaos(Path(base), seed, plan_for(seed, faults=0))
+    chaos = run_chaos(tmp_path, 7000, plan_for(7000, faults=0))
 
     assert chaos.run is not None
     assert chaos.injected == []

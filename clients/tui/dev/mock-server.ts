@@ -256,7 +256,6 @@ function activeExecutionsFrom(delivered: RunEventRecord[]): ActiveExecutionCheck
         // an `AgentExecutionActivityData`, closed `mode` set included, and a
         // translated one was built as that type in `journal.ts`.
         activity: data['activity'] as ExecutionCheckpoint['activity'],
-        driver: optionalString(data['driver']),
         provider: optionalString(data['provider']),
         model: optionalString(data['model']),
       });

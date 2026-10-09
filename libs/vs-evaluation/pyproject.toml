@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=70.1", "wheel>=0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-evaluation"
+version = "0.1.0"
+description = "Evaluation lifecycle, evidence and agent-facing evaluation tools"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2",
+    "vs-async-ops",
+    "vs-evaluator-protocol",
+    "vs-mcp",
+    "vs-project",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vs_evaluation = ["py.typed"]
+
+[tool.uv.sources]
+vs-async-ops = { workspace = true }
+vs-evaluator-protocol = { workspace = true }
+vs-mcp = { workspace = true }
+vs-project = { workspace = true }

@@ -9,6 +9,7 @@ import sys
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.docker_environment import host_container_backend
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
@@ -112,7 +113,10 @@ def test_an_orchestration_failure_cancels_a_pending_benchmark_job(
     async def exercise() -> None:
         try:
             async with open_product_run_host(
-                _request(project_root, config_path), integration, plugin=_PLUGIN
+                _request(project_root, config_path),
+                integration,
+                plugin=_PLUGIN,
+                backend_factory=host_container_backend,
             ) as run:
                 await orchestrate(run)
         finally:

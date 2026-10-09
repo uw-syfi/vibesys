@@ -25,7 +25,10 @@ from vs_agent.contracts import (
     AgentTurnRequest,
     AgentTurnResult,
     AgentUsage,
+    AuthStatus,
     MCPServerSpec,
+    ProviderNotReadyError,
+    ReadinessProbe,
     SessionDisposition,
     session_spec_fingerprint,
 )
@@ -110,9 +113,16 @@ def _publish_final_text(logger: AgentLogger, text: str) -> None:
 class _LoggerObserver:
     """Translate neutral driver events into VibeSys's application logger."""
 
-    def __init__(self, logger: AgentLogger, observer: AgentObserver | None = None) -> None:
+    def __init__(
+        self,
+        logger: AgentLogger,
+        observer: AgentObserver | None = None,
+        *,
+        provider: str | None = None,
+    ) -> None:
         self._logger = logger
         self._observer = observer
+        self._provider = provider
 
     def on_event(self, event: AgentEvent) -> None:
         """Render one normalized driver event and preserve the caller observer."""
@@ -150,6 +160,8 @@ class _LoggerObserver:
             )
         elif event.kind is AgentEventKind.USAGE and event.usage is not None:
             self._logger.update_usage(usage_dict(event.usage))
+        elif event.kind is AgentEventKind.RATE_LIMIT and event.rate_limit is not None:
+            self._logger.on_rate_limit(replace(event.rate_limit, provider=self._provider))
         elif event.kind is AgentEventKind.SKILL:
             self._logger.on_diagnostic(f"[skill] {event.text or 'unknown'}")
 
@@ -203,13 +215,18 @@ class AgentClient:
         require_host_sandbox: bool = False,
         containerized: bool = False,
         driver_log: AgentDiagnosticLog | None = None,
-        driver_name: str | None = None,
         session_store: SessionStore | None = None,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
+        check_readiness: bool = False,
     ) -> None:
-        """Create a client that owns ``driver`` and every session it creates."""
+        """Create a client that owns ``driver`` and every session it creates.
+
+        ``check_readiness`` makes the first session of each role probe the
+        provider CLI first (see :meth:`_require_ready`). Product wiring turns
+        it on; a client built around a scripted driver leaves it off, since a
+        probe is a command the script would have to answer.
+        """
         self._driver = driver
-        self._driver_name = driver_name
         self._sink = event_sink
         self._session_store: SessionStore = session_store or NullSessionStore()
         self._provider = provider
@@ -233,6 +250,9 @@ class AgentClient:
         # Where each key's last completed turn ran, kept across evictions so a
         # caller can tell a retired conversation from a replaced one.
         self._last_turn_sessions: dict[AgentSessionKey, str | None] = {}
+        #: Roles whose provider CLI passed its readiness probe on this client.
+        self._check_readiness = check_readiness
+        self._ready_roles: set[str] = set()
         self._closed = False
         self._cancelled = False
         self._active_lock = threading.Lock()
@@ -242,15 +262,6 @@ class AgentClient:
     def capabilities(self) -> AgentCapabilities:
         """Return the selected driver's factual capabilities."""
         return self._driver.capabilities
-
-    @property
-    def driver_name(self) -> str | None:
-        """Return the stable configured driver name (``"agentshim"``).
-
-        This is the application-configuration string, not the driver's Python
-        class name, so it stays stable across implementation refactors.
-        """
-        return self._driver_name
 
     @property
     def provider(self) -> str | None:
@@ -458,7 +469,7 @@ class AgentClient:
         )
         _emit_and_log(
             self._sink,
-            f"driver: {self.driver_name or type(self._driver).__name__}, provider: {spec.provider}, "
+            f"provider: {spec.provider}, "
             f"model: {spec.model}, reasoning_effort: {spec.reasoning_effort or 'provider_default'}, "
             f"cwd: {spec.workspace}",
             self._run_log_file,
@@ -471,7 +482,7 @@ class AgentClient:
             channel="prompt",
         )
         result: AgentTurnResult | None = None
-        stream = _LoggerObserver(logger, observer)
+        stream = _LoggerObserver(logger, observer, provider=spec.provider)
         try:
             result = self._run(
                 session_spec=spec,
@@ -874,6 +885,7 @@ class AgentClient:
 
     def _create_session(self, spec: AgentSessionSpec) -> AgentSession:
         """Perform VibeSys-owned setup, then delegate runtime-specific setup."""
+        self._require_ready(spec)
         materialize_skills(
             spec.workspace,
             list(spec.skills),
@@ -882,6 +894,37 @@ class AgentClient:
             event_sink=self._sink,
         )
         return self._driver.create_session(spec)
+
+    def _require_ready(self, spec: AgentSessionSpec) -> None:
+        """Fail before a role's first session if its provider CLI cannot start a turn.
+
+        The driver probes through the route the session itself will use. A
+        missing binary or a failed login raises :class:`ProviderNotReadyError`;
+        an unknown login state (a CLI with no status command) proceeds with a
+        log line. Passing is remembered per role, so later sessions pay
+        nothing; a failure is not, so a fixed environment is rechecked.
+        Drivers without a probe are skipped.
+        """
+        driver = self._driver
+        if (
+            not self._check_readiness
+            or spec.role in self._ready_roles
+            or not isinstance(driver, ReadinessProbe)
+        ):
+            return
+        readiness = driver.probe_readiness(spec)
+        if readiness.problem is not None:
+            raise ProviderNotReadyError(readiness)
+        self._ready_roles.add(spec.role)
+        if self._driver_log is not None:
+            version = readiness.version or "unknown version"
+            if readiness.auth is AuthStatus.UNKNOWN:
+                self._driver_log(
+                    f"[readiness] {readiness.provider} {version} found; login state unknown "
+                    f"({readiness.detail}); proceeding"
+                )
+            else:
+                self._driver_log(f"[readiness] {readiness.provider} {version} found and logged in")
 
     def _ensure_open(self) -> None:
         if self._closed or self._cancelled:

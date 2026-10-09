@@ -1,9 +1,13 @@
 # Architecture: Python module graph
 
 [`tach.toml`](https://github.com/uw-syfi/vibesys/blob/main/tach.toml) freezes
-the Python module graph, and CI runs `uv run tach check`. An import between
+the Python module graph, and CI runs `uv run python scripts/check_tach.py`. An import between
 modules that is not a declared `depends_on` edge fails the check. Modules cover
 `src/` (`entrypoints`, `launch`, `headless`, `server.*`, `vibesys.*`) and every `libs/*/src`.
+Run it through the wrapper, not `tach check` directly: tach treats a library with
+its own `pyproject.toml` (a uv workspace member) as a separate package and stops
+checking its edges and interfaces, and the wrapper runs tach on a copy of the
+source roots without those files.
 
 The graph below is generated from `tach.toml` by `tach show --mermaid`. CI
 fails when it is stale. To refresh after editing `tach.toml`:
@@ -86,7 +90,8 @@ through `[tool.uv.sources] <name> = { workspace = true }`.
 `scripts/check_member_dependencies.py` fails CI on an undeclared or unused
 dependency, an undeclared member edge, or an import of a root-distribution
 package. The `vibesys` wheel still bundles every library's source, so each
-member dependency must also appear in the root `dependencies`.
+member dependency must also appear in the root `dependencies` with the same
+version constraint.
 
 The internal custom-policy execution contract and example are in
 [orchestration-runtime.md](orchestration-runtime.md).

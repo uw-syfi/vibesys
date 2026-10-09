@@ -116,18 +116,6 @@ const runEventSchema: Record<string, unknown> = {
         "activity": {
           "$ref": "#/$defs/AgentExecutionActivityData"
         },
-        "driver": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Driver"
-        },
         "provider": {
           "anyOf": [
             {
@@ -352,10 +340,6 @@ const runEventSchema: Record<string, unknown> = {
           "title": "Title",
           "type": "string"
         },
-        "driver": {
-          "title": "Driver",
-          "type": "string"
-        },
         "provider": {
           "title": "Provider",
           "type": "string"
@@ -373,7 +357,6 @@ const runEventSchema: Record<string, unknown> = {
       "required": [
         "kind",
         "thread_id",
-        "driver",
         "provider",
         "model",
         "created_at"
@@ -683,6 +666,7 @@ const runEventSchema: Record<string, unknown> = {
         "tool_result",
         "todo_update",
         "usage_update",
+        "rate_limit_update",
         "gate_started",
         "gate_finished",
         "workspace_snapshot",
@@ -1153,6 +1137,99 @@ const runEventSchema: Record<string, unknown> = {
         "phase"
       ],
       "title": "PhaseData",
+      "type": "object"
+    },
+    "RateLimitUpdateData": {
+      "description": "One rate-limit window a provider reported, as semantic data.\n\n``exhausted`` is the resolved fact (the provider's own statement, else\nusage at or past 100%); the other fields are what the provider stated,\n``None`` when it did not state them. ``resets_at`` is epoch seconds.",
+      "properties": {
+        "kind": {
+          "const": "rate_limit_update",
+          "default": "rate_limit_update",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "window": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Window"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "used_fraction": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Used Fraction"
+        },
+        "resets_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resets At"
+        },
+        "window_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Window Minutes"
+        },
+        "exhausted": {
+          "title": "Exhausted",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "exhausted"
+      ],
+      "title": "RateLimitUpdateData",
       "type": "object"
     },
     "RoundFinishedData": {
@@ -1945,6 +2022,7 @@ const runEventSchema: Record<string, unknown> = {
               "judge_result": "#/$defs/JudgeResultData",
               "output": "#/$defs/OutputData",
               "phase": "#/$defs/PhaseData",
+              "rate_limit_update": "#/$defs/RateLimitUpdateData",
               "round_finished": "#/$defs/RoundFinishedData",
               "run_configured": "#/$defs/RunConfiguredData",
               "run_failed": "#/$defs/RunFailedData",
@@ -2036,6 +2114,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/UsageUpdateData"
+            },
+            {
+              "$ref": "#/$defs/RateLimitUpdateData"
             },
             {
               "$ref": "#/$defs/GateStartedData"

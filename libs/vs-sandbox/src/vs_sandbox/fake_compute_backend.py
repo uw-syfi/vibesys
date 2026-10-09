@@ -14,18 +14,22 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vs_sandbox.accelerator_discovery import AcceleratorInventory
-from vs_sandbox.compute_backends import ComputeBackend
-from vs_sandbox.fake_command_runner import FakeCommandRunner
+from vs_sandbox.compute_backends import ComputeBackend, SandboxKind
+from vs_sandbox.fake_command_runner import FakeCommandRunner, FakeLifecycleRunner
 from vs_sandbox.lifecycle import SandboxLifecycle
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
-    from vs_sandbox.compute_backends import ContentionMonitor, SandboxKind
+    from vs_sandbox.compute_backends import ContentionMonitor
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
+
+
+DEFAULT_FAKE_IMAGE = "fake-backend-image"
+"""The base image a :class:`FakeComputeBackend` reports unless one is given."""
 
 
 class FakeAcceleratorDiscovery:
@@ -67,6 +71,7 @@ class FakeRunnerCreation:
     auth_files: tuple[tuple[str, str], ...]
     resources: tuple[HostResource, ...]
     docker_in_docker: bool = False
+    run_id: str | None = None
 
 
 class FakeComputeBackend:
@@ -82,7 +87,8 @@ class FakeComputeBackend:
         image: str | None = None,
     ) -> None:
         """Accept the same construction shape as a real backend factory."""
-        del log_dir, log, image
+        del log_dir, log
+        self.image = image or DEFAULT_FAKE_IMAGE
         self.sandboxes: dict[str, FakeCommandRunner] = {}
         self.creations: list[FakeRunnerCreation] = []
 
@@ -111,6 +117,7 @@ class FakeComputeBackend:
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
         docker_in_docker: bool = False,
+        run_id: str | None = None,
     ) -> CommandRunner:
         """Return a fresh :class:`FakeCommandRunner` keyed by *kind* and *host_workspace*."""
         self.creations.append(
@@ -128,12 +135,14 @@ class FakeComputeBackend:
                 auth_files=tuple(auth_files or ()),
                 resources=tuple(resources),
                 docker_in_docker=docker_in_docker,
+                run_id=run_id,
             )
         )
         key = f"{kind.value}:{host_workspace}"
         sandbox = self.sandboxes.get(key)
         if sandbox is None:
-            sandbox = FakeCommandRunner()
+            # A container sandbox has a lifecycle; a host one has nothing to start.
+            sandbox = FakeLifecycleRunner() if kind is SandboxKind.DOCKER else FakeCommandRunner()
             self.sandboxes[key] = sandbox
         SandboxLifecycle(lifecycle_hooks).before_ready(sandbox)
         return sandbox

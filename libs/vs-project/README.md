@@ -110,3 +110,37 @@ through the authoritative kernel codec, migrate explicitly, and reconcile
 persisted request identities before replay. External executors must honor the
 epoch or provide identity-based idempotency and reconciliation; a filesystem
 lease alone cannot stop an already executing external request.
+
+## Git history
+
+`GitTracker` owns snapshot policy: which paths are framework state, how a
+checkpoint is committed, which paths are excluded. It does no I/O of its own.
+Every Git operation goes through `GitRepository`, a role interface of semantic
+operations (`head`, `is_ancestor`, `stage_all`, `commit`, `diff_patch`, ...)
+declared in `vs_project.api` with typed errors (`GitError`, `GitCommandError`,
+`StagingError`) and typed values (`RepositoryLocation`, `CommitSubject`,
+`PatchStyle`). Its module docstring is the contract: conventions, pathspec
+subset, atomicity and restart expectations, and which operations are
+CLI-only.
+
+`CliGitRepository` runs the Git CLI and is the reference implementation;
+`GitTracker(..., repository=...)` accepts any other. The contract suite in
+`tests/git_contract` runs every case against every implementation registered in
+its `conftest.py` (`IMPLEMENTATIONS`), including operation sequences compared
+with the CLI as the oracle. A new implementation is one entry there.
+
+`Pygit2GitRepository` answers the portable operations in process with libgit2
+(`pygit2`) and delegates the CLI-only ones to a wrapped `CliGitRepository`; its
+module docstring lists the exact split, the requests it hands to the CLI to keep
+Git's answer, and the known differences. It shares a repository safely with the
+real `git` the agents run (the contract suite alternates the two). Which
+implementation a `GitTracker` gets is decided in one place,
+`open_git_repository`: `VIBESYS_GIT_BACKEND=cli|pygit2` selects explicitly (an
+unknown value, or `pygit2` where the package is not installed, is a
+`GitBackendError`); unset, it is `DEFAULT_GIT_BACKEND` when `pygit2` is
+installed and the CLI implementation otherwise. `pygit2` is imported only when
+that backend is built.
+
+Repositories that are not the tracked project (cloning a source tree, probing
+whether a directory is inside a repository, remote operations in
+`GitRemoteRepository`) are outside this interface and use `run_git` directly.

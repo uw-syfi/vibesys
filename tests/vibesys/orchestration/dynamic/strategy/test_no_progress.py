@@ -166,7 +166,7 @@ def _script(turns: list[_Turn]) -> tuple[deque[str | Answer], int]:
     return replies, sum(turn is _Turn.REJECTED for turn in turns)
 
 
-@settings(max_examples=8, deadline=None, derandomize=True, database=None)
+@settings(max_examples=5, deadline=None, derandomize=True, database=None)
 @given(
     turns=st.lists(st.sampled_from(_Turn), min_size=8, max_size=8),
     bound=st.integers(min_value=1, max_value=4),

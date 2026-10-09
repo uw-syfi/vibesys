@@ -44,11 +44,6 @@ class StubAgentClient:
         )
 
     @property
-    def driver_name(self) -> str | None:
-        """No driver runs a stub turn; the stub itself is the attribution."""
-        return "stub"
-
-    @property
     def provider(self) -> str | None:
         """No external provider runs a stub turn."""
         return "stub"

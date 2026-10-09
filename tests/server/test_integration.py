@@ -10,7 +10,7 @@ import pytest
 from tests.server.support import (
     ServerParts,
     agent_descriptor,
-    auxiliary_agent_drivers,
+    auxiliary_agent_providers,
     build_server_parts,
     run_record,
 )
@@ -42,6 +42,7 @@ from vibesys.events import (
     GateKind,
     InvocationFinishedData,
     PhaseData,
+    RateLimitUpdateData,
     ToolCallData,
 )
 from vibesys.events import (
@@ -67,7 +68,7 @@ def _project_run(root: Path) -> tuple[Project, str]:
         run_id="queue-run",
         branch="vibesys/queue-run",
         vibesys_version="0.2.0-test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=agent_descriptor(),
         trusted_input_baseline="0" * 40,
@@ -80,7 +81,6 @@ def _execution_started_data(
     kind: str,
     user_prompt: str,
     *,
-    driver: str | None = None,
     provider: str | None = None,
     model: str | None = None,
 ) -> AgentExecutionStartedData:
@@ -89,7 +89,6 @@ def _execution_started_data(
         stage=kind,
         user_prompt=user_prompt,
         activity=AgentExecutionActivityData(mode="thinking", summary="Working"),
-        driver=driver,
         provider=provider,
         model=model,
     )
@@ -153,10 +152,9 @@ def _attach_test_run(
             frontend_state_directory=project.state.local_namespace(
                 run_id, "server"
             ).external_directory(),
-            agent_driver=defaults.driver,
             agent_provider=defaults.provider,
             agent_model=defaults.model,
-            agent_drivers=auxiliary_agent_drivers(),
+            agent_providers=auxiliary_agent_providers(),
             role_models=defaults.role_models,
         ),
     )
@@ -169,7 +167,7 @@ def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path: Pa
     execution_id = _emit_execution_started(
         parts,
         "round-1",
-        _execution_started_data("implementer", "work", driver="agentshim", provider="codex"),
+        _execution_started_data("implementer", "work", provider="codex"),
     )
 
     parts.core_events.emit(
@@ -196,6 +194,24 @@ def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path: Pa
     assert activity.mode == "tool"
     assert activity.tool == "Bash"
     assert (tmp_path / "core-events.jsonl").is_file()
+
+
+def test_a_rate_limit_report_reaches_the_wire_journal_under_the_active_execution(
+    tmp_path: Path,
+) -> None:
+    parts = build_server_parts(tmp_path)
+    _emit_execution_started(parts, "round-1", _execution_started_data("implementer", "work"))
+
+    parts.core_events.emit(
+        CoreEventType.RATE_LIMIT_UPDATE,
+        data=RateLimitUpdateData(provider="claude", window="five_hour", exhausted=True),
+    )
+
+    update = next(e for e in parts.journal.read() if e.type is EventType.RATE_LIMIT_UPDATE)
+    assert update.agent_kind == "implementer"
+    assert update.data is not None
+    assert update.data.kind == "rate_limit_update"
+    assert update.data.exhausted is True
 
 
 def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: Path) -> None:
@@ -422,9 +438,7 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
             closed.append("closed")
 
     def build_agent(request: ChatAgentBuildRequest) -> FakeManagedAgent:
-        assert request.selection == AgentSelection(
-            driver="agentshim", provider="codex", model="gpt-test"
-        )
+        assert request.selection == AgentSelection(provider="codex", model="gpt-test")
         assert request.instance_id is None
         return FakeManagedAgent()
 
@@ -433,7 +447,7 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
         parts,
         project,
         run_id,
-        AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
+        AgentSelection(provider="codex", model="gpt-test"),
         project.state.log_directory(run_id),
     )
     response = parts.api.execute(ChatQuery(text="what improved?"))
@@ -473,17 +487,17 @@ def test_chat_thread_rejects_an_unsupported_provider(tmp_path: Path) -> None:
         parts,
         project,
         run_id,
-        AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
+        AgentSelection(provider="codex", model="gpt-test"),
         project.state.log_directory(run_id),
     )
 
-    with pytest.raises(ValueError, match="does not support provider"):
+    with pytest.raises(ValueError, match="is not supported"):
         parts.api.execute(ChatThreadCreateQuery(provider="not-a-provider", model="gpt-test"))
     parts.integration.close()
     assert auxiliary.closed
 
 
-def test_chat_thread_uses_snapshotted_cross_driver_support_and_free_text_model(
+def test_chat_thread_uses_snapshotted_provider_support_and_free_text_model(
     tmp_path: Path,
 ) -> None:
     project, run_id = _project_run(tmp_path / "project")
@@ -506,13 +520,12 @@ def test_chat_thread_uses_snapshotted_cross_driver_support_and_free_text_model(
         parts,
         project,
         run_id,
-        AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
+        AgentSelection(provider="codex", model="gpt-test"),
         project.state.log_directory(run_id),
     )
 
     response = parts.api.execute(
         ChatThreadCreateQuery(
-            driver="agentshim",
             provider="claude",
             model="future-free-text-model",
         )
@@ -520,7 +533,6 @@ def test_chat_thread_uses_snapshotted_cross_driver_support_and_free_text_model(
 
     assert response.chat_thread is not None
     assert selections[-1] == AgentSelection(
-        driver="agentshim",
         provider="claude",
         model="future-free-text-model",
     )

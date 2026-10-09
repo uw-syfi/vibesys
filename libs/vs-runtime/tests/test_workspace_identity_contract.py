@@ -7,7 +7,6 @@ import os
 from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from subprocess import CalledProcessError
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -21,7 +20,12 @@ from tests.support.runtime_operations import VerifyParentRevision as _VerifyRequ
 
 from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
 from vs_core.api import HostFence, HostId
-from vs_project.api import NullGitTrackerEvents, OrchestrationDescriptor, RunEnvironmentRecord
+from vs_project.api import (
+    GitError,
+    NullGitTrackerEvents,
+    OrchestrationDescriptor,
+    RunEnvironmentRecord,
+)
 from vs_runtime.api import (
     RuntimeContractError,
     WorkspaceRestoreError,
@@ -106,7 +110,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                         task_name=None,
                         existing=False,
                         framework_version="1.2.3",
-                        run_environment=RunEnvironmentRecord(name="local"),
+                        run_environment=RunEnvironmentRecord(name="docker"),
                         execution=run_execution_record(),
                         orchestration=OrchestrationDescriptor(
                             id="test-policy", config_version=1, options={}
@@ -357,7 +361,7 @@ def test_revision_mismatch_does_not_acquire_member(member_id: str) -> None:
             assert revision is not None
             # Workspaces.create_candidate promises no uniform failure type for
             # an unavailable revision. Both failures must leave ownership free.
-            with pytest.raises((RuntimeError, CalledProcessError)):
+            with pytest.raises((RuntimeError, GitError)):
                 await workspaces.create_candidate("0" * 40, member_id=member_id)
             candidate = await workspaces.create_candidate(revision, member_id=member_id)
             assert candidate.revision == revision

@@ -502,7 +502,6 @@ function validateActiveExecution(value: unknown, path: string): void {
   nullableNumber(record, 'attempt', path);
   requireString(record, 'assignment', path);
   requireString(record, 'started_at', path);
-  nullableString(record, 'driver', path);
   nullableString(record, 'provider', path);
   nullableString(record, 'model', path);
   const activityPath = `${path}.activity`;

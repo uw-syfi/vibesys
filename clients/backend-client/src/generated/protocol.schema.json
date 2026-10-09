@@ -44,18 +44,6 @@
         "activity": {
           "$ref": "#/$defs/AgentExecutionActivityData"
         },
-        "driver": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Driver"
-        },
         "provider": {
           "anyOf": [
             {
@@ -212,18 +200,6 @@
         },
         "activity": {
           "$ref": "#/$defs/AgentExecutionActivityData"
-        },
-        "driver": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Driver"
         },
         "provider": {
           "anyOf": [
@@ -640,7 +616,7 @@
     },
     "ChatThreadCreateQuery": {
       "additionalProperties": false,
-      "description": "Create a new experiment-chat thread with its own agent selection.\n\nOmitted fields resolve to the run's configured driver, provider, and\nmodel. The response carries the resolved settings and thread identity.\n``driver`` exists for completeness and stays validated when supplied, but\nwhich driver backs a run is a deployment detail: clients omit it so every\nthread inherits the run's.",
+      "description": "Create a new experiment-chat thread with its own agent selection.\n\nOmitted fields resolve to the run's configured provider and model. The\nresponse carries the resolved settings and thread identity.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -667,19 +643,6 @@
           "default": "query.chat_thread_create",
           "title": "Type",
           "type": "string"
-        },
-        "driver": {
-          "anyOf": [
-            {
-              "const": "agentshim",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Driver"
         },
         "provider": {
           "anyOf": [
@@ -742,10 +705,6 @@
           "title": "Title",
           "type": "string"
         },
-        "driver": {
-          "title": "Driver",
-          "type": "string"
-        },
         "provider": {
           "title": "Provider",
           "type": "string"
@@ -763,7 +722,6 @@
       "required": [
         "kind",
         "thread_id",
-        "driver",
         "provider",
         "model",
         "created_at"
@@ -784,10 +742,6 @@
           "title": "Title",
           "type": "string"
         },
-        "driver": {
-          "title": "Driver",
-          "type": "string"
-        },
         "provider": {
           "title": "Provider",
           "type": "string"
@@ -799,7 +753,6 @@
       },
       "required": [
         "thread_id",
-        "driver",
         "provider",
         "model"
       ],
@@ -1444,6 +1397,7 @@
         "tool_result",
         "todo_update",
         "usage_update",
+        "rate_limit_update",
         "gate_started",
         "gate_finished",
         "workspace_snapshot",
@@ -2874,6 +2828,99 @@
       "title": "ProtocolErrorMessage",
       "type": "object"
     },
+    "RateLimitUpdateData": {
+      "description": "One rate-limit window a provider reported, as semantic data.\n\n``exhausted`` is the resolved fact (the provider's own statement, else\nusage at or past 100%); the other fields are what the provider stated,\n``None`` when it did not state them. ``resets_at`` is epoch seconds.",
+      "properties": {
+        "kind": {
+          "const": "rate_limit_update",
+          "default": "rate_limit_update",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "window": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Window"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "used_fraction": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Used Fraction"
+        },
+        "resets_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resets At"
+        },
+        "window_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Window Minutes"
+        },
+        "exhausted": {
+          "title": "Exhausted",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "exhausted"
+      ],
+      "title": "RateLimitUpdateData",
+      "type": "object"
+    },
     "RepositoryVisibility": {
       "description": "Supported GitHub repository visibility values.",
       "enum": [
@@ -3412,6 +3459,7 @@
                   "judge_result": "#/$defs/JudgeResultData",
                   "output": "#/$defs/OutputData",
                   "phase": "#/$defs/PhaseData",
+                  "rate_limit_update": "#/$defs/RateLimitUpdateData",
                   "round_finished": "#/$defs/RoundFinishedData",
                   "run_configured": "#/$defs/RunConfiguredData",
                   "run_failed": "#/$defs/RunFailedData",
@@ -3503,6 +3551,9 @@
                 },
                 {
                   "$ref": "#/$defs/UsageUpdateData"
+                },
+                {
+                  "$ref": "#/$defs/RateLimitUpdateData"
                 },
                 {
                   "$ref": "#/$defs/GateStartedData"

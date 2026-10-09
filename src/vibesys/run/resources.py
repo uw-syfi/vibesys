@@ -1,6 +1,7 @@
 """Explicit product composition for one canonical VibeSys run."""
 
 import shlex
+import sys
 import time
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
@@ -100,6 +101,7 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
     prepare_trusted_evaluator,
+    resolve_run_environment_spec,
     run_environment_record,
 )
 from vs_sandbox.api import (
@@ -232,7 +234,12 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                         )
                     )
 
-            run_environment_spec = run_environment or make_run_environment_spec()
+            run_environment_spec = resolve_run_environment_spec(
+                run_environment or make_run_environment_spec(),
+                backend,
+                platform=sys.platform,
+                log=buffered_logs.append,
+            )
             environment = build_run_environment(run_environment_spec)
             input_path_str = _coerce_dir_path(input_path, "--input")
             input_dir = Path(input_path_str)
@@ -612,7 +619,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 project_resources=project_resources,
                 environment_resources=environment_resources,
                 agent_backend=resolved_backend,
-                driver="agentshim",
                 provider=resolved_cli_provider,
                 model=model_name,
                 role_models=tuple(

@@ -12,6 +12,7 @@ tests, or launch benchmarks.
 - Progress ledger: `progress/`
 - Roadmap: `roadmap/index.md`
 - Pareto archive: `progress/pareto-frontier.md`
+- Runtime contract: Commands run inside the active execution environment. Use normal shell commands to start, stop, and test the server. Framework-owned Git history is mounted read-only at `/opt/vibesys-history`; inspect it with `git -c safe.directory=/opt/vibesys-history -C /opt/vibesys-history log --oneline`. Before a paid or official measurement, retain the exact measured source bytes, archive, or checkpoint plus diff beside the raw result; hashes without recoverable source are insufficient provenance.
 Read the objective first; every operator constraint is hard feasibility.
 Accuracy, Pareto gain, or diagnostic value cannot excuse a violation. Cite
 paths, not stable text. Then inspect the latest relevant ledger/roadmap entries;

@@ -18,7 +18,6 @@ from server.chat.prompts import (
     experiment_chat_system_prompt,
 )
 from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.api import AuxiliaryAgentDriver
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,7 +60,7 @@ class _FakeRunSession:
 
 
 def _selection() -> AgentSelection:
-    return AgentSelection(driver="agentshim", provider="codex", model="gpt-test")
+    return AgentSelection(provider="codex", model="gpt-test")
 
 
 def test_default_chat_declares_one_fixed_managed_conversation(tmp_path: Path) -> None:
@@ -84,8 +83,7 @@ def test_default_chat_declares_one_fixed_managed_conversation(tmp_path: Path) ->
     launch = session.launches[0]
     assert launch.role == "chat"
     assert launch.member_id == DEFAULT_CHAT_THREAD
-    assert (launch.driver, launch.provider, launch.model) == (
-        "agentshim",
+    assert (launch.provider, launch.model) == (
         "codex",
         "gpt-test",
     )
@@ -144,7 +142,7 @@ def test_factory_creates_transcript_directory_before_declaring_readable_input(
         attachment=RunAttachment(
             chat_state_dir=shared_state_dir,
             agent_defaults=_selection(),
-            agent_drivers=(AuxiliaryAgentDriver(driver="agentshim", providers=("codex",)),),
+            agent_providers=("codex",),
         ),
         build_agent=build_chat_agent,
         fallback=lambda _question: "recorded summary",

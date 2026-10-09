@@ -20,7 +20,7 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
-from vs_agent.api.testing import FakeAgentClient
+from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_runtime.api import OrchestrationPlugin, Run, RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend
 
@@ -56,7 +56,7 @@ def _request(root: Path) -> RunRequest:
         input_bundle=load_input_bundle(root),
         objective="Improve the queue.",
         exp_name="launch-test",
-        run_environment=RunEnvironmentSpec("local"),
+        run_environment=RunEnvironmentSpec("docker", {"build_runner": FakeDockerBuildRunner()}),
         agent_backend="stub",
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,

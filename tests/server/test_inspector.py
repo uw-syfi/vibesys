@@ -25,7 +25,7 @@ def _project_run(root: Path) -> tuple[Project, str]:
         run_id="queue-run",
         branch="vibesys/queue-run",
         vibesys_version="0.2.0-test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=agent_descriptor(),
         trusted_input_baseline="0" * 40,

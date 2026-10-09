@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.docker_environment import fake_docker_environment
 
 from vibesys.api import Config, OrchestrationDescriptor, ResumeRef, RunRequest
 from vibesys.api.request import load_input_bundle
@@ -19,6 +20,7 @@ _EXAMPLE = "examples/model-serving/whisper-large-v3"
 def _request(root: Path) -> RunRequest:
     bundle = load_input_bundle(root)
     return RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=root,
         orchestration=OrchestrationDescriptor(id="multi-agent", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "gpt-test"}}),

@@ -10,6 +10,7 @@ from vibesys.events import (
     CommandResultPayload,
     CoreEventType,
     JsonResultPayload,
+    RateLimitUpdateData,
     TodoItemData,
     TodoUpdateData,
     ToolCallData,
@@ -17,7 +18,7 @@ from vibesys.events import (
     UsageUpdateData,
 )
 from vibesys.run import CoreAgentEventSink, EventJournal
-from vs_agent.api import AgentEventSink
+from vs_agent.api import AgentEventSink, AgentRateLimit
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -142,3 +143,26 @@ def test_adapters_are_isolated_by_their_injected_run_journals(tmp_path: Path) ->
     assert [event.run_id for event in first_journal.read()] == ["run-1", "run-1"]
     assert [event.type for event in second_journal.read()] == [CoreEventType.AGENT_OUTPUT_CHUNK]
     assert [event.run_id for event in second_journal.read()] == ["run-2"]
+
+
+def test_a_rate_limit_report_is_recorded_with_its_resolved_exhaustion(tmp_path: Path) -> None:
+    journal, sink = _attached_sink(tmp_path, "run-1")
+
+    sink.rate_limit_update(
+        AgentRateLimit(provider="claude", window="five_hour", used_fraction=1.2, resets_at=1.5e9),
+        agent_kind="implementer",
+        round_label="round-2",
+        invocation_id="invocation-7",
+    )
+
+    (event,) = journal.read()
+    assert event.type is CoreEventType.RATE_LIMIT_UPDATE
+    assert event.agent_kind == "implementer"
+    assert event.execution_id == "invocation-7"
+    assert event.data == RateLimitUpdateData(
+        provider="claude",
+        window="five_hour",
+        used_fraction=1.2,
+        resets_at=1.5e9,
+        exhausted=True,
+    )
