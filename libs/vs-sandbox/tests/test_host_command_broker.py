@@ -387,7 +387,7 @@ class TestGateOperation:
             ),
         )
         def check(kind: GateKind, arguments: list[str]) -> None:
-            gates.runs.clear()
+            runs_before = len(gates.runs)
             frames = _frames(
                 broker,
                 _gate_call(broker, str(workspace), kind=kind.value, arguments=arguments),
@@ -398,7 +398,7 @@ class TestGateOperation:
                 and arguments[0] == _OUTPUT_ARGUMENT
                 and arguments[1] in valid_results
             )
-            assert bool(gates.runs) == expected
+            assert (len(gates.runs) > runs_before) == expected
             if not expected:
                 assert "invalid arguments" in str(frames[0]["error"])
 
@@ -464,18 +464,19 @@ class TestRoots:
             parts=st.lists(st.sampled_from(["a", "b", "..", "."]), max_size=4),
         )
         def check(base: str, parts: list[str]) -> None:
-            launcher.commands.clear()
+            commands_before = len(launcher.commands)
             named = posixpath.join(starts[base], *parts)
             reply = _frames(broker, _gpu_call(broker, named))
             cwd = posixpath.normpath(named)
             ws, wt = str(workspace.resolve()), str(worktrees.resolve())
             inside_workspace = cwd == ws or cwd.startswith(ws + "/")
             inside_candidate = cwd.startswith(wt + "/")
-            accepted = bool(launcher.commands)
+            started = launcher.commands[commands_before:]
+            accepted = bool(started)
             assert accepted == (inside_workspace or inside_candidate)
             if accepted:
                 # The job is confined to the run's workspace or to one candidate under the root.
-                confined = launcher.commands[0].argv[1]
+                confined = started[0].argv[1]
                 assert confined == ws or confined.startswith(wt + "/")
                 assert reply[-1] == {"exit": 5}
 
