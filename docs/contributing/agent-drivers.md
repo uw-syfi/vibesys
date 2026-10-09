@@ -75,9 +75,7 @@ The container process is started by agentshim through
   container.
 
 agentshim maps the working directory, MCP server paths and the schema directory
-into the container itself, so a confined session passes host paths through. The
-Codex rollout watchdog guards one-shot `codex exec --json` runs and is not part
-of a stream session.
+into the container itself, so a confined session passes host paths through.
 
 ### Startup recovery
 
@@ -484,16 +482,6 @@ everything else to a container.
   for a containerized session (the run context's `gpu_env()`, the only source
   `AgentClient.invoke` draws it from, returns an empty mapping whenever
   `capabilities.container_execution` is true).
-- Every container session runs through a `CodexRolloutWatchdogExecutor`,
-  regardless of provider; it no-ops for any command that is not a resumed
-  `codex exec --json` run. A resumed one inside a container regularly
-  finishes its work, writes the terminal events to its rollout file, and
-  never exits; the watchdog reads the rollout, replays the completion into
-  the stream, and stops the process. It derives the rollout-sessions
-  directory it polls from the sandbox's own `env["HOME"]` and the Codex
-  provider profile's state directory, instead of a hardcoded `/home/agent` or
-  `/root`. It is provider-behaviour compensation and stays in VibeSys until
-  the behaviour is verified fixed upstream.
 
 ### A failed health check is a typed agent fault
 
@@ -662,12 +650,12 @@ approvals and their own sandboxes off, so this is the only boundary.
 
 Provider state comes from `ProviderProfile.state_dirs` and is granted whole,
 because a CLI writes session history and caches there and needs them back on
-resume. Codex is the exception: a Codex checkout may itself live under
-`$CODEX_HOME/worktrees`, so only named leaves are granted (`auth.json`
-read-write, `sessions`). `sessions` is not optional: a rollout that does
-not outlive its turn makes `codex exec resume` report no rollout for the
-thread, and a confined run then loses the conversation continuity it was told
-it had.
+resume. A provider whose profile declares `resume_state_paths` is the exception:
+its state directory may hold checkouts (a Codex checkout can live under
+`$CODEX_HOME/worktrees`), so only its authentication files (read-write) and
+those paths are granted. The history paths are not optional: a rollout that does
+not outlive its turn makes a resume report no rollout for the thread, and a
+confined run then loses the conversation continuity it was told it had.
 
 ## End-to-end tests
 

@@ -29,9 +29,6 @@ declarations nor a container install recipe for, so it is not offered here.
 DEFAULT_CLI_PROVIDER = "codex"
 """The CLI provider selected when neither a flag nor config names one."""
 
-CODEX_PROVIDER = "codex"
-"""The provider name naming Codex itself, to look up its ``agentshim`` profile."""
-
 
 # --- Docker container environment -------------------------------------------
 

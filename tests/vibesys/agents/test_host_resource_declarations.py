@@ -39,6 +39,7 @@ _FAKE_PROFILES = {
         ),
         state_root_env="CODEX_HOME",
         auth_files=(".codex/auth.json",),
+        resume_state_paths=(".codex/sessions",),
     ),
     "gemini": fake_profiles.profile("gemini", state_dirs=(".gemini", ".config/gemini")),
     "opencode": fake_profiles.profile(
@@ -271,6 +272,31 @@ def test_codex_home_relocates_the_state_leaves(tmp_path: Path) -> None:
     assert ".codex/auth.json" not in by_path
     # $CODEX_HOME does not move the XDG config directory.
     assert by_path[".config/codex"] is HostResourceAccess.READ_WRITE
+
+
+@pytest.mark.parametrize("name", ["codex", "claude", "newcli"])
+def test_narrowing_follows_the_profile_fact_not_the_provider_name(
+    tmp_path: Path, name: str
+) -> None:
+    """Any provider that declares resume state paths is narrowed to them, and
+    one that declares none is granted whole, whatever it is called."""
+    narrowed = fake_profiles.profile(
+        name,
+        state_dirs=(".state",),
+        auth_files=(".state/auth.json",),
+        resume_state_paths=(".state/history",),
+    )
+    whole = fake_profiles.profile(name, state_dirs=(".state",), auth_files=(".state/auth.json",))
+    env = {"HOME": str(tmp_path)}
+
+    def granted(profile: agentshim.ProviderProfile) -> set[str]:
+        return {
+            r.path.relative_to(tmp_path).as_posix()
+            for r in declare_provider_state_resources(env, profile=profile)
+        }
+
+    assert granted(narrowed) == {".state/auth.json", ".state/history"}
+    assert granted(whole) == {".state"}
 
 
 @pytest.mark.usefixtures("_fake_profiles_installed")

@@ -63,6 +63,7 @@ from vibesys.run.workspace_policy import (
     materialized_skill_dirs,
 )
 from vs_agent.api import (
+    DEFAULT_CLI_PROVIDER,
     AgentBackend,
     AgentSpec,
     task_agent_host_resources,
@@ -306,7 +307,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             resolved_backend = str(
                 request.agent_backend or config.agent.backend or AgentBackend.CLI
             )
-            resolved_cli_provider = request.cli_provider or config.agent.cli_provider or "codex"
+            resolved_cli_provider = (
+                request.cli_provider or config.agent.cli_provider or DEFAULT_CLI_PROVIDER
+            )
             execution_record = RunExecutionRecord(
                 model=config.model.name,
                 agent_backend=resolved_backend,
