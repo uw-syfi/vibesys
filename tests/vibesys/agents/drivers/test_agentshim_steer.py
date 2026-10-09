@@ -159,7 +159,6 @@ def test_a_steer_reaches_the_running_turn_through_the_client(tmp_path: Path, hom
 
     client = AgentClient(
         driver,
-        driver_name="agentshim",
         provider="codex",
         event_sink=_Sink(),
         driver_log=AgentDiagnosticLog(io.StringIO()),
@@ -274,7 +273,6 @@ def test_a_client_with_no_turn_in_flight_reports_none_running(home: Path) -> Non
     fake = FakeExecutor(scripted_turn("claude"))
     client = AgentClient(
         _driver("claude", fake, home, agentshim.TransportKind.ONE_SHOT),
-        driver_name="agentshim",
         provider="claude",
     )
 
