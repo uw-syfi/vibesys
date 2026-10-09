@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+from vs_project._exclude_file import append_excludes
 from vs_project._git_process import git_environment, run_git
 from vs_project._head_reader import Commit, Unborn, locate_git_dir, read_head
 from vs_project.api.git_repository import (
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_project.api.git_repository import GitFaultSink, Pathspec, Revision
+
+
+_BRANCH_PREFIX = "refs/heads/"
 
 
 def _text(data: bytes) -> str:
@@ -60,6 +64,14 @@ class CliGitRepository:
         self._git_dir: Path | None = None
         self._work_tree: Path | None = None
         self._exclude_file = root / ".git" / "info" / "exclude"
+
+    def pin(self, location: RepositoryLocation) -> None:
+        """Adopt an already-resolved ``location`` instead of asking Git for it (see ``bind``).
+
+        For an implementation that wraps this one and located the repository itself.
+        """
+        self._git_dir = location.git_dir
+        self._work_tree = location.work_tree
 
     # -- process plumbing ----------------------------------------------------
 
@@ -174,10 +186,12 @@ class CliGitRepository:
         return _text(result.stdout).strip()
 
     def current_branch(self) -> str | None:
-        result = self._run(["symbolic-ref", "--quiet", "--short", "HEAD"])
-        if result.returncode != 0:
+        # Not ``--short``: it prints ``heads/x`` when a tag is also named ``x``.
+        result = self._run(["symbolic-ref", "--quiet", "HEAD"])
+        ref = _text(result.stdout).strip()
+        if result.returncode != 0 or not ref.startswith(_BRANCH_PREFIX):
             return None
-        return _text(result.stdout).strip()
+        return ref.removeprefix(_BRANCH_PREFIX)
 
     def branch_exists(self, branch: str) -> bool:
         result = self._run(["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"])
@@ -225,7 +239,8 @@ class CliGitRepository:
         )
 
     def read_blob(self, revision: Revision, path: str) -> bytes | None:
-        result = self._run(["show", f"{revision}:{path}"])
+        # ``cat-file blob``, unlike ``show``, refuses a directory instead of listing it.
+        result = self._run(["cat-file", "blob", f"{revision}:{path}"])
         return None if result.returncode != 0 else result.stdout
 
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
@@ -287,8 +302,9 @@ class CliGitRepository:
         return _text(result.stdout)
 
     def tracked_changes_since_head(self, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
-        output = self._run_checked(["diff", "--name-only", "HEAD", "--", *pathspecs]).stdout
-        return tuple(sorted(path for path in _text(output).splitlines() if path))
+        # ``-z``: without it Git quotes names with non-ASCII characters.
+        output = self._run_checked(["diff", "--name-only", "-z", "HEAD", "--", *pathspecs]).stdout
+        return tuple(sorted(path for path in _text(output).split("\0") if path))
 
     def uncommitted_paths(self, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
         status = self._run_checked(
@@ -431,13 +447,4 @@ class CliGitRepository:
     # -- repository-local ignore rules ---------------------------------------
 
     def add_excludes(self, patterns: Sequence[str]) -> tuple[str, ...]:
-        exclude_file = self._exclude_file
-        exclude_file.parent.mkdir(parents=True, exist_ok=True)
-        existing = exclude_file.read_text() if exclude_file.exists() else ""
-        have = set(existing.splitlines())
-        new = tuple(pattern for pattern in dict.fromkeys(patterns) if pattern not in have)
-        if not new:
-            return ()
-        prefix = "" if not existing or existing.endswith("\n") else "\n"
-        exclude_file.write_text(existing + prefix + "\n".join(new) + "\n")
-        return new
+        return append_excludes(self._exclude_file, patterns)

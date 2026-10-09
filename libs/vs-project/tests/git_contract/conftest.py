@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.git_contract import Sandbox
 
-from vs_project.api import CliGitRepository, NullGitTrackerEvents
+from vs_project.api import CliGitRepository, NullGitTrackerEvents, Pygit2GitRepository
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -28,8 +28,13 @@ def _cli(root: Path) -> GitRepository:
     return CliGitRepository(root, faults=NullGitTrackerEvents())
 
 
+def _pygit2(root: Path) -> GitRepository:
+    return Pygit2GitRepository(root, faults=NullGitTrackerEvents())
+
+
 IMPLEMENTATIONS: dict[str, RepositoryFactory] = {
     "cli": _cli,
+    "pygit2": _pygit2,
 }
 
 _ORACLE: RepositoryFactory = _cli

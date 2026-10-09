@@ -129,6 +129,18 @@ CLI-only.
 its `conftest.py` (`IMPLEMENTATIONS`), including operation sequences compared
 with the CLI as the oracle. A new implementation is one entry there.
 
+`Pygit2GitRepository` answers the portable operations in process with libgit2
+(`pygit2`) and delegates the CLI-only ones to a wrapped `CliGitRepository`; its
+module docstring lists the exact split, the requests it hands to the CLI to keep
+Git's answer, and the known differences. It shares a repository safely with the
+real `git` the agents run (the contract suite alternates the two). Which
+implementation a `GitTracker` gets is decided in one place,
+`open_git_repository`: `VIBESYS_GIT_BACKEND=cli|pygit2` selects explicitly (an
+unknown value, or `pygit2` where the package is not installed, is a
+`GitBackendError`); unset, it is `DEFAULT_GIT_BACKEND` when `pygit2` is
+installed and the CLI implementation otherwise. `pygit2` is imported only when
+that backend is built.
+
 Repositories that are not the tracked project (cloning a source tree, probing
 whether a directory is inside a repository, remote operations in
 `GitRemoteRepository`) are outside this interface and use `run_git` directly.
