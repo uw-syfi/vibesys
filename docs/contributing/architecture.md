@@ -90,7 +90,8 @@ through `[tool.uv.sources] <name> = { workspace = true }`.
 `scripts/check_member_dependencies.py` fails CI on an undeclared or unused
 dependency, an undeclared member edge, or an import of a root-distribution
 package. The `vibesys` wheel still bundles every library's source, so each
-member dependency must also appear in the root `dependencies`.
+member dependency must also appear in the root `dependencies` with the same
+version constraint.
 
 The internal custom-policy execution contract and example are in
 [orchestration-runtime.md](orchestration-runtime.md).

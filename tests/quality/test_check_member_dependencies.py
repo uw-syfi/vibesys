@@ -150,3 +150,33 @@ def test_load_workspace_reads_only_library_members_from_the_tree(tmp_path: Path)
     assert loaded.root_dependencies == {"pydantic"}
     assert loaded.root_packages == {"app"}
     assert check_workspace(loaded, INSTALLED) == []
+
+
+SPECIFIERS = st.sampled_from([">=1", ">=1,<2", "<2,>=1", ">=3.1", "==0.10.0", ""])
+
+
+@given(member_spec=SPECIFIERS, root_spec=SPECIFIERS)
+def test_a_member_constraint_must_match_the_root_constraint(
+    member_spec: str, root_spec: str
+) -> None:
+    declared = Member(
+        name="vs-example",
+        directory="libs/vs-example",
+        dependencies=frozenset({"pydantic"}),
+        workspace_sources=frozenset(),
+        imports=frozenset({"pydantic"}),
+        packages=frozenset({"vs_example"}),
+        specifiers={"pydantic": ",".join(sorted(member_spec.split(",")))},
+    )
+    root = Workspace(
+        (declared,),
+        frozenset({"pydantic"}),
+        ROOT_PACKAGES,
+        {"pydantic": ",".join(sorted(root_spec.split(",")))},
+    )
+
+    failures = check_workspace(root, INSTALLED)
+
+    agree = sorted(member_spec.split(",")) == sorted(root_spec.split(","))
+    assert (failures == []) is agree
+    assert all("keep one constraint" in failure for failure in failures)
