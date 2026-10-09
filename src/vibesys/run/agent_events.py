@@ -13,6 +13,7 @@ from vibesys.events import (
     CoreEvent,
     CoreEventType,
     JsonResultPayload,
+    QuotaAbandonedData,
     QuotaPausedData,
     QuotaResumedData,
     RateLimitUpdateData,
@@ -26,7 +27,7 @@ from vibesys.events import (
 )
 
 if TYPE_CHECKING:
-    from vs_agent.api import AgentQuotaError, AgentRateLimit
+    from vs_agent.api import AgentQuotaError, AgentRateLimit, QuotaResumeReason
 
 EventSink = Callable[[CoreEvent], object]
 
@@ -69,7 +70,8 @@ class CoreAgentEventSink:
         | UsageUpdateData
         | RateLimitUpdateData
         | QuotaPausedData
-        | QuotaResumedData,
+        | QuotaResumedData
+        | QuotaAbandonedData,
         *,
         agent_kind: str | None,
         round_label: str | None,
@@ -225,6 +227,7 @@ class CoreAgentEventSink:
         self,
         error: AgentQuotaError,
         *,
+        resumes_at: float | None = None,
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
@@ -237,6 +240,7 @@ class CoreAgentEventSink:
                 condition=error.condition.value,
                 detail=error.detail,
                 resets_at=error.resets_at,
+                resumes_at=resumes_at,
             ),
             agent_kind=agent_kind,
             round_label=round_label,
@@ -247,6 +251,7 @@ class CoreAgentEventSink:
         self,
         provider: str,
         *,
+        reason: QuotaResumeReason = "operator",
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
@@ -254,7 +259,30 @@ class CoreAgentEventSink:
         """Emit that the paused turn is being sent again on the same provider."""
         self._emit(
             CoreEventType.QUOTA_RESUMED,
-            QuotaResumedData(provider=provider),
+            QuotaResumedData(provider=provider, reason=reason),
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+        )
+
+    def quota_abandoned(
+        self,
+        error: AgentQuotaError,
+        *,
+        reason: str,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Emit that the quota policy ended the turn with the quota error."""
+        self._emit(
+            CoreEventType.QUOTA_ABANDONED,
+            QuotaAbandonedData(
+                provider=error.provider,
+                condition=error.condition.value,
+                detail=error.detail,
+                reason=reason,
+            ),
             agent_kind=agent_kind,
             round_label=round_label,
             invocation_id=invocation_id,

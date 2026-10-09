@@ -23,12 +23,12 @@ class _Gate:
     """A gate that returns at once, or raises ``refusal``, recording each call."""
 
     refusal: Exception | None = None
-    calls: list[tuple[AgentQuotaError, str, str | None]] = field(default_factory=list)
+    calls: list[tuple[AgentQuotaError, str, str | None, int]] = field(default_factory=list)
 
     def wait_for_capacity(
-        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, attempt: int
     ) -> None:
-        self.calls.append((error, role, turn.invocation_id))
+        self.calls.append((error, role, turn.invocation_id, attempt))
         if self.refusal is not None:
             raise self.refusal
 
@@ -66,8 +66,8 @@ def test_the_turn_is_sent_again_after_each_gate_return(stops: int) -> None:
         text = _invoke(client, Path(tmp))
 
     assert text == "ok"
-    assert [(error.detail, role, inv) for error, role, inv in gate.calls] == [
-        (f"stop {n}", "implementer", "inv-1") for n in range(stops)
+    assert [(error.detail, role, inv, attempt) for error, role, inv, attempt in gate.calls] == [
+        (f"stop {n}", "implementer", "inv-1", n + 1) for n in range(stops)
     ]
 
 

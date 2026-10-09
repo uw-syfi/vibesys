@@ -63,6 +63,28 @@ framework setup when requested. Requested stages without a declared timeout
 cannot produce a suspension deadline. Queue estimates inform planning; they do
 not extend the deadline.
 
+### Provider quota and rate limits
+
+When a provider runs out of quota, or stays rate limited after the agent
+library's own waiting, the run pauses (the same PAUSING/PAUSED states as an
+operator pause) and publishes a `quota_paused` event with the provider's
+diagnostic. Resuming sends the stopped turn again. To handle this without an
+operator, declare a policy in `agent.toml`:
+
+```toml
+[agent.quota]
+policy = "wait"        # pause | wait | fail
+wait_seconds = 21600   # only with "wait"; omitted means no limit
+retry_seconds = 300    # used when the provider gave no reset time
+```
+
+`pause` (the default) waits for the operator. `wait` resumes the run by itself
+once the provider's reported reset time (plus a few seconds) has passed, or
+every `retry_seconds` when it reported none, and fails the turn with the quota
+error once `wait_seconds` is spent or the reset lies beyond it. `fail` does not
+pause. A misspelled key, an unknown policy, or `wait_seconds` with another
+policy is rejected at startup, naming the key.
+
 ### Run time budget
 
 Optionally bound the wall-clock time of one run in `agent.toml`:

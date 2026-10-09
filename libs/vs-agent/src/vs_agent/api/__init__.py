@@ -115,7 +115,12 @@ from vs_agent.sessions import (
     Unknown,
     inspect_invocation_journal,
 )
-from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink, NullAgentEventSink
+from vs_agent.sink import (
+    NULL_AGENT_EVENT_SINK,
+    AgentEventSink,
+    NullAgentEventSink,
+    QuotaResumeReason,
+)
 from vs_agent.skills import NULL_SKILL_SELECTION, SkillSelection
 from vs_agent.spec import AgentBackend, AgentSpec
 from vs_agent.todos import todos_from_tool_call
@@ -196,6 +201,7 @@ __all__ = [
     "ProviderNotReadyError",
     "ProviderReadiness",
     "QuotaCondition",
+    "QuotaResumeReason",
     "ReadinessProbe",
     "ReadinessProblem",
     "RoundProgress",

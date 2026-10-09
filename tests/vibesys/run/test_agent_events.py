@@ -10,6 +10,7 @@ from vibesys.events import (
     CommandResultPayload,
     CoreEventType,
     JsonResultPayload,
+    QuotaAbandonedData,
     QuotaPausedData,
     QuotaResumedData,
     RateLimitUpdateData,
@@ -175,18 +176,34 @@ def test_a_quota_pause_and_its_resume_are_recorded_with_the_provider_diagnostic(
 ) -> None:
     journal, sink = _attached_sink(tmp_path, "run-1")
 
+    error = AgentQuotaError("claude", QuotaCondition.RATE_LIMITED, "429 too many", 1.5e9)
     sink.quota_paused(
-        AgentQuotaError("claude", QuotaCondition.RATE_LIMITED, "429 too many", 1.5e9),
+        error,
+        resumes_at=1.6e9,
         agent_kind="implementer",
         round_label="round-2",
         invocation_id="invocation-7",
     )
-    sink.quota_resumed("claude", agent_kind="implementer", invocation_id="invocation-7")
+    sink.quota_resumed(
+        "claude", reason="wait_elapsed", agent_kind="implementer", invocation_id="invocation-7"
+    )
+    sink.quota_abandoned(error, reason="policy", agent_kind="implementer")
 
-    paused, resumed = journal.read()
-    assert (paused.type, resumed.type) == (CoreEventType.QUOTA_PAUSED, CoreEventType.QUOTA_RESUMED)
+    paused, resumed, abandoned = journal.read()
+    assert [e.type for e in (paused, resumed, abandoned)] == [
+        CoreEventType.QUOTA_PAUSED,
+        CoreEventType.QUOTA_RESUMED,
+        CoreEventType.QUOTA_ABANDONED,
+    ]
     assert paused.execution_id == "invocation-7"
     assert paused.data == QuotaPausedData(
-        provider="claude", condition="rate_limited", detail="429 too many", resets_at=1.5e9
+        provider="claude",
+        condition="rate_limited",
+        detail="429 too many",
+        resets_at=1.5e9,
+        resumes_at=1.6e9,
     )
-    assert resumed.data == QuotaResumedData(provider="claude")
+    assert resumed.data == QuotaResumedData(provider="claude", reason="wait_elapsed")
+    assert abandoned.data == QuotaAbandonedData(
+        provider="claude", condition="rate_limited", detail="429 too many", reason="policy"
+    )

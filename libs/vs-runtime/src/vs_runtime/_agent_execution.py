@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, suppress
@@ -40,7 +41,12 @@ from vs_runtime._agent_lifecycle import (
     AgentExecutionStarted,
     AgentExecutionStatus,
 )
-from vs_runtime._capacity_gate import PausingCapacityGate
+from vs_runtime._capacity_gate import (
+    PAUSE_ONLY,
+    CapacityHandling,
+    ControlCapacityTimer,
+    PolicyCapacityGate,
+)
 from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
 
 if TYPE_CHECKING:
@@ -338,6 +344,7 @@ class RuntimeAgentExecution:
         agent_events: AgentEventSink,
         route_message: AgentMessageRouter,
         client_factory: AgentClientFactory = build_agent_client,
+        capacity: CapacityHandling = PAUSE_ONLY,
     ) -> RuntimeAgentExecution:
         executor = ThreadPoolExecutor(
             max_workers=1,
@@ -356,6 +363,7 @@ class RuntimeAgentExecution:
                 agent_events=agent_events,
                 route_message=route_message,
                 client_factory=client_factory,
+                capacity=capacity,
             ),
         )
         try:
@@ -387,6 +395,7 @@ class RuntimeAgentExecution:
         agent_events: AgentEventSink,
         route_message: AgentMessageRouter,
         client_factory: AgentClientFactory,
+        capacity: CapacityHandling,
     ) -> RuntimeAgentExecution:
         with ExitStack() as resources:
             environment = scope.open_environment(configuration)
@@ -416,7 +425,10 @@ class RuntimeAgentExecution:
                 raise AgentSpawnError(configuration.spec.provider, str(error)) from error
             resources.callback(client.close)
             if isinstance(client, CapacityGated):
-                client.set_capacity_gate(PausingCapacityGate(control, agent_events))
+                timer = capacity.timer or ControlCapacityTimer(control, time.time)
+                client.set_capacity_gate(
+                    PolicyCapacityGate(control, agent_events, capacity.policy, timer)
+                )
             return cls(
                 configuration,
                 scope,

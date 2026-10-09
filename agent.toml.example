@@ -17,6 +17,20 @@ name = "gpt-5.4"
 # one of: claude, gemini, codex, opencode
 # cli_timeout = 1800          # per-invocation timeout in seconds
 
+# [agent.quota]
+# What the run does when a provider runs out of quota or is rate limited for
+# long enough that waiting inside the turn did not help. The run never silently
+# switches provider mid-turn. Unknown keys are an error.
+#   policy = "pause"  (default) pause the run and wait for the operator to resume it.
+#   policy = "wait"   pause, then resume by itself when capacity should be back
+#                     (the provider's reported reset time, else every retry_seconds),
+#                     for at most wait_seconds per turn (no limit when omitted);
+#                     after that the turn fails with the quota error.
+#   policy = "fail"   do not pause: the turn fails with the quota error at once.
+# policy = "wait"
+# wait_seconds = 21600       # positive integer seconds; only with policy = "wait"
+# retry_seconds = 300        # seconds between attempts when no reset time is known
+
 # [evaluation]
 # Added to declared stage execution budgets to bound evaluation suspension.
 # queue_allowance_seconds = 900  # positive integer seconds; default 15 minutes

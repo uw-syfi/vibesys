@@ -8,6 +8,7 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    QuotaAbandonedData,
     QuotaPausedData,
     QuotaResumedData,
     RateLimitUpdateData,
@@ -269,9 +270,42 @@ class TestQuotaEvents:
         )
         assert out == "[quota] codex rate limited: 429; the run is paused\n"
 
+    def test_a_waiting_policy_says_when_the_run_resumes_by_itself(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_PAUSED,
+            QuotaPausedData(
+                provider="claude",
+                condition="quota_exhausted",
+                detail="limit",
+                resumes_at=1_791_954_019,
+            ),
+        )
+        assert out == (
+            "[quota] claude quota exhausted: limit; the run is paused; "
+            "resuming by itself at 2026-10-14 05:00 UTC\n"
+        )
+
     def test_a_resume_is_shown(self) -> None:
         out = _render_event(CoreEventType.QUOTA_RESUMED, QuotaResumedData(provider="claude"))
-        assert out == "[quota] resumed on claude; sending the paused turn again\n"
+        assert out == "[quota] resumed; sending the paused claude turn again\n"
+
+    def test_a_wait_that_elapsed_is_shown(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_RESUMED, QuotaResumedData(provider="claude", reason="wait_elapsed")
+        )
+        assert out == "[quota] the wait elapsed; sending the paused claude turn again\n"
+
+    def test_an_abandoned_turn_names_the_policys_reason(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_ABANDONED,
+            QuotaAbandonedData(
+                provider="codex",
+                condition="rate_limited",
+                detail="429",
+                reason="the quota policy is fail",
+            ),
+        )
+        assert out == "[quota] codex rate limited: 429; the quota policy is fail\n"
 
 
 class TestToolEvents:

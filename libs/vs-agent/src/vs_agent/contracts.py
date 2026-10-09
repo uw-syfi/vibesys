@@ -108,9 +108,13 @@ class CapacityGate(Protocol):
     """
 
     def wait_for_capacity(
-        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, attempt: int
     ) -> None:
-        """Block until ``turn`` may be sent again, or raise to give up."""
+        """Block until ``turn`` may be sent again, or raise to give up.
+
+        ``attempt`` counts the capacity stops of this one turn, starting at 1, so a
+        gate can budget its waiting per turn.
+        """
         ...
 
 

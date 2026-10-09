@@ -256,6 +256,7 @@ export type EventType =
   | "rate_limit_update"
   | "quota_paused"
   | "quota_resumed"
+  | "quota_abandoned"
   | "gate_started"
   | "gate_finished"
   | "workspace_snapshot"
@@ -302,6 +303,7 @@ export type Data =
       | RateLimitUpdateData
       | QuotaPausedData
       | QuotaResumedData
+      | QuotaAbandonedData
       | GateStartedData
       | GateFinishedData
       | WorkspaceSnapshotData
@@ -437,9 +439,16 @@ export type Provider7 = string;
 export type Condition = "quota_exhausted" | "rate_limited";
 export type Detail1 = string;
 export type ResetsAt1 = number | null;
+export type ResumesAt = number | null;
 export type Kind29 = "quota_resumed";
 export type Provider8 = string;
-export type Kind30 = "gate_started";
+export type Reason3 = "operator" | "wait_elapsed";
+export type Kind30 = "quota_abandoned";
+export type Provider9 = string;
+export type Condition1 = "quota_exhausted" | "rate_limited";
+export type Detail2 = string;
+export type Reason4 = string;
+export type Kind31 = "gate_started";
 /**
  * Closed set of framework-owned gates a candidate passes through.
  */
@@ -451,7 +460,7 @@ export type Command = string | null;
  */
 export type FrameworkSource = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel = string | null;
-export type Kind31 = "gate_finished";
+export type Kind32 = "gate_finished";
 export type Recipe1 = string | null;
 export type Reused = boolean;
 export type Metric1 = string | null;
@@ -463,7 +472,7 @@ export type OutputTail = string | null;
  */
 export type FrameworkSource1 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel1 = string | null;
-export type Kind32 = "workspace_snapshot";
+export type Kind33 = "workspace_snapshot";
 export type Label = string;
 export type Commit = string | null;
 export type Baseline = string | null;
@@ -472,7 +481,7 @@ export type ExcludedPaths = string[];
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource2 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind33 = "run_configured";
+export type Kind34 = "run_configured";
 export type RunLogPath = string;
 export type ProjectRoot = string;
 export type Model7 = string | null;
@@ -484,9 +493,9 @@ export type ParetoObjectives = string | null;
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource3 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind34 = "framework_warning";
+export type Kind35 = "framework_warning";
 export type Summary2 = string;
-export type Detail2 = string | null;
+export type Detail3 = string | null;
 /**
  * Closed set of framework subsystems that emit framework events.
  */
@@ -1336,7 +1345,9 @@ export interface RateLimitUpdateData {
  * ``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or
  * ``rate_limited`` (sustained rate limiting); ``detail`` is the provider's
  * diagnostic and ``resets_at`` the epoch second the provider said capacity
- * returns, when it said. The run stays paused until it resumes.
+ * returns, when it said. The run stays paused until it resumes; ``resumes_at`` is the
+ * epoch second the run's quota policy resumes it by itself, ``None`` when only the
+ * operator can.
  */
 export interface QuotaPausedData {
   kind: Kind28;
@@ -1344,6 +1355,7 @@ export interface QuotaPausedData {
   condition: Condition;
   detail: Detail1;
   resets_at?: ResetsAt1;
+  resumes_at?: ResumesAt;
   [k: string]: unknown;
 }
 /**
@@ -1352,13 +1364,25 @@ export interface QuotaPausedData {
 export interface QuotaResumedData {
   kind: Kind29;
   provider: Provider8;
+  reason?: Reason3;
+  [k: string]: unknown;
+}
+/**
+ * The quota policy ended a turn with the quota error instead of pausing or waiting longer.
+ */
+export interface QuotaAbandonedData {
+  kind: Kind30;
+  provider: Provider9;
+  condition: Condition1;
+  detail: Detail2;
+  reason: Reason4;
   [k: string]: unknown;
 }
 /**
  * One framework gate began evaluating the current candidate.
  */
 export interface GateStartedData {
-  kind: Kind30;
+  kind: Kind31;
   gate: GateKind;
   recipe?: Recipe;
   command?: Command;
@@ -1375,7 +1399,7 @@ export interface GateStartedData {
  * output on failure.
  */
 export interface GateFinishedData {
-  kind: Kind31;
+  kind: Kind32;
   gate: GateKind;
   recipe?: Recipe1;
   reused?: Reused;
@@ -1396,7 +1420,7 @@ export interface GateFinishedData {
  * change carries ``excluded_paths``.
  */
 export interface WorkspaceSnapshotData {
-  kind: Kind32;
+  kind: Kind33;
   label?: Label;
   commit?: Commit;
   baseline?: Baseline;
@@ -1408,7 +1432,7 @@ export interface WorkspaceSnapshotData {
  * One per run: the resolved configuration a loop starts with.
  */
 export interface RunConfiguredData {
-  kind: Kind33;
+  kind: Kind34;
   run_log_path: RunLogPath;
   project_root: ProjectRoot;
   model?: Model7;
@@ -1426,9 +1450,9 @@ export interface RunConfiguredData {
  * ``diagnostic`` field so diagnostic-oriented clients need no new handling.
  */
 export interface FrameworkWarningData {
-  kind: Kind34;
+  kind: Kind35;
   summary: Summary2;
-  detail?: Detail2;
+  detail?: Detail3;
   source?: FrameworkSource4;
   source_label?: SourceLabel2;
   [k: string]: unknown;

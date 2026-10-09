@@ -10,6 +10,7 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    QuotaAbandonedData,
     QuotaPausedData,
     QuotaResumedData,
     RateLimitUpdateData,
@@ -54,18 +55,29 @@ def format_rate_limit_event(event: CoreEvent) -> str | None:
 
 
 def format_quota_event(event: CoreEvent) -> str | None:
-    """Return the terminal rendering of a quota pause or its resume, or None."""
+    """Return the terminal rendering of a quota pause, resume or abandonment, or None."""
     data = event.data
     if isinstance(data, QuotaResumedData):
-        return f"[quota] resumed on {data.provider}; sending the paused turn again"
+        by = "the wait elapsed" if data.reason == "wait_elapsed" else "resumed"
+        return f"[quota] {by}; sending the paused {data.provider} turn again"
+    if isinstance(data, QuotaAbandonedData):
+        return f"[quota] {data.provider} {_quota_condition(data.condition)}: {data.detail}; {data.reason}"
     if not isinstance(data, QuotaPausedData):
         return None
-    what = "quota exhausted" if data.condition == "quota_exhausted" else "rate limited"
-    line = f"[quota] {data.provider} {what}: {data.detail}; the run is paused"
+    line = f"[quota] {data.provider} {_quota_condition(data.condition)}: {data.detail}; the run is paused"
     if data.resets_at is not None:
-        reset = datetime.fromtimestamp(data.resets_at, tz=UTC)
-        line += f" (capacity returns {reset:%Y-%m-%d %H:%M} UTC)"
+        line += f" (capacity returns {_utc(data.resets_at)})"
+    if data.resumes_at is not None:
+        line += f"; resuming by itself at {_utc(data.resumes_at)}"
     return line
+
+
+def _quota_condition(condition: str) -> str:
+    return "quota exhausted" if condition == "quota_exhausted" else "rate limited"
+
+
+def _utc(epoch: float) -> str:
+    return f"{datetime.fromtimestamp(epoch, tz=UTC):%Y-%m-%d %H:%M} UTC"
 
 
 def _format_gate_started(data: GateStartedData) -> str:

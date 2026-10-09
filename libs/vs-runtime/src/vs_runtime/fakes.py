@@ -96,7 +96,7 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentInvocationStore, AgentSessions, InvocationOutcome
     from vs_evaluation.api import EvaluationSettlements
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
-    from vs_runtime._run_control import RunControlTransition
+    from vs_runtime._run_control import RunControlChannel, RunControlTransition
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
 
 
@@ -221,6 +221,44 @@ class FakeRunControlEventSink:
         self.transitions.append(transition)
         if self._on_transition is not None:
             self._on_transition(transition)
+
+
+class FakeCapacityTimer:
+    """A virtual clock for the capacity gate: waits cost no real time.
+
+    ``wait_resumed`` advances the clock by the requested seconds and lets the real
+    control channel settle the wait with a zero timeout, so the channel's PAUSED and
+    RESUMED transitions are the production ones. With ``operator_resumes_after`` set,
+    the operator resumes the run that many virtual seconds into any wait that lasts
+    longer.
+    """
+
+    def __init__(
+        self,
+        control: RunControlChannel,
+        *,
+        start: float = 1_000_000.0,
+        operator_resumes_after: float | None = None,
+    ) -> None:
+        """Start the virtual clock at ``start`` epoch seconds."""
+        self._control = control
+        self._now = start
+        self._operator_after = operator_resumes_after
+        self.waits: list[float] = []
+
+    def now(self) -> float:
+        """Return the virtual epoch second."""
+        return self._now
+
+    def wait_resumed(self, seconds: float) -> bool:
+        """Spend ``seconds`` of virtual time, or fewer when the operator resumes first."""
+        self.waits.append(seconds)
+        if self._operator_after is not None and self._operator_after < seconds:
+            self._now += self._operator_after
+            self._control.resume()
+        else:
+            self._now += seconds
+        return self._control.wait_resumed(0.0)
 
 
 class FakeProjectMaterializationEffects:
