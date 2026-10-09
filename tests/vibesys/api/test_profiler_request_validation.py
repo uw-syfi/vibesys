@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.docker_environment import host_container_backend
 
-from launch import create_session
+from launch import LaunchSettings, create_session
 from vibesys.api import (
     ComputeBackend,
     Config,
@@ -90,11 +91,17 @@ def test_profile_workload_requirement_precedes_provisioning(
 
     if service and not profile and requested is not ProfilerKind.NONE:
         with pytest.raises(ConfigurationError, match=r"profile\.command") as error:
-            create_session(request, sink=record)
+            create_session(
+                request,
+                sink=record,
+                settings=LaunchSettings(backend_factory=host_container_backend),
+            )
         assert error.value.diagnostic.code == "profile_workload_invalid"
         assert error.value.diagnostic.stage == "profiler_validation"
     else:
-        session = create_session(request, sink=record)
+        session = create_session(
+            request, sink=record, settings=LaunchSettings(backend_factory=host_container_backend)
+        )
         session.close()
     assert events == []
     assert set(tmp_path.rglob("*")) == before
@@ -118,7 +125,9 @@ def test_incompatible_profiler_is_a_typed_early_configuration_failure(
         del event
 
     with pytest.raises(ConfigurationError, match="--profiler") as error:
-        create_session(request, sink=discard)
+        create_session(
+            request, sink=discard, settings=LaunchSettings(backend_factory=host_container_backend)
+        )
     assert error.value.diagnostic.code == "profiler_incompatible"
     assert error.value.diagnostic.stage == "profiler_validation"
     assert set(tmp_path.rglob("*")) == before

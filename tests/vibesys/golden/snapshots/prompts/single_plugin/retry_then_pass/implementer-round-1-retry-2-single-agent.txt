@@ -12,6 +12,7 @@ self-review it, and collect only the profile/evidence needed to classify it.
 - Progress ledger: `progress/`
 - Pareto archive: `progress/pareto-frontier.md`
 - Framework validation ledger: `progress/validation/`
+- Runtime contract: Commands run inside the active execution environment. Use normal shell commands to start, stop, and test the server. Framework-owned Git history is mounted read-only at `/opt/vibesys-history`; inspect it with `git -c safe.directory=/opt/vibesys-history -C /opt/vibesys-history log --oneline`. Before a paid or official measurement, retain the exact measured source bytes, archive, or checkpoint plus diff beside the raw result; hashes without recoverable source are insufficient provenance.
 Read these files with tools. Do not rely on embedded copies or stale history.
 Read older rounds and installed references only for a named dependency.
 Reuse a matching framework validation PASS when its declared inputs are unchanged.

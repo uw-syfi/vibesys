@@ -26,6 +26,7 @@ from vs_runtime._checkpoint import (
     RoundRecoveryOutcome,
 )
 from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._recorded_environment import migrate_recorded_run_environment
 from vs_runtime._run_state import RunState
 from vs_runtime.contracts import OrchestrationResumeDecision
 
@@ -352,6 +353,9 @@ def _assemble_project_run_resources(
             project_state.load_project()
             run_manifest = project_state.load_run(request.run_id)
             _validate_resume_identity(request, run_manifest, git)
+            run_manifest = _migrate_run_environment(
+                request.run_id, project, git, run_manifest, log=logger.lprint
+            )
             decision = resolve_resume(run_manifest)
             round_transaction_coordinator = _round_transaction(request, project, git)
             if round_transaction_coordinator is not None:
@@ -455,6 +459,29 @@ def _validate_resume_identity(
             manifest.task_name,
             request.task_name,
         )
+
+
+def _migrate_run_environment(
+    run_id: str,
+    project: Project,
+    git: GitTracker,
+    manifest: OrchestrationRunManifest,
+    *,
+    log: Callable[[str], None],
+) -> OrchestrationRunManifest:
+    """Persist the environment a resumed run continues in, logging a migration."""
+    migrated = migrate_recorded_run_environment(manifest.run_environment)
+    if migrated == manifest.run_environment:
+        return manifest
+    log(
+        f"[resume] run {run_id} was recorded with the {manifest.run_environment.name!r} "
+        f"agent environment; continuing in {migrated.name!r}"
+    )
+    project.state.update_run_environment(run_id, migrated)
+    git.snapshot_framework_metadata_only(
+        "vibesys: migrate run environment", project.state.run_manifest_snapshot(run_id)
+    )
+    return manifest.model_copy(update={"run_environment": migrated})
 
 
 def _apply_resume_decision(

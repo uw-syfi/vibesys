@@ -48,7 +48,7 @@ def _legacy_run(root: Path, *, state: bytes | None) -> Path:
         run_id=_RUN_ID,
         branch=f"vibesys-runs/{_RUN_ID}",
         vibesys_version="0.2.0-test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(
             id="dynamic",

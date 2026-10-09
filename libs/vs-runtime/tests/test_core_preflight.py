@@ -32,7 +32,7 @@ def project_run(root: Path) -> tuple[Project, str]:
         "shell-test",
         branch="test",
         vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="dynamic", config_version=1, options={}),
         trusted_input_baseline="a" * 40,

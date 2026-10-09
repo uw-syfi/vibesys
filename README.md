@@ -67,17 +67,14 @@ accuracy and performance results.
 
 ## Quickstart
 
-Install Python 3.12+, Git, and [uv](https://docs.astral.sh/uv/). Linux also
-requires `bubblewrap`, and a kernel that lets it create an unprivileged user
-namespace; macOS includes the required `sandbox-exec` command. Where user
-namespaces are blocked and installing bubblewrap needs root you do not have,
-`VIBESYS_AGENT_SANDBOX=landlock` selects a weaker but root-free backend (see
-the [CLI reference](docs/cli-flags.md) for what it stops enforcing). Tasks whose
-candidate is a container topology, such as the `microservices` examples,
-declare `docker_in_docker = true`: they run in a Docker sandbox with its own
-daemon and need Docker Engine reachable without `sudo` (add your user to the
-`docker` group) with the [Sysbox](https://github.com/nestybox/sysbox) runtime
-installed. Then install VibeSys:
+Install Python 3.12+, Git, and [uv](https://docs.astral.sh/uv/). Agents always
+run in a local Docker container, so Docker Engine must be reachable without
+`sudo` (add your user to the `docker` group). Tasks whose candidate is a
+container topology, such as the `microservices` examples, declare
+`docker_in_docker = true`: their container gets a Docker daemon of its own and
+needs the [Sysbox](https://github.com/nestybox/sysbox) runtime installed. Slurm
+runs still edit on the host and need `bubblewrap` on Linux (see the
+[CLI reference](docs/cli-flags.md)). Then install VibeSys:
 
 ```bash
 uv tool install vibesys

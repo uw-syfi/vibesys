@@ -13,6 +13,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ConfigDict
+from tests.support.docker_environment import (
+    fake_docker_environment,
+    host_container_backend,
+)
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
@@ -87,6 +91,7 @@ async def _real(tmp_path: Path) -> AsyncIterator[tuple[State, Workspace]]:
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
     )
     request = RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=root,
         orchestration=OrchestrationDescriptor(id=_PLUGIN.id, config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "state-contract"}}),
@@ -98,7 +103,9 @@ async def _real(tmp_path: Path) -> AsyncIterator[tuple[State, Workspace]]:
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
     )
-    async with open_product_run_host(request, LocalRunIntegration(), plugin=_PLUGIN) as run:
+    async with open_product_run_host(
+        request, LocalRunIntegration(), plugin=_PLUGIN, backend_factory=host_container_backend
+    ) as run:
         yield run.state, run.workspaces.root
 
 

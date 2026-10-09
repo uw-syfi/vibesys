@@ -72,7 +72,7 @@ def _namespace(root: Path) -> StateNamespace:
         branch="test",
         vibesys_version="test",
         trusted_input_baseline="a" * 40,
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=RunExecutionRecord(
             model="test",
             agent_backend="stub",

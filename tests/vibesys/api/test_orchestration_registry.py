@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
+from tests.support.docker_environment import fake_docker_environment, host_container_backend
 
-from launch import built_in_orchestrations, create_session, open_run_store
+from launch import LaunchSettings, built_in_orchestrations, create_session, open_run_store
 from vibesys.api import (
     ComputeBackend,
     Config,
@@ -20,7 +21,7 @@ from vibesys.api import (
     RunStatus,
     RunView,
 )
-from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
+from vibesys.api.request import load_input_bundle
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData, RunStartedData
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.dynamic import PLUGIN as DYNAMIC_PLUGIN
@@ -156,7 +157,7 @@ def _custom_request(tmp_path: Path) -> RunRequest:
         config=Config.model_validate({"model": {"name": "gpt-test"}}),
         input_bundle=load_input_bundle(root),
         exp_name="custom-run",
-        run_environment=RunEnvironmentSpec("local"),
+        run_environment=fake_docker_environment(),
         agent_backend="stub",
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
@@ -226,7 +227,11 @@ def test_builtin_single_agent_reaches_its_first_structured_turn_with_the_stub_ba
             )
         }
     )
-    session = create_session(request, sink=_discard_event)
+    session = create_session(
+        request,
+        sink=_discard_event,
+        settings=LaunchSettings(backend_factory=host_container_backend),
+    )
 
     # The stub backend writes no structured output, and the plugin must not
     # fabricate a plan in its place: the run reaches the designer turn and
@@ -477,7 +482,12 @@ def test_session_executes_registered_policy_with_canonical_request(tmp_path: Pat
     def record(event: CoreEvent) -> None:
         events.append(event)
 
-    session = create_session(request, sink=record, registry=registry)
+    session = create_session(
+        request,
+        sink=record,
+        registry=registry,
+        settings=LaunchSettings(backend_factory=host_container_backend),
+    )
 
     session.start()
     result = asyncio.run(session.await_result())
@@ -528,7 +538,12 @@ def test_projector_uses_same_committed_state_for_live_and_stored_views(tmp_path:
     request = _custom_request(tmp_path)
     registry = OrchestrationRegistry()
     registry.register(_EVIDENCE_REGISTRATION)
-    session = create_session(request, sink=_discard_event, registry=registry)
+    session = create_session(
+        request,
+        sink=_discard_event,
+        registry=registry,
+        settings=LaunchSettings(backend_factory=host_container_backend),
+    )
     committed: list[RunView] = []
     session.on_committed_view(lambda view, _keys: committed.append(view))
 
@@ -612,7 +627,12 @@ def test_constructor_rejects_invalid_descriptor_before_run_resources(tmp_path: P
     registry = OrchestrationRegistry()
     registry.register_plugin(_TEAM_PLUGIN)
     with pytest.raises(ValueError, match="requires config version 2"):
-        create_session(request, sink=_discard_event, registry=registry)
+        create_session(
+            request,
+            sink=_discard_event,
+            registry=registry,
+            settings=LaunchSettings(backend_factory=host_container_backend),
+        )
     assert not (request.project_root / ".vibesys").exists()
 
 
@@ -634,7 +654,12 @@ def test_public_session_applies_registered_plugin_metadata(tmp_path: Path) -> No
     def record(event: CoreEvent) -> None:
         events.append(event)
 
-    session = create_session(request, sink=record, registry=registry)
+    session = create_session(
+        request,
+        sink=record,
+        registry=registry,
+        settings=LaunchSettings(backend_factory=host_container_backend),
+    )
     session.on_committed_view(lambda view, _keys: committed.append(view))
     session.start()
 
@@ -709,7 +734,12 @@ def test_registered_plugin_rejects_invalid_options_before_run_resources(tmp_path
     registry.register_plugin(_SETUP_PLUGIN)
 
     with pytest.raises(ValidationError, match="unknown"):
-        create_session(request, sink=_discard_event, registry=registry)
+        create_session(
+            request,
+            sink=_discard_event,
+            registry=registry,
+            settings=LaunchSettings(backend_factory=host_container_backend),
+        )
 
     assert not (request.project_root / ".vibesys").exists()
 

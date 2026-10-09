@@ -64,7 +64,7 @@ def _project(tmp_path: Path) -> tuple[Project, GitTracker, MultiSlotRoundTransac
         run_id=_RUN_ID,
         branch=tracker.project_branch,
         vibesys_version="0.1.0",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="multi-agent", config_version=1, options={}),
         trusted_input_baseline=tracker.trusted_input_baseline,

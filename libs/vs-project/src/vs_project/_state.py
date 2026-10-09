@@ -1143,6 +1143,16 @@ class ProjectState:
                 manifest.model_copy(update={"orchestration": orchestration}),
             )
 
+    def update_run_environment(self, run_id: str, run_environment: RunEnvironmentRecord) -> None:
+        """Replace the recorded run environment, as when resume migrates a retired one."""
+        self._validate_storage_roots()
+        manifest = self.load_run(run_id)
+        if run_environment != manifest.run_environment:
+            _atomic_write_model(
+                self._run_manifest_path(run_id),
+                manifest.model_copy(update={"run_environment": run_environment}),
+            )
+
     def list_runs(self) -> list[OrchestrationRunManifest]:
         """Return all compatible runs ordered by creation time, then run ID.
 

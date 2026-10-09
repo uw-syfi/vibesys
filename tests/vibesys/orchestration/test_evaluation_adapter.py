@@ -8,6 +8,10 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.docker_environment import (
+    fake_docker_environment,
+    host_container_backend,
+)
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
@@ -38,7 +42,7 @@ from vs_runtime.api import (
 )
 from vs_runtime.api.testing import FakeWorkspace
 from vs_sandbox.api import CommandResult, SandboxKind
-from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -51,7 +55,7 @@ if TYPE_CHECKING:
 _PLUGIN = capability_plugin("evaluation")
 
 
-class _BlockingEvaluationSandbox(FakeCommandRunner):
+class _BlockingEvaluationSandbox(FakeLifecycleRunner):
     """Hold trusted execution until its lifecycle event is observable."""
 
     def __init__(self) -> None:
@@ -128,8 +132,15 @@ def _write_project(
     )
 
 
+@pytest.fixture(autouse=True)
+def _container_cli_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agents run in a container, which needs credentials for the CLI it starts."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-anthropic-key")
+
+
 def _request(project_root: Path, *, agent_backend: str | None = None) -> RunRequest:
     return RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id="evaluation", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "evaluation"}}),
@@ -168,6 +179,7 @@ def _run_project(
             _request(project_root, agent_backend=agent_backend),
             integration,
             plugin=_PLUGIN,
+            backend_factory=host_container_backend,
         ) as ctx:
             return await body(ctx)
 
@@ -422,7 +434,7 @@ def test_gate_starts_before_execution_and_finishes_on_cancellation(
     integration = LocalRunIntegration()
     sandbox = _BlockingEvaluationSandbox()
     backend = FakeComputeBackend()
-    backend.script_sandbox(SandboxKind.LOCAL, str(project_root), sandbox)
+    backend.script_sandbox(SandboxKind.DOCKER, str(project_root), sandbox)
 
     async def exercise() -> None:
         async with open_product_run_host(

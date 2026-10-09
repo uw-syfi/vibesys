@@ -268,7 +268,7 @@ def _namespace(tmp_path: Path) -> StateNamespace:
         trusted_input_baseline="a" * 40,
         branch="test/evaluation-agent",
         vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=RunExecutionRecord(
             model="test-model",
             agent_backend="stub",

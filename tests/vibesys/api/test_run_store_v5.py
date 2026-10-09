@@ -60,7 +60,7 @@ def test_public_run_store_rejects_pre_v5_manifests_explicitly(
         run_id=f"v{schema_version}-run",
         branch=f"vibesys-runs/v{schema_version}-run",
         vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="plain", config_version=1, options={}),
         trusted_input_baseline="0" * 40,
@@ -88,7 +88,7 @@ def test_plain_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
         run_id="plain-run",
         branch="vibesys-runs/plain-run",
         vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(
             id="plain",
@@ -133,7 +133,7 @@ def test_evolve_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
         run_id="evolve-run",
         branch="vibesys-runs/evolve-run",
         vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(
             id="evolve", config_version=1, options={"max_generations": 3}
@@ -169,7 +169,7 @@ def test_unknown_v5_run_has_generic_history_view(tmp_path: Path) -> None:
         run_id="team-run",
         branch="vibesys-runs/team-run",
         vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(
             id="team-search", config_version=2, options={"workers": 3}
@@ -227,7 +227,7 @@ def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
         run_id="profile-run",
         branch="vibesys-runs/profile-run",
         vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(
             id="profile-guided-multi-agent", config_version=1, options={}
@@ -261,7 +261,7 @@ def test_workspace_changes_hide_the_registered_plugins_memory(tmp_path: Path) ->
         run_id="custom-memory-run",
         branch="vibesys-runs/custom-memory-run",
         vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(id="memory-policy", config_version=1, options={}),
         trusted_input_baseline=baseline,

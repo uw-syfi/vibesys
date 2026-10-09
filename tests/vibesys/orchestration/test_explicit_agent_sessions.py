@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict
+from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.slurm_environment import slurm_environment
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 import vibesys
@@ -19,7 +21,7 @@ import vs_evaluation
 import vs_project
 import vs_runtime
 import vs_sandbox
-from launch import create_session
+from launch import LaunchSettings, create_session
 from launch.composition import AGENT_TOOL_BINDINGS
 from vibesys.api import CoreEvent, OrchestrationRegistry
 from vibesys.config import Config
@@ -123,6 +125,12 @@ def _write_project(root: Path, *, domain: str = "generic") -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _container_cli_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agents run in a container, which needs credentials for the CLI it starts."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-anthropic-key")
+
+
 def _request(
     project_root: Path,
     *,
@@ -142,7 +150,7 @@ def _request(
         cli_provider="claude",
         profiler_kind=profiler_kind,
         backend=ComputeBackend.CPU,
-        run_environment=run_environment,
+        run_environment=run_environment or fake_docker_environment(),
     )
 
 
@@ -181,6 +189,7 @@ def _run_with_clients(
             agent_client_factory=configuration.client_factory or create_client,
             agent_tool_bindings=configuration.tool_bindings,
             plugin=plugin,
+            backend_factory=host_container_backend,
         ) as ctx:
             return await body(ctx)
 
@@ -240,7 +249,9 @@ def test_product_composition_declares_its_runtime_to_confined_agents(tmp_path: P
         [client],
         body,
         declaration=(role,),
-        configuration=_RunConfiguration(client_factory=create_client),
+        configuration=_RunConfiguration(
+            client_factory=create_client, run_environment=slurm_environment(tmp_path)
+        ),
     )
 
     package_root = Path(vibesys.__file__).resolve().parents[1]
@@ -270,7 +281,9 @@ def test_confined_agents_can_import_every_first_party_package(tmp_path: Path) ->
         [client],
         body,
         declaration=(role,),
-        configuration=_RunConfiguration(client_factory=create_client),
+        configuration=_RunConfiguration(
+            client_factory=create_client, run_environment=slurm_environment(tmp_path)
+        ),
     )
 
     readable = {
@@ -568,6 +581,7 @@ def test_public_session_supplies_product_profiler_tool_binding(tmp_path: Path) -
         _request(project_root, orchestration_id=plugin.id),
         sink=_discard_event,
         registry=registry,
+        settings=LaunchSettings(backend_factory=host_container_backend),
     )
 
     result = asyncio.run(session.await_result())
@@ -606,6 +620,7 @@ def test_public_session_supplies_role_scoped_evaluation_tool_binding(tmp_path: P
         _request(project_root, orchestration_id=plugin.id),
         sink=_discard_event,
         registry=registry,
+        settings=LaunchSettings(backend_factory=host_container_backend),
     )
 
     result = asyncio.run(session.await_result())

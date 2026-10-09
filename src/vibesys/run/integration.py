@@ -56,6 +56,10 @@ def run_log_emitter(events: AgentEventSink) -> Callable[[str, TextIO], None]:
 
     def emit(text: str, log_file: TextIO) -> None:
         events.agent_output(text + "\n", channel="diagnostic")
+        if log_file.closed:
+            # A conversation that outlives its run, such as an auxiliary scope
+            # starting its container, still reports on the event stream.
+            return
         log_file.write(text + "\n")
         log_file.flush()
 

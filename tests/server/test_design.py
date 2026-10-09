@@ -579,7 +579,7 @@ def _project_run(project: Path, *, trusted_input_baseline: str) -> tuple[Project
         run_id="queue-run",
         branch="vibesys/queue-run",
         vibesys_version="0.2.0-test",
-        run_environment=RunEnvironmentRecord(name="local"),
+        run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
         orchestration=agent_descriptor(),
         trusted_input_baseline=trusted_input_baseline,

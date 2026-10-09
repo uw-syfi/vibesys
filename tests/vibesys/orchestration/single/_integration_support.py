@@ -7,6 +7,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+from tests.support.docker_environment import fake_docker_environment
+
 from launch.testing import create_session
 from vibesys.api import (
     ComputeBackend,
@@ -178,6 +180,7 @@ def execute(
         options=configured.model_dump(mode="json"),
     )
     request = RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=project_root,
         orchestration=descriptor,
         config=Config.model_validate({"model": {"name": "single-plugin-test"}}),

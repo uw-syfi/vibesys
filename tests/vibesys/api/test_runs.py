@@ -9,6 +9,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.support.docker_environment import fake_docker_environment
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from entrypoints.run import supervise
@@ -25,7 +26,7 @@ from vibesys.api import (
     RunResult,
 )
 from vibesys.api import RunStatus as ProductRunStatus
-from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
+from vibesys.api.request import load_input_bundle
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, ProjectStateError, validate_run_id
 from vs_runtime.api import OrchestrationPlugin, RunStatus
@@ -55,7 +56,7 @@ def request_template(tmp_path: Path) -> RunRequest:
         config=Config.model_validate({"model": {"name": "gpt-test"}}),
         input_bundle=load_input_bundle(root),
         exp_name="Display NAME / safe!",
-        run_environment=RunEnvironmentSpec("local"),
+        run_environment=fake_docker_environment(),
         agent_backend="stub",
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,

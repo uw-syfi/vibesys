@@ -11,6 +11,8 @@ from unittest.mock import patch
 import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
+from tests.support.docker_environment import fake_docker_environment
+from tests.support.slurm_environment import slurm_environment
 
 from launch import built_in_orchestrations, open_run_store
 from vibesys.composition import resolve_agent_specs
@@ -89,6 +91,7 @@ class _CreateContextOptions(TypedDict, total=False):
     backend_factory: _RecordingBackendFactory
     skills_dirs: list[str] | None
     backend: ComputeBackend
+    run_environment: RunEnvironmentSpec
 
 
 def _write_project(root: Path, *, evaluator_name: str = "checker") -> Path:
@@ -196,7 +199,7 @@ def _create_context(
         resume=ResumeRef(run_id=exp_name) if options.get("existing", False) else None,
         runs_dir=options.get("runs_dir"),
         profiler_kind=options.get("profiler_kind", ProfilerKind.NONE),
-        run_environment=RunEnvironmentSpec("local"),
+        run_environment=options.get("run_environment") or fake_docker_environment(),
         agent_backend=options.get("agent_backend", "stub"),
         remote_repo=options.get("remote_repo"),
         skills_dirs=options.get("skills_dirs"),
@@ -388,7 +391,11 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
     for name, spec in package.metadata.tools.items():
         tool_install_root(tools_root, name, spec).mkdir(parents=True)
 
-    with _create_context(project, evaluator_package_root=package.root) as ctx:
+    with _create_context(
+        project,
+        evaluator_package_root=package.root,
+        run_environment=slurm_environment(tmp_path),
+    ) as ctx:
         tools_root = ctx.project_resources.project.state.machine_cache_directory("evaluator-tools")
         resources = {resource.path: resource.access for resource in ctx.agent_host_resources}
         expected_tool_roots = tuple(
@@ -424,7 +431,11 @@ def test_evaluator_tools_built_for_one_project_are_reused_by_another(tmp_path: P
 
     project = tmp_path / "queue"
     _write_project(project)
-    with _create_context(project, evaluator_package_root=package.root) as ctx:
+    with _create_context(
+        project,
+        evaluator_package_root=package.root,
+        run_environment=slurm_environment(tmp_path),
+    ) as ctx:
         resources = {resource.path: resource.access for resource in ctx.agent_host_resources}
 
     assert all(resources[root] is HostResourceAccess.READ_ONLY for root in built_roots)
@@ -932,7 +943,10 @@ def test_direct_run_rejects_unmaterialized_workspace_source(tmp_path: Path) -> N
         _create_context(project, evaluator=evaluator, workspace_sources=(source,))
 
 
-def test_cli_backend_accepts_active_profiler_configuration(tmp_path: Path) -> None:
+def test_cli_backend_accepts_active_profiler_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-openai-key")
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     manifest = project / "vibesys.input.toml"

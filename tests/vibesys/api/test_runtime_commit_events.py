@@ -17,8 +17,12 @@ from typing import TYPE_CHECKING
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
+from tests.support.docker_environment import (
+    fake_docker_environment,
+    host_container_backend,
+)
 
-from launch import create_session
+from launch import LaunchSettings, create_session
 from vibesys.api import ComputeBackend, Config, OrchestrationRegistry, PluginProjection
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData
 from vibesys.inputs import load_input_bundle
@@ -125,6 +129,7 @@ def _request(
     project_root: Path, *, exp_name: str = "commit-probe", resume: ResumeRef | None = None
 ) -> RunRequest:
     return RunRequest(
+        run_environment=fake_docker_environment(),
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id="commit-probe", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "commit-probe"}}),
@@ -153,6 +158,7 @@ def test_commit_derives_round_finished_and_experiments_changed(tmp_path: Path) -
             integration,
             projector=_FakeProjector(),
             plugin=_PLUGIN,
+            backend_factory=host_container_backend,
         ) as ctx:
             # First commit ever for this run: establishes round 1, revision 1.
             # No prior view exists, so no EXPERIMENTS_CHANGED fires for it
@@ -196,7 +202,12 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
     registry.register(_REGISTRATION)
 
     async def commit_round_one() -> str:
-        session = create_session(_request(project_root), sink=_discard_event, registry=registry)
+        session = create_session(
+            _request(project_root),
+            sink=_discard_event,
+            registry=registry,
+            settings=LaunchSettings(backend_factory=host_container_backend),
+        )
         session.start()
         try:
             result = await session.await_result()
@@ -213,6 +224,7 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
             _request(project_root, resume=ResumeRef(run_id=run_id)),
             sink=lambda event: captured.append((event.type, event.data)),
             registry=registry,
+            settings=LaunchSettings(backend_factory=host_container_backend),
         )
         session.start()
         try:
