@@ -1152,6 +1152,10 @@ class TestWritableCredentialMounts:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
+            # The engine's agent already has these ids, so no remap script runs
+            # and the host user's uid cannot change which scripts are recorded.
+            agent_uid=1000,
+            agent_gid=1000,
             docker=engine,
             bind_mounts=bind_mounts,
             auth_files=auth_files,
