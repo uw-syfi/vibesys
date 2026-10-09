@@ -46,6 +46,9 @@ the software-design rule
 [Functional core, interfaces and implementations](https://github.com/uw-syfi/vibesys/blob/main/.agents/skills/software-design/references/functional-core.md)
 for durable intent, recovery, and tests.
 
+Execution environments, command runners, and agent confinement have separate
+owners; see [Sandboxing and confinement](sandboxing.md).
+
 `vibesys.orchestration` owns built-in orchestration policy. Explicit plugins,
 including the issue queue, live under the singular
 `vibesys.orchestration.<plugin>` namespace; `launch` assembles their built-in

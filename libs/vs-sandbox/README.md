@@ -3,31 +3,39 @@
 ## Responsibility
 
 This package provides compute backend implementations, accelerator discovery
-and monitoring, workspace execution backends, host resource and path policies,
-lifecycle hooks, and Modal model-weight volume provisioning. Applications
+and monitoring, command runners, agent confinement backends, host resource and
+path policies, lifecycle hooks, Modal model-weight volume provisioning and
+evaluator helpers, SkyPilot, and the Slurm broker and executor. See
+[Sandboxing and confinement](../../docs/contributing/sandboxing.md) for the
+vocabulary. Applications
 select a compute stack and profiler policy, then declare the resources their
 agents need.
 
 ## Concepts
 
-- `Sandbox` is the command-execution protocol (`id`, `execute`) every sandbox
-  kind satisfies; `SandboxExecutionResult` is its bounded result.
-- `ComputeBackendImpl` constructs sandboxes for one compute stack. The public
+- `CommandRunner` is the command-execution protocol (`id`, `execute`) every
+  `SandboxKind` satisfies; `CommandResult` is its bounded result. It executes
+  a shell command and isolates nothing. "Sandbox" in a name means agent
+  confinement (`WorkspaceSandbox` and its backends, `DockerSandbox`).
+- `ComputeBackendImpl.make_sandbox` constructs a command runner (a
+  `DockerSandbox` also confines) for one compute stack. The public
   registry supplies CUDA, ROCm, Trainium, Metal, and CPU implementations;
   application code retains the policy for choosing among them.
 - `AcceleratorDiscovery` and the GPU contention monitor isolate host hardware
   inspection from orchestration. Their deterministic Fakes are public through
   `vs_sandbox.api.testing`.
-- `LocalShellSandbox` runs shell commands directly on the host with no
+- `LocalShellRunner` runs shell commands directly on the host with no
   isolation, for backends that have no container.
-- `DockerSandbox` runs agent operations in a local Docker container with
-  host bind mounts, and cleans up tracked containers on process exit (an interrupt reaches it through the interpreter's normal unwinding).
+- `DockerSandbox` runs commands in a local Docker container with host bind
+  mounts, and also confines the agent CLI (`wrap`, `agent_path`). It cleans up
+  tracked containers on process exit (an interrupt reaches it through the
+  interpreter's normal unwinding).
 - `HostResource` and related declaration types form a backend-neutral SDK for
   describing which host paths an application needs to import. `agent_path`
   identifies the path the agent sees when a container remaps a host resource.
 - `HostSandbox`, `LandlockSandbox`, and `SeatbeltSandbox` consume those
   declarations to confine a local process with bubblewrap, Landlock, or
-  Seatbelt. Applications own their resource lists; this package owns
+  Seatbelt. Landlock cannot enforce read-only or hidden project paths. Applications own their resource lists; this package owns
   validation and import mechanics. `WorkspaceSandbox` exposes a common path
   mapping and environment interface to callers.
 - `ProjectPathPolicy` protects workspace-relative files and directories inside
@@ -45,5 +53,9 @@ agents need.
   evaluator bridge, wire protocol, and durable invocation-recovery mechanics.
   Applications select and compose that backend without carrying its
   implementation in product policy code.
+- Modal and Slurm support lives here too: `modal_evaluator`,
+  `modal_model_setup`, and the `slurm_*` modules (broker, executor, policy,
+  profile). They are evaluator dispatch, not `SandboxKind`s; run environments
+  in `vs_runtime` select them.
 - `vs_sandbox.api.evaluator_helpers` locates the installed Modal and SkyPilot
   helper programs that runtime composition mounts into remote sandboxes.

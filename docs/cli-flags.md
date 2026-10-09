@@ -176,8 +176,13 @@ at startup. Evaluator-input integrity still holds, because the accuracy gate
 independently diffs those paths against a trusted baseline and fails the round.
 Landlock is never selected automatically, and a project that sits inside a tree
 the backend must grant (such as `/tmp`) is refused rather than run unconfined.
-Set the variable to `0`/`false`/`off`/`no` to disable confinement entirely; any
-other value is rejected.
+`0`/`false`/`off`/`no` request no confinement, but VibeSys runs on the host
+require it, so they stop the run with `SandboxUnavailableError` instead of
+launching the agent unconfined. Only an embedder that builds an `AgentClient`
+with `require_host_sandbox=False` gets the disable. Any other value is
+rejected. `VIBESYS_AGENT_SANDBOX_ALLOW` is an `os.pathsep`-separated list of
+extra host paths granted to the agent read-only. See
+[Sandboxing and confinement](contributing/sandboxing.md).
 
 VibeSys initializes Git when needed and creates one `vibesys-runs/<run-id>` branch
 per run. Agent-authored source stays at its normal project paths. Portable state
@@ -389,9 +394,9 @@ starts with an actionable error.
 | Flags | Environment | Notes |
 | --- | --- | --- |
 | neither `--docker` nor `--modal` | Local host. | Requires bubblewrap on Linux or Seatbelt on macOS. Enforces the project path policy. `VIBESYS_AGENT_SANDBOX=landlock` trades the nested read-only and hidden tiers for a backend that runs without user namespaces. |
-| `--docker` | Docker container. | Mounts the project with the same hidden and read-only overlays. Backend controls GPU/device passthrough. |
-| `--modal` | Local Docker editor container; GPU-bound work dispatches through the candidate's own `modal run`. | Mutually exclusive with `--docker`. |
-| `--run-environment skypilot` | Local CPU editor with SkyPilot evaluators. | Requires portable task resources and an operator-owned cluster profile. See [Remote Slurm execution](remote-slurm-execution.md). |
+| `--docker` | Docker container. | Re-mounts read-only project paths read-only and overlays hidden paths with empty masks. Backend controls GPU/device passthrough. |
+| `--modal` | Local Docker editor container; GPU-bound work dispatches through the candidate's own `modal run`. | Mutually exclusive with `--docker`. Same overlays as `--docker`. |
+| `--run-environment skypilot` | Local CPU editor with SkyPilot evaluators. | Requires portable task resources and an operator-owned cluster profile. Same overlays as `--docker`. See [Remote Slurm execution](remote-slurm-execution.md). |
 
 A repository-native task may provide
 `.vibesys/tasks/<task>/Dockerfile`. Its presence automatically selects the
