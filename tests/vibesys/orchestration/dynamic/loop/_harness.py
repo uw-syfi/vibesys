@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from tests.support.docker_environment import host_container_backend
+from tests.support.slurm_environment import with_fake_image_build
 
 from launch.testing import FakeStopTimer, create_session
 from vibesys.api import (
@@ -63,7 +64,7 @@ from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.orchestration.resume import compare_round_budget
 from vibesys.plugin_registration import OrchestrationRegistration
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
-from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
+from vs_agent.api.testing import FakeAgentClient
 from vs_evaluation.api import EvaluationAgentRole
 from vs_evaluation.api.tools import build_evaluation_tools
 from vs_project.api import GitRepositoryFactory, Project, run_git
@@ -817,10 +818,7 @@ def run_loop(  # noqa: PLR0913
         cli_provider="claude",
         profiler_kind=loop_input.profiler,
         backend=loop_input.backend,
-        run_environment=RunEnvironmentSpec(
-            "slurm",
-            {"config_path": str(loop_input.slurm_config), "build_runner": FakeDockerBuildRunner()},
-        ),
+        run_environment=RunEnvironmentSpec("slurm", {"config_path": str(loop_input.slurm_config)}),
     )
     return run_request(
         request,
@@ -844,7 +842,12 @@ def run_request(  # noqa: PLR0913
     client_factory: Callable[..., AgentClientProtocol] | None = None,
     git_repository: GitRepositoryFactory | None = None,
 ) -> LoopRun:
-    """Execute an already-built request through the same production composition."""
+    """Execute an already-built request through the same production composition.
+
+    A Slurm request gets an in-memory agent image build: the agent runs in a
+    container, and the build is its only external process.
+    """
+    request = with_fake_image_build(request)
     events: list[CoreEvent] = []
 
     def sink(event: CoreEvent) -> None:

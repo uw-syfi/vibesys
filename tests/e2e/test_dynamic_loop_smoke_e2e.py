@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import (
     RunRecords,
     Violation,
@@ -45,6 +46,7 @@ from tests.support.loop_invariants import (
     summarize,
     terminal_event,
 )
+from tests.support.slurm_environment import with_fake_image_build
 from tests.vibesys.orchestration.dynamic.loop._harness import (
     CAPTURE_RUNTIME_PYTHON,
     PASS,
@@ -120,6 +122,9 @@ _POLL_S = 0.5
 # which it answers as ``remote_capture.py --print-output`` does: one trace
 # directory under the requested profile store and the capture summary.
 _REMOTE_PYTHON = CAPTURE_RUNTIME_PYTHON.replace("queue_step", "count_primes")
+
+
+pytestmark = pytest.mark.usefixtures("container_cli_credentials")
 
 
 def _provider() -> str:
@@ -854,7 +859,10 @@ def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
             ]
         )
     )
-    runs = launch.default_runs(LaunchSettings(agent_client_factory=_core_agents))
+    request = with_fake_image_build(request)
+    runs = launch.default_runs(
+        LaunchSettings(agent_client_factory=_core_agents, backend_factory=host_container_backend)
+    )
 
     renderer = _RecordingRenderer()
     with _executed_legacy_files() as executed:

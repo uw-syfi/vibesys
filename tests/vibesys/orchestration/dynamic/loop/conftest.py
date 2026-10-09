@@ -1,15 +1,12 @@
-"""Shared setup for the dynamic-loop scenarios over the Slurm environment."""
+"""Shared setup for the dynamic-loop scenarios."""
 
 from __future__ import annotations
 
 import pytest
+from tests.support.container_credentials import set_container_cli_credentials
 
 
 @pytest.fixture(autouse=True)
 def _container_cli_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give the agent container the credential its CLI would start with.
-
-    The Slurm environment runs the agent in a container, which refuses to start
-    without one; the scenarios' agents are scripted and never use it.
-    """
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-anthropic-key")
+    """Give the agent container the credential its CLI would start with."""
+    set_container_cli_credentials(monkeypatch)

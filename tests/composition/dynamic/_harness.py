@@ -28,13 +28,14 @@ import sys
 import threading
 from collections import defaultdict, deque
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from tests.support.docker_environment import host_container_backend
 from tests.support.fake_run_clock import FakeRunClock
 from tests.support.liveness import Budget, End, Journal, assert_live
 from tests.support.loop_invariants import RunRecords, check, terminal_event
+from tests.support.slurm_environment import with_fake_image_build
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
@@ -53,7 +54,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     dynamic_operation_registry,
 )
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
-from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
+from vs_agent.api.testing import FakeAgentClient
 from vs_core.api import RunEnvelope
 from vs_project.api import Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
@@ -488,14 +489,7 @@ class LoopInput:
         for name, value in chosen.items():
             argv += [f"--{name.replace('_', '-')}", str(value)]
         request = build_run_request(parse_cli_invocation(argv))
-        if not slurm or request.run_environment is None:
-            return request
-        # The agent runs in a container; the image build is the only external process,
-        # so an in-memory runner stands in for it.
-        options = {**request.run_environment.options, "build_runner": FakeDockerBuildRunner()}
-        return request.model_copy(
-            update={"run_environment": replace(request.run_environment, options=options)}
-        )
+        return with_fake_image_build(request) if slurm else request
 
 
 @dataclass
