@@ -49,6 +49,7 @@ from vs_agent.contracts import (
     SessionDisposition,
     SteerOutcome,
 )
+from vs_agent.docker_confinement import DockerSandboxConfinement
 from vs_agent.docker_executor import CodexRolloutWatchdogExecutor
 from vs_agent.events import CommandResultPayload
 from vs_agent.host_resource_declarations import (
@@ -825,6 +826,14 @@ class _Launch:
     env: Mapping[str, str]
     sandbox: _ConfinableSandbox | None
     config_scope: agentshim.ConfigScope
+    transport: agentshim.TransportKind
+    confinement: agentshim.Confinement | None = None
+    """Set for a long-lived transport in a container: agentshim confines, maps and reaps.
+
+    ``executor`` is then the plain executor and ``env`` is unused (the
+    confinement supplies the environment). Without it the executor is already
+    confined and ``env`` is the agent's environment.
+    """
 
 
 _AUTH_STATUS = {
@@ -862,9 +871,15 @@ class AgentShimDriver:
         agent_homes: Path | None = None,
         env_passthrough: Sequence[str] = (),
         launcher_env: Callable[[], Mapping[str, str]] = agentshim.interactive_env,
-        transport: agentshim.TransportKind = agentshim.TransportKind.ONE_SHOT,
+        transport: agentshim.TransportKind | None = None,
     ) -> None:
         """Configure one provider; ``executor_factory`` replaces the base executor.
+
+        ``transport`` fixes how every session reaches the provider. Left as
+        ``None`` it is derived: a container session of a provider that
+        agentshim lists in ``stream_provider_names()`` keeps one long-lived
+        process per conversation (``TransportKind.STREAM``); every other
+        session runs one process per turn (``TransportKind.ONE_SHOT``).
 
         ``agent_homes`` is the run's root for dedicated provider CLI homes
         (one subdirectory per provider, shared by every session the run opens
@@ -887,12 +902,6 @@ class AgentShimDriver:
         each session runs before its first turn. It defaults to the execution
         mode's budget: a container check crosses a ``docker exec`` and is given
         four times as long as a host one.
-
-        ``transport`` picks how the provider CLI is reached. The one-shot
-        default runs a process per turn and cannot take a message mid-turn;
-        ``TransportKind.STREAM`` keeps a long-lived process per conversation,
-        on providers that have one, and is what makes
-        :meth:`AgentShimSession.steer` deliver.
 
         ``transient_retry_delays`` are the waits before each retry of a turn
         that failed on a transient provider error; see
@@ -974,7 +983,8 @@ class AgentShimDriver:
         status = agentshim.probe_provider(
             spec.provider,
             executor=launch.executor,
-            env=launch.env,
+            confinement=launch.confinement,
+            env=None if launch.confinement is not None else launch.env,
             timeout=self._check_timeout,
         )
         return _readiness_from(status)
@@ -1007,6 +1017,24 @@ class AgentShimDriver:
         provider = agentshim.get_provider(spec.provider)
         config_scope = self._config_scope_for(provider.profile)
         sandbox, find_binary, host_env = self._sandbox_for(spec, config_scope)
+        transport = self._transport_for(spec)
+
+        if transport is agentshim.TransportKind.STREAM and in_container:
+            # agentshim confines the long-lived process itself, so it can mark
+            # it for `reap` and map the working directory, MCP commands and
+            # schema directory the way the container sees them. A rollout
+            # watchdog guards one-shot `codex exec` runs; no such run exists.
+            confinement = DockerSandboxConfinement(
+                self._docker_sandbox_for(spec), runner=self._executor_factory()
+            )
+            return _Launch(
+                executor=self._executor_factory(),
+                env=confinement.env,
+                sandbox=sandbox,
+                config_scope=config_scope,
+                transport=transport,
+                confinement=confinement,
+            )
 
         executor: agentshim.CommandExecutor = self._executor_factory()
         if sandbox is not None:
@@ -1019,7 +1047,21 @@ class AgentShimDriver:
                 log=self._log,
             )
         env = sandbox.env if sandbox is not None else host_env
-        return _Launch(executor=executor, env=env, sandbox=sandbox, config_scope=config_scope)
+        return _Launch(
+            executor=executor,
+            env=env,
+            sandbox=sandbox,
+            config_scope=config_scope,
+            transport=transport,
+        )
+
+    def _transport_for(self, spec: AgentSessionSpec) -> agentshim.TransportKind:
+        """Choose the transport from the execution mode and agentshim's registry."""
+        if self._transport is not None:
+            return self._transport
+        if spec.policy.containerized and spec.provider in agentshim.stream_provider_names():
+            return agentshim.TransportKind.STREAM
+        return agentshim.TransportKind.ONE_SHOT
 
     def _create_session(self, spec: AgentSessionSpec) -> AgentSession:
         """Create one configured AgentShim conversation."""
@@ -1032,14 +1074,15 @@ class AgentShimDriver:
             spec.provider,
             model=spec.model,
             executor=launch.executor,
+            confinement=launch.confinement,
+            transport=launch.transport,
             permissions=agentshim.NativePermissions.bypass(),
             approvals=agentshim.ApprovalPolicy.DENY,
             retry=agentshim.RetryPolicy(delays=self._transient_retry_delays),
             event_handlers=[event_handler],
-            env=launch.env,
+            env=None if launch.confinement is not None else launch.env,
             log=self._log,
             check_timeout=self._check_timeout,
-            transport=self._transport,
         )
         skill_scope = _skill_scope(agent.profile)
         if skill_scope is not agentshim.SkillScope.PROJECT:
@@ -1070,7 +1113,8 @@ class AgentShimDriver:
             timeout=self._timeout,
             event_handler=event_handler,
             steers=steers,
-            sandbox=sandbox,
+            # agentshim maps paths itself when it confines the process.
+            sandbox=None if launch.confinement is not None else sandbox,
             log=self._log,
         )
         self._sessions.add(session)

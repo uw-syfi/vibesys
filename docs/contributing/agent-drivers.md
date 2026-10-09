@@ -48,6 +48,37 @@ belongs here.
 New provider behavior therefore goes upstream, not into a VibeSys driver
 workaround.
 
+## Transports
+
+A containerized session of a provider that agentshim lists in
+`stream_provider_names()` (Claude Code and Codex today) keeps one long-lived
+process per conversation (`TransportKind.STREAM`) instead of starting a CLI per
+turn. The driver reads that registry; it never branches on a provider name.
+Every other session (Gemini, opencode, and every host session) stays one process
+per turn (`TransportKind.ONE_SHOT`). `AgentShimDriver(transport=...)` fixes the
+choice for tests.
+
+A long-lived process lets a turn receive a message while it runs
+(`Session.steer`) and report rate-limit windows as they change, and it keeps the
+model's context between turns without a resume.
+
+The container process is started by agentshim through
+`vs_agent.docker_confinement.DockerSandboxConfinement`, an
+`agentshim.Confinement` over the run's `DockerSandbox`:
+
+- `docker exec -i` with the environment passed by name, so a credential never
+  appears in the host process table;
+- an `AGENTSHIM_CONFINED=1` marker on every process it starts, which
+  `Confinement.reap()` uses to kill them, including processes a dead host
+  process left behind;
+- the container id read at every call, because a GPU reselect replaces the
+  container.
+
+agentshim maps the working directory, MCP server paths and the schema directory
+into the container itself, so a confined session passes host paths through. The
+Codex rollout watchdog guards one-shot `codex exec --json` runs and is not part
+of a stream session.
+
 ## Provider readiness
 
 A missing CLI or a logged-out account would otherwise surface as the first
