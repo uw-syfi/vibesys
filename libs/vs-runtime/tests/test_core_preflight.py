@@ -283,3 +283,28 @@ def test_early_rejection_leaves_core_runs_and_unknown_runs_to_the_resume(tmp_pat
     commit_record(project, run_id)
     reject_legacy_resume(project, run_id)  # a committed core record: not legacy
     reject_legacy_resume(project, "no-such-run")  # the resume reports a missing run
+
+
+@pytest.mark.parametrize("damage", ["truncated", "newer_store_version", "unknown_key"])
+def test_a_damaged_store_document_is_a_resume_diagnostic(tmp_path: Path, damage: str) -> None:
+    """Mechanism: the store document itself was decoded outside every typed error path.
+
+    A damaged envelope payload is a ``core_resume_invalid`` diagnostic; damage one layer
+    out, in the store document that holds the envelope and lease, raised pydantic's raw
+    ``ValidationError`` (with excerpts of the file) through the resume instead.
+    """
+    project, run_id = project_run(tmp_path)
+    commit_record(project, run_id)
+    document = project.state.state_store_namespace(run_id).external_directory() / "store.json"
+    source = document.read_text(encoding="utf-8")
+    if damage == "truncated":
+        source = source[: len(source) // 2]
+    elif damage == "newer_store_version":
+        source = source.replace('"version":1', '"version":2', 1)
+    else:
+        source = source[:-1] + ',"written_by_a_newer_release":1}'
+    document.write_text(source, encoding="utf-8")
+
+    with pytest.raises(CoreResumeError) as failure:
+        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+    assert failure.value.diagnostic.code == "core_resume_invalid"

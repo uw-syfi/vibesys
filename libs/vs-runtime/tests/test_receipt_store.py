@@ -14,11 +14,12 @@ from tests.support.executor_context import RevocableLease, context_for
 from tests.support.runtime_operations import SCOPE
 
 from vs_core.api import BlockIntent, RequestId
-from vs_project.api import Project
+from vs_project.api import Project, ProjectStateError
 from vs_runtime.api.core import (
     Conflict,
     Declined,
     Performed,
+    ReceiptCorruptError,
     ReceiptStore,
     Replayed,
     Settled,
@@ -161,3 +162,18 @@ async def test_an_unreadable_receipt_is_refused_not_guessed() -> None:
         got = await run(store_at(Path(raw)), effect, context_for(request()))
         assert isinstance(got, Declined)
         assert effect.calls == 1
+
+
+async def test_only_a_damaged_receipt_is_corruption_an_invalid_path_is_not() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        store = store_at(Path(raw))
+        await run(store, Performer(), context_for(request()))
+        for path in (Path(raw) / "project").rglob("*.execution.json"):
+            path.write_text("secret-receipt-bytes")
+        with pytest.raises(ReceiptCorruptError) as damaged:
+            store.history("r1")
+        assert "secret-receipt-bytes" not in str(damaged.value.__cause__)
+        # A family that is not a safe path is a caller bug, not a damaged receipt.
+        with pytest.raises(ProjectStateError) as invalid:
+            store.load("../escape", "execution", "r1", Done)
+        assert not isinstance(invalid.value, ReceiptCorruptError)

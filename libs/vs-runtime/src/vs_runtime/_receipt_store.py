@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from vs_core.api import ContractError, HostFence
-from vs_project.api import ProjectStateError
+from vs_project.api import StateDocumentDamagedError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -182,11 +182,12 @@ class ReceiptStore:
     ) -> ReceiptT | None:
         """The recorded receipt, or None when nothing was recorded.
 
-        Raises ``ReceiptCorruptError`` when a file exists but cannot be read back.
+        Raises ``ReceiptCorruptError`` when a file exists but fails to decode. Other
+        project-state errors (unreadable file, invalid path) are not corruption and propagate.
         """
         try:
             return self._namespace.load_optional(self._path(family, part, key), model)
-        except (ValidationError, ProjectStateError) as error:
+        except StateDocumentDamagedError as error:
             message = f"{family} {part} receipt is unreadable"
             raise ReceiptCorruptError(message) from error
 

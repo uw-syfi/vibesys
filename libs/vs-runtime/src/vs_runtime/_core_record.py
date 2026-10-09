@@ -30,6 +30,7 @@ def _integer_schema(value: object) -> object:
     return value
 
 
+PUBLICATION_SCHEMA_VERSION: Literal[1] = 1
 type _SchemaVersion = Annotated[Literal[1], BeforeValidator(_integer_schema)]
 
 

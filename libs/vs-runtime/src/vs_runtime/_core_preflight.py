@@ -9,7 +9,13 @@ from typing import TYPE_CHECKING, Literal, cast
 from pydantic import BaseModel, ConfigDict
 
 from vs_core.api import ContractError, OperationRegistry, Strategy, StrategyState, validate_startup
-from vs_project.api import Project, ProjectStateError, StateStore, StoredEnvelope
+from vs_project.api import (
+    Project,
+    ProjectStateError,
+    StateDocumentDamagedError,
+    StateStore,
+    StoredEnvelope,
+)
 from vs_runtime._core_record import RuntimeRecord
 
 if TYPE_CHECKING:
@@ -150,7 +156,18 @@ def resolve_core_resume[S: StrategyState](
     if store_namespace.read_bytes("store.json") is None:
         stored = None
     else:
-        stored = project.state_store(selected.run_id).load()
+        try:
+            stored = project.state_store(selected.run_id).load()
+        except StateDocumentDamagedError as error:
+            path = _path(store_namespace, "store.json")
+            raise CoreResumeError(
+                ResumeDiagnostic(
+                    code="core_resume_invalid",
+                    path=path,
+                    source_schema="unreadable",
+                    message=f"invalid core resume: {path} (schema unreadable): {error}",
+                )
+            ) from error
     if stored is None:
         raise _missing_envelope(project, selected.run_id)
     registry = registry or OperationRegistry()

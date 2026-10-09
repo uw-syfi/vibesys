@@ -8,8 +8,12 @@ from contextlib import contextmanager
 from threading import RLock
 from typing import TYPE_CHECKING
 
-from vs_project._state_io import LocalAtomicWriteEffects, sync_directory_chain
-from vs_project._store_operations import StoreDocument, StoreOperations
+from vs_project._state_io import (
+    LocalAtomicWriteEffects,
+    decode_state_document,
+    sync_directory_chain,
+)
+from vs_project._store_operations import STORE_DOCUMENT_VERSION, StoreDocument, StoreOperations
 from vs_project.api.state_store import CommitFault, ObservationFault, StateStoreWriteError
 from vs_project.errors import ProjectStateError
 
@@ -19,6 +23,13 @@ if TYPE_CHECKING:
 
     from vs_project._state_io import AtomicWriteEffects, AtomicWriteStream
     from vs_project.project import Project
+
+
+def _decode_store_document(source: bytes, *, location: str) -> StoreDocument:
+    """Decode store bytes; damage, or a newer release's version, is a typed error."""
+    return decode_state_document(
+        StoreDocument, source, source=location, versioned_by=("version", STORE_DOCUMENT_VERSION)
+    )
 
 
 class _FaultAtomicWriteEffects(LocalAtomicWriteEffects):
@@ -69,8 +80,13 @@ class FakeStateStore(StoreOperations):
     ) -> None:
         """Create a shared store with deterministic mutation and read faults."""
         super().__init__(fault_plan, lease_fault_plan, observation_fault_plan)
-        self._document = StoreDocument()
+        self._contents: bytes | None = None
         self._lock = RLock()
+
+    def replace_document(self, contents: bytes) -> None:
+        """Replace the stored document bytes, including deliberately damaged ones."""
+        with self._lock:
+            self._contents = contents
 
     @contextmanager
     def _transaction(self) -> Iterator[None]:
@@ -80,14 +96,16 @@ class FakeStateStore(StoreOperations):
     def _read(self) -> StoreDocument:
         fault = next(self._observation_faults, None)
         if fault == ObservationFault.READ or (
-            fault == ObservationFault.SYNC and self._document != StoreDocument()
+            fault == ObservationFault.SYNC and self._contents is not None
         ):
             message = f"state-store observation {fault} failed"
             raise OSError(message)
-        return self._document
+        if self._contents is None:
+            return StoreDocument()
+        return _decode_store_document(self._contents, location="store.json")
 
     def _write(self, document: StoreDocument) -> None:
-        self._document = StoreDocument.model_validate_json(document.model_dump_json())
+        self._contents = document.model_dump_json().encode()
 
 
 class LocalStateStore(StoreOperations):
@@ -134,7 +152,9 @@ class LocalStateStore(StoreOperations):
         source = self._namespace.read_bytes("store.json")
         if source is None:
             return StoreDocument()
-        document = StoreDocument.model_validate_json(source)
+        document = _decode_store_document(
+            source, location=str(self._namespace.external_directory() / "store.json")
+        )
         # Reload resolves a lost durability acknowledgement: synchronize the
         # whole observed document before any caller can dispatch from it.
         directory = self._namespace.external_directory()

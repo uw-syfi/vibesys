@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vs_core.api import ContractError, OperationRegistry
+from vs_project.api import decode_state_document
 from vs_runtime._core_record import (
+    PUBLICATION_SCHEMA_VERSION,
     Publication,
     PublicationAcknowledgement,
     PublicationContext,
@@ -38,8 +40,12 @@ class JournalPublicationDelivery:
         source = self._namespace.read_bytes("publications.json")
         if source is None:
             return ()
-        return PublicationHistory.model_validate_json(
-            source, context={"operation_registry": self._registry}
+        return decode_state_document(
+            PublicationHistory,
+            source,
+            source="publications.json",
+            context={"operation_registry": self._registry},
+            versioned_by=("schema_version", PUBLICATION_SCHEMA_VERSION),
         ).publications
 
     async def publish(
@@ -54,7 +60,9 @@ class JournalPublicationDelivery:
             return PublicationAcknowledgement(
                 publication_id=publication.publication_id, sequence=publication.sequence
             )
-        journal = PublicationHistory(schema_version=1, publications=appended)
+        journal = PublicationHistory(
+            schema_version=PUBLICATION_SCHEMA_VERSION, publications=appended
+        )
         self._namespace.write_bytes("publications.json", journal.model_dump_json().encode())
         return PublicationAcknowledgement(
             publication_id=publication.publication_id, sequence=publication.sequence

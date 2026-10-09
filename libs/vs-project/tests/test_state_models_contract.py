@@ -16,6 +16,7 @@ from vs_project.api import (
     Project,
     ProjectStateError,
     RunEnvironmentRecord,
+    StateDocumentDamagedError,
     StateNamespace,
 )
 
@@ -68,13 +69,49 @@ def test_models_are_optional_detached_and_replace_atomically(
     assert namespace.load_optional("nested/cursor.json", _Record) == _Record(count=5, values=[])
 
 
-@pytest.mark.parametrize("contents", [b'{"count":"1","values":[]}', b'{"extra":1}', b"invalid"])
+@pytest.mark.parametrize(
+    "contents",
+    [
+        b'{"count":"leaked-value","values":[]}',
+        b'{"unexpected":"leaked-value"}',
+        b"leaked-garbage",
+        b'{"count":1,"values":[]',
+        b"\xff leaked-bytes",
+    ],
+)
 def test_persisted_models_validate_strictly_without_echoing_inputs(
     namespace: StateNamespace | FakeStateModels, contents: bytes
 ) -> None:
     namespace.write_bytes("cursor.json", contents)
-    with pytest.raises(ProjectStateError, match="Invalid VibeSys state model"):
+    with pytest.raises(StateDocumentDamagedError, match="Invalid VibeSys state model") as failure:
         namespace.load_optional("cursor.json", _Record)
+    assert "leaked" not in str(failure.value)
+
+
+@pytest.mark.parametrize("name", ["a\0b.json", "x" * 256, "dir/" + "y" * 256])
+def test_names_no_filesystem_accepts_are_rejected_as_unsafe_paths(
+    namespace: StateNamespace | FakeStateModels, name: str
+) -> None:
+    with pytest.raises(ProjectStateError):
+        namespace.write_bytes(name, b"{}")
+    with pytest.raises(ProjectStateError):
+        namespace.read_bytes(name)
+
+
+def test_a_file_and_a_directory_cannot_share_a_name(
+    namespace: StateNamespace | FakeStateModels,
+) -> None:
+    namespace.write_bytes("leaf", b"{}")
+    namespace.write_bytes("branch/leaf", b"{}")
+    with pytest.raises(ProjectStateError):
+        namespace.write_bytes("leaf/child", b"{}")
+    with pytest.raises(ProjectStateError):
+        namespace.write_bytes("branch", b"{}")
+    with pytest.raises(ProjectStateError):
+        namespace.read_bytes("branch")
+    with pytest.raises(ProjectStateError):
+        namespace.load_optional("branch", _Record)
+    assert namespace.read_bytes("leaf") == b"{}"
 
 
 @pytest.mark.parametrize("path", ["../escape.json", "/absolute.json", "", "safe/../../escape"])

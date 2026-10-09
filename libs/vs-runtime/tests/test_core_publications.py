@@ -10,7 +10,7 @@ from hypothesis import strategies as st
 from tests.support.runtime_core_shell import LostAcknowledgementStateStore, runtime
 
 from vs_core.api import ClockAdvanced, ContractError, OperationRegistry
-from vs_project.api import FakeStateStore, Project
+from vs_project.api import FakeStateStore, Project, StateDocumentDamagedError
 from vs_runtime.api.core import (
     JournalPublicationDelivery,
     Publication,
@@ -136,3 +136,24 @@ async def test_unknown_ack_commit_halts_without_duplicate_publication() -> None:
     restarted.start("second", now_at=10, lease_duration=10)
     assert not await restarted.publish_one(delivery, now_at=10)
     assert len(delivery.read()) == 1
+
+
+@pytest.mark.parametrize(
+    ("contents", "expected"),
+    [
+        (b'{"schema_version":1,"publications":[', "publications.json"),
+        (b"\xff\xfe secret-journal-bytes", "publications.json"),
+        (b'{"schema_version":2,"publications":[]}', "version 2.*reads version 1"),
+    ],
+    ids=["truncated", "not_utf8", "newer_version"],
+)
+async def test_a_damaged_journal_is_a_typed_error_that_does_not_echo_it(
+    tmp_path: Path, contents: bytes, expected: str
+) -> None:
+    namespace = Project.open(tmp_path).state.state_store_namespace("run")
+    namespace.write_bytes("publications.json", contents)
+    delivery = JournalPublicationDelivery(namespace, OperationRegistry(), FakeStateStore())
+
+    with pytest.raises(StateDocumentDamagedError, match=expected) as failure:
+        delivery.read()
+    assert "secret-journal-bytes" not in str(failure.value)

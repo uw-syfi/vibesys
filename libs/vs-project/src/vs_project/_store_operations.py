@@ -21,6 +21,8 @@ from vs_project.api.state_store import (
     Unknown,
 )
 
+STORE_DOCUMENT_VERSION = 1
+
 
 class StoreDocument(BaseModel):
     """One atomic document owns both CAS record and dispatch fencing."""
@@ -28,7 +30,9 @@ class StoreDocument(BaseModel):
     model_config = ConfigDict(
         extra="forbid", frozen=True, strict=True, ser_json_bytes="base64", val_json_bytes="base64"
     )
-    version: int = Field(default=1, ge=1, le=1)
+    version: int = Field(
+        default=STORE_DOCUMENT_VERSION, ge=STORE_DOCUMENT_VERSION, le=STORE_DOCUMENT_VERSION
+    )
     record: StoreRecord | None = None
     fence: StoreFence | None = None
     observed_at: float = Field(default=0, ge=0, allow_inf_nan=False)
