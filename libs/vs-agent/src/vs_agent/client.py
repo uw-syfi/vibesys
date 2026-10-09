@@ -245,7 +245,7 @@ class AgentClient:
 
     @property
     def driver_name(self) -> str | None:
-        """Return the stable configured driver name (``"agentshim"``/``"omnigent"``).
+        """Return the stable configured driver name (``"agentshim"``).
 
         This is the application-configuration string, not the driver's Python
         class name, so it stays stable across implementation refactors.

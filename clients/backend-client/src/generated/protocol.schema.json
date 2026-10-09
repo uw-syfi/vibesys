@@ -671,10 +671,7 @@
         "driver": {
           "anyOf": [
             {
-              "enum": [
-                "agentshim",
-                "omnigent"
-              ],
+              "const": "agentshim",
               "type": "string"
             },
             {

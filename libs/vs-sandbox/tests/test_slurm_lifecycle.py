@@ -234,16 +234,61 @@ def test_published_lifecycle_never_decreases_for_any_scheduler_timeline(
     )
 
 
+def _parked_submitter(
+    cluster: _ScheduledCluster, root: Path
+) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator, threading.Event, threading.Event]:
+    """A stack whose submitter parks at its first wait, so a test alone acts on the job.
+
+    Acting on ``cluster.accepted`` alone races the submitter's remaining acceptance
+    work: a stop landing mid-acceptance sends its own scancel, and a second one when
+    the confirmation budget runs out. Parking leaves the batch accepted and its handle
+    recorded. Every later pause (a cancel confirming) advances the cluster's clock.
+    """
+    idle = threading.Event()
+    release = threading.Event()
+    lock = threading.Lock()
+    parked: list[bool] = []
+
+    def pause(seconds: float) -> None:
+        with lock:
+            first = not parked
+            parked.append(True)
+        if first:
+            idle.set()
+            release.wait()
+        else:
+            cluster.advance(seconds)
+
+    workspace = root / "workspace"
+    workspace.mkdir()
+    executor = SlurmEvaluationExecutor(
+        _config(),
+        workspace=workspace,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=root / "handles",
+        cluster=cluster,
+        pause=pause,
+        cancel_confirmation_seconds=_CONFIRMATION_S,
+    )
+    store = evaluation_testing.InMemoryEvaluationStore()
+    return executor, EvaluationCoordinator(executor, store, FakeClock()), idle, release
+
+
 async def _stopped_while_active(schedule: _Schedule) -> None:
     with tempfile.TemporaryDirectory() as raw:
         cluster = _ScheduledCluster(schedule)
-        executor, coordinator = _stack(Path(raw), cluster)
+        executor, coordinator, idle, release = _parked_submitter(cluster, Path(raw))
         handle = await coordinator.submit(_request())
-        await asyncio.to_thread(cluster.accepted.wait)
-        record = await coordinator.cancel(handle.id)
-        assert record.state is EvaluationState.CANCELED
-        assert cluster.scancels == 1
-        await executor.close()
+        await asyncio.to_thread(idle.wait)
+        try:
+            record = await coordinator.cancel(handle.id)
+            assert record.state is EvaluationState.CANCELED
+            assert cluster.scancels == 1
+        finally:
+            release.set()
+            await executor.close()
         assert cluster.scancels == 1
 
 
@@ -269,15 +314,82 @@ async def test_a_stop_beyond_the_confirmation_bound_leaves_the_evaluation_cancel
 ) -> None:
     """The job is known, so the evaluation is CANCELING, and a later request confirms it."""
     cluster = _ScheduledCluster(_Schedule(queue_wait_s=0, run_s=math.inf, completing_s=10**9))
-    executor, coordinator = _stack(tmp_path, cluster)
+    executor, coordinator, idle, release = _parked_submitter(cluster, tmp_path)
     handle = await coordinator.submit(_request())
-    await asyncio.to_thread(cluster.accepted.wait)
-    record = await coordinator.cancel(handle.id)
-    assert record.state is EvaluationState.CANCELING
-    assert record.cancel_requested
-    assert cluster.scancels == 1
-    # The scheduler finishes tearing the job down; the next request observes it.
-    cluster.advance(10**9)
-    record = await coordinator.snapshot(handle.id)
-    assert record.state is EvaluationState.CANCELED
-    await executor.close()
+    await asyncio.to_thread(idle.wait)
+    try:
+        record = await coordinator.cancel(handle.id)
+        assert record.state is EvaluationState.CANCELING
+        assert record.cancel_requested
+        assert cluster.scancels == 1
+        # The scheduler finishes tearing the job down; the next request observes it.
+        cluster.advance(10**9)
+        record = await coordinator.snapshot(handle.id)
+        assert record.state is EvaluationState.CANCELED
+    finally:
+        release.set()
+        await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_recovery_of_a_stopped_job_ends_canceled_like_a_poll(tmp_path: Path) -> None:
+    """Both read paths agree: a cancelled job is CANCELED even though its script exited 0.
+
+    A stop that outlives the confirmation bound leaves the evaluation CANCELING. The
+    recovery task a later ``inspect`` starts reads the job's terminal state; it used to
+    collect the job's evidence, where exit code 0 contradicted CANCELLED and the stop
+    ended FAILED, while ``poll`` reported CANCELED for the same reading.
+    """
+    cluster = _ScheduledCluster(_Schedule(queue_wait_s=0, run_s=math.inf, completing_s=10**9))
+    executor, coordinator, idle, release = _parked_submitter(cluster, tmp_path)
+    handle = await coordinator.submit(_request())
+    await asyncio.to_thread(idle.wait)
+    try:
+        record = await coordinator.cancel(handle.id)
+        assert record.state is EvaluationState.CANCELING
+        cluster.advance(10**9)
+        polled = await executor.poll(handle.id)
+        assert polled.terminal is not None
+        assert polled.terminal.state is EvaluationState.CANCELED
+        observed = await executor.inspect(handle.id)
+        for _ in range(10_000):
+            assert observed is not None
+            if observed.state in {
+                EvaluationState.SUCCEEDED,
+                EvaluationState.FAILED,
+                EvaluationState.CANCELED,
+            }:
+                break
+            await executor.wait_for_change(handle.id, 60.0)
+            observed = await executor.inspect(handle.id)
+        assert observed is not None
+        assert observed.state is EvaluationState.CANCELED
+    finally:
+        release.set()
+        await executor.close()
+
+
+@pytest.mark.parametrize("requeues", [1, 2])
+@pytest.mark.asyncio
+async def test_an_ended_poll_names_the_attempt_that_ended(tmp_path: Path, requeues: int) -> None:
+    """Polls are ordered per attempt, so the ending poll carries the last attempt, not attempt 0."""
+    schedule = _Schedule(queue_wait_s=1.0, run_s=1.0, completing_s=1.0, requeues=requeues)
+    cluster = _ScheduledCluster(schedule)
+    executor, coordinator, idle, release = _parked_submitter(cluster, tmp_path)
+    handle = await coordinator.submit(_request())
+    await asyncio.to_thread(idle.wait)
+    phases: list[tuple[int, int]] = []
+    try:
+        for _ in range(1_000):
+            cluster.advance(0.5)
+            polled = await executor.poll(handle.id)
+            if polled.phase in _PHASE_RANK:
+                phases.append((polled.attempt, _PHASE_RANK[polled.phase]))
+            if polled.phase is PollPhase.ENDED:
+                break
+    finally:
+        release.set()
+        await executor.close()
+    assert phases[-1][1] == _PHASE_RANK[PollPhase.ENDED]
+    assert phases[-1][0] == requeues
+    assert phases == sorted(phases)

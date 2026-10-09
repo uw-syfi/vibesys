@@ -62,9 +62,7 @@ def _request(root: Path, *, service: bool, profile: bool, requested: ProfilerKin
                 "official_eval_every": 1,
             },
         ),
-        config=Config.model_validate(
-            {"model": {"name": "gpt-test"}, "agent": {"driver": "agentshim"}}
-        ),
+        config=Config.model_validate({"model": {"name": "gpt-test"}}),
         exp_name="profile-preflight",
         runs_dir=root / "runs",
         profiler_kind=requested,

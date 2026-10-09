@@ -356,21 +356,55 @@ def test_published_lifecycle_never_goes_backwards(spec: _WorldSpec, operations: 
     asyncio.run(_publishes_monotonically(spec, operations))
 
 
+def _after_submitter_idles(
+    world: _World,
+) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator, threading.Event, threading.Event]:
+    """A stack whose submitter parks at its first wait, so a test alone sends commands.
+
+    The first pause is the submitter's own wait loop and parks; every later pause
+    (a cancel confirming) advances the world's clock. Parking fixes where the
+    submitter is when the test acts: its batch is accepted and its handle recorded.
+    Acting on ``accepted`` alone races the submitter's remaining acceptance work, so
+    a stop could land mid-acceptance, which sends its own scancel and a second one
+    when the confirmation budget runs out.
+    """
+    idle = threading.Event()
+    release = threading.Event()
+    lock = threading.Lock()
+    parked = []
+
+    def pause(seconds: float) -> None:
+        with lock:
+            first = not parked
+            parked.append(True)
+        if first:
+            idle.set()
+            release.wait()
+        else:
+            world.clock.advance(seconds)
+
+    executor, coordinator = _stack(world, pause)
+    return executor, coordinator, idle, release
+
+
 async def _stopped_after(spec: _WorldSpec, delay_s: float) -> None:
     with tempfile.TemporaryDirectory() as raw:
         world = spec.build(Path(raw))
-        executor, coordinator = _stack(world)
+        executor, coordinator, idle, release = _after_submitter_idles(world)
         handle = await coordinator.submit(_request())
-        await asyncio.to_thread(world.cluster.accepted.wait)
-        world.clock.advance(delay_s)
-        record = await coordinator.cancel(handle.id)
-        # A job that ended before the stop is a success; every other stop is CANCELED.
-        assert record.state in {EvaluationState.CANCELED, EvaluationState.SUCCEEDED}
-        assert world.cluster.scancels <= 1
-        assert world.transport_scancels() <= 1
-        if record.state is EvaluationState.CANCELED:
-            assert world.cluster.scancels == 1
-        await executor.close()
+        await asyncio.to_thread(idle.wait)
+        try:
+            world.clock.advance(delay_s)
+            record = await coordinator.cancel(handle.id)
+            # A job that ended before the stop is a success; every other stop is CANCELED.
+            assert record.state in {EvaluationState.CANCELED, EvaluationState.SUCCEEDED}
+            assert world.cluster.scancels <= 1
+            assert world.transport_scancels() <= 1
+            if record.state is EvaluationState.CANCELED:
+                assert world.cluster.scancels == 1
+        finally:
+            release.set()
+            await executor.close()
         assert world.cluster.scancels <= 1
 
 
@@ -431,19 +465,22 @@ async def test_a_stop_beyond_the_confirmation_bound_is_canceling_and_later_confi
 ) -> None:
     """The job is known, so the stop is a typed CANCELING, never an unknown-identity error."""
     world = spec.build(tmp_path)
-    executor, coordinator = _stack(world)
+    executor, coordinator, idle, release = _after_submitter_idles(world)
     handle = await coordinator.submit(_request())
-    await asyncio.to_thread(world.cluster.accepted.wait)
-    record = await coordinator.cancel(handle.id)
-    assert record.state is EvaluationState.CANCELING
-    assert record.cancel_requested
-    assert world.cluster.scancels == 1
-    # While the job tears down, confirming the stop must not send further scancels.
-    assert world.transport_scancels() <= 1
-    world.clock.advance(_FOREVER)
-    record = await coordinator.snapshot(handle.id)
-    assert record.state is EvaluationState.CANCELED
-    await executor.close()
+    await asyncio.to_thread(idle.wait)
+    try:
+        record = await coordinator.cancel(handle.id)
+        assert record.state is EvaluationState.CANCELING
+        assert record.cancel_requested
+        assert world.cluster.scancels == 1
+        # While the job tears down, confirming the stop must not send further scancels.
+        assert world.transport_scancels() <= 1
+        world.clock.advance(_FOREVER)
+        record = await coordinator.snapshot(handle.id)
+        assert record.state is EvaluationState.CANCELED
+    finally:
+        release.set()
+        await executor.close()
 
 
 async def _finish_time(spec: _WorldSpec) -> tuple[float, float]:
@@ -532,33 +569,6 @@ _FAULT_WORLDS = tuple(
 # A poll or a cancel sends fewer commands than this, so the later positions are
 # no-fault controls.
 _FAULT_POSITIONS = 12
-
-
-def _after_submitter_idles(
-    world: _World,
-) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator, threading.Event, threading.Event]:
-    """A stack whose submitter parks at its first wait, so a test alone sends commands.
-
-    The first pause is the submitter's own wait loop and parks; every later pause
-    (a cancel confirming) advances the world's clock.
-    """
-    idle = threading.Event()
-    release = threading.Event()
-    lock = threading.Lock()
-    parked = []
-
-    def pause(seconds: float) -> None:
-        with lock:
-            first = not parked
-            parked.append(True)
-        if first:
-            idle.set()
-            release.wait()
-        else:
-            world.clock.advance(seconds)
-
-    executor, coordinator = _stack(world, pause)
-    return executor, coordinator, idle, release
 
 
 async def _poll_with_dropped_command(spec: _WorldSpec, delay_s: float, position: int) -> None:

@@ -306,7 +306,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--run-environment",
-        choices=("local", "docker", "modal", "skypilot", "slurm"),
+        choices=("local", "docker", "modal", "skypilot", "slurm", "slurm-gpu"),
         default=None,
         help=(
             "Select where trusted work runs. SkyPilot and Modal keep the agent "
@@ -319,7 +319,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "External operator TOML for Slurm execution. Selecting this option also "
-            "selects --run-environment slurm."
+            "selects --run-environment slurm unless --run-environment slurm-gpu is given, "
+            "which reads its GPU job limits from this file instead."
         ),
     )
     parser.add_argument(

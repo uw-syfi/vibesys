@@ -58,7 +58,6 @@ def _restore_project_config(
             frozenset({"agent_backend"}),
             "agent_backend",
         ),
-        (("agent", "driver"), recorded.agent_driver, frozenset(), "agent_driver"),
         (
             ("agent", "cli_provider"),
             recorded.cli_provider,
@@ -98,7 +97,6 @@ def _restore_project_config(
         {
             **config.agent.model_dump(mode="python"),
             "backend": recorded.agent_backend,
-            "driver": recorded.agent_driver,
             "cli_provider": recorded.cli_provider,
             "cli_timeout": recorded.cli_timeout,
             "roles": recorded.agent_roles,

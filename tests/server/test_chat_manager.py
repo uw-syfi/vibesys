@@ -54,19 +54,19 @@ def test_created_thread_routes_chat_and_stamps_events(tmp_path: Path) -> None:
         lambda question: ChatAnswer(text=f"default: {question}", invocation_id="exec-default")
     )
     calls: list[tuple[str, str | None, str | None, str | None]] = []
-    parts.chat.set_thread_factory(_factory(calls, "omnigent-claude"))
+    parts.chat.set_thread_factory(_factory(calls, "agentshim-claude"))
 
-    spec = parts.chat.create_thread(driver="omnigent", provider="claude", model="opus")
-    assert calls == [(spec.thread_id, "omnigent", "claude", "opus")]
+    spec = parts.chat.create_thread(driver="agentshim", provider="claude", model="opus")
+    assert calls == [(spec.thread_id, "agentshim", "claude", "opus")]
     assert parts.chat.chat("what changed?", thread_id=spec.thread_id) == (
-        "omnigent-claude: what changed?"
+        "agentshim-claude: what changed?"
     )
     assert parts.chat.chat("what changed?") == "default: what changed?"
 
     created = [event for event in _events(tmp_path) if event["type"] == "chat_thread_created"]
     assert len(created) == 1
     assert created[0]["chat_thread_id"] == spec.thread_id
-    assert created[0]["data"]["driver"] == "omnigent"
+    assert created[0]["data"]["driver"] == "agentshim"
     assert created[0]["data"]["provider"] == "claude"
     assert created[0]["data"]["model"] == "opus"
     chats = [event for event in _events(tmp_path) if event["type"] == "chat"]
@@ -126,12 +126,12 @@ def test_factory_validation_error_propagates_without_event(tmp_path: Path) -> No
     parts = build_server_parts(tmp_path)
 
     def rejecting_factory(*_args: object) -> ChatThreadHandle:
-        _failure_message = "agent driver 'omnigent' does not support provider 'gemini'"
+        _failure_message = "agent driver 'agentshim' does not support provider 'unknown'"
         raise ValueError(_failure_message)
 
     parts.chat.set_thread_factory(rejecting_factory)
-    with pytest.raises(ValueError, match="does not support provider 'gemini'"):
-        parts.chat.create_thread(driver="omnigent", provider="gemini")
+    with pytest.raises(ValueError, match="does not support provider 'unknown'"):
+        parts.chat.create_thread(driver="agentshim", provider="unknown")
     assert all(event["type"] != "chat_thread_created" for event in _events(tmp_path))
 
 
@@ -214,7 +214,7 @@ def test_chat_options_group_by_provider_and_mark_run_model(tmp_path: Path) -> No
     parts = build_server_parts(tmp_path)
     parts.chat.set_run_settings(
         ChatRunSettings(
-            driver="omnigent",
+            driver="agentshim",
             provider="codex",
             model="gpt-5.5-run",
             agent_drivers=auxiliary_agent_drivers(),
@@ -223,7 +223,12 @@ def test_chat_options_group_by_provider_and_mark_run_model(tmp_path: Path) -> No
     )
     options = parts.api.execute(ChatOptionsQuery()).chat_options
     assert options is not None
-    assert [group.provider for group in options.providers] == ["claude", "codex"]
+    assert [group.provider for group in options.providers] == [
+        "claude",
+        "codex",
+        "gemini",
+        "opencode",
+    ]
     assert "driver" not in options.model_dump()
 
     codex = next(group for group in options.providers if group.provider == "codex")
@@ -256,7 +261,7 @@ def test_api_passes_optional_thread_choices_to_factory(tmp_path: Path) -> None:
 
 
 def test_chat_thread_wire_shapes_round_trip() -> None:
-    request = ChatThreadCreateQuery(driver="omnigent", provider="codex", model="o4", title="t")
+    request = ChatThreadCreateQuery(driver="agentshim", provider="codex", model="o4", title="t")
     assert ChatThreadCreateQuery.model_validate_json(request.model_dump_json()) == request
     query = ChatQuery(text="why?", thread_id="thread-1")
     assert ChatQuery.model_validate_json(query.model_dump_json()) == query

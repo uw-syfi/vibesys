@@ -105,8 +105,6 @@ name = "gpt-5.4"
 
 [agent]
 backend = "cli"
-# Optional. AgentShim is the default; Omnigent is an alternate runtime.
-driver = "agentshim"
 cli_provider = "codex"
 
 [backend]

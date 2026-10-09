@@ -15,7 +15,6 @@ from vs_agent.api import (
     DEFAULT_CLI_PROVIDER,
     AgentBackend,
     AgentSpec,
-    Driver,
 )
 from vs_runtime.api.infrastructure import (
     ModelArtifactRequest,
@@ -96,38 +95,20 @@ def _vibesys_runtime_host_resources() -> tuple[HostResource, ...]:
     )
 
 
-def resolve_agent_driver(config: Config) -> Driver:
-    """Resolve the configured agent driver, defaulting to agentshim."""
-    return Driver(config.agent.driver) if config.agent.driver is not None else Driver.AGENTSHIM
-
-
 def agent_spec_from_config(
     config: Config,
     *,
     backend: AgentBackend | str | None = None,
-    driver: Driver | str | None = None,
     provider: str | None = None,
     model: str | None = None,
 ) -> AgentSpec:
     """Bind application config and explicit overrides into one agent spec."""
     agent_cfg = config.agent
     resolved_backend = AgentBackend(backend or agent_cfg.backend or AgentBackend.CLI)
-    resolved_driver = Driver(driver) if driver is not None else resolve_agent_driver(config)
-
-    if resolved_backend != AgentBackend.CLI and agent_cfg.driver is not None:
-        message = f"agent driver {agent_cfg.driver!r} is valid only with backend='cli', not {resolved_backend.value!r}"
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="agent_driver_configuration_invalid",
-                stage="agent_configuration_validation",
-                message=message,
-            )
-        )
 
     resolved_provider = provider or agent_cfg.cli_provider or DEFAULT_CLI_PROVIDER
     return AgentSpec(
         backend=resolved_backend,
-        driver=resolved_driver,
         provider=resolved_provider,
         model=model if model is not None else config.model.name,
         reasoning_effort=config.thinking.level,

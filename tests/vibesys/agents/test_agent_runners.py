@@ -151,14 +151,13 @@ class TestBuildAgentClient:
         with pytest.raises(ValueError, match="unsupported"):
             agent_spec_from_config(_agent_config(backend="unsupported"))
 
-    def test_required_workspace_enforcement_permits_omnigent(self) -> None:
+    def test_required_workspace_enforcement_permits_the_cli_backend(self) -> None:
         config = Config.model_validate(
             {
                 "model": {"name": "m"},
                 "agent": {
                     "backend": "cli",
                     "cli_provider": "codex",
-                    "driver": "omnigent",
                 },
             }
         )
@@ -166,7 +165,7 @@ class TestBuildAgentClient:
         runner = _build_client(config, require_host_sandbox=True)
 
         assert isinstance(runner, AgentClient)
-        assert runner.driver_name == "omnigent"
+        assert runner.driver_name == "agentshim"
 
     def test_required_project_enforcement_permits_stub(self) -> None:
         runner = _build_client(_agent_config(backend="stub"), require_host_sandbox=True)

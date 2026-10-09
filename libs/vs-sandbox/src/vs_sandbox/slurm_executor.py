@@ -475,11 +475,16 @@ class SlurmEvaluationExecutor:
             case PollPhase.ENDED if view.lifecycle is EvaluationState.CANCELED:
                 return ExecutorPoll(
                     phase=PollPhase.ENDED,
+                    attempt=merged.attempt,
                     terminal=ExecutorObservation(state=EvaluationState.CANCELED),
                 )
             case _:
                 return await self._poll_terminal(
-                    handle_id, durable, durable.handle or inspected.handle, inspected
+                    handle_id,
+                    durable,
+                    durable.handle or inspected.handle,
+                    inspected,
+                    attempt=merged.attempt,
                 )
 
     async def _poll_terminal(
@@ -488,6 +493,8 @@ class SlurmEvaluationExecutor:
         durable: _DurableSlurmEvaluation,
         handle: object,
         inspected: ClusterObservation,
+        *,
+        attempt: int,
     ) -> ExecutorPoll:
         if not isinstance(handle, SlurmBatchHandle):
             return ExecutorPoll(phase=PollPhase.UNKNOWN, detail="missing batch identity")
@@ -499,7 +506,7 @@ class SlurmEvaluationExecutor:
             terminal = self._collected_observation(handle_id, durable.request, handle, collected)
         except SlurmError as error:
             return ExecutorPoll(phase=PollPhase.UNKNOWN, detail=str(error))
-        return ExecutorPoll(phase=PollPhase.ENDED, terminal=terminal)
+        return ExecutorPoll(phase=PollPhase.ENDED, attempt=attempt, terminal=terminal)
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Recover durable intent and inspect before resuming unfinished work."""
@@ -752,7 +759,13 @@ class SlurmEvaluationExecutor:
         handle = self._handles.get(handle_id) or (durable.handle if durable is not None else None)
         if handle is None:
             raise _SlurmExecutionError.not_accepted()
-        handle = await self._wait_for_batch(handle_id, handle, request, durable)
+        status = await self._wait_for_batch(handle_id, handle, request, durable)
+        if status is SlurmJobStatus.CANCELLED:
+            # A cancelled job ends CANCELED however its allocation exit code reads,
+            # as poll() reports it. Collecting would let a recorded "0:0" exit
+            # contradict the scheduler and turn a requested stop into a failure.
+            self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+            return
         collection = asyncio.create_task(asyncio.to_thread(self._cluster.collect, handle))
         try:
             collected = await asyncio.shield(collection)
@@ -864,8 +877,8 @@ class SlurmEvaluationExecutor:
         handle: SlurmBatchHandle,
         request: EvaluationRequest,
         durable: _DurableSlurmEvaluation | None,
-    ) -> SlurmBatchHandle:
-        """Persist and enforce the scheduler observation deadline."""
+    ) -> SlurmJobStatus:
+        """Persist and enforce the scheduler observation deadline; return the terminal status."""
         wait_deadline_epoch_s = durable.wait_deadline_epoch_s if durable is not None else None
         if wait_deadline_epoch_s is None:
             remaining = self._job_timeout_seconds - handle.waited_seconds
@@ -888,7 +901,7 @@ class SlurmEvaluationExecutor:
                     SlurmJobStatus.FAILED,
                     SlurmJobStatus.CANCELLED,
                 }:
-                    return handle
+                    return observed.status
                 active = self._lifecycle_observation(handle_id, observed, request)
                 if active is not None:
                     self._publish(handle_id, active)

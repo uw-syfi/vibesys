@@ -28,10 +28,9 @@ Import application-facing types and functions from `vs_agent.api`. Test doubles
 and scripted events live in `vs_agent.api.testing`.
 
 ```python
-from vs_agent.api import AgentSpec, Driver, agent_catalog
+from vs_agent.api import SHIPPED_PROVIDERS, AgentSpec
 
-spec = AgentSpec(driver=Driver.AGENTSHIM)
-providers = agent_catalog()[spec.driver].providers
+spec = AgentSpec(provider="codex")  # rejected unless in SHIPPED_PROVIDERS
 ```
 
 `build_agent_client` also needs the selected sandbox, skills, session store, and

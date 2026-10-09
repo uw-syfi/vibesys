@@ -1,8 +1,6 @@
-"""Tests for the helpers shared by the agentshim and Omnigent CLI runners.
+"""Tests for the helpers shared by the CLI runners.
 
-These moved out of the pre-driver CLI runner unchanged when the Omnigent
-backend needed the same behavior. The cases here cover the branches that both
-backends depend on — skill discovery across layouts, platform pruning,
+The cases here cover the branches the CLI runners depend on — skill discovery across layouts, platform pruning,
 replacement on re-materialization, and the deliberate never-raise policy on
 copy failures.
 """

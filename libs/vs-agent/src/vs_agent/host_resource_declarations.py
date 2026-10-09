@@ -146,8 +146,7 @@ def declare_active_rust_toolchain_resources(
 ) -> Iterable[HostResource]:
     """Declare a narrow view of the active Rust compiler and runtime.
 
-    Omnigent may scan read grants for hidden paths. Granting all
-    of ``~/.rustup`` is both expensive and likely to exceed its scan cap, so
+    Granting all of ``~/.rustup`` is expensive, so
     VibeSys bypasses the rustup proxy and exposes only the selected toolchain.
     """
     resolved = resolve_active_rust_toolchain(ctx, workspace=workspace)
@@ -392,5 +391,34 @@ def declare_agent_host_resources(
     return declare_resources(
         HostResourceContext(env=env, binary_path=binary_path, provider=provider),
         DEFAULT_AGENT_HOST_RESOURCE_DECLARERS,
+        additional=additional,
+    )
+
+
+#: The declarers that describe the host's toolchains rather than one agent
+#: CLI: no provider binary, state, or credentials.
+COMMAND_HOST_RESOURCE_DECLARERS: tuple[HostResourceDeclarer, ...] = (
+    _python_runtime,
+    _path_toolchain,
+    declare_rust_toolchain_resources,
+    _shell_setup,
+    _operator_allowlist,
+)
+
+
+def declare_command_host_resources(
+    env: Mapping[str, str],
+    *,
+    additional: Iterable[HostResource] = (),
+) -> tuple[HostResource, ...]:
+    """Declare what a confined agent command needs, without any agent CLI's own state.
+
+    This is the agent's resource set minus its CLI binary, provider state, and
+    credentials, for confining a command the agent started somewhere else,
+    such as in a Slurm job.
+    """
+    return declare_resources(
+        HostResourceContext(env=env),
+        COMMAND_HOST_RESOURCE_DECLARERS,
         additional=additional,
     )

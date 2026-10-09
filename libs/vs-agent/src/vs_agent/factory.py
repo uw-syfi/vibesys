@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from vs_agent.catalog import agent_catalog
 from vs_agent.client import AgentClient, AgentDiagnosticLog
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
-from vs_agent.spec import AgentBackend, Driver
+from vs_agent.spec import AgentBackend
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -24,7 +23,7 @@ if TYPE_CHECKING:
 
 
 def agent_driver_supports_tool_servers(spec: AgentSpec) -> bool | None:
-    """Return whether the configured external driver supports agent tool servers.
+    """Return whether the configured agent driver supports agent tool servers.
 
     This query has no runtime side effects, so wiring code can reject an
     incompatible feature before creating a project or driver resources.
@@ -32,14 +31,6 @@ def agent_driver_supports_tool_servers(spec: AgentSpec) -> bool | None:
     """
     if spec.backend != AgentBackend.CLI:
         return None
-
-    driver_name = spec.driver
-    if driver_name is Driver.OMNIGENT:
-        from vs_agent.drivers.omnigent import (  # noqa: PLC0415  # lint-waiver: LW-010170 [PLC0415]; Keep OMNIGENT_CAPABILITIES lazy so unused providers and import cycles stay unloaded.
-            OMNIGENT_CAPABILITIES,
-        )
-
-        return OMNIGENT_CAPABILITIES.tool_servers
 
     from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # lint-waiver: LW-010171 [PLC0415]; Keep AGENTSHIM_CAPABILITIES lazy so unused providers and import cycles stay unloaded.
         AGENTSHIM_CAPABILITIES,
@@ -91,57 +82,39 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
         message = f"unknown agent backend: {backend.value!r}"
         raise SystemExit(message)
 
-    driver_name = spec.driver
     provider = spec.provider
     timeout = spec.cli_timeout
     driver_log = AgentDiagnosticLog(run_log_file)
 
-    if use_docker and not agent_catalog()[driver_name].supports_docker:
-        message = f"agent.driver={driver_name.value!r} is not supported with --docker"
-        raise SystemExit(message)
-
-    if driver_name == Driver.OMNIGENT:
-        from vs_agent.drivers.omnigent import (  # noqa: PLC0415  # lint-waiver: LW-010174 [PLC0415]; Keep this dependency lazy in build_agent_client so unused providers and import cycles stay unloaded.
-            OmnigentDriver,
-            OmnigentDriverError,
+    docker_sandboxes = None
+    if use_docker:
+        from vs_agent.cli_docker import (  # noqa: PLC0415  # lint-waiver: LW-010175 [PLC0415]; Keep DOCKER_PROVIDER_ENV lazy in build_agent_client so unused providers and import cycles stay unloaded.
+            DOCKER_PROVIDER_ENV,
         )
 
-        if host_resources:
-            raise OmnigentDriverError.host_resource_grants_require_agentshim(
-                [str(resource.path) for resource in host_resources]
+        if provider not in DOCKER_PROVIDER_ENV:
+            message = (
+                f"--cli-provider {provider!r} is not yet supported with --docker; "
+                f"supported: {sorted(DOCKER_PROVIDER_ENV)}"
             )
+            raise SystemExit(message)
+        docker_sandboxes = backends
+    from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # lint-waiver: LW-010176 [PLC0415]; Keep AgentShimDriver lazy in build_agent_client so unused providers and import cycles stay unloaded.
+        AgentShimDriver,
+    )
 
-        driver = OmnigentDriver()
-    else:
-        docker_sandboxes = None
-        if use_docker:
-            from vs_agent.cli_docker import (  # noqa: PLC0415  # lint-waiver: LW-010175 [PLC0415]; Keep DOCKER_PROVIDER_ENV lazy in build_agent_client so unused providers and import cycles stay unloaded.
-                DOCKER_PROVIDER_ENV,
-            )
-
-            if provider not in DOCKER_PROVIDER_ENV:
-                message = (
-                    f"--cli-provider {provider!r} is not yet supported with --docker; "
-                    f"supported: {sorted(DOCKER_PROVIDER_ENV)}"
-                )
-                raise SystemExit(message)
-            docker_sandboxes = backends
-        from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # lint-waiver: LW-010176 [PLC0415]; Keep AgentShimDriver lazy in build_agent_client so unused providers and import cycles stay unloaded.
-            AgentShimDriver,
-        )
-
-        driver = AgentShimDriver(
-            provider=provider,
-            timeout=timeout,
-            docker_sandboxes=docker_sandboxes,
-            log=driver_log,
-            agent_homes=agent_homes_dir,
-            env_passthrough=spec.env_passthrough,
-        )
+    driver = AgentShimDriver(
+        provider=provider,
+        timeout=timeout,
+        docker_sandboxes=docker_sandboxes,
+        log=driver_log,
+        agent_homes=agent_homes_dir,
+        env_passthrough=spec.env_passthrough,
+    )
 
     return AgentClient(
         driver,
-        driver_name=driver_name,
+        driver_name="agentshim",
         provider=provider,
         skills=skill_source_dirs,
         skill_selection=skill_selection,

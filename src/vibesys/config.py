@@ -14,7 +14,7 @@ allowlist loader suffered from.
 
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -103,16 +103,20 @@ class AgentRoleCfg(_Strict):
 
 
 class AgentCfg(_Strict):
-    """Agent driver and role-specific model controls."""
+    """Agent backend, provider, and role-specific model controls."""
 
-    driver: Literal["agentshim", "omnigent"] | None = Field(
-        default=None,
-        description=(
-            "Optional agent execution driver override. When omitted, VibeSys "
-            "uses its current default driver. This is independent of the "
-            "agent provider selected below."
-        ),
-    )
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_driver(cls, data: object) -> object:
+        """Name the removed ``driver`` key instead of a generic unknown-key error."""
+        if isinstance(data, dict) and "driver" in data:
+            message = (
+                "agent.driver: this key was removed because AgentShim is the only agent "
+                f"driver (got {data['driver']!r}); delete the key"
+            )
+            raise ValueError(message)
+        return data
+
     backend: str | None = Field(
         default=None,
         description=(

@@ -512,7 +512,7 @@ def test_chat_thread_uses_snapshotted_cross_driver_support_and_free_text_model(
 
     response = parts.api.execute(
         ChatThreadCreateQuery(
-            driver="omnigent",
+            driver="agentshim",
             provider="claude",
             model="future-free-text-model",
         )
@@ -520,7 +520,7 @@ def test_chat_thread_uses_snapshotted_cross_driver_support_and_free_text_model(
 
     assert response.chat_thread is not None
     assert selections[-1] == AgentSelection(
-        driver="omnigent",
+        driver="agentshim",
         provider="claude",
         model="future-free-text-model",
     )

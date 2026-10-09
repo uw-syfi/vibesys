@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict
+from typing import Literal, TypedDict
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -197,7 +197,7 @@ def test_cli_rejects_mixed_generic_and_compatibility_environment_flags(tmp_path:
 class _CommonConfiguration(TypedDict):
     model: str
     agent_backend: str
-    agent_driver: str
+    agent_driver: Literal["agentshim"]
     cli_provider: str
     cli_timeout: int
     compute_backend: str
@@ -221,7 +221,9 @@ def _common_configuration() -> _CommonConfiguration:
     return {
         "model": "gpt-recorded",
         "agent_backend": "cli",
-        "agent_driver": "omnigent",
+        # Runs created while a second driver existed recorded this field; they must
+        # still resume. New runs omit it.
+        "agent_driver": "agentshim",
         "cli_provider": "claude",
         "cli_timeout": 321,
         "compute_backend": "cpu",
@@ -1478,7 +1480,6 @@ def test_agent_resume_restores_its_configuration(
     assert backend is ComputeBackend.CPU
     assert config.model.name == "gpt-recorded"
     assert config.agent.cli_timeout == 321
-    assert config.agent.driver == "omnigent"
     assert config.agent.roles["orchestrator"].model == "gpt-orchestrator"
     assert config.agent.roles["implementer"].model == "gpt-implementer"
 
@@ -1532,7 +1533,6 @@ def test_v5_agent_resume_restores_config_constraints_and_budget(
     assert args.profiler is ProfilerKind.NONE
     assert backend is ComputeBackend.CPU
     assert config.model.name == "gpt-recorded"
-    assert config.agent.driver == "omnigent"
     assert raised.max_rounds == 8
     with pytest.raises(ConfigurationError, match="operator_constraints"):
         parse_cli_invocation(

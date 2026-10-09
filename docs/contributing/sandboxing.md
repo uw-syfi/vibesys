@@ -98,7 +98,6 @@ allowlist (`session_env_allowlist`).
 | `--docker` | `DockerSandbox` | enforced (read-only re-mount) | enforced (empty mask mount) |
 | `--modal`, `--run-environment skypilot` | `DockerSandbox` editor container | enforced | enforced |
 | `--run-environment slurm` | local editor: host row above | per host | per host |
-| Omnigent driver (host only) | bubblewrap or `sandbox-exec` via `OSEnvSpec` | top-level dot paths only, by contract | explicit masks |
 
 Reads are not uniformly hidden. Bubblewrap and Landlock deny all reads outside
 the project and declared resources. Seatbelt allows broad reads and denies the
@@ -114,10 +113,6 @@ macOS when full read confinement matters.
   trusted baseline and fails the round. Credentials in the project directory
   (`agent.toml`, `.env*`, `.vibesys/state/local`) stay readable. A project under
   a tree Landlock must grant, such as `/tmp`, is refused.
-- **Omnigent 0.10.0** cannot make `.git` and `.vibesys` read-only beneath a
-  writable workspace. Their protection is the run contract, not enforcement,
-  and has not been shown equivalent. Omnigent has no container path and is
-  rejected with `--docker`.
 - **Seatbelt** reads are broader than bubblewrap (above).
 - **Hidden-path design.** The planning issue for prebuilt agent images (#674,
   closed) proposed "no explicit hidden access: deny what is not listed". The

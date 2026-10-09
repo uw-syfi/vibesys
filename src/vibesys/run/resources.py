@@ -11,7 +11,6 @@ from typing import overload
 from vibesys.composition import (
     _vibesys_runtime_host_resources,
     prepare_domain_model_artifacts,
-    resolve_agent_driver,
 )
 from vibesys.config import BUNDLED_RESOURCES, as_config
 from vibesys.constants import (
@@ -304,9 +303,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             execution_record = RunExecutionRecord(
                 model=config.model.name,
                 agent_backend=resolved_backend,
-                agent_driver=(
-                    resolve_agent_driver(config).value if resolved_backend == "cli" else None
-                ),
                 cli_provider=resolved_cli_provider,
                 cli_timeout=config.agent.cli_timeout,
                 compute_backend=backend.value,
@@ -593,6 +589,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         )
         if not session.view.cli_sandboxed:
             agent_host_resources = (*agent_host_resources, *_vibesys_runtime_host_resources())
+        agent_host_resources = (*agent_host_resources, *session.view.agent_host_resources)
         result = _PreparedRun(
             backend=backend,
             agent_specs=agent_specs,
@@ -615,7 +612,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 project_resources=project_resources,
                 environment_resources=environment_resources,
                 agent_backend=resolved_backend,
-                driver=resolve_agent_driver(config).value,
+                driver="agentshim",
                 provider=resolved_cli_provider,
                 model=model_name,
                 role_models=tuple(

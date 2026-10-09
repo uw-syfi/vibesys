@@ -56,6 +56,7 @@ if TYPE_CHECKING:
         host_resource_for_mount,
     )
     from vs_sandbox.host_sandbox import DISABLE_ENV as SANDBOX_DISABLE_ENV
+    from vs_sandbox.host_sandbox import GPU_DEVICES_ENV as SANDBOX_GPU_DEVICES_ENV
     from vs_sandbox.host_sandbox import (
         HostSandbox,
         LandlockSandbox,
@@ -84,6 +85,7 @@ if TYPE_CHECKING:
 __all__ = [
     "AGENT_HOME",
     "SANDBOX_DISABLE_ENV",
+    "SANDBOX_GPU_DEVICES_ENV",
     "AcceleratorDiscovery",
     "AcceleratorInventory",
     "BeforeReadyContext",
@@ -191,6 +193,7 @@ _LAZY_EXPORTS = {
     "LandlockSandbox": ("host_sandbox", "LandlockSandbox"),
     "LinuxBackend": ("host_sandbox", "LinuxBackend"),
     "SANDBOX_DISABLE_ENV": ("host_sandbox", "DISABLE_ENV"),
+    "SANDBOX_GPU_DEVICES_ENV": ("host_sandbox", "GPU_DEVICES_ENV"),
     "SandboxUnavailableError": ("host_sandbox", "SandboxUnavailableError"),
     "SeatbeltSandbox": ("host_sandbox", "SeatbeltSandbox"),
     "WorkspaceSandbox": ("host_sandbox", "WorkspaceSandbox"),
