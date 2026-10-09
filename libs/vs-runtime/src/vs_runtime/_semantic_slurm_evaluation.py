@@ -38,6 +38,7 @@ from vs_evaluation.api import (
     StageState,
     TrustedEvidence,
     evidence_identity,
+    is_finished,
 )
 from vs_runtime._failure_classification import RecordState, classify, is_unsettled, signal_of
 from vs_runtime._trusted_evaluation import (
@@ -405,17 +406,7 @@ class SemanticSlurmEvaluationExecutor:
             state = observed.state
         return ExecutorObservation(
             state=state,
-            current_stage=(
-                None
-                if state
-                in {
-                    EvaluationState.SUCCEEDED,
-                    EvaluationState.FAILED,
-                    EvaluationState.CANCELED,
-                    EvaluationState.SUPERSEDED,
-                }
-                else observed.current_stage
-            ),
+            current_stage=None if is_finished(state) else observed.current_stage,
             stage_results=tuple(results),
             failure=None if state is EvaluationState.SUCCEEDED else failure,
         )

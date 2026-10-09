@@ -237,3 +237,46 @@ async def test_poll_reports_each_phase_without_submitting_or_cancelling(
     assert polled.terminal is not None
     assert polled.terminal.state is EvaluationState.SUCCEEDED
     await world.executor.close()
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+async def test_cancelling_a_finished_evaluation_keeps_its_terminal_result(
+    build: _Build, tmp_path: Path
+) -> None:
+    """Cancel is a request: an evaluation that already ended keeps its result.
+
+    Closing a scope cancels every job it registered, finished ones included, and
+    then polls each to prove release. A cancel that rewrites a SUCCEEDED
+    evaluation as CANCELED discards evidence the run already paid for.
+    """
+    world = await build(tmp_path, _Script.SUCCEED)
+    await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
+    finished = await _terminal(world.executor)
+    assert finished.state is EvaluationState.SUCCEEDED
+
+    await world.executor.cancel(_HANDLE)
+
+    inspected = await world.executor.inspect(_HANDLE)
+    assert inspected is not None
+    assert inspected.state is EvaluationState.SUCCEEDED, inspected
+    polled = await world.executor.poll(_HANDLE)
+    assert polled.phase is PollPhase.ENDED
+    assert polled.terminal is not None
+    assert polled.terminal.state is EvaluationState.SUCCEEDED
+    assert polled.terminal.stage_results == finished.stage_results
+    await world.executor.close()
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+async def test_close_ends_every_submitted_evaluation_in_a_terminal_state(
+    build: _Build, tmp_path: Path
+) -> None:
+    """Closing the executor right after a submit leaves no evaluation non-terminal."""
+    world = await build(tmp_path, _Script.HOLD_FIRST_STAGE)
+    await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
+
+    await world.executor.close()
+
+    observed = await world.executor.inspect_only(_HANDLE)
+    assert observed is not None
+    assert observed.state in _TERMINAL, observed

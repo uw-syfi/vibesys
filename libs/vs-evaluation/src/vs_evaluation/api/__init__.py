@@ -82,6 +82,13 @@ from vs_evaluation.filesystem_store import (
     EvaluationStoreCorruptionError,
     FilesystemEvaluationStore,
 )
+from vs_evaluation.lifecycle import (
+    FINISHED_STATES,
+    LifecyclePublisher,
+    is_finished,
+    join_observation,
+    state_rank,
+)
 from vs_evaluation.models import (
     STAGE_OUTPUT_TAIL_CHARS,
     AvailabilitySnapshot,
@@ -196,6 +203,7 @@ from vs_evaluator_protocol.api import ProfileField
 
 __all__ = [
     "EVALUATION_ACCESS_STATE_PATH",
+    "FINISHED_STATES",
     "MAX_AGENT_AWAIT_S",
     "MAX_EVIDENCE_SUMMARY_CHARS",
     "MAX_LIVE_PROFILER_OPERATIONS",
@@ -289,6 +297,7 @@ __all__ = [
     "HandleAccess",
     "HandleAssociation",
     "InFlightProfilerOperation",
+    "LifecyclePublisher",
     "OwnedEvaluationDependencies",
     "PartialMeasurement",
     "PollPhase",
@@ -366,4 +375,7 @@ __all__ += [
     "SemanticEvaluationStage",
     "SocketFailure",
     "SocketSuccess",
+    "is_finished",
+    "join_observation",
+    "state_rank",
 ]

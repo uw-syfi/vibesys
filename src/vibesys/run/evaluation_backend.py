@@ -61,6 +61,7 @@ from vs_evaluation.api import (
     TrustedEvidence,
     evidence_identity,
     failure_signature,
+    is_finished,
     stable_handle_id,
 )
 from vs_prompts.api import TemplateRenderer
@@ -180,13 +181,7 @@ class _NamespaceEvaluationStore:
             )
 
     async def nonterminal(self) -> tuple[StoredEvaluation, ...]:
-        terminal = {
-            EvaluationState.SUCCEEDED,
-            EvaluationState.FAILED,
-            EvaluationState.CANCELED,
-            EvaluationState.SUPERSEDED,
-        }
-        return tuple(record for record in await self.records() if record.state not in terminal)
+        return tuple(record for record in await self.records() if not is_finished(record.state))
 
     def _load_index(self) -> _EvaluationIndex:
         return self._namespace.load_optional(_INDEX_PATH, _EvaluationIndex) or _EvaluationIndex()
@@ -956,16 +951,6 @@ def _candidate_profile(revision: str, operation: ProfilerOperation) -> Candidate
     )
 
 
-_TERMINAL_EVALUATION_STATES = frozenset(
-    {
-        EvaluationState.SUCCEEDED,
-        EvaluationState.FAILED,
-        EvaluationState.CANCELED,
-        EvaluationState.SUPERSEDED,
-    }
-)
-
-
 @dataclass(frozen=True, slots=True)
 class _CapturedProfile:
     """The recorded outcome of one host-run trusted profile capture."""
@@ -1256,7 +1241,7 @@ class EvidenceReusingEvaluation:
             await self._scopes.cancel_scope(member_workspace_id(member_id))
         while True:
             snapshot = await self._backend.operation_snapshot(submitted.handle_id)
-            if snapshot.state in _TERMINAL_EVALUATION_STATES:
+            if is_finished(snapshot.state):
                 break
             await self._backend.await_result(submitted.handle_id, MAX_AGENT_AWAIT_S)
         if not snapshot.stage_outcomes or not snapshot.evidence_ids:

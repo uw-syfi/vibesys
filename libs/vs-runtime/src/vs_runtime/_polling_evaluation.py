@@ -27,6 +27,7 @@ from vs_evaluation.api import (
     EvidenceResultIdentity,
     ExecutorObservation,
     ExecutorPoll,
+    LifecyclePublisher,
     PollPhase,
     ResourceRequirements,
     ReuseStatus,
@@ -35,6 +36,7 @@ from vs_evaluation.api import (
     StageState,
     TrustedEvidence,
     evidence_identity,
+    is_finished,
 )
 from vs_runtime._evaluation_failure_text import render_evaluation_failure, render_stage_failure
 from vs_runtime._failure_classification import is_unsettled
@@ -42,16 +44,6 @@ from vs_runtime.contracts import BenchmarkFailureKind
 
 if TYPE_CHECKING:
     from vs_runtime.contracts import CandidateWorkspace, Evaluation, Workspace, Workspaces
-
-
-_ENDED = frozenset(
-    {
-        EvaluationState.SUCCEEDED,
-        EvaluationState.FAILED,
-        EvaluationState.CANCELED,
-        EvaluationState.SUPERSEDED,
-    }
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,8 +65,7 @@ class PollingEvaluationExecutor:
         self._evaluation = evaluation
         self._workspaces = workspaces
         self._tasks: dict[str, asyncio.Task[None]] = {}
-        self._observations: dict[str, ExecutorObservation] = {}
-        self._changes: dict[str, asyncio.Event] = {}
+        self._lifecycle = LifecyclePublisher()
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         del requirements
@@ -92,45 +83,37 @@ class PollingEvaluationExecutor:
         )
 
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
-        if handle_id in self._tasks or handle_id in self._observations:
+        if handle_id in self._tasks or self._lifecycle.observation(handle_id) is not None:
             return
         self._publish(handle_id, ExecutorObservation(state=EvaluationState.QUEUED))
         self._tasks[handle_id] = asyncio.create_task(self._run(handle_id, request))
 
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
         """Read process-local evidence without starting recovery tasks."""
-        return self._observations.get(handle_id)
+        return self._lifecycle.observation(handle_id)
 
     async def poll(self, handle_id: str) -> ExecutorPoll:
         """Inspect once from process-local state; never submits, cancels or creates a workspace."""
-        observed = self._observations.get(handle_id)
+        observed = self._lifecycle.observation(handle_id)
         if observed is None:
             return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
-        if observed.state in _ENDED:
+        if is_finished(observed.state):
             return ExecutorPoll(phase=PollPhase.ENDED, terminal=observed)
         phase = PollPhase.QUEUED if observed.state is EvaluationState.QUEUED else PollPhase.RUNNING
         return ExecutorPoll(phase=phase, current_stage=observed.current_stage)
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
-        return self._observations.get(handle_id)
+        return self._lifecycle.observation(handle_id)
 
     async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
-        event = self._changes.setdefault(handle_id, asyncio.Event())
-        if event.is_set():
-            event.clear()
-            return
-        try:
-            await asyncio.wait_for(event.wait(), timeout_s)
-        except TimeoutError:
-            return
-        event.clear()
+        await self._lifecycle.wait_for_change(handle_id, timeout_s)
 
     async def cancel(self, handle_id: str) -> None:
         task = self._tasks.get(handle_id)
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-        observed = self._observations.get(handle_id)
+        observed = self._lifecycle.observation(handle_id)
         self._publish(
             handle_id,
             ExecutorObservation(
@@ -140,11 +123,10 @@ class PollingEvaluationExecutor:
         )
 
     async def close(self) -> None:
-        tasks = tuple(task for task in self._tasks.values() if not task.done())
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        # Through cancel(), not task.cancel(): a task cancelled before its first step
+        # never runs its own handler, so only cancel() ends it in a published state.
+        active = tuple(handle_id for handle_id, task in self._tasks.items() if not task.done())
+        await asyncio.gather(*(self.cancel(handle_id) for handle_id in active))
 
     async def _run(self, handle_id: str, request: EvaluationRequest) -> None:
         first = SemanticEvaluationStage.model_validate(request.stages[0].payload)
@@ -307,5 +289,4 @@ class PollingEvaluationExecutor:
         return _SemanticStageObservation(evidence=evidence, completed=completed)
 
     def _publish(self, handle_id: str, observation: ExecutorObservation) -> None:
-        self._observations[handle_id] = observation
-        self._changes.setdefault(handle_id, asyncio.Event()).set()
+        self._lifecycle.publish(handle_id, observation)

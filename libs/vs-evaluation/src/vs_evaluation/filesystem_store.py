@@ -16,6 +16,7 @@ from vs_evaluation.coordinator import (
     RevisionConflictError,
     stable_handle_id,
 )
+from vs_evaluation.lifecycle import FINISHED_STATES
 from vs_evaluation.models import EvaluationRequest, EvaluationState, StoredEvaluation
 from vs_project.api import atomic_write_bytes
 
@@ -25,14 +26,6 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 _HANDLE_ID_LENGTH = len("eval_") + 64
-_TERMINAL = frozenset(
-    {
-        EvaluationState.SUCCEEDED,
-        EvaluationState.FAILED,
-        EvaluationState.CANCELED,
-        EvaluationState.SUPERSEDED,
-    }
-)
 
 
 class EvaluationStoreCorruptionError(RuntimeError):
@@ -128,7 +121,9 @@ class FilesystemEvaluationStore:
 
     async def nonterminal(self) -> tuple[StoredEvaluation, ...]:
         """Return all durable records that need lifecycle reconciliation."""
-        return tuple(record for record in await self.records() if record.state not in _TERMINAL)
+        return tuple(
+            record for record in await self.records() if record.state not in FINISHED_STATES
+        )
 
     async def _run_locked(self, operation: Callable[[], T]) -> T:
         """Run blocking filesystem and flock operations off the event loop."""

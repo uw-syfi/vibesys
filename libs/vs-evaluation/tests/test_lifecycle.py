@@ -399,7 +399,11 @@ async def test_status_rejects_executor_state_regression() -> None:
     handle = await coordinator(executor, InMemoryEvaluationStore()).submit(request())
     executor.set_state(handle.id, EvaluationState.RUNNING, current_stage="correctness")
     await handle.status()
-    executor.set_state(handle.id, EvaluationState.STARTING, current_stage="correctness")
+    # A misbehaving provider reports a lower state; the Fake's own backend would
+    # refuse to hold it, so script the reading the coordinator will see.
+    executor.script_observations(
+        ExecutorObservation(state=EvaluationState.STARTING, current_stage="correctness")
+    )
 
     with pytest.raises(RuntimeError, match="regressed"):
         await handle.status()
