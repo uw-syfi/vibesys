@@ -1448,6 +1448,9 @@ async def test_inactive_executor_cancels_prepared_intent_without_external_identi
             assert isinstance(unknown, ClusterUnknown)
             assert unknown.job_id is None
             await first.close()
+            # Closing drains the executor's waiting execution even though the
+            # evaluation had already ended durably, so nothing is left queued.
+            assert await admission.counts() == (1, 0)
         rejected = cluster.submit(
             SlurmBatchRequest(
                 workspace=workspace,
