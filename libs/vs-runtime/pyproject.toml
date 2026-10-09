@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=70.1", "wheel>=0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-runtime"
+version = "0.1.0"
+description = "Run mechanisms: sessions, workspaces, evaluation execution and the core shell"
+requires-python = ">=3.12"
+dependencies = [
+    "jinja2>=3.1",
+    "pydantic>=2",
+    "pyyaml>=6",
+    "vs-agent",
+    "vs-async-ops",
+    "vs-core",
+    "vs-evaluation",
+    "vs-evaluator-protocol",
+    "vs-mcp",
+    "vs-project",
+    "vs-prompts",
+    "vs-sandbox",
+    "vs-slurm",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vs_runtime = ["py.typed", "prompts/*.j2"]
+
+[tool.uv.sources]
+vs-agent = { workspace = true }
+vs-async-ops = { workspace = true }
+vs-core = { workspace = true }
+vs-evaluation = { workspace = true }
+vs-evaluator-protocol = { workspace = true }
+vs-mcp = { workspace = true }
+vs-project = { workspace = true }
+vs-prompts = { workspace = true }
+vs-sandbox = { workspace = true }
+vs-slurm = { workspace = true }

@@ -355,9 +355,10 @@ def test_root_metadata_declares_internal_runtime_dependencies_directly() -> None
 
     assert requirements.isdisjoint(INTERNAL_DISTRIBUTIONS)
     assert {"mcp", "modal"} <= requirements
-    members = pyproject["tool"]["uv"]["workspace"]["members"]
-    assert members[0] == "sdk/*"
-    assert all((PROJECT_ROOT / member / "pyproject.toml").is_file() for member in members[1:])
+    assert pyproject["tool"]["uv"]["workspace"]["members"] == ["sdk/*", "libs/*"]
+    libraries = sorted((PROJECT_ROOT / "libs").iterdir())
+    assert libraries
+    assert all((library / "pyproject.toml").is_file() for library in libraries)
 
 
 def test_frontend_payload_belongs_to_the_entrypoints_package() -> None:
