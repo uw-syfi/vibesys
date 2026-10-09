@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from vs_slurm.api import (
     SlurmBatchStage,
     SlurmConfig,
     SlurmConnectorTransport,
+    SlurmError,
     SlurmFileArtifact,
     SlurmJobHandle,
     SlurmJobRequest,
@@ -104,6 +106,32 @@ def test_an_executing_cluster_runs_the_staged_job_before_its_first_poll(tmp_path
     assert failed.exit_code != 0
     assert failed.job_id != job.job_id
     assert "staged" in runner.run(request).output
+
+
+def _racing_mv(directory: Path) -> Path:
+    """Shadow ``mv`` so a competitor creates the destination just before the rename."""
+    directory.mkdir()
+    shim = directory / "mv"
+    shim.write_text(
+        "#!/bin/sh\n"
+        "for last; do :; done\n"
+        'case "$last" in *.vibesys-content-cache/*) mkdir -p "$last" ;; esac\n'
+        'exec /bin/mv "$@"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    return directory
+
+
+def test_publishing_never_reports_success_when_a_competitor_took_the_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _state, runner, workspace = _executing_runner(tmp_path)
+    shims = _racing_mv(tmp_path / "racing-bin")
+    monkeypatch.setenv("PATH", f"{shims}{os.pathsep}{os.environ['PATH']}")
+
+    with pytest.raises(SlurmError, match="exit code 74"):
+        runner.run(SlurmJobRequest(workspace=workspace, command=("true",)))
 
 
 def test_an_executing_cluster_holds_jobs_until_they_are_cancelled(tmp_path: Path) -> None:

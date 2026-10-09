@@ -249,6 +249,7 @@ def _publish_command(
     ready = shlex.quote((object_root / "ready").as_posix())
     stale_prefix = shlex.quote((object_root.parent / f"{object_root.name}.lock.stale").as_posix())
     temporary_ready = shlex.quote((temporary_root / "ready").as_posix())
+    nested = shlex.quote((object_root / temporary_root.name).as_posix())
     return (
         "for attempt in $(seq 1 30); do "
         f"if [ -f {ready} ]; then printf 'READY'; exit 0; fi; "
@@ -258,7 +259,11 @@ def _publish_command(
         f'printf \'owner=%s\\npid=%s\\ncreated=%s\\n\' {staging} "$$" "$(date +%s)" > {owner}; '
         f"if [ -f {ready} ]; then printf 'READY'; exit 0; fi; "
         f"if [ -e {target} ]; then exit 73; fi; "
-        f"touch {temporary_ready} && mv -T -- {temporary} {target} || exit 74; "
+        # POSIX mv has no -T: if a directory appeared at the target after the
+        # check above, mv would move the temporary tree inside it and exit 0.
+        # Publishing counts only if the target is the ready tree itself.
+        f"touch {temporary_ready} && mv -- {temporary} {target} && "
+        f"[ -f {ready} ] && [ ! -e {nested} ] || exit 74; "
         "printf 'PUBLISHED'; exit 0; fi; "
         f"owner_pid=$(sed -n 's/^pid=//p' {owner} 2>/dev/null); "
         f"created_at=$(sed -n 's/^created=//p' {owner} 2>/dev/null); "
