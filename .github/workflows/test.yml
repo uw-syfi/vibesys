@@ -464,9 +464,11 @@ jobs:
   # Keeps the shard balance current without a hand-edited record: a green run on
   # main merges its shards' measured seconds into a cache entry, which the
   # `changes` job of every later run restores. Off the critical path (it runs
-  # beside `coverage`), and never required.
+  # beside `coverage`), and advisory: its failure does not fail the run.
   record-durations:
     needs: [changes, test]
+    # A failed recording only leaves the previous cache entry in use.
+    continue-on-error: true
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       needs.test.result == 'success'
@@ -651,6 +653,7 @@ jobs:
       - validate-examples
       - agent-image
       - test
+      - record-durations
       - coverage
       - sandbox-linux
       - sandbox-macos
