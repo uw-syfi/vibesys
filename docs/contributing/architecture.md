@@ -79,6 +79,15 @@ settings, including the concrete profiler. Resume checks it before setup.
 Trusted evaluator execution and package mechanics live in the runtime and
 sandbox libraries. Orchestration owns gate cadence and result interpretation.
 
+Libraries are converted to uv workspace members bottom-up (a library converts
+once every library it imports is a member). A member's `pyproject.toml` declares
+exactly the third-party packages its `src/` imports, and reaches other members
+through `[tool.uv.sources] <name> = { workspace = true }`.
+`scripts/check_member_dependencies.py` fails CI on an undeclared or unused
+dependency, an undeclared member edge, or an import of a root-distribution
+package. The `vibesys` wheel still bundles every library's source, so each
+member dependency must also appear in the root `dependencies`.
+
 The internal custom-policy execution contract and example are in
 [orchestration-runtime.md](orchestration-runtime.md).
 

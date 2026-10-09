@@ -353,7 +353,9 @@ def test_root_metadata_declares_internal_runtime_dependencies_directly() -> None
 
     assert requirements.isdisjoint(INTERNAL_DISTRIBUTIONS)
     assert {"mcp", "modal"} <= requirements
-    assert pyproject["tool"]["uv"]["workspace"]["members"] == ["sdk/*", "libs/vs-core"]
+    members = pyproject["tool"]["uv"]["workspace"]["members"]
+    assert members[0] == "sdk/*"
+    assert all((PROJECT_ROOT / member / "pyproject.toml").is_file() for member in members[1:])
 
 
 def test_frontend_payload_belongs_to_the_entrypoints_package() -> None:
@@ -428,6 +430,14 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
         members = {
             member.name.partition("/")[2] for member in archive.getmembers() if member.isfile()
         }
+
+    workspace_members = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())["tool"]["uv"][
+        "workspace"
+    ]["members"]
+    for member_glob in workspace_members:
+        for manifest_path in PROJECT_ROOT.glob(f"{member_glob}/pyproject.toml"):
+            if member_glob.startswith("libs/"):
+                assert manifest_path.relative_to(PROJECT_ROOT).as_posix() in members
 
     assert "resources/evaluators/queue/vibesys.evaluator.toml" in members
     assert "resources/evaluators/microservice/vibesys.evaluator.toml" in members
