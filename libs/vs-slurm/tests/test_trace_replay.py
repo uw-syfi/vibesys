@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from vs_slurm.api import (
     CANCEL_REACTIONS,
     LIFETIMES,
+    ClusterCancelRequested,
     ClusterObservation,
     ClusterUnknown,
     ManualClock,
@@ -354,3 +355,100 @@ def test_a_connector_prints_sacct_states_as_the_real_command_does(tmp_path: Path
         replies[flag] = json.loads(reply.stdout)["stdout"]
 
     assert replies == {"": "OUT_OF_ME+    0:125\n", "-P ": "OUT_OF_MEMORY|0:125\n"}
+
+
+_PURGED = "slurm_load_jobs error: Invalid job id specified"
+
+
+def _purged_after_the_run(accounting_state: str | None) -> SchedulerTrace:
+    """Synthetic (from Slurm's documented behavior, not a recording): ``MinJobAge`` after the
+    job ended the controller drops it, so ``squeue -j`` and ``scancel`` exit 1."""
+    ended = LIFETIMES["normal-run"].steps[-1]
+    return SchedulerTrace(
+        name="purged",
+        provenance="synthetic: the controller purged the ended job; only accounting remains",
+        steps=(
+            *LIFETIMES["normal-run"].steps,
+            TraceStep(
+                at_seconds=ended.at_seconds + 300,
+                queue_state=None,
+                queue_failure=_PURGED,
+                accounting_state=accounting_state,
+                exit_code="0:0",
+            ),
+        ),
+    )
+
+
+def _submitted_then_purged(
+    tmp_path: Path, lifetime: SchedulerTrace
+) -> tuple[SlurmCluster, TraceConnector]:
+    runner, connector, clock = _runner(tmp_path, lifetime, CANCEL_REACTIONS["cancel-running"])
+    cluster = SlurmCluster(runner, state_root=tmp_path / "ids")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request = SlurmBatchRequest(
+        workspace=workspace, stages=(SlurmBatchStage(name="work", command=("true",)),)
+    )
+    cluster.submit(request, operation_id="op")
+    clock.advance(lifetime.duration_seconds + 1)
+    return cluster, connector
+
+
+def test_a_job_the_controller_has_purged_is_read_from_accounting(tmp_path: Path) -> None:
+    """Mechanism: a failed queue read raised before accounting was consulted."""
+    cluster, _connector = _submitted_then_purged(tmp_path, _purged_after_the_run("COMPLETED"))
+
+    observed = cluster.inspect("op")
+
+    assert isinstance(observed, ClusterObservation), observed
+    assert observed.status is SlurmJobStatus.COMPLETED
+
+
+def test_cancelling_a_purged_job_keeps_its_terminal_result(tmp_path: Path) -> None:
+    """scancel on a purged job exits 1 too; the cancel must not turn that into a failure."""
+    cluster, connector = _submitted_then_purged(tmp_path, _purged_after_the_run("COMPLETED"))
+
+    assert isinstance(cluster.cancel("op"), ClusterCancelRequested)
+    observed = cluster.inspect("op")
+
+    assert isinstance(observed, ClusterObservation), observed
+    assert observed.status is SlurmJobStatus.COMPLETED
+    assert connector.scancels() == 0
+
+
+def test_a_purged_job_accounting_knows_nothing_of_stays_unknown(tmp_path: Path) -> None:
+    """With neither source naming the job, nothing may be claimed."""
+    cluster, _connector = _submitted_then_purged(tmp_path, _purged_after_the_run(None))
+
+    assert isinstance(cluster.inspect("op"), ClusterUnknown)
+
+
+def test_a_queue_failure_cannot_carry_a_queue_state() -> None:
+    with pytest.raises(ValidationError):
+        TraceStep(
+            at_seconds=0.0, queue_state="RUNNING", accounting_state=None, queue_failure=_PURGED
+        )
+
+
+def test_a_connector_refuses_squeue_and_scancel_for_a_purged_job_as_slurm_does(
+    tmp_path: Path,
+) -> None:
+    """The Fake must not be kinder than Slurm: both programs exit 1 for a job it forgot."""
+    cluster, connector = _submitted_then_purged(tmp_path, _purged_after_the_run("COMPLETED"))
+    observed = cluster.inspect("op")
+    assert isinstance(observed, ClusterObservation)
+    replies = {}
+    for command in (f"squeue -h -j {observed.job_id} -o %T", f"scancel {observed.job_id}"):
+        reply = connector(
+            ["c"], stdin=json.dumps({"operation": "exec", "command": command}), timeout=1
+        )
+        replies[command.split()[0]] = json.loads(reply.stdout)
+
+    assert {name: (r["returncode"], r["stderr"].strip()) for name, r in replies.items()} == {
+        "squeue": (1, _PURGED),
+        "scancel": (
+            1,
+            f"scancel: error: Kill job error on job id {observed.job_id}: Invalid job id specified",
+        ),
+    }

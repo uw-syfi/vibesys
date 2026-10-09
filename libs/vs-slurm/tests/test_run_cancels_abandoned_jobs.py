@@ -63,6 +63,7 @@ class _Cluster:
         self._failure = failure
         self.polls_before_failure = 0
         self.fail_scancel = False
+        self._down = False
 
     def process(
         self, argv: Sequence[str], *, stdin: str | None, timeout: float
@@ -73,8 +74,12 @@ class _Cluster:
         command = str(request.get("command", ""))
         if command.startswith("squeue"):
             if self.polls_before_failure == 0:
-                return self._failure(argv)  # ty: ignore[invalid-return-type]
-            self.polls_before_failure -= 1
+                self._down = True
+            else:
+                self.polls_before_failure -= 1
+        # A transport failure takes the accounting read down with the queue read.
+        if self._down and command.startswith(("squeue", "sacct")):
+            return self._failure(argv)  # ty: ignore[invalid-return-type]
         if command.startswith("scancel") and self.fail_scancel:
             handle(self.state, request)
             return _killed_transport(argv)

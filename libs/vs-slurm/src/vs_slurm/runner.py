@@ -1139,7 +1139,16 @@ class SlurmJobRunner:
         """Read scheduler state with queue reason and estimated start evidence."""
         if re.fullmatch(r"[0-9]+", job_id) is None:
             raise SlurmError.invalid_job_id()
-        active = self._queue_state(job_id)
+        # Accounting, not the queue, is authoritative for an ended job: slurmctld
+        # purges it after MinJobAge (300 s by default) and ``squeue -j`` then fails
+        # with "Invalid job id specified". A failed queue read is therefore not a
+        # verdict; sacct decides, and only both failing (or sacct knowing nothing
+        # of a job the queue could not be read for) leaves the state unknown.
+        queue_failure: SlurmError | None = None
+        try:
+            active = self._queue_state(job_id)
+        except SlurmError as exc:
+            queue_failure, active = exc, ""
         queued = None
         if active:
             fields = active.splitlines()[0].split("|")
@@ -1173,6 +1182,8 @@ class SlurmJobRunner:
             # the result.
             if queued is None or ended.phase is SlurmPhase.ENDED:
                 return ended
+        if queue_failure is not None:
+            raise queue_failure
         return queued if queued is not None else _reading("UNKNOWN")
 
     def _queue_state(self, job_id: str) -> str:
