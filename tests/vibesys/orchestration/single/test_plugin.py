@@ -380,7 +380,7 @@ def test_interrupted_final_paid_attempt_closes_its_round_and_the_run_continues(
 
     status, script, state = asyncio.run(scenario())
 
-    assert status is RunStatus.SUCCEEDED
+    assert status is RunStatus.FAILED  # nothing measured
     assert [role for role, _history, _message in script.calls] == [
         DESIGNER.id,
         IMPLEMENTER.id,
@@ -444,7 +444,9 @@ def test_resume_runs_the_same_implementer_attempts_as_an_uninterrupted_run(
     base_status, base_turns, _ = implementer_calls(None, tmp_path / "base")
     status, turns, state = implementer_calls(crash_at, tmp_path / "crashed")
 
-    assert (status, turns) == (base_status, base_turns) == (RunStatus.SUCCEEDED, budget)
+    assert (
+        (status, turns) == (base_status, base_turns) == (RunStatus.FAILED, budget)
+    )  # nothing measured
     assert state.last_paid_attempt is None
     assert [(record.round_number, record.passed) for record in state.search.rounds] == [(1, False)]
 
