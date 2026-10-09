@@ -104,6 +104,11 @@ testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/te
 # shared native-build fixtures on one worker.
 addopts = "-ra -p no:tach --import-mode=importlib --dist load --maxschedchunk=1 --cov --cov-report=term-missing -m 'not slow'"
 pythonpath = [".", "packaging"]
+# A test still running after this many seconds dumps every thread's stack to
+# stderr (xdist workers inherit the controller's stderr, so it reaches the CI
+# log). It never kills or fails the test, so it is a diagnostic and not a
+# wall-clock assertion. It sits far above the slowest legitimate test.
+faulthandler_timeout = 300
 markers = [
     # Applied by `pytest_collection_modifyitems` in the root conftest.py, which
     # maps it onto an xdist scheduling group so CI's `-n auto --dist loadgroup`
