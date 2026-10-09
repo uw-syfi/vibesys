@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
@@ -479,8 +480,14 @@ _TURNS = st.lists(
 ).map(tuple)
 
 
+# A pull request draws a sample; the scheduled workflow sets ``VIBESYS_FULL_PROPERTIES=1``
+# and draws the full count. An example costs about 0.15 s (the core validates the whole
+# run record at every step), so the full count is a half-minute run.
+_EXAMPLES = 200 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 30
+
+
 @settings(
-    max_examples=200,
+    max_examples=_EXAMPLES,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
 )
