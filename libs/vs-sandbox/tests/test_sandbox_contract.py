@@ -37,6 +37,7 @@ from __future__ import annotations
 import contextlib
 import errno
 import os
+import select
 import shlex
 import shutil
 import threading
@@ -55,6 +56,8 @@ if TYPE_CHECKING:
 
 _CAP = 200
 _TIMEOUT_SECONDS = 2
+#: Upper bound on a stopped process exiting; reached only when a stop failed.
+_EXIT_BOUND_SECONDS = 30.0
 _PARTIAL_STDOUT = "partial-out"
 _PARTIAL_STDERR = "partial-err"
 _TRUNCATION_MARKER = "...[truncated]..."
@@ -152,13 +155,26 @@ class _ShellHarness:
             os.close(os.open(self.workspace / "ready", os.O_WRONLY | os.O_NONBLOCK))
 
     def processes_gone(self) -> bool:
-        try:
-            # b"" is end-of-file (no writer left); a live writer raises EAGAIN.
-            return os.read(self._alive_reader, 1) == b""
-        except OSError as error:
-            if error.errno in {errno.EAGAIN, errno.EWOULDBLOCK}:
+        """Whether every process of the command exits once its stop was delivered.
+
+        ``execute`` returns when the stopped command's leader has exited and been
+        reaped. A descendant it left behind exits asynchronously after its signal,
+        so an instantaneous check can see it mid-exit. A live writer makes the read
+        end unreadable; waiting for end-of-file on ``alive`` observes the exit itself.
+        The bound only turns a process that survives its stop into a failure instead
+        of a hang. A command that never started has no writer and reads end-of-file
+        at once, which a wait could never see.
+        """
+        while True:
+            try:
+                # b"" is end-of-file: no writer is left.
+                return os.read(self._alive_reader, 1) == b""
+            except OSError as error:
+                if error.errno not in {errno.EAGAIN, errno.EWOULDBLOCK}:
+                    raise
+            readable, _, _ = select.select([self._alive_reader], [], [], _EXIT_BOUND_SECONDS)
+            if not readable:
                 return False
-            raise
 
 
 @dataclass
