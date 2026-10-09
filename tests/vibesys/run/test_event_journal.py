@@ -70,7 +70,6 @@ def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> 
                 execution_id="invocation-1",
                 system_prompt="system",
                 user_prompt="task",
-                driver="mock",
                 provider="test",
                 model="model-for-implementer",
             )

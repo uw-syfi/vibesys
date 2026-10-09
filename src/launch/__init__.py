@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, cast
 from launch.agents import BuiltInSessionAgents
 from launch.catalog import built_in_orchestrations
 from launch.composition import AGENT_TOOL_BINDINGS
-from vibesys.api import AuxiliaryAgentDriver
 from vibesys.api.request import validate_descriptor as _validate_descriptor
 from vibesys.api.request import validate_run_request as _validate_run_request
 from vibesys.api.store import open_run_store as _open_run_store
@@ -104,11 +103,7 @@ def create_session(
                 else selected.invocation_store_factory
             ),
             agent_tool_bindings=AGENT_TOOL_BINDINGS,
-            agent_drivers=(
-                AuxiliaryAgentDriver(
-                    driver="agentshim", providers=tuple(sorted(SHIPPED_PROVIDERS))
-                ),
-            ),
+            agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),
         ),
     )
 

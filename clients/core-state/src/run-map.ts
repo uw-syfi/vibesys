@@ -59,7 +59,6 @@ export interface AgentPhase {
   readonly invocationId?: string;
   readonly startedAt?: string;
   readonly finishedAt?: string;
-  readonly driver?: string | null;
   readonly provider?: string | null;
   readonly model?: string | null;
 }
@@ -589,7 +588,7 @@ function applyPhaseEvent(state: RunMapState, event: RunEvent): AgentPhase[] {
   const data = event.data;
   const runtime =
     started && data?.kind === 'agent_execution_started'
-      ? {driver: data.driver ?? null, provider: data.provider ?? null, model: data.model ?? null}
+      ? {provider: data.provider ?? null, model: data.model ?? null}
       : {};
   return upsertPhase(phases, {
     kind,

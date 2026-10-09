@@ -8,10 +8,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from tests.server.support import build_server_parts
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
 from server.diagnostics import (
@@ -376,3 +378,78 @@ def test_terminal_wrapper_reuses_cause_diagnostic(tmp_path: Path) -> None:
     assert terminal.diagnostic.detail == (
         "RuntimeError: run cleanup failed <- RuntimeError: token=[REDACTED] agent process exited"
     )
+
+
+def _legacy_driver_line(sequence: int, event_type: str, data: Mapping[str, object]) -> str:
+    return json.dumps(
+        {
+            "protocol_version": 1,
+            "sequence": sequence,
+            "run_id": "persisted-run",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "type": event_type,
+            "agent_kind": "implementer",
+            "round_label": "round 1",
+            "execution_id": "exec-1",
+            "data": data,
+        }
+    )
+
+
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=25)
+@given(driver=st.one_of(st.none(), st.text(max_size=12)))
+def test_journal_recorded_with_the_removed_driver_field_still_replays(
+    tmp_path_factory: pytest.TempPathFactory, driver: str | None
+) -> None:
+    """Events written while a ``driver`` attribution existed replay without it.
+
+    The field was always ``"agentshim"`` and was removed from the wire. Event
+    payloads ignore keys they no longer declare, so history recorded before the
+    removal loads and the dropped key never reappears on the wire. The event
+    envelope still rejects unknown keys.
+    """
+    log_dir = tmp_path_factory.mktemp("legacy-driver") / "logs"
+    log_dir.mkdir()
+    started = {
+        "kind": "agent_execution_started",
+        "stage": "implementer",
+        "activity": {
+            "kind": "agent_execution_activity_changed",
+            "mode": "thinking",
+            "summary": "working",
+        },
+        "driver": driver,
+        "provider": "codex",
+        "model": "gpt-test",
+    }
+    created = {
+        "kind": "chat_thread_created",
+        "thread_id": "thread-1",
+        "driver": driver or "agentshim",
+        "provider": "codex",
+        "model": "gpt-test",
+        "created_at": "2024-01-01T00:00:00Z",
+    }
+    (log_dir / "run-events.jsonl").write_text(
+        _legacy_driver_line(1, "agent_execution_started", started)
+        + "\n"
+        + _legacy_driver_line(2, "chat_thread_created", created)
+        + "\n"
+    )
+
+    parts = build_server_parts(log_dir)
+    events = parts.journal.read()
+
+    started_events = [e.data for e in events if isinstance(e.data, AgentExecutionStartedData)]
+    assert [data.provider for data in started_events] == ["codex"]
+    assert all("driver" not in (event.model_dump(mode="json")["data"] or {}) for event in events)
+    assert [thread.thread_id for thread in parts.chat.threads()] == ["thread-1"]
+
+
+def test_unknown_event_envelope_keys_stay_rejected() -> None:
+    with pytest.raises(ValueError, match="driver"):
+        RunEvent.model_validate_json(
+            _legacy_driver_line(1, "output", {"kind": "agent_output_chunk"}).replace(
+                '"sequence"', '"driver": "agentshim", "sequence"', 1
+            )
+        )

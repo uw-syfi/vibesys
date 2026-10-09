@@ -636,11 +636,10 @@ describe('prefix merges across the chunk boundary', () => {
 
     expect(merged).toEqual(reduceEventBatch(initialCoreState(), events));
     expect(merged.chatThreads).toEqual([
-      {id: DEFAULT_CHAT_THREAD_ID, title: '', driver: null, provider: null, model: null},
+      {id: DEFAULT_CHAT_THREAD_ID, title: '', provider: null, model: null},
       {
         id: 'thread-a',
         title: 'Ring buffer sizing',
-        driver: 'agentshim',
         provider: 'anthropic',
         model: 'opus',
       },
@@ -1101,7 +1100,6 @@ function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds 
             summary: 'Thinking',
             tool: null,
           },
-          driver: 'agentshim',
           provider: 'anthropic',
           model: 'claude-sonnet',
         },
@@ -1276,7 +1274,6 @@ function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds 
             kind: 'chat_thread_created',
             thread_id: threadId,
             title: '',
-            driver: 'agentshim',
             provider: 'anthropic',
             model: 'claude-sonnet',
             created_at: isoAt(clock),
@@ -1471,7 +1468,6 @@ function threadCreatedEvent(sequence: number, threadId: string): RunEvent {
       kind: 'chat_thread_created',
       thread_id: threadId,
       title: '',
-      driver: 'agentshim',
       provider: 'anthropic',
       model: 'opus',
       created_at: timestamp(sequence),

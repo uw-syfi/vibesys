@@ -1786,7 +1786,7 @@ describe('session controller', () => {
     expect(menu?.selected).toBe(1);
   });
 
-  it('starts a thread on the selected model, sending no driver', async () => {
+  it('starts a thread on the selected model', async () => {
     const transport = new ThreadTransport();
     const controller = new SocketSessionController(transport);
     await controller.start();
@@ -3367,9 +3367,7 @@ class ThreadTransport implements ServerTransport {
     }
     if (input.type === 'query.chat_thread_create') {
       const threadId = `thread-${++this.#threads}`;
-      // The backend resolves the run's own driver; the client never sends one.
       const settings = {
-        driver: 'agentshim',
         provider: input.provider ?? 'codex',
         model: input.model ?? 'gpt-run',
       };

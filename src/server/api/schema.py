@@ -574,7 +574,6 @@ def fully_populated_response() -> Response:
             "chat_thread": {
                 "thread_id": "thread",
                 "title": "A thread title",
-                "driver": "driver",
                 "provider": "provider",
                 "model": "model",
             },
@@ -616,7 +615,6 @@ def fully_populated_response() -> Response:
                             "summary": "working",
                             "tool": "tool",
                         },
-                        "driver": "driver",
                         "provider": "provider",
                         "model": "model",
                     }
@@ -625,7 +623,6 @@ def fully_populated_response() -> Response:
                     {
                         "thread_id": "thread",
                         "title": "A thread title",
-                        "driver": "driver",
                         "provider": "provider",
                         "model": "model",
                     }

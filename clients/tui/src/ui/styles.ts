@@ -447,9 +447,9 @@ export function createMarkdownBlockOptions(
 }
 
 /**
- * A driver lifecycle line that reports a failure rather than a heartbeat.
+ * A lifecycle line that reports a failure rather than a heartbeat.
  *
- * AgentShim drivers stream provider stderr and driver errors through the
+ * AgentShim streams provider stderr and provider errors through the
  * diagnostic channel behind a `[<provider> error]` or `[<provider> stderr]`
  * marker, and nothing in the event distinguishes a crash from a turn
  * boundary. The marker is the only signal the transcript gets, so the failure
@@ -465,7 +465,7 @@ export function conversationRole(entry: ConversationEntry): ConversationRole {
   if (entry.kind === 'assistant') return 'assistant';
   if (entry.kind === 'user') return 'user';
   if (entry.kind === 'prompt') return 'prompt';
-  // A driver's own error markers are the only failure signal on this channel,
+  // A provider's own error markers are the only failure signal on this channel,
   // so they are promoted out of the muted narration style.
   if (entry.kind === 'diagnostic') {
     return FAILURE_DIAGNOSTIC.test(entry.content) ? 'failure' : 'analysis';

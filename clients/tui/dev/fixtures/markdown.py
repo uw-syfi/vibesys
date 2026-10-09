@@ -134,7 +134,6 @@ EXECUTION_STARTED = {
         "summary": "Implementing",
         "tool": None,
     },
-    "driver": "agentshim",
     "provider": "claude",
     "model": "claude-opus-5",
 }

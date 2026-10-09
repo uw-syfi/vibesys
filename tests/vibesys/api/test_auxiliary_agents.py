@@ -15,7 +15,6 @@ from launch import LaunchSettings, create_session, default_runs
 from launch.agents import BuiltInSessionAgents
 from launch.testing import FakeSessionAgents
 from vibesys.api import (
-    AuxiliaryAgentDriver,
     AuxiliaryAgentLaunch,
     AuxiliaryAgents,
     AuxiliaryReadableInput,
@@ -205,7 +204,6 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
             _EnvironmentResources(environment_request, shared_session, environment),
         ),
         agent_backend="stub",
-        driver="agentshim",
         provider="codex",
         model="gpt-test",
         role_models=("gpt-worker",),
@@ -225,7 +223,6 @@ def _launch(readable_path: Path) -> AuxiliaryAgentLaunch:
     return AuxiliaryAgentLaunch(
         role="chat",
         member_id="thread-1",
-        driver="agentshim",
         provider="codex",
         model="gpt-test",
         system_prompt="Investigate read-only evidence.",
@@ -238,14 +235,6 @@ def _launch(readable_path: Path) -> AuxiliaryAgentLaunch:
             ),
         ),
     )
-
-
-@pytest.mark.parametrize("providers", [(), ("codex", "codex"), ("",)])
-def test_auxiliary_agent_driver_rejects_ambiguous_provider_facts(
-    providers: tuple[str, ...],
-) -> None:
-    with pytest.raises(ValidationError, match="provider"):
-        AuxiliaryAgentDriver(driver="agentshim", providers=providers)
 
 
 def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
@@ -261,15 +250,9 @@ def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
             record=observed[0].record,
             log_directory=tmp_path / "logs",
             frontend_state_directory=observed[0].frontend_state_directory,
-            agent_driver="agentshim",
             agent_provider="codex",
             agent_model="gpt-test",
-            agent_drivers=(
-                AuxiliaryAgentDriver(
-                    driver="agentshim",
-                    providers=("claude", "codex", "gemini", "opencode"),
-                ),
-            ),
+            agent_providers=("claude", "codex", "gemini", "opencode"),
             role_models=("gpt-worker",),
         )
     ]
@@ -286,22 +269,14 @@ def test_ready_projection_rejects_inconsistent_agent_defaults(tmp_path: Path) ->
     session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-101220 [SLF001]; exercise the private composition input and validate its public projection contract.
     payload = observed[0].model_dump()
 
-    with pytest.raises(ValidationError, match="drivers must be unique"):
-        RunReady.model_validate(
-            payload
-            | {
-                "agent_drivers": [
-                    {"driver": "agentshim", "providers": ["codex"]},
-                    {"driver": "agentshim", "providers": ["claude"]},
-                ]
-            }
-        )
-    with pytest.raises(ValidationError, match="default auxiliary agent driver is unavailable"):
-        RunReady.model_validate(payload | {"agent_drivers": []})
-    with pytest.raises(ValidationError, match="does not support provider"):
-        RunReady.model_validate(
-            payload | {"agent_drivers": [{"driver": "agentshim", "providers": ["claude"]}]}
-        )
+    for providers, message in (
+        (["codex", "codex"], "must be unique"),
+        ([], "at least one provider"),
+        ([""], "must not be empty"),
+        (["claude"], "is not supported"),
+    ):
+        with pytest.raises(ValidationError, match=message):
+            RunReady.model_validate(payload | {"agent_providers": providers})
 
 
 def test_managed_agent_hides_environment_and_owns_cleanup(
@@ -380,23 +355,18 @@ def test_auxiliary_launch_is_strict_and_rejects_duplicate_paths(tmp_path: Path) 
         )
 
 
-@pytest.mark.parametrize(
-    ("driver", "provider"),
-    [("agentshim", "unknown")],
-)
 def test_auxiliary_selection_rejected_before_environment_acquisition(
     tmp_path: Path,
     agent_settings: LaunchSettings,
-    driver: str,
-    provider: str,
 ) -> None:
     """Every implementation rejects invalid selection before provisioning."""
     environment = _Environment()
     resources = _resources(tmp_path, environment)
     evidence = tmp_path / "evidence"
     evidence.mkdir()
+    provider = "unknown"
     launch = AuxiliaryAgentLaunch.model_validate(
-        _launch(evidence).model_dump() | {"driver": driver, "provider": provider}
+        _launch(evidence).model_dump() | {"provider": provider}
     )
     agents = agent_settings.agents or BuiltInSessionAgents()
 

@@ -504,7 +504,6 @@ class RuntimeAgentExecution:
                 execution_id=execution_id,
                 system_prompt=system_prompt,
                 user_prompt=routed,
-                driver=self._client.driver_name,
                 provider=self._client.provider,
                 model=self._client.model_for_kind(agent_id),
             )
@@ -720,7 +719,6 @@ class RuntimeAgentExecution:
                 execution_id=invocation_id,
                 system_prompt=configuration.system_prompt,
                 user_prompt=message,
-                driver=self.driver_name,
                 provider=self.provider,
                 model=self.model,
             )

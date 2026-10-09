@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from vibesys.api.auxiliary import AuxiliaryAgentDriver, AuxiliaryAgentLaunch, ManagedAgent
+    from vibesys.api.auxiliary import AuxiliaryAgentLaunch, ManagedAgent
     from vibesys.run.integration import RunResources
     from vs_agent.api import (
         AgentClientProtocol,
@@ -62,7 +62,7 @@ class SessionImplementations:
     agent_client_factory: Callable[..., AgentClientProtocol]
     backend_factory: Callable[..., ComputeBackendImpl]
     agents: SessionAgents
-    agent_drivers: tuple[AuxiliaryAgentDriver, ...]
+    agent_providers: tuple[str, ...]
     stop_timer: StopTimer
     timing: RunTiming
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]

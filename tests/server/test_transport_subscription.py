@@ -86,7 +86,6 @@ def _round_log(count: int, *, with_threads: bool = False) -> list[RunEvent]:
                 chat_thread_id="thread-1",
                 data=ChatThreadCreatedData(
                     thread_id="thread-1",
-                    driver="agentshim",
                     provider="claude",
                     model="opus",
                     created_at=_TIMESTAMP,

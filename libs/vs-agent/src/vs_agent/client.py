@@ -458,7 +458,7 @@ class AgentClient:
         )
         _emit_and_log(
             self._sink,
-            f"driver: {self.driver_name or type(self._driver).__name__}, provider: {spec.provider}, "
+            f"provider: {spec.provider}, "
             f"model: {spec.model}, reasoning_effort: {spec.reasoning_effort or 'provider_default'}, "
             f"cwd: {spec.workspace}",
             self._run_log_file,

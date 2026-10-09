@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from vibesys.api.auxiliary import (
-    AgentDriver,
-    AuxiliaryAgentDriver,
     AuxiliaryAgentLaunch,
     ManagedAgent,
     RunReady,
@@ -210,7 +208,7 @@ class _LocalRunSession:
         self._resources = resources
         if self._ready_listener is not None:
             self._ready_listener(
-                _run_ready(resources, self._registry, self._implementations.agent_drivers)
+                _run_ready(resources, self._registry, self._implementations.agent_providers)
             )
 
     def _run_id(self) -> str:
@@ -447,7 +445,7 @@ class InProcessAuxiliaryAgents:
 def _run_ready(
     resources: RunResources,
     registry: OrchestrationRegistry,
-    agent_drivers: tuple[AuxiliaryAgentDriver, ...],
+    agent_providers: tuple[str, ...],
 ) -> RunReady:
     """Project private resource facts to the narrow frontend contract."""
     project = resources.project_resources
@@ -458,9 +456,8 @@ def _run_ready(
         frontend_state_directory=project.project.state.local_namespace(
             project.state.run_id, "server"
         ).external_directory(),
-        agent_driver=cast("AgentDriver", resources.driver),
         agent_provider=resources.provider,
         agent_model=resources.model,
-        agent_drivers=agent_drivers,
+        agent_providers=agent_providers,
         role_models=resources.role_models,
     )

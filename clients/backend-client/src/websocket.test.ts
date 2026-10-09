@@ -1153,7 +1153,7 @@ describe('wire payload validation', () => {
       '{"protocol_version":1,"sequence":0,"run_id":"","timestamp":"2026-01-01T00:00:00Z","type":"agent_output_chunk","text":"hi","diagnostic":null,"status":null,"round_label":null,"agent_kind":null,"invocation_id":null,"execution_id":null,"chat_thread_id":null,"data":null}';
     const activity =
       '{"kind":"agent_execution_activity_changed","mode":"thinking","summary":"working","tool":null}';
-    const checkpoint = `{"execution_id":"e","agent_kind":"implementer","round_label":"r","stage":"implement","attempt":null,"assignment":"a","started_at":"2026-01-01T00:00:00Z","activity":${activity},"driver":null,"provider":null,"model":null}`;
+    const checkpoint = `{"execution_id":"e","agent_kind":"implementer","round_label":"r","stage":"implement","attempt":null,"assignment":"a","started_at":"2026-01-01T00:00:00Z","activity":${activity},"provider":null,"model":null}`;
     const diagnostic =
       '{"id":"a0bb873b","code":"c","summary":"s","detail":null,"hint":null,"scope":"transport","severity":"error","retryability":"unknown","cause_id":null,"debug_ref":null,"source":null}';
 

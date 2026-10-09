@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from tests.server.support import ServerParts, auxiliary_agent_drivers, build_server_parts
+from tests.server.support import ServerParts, auxiliary_agent_providers, build_server_parts
 
 from server.chat.factory import (
     ChatAgentBuilder,
@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 def _remember_thread(parts: ServerParts, thread_id: str = "thread-1") -> ChatThreadCreatedData:
     spec = ChatThreadCreatedData(
         thread_id=thread_id,
-        driver="agentshim",
         provider="codex",
         model="gpt-test",
         created_at=datetime.now(UTC),
@@ -60,7 +59,6 @@ def test_concurrent_restore_is_single_flight(tmp_path: Path) -> None:
 
     def factory(
         thread_id: str,
-        _driver: str | None,
         _provider: str | None,
         _model: str | None,
     ) -> ChatThreadHandle:
@@ -104,7 +102,6 @@ def test_concurrent_restore_shares_factory_failure(tmp_path: Path) -> None:
 
     def factory(
         _thread_id: str,
-        _driver: str | None,
         _provider: str | None,
         _model: str | None,
     ) -> ChatThreadHandle:
@@ -142,7 +139,6 @@ def test_restore_cancellation_wakes_every_waiter(tmp_path: Path) -> None:
 
     def factory(
         _thread_id: str,
-        _driver: str | None,
         _provider: str | None,
         _model: str | None,
     ) -> ChatThreadHandle:
@@ -186,14 +182,12 @@ def test_thread_turns_serialize_and_shutdown_drains_queued_borrowers(tmp_path: P
 
     def factory(
         thread_id: str,
-        driver: str | None,
         provider: str | None,
         model: str | None,
     ) -> ChatThreadHandle:
         return ChatThreadHandle(
             spec=ChatThreadCreatedData(
                 thread_id=thread_id,
-                driver=driver or "agentshim",
                 provider=provider or "codex",
                 model=model or "gpt-test",
                 created_at=datetime.now(UTC),
@@ -250,7 +244,6 @@ def test_restoration_finishing_during_shutdown_is_closed_without_invocation(
 
     def factory(
         _thread_id: str,
-        _driver: str | None,
         _provider: str | None,
         _model: str | None,
     ) -> ChatThreadHandle:
@@ -291,7 +284,6 @@ def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
 
     def factory(
         thread_id: str,
-        driver: str | None,
         provider: str | None,
         model: str | None,
     ) -> ChatThreadHandle:
@@ -300,7 +292,6 @@ def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
         return ChatThreadHandle(
             spec=ChatThreadCreatedData(
                 thread_id=thread_id,
-                driver=driver or "agentshim",
                 provider=provider or "codex",
                 model=model or "gpt-test",
                 created_at=datetime.now(UTC),
@@ -335,10 +326,9 @@ def _factory_for_test(
     build_agent: ChatAgentBuilder,
 ) -> ExperimentChatFactory:
     defaults = ChatRunSettings(
-        driver="agentshim",
         provider="codex",
         model="gpt-test",
-        agent_drivers=auxiliary_agent_drivers(),
+        agent_providers=auxiliary_agent_providers(),
     )
 
     return ExperimentChatFactory(
@@ -349,11 +339,10 @@ def _factory_for_test(
         attachment=RunAttachment(
             chat_state_dir=tmp_path / "chat",
             agent_defaults=AgentSelection(
-                driver=defaults.driver,
                 provider=defaults.provider,
                 model=defaults.model,
             ),
-            agent_drivers=auxiliary_agent_drivers(),
+            agent_providers=auxiliary_agent_providers(),
         ),
         build_agent=build_agent,
         fallback=lambda _question: "fallback",

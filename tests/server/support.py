@@ -14,7 +14,7 @@ from server.execution import AgentExecutionRequest, ExecutionHandle, ExecutionTr
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
-from vibesys.api import AuxiliaryAgentDriver, CoreEventType
+from vibesys.api import CoreEventType
 from vibesys.api.metrics import MetricSpace
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
@@ -97,14 +97,9 @@ def agent_descriptor(
     )
 
 
-def auxiliary_agent_drivers() -> tuple[AuxiliaryAgentDriver, ...]:
-    """Return stable driver/provider facts for server composition tests."""
-    return (
-        AuxiliaryAgentDriver(
-            driver="agentshim",
-            providers=("claude", "codex", "gemini", "opencode"),
-        ),
-    )
+def auxiliary_agent_providers() -> tuple[str, ...]:
+    """Return stable provider facts for server composition tests."""
+    return ("claude", "codex", "gemini", "opencode")
 
 
 def run_record(project: Project, run_id: str) -> RunRecord:
@@ -147,7 +142,6 @@ class ServerParts:
                 system_prompt=system_prompt,
                 participates_in_run_control=participates_in_run_control,
                 emit_lifecycle=emit_lifecycle,
-                driver=agent_selection.driver if agent_selection is not None else None,
                 provider=agent_selection.provider if agent_selection is not None else None,
                 model=agent_selection.model if agent_selection is not None else None,
             )

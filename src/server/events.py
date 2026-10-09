@@ -128,6 +128,13 @@ class EventPayload(BaseModel):
     Payloads are frozen so ``EventStore`` can hand the same stored object to
     every reader instead of copying the whole history on each replay. Producers
     build new payloads; ``model_copy(update=...)`` still works on frozen models.
+
+    Payloads ignore keys they do not declare, which is how history recorded
+    before a field was removed still replays: the retired ``driver``
+    attribution (always ``"agentshim"``) on ``chat_thread_created`` and
+    ``agent_execution_started`` events is dropped on read and never
+    re-serialized. The ``RunEvent`` envelope and wire requests still reject
+    unknown keys.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -158,7 +165,6 @@ class ChatThreadCreatedData(EventPayload):
     kind: Literal["chat_thread_created"] = "chat_thread_created"
     thread_id: str
     title: str = ""
-    driver: str
     provider: str
     model: str
     created_at: datetime
@@ -201,7 +207,6 @@ class AgentExecutionStartedData(EventPayload):
     system_prompt: str = ""
     user_prompt: str = ""
     activity: AgentExecutionActivityData
-    driver: str | None = None
     provider: str | None = None
     model: str | None = None
 

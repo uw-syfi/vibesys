@@ -74,7 +74,6 @@ class RunResources:
     project_resources: ProjectRunResources
     environment_resources: RunEnvironmentResources
     agent_backend: str
-    driver: str
     provider: str
     model: str
     role_models: tuple[str, ...]
@@ -334,7 +333,6 @@ class LocalRunIntegration:
                     activity=AgentExecutionActivityData(
                         mode="thinking", summary=f"{event.agent_id} is working"
                     ),
-                    driver=event.driver,
                     provider=event.provider,
                     model=event.model,
                 ),

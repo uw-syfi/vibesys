@@ -32,7 +32,6 @@ class AgentExecutionStarted(BaseModel):
     execution_id: str
     system_prompt: str
     user_prompt: str
-    driver: str | None = None
     provider: str | None = None
     model: str | None = None
 

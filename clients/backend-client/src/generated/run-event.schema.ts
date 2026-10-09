@@ -116,18 +116,6 @@ const runEventSchema: Record<string, unknown> = {
         "activity": {
           "$ref": "#/$defs/AgentExecutionActivityData"
         },
-        "driver": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Driver"
-        },
         "provider": {
           "anyOf": [
             {
@@ -352,10 +340,6 @@ const runEventSchema: Record<string, unknown> = {
           "title": "Title",
           "type": "string"
         },
-        "driver": {
-          "title": "Driver",
-          "type": "string"
-        },
         "provider": {
           "title": "Provider",
           "type": "string"
@@ -373,7 +357,6 @@ const runEventSchema: Record<string, unknown> = {
       "required": [
         "kind",
         "thread_id",
-        "driver",
         "provider",
         "model",
         "created_at"

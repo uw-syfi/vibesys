@@ -57,7 +57,6 @@ describe('run map projection', () => {
           summary: 'Starting',
           tool: null,
         },
-        driver: 'agentshim',
         provider: 'codex',
         model: 'gpt-5.1-codex-max',
       },
@@ -68,7 +67,6 @@ describe('run map projection', () => {
       {
         executionId: 'a',
         status: 'completed',
-        driver: 'agentshim',
         provider: 'codex',
         model: 'gpt-5.1-codex-max',
       },
@@ -79,7 +77,7 @@ describe('run map projection', () => {
     const state = applyRunMapEvent(emptyRunMap(), execution(1, 'agent_execution_started', 'a'));
 
     expect(state.phases.filter(phase => phase.kind === 'implementer')).toMatchObject([
-      {driver: null, provider: null, model: null},
+      {provider: null, model: null},
     ]);
   });
 

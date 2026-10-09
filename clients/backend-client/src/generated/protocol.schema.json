@@ -44,18 +44,6 @@
         "activity": {
           "$ref": "#/$defs/AgentExecutionActivityData"
         },
-        "driver": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Driver"
-        },
         "provider": {
           "anyOf": [
             {
@@ -212,18 +200,6 @@
         },
         "activity": {
           "$ref": "#/$defs/AgentExecutionActivityData"
-        },
-        "driver": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Driver"
         },
         "provider": {
           "anyOf": [
@@ -640,7 +616,7 @@
     },
     "ChatThreadCreateQuery": {
       "additionalProperties": false,
-      "description": "Create a new experiment-chat thread with its own agent selection.\n\nOmitted fields resolve to the run's configured driver, provider, and\nmodel. The response carries the resolved settings and thread identity.\n``driver`` exists for completeness and stays validated when supplied, but\nwhich driver backs a run is a deployment detail: clients omit it so every\nthread inherits the run's.",
+      "description": "Create a new experiment-chat thread with its own agent selection.\n\nOmitted fields resolve to the run's configured provider and model. The\nresponse carries the resolved settings and thread identity.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -667,19 +643,6 @@
           "default": "query.chat_thread_create",
           "title": "Type",
           "type": "string"
-        },
-        "driver": {
-          "anyOf": [
-            {
-              "const": "agentshim",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Driver"
         },
         "provider": {
           "anyOf": [
@@ -742,10 +705,6 @@
           "title": "Title",
           "type": "string"
         },
-        "driver": {
-          "title": "Driver",
-          "type": "string"
-        },
         "provider": {
           "title": "Provider",
           "type": "string"
@@ -763,7 +722,6 @@
       "required": [
         "kind",
         "thread_id",
-        "driver",
         "provider",
         "model",
         "created_at"
@@ -784,10 +742,6 @@
           "title": "Title",
           "type": "string"
         },
-        "driver": {
-          "title": "Driver",
-          "type": "string"
-        },
         "provider": {
           "title": "Provider",
           "type": "string"
@@ -799,7 +753,6 @@
       },
       "required": [
         "thread_id",
-        "driver",
         "provider",
         "model"
       ],
