@@ -270,7 +270,7 @@ registries, builders, or callback bundles merely to shorten orchestration code.
 5. Add policy tests through `FakeRun`, prompt or state-transition tests as
    appropriate, and integration coverage for product composition only when the
    boundary itself changes.
-6. Add any new module edge to `tach.toml` and run `uv run tach check`.
+6. Add any new module edge to `tach.toml` and run `uv run python scripts/check_tach.py`.
 
 A preset that shares an implementation but changes policy options should be a
 separate plugin with its own stable ID and options type. Plugin IDs and option
@@ -331,7 +331,7 @@ uv run pytest tests/vibesys/orchestration/single/test_designer.py
 uv run pytest tests/vibesys/orchestration/single/test_plugin.py
 uv run pytest tests/vibesys/orchestration/test_explicit_agent_sessions.py
 uv run pytest tests/vibesys/architecture
-uv run tach check
+uv run python scripts/check_tach.py
 uv run python scripts/check_test_isolation.py
 ```
 

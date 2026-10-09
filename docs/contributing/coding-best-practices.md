@@ -120,7 +120,7 @@ Faster commands for iterating:
 ./scripts/check_format.sh
 ./scripts/check_lint.sh
 ./scripts/check_types.sh
-uv run tach check
+uv run python scripts/check_tach.py
 uv run python scripts/check_doc_links.py
 python3 -m scripts.check_doc_citations
 uv run pytest path/to/test.py

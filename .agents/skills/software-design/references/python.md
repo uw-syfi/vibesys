@@ -17,7 +17,7 @@ package stays whole.
 ## Declaring and enforcing a public interface
 
 Tach is module-granular: each `[[modules]]` entry lists its allowed
-`depends_on` edges, and `uv run tach check` fails on an undeclared edge or a
+`depends_on` edges, and `uv run python scripts/check_tach.py` fails on an undeclared edge or a
 cycle (`forbid_circular_dependencies`).
 
 - **Libraries.** Each `libs/*` package exposes only `<pkg>.api` through an
@@ -36,7 +36,7 @@ cycle (`forbid_circular_dependencies`).
 2. Add the target to the importer's `depends_on` in `tach.toml`, in the same PR.
    Prefer removing an edge to adding one. Never add an upward edge or a cycle;
    move the shared code down.
-3. `uv run tach check`
+3. `uv run python scripts/check_tach.py`
 4. `uv run python scripts/check_tach_graph.py --write`, then commit the updated
    graph in `docs/contributing/architecture.md`.
 
@@ -81,7 +81,7 @@ Named by symbol; read them before writing something similar.
 ## Commands
 
 ```bash
-uv run tach check
+uv run python scripts/check_tach.py
 uv run python scripts/check_tach_graph.py --check   # --write after editing tach.toml
 uv run python scripts/check_file_length.py
 ./scripts/check_lint.sh
