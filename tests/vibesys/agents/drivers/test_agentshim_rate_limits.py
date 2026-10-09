@@ -83,7 +83,6 @@ def _run_turn(info: dict[str, object], root: Path, home: Path) -> tuple[list[Cor
                 SANDBOX_DISABLE_ENV: "off",
             },
         ),
-        driver_name="agentshim",
         provider="claude",
         run_log_file=log,
         event_sink=CoreAgentEventSink(journal.record),
