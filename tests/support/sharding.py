@@ -7,10 +7,14 @@ the per-file seconds in ``shard_durations.json``. A file missing from that
 record is weighted at the mean of the recorded files, so a new test file lands
 somewhere sensible until the record is refreshed.
 
-A file whose recorded seconds exceed ``HEAVY_SECONDS`` is too big to place as one
-unit (one crash-sweep file alone can outlast a whole shard's budget). Its tests
-are spread over the shards instead, each weighted at an even share of the file's
-seconds, and are placed after every whole file so they fill the gaps.
+A file whose recorded seconds exceed ``HEAVY_SHARE`` times the mean shard load
+(the record's total over the shard count) is too big to place as one unit: it
+alone would outlast the other shards. Its tests are spread over the shards
+instead, each weighted at an even share of the file's seconds, and are placed
+after every whole file so they fill the gaps. The threshold is relative so it
+tracks the record: spreading a file makes every shard import and collect it,
+which is minutes of CPU for a file whose collection enumerates crash points,
+so a file that fits in a shard is kept whole even when it is large.
 
 Files that belong to other shards are skipped before import (``pytest_ignore_collect``),
 because importing the whole suite in every shard cost minutes of each CI job.
@@ -51,8 +55,8 @@ DEFAULT_DURATIONS = Path(__file__).with_name("shard_durations.json")
 #: record the latest run on main wrote; unset, the checked-in record is the cold start.
 DURATIONS_ENV = "VIBESYS_SHARD_DURATIONS"
 
-#: Recorded seconds above which a file's tests are spread over the shards.
-HEAVY_SECONDS = 90.0
+#: A file above this multiple of the mean shard load has its tests spread over the shards.
+HEAVY_SHARE = 1.1
 #: xdist workers per CI shard (a standard runner has two cores).
 WORKERS_PER_SHARD = 2
 #: Wall seconds one shard's tests may take; above this the shards need rebalancing
@@ -115,9 +119,14 @@ def parse_shard(spec: str) -> tuple[int, int]:
     return index, count
 
 
-def is_heavy(name: str, durations: Mapping[str, float]) -> bool:
+def heavy_threshold(durations: Mapping[str, float], count: int) -> float:
+    """Recorded seconds above which a file is spread over ``count`` shards."""
+    return HEAVY_SHARE * sum(durations.values()) / count
+
+
+def is_heavy(name: str, durations: Mapping[str, float], count: int) -> bool:
     """Whether the file's tests are spread over shards instead of placed as one unit."""
-    return durations.get(name, 0.0) > HEAVY_SECONDS
+    return durations.get(name, 0.0) > heavy_threshold(durations, count)
 
 
 def shard_loads(
@@ -128,7 +137,7 @@ def shard_loads(
     Heavy files are left out: ``assign_heavy_items`` places their tests. Return
     the assignment and the seconds on each shard so far.
     """
-    unique = sorted({name for name in files if not is_heavy(name, durations)})
+    unique = sorted({name for name in files if not is_heavy(name, durations, count)})
     known = [durations[name] for name in unique if name in durations]
     fallback = sum(known) / len(known) if known else 1.0
     weights = {name: durations.get(name, fallback) for name in unique}
@@ -163,7 +172,7 @@ def assign_heavy_items(
     units = [
         (durations[name] / total, name, index)
         for name, total in items_per_file.items()
-        if is_heavy(name, durations)
+        if is_heavy(name, durations, len(final))
         for index in range(total)
     ]
     assignment: dict[tuple[str, int], int] = {}
@@ -181,7 +190,7 @@ def projected_shard_seconds(
     unique = sorted(set(files))
     _, loads = shard_loads(unique, durations, count)
     _, loads = assign_heavy_items(
-        {name: _PROJECTION_UNITS for name in unique if is_heavy(name, durations)},
+        {name: _PROJECTION_UNITS for name in unique if is_heavy(name, durations, count)},
         durations,
         loads,
     )
@@ -339,7 +348,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         dropped: list[pytest.Item] = []
         for item, name in zip(items, files, strict=True):
             owner = (
-                heavy.get((name, position[name])) if is_heavy(name, durations) else assignment[name]
+                heavy.get((name, position[name]))
+                if is_heavy(name, durations, count)
+                else assignment[name]
             )
             position[name] += 1
             (kept if owner == index else dropped).append(item)
@@ -401,9 +412,21 @@ def pytest_terminal_summary(terminalreporter: TerminalReporter, config: pytest.C
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:
-    """Write the measured durations from the controller process, not xdist workers."""
-    path = session.config.getoption("--record-shard-durations")
-    if path is None or hasattr(session.config, "workerinput"):
+    """Accept an empty shard; write the measured durations from the controller, not xdist workers.
+
+    A shard that owns none of the tests under the paths it was given ran what it
+    was given: a whole file goes to one shard, so another shard has nothing there.
+    """
+    config = session.config
+    if hasattr(config, "workerinput"):
+        return
+    if (
+        config.getoption("--shard") is not None
+        and session.exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
+    ):
+        session.exitstatus = pytest.ExitCode.OK
+    path = config.getoption("--record-shard-durations")
+    if path is None:
         return
     Path(path).write_text(
         json.dumps(record_durations(_measured, Path(path)), indent=1) + "\n", encoding="utf-8"
