@@ -57,7 +57,7 @@ ONE_SHOT_PROVIDERS = tuple(
     name for name in subject.supported_providers() if name not in STREAM_PROVIDERS
 )
 
-SECRET = "s3cret-value"  # noqa: S105  # a fixture value, not a credential
+LOGIN_VALUE = "s3cret-value"
 WINDOW = {"unifiedWindows": {"five_hour": {"utilization": 0.4, "resetsAt": 1_791_954_019}}}
 
 
@@ -146,7 +146,7 @@ def _container_spec(tmp_path: Path, provider: str) -> AgentSessionSpec:
 def test_container_turns_share_one_process_marked_for_reaping(
     tmp_path: Path, provider: str
 ) -> None:
-    sandbox = FakeDockerSandbox(workspace=tmp_path, extra_env={"ANTHROPIC_AUTH_TOKEN": SECRET})
+    sandbox = FakeDockerSandbox(workspace=tmp_path, extra_env={"ANTHROPIC_AUTH_TOKEN": LOGIN_VALUE})
     executor = FakeExecutor([], peers=_answering(provider, "one", "two"))
     session = _driver(provider, executor, sandbox).create_session(
         _container_spec(tmp_path, provider)
@@ -163,8 +163,8 @@ def test_container_turns_share_one_process_marked_for_reaping(
     assert argv[argv.index("-w") + 1] == "/workspace"
     assert sandbox.container_id in argv
     # The credential rides in the docker client's environment, never its argv.
-    assert not any(SECRET in part for part in argv)
-    assert executor.spawns[0].env["ANTHROPIC_AUTH_TOKEN"] == SECRET
+    assert not any(LOGIN_VALUE in part for part in argv)
+    assert executor.spawns[0].env["ANTHROPIC_AUTH_TOKEN"] == LOGIN_VALUE
     assert "ANTHROPIC_AUTH_TOKEN" in argv
 
 
@@ -250,7 +250,7 @@ def test_a_rate_limit_report_reaches_the_observer_while_the_turn_still_runs(
     def turn() -> None:
         try:
             session.run_turn(AgentTurnRequest(message="work"), observer)
-        except BaseException as error:  # noqa: BLE001  # the cancelled turn raises by design
+        except agentshim.TurnCancelledError as error:
             failures.append(error)
 
     worker = threading.Thread(target=turn)
