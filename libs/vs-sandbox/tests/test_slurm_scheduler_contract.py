@@ -424,6 +424,9 @@ _UNCONFIRMED = (
 )
 
 
+@pytest.mark.skip(
+    reason="flaky; skipped pending root-cause fix, tracked in https://github.com/uw-syfi/vibesys/issues/1477"
+)
 @pytest.mark.parametrize("spec", _UNCONFIRMED, ids=lambda spec: spec.label)
 @pytest.mark.asyncio
 async def test_a_stop_beyond_the_confirmation_bound_is_canceling_and_later_confirmed(

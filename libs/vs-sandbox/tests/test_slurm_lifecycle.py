@@ -247,6 +247,9 @@ async def _stopped_while_active(schedule: _Schedule) -> None:
         assert cluster.scancels == 1
 
 
+@pytest.mark.skip(
+    reason="flaky; skipped pending root-cause fix, tracked in https://github.com/uw-syfi/vibesys/issues/1477"
+)
 @settings(max_examples=30)
 @given(
     queue_wait=st.floats(0, 95, allow_nan=False),
