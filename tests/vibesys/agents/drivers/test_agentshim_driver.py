@@ -8,7 +8,7 @@ events the observer saw, how usage maps onto the neutral contract, and when a
 conversation is retired.
 
 Sandbox-facing scenarios run against two ``WorkspaceSandbox`` doubles,
-``_FakeHostSandbox`` and ``_FakeDockerSandbox``: the driver has one code path
+``_FakeHostSandbox`` and ``FakeDockerSandbox``: the driver has one code path
 for both (:func:`vs_agent.drivers.agentshim.confine_to_sandbox`), so a
 test that is really about that path is parametrized over both rather than
 duplicated per mode.
@@ -30,6 +30,7 @@ import agentshim
 import pytest
 from agentshim.testing import (
     FakeExecutor,
+    FakeProcess,
     FakeRun,
     TokenUsage,
     installed_mcp_servers,
@@ -39,10 +40,10 @@ from agentshim.testing import (
 )
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
 from vibesys.events import CommandResultPayload
 from vibesys.orchestration.multi.contracts import ImplementerResponse, JudgeResponse
-from vs_agent import docker_executor
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
     AgentClient,
@@ -143,44 +144,6 @@ class _FakeHostSandbox:
         return {"HOME": self.home, "PATH": self.path}
 
 
-@dataclass
-class _FakeDockerSandbox:
-    """A ``WorkspaceSandbox`` double shaped like ``vs_sandbox.DockerSandbox``.
-
-    ``wrap`` accepts the optional ``cwd`` the real sandbox does (the
-    capability :func:`confine_to_sandbox` probes for), maps it through the
-    same workspace-prefix rule ``agent_path`` uses, and renders its own extra
-    environment as ``-e`` flags exactly the way the real sandbox's ``wrap``
-    does.
-    """
-
-    workspace: Path
-    container_id: str = "container-1"
-    extra_env: dict[str, str] = field(default_factory=dict)
-    home: str = "/home/agent"
-    container_path: str = "/usr/local/bin:/usr/bin"
-
-    def agent_path(self, path: Path | str) -> str:
-        normalized = str(path)
-        workspace = str(self.workspace)
-        if normalized == workspace:
-            return "/workspace"
-        if normalized.startswith(workspace + "/"):
-            return "/workspace" + normalized[len(workspace) :]
-        return normalized
-
-    def wrap(self, argv: list[str], cwd: Path | str | None = None) -> list[str]:
-        workdir = self.agent_path(cwd) if cwd is not None else "/workspace"
-        env_flags = [
-            flag for key, value in self.extra_env.items() for flag in ("-e", f"{key}={value}")
-        ]
-        return ["docker", "exec", "-i", "-w", workdir, *env_flags, self.container_id, *argv]
-
-    @property
-    def env(self) -> dict[str, str]:
-        return {"HOME": self.home, "PATH": self.container_path, **self.extra_env}
-
-
 @pytest.fixture
 def sandbox_builds(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Record every host-sandbox build and leave the fake executor unconfined."""
@@ -228,6 +191,8 @@ def _driver(
         docker_sandboxes=options.get("docker_sandboxes"),
         check_timeout=options.get("check_timeout"),
         executor_factory=lambda: fake,
+        # These tests script one process per turn; the stream transport has its own suite.
+        transport=agentshim.TransportKind.ONE_SHOT,
         # Zero waits keep the retry tests instant; the schedule is the knob.
         transient_retry_delays=options.get("transient_retry_delays", (0.0, 0.0)),
     )
@@ -564,7 +529,7 @@ def test_confine_to_sandbox_rewrites_argv_through_any_workspace_sandbox(
 ) -> None:
     """One transform serves a host confinement policy and a Docker sandbox alike."""
     sandbox = (
-        _FakeHostSandbox() if sandbox_kind == "host" else _FakeDockerSandbox(workspace=tmp_path)
+        _FakeHostSandbox() if sandbox_kind == "host" else FakeDockerSandbox(workspace=tmp_path)
     )
     fake = FakeExecutor(scripted_turn("claude", text="ok"))
 
@@ -577,7 +542,7 @@ def test_confine_to_sandbox_rewrites_argv_through_any_workspace_sandbox(
     )
 
     argv = list(fake.requests[-1].argv)
-    if isinstance(sandbox, _FakeDockerSandbox):
+    if isinstance(sandbox, FakeDockerSandbox):
         assert argv[:3] == ["docker", "exec", "-i"]
         assert argv[argv.index("-w") + 1] == "/workspace"
     else:
@@ -688,7 +653,7 @@ def test_a_container_mcp_command_is_left_for_the_image_to_resolve(tmp_path: Path
         installed.append(installed_mcp_servers("claude", request, tmp_path))
         return scripted_turn("claude", text="ok")
 
-    sandbox = _FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerSandbox(workspace=tmp_path)
     driver, _fake = _driver("claude", run, docker_sandboxes={"implementer": sandbox})
     session = driver.create_session(
         _spec(
@@ -747,7 +712,7 @@ def test_a_container_turn_carries_the_sandbox_environment_and_workdir(
     per-turn environment-forwarding path any more, so the session hands the
     library exactly ``sandbox.env``.
     """
-    sandbox = _FakeDockerSandbox(workspace=tmp_path, extra_env={"VIBESYS_ROUND": "3"})
+    sandbox = FakeDockerSandbox(workspace=tmp_path, extra_env={"VIBESYS_ROUND": "3"})
     driver, fake = _driver(
         provider, scripted_turn(provider, text="ok"), docker_sandboxes={"implementer": sandbox}
     )
@@ -777,7 +742,7 @@ def test_a_container_binary_check_gets_the_container_budget(
     A failed health check ends the run before the first turn, so the budget
     has to survive a daemon that is busy rather than dead.
     """
-    sandbox = _FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerSandbox(workspace=tmp_path)
     driver, fake = _driver(
         provider, scripted_turn(provider, text="ok"), docker_sandboxes={"implementer": sandbox}
     )
@@ -794,7 +759,7 @@ def test_the_binary_check_budget_is_a_driver_option(
     tmp_path: Path,
     provider: str,
 ) -> None:
-    sandbox = _FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerSandbox(workspace=tmp_path)
     driver, fake = _driver(
         provider,
         scripted_turn(provider, text="ok"),
@@ -805,83 +770,6 @@ def test_the_binary_check_budget_is_a_driver_option(
     driver.create_session(_container_spec(tmp_path, provider))
 
     assert fake.requests[0].timeout == 5
-
-
-def _watchdog_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
-    """Record the argv of every command a container session sends to the watchdog.
-
-    The watchdog wraps the ``docker exec`` transport rather than replacing it,
-    so what it sees is the command agentshim built, before the transform. An
-    empty list means the session never had one.
-    """
-    watched: list[tuple[str, ...]] = []
-
-    class _Recording(docker_executor.CodexRolloutWatchdogExecutor):
-        def run(
-            self,
-            request: agentshim.CommandRequest,
-            sink: agentshim.CommandStreamSink,
-        ) -> agentshim.CommandResult:
-            watched.append(tuple(request.argv))
-            return super().run(request, sink)
-
-    monkeypatch.setattr(subject, "CodexRolloutWatchdogExecutor", _Recording)
-    return watched
-
-
-@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
-def test_every_container_session_runs_its_turns_through_the_watchdog(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    provider: str,
-) -> None:
-    """The watchdog wraps unconditionally: it only ever acts on a resumed Codex
-    JSON run, so wrapping every provider's container session costs nothing for
-    the rest and needs no per-provider branch in the driver."""
-    watched = _watchdog_spy(monkeypatch)
-    sandbox = _FakeDockerSandbox(workspace=tmp_path)
-    driver, _fake = _driver(
-        provider, scripted_turn(provider, text="ok"), docker_sandboxes={"implementer": sandbox}
-    )
-    session = driver.create_session(_container_spec(tmp_path, provider))
-
-    session.run_turn(AgentTurnRequest(message="Do it"))
-
-    assert watched, "the container session's turn did not go through the watchdog"
-
-
-def test_the_watchdog_rollout_root_comes_from_the_sandbox_home(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """No ``/root`` or ``/home/agent`` literal: it is read off the sandbox."""
-    captured: dict[str, str] = {}
-    real = docker_executor.CodexRolloutWatchdogExecutor
-
-    def _spy(
-        inner: agentshim.CommandExecutor,
-        container_id_resolver: Callable[[], str],
-        *,
-        rollout_sessions_root: str,
-        log: Callable[[str], None],
-    ) -> object:
-        captured["rollout_sessions_root"] = rollout_sessions_root
-        return real(
-            inner,
-            container_id_resolver,
-            rollout_sessions_root=rollout_sessions_root,
-            log=log,
-        )
-
-    monkeypatch.setattr(subject, "CodexRolloutWatchdogExecutor", _spy)
-    sandbox = _FakeDockerSandbox(workspace=tmp_path, home="/home/somebody-else")
-    driver, _fake = _driver(
-        "codex", scripted_turn("codex", text="ok"), docker_sandboxes={"implementer": sandbox}
-    )
-
-    driver.create_session(_container_spec(tmp_path, "codex"))
-
-    assert captured["rollout_sessions_root"] == "/home/somebody-else/.codex/sessions"
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
@@ -908,7 +796,7 @@ def test_container_session_mcp_servers_are_installed_on_the_host_workspace(
         installed.append(installed_mcp_servers(provider, request, tmp_path))
         return scripted_turn(provider, text="ok")
 
-    sandbox = _FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerSandbox(workspace=tmp_path)
     driver, _fake = _driver(provider, run, docker_sandboxes={"implementer": sandbox})
     session = driver.create_session(_container_spec(tmp_path, provider, mcp_servers=(server,)))
 
@@ -944,7 +832,7 @@ def test_a_container_timeout_reports_no_docker_transport_in_its_message(
         # included; only the turn itself is the one that hangs.
         return FakeRun() if "--help" in request.argv else FakeRun(timeout=True)
 
-    sandbox = _FakeDockerSandbox(workspace=tmp_path, extra_env={"ANTHROPIC_AUTH_TOKEN": "secret"})
+    sandbox = FakeDockerSandbox(workspace=tmp_path, extra_env={"ANTHROPIC_AUTH_TOKEN": "secret"})
     driver, _fake = _driver(provider, run, docker_sandboxes={"implementer": sandbox})
     session = driver.create_session(_container_spec(tmp_path, provider))
 
@@ -1009,7 +897,7 @@ def test_a_container_native_schema_directory_is_mapped_through_agent_path(
     if profile.output_schema is not agentshim.OutputSchemaStyle.FILE_PATH:
         pytest.skip(f"{provider} does not reference a schema file path")
     payload = {"analysis": "it improved", "verdict": "accept"}
-    sandbox = _FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerSandbox(workspace=tmp_path)
     driver, fake = _driver(
         provider,
         scripted_turn(provider, text="", structured_output=payload),
@@ -1388,7 +1276,7 @@ def test_a_transient_provider_error_is_retried(
 @pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
 @pytest.mark.parametrize(
     "kind",
-    [agentshim.FailureKind.USAGE_LIMIT, agentshim.FailureKind.AUTH, agentshim.FailureKind.OTHER],
+    [agentshim.FailureKind.AUTH, agentshim.FailureKind.OTHER],
 )
 def test_a_failure_that_waiting_cannot_fix_fails_fast(
     sandbox_builds: list[dict[str, Any]],
@@ -1984,7 +1872,7 @@ def test_a_host_policy_on_a_container_driver_is_rejected(
     tmp_path: Path,
     provider: str,
 ) -> None:
-    sandbox = _FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerSandbox(workspace=tmp_path)
     driver, _fake = _driver(
         provider, scripted_turn(provider, text="ok"), docker_sandboxes={"implementer": sandbox}
     )
@@ -2280,7 +2168,7 @@ def _requests_session_scope(
 def test_a_container_driver_reports_no_config_isolation_even_with_a_run_home(
     tmp_path: Path,
 ) -> None:
-    sandboxes: dict[str, Any] = {"implementer": _FakeDockerSandbox(workspace=tmp_path)}
+    sandboxes: dict[str, Any] = {"implementer": FakeDockerSandbox(workspace=tmp_path)}
     driver = subject.AgentShimDriver(
         provider="codex",
         docker_sandboxes=sandboxes,
@@ -2310,6 +2198,10 @@ class _SpawnFailureExecutor(FakeExecutor):
             return super().run(request, sink)
         raise self.failure
 
+    def spawn(self, request: agentshim.SpawnRequest) -> FakeProcess:
+        del request
+        raise self.failure
+
 
 @pytest.mark.parametrize("health_check", [False, True])
 @given(
@@ -2329,7 +2221,7 @@ def test_process_spawn_os_errors_are_retryable_typed_faults(
         executor = _SpawnFailureExecutor(failure, health_check=health_check)
         driver = subject.AgentShimDriver(
             provider="claude",
-            docker_sandboxes={"worker": cast("DockerSandbox", _FakeDockerSandbox(tmp_path))},
+            docker_sandboxes={"worker": cast("DockerSandbox", FakeDockerSandbox(tmp_path))},
             executor_factory=lambda: executor,
             launcher_env=dict,
         )

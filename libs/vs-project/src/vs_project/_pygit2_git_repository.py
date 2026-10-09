@@ -63,7 +63,6 @@ from pygit2.enums import ReferenceType, SortMode
 
 from vs_project._cli_git_repository import CliGitRepository
 from vs_project._exclude_file import append_excludes
-from vs_project._head_reader import Commit, Unborn, locate_git_dir, read_head
 from vs_project._pathspec import compile_pathspecs
 from vs_project._ref_names import is_valid_branch_name, is_valid_ref_name
 from vs_project.api.git_repository import (
@@ -210,13 +209,6 @@ class Pygit2GitRepository:
     # -- reading history -----------------------------------------------------
 
     def head(self) -> str | None:
-        git_dir = self._location.git_dir if self._location else locate_git_dir(self._root)
-        if git_dir is not None:
-            state = read_head(git_dir)
-            if isinstance(state, Commit):
-                return state.sha
-            if isinstance(state, Unborn):
-                return None
         try:
             repository = self._open()
             if repository.head_is_unborn:

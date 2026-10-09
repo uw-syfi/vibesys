@@ -28,6 +28,7 @@ from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentObserver,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentRateLimit,
     AgentSessionSpec,
     AgentSpawnError,
@@ -35,13 +36,24 @@ from vs_agent.contracts import (
     AgentTurnResult,
     AgentTurnTimeoutError,
     AgentUsage,
+    Attribution,
     AuthStatus,
+    CapacityGate,
+    CapacityGated,
     MCPServerSpec,
     ProviderNotReadyError,
     ProviderReadiness,
+    ProviderSwitch,
+    ProviderSwitchReason,
+    QuotaCondition,
+    QuotaPlan,
+    QuotaResumeReason,
     ReadinessProbe,
     ReadinessProblem,
     SessionDisposition,
+    SteerableAgentClient,
+    SteerableSession,
+    SteerOutcome,
 )
 from vs_agent.events import (
     AgentOutputChannel,
@@ -108,7 +120,11 @@ from vs_agent.sessions import (
     Unknown,
     inspect_invocation_journal,
 )
-from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink, NullAgentEventSink
+from vs_agent.sink import (
+    NULL_AGENT_EVENT_SINK,
+    AgentEventSink,
+    NullAgentEventSink,
+)
 from vs_agent.skills import NULL_SKILL_SELECTION, SkillSelection
 from vs_agent.spec import AgentBackend, AgentSpec
 from vs_agent.todos import todos_from_tool_call
@@ -121,6 +137,7 @@ if TYPE_CHECKING:
     from vs_agent.cli_common import materialize_skills
     from vs_agent.client import AgentClient
     from vs_agent.factory import agent_driver_supports_tool_servers
+    from vs_agent.orphans import OrphanReapError, reap_orphaned_agents
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 __all__ = [
@@ -154,6 +171,7 @@ __all__ = [
     "AgentOutputChannel",
     "AgentOutputSchemaError",
     "AgentProgress",
+    "AgentQuotaError",
     "AgentRateLimit",
     "AgentSelection",
     "AgentSessionCheckpoint",
@@ -169,8 +187,11 @@ __all__ = [
     "AgentTurnResult",
     "AgentTurnTimeoutError",
     "AgentUsage",
+    "Attribution",
     "AuthStatus",
     "CandidateProgress",
+    "CapacityGate",
+    "CapacityGated",
     "ClientAgentSessions",
     "CommandResultPayload",
     "Completed",
@@ -182,9 +203,15 @@ __all__ = [
     "MCPServerSpec",
     "NullAgentEventSink",
     "NullSessionStore",
+    "OrphanReapError",
     "Pending",
     "ProviderNotReadyError",
     "ProviderReadiness",
+    "ProviderSwitch",
+    "ProviderSwitchReason",
+    "QuotaCondition",
+    "QuotaPlan",
+    "QuotaResumeReason",
     "ReadinessProbe",
     "ReadinessProblem",
     "RoundProgress",
@@ -195,6 +222,9 @@ __all__ = [
     "SessionScope",
     "SessionStore",
     "SkillSelection",
+    "SteerOutcome",
+    "SteerableAgentClient",
+    "SteerableSession",
     "TodoItemData",
     "ToolResultPayload",
     "Unknown",
@@ -213,6 +243,7 @@ __all__ = [
     "inspect_invocation_journal",
     "materialize_skills",
     "parse_typed_response",
+    "reap_orphaned_agents",
     "session_env_allowlist",
     "session_environment",
     "task_agent_host_resources",
@@ -244,6 +275,17 @@ def __getattr__(name: str) -> object:
         )
 
         return agent_driver_supports_tool_servers
+    if name in {"OrphanReapError", "reap_orphaned_agents"}:
+        # The reaper builds agentshim confinements, and importing agentshim at
+        # module import would load it into every consumer of this package.
+        from vs_agent.orphans import (  # noqa: PLC0415  # lint-waiver: LW-482907 [PLC0415]; keep agentshim unloaded for consumers of vs_agent.api that never reap, like the other lazy names here.
+            OrphanReapError,
+            reap_orphaned_agents,
+        )
+
+        return {"OrphanReapError": OrphanReapError, "reap_orphaned_agents": reap_orphaned_agents}[
+            name
+        ]
     message = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(message)
 

@@ -17,6 +17,9 @@ from server.events import (
     GateKind,
     GateStartedData,
     JsonResultPayload,
+    ProviderSwitchedData,
+    QuotaPausedData,
+    QuotaResumedData,
     RateLimitUpdateData,
     RoundFinishedData,
     RunConfiguredData,
@@ -135,6 +138,41 @@ class TestNewEventDataRoundTrip:
         assert isinstance(restored.data, RateLimitUpdateData)
         assert restored.data.window == "five_hour"
         assert restored.data.resets_at is None
+
+    def test_quota_events(self) -> None:
+        paused = _round_trip(
+            make_event(
+                EventType.QUOTA_PAUSED,
+                data=QuotaPausedData(
+                    provider="claude",
+                    condition="rate_limited",
+                    detail="429",
+                    resets_at=1.5e9,
+                ),
+            )
+        )
+        resumed = _round_trip(
+            make_event(EventType.QUOTA_RESUMED, data=QuotaResumedData(provider="claude"))
+        )
+        assert isinstance(paused.data, QuotaPausedData)
+        assert (paused.data.condition, paused.data.resets_at) == ("rate_limited", 1.5e9)
+        assert isinstance(resumed.data, QuotaResumedData)
+
+    def test_provider_switched(self) -> None:
+        restored = _round_trip(
+            make_event(
+                EventType.PROVIDER_SWITCHED,
+                data=ProviderSwitchedData(
+                    from_provider="claude",
+                    to_provider="codex",
+                    to_model="gpt-5",
+                    reason="operator",
+                    detail="the operator resumed with the fallback",
+                ),
+            )
+        )
+        assert isinstance(restored.data, ProviderSwitchedData)
+        assert (restored.data.to_provider, restored.data.reason) == ("codex", "operator")
 
     def test_agent_output_chunk_status_is_optional_and_round_trips(self) -> None:
         bare = make_event(

@@ -205,3 +205,61 @@ def test_transition_contract_rejects_unknown_fields_and_is_immutable() -> None:
     transition = RunControlTransition(kind=RunControlTransitionKind.PAUSED)
     with pytest.raises(ValidationError):
         transition.__setattr__("text", "changed")
+
+
+def test_a_bounded_wait_that_times_out_resumes_the_run_itself() -> None:
+    events = FakeRunControlEventSink()
+    control = create_run_control_channel(events)
+    control.request_pause()
+
+    resumed = control.wait_resumed(0.0)
+
+    assert resumed is False
+    assert not control.pause_requested()
+    assert [transition.kind for transition in events.transitions] == [
+        RunControlTransitionKind.PAUSE_REQUESTED,
+        RunControlTransitionKind.PAUSED,
+        RunControlTransitionKind.RESUMED,
+    ]
+
+
+def test_a_bounded_wait_that_something_resumed_reports_it() -> None:
+    control = create_run_control_channel(FakeRunControlEventSink())
+    control.request_pause()
+    control.resume()
+
+    assert control.wait_resumed(0.0) is True
+
+
+def test_a_stop_ends_a_bounded_wait_and_is_never_cleared_by_its_timeout() -> None:
+    control = create_run_control_channel(FakeRunControlEventSink())
+    control.request_pause()
+    control.request_stop()
+
+    with pytest.raises(RunStopped):
+        control.wait_resumed(0.0)
+
+    assert control.stop_requested()
+
+
+def test_a_fallback_request_is_taken_once_and_a_plain_resume_clears_a_stale_one() -> None:
+    control = create_run_control_channel(FakeRunControlEventSink())
+
+    control.resume_with_fallback()
+    assert control.consume_fallback_request() is True
+    assert control.consume_fallback_request() is False
+
+    control.resume_with_fallback()
+    control.resume()
+    assert control.consume_fallback_request() is False
+
+
+def test_resuming_with_the_fallback_releases_a_parked_run_like_a_resume() -> None:
+    events = FakeRunControlEventSink()
+    control = create_run_control_channel(events)
+    control.request_pause()
+
+    control.resume_with_fallback()
+
+    assert not control.pause_requested()
+    assert events.transitions[-1].kind is RunControlTransitionKind.RESUMED

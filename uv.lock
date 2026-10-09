@@ -35,11 +35,11 @@ members = [
 
 [[package]]
 name = "agentshim"
-version = "0.15.3"
+version = "0.15.7"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f8/39/7e66cc7d01818bc040f20ee2ec78d0fd18be0fcce4993fd3bc3e656be7ba/agentshim-0.15.3.tar.gz", hash = "sha256:a497808b60dcb75c99a56157ebdb0956222dc657ae410436622fee4aafb70f24", size = 250340, upload-time = "2026-10-09T14:35:00.09Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d6/c7/bc40e328588d088a78e1c54f4726d963315541ab7f99a280e70c2476875c/agentshim-0.15.7.tar.gz", hash = "sha256:9c25c8c01180115622d7f9de25dbe2884c15bd201365172b496bc1d6fa42d64b", size = 251468, upload-time = "2026-10-09T19:46:17.007Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/71/ae/c7f6a81dee52c7694f465406198f60639946db54427175133c4ee413690f/agentshim-0.15.3-py3-none-any.whl", hash = "sha256:8e9d057c00698ac2d1a0ce94fceb0c09b30ef5950c9d416baf49c015551fc7b4", size = 293596, upload-time = "2026-10-09T14:34:58.351Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/2c/5b6dbe42cb81896ea2ac3b970024dcb5afdb5853f2e728769f17b36f36b4/agentshim-0.15.7-py3-none-any.whl", hash = "sha256:6c02a1145296d34c2fe895bd7de422da16aeab769b03e91f5b1382f9f136360a", size = 294243, upload-time = "2026-10-09T19:46:15.227Z" },
 ]
 
 [[package]]
@@ -2922,7 +2922,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.15.3,<0.16" },
+    { name = "agentshim", specifier = ">=0.15.7,<0.16" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
     { name = "huggingface-hub" },
@@ -2977,7 +2977,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.15.3,<0.16" },
+    { name = "agentshim", specifier = ">=0.15.7,<0.16" },
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },
@@ -3068,6 +3068,7 @@ name = "vs-faults"
 version = "0.1.0"
 source = { editable = "libs/vs-faults" }
 dependencies = [
+    { name = "agentshim" },
     { name = "pydantic" },
     { name = "vs-agent" },
     { name = "vs-mcp" },
@@ -3075,6 +3076,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agentshim", specifier = ">=0.15.7,<0.16" },
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-agent", editable = "libs/vs-agent" },
     { name = "vs-mcp", editable = "libs/vs-mcp" },

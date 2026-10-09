@@ -63,6 +63,7 @@ from vibesys.run.workspace_policy import (
     materialized_skill_dirs,
 )
 from vs_agent.api import (
+    DEFAULT_CLI_PROVIDER,
     AgentBackend,
     AgentSpec,
     task_agent_host_resources,
@@ -306,7 +307,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             resolved_backend = str(
                 request.agent_backend or config.agent.backend or AgentBackend.CLI
             )
-            resolved_cli_provider = request.cli_provider or config.agent.cli_provider or "codex"
+            resolved_cli_provider = (
+                request.cli_provider or config.agent.cli_provider or DEFAULT_CLI_PROVIDER
+            )
             execution_record = RunExecutionRecord(
                 model=config.model.name,
                 agent_backend=resolved_backend,
@@ -384,6 +387,11 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 workspace_files.create()
 
         if existing:
+            # The previous host is gone (the resume holds the run's host lock), so
+            # whatever agent it left running is an orphan: end it before anything
+            # touches the workspace or the journal's in-flight turns are reconciled.
+            with boot_trace.span("reap_orphans"):
+                environment.reap_orphans(run_id, log=buffered_logs.append)
             with boot_trace.span("workspace_repair"):
                 workspace_files.repair()
         project_excluded_dirs = set(workspace_files.excluded_dirs)
@@ -443,6 +451,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     git_events=CoreGitTrackerEvents(integration.events),
                     log_emit=run_log_emitter(integration.agent_events),
                     on_log_ready=integration.attach,
+                    git_repository=integration.git_repository,
                 ),
                 buffered_logs=buffered_logs,
                 resolve_resume=resolve_recorded_run,

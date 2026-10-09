@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+from collections import deque
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -33,6 +34,7 @@ from vs_agent.contracts import (
     AgentEventKind,
     AgentObserver,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentRateLimit,
     AgentSession,
     AgentSessionSpec,
@@ -45,15 +47,17 @@ from vs_agent.contracts import (
     AuthStatus,
     MCPServerSpec,
     ProviderReadiness,
+    QuotaCondition,
     SessionDisposition,
+    SteerOutcome,
 )
-from vs_agent.docker_executor import CodexRolloutWatchdogExecutor
+from vs_agent.docker_confinement import DockerContainerConfinement
 from vs_agent.events import CommandResultPayload
 from vs_agent.host_resource_declarations import (
     declare_agent_host_resources,
     prepare_provider_state,
 )
-from vs_agent.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS
+from vs_agent.provider_policy import SHIPPED_PROVIDERS
 from vs_agent.session_environment import (
     dropped_launcher_names,
     session_environment,
@@ -346,7 +350,12 @@ def _translate(  # one arm per event type
             kind=AgentEventKind.USAGE,
             usage=_usage_from(event.usage, cost_usd=event.cost_usd),
         )
-    return _translate_skill(event) or _translate_rate_limit(event) or _translate_plumbing(event)
+    return (
+        _translate_skill(event)
+        or _translate_rate_limit(event)
+        or _translate_steer(event)
+        or _translate_plumbing(event)
+    )
 
 
 def _translate_skill(event: agentshim.AgentEvent) -> AgentEvent | None:
@@ -383,6 +392,20 @@ def _translate_rate_limit(event: agentshim.AgentEvent) -> AgentEvent | None:
     )
 
 
+def _translate_steer(event: agentshim.AgentEvent) -> AgentEvent | None:
+    """Report what became of an operator message sent into the running turn."""
+    if isinstance(event, agentshim.SteerDelivered):
+        return _diagnostic("[steer] the provider accepted an operator message mid-turn")
+    if isinstance(event, agentshim.SteerConsumed):
+        return _diagnostic("[steer] the model took the operator message into the running turn")
+    if isinstance(event, agentshim.SteerRejected):
+        return _diagnostic(
+            f"[steer] the provider refused the operator message ({event.reason}); "
+            "it is delivered at the next turn boundary instead"
+        )
+    return None
+
+
 def _translate_plumbing(event: agentshim.AgentEvent) -> AgentEvent | None:
     """Translate the events that describe the provider, not the agent."""
     if isinstance(event, agentshim.SessionStarted):
@@ -400,16 +423,74 @@ def _translate_plumbing(event: agentshim.AgentEvent) -> AgentEvent | None:
     return None
 
 
+class _SteerLedger:
+    """The steers this session offered whose fate the provider has not yet reported.
+
+    A provider that accepts a message may still refuse it a moment later
+    (``SteerRejected``). The ledger remembers each accepted text with the
+    caller's fallback, so a refusal reaches the caller exactly once and a text
+    the model consumed is forgotten. Thread-safe: ``steer`` runs on a
+    caller's thread, the library's events on the turn's.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._waiting: dict[str, deque[Callable[[], None]]] = {}
+
+    def expect(self, text: str, on_rejected: Callable[[], None]) -> None:
+        with self._lock:
+            self._waiting.setdefault(text, deque()).append(on_rejected)
+
+    def forget(self, text: str, on_rejected: Callable[[], None]) -> None:
+        with self._lock:
+            callbacks = self._waiting.get(text)
+            if callbacks is not None and on_rejected in callbacks:
+                callbacks.remove(on_rejected)
+                if not callbacks:
+                    del self._waiting[text]
+
+    def consumed(self, text: str) -> None:
+        self._pop(text)
+
+    def rejected(self, text: str) -> None:
+        callback = self._pop(text)
+        if callback is not None:
+            callback()
+
+    def clear(self) -> None:
+        with self._lock:
+            self._waiting.clear()
+
+    def _pop(self, text: str) -> Callable[[], None] | None:
+        with self._lock:
+            callbacks = self._waiting.get(text)
+            if not callbacks:
+                return None
+            callback = callbacks.popleft()
+            if not callbacks:
+                del self._waiting[text]
+            return callback
+
+
 class _AgentShimEventHandler:
     """Route the library's typed events to the turn's observer."""
 
-    def __init__(self) -> None:
+    def __init__(self, steers: _SteerLedger) -> None:
         self.observer: AgentObserver | None = None
         #: Whether the turn in flight asked for a response schema.
         self.structured = False
+        #: Windows the provider reported exhausted during the turn in flight.
+        self.exhausted: list[agentshim.RateLimitStatus] = []
+        self._steers = steers
 
     def on_event(self, event: agentshim.AgentEvent) -> None:
         """Translate and forward one library event, if anyone is listening."""
+        if isinstance(event, agentshim.SteerConsumed):
+            self._steers.consumed(event.text)
+        elif isinstance(event, agentshim.SteerRejected):
+            self._steers.rejected(event.text)
+        elif isinstance(event, agentshim.RateLimitStatus) and event.exhausted:
+            self.exhausted.append(event)
         observer = self.observer
         if observer is None:
             return
@@ -434,6 +515,7 @@ class AgentShimSession:
         profile: agentshim.ProviderProfile,
         timeout: int | None,
         event_handler: _AgentShimEventHandler,
+        steers: _SteerLedger,
         sandbox: _ConfinableSandbox | None,
         log: Callable[[str], None],
     ) -> None:
@@ -443,6 +525,7 @@ class AgentShimSession:
         self._profile = profile
         self._timeout = timeout
         self._event_handler = event_handler
+        self._steers = steers
         self._sandbox = sandbox
         self._log = log
         self._mcp_servers = tuple(
@@ -464,6 +547,7 @@ class AgentShimSession:
         expected = request.expected_provider_session_id
         self._event_handler.observer = observer
         self._event_handler.structured = request.output_schema is not None
+        self._event_handler.exhausted = []
         try:
             if expected is None:
                 turn = self._run(request, expect_conversation=None)
@@ -479,6 +563,7 @@ class AgentShimSession:
         finally:
             self._event_handler.observer = None
             self._event_handler.structured = False
+            self._steers.clear()
 
         result = turn.result
         if result.interrupted:
@@ -503,6 +588,27 @@ class AgentShimSession:
             ),
             skills=_skill_use(result.skills),
         )
+
+    def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
+        """Offer *text* to the running turn, on a transport that can take it.
+
+        A one-shot provider process reads no input after launch, so its
+        profile says it cannot steer and the library is not asked. A refusal
+        the provider reports after accepting the message calls *on_rejected*
+        (see :class:`~vs_agent.contracts.SteerableSession`).
+        """
+        if not self._profile.supports_steer:
+            return SteerOutcome.UNSUPPORTED
+        self._steers.expect(text, on_rejected)
+        try:
+            self._session.steer(text)
+        except agentshim.NoRunningTurnError:
+            self._steers.forget(text, on_rejected)
+            return SteerOutcome.NO_RUNNING_TURN
+        except agentshim.ProviderCapabilityError:
+            self._steers.forget(text, on_rejected)
+            return SteerOutcome.UNSUPPORTED
+        return SteerOutcome.DELIVERED
 
     def _log_continuity(self, continuity: agentshim.Continuity) -> None:
         """Tell the operator when the library dropped the conversation behind a turn.
@@ -561,17 +667,48 @@ class AgentShimSession:
             return self._session.run(ticket)
         except (OSError, ImportError, agentshim.CliNotFoundError) as exc:
             raise AgentSpawnError(self._profile.name, str(exc)) from exc
-        except agentshim.CliTimeoutError as exc:
+        except agentshim.TurnTimeoutError as exc:
+            # A one-shot process reports the budget as `CliTimeoutError`; a
+            # long-lived one raises its parent, `TurnTimeoutError`.
             raise AgentTurnTimeoutError(exc.timeout) from exc
         except agentshim.TurnFailedError as exc:
             if exc.kind is agentshim.FailureKind.SCHEMA:
                 raise AgentOutputSchemaError(exc.detail) from exc
+            quota = self._quota_error(exc)
+            if quota is not None:
+                raise quota from exc
             if held is not None and self._session.conversation_id is None:
                 self._log(
                     f"the resumed {self._profile.name} turn failed; dropped the conversation "
                     "so the next turn starts fresh."
                 )
             raise
+
+    def _quota_error(self, exc: agentshim.TurnFailedError) -> AgentQuotaError | None:
+        """Classify a failed turn as a capacity limit, or ``None`` when it is not one.
+
+        agentshim classifies a usage or spend limit as ``USAGE_LIMIT`` and has
+        already waited out the transient failures it can. A ``TRANSIENT``
+        failure that outlasted those waits is sustained rate limiting only when
+        the provider also reported an exhausted window during the turn: a
+        server error or an overload names no capacity limit and stays a plain
+        failure. The reset time is the latest of the exhausted windows, since
+        capacity returns only when every one of them has reopened.
+        """
+        exhausted = self._event_handler.exhausted
+        if exc.kind is agentshim.FailureKind.USAGE_LIMIT:
+            condition = QuotaCondition.QUOTA_EXHAUSTED
+        elif exc.kind is agentshim.FailureKind.TRANSIENT and exhausted:
+            condition = QuotaCondition.RATE_LIMITED
+        else:
+            return None
+        resets = [window.resets_at for window in exhausted if window.resets_at is not None]
+        return AgentQuotaError(
+            self._profile.name,
+            condition,
+            exc.detail or str(exc),
+            max(resets) if resets else None,
+        )
 
     def _build_request(self, request: AgentTurnRequest) -> agentshim.TurnRequest:
         """Translate one VibeSys turn into the library's request."""
@@ -726,6 +863,14 @@ class _Launch:
     env: Mapping[str, str]
     sandbox: _ConfinableSandbox | None
     config_scope: agentshim.ConfigScope
+    transport: agentshim.TransportKind
+    confinement: agentshim.Confinement | None = None
+    """Set for a long-lived transport in a container: agentshim confines, maps and reaps.
+
+    ``executor`` is then the plain executor and ``env`` is unused (the
+    confinement supplies the environment). Without it the executor is already
+    confined and ``env`` is the agent's environment.
+    """
 
 
 _AUTH_STATUS = {
@@ -763,8 +908,17 @@ class AgentShimDriver:
         agent_homes: Path | None = None,
         env_passthrough: Sequence[str] = (),
         launcher_env: Callable[[], Mapping[str, str]] = agentshim.interactive_env,
+        transport: agentshim.TransportKind | None = None,
+        clock: agentshim.Clock | None = None,
+        ids: agentshim.IdAllocator | None = None,
     ) -> None:
         """Configure one provider; ``executor_factory`` replaces the base executor.
+
+        ``transport`` fixes how every session reaches the provider. Left as
+        ``None`` it is derived: a container session of a provider that
+        agentshim lists in ``stream_provider_names()`` keeps one long-lived
+        process per conversation (``TransportKind.STREAM``); every other
+        session runs one process per turn (``TransportKind.ONE_SHOT``).
 
         ``agent_homes`` is the run's root for dedicated provider CLI homes
         (one subdirectory per provider, shared by every session the run opens
@@ -787,6 +941,10 @@ class AgentShimDriver:
         each session runs before its first turn. It defaults to the execution
         mode's budget: a container check crosses a ``docker exec`` and is given
         four times as long as a host one.
+
+        ``clock`` and ``ids`` replace agentshim's wall clock and random turn ids,
+        so a test measures turn timeouts and retry waits on a fake clock and
+        names turns reproducibly; production leaves them ``None``.
 
         ``transient_retry_delays`` are the waits before each retry of a turn
         that failed on a transient provider error; see
@@ -817,6 +975,9 @@ class AgentShimDriver:
         self._dropped_names_logged = False
         self._dropped_names_lock = threading.Lock()
         self._launcher_env = launcher_env
+        self._transport = transport
+        self._clock = clock
+        self._ids = ids
         self._sessions: WeakSet[AgentShimSession] = WeakSet()
         self._closed = False
 
@@ -867,7 +1028,8 @@ class AgentShimDriver:
         status = agentshim.probe_provider(
             spec.provider,
             executor=launch.executor,
-            env=launch.env,
+            confinement=launch.confinement,
+            env=None if launch.confinement is not None else launch.env,
             timeout=self._check_timeout,
         )
         return _readiness_from(status)
@@ -877,9 +1039,7 @@ class AgentShimDriver:
 
         Every session takes the same route: look up or build the sandbox for
         this role, confine a fresh executor to it, and hand the library the
-        sandbox's own environment. A container session additionally runs
-        through the Codex rollout watchdog, which no-ops for every other
-        provider and every non-``exec --json`` command.
+        sandbox's own environment.
         """
         if self._closed:
             message = "agent driver is closed"
@@ -900,37 +1060,66 @@ class AgentShimDriver:
         provider = agentshim.get_provider(spec.provider)
         config_scope = self._config_scope_for(provider.profile)
         sandbox, find_binary, host_env = self._sandbox_for(spec, config_scope)
+        transport = self._transport_for(spec)
+
+        if transport is agentshim.TransportKind.STREAM and in_container:
+            # agentshim confines the long-lived process itself, so it can mark
+            # it for `reap` and map the working directory, MCP commands and
+            # schema directory the way the container sees them.
+            confinement = DockerContainerConfinement(
+                self._docker_sandbox_for(spec), runner=self._executor_factory()
+            )
+            return _Launch(
+                executor=self._executor_factory(),
+                env=confinement.env,
+                sandbox=sandbox,
+                config_scope=config_scope,
+                transport=transport,
+                confinement=confinement,
+            )
 
         executor: agentshim.CommandExecutor = self._executor_factory()
         if sandbox is not None:
             executor = confine_to_sandbox(executor, sandbox, find_binary=find_binary)
-        if in_container:
-            executor = CodexRolloutWatchdogExecutor(
-                executor,
-                self._container_id_resolver(spec),
-                rollout_sessions_root=_codex_rollout_sessions_root(sandbox),
-                log=self._log,
-            )
         env = sandbox.env if sandbox is not None else host_env
-        return _Launch(executor=executor, env=env, sandbox=sandbox, config_scope=config_scope)
+        return _Launch(
+            executor=executor,
+            env=env,
+            sandbox=sandbox,
+            config_scope=config_scope,
+            transport=transport,
+        )
+
+    def _transport_for(self, spec: AgentSessionSpec) -> agentshim.TransportKind:
+        """Choose the transport from the execution mode and agentshim's registry."""
+        if self._transport is not None:
+            return self._transport
+        if spec.policy.containerized and spec.provider in agentshim.stream_provider_names():
+            return agentshim.TransportKind.STREAM
+        return agentshim.TransportKind.ONE_SHOT
 
     def _create_session(self, spec: AgentSessionSpec) -> AgentSession:
         """Create one configured AgentShim conversation."""
         launch = self._launch_for(spec)
         sandbox = launch.sandbox
         config_scope = launch.config_scope
-        event_handler = _AgentShimEventHandler()
+        steers = _SteerLedger()
+        event_handler = _AgentShimEventHandler(steers)
         agent = agentshim.Agent(
             spec.provider,
             model=spec.model,
             executor=launch.executor,
+            confinement=launch.confinement,
+            transport=launch.transport,
             permissions=agentshim.NativePermissions.bypass(),
             approvals=agentshim.ApprovalPolicy.DENY,
             retry=agentshim.RetryPolicy(delays=self._transient_retry_delays),
             event_handlers=[event_handler],
-            env=launch.env,
+            env=None if launch.confinement is not None else launch.env,
             log=self._log,
             check_timeout=self._check_timeout,
+            clock=self._clock,
+            ids=self._ids,
         )
         skill_scope = _skill_scope(agent.profile)
         if skill_scope is not agentshim.SkillScope.PROJECT:
@@ -960,7 +1149,9 @@ class AgentShimDriver:
             profile=agent.profile,
             timeout=self._timeout,
             event_handler=event_handler,
-            sandbox=sandbox,
+            steers=steers,
+            # agentshim maps paths itself when it confines the process.
+            sandbox=None if launch.confinement is not None else sandbox,
             log=self._log,
         )
         self._sessions.add(session)
@@ -1070,19 +1261,6 @@ class AgentShimDriver:
             raise ValueError(message)
         return sandbox
 
-    def _container_id_resolver(self, spec: AgentSessionSpec) -> Callable[[], str]:
-        """Return the sandbox's current container ID, read at every call.
-
-        Read through the sandbox rather than captured, because a GPU reselect
-        replaces the container and nothing should then have to rebuild the
-        executor or the cleanup hook.
-        """
-
-        def resolve() -> str:
-            return str(self._docker_sandbox_for(spec).container_id)
-
-        return resolve
-
     def close(self) -> None:
         """Close every session created by this driver, idempotently."""
         if self._closed:
@@ -1091,16 +1269,3 @@ class AgentShimDriver:
         for session in self._sessions:
             session.close()
         self._sessions.clear()
-
-
-def _codex_rollout_sessions_root(sandbox: _ConfinableSandbox | None) -> str:
-    """Return the sessions directory a resumed Codex thread writes its rollout to.
-
-    Derived from the sandbox's own ``HOME`` and the Codex provider's state
-    directory convention, never a hardcoded ``/root`` or ``/home/agent``: the
-    watchdog only ever polls a container sandbox, but the value is computed
-    generically so nothing here has to know that in advance.
-    """
-    home = "" if sandbox is None else sandbox.env.get("HOME", "")
-    state_dir = agentshim.get_provider(CODEX_PROVIDER).profile.state_dirs[0]
-    return f"{home}/{state_dir}/sessions"

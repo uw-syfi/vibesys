@@ -16,8 +16,8 @@ from vs_project.api import (
     OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
-    run_git,
 )
+from vs_project.api.testing import FakeGitRepositories
 from vs_runtime.api.infrastructure import (
     MultiSlotRoundTransaction,
     MultiSlotRoundTransactionCoordinator,
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
     from vs_project.api import StateSlot
 
+_DISK = FakeGitRepositories()
 _RUN_ID = "transaction-test"
 
 
@@ -56,7 +57,7 @@ def _project(tmp_path: Path) -> tuple[Project, GitTracker, MultiSlotRoundTransac
     (tmp_path / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
     project = Project.open(tmp_path)
     project.state.create_project("transaction test", now=datetime(2026, 8, 11, tzinfo=UTC))
-    tracker = GitTracker(tmp_path, events=NullGitTrackerEvents(), run_id=_RUN_ID)
+    tracker = _tracker(tmp_path, _RUN_ID)
     tracker.init(existing=False)
     assert tracker.trusted_input_baseline is not None
     assert tracker.project_branch is not None
@@ -90,10 +91,15 @@ def _load_state(project: Project) -> _AgentState | None:
     return _state_slot(project).load_optional()
 
 
-def _git(tracker: GitTracker, *args: str) -> bytes:
-    result = run_git(list(args), cwd=tracker.root)
-    assert result.returncode == 0, result.stderr
-    return result.stdout
+def _tracker(root: Path, run_id: str) -> GitTracker:
+    """A tracker on in-memory Git: these cases test checkpoint recovery, not the Git CLI."""
+    events = NullGitTrackerEvents()
+    return GitTracker(root, events=events, run_id=run_id, repository=_DISK.repository(root, events))
+
+
+def _committed(tracker: GitTracker, path: str) -> bytes | None:
+    """The bytes of ``path`` in ``HEAD`` (``git show HEAD:<path>``)."""
+    return _DISK.repository(tracker.root).read_blob("HEAD", path)
 
 
 def test_complete_commits_candidate_and_exact_typed_agent_state(tmp_path: Path) -> None:
@@ -105,10 +111,10 @@ def test_complete_commits_candidate_and_exact_typed_agent_state(tmp_path: Path) 
     completed = transaction.complete()
 
     assert completed.checkpoint == tracker.current_sha()
-    assert _git(tracker, "show", "HEAD:main.py") == b"VALUE = 2\n"
+    assert _committed(tracker, "main.py") == b"VALUE = 2\n"
     assert _load_state(project) == state
     assert (
-        _git(tracker, "show", f"HEAD:.vibesys/state/runs/{_RUN_ID}/agent/state.json")
+        _committed(tracker, f".vibesys/state/runs/{_RUN_ID}/agent/state.json")
         == _state_slot(project)
         .snapshot_transition(_state_slot(project).transition(state))
         .files[0]
@@ -130,7 +136,7 @@ def test_generic_transaction_commits_a_policy_owned_state_slot(tmp_path: Path) -
     assert state_slot.load_optional() == state
     assert _state_slot(project).load_optional() is None
     assert (
-        _git(tracker, "show", f"HEAD:.vibesys/state/runs/{_RUN_ID}/team-search/state.json")
+        _committed(tracker, f".vibesys/state/runs/{_RUN_ID}/team-search/state.json")
         == state_slot.snapshot_transition(state_slot.transition(state)).files[0].contents
     )
 
@@ -144,7 +150,7 @@ def test_recovery_rolls_prepared_state_and_candidate_forward(tmp_path: Path) -> 
 
     assert restarted.recover() is RoundRecoveryOutcome.COMMITTED
     assert _load_state(project) == _AgentState(completed_rounds=(1,))
-    assert _git(tracker, "show", "HEAD:main.py") == b"VALUE = 2\n"
+    assert _committed(tracker, "main.py") == b"VALUE = 2\n"
     assert restarted.recover() is RoundRecoveryOutcome.NO_TRANSACTION
 
 
@@ -212,12 +218,12 @@ def test_snapshot_failure_remains_recoverable(tmp_path: Path) -> None:
 def test_begin_rejects_staged_changes_without_leaving_a_transaction(tmp_path: Path) -> None:
     _project_data, tracker, coordinator = _project(tmp_path)
     (tmp_path / "main.py").write_text("VALUE = 2\n", encoding="utf-8")
-    _git(tracker, "add", "--", "main.py")
+    _DISK.repository(tracker.root).stage_all(["main.py"])
 
     with pytest.raises(RoundTransactionError, match="index has staged changes"):
         coordinator.begin(1, writes={"state.json": _state(active=None, rounds=(1,))})
 
-    _git(tracker, "reset", "--quiet", "HEAD", "--", ".")
+    _DISK.repository(tracker.root).unstage(["."])
     assert coordinator.recover() is RoundRecoveryOutcome.NO_TRANSACTION
 
 
@@ -241,7 +247,7 @@ def test_transaction_handle_cannot_complete_twice(tmp_path: Path) -> None:
 
 def test_coordinator_requires_matching_run_tracker(tmp_path: Path) -> None:
     project, tracker, _ = _project(tmp_path)
-    wrong_run = GitTracker(tmp_path, events=NullGitTrackerEvents(), run_id="another-run")
+    wrong_run = _tracker(tmp_path, "another-run")
 
     with pytest.raises(RoundTransactionError, match="must agree"):
         _coordinator(project, wrong_run)

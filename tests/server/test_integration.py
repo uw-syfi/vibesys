@@ -42,6 +42,7 @@ from vibesys.events import (
     GateKind,
     InvocationFinishedData,
     PhaseData,
+    QuotaPausedData,
     RateLimitUpdateData,
     ToolCallData,
 )
@@ -212,6 +213,23 @@ def test_a_rate_limit_report_reaches_the_wire_journal_under_the_active_execution
     assert update.data is not None
     assert update.data.kind == "rate_limit_update"
     assert update.data.exhausted is True
+
+
+def test_a_quota_pause_reaches_the_wire_journal_under_the_active_execution(
+    tmp_path: Path,
+) -> None:
+    parts = build_server_parts(tmp_path)
+    _emit_execution_started(parts, "round-1", _execution_started_data("implementer", "work"))
+
+    parts.core_events.emit(
+        CoreEventType.QUOTA_PAUSED,
+        data=QuotaPausedData(provider="claude", condition="quota_exhausted", detail="limit"),
+    )
+
+    paused = next(e for e in parts.journal.read() if e.type is EventType.QUOTA_PAUSED)
+    assert paused.agent_kind == "implementer"
+    assert paused.data is not None
+    assert paused.data.kind == "quota_paused"
 
 
 def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: Path) -> None:

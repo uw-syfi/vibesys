@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Seeded, declarative fault injection at VibeSys boundary interfaces"
 requires-python = ">=3.12"
 dependencies = [
+    "agentshim>=0.15.7,<0.16",
     "pydantic>=2",
     "vs-agent",
     "vs-mcp",

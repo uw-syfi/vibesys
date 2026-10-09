@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import agentshim
+
 from vs_agent.drivers.agentshim import AgentShimDriver
 from vs_agent.drivers.fake import FakeDriver, FakeTurnScript
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
@@ -15,7 +17,6 @@ from vs_agent.fake_docker_build_runner import FakeDockerBuildRunner
 from vs_agent.sessions import AgentInvocationState, ClientAgentSessions
 
 if TYPE_CHECKING:
-    import agentshim
     from agentshim.testing import FakeExecutor
 
     from vs_agent.contracts import AgentDriver, AgentSessionSpec
@@ -33,18 +34,26 @@ __all__ = [
 ]
 
 
-def fake_agentshim_driver(*, provider: str, executor: FakeExecutor) -> AgentDriver:
+def fake_agentshim_driver(
+    *,
+    provider: str,
+    executor: FakeExecutor,
+    transport: agentshim.TransportKind = agentshim.TransportKind.ONE_SHOT,
+) -> AgentDriver:
     """Drive the real usage/policy adapter with a scripted in-memory executor.
 
     No provider CLI or operator environment is used. The fake executor emits
     the provider's real protocol; normalization follows the production path.
     No process runs, so workspace confinement is satisfied vacuously.
+    ``transport`` is the one the scripted executor speaks: a ``STREAM`` fake
+    needs an executor built with ``peers``.
     """
     return _FakeAgentShimDriver(
         provider=provider,
         executor_factory=lambda: executor,
         launcher_env=dict,
         transient_retry_delays=(),
+        transport=transport,
     )
 
 

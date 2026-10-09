@@ -10,6 +10,10 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    ProviderSwitchedData,
+    QuotaAbandonedData,
+    QuotaPausedData,
+    QuotaResumedData,
     RateLimitUpdateData,
     RunConfiguredData,
     WorkspaceSnapshotData,
@@ -49,6 +53,39 @@ def format_rate_limit_event(event: CoreEvent) -> str | None:
         reset = datetime.fromtimestamp(data.resets_at, tz=UTC)
         line += f"; resets {reset:%Y-%m-%d %H:%M} UTC"
     return line
+
+
+def format_quota_event(event: CoreEvent) -> str | None:
+    """Return the terminal rendering of a quota pause, resume or abandonment, or None."""
+    data = event.data
+    if isinstance(data, QuotaResumedData):
+        by = "the wait elapsed" if data.reason == "wait_elapsed" else "resumed"
+        return f"[quota] {by}; sending the paused {data.provider} turn again"
+    if isinstance(data, ProviderSwitchedData):
+        return (
+            f"[quota] switched from {data.from_provider} to {data.to_provider} ({data.to_model}) "
+            f"by the {data.reason}; new sessions start there ({data.detail})"
+        )
+    if isinstance(data, QuotaAbandonedData):
+        return f"[quota] {data.provider} {_quota_condition(data.condition)}: {data.detail}; {data.reason}"
+    if not isinstance(data, QuotaPausedData):
+        return None
+    line = f"[quota] {data.provider} {_quota_condition(data.condition)}: {data.detail}; the run is paused"
+    if data.resets_at is not None:
+        line += f" (capacity returns {_utc(data.resets_at)})"
+    if data.resumes_at is not None:
+        line += f"; resuming by itself at {_utc(data.resumes_at)}"
+    if data.fallback_provider is not None:
+        line += f"; fallback: {data.fallback_provider} ({data.fallback_model})"
+    return line
+
+
+def _quota_condition(condition: str) -> str:
+    return "quota exhausted" if condition == "quota_exhausted" else "rate limited"
+
+
+def _utc(epoch: float) -> str:
+    return f"{datetime.fromtimestamp(epoch, tz=UTC):%Y-%m-%d %H:%M} UTC"
 
 
 def _format_gate_started(data: GateStartedData) -> str:

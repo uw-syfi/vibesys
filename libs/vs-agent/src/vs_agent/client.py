@@ -19,6 +19,7 @@ from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentObserver,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentSession,
     AgentSessionSpec,
     AgentSkillUse,
@@ -30,6 +31,8 @@ from vs_agent.contracts import (
     ProviderNotReadyError,
     ReadinessProbe,
     SessionDisposition,
+    SteerableSession,
+    SteerOutcome,
     session_spec_fingerprint,
 )
 from vs_agent.events import CommandResultPayload, JsonResultPayload
@@ -43,10 +46,11 @@ from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.usage_records import USAGE_FILE, append_usage_record, usage_dict
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
     from typing import TextIO
 
+    from vs_agent.contracts import CapacityGate
     from vs_agent.events import AgentOutputChannel
     from vs_agent.progress import AgentProgress
     from vs_agent.sink import AgentEventSink
@@ -257,6 +261,7 @@ class AgentClient:
         self._cancelled = False
         self._active_lock = threading.Lock()
         self._active_sessions: list[AgentSession] = []
+        self._capacity_gate: CapacityGate | None = None
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -545,6 +550,10 @@ class AgentClient:
                 self._run_log_file,
             )
 
+    def set_capacity_gate(self, gate: CapacityGate) -> None:
+        """Hand every later provider capacity limit to ``gate`` instead of failing the turn."""
+        self._capacity_gate = gate
+
     def run(
         self,
         *,
@@ -599,7 +608,7 @@ class AgentClient:
             self._sessions[session_key] = cached
 
         try:
-            result = self._run_session(cached.session, turn, observer)
+            result = self._run_session(cached.session, turn, observer, role=session_spec.role)
         except AgentOutputSchemaError:
             # The driver kept the conversation that produced the invalid
             # output, so the session stays live: the caller's correction turn
@@ -817,6 +826,23 @@ class AgentClient:
         for session in active:
             session.cancel()
 
+    def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
+        """Offer *text* to the turn running now, on a driver that can take it mid-turn.
+
+        An execution runs one turn at a time, so there is at most one target;
+        with several in flight the newest is offered the message. A driver or
+        provider without mid-turn input reports ``UNSUPPORTED`` and is never
+        asked; nothing is queued here, so the caller keeps its own fallback.
+        """
+        with self._active_lock:
+            active = tuple(self._active_sessions)
+        if not active:
+            return SteerOutcome.NO_RUNNING_TURN
+        session = active[-1]
+        if not isinstance(session, SteerableSession):
+            return SteerOutcome.UNSUPPORTED
+        return session.steer(text, on_rejected=on_rejected)
+
     def cancel_session(self, key: AgentSessionKey) -> None:
         """Stop the in-flight turn of one keyed conversation, keeping its checkpoint.
 
@@ -840,7 +866,7 @@ class AgentClient:
         session = self._create_session(session_spec)
         turn_error: BaseException | None = None
         try:
-            return self._run_session(session, turn, observer)
+            return self._run_session(session, turn, observer, role=session_spec.role)
         except BaseException as error:
             turn_error = error
             raise
@@ -857,15 +883,31 @@ class AgentClient:
         session: AgentSession,
         turn: AgentTurnRequest,
         observer: AgentObserver | None,
+        *,
+        role: str,
     ) -> AgentTurnResult:
-        """Publish a turn before running it so cross-thread cancellation cannot miss it."""
+        """Publish a turn before running it so cross-thread cancellation cannot miss it.
+
+        A turn that stops on a provider capacity limit goes to the capacity
+        gate, when one is installed, and is sent again on the same live
+        session once the gate returns; the gate raises to end the turn.
+        """
         with self._active_lock:
             if self._cancelled:
                 msg = "agent client is cancelled"
                 raise RuntimeError(msg)
             self._active_sessions.append(session)
         try:
-            return session.run_turn(turn, observer)
+            stops = 0
+            while True:
+                try:
+                    return session.run_turn(turn, observer)
+                except AgentQuotaError as error:
+                    gate = self._capacity_gate
+                    if gate is None:
+                        raise
+                    stops += 1
+                    gate.wait_for_capacity(error, turn, role=role, attempt=stops)
         finally:
             with self._active_lock:
                 self._active_sessions.remove(session)

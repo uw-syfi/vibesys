@@ -925,6 +925,78 @@ describe('unnumbered round compatibility', () => {
   });
 });
 
+describe('quota pause banner', () => {
+  const paused = (fallback: boolean, resumesAt?: number): RunEvent =>
+    event(1, 'quota_paused', {
+      kind: 'quota_paused',
+      provider: 'claude',
+      condition: 'quota_exhausted',
+      detail: 'five hour limit reached',
+      resets_at: 1_800_000_000,
+      ...(resumesAt === undefined ? {} : {resumes_at: resumesAt}),
+      ...(fallback ? {fallback_provider: 'codex', fallback_model: 'gpt-5.4'} : {}),
+    });
+  const settled = (kind: 'quota_resumed' | 'quota_abandoned' | 'provider_switched'): RunEvent =>
+    event(
+      2,
+      kind,
+      kind === 'quota_resumed'
+        ? {kind, provider: 'claude'}
+        : kind === 'quota_abandoned'
+          ? {
+              kind,
+              provider: 'claude',
+              condition: 'quota_exhausted',
+              detail: 'five hour limit reached',
+              reason: 'wait budget spent',
+            }
+          : {
+              kind,
+              from_provider: 'claude',
+              to_provider: 'codex',
+              to_model: 'gpt-5.4',
+              reason: 'policy',
+              detail: 'five hour limit reached',
+            },
+    );
+
+  it('names the provider, the diagnostic and the choices, with fallback only when configured', () => {
+    const withFallback = applyEvent(initialSessionState(), paused(true));
+    expect(withFallback.errorBanner).toMatchObject({
+      title: 'Paused on provider quota',
+      severity: 'recoverable',
+      message: 'claude is out of quota. The run is paused until you decide.',
+    });
+    expect(withFallback.errorBanner?.detail).toContain('five hour limit reached');
+    expect(withFallback.errorBanner?.hint).toContain(
+      '/resume fallback: continue on codex (gpt-5.4)',
+    );
+
+    const without = applyEvent(initialSessionState(), paused(false));
+    expect(without.errorBanner?.hint).toContain('/resume: try the same provider again');
+    expect(without.errorBanner?.hint).not.toContain('fallback');
+  });
+
+  it('says when a timed policy resumes the run by itself', () => {
+    const state = applyEvent(initialSessionState(), paused(false, 1_800_000_005));
+    expect(state.errorBanner?.hint).toContain('resumes by itself at 2027-01-15 08:00 UTC');
+  });
+
+  it('retires the banner when the stop settles, however it settles', () => {
+    for (const kind of ['quota_resumed', 'quota_abandoned', 'provider_switched'] as const) {
+      const state = applyEvent(applyEvent(initialSessionState(), paused(true)), settled(kind));
+      expect(state.errorBanner).toBeNull();
+    }
+  });
+
+  it('leaves an unrelated banner alone when the stop settles', () => {
+    let state = applyEvent(initialSessionState(), paused(true));
+    state = reportError(state, 'Connection lost', {scope: 'transport'});
+    state = applyEvent(state, settled('quota_resumed'));
+    expect(state.errorBanner?.message).toBe('Connection lost');
+  });
+});
+
 describe('session event model', () => {
   it('tracks concurrent agent executions independently through activity and finish events', () => {
     let state = initialSessionState();

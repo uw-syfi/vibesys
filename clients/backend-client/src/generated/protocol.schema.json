@@ -1356,6 +1356,7 @@
         "answered",
         "pending",
         "consumed",
+        "delivered",
         "completed",
         "failed",
         "cancelled",
@@ -1398,6 +1399,10 @@
         "todo_update",
         "usage_update",
         "rate_limit_update",
+        "quota_paused",
+        "quota_resumed",
+        "quota_abandoned",
+        "provider_switched",
         "gate_started",
         "gate_finished",
         "workspace_snapshot",
@@ -2828,6 +2833,215 @@
       "title": "ProtocolErrorMessage",
       "type": "object"
     },
+    "ProviderSwitchedData": {
+      "description": "The run replaced a provider by its fallback.\n\nSessions opened from now on run on ``to_provider`` and ``to_model`` as fresh\nconversations; a session already open does not move. Every later event\ncarries the provider and model it actually ran on.",
+      "properties": {
+        "kind": {
+          "const": "provider_switched",
+          "default": "provider_switched",
+          "title": "Kind",
+          "type": "string"
+        },
+        "from_provider": {
+          "title": "From Provider",
+          "type": "string"
+        },
+        "to_provider": {
+          "title": "To Provider",
+          "type": "string"
+        },
+        "to_model": {
+          "title": "To Model",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "policy",
+            "operator"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "from_provider",
+        "to_provider",
+        "to_model",
+        "reason",
+        "detail"
+      ],
+      "title": "ProviderSwitchedData",
+      "type": "object"
+    },
+    "QuotaAbandonedData": {
+      "description": "The quota policy ended a turn with the quota error instead of pausing or waiting longer.",
+      "properties": {
+        "kind": {
+          "const": "quota_abandoned",
+          "default": "quota_abandoned",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "condition": {
+          "enum": [
+            "quota_exhausted",
+            "rate_limited"
+          ],
+          "title": "Condition",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "provider",
+        "condition",
+        "detail",
+        "reason"
+      ],
+      "title": "QuotaAbandonedData",
+      "type": "object"
+    },
+    "QuotaPausedData": {
+      "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or\n``rate_limited`` (sustained rate limiting); ``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes; ``resumes_at`` is the\nepoch second the run's quota policy resumes it by itself, ``None`` when only the\noperator can. ``policy`` is the unattended quota policy; the fallback fields name the\nprovider and model an operator may resume with, ``None`` when none is configured.",
+      "properties": {
+        "kind": {
+          "const": "quota_paused",
+          "default": "quota_paused",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "condition": {
+          "enum": [
+            "quota_exhausted",
+            "rate_limited"
+          ],
+          "title": "Condition",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "resets_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resets At"
+        },
+        "resumes_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resumes At"
+        },
+        "policy": {
+          "default": "pause",
+          "enum": [
+            "pause",
+            "wait",
+            "fail",
+            "fallback"
+          ],
+          "title": "Policy",
+          "type": "string"
+        },
+        "fallback_provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Provider"
+        },
+        "fallback_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Model"
+        }
+      },
+      "required": [
+        "kind",
+        "provider",
+        "condition",
+        "detail"
+      ],
+      "title": "QuotaPausedData",
+      "type": "object"
+    },
+    "QuotaResumedData": {
+      "description": "A run paused on a capacity limit resumed on the same provider and sent the turn again.",
+      "properties": {
+        "kind": {
+          "const": "quota_resumed",
+          "default": "quota_resumed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "reason": {
+          "default": "operator",
+          "enum": [
+            "operator",
+            "wait_elapsed"
+          ],
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "provider"
+      ],
+      "title": "QuotaResumedData",
+      "type": "object"
+    },
     "RateLimitUpdateData": {
       "description": "One rate-limit window a provider reported, as semantic data.\n\n``exhausted`` is the resolved fact (the provider's own statement, else\nusage at or past 100%); the other fields are what the provider stated,\n``None`` when it did not state them. ``resets_at`` is epoch seconds.",
       "properties": {
@@ -3170,6 +3384,11 @@
           "default": "command.resume",
           "title": "Type",
           "type": "string"
+        },
+        "fallback": {
+          "default": false,
+          "title": "Fallback",
+          "type": "boolean"
         }
       },
       "title": "ResumeCommand",
@@ -3459,6 +3678,10 @@
                   "judge_result": "#/$defs/JudgeResultData",
                   "output": "#/$defs/OutputData",
                   "phase": "#/$defs/PhaseData",
+                  "provider_switched": "#/$defs/ProviderSwitchedData",
+                  "quota_abandoned": "#/$defs/QuotaAbandonedData",
+                  "quota_paused": "#/$defs/QuotaPausedData",
+                  "quota_resumed": "#/$defs/QuotaResumedData",
                   "rate_limit_update": "#/$defs/RateLimitUpdateData",
                   "round_finished": "#/$defs/RoundFinishedData",
                   "run_configured": "#/$defs/RunConfiguredData",
@@ -3554,6 +3777,18 @@
                 },
                 {
                   "$ref": "#/$defs/RateLimitUpdateData"
+                },
+                {
+                  "$ref": "#/$defs/QuotaPausedData"
+                },
+                {
+                  "$ref": "#/$defs/QuotaResumedData"
+                },
+                {
+                  "$ref": "#/$defs/QuotaAbandonedData"
+                },
+                {
+                  "$ref": "#/$defs/ProviderSwitchedData"
                 },
                 {
                   "$ref": "#/$defs/GateStartedData"

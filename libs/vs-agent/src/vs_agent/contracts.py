@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from datetime import timedelta
     from pathlib import Path
     from typing import TextIO
@@ -61,6 +61,114 @@ class AgentOutputSchemaError(RuntimeError):
         """Record the validation errors the provider reported last."""
         self.detail = detail
         super().__init__(f"agent output did not match the response schema: {detail}")
+
+
+class QuotaCondition(StrEnum):
+    """Which kind of capacity limit stopped a provider turn."""
+
+    QUOTA_EXHAUSTED = "quota_exhausted"
+    """A usage quota, spend limit or billing limit: retrying now cannot succeed."""
+    RATE_LIMITED = "rate_limited"
+    """Sustained rate limiting: the provider's retries ran out while a window was exhausted."""
+
+
+class AgentQuotaError(RuntimeError):
+    """A turn failed because the provider has no capacity left, not because the work failed.
+
+    Raised instead of a provider exit error so a caller can pause and wait for
+    capacity instead of treating the turn as failed. The conversation is intact
+    and the same turn may be sent again once capacity returns. ``resets_at`` is
+    epoch seconds when the provider reported when the exhausted window reopens,
+    else ``None``.
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        condition: QuotaCondition,
+        detail: str,
+        resets_at: float | None = None,
+    ) -> None:
+        """Record the provider, the condition, its diagnostic and the reset time."""
+        self.provider = provider
+        self.condition = condition
+        self.detail = detail
+        self.resets_at = resets_at
+        super().__init__(f"{provider} {condition.value.replace('_', ' ')}: {detail}")
+
+
+type QuotaResumeReason = Literal["operator", "wait_elapsed"]
+"""Who ended a quota pause: the operator, or the policy's wait running out."""
+
+type ProviderSwitchReason = Literal["policy", "operator"]
+"""Who switched the run to its fallback provider: the quota policy, or the operator."""
+
+
+@dataclass(frozen=True, slots=True)
+class Attribution:
+    """Which agent, round and invocation an event belongs to; ``None`` when unknown."""
+
+    agent_kind: str | None = None
+    round_label: str | None = None
+    invocation_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class QuotaPlan:
+    """What happens next to a run paused on a capacity limit.
+
+    ``policy`` names the run's unattended quota policy (``pause``, ``wait``, ``fail`` or
+    ``fallback``).
+    ``resumes_at`` is the epoch second the run resumes itself, when its policy
+    does; ``fallback_provider`` and ``fallback_model`` name where an operator may
+    resume it instead, when a fallback is configured.
+    """
+
+    policy: str = "pause"
+    resumes_at: float | None = None
+    fallback_provider: str | None = None
+    fallback_model: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderSwitch:
+    """A run's switch from one provider to its fallback, and why."""
+
+    from_provider: str
+    to_provider: str
+    to_model: str
+    reason: ProviderSwitchReason
+    detail: str
+
+
+class CapacityGate(Protocol):
+    """The caller's policy for a turn that stopped on a provider capacity limit.
+
+    The client calls :meth:`wait_for_capacity` with the failure and returns
+    only when the same turn should be sent again on the same conversation. It
+    raises to end the turn instead, and the raised error replaces the quota
+    error. The call may block for hours, so a gate owns its own cancellation:
+    a stop request must end the wait by raising.
+    """
+
+    def wait_for_capacity(
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, attempt: int
+    ) -> None:
+        """Block until ``turn`` may be sent again, or raise to give up.
+
+        ``attempt`` counts the capacity stops of this one turn, starting at 1, so a
+        gate can budget its waiting per turn.
+        """
+        ...
+
+
+@runtime_checkable
+class CapacityGated(Protocol):
+    """An optional client capability: capacity limits go to an installed gate."""
+
+    def set_capacity_gate(self, gate: CapacityGate) -> None:
+        """Route every later capacity limit through ``gate``."""
+        ...
 
 
 class AuthStatus(StrEnum):
@@ -415,6 +523,41 @@ class AgentDriver(Protocol):
 
     def close(self) -> None:
         """Release driver resources. Implementations must be idempotent."""
+        ...
+
+
+class SteerOutcome(StrEnum):
+    """What became of a message offered to a running turn."""
+
+    DELIVERED = "delivered"
+    """The provider accepted it into the running turn."""
+    UNSUPPORTED = "unsupported"
+    """This driver, provider or transport cannot take a message mid-turn."""
+    NO_RUNNING_TURN = "no_running_turn"
+    """No turn could take it right now: none is running, or it is starting or finishing."""
+
+
+@runtime_checkable
+class SteerableSession(Protocol):
+    """An optional session capability: accept a message while a turn runs."""
+
+    def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
+        """Offer *text* to the turn running now. Thread-safe; never queues.
+
+        ``DELIVERED`` means the provider holds the message. If it later
+        refuses it (the turn is unaffected), *on_rejected* is called once, on
+        the thread running the turn, so the caller can deliver the text another
+        way. It is never called for any other outcome.
+        """
+        ...
+
+
+@runtime_checkable
+class SteerableAgentClient(Protocol):
+    """An optional client capability: offer a message to the turn running now."""
+
+    def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
+        """Offer *text* to the in-flight turn; see :meth:`SteerableSession.steer`."""
         ...
 
 

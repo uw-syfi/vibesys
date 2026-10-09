@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vs_agent import provider_profiles
-from vs_agent.provider_policy import CODEX_PROVIDER
 from vs_sandbox.api import (
     HostResource,
     HostResourceAccess,
@@ -190,33 +189,38 @@ def _agent_executable_runtime(ctx: HostResourceContext) -> Iterable[HostResource
     return _resources(paths, purpose="agent runtime")
 
 
-#: Writable leaves for provider state directories that must not be granted whole.
-#:
-#: This is VibeSys sandbox policy, not a provider fact: a Codex checkout may
-#: itself live under the CLI's own state root (``$CODEX_HOME/worktrees`` by
-#: default), so granting the directory would expose sibling tasks to the agent.
-#: Bubblewrap creates the ephemeral parent directory these leaf mounts need.
-#: Authentication leaves come from ``ProviderProfile.auth_files`` and are
-#: mounted read-write: a CLI that refreshes its OAuth login writes the new
-#: tokens back, and when the provider rotates its refresh token on use (Codex
-#: does) a refresh that cannot be saved leaves the stored login holding a token
-#: the server already rejects, logging the operator out. This table names only the additional state that VibeSys
-#: deliberately persists across turns. Every other provider state directory is
-#: granted whole because those CLIs write session history and caches throughout
-#: their declared roots.
-#:
-#: The outer key is the provider profile name and the inner key is its default
-#: state directory, regardless of where a state-root environment variable
-#: relocates it at runtime. :func:`_state_root` resolves the actual root.
-#:
-#: ``sessions`` is that session history for Codex. Without it the rollout a
-#: turn writes lands in the sandbox's ephemeral view of ``$CODEX_HOME`` and is
-#: gone by the next turn, so ``codex exec resume`` reports no rollout for the
-#: thread, the driver restarts the conversation, and a confined run silently
-#: loses continuity it was told it had.
-_NARROWED_WRITABLE_STATE_DIRS: dict[str, dict[str, tuple[str, ...]]] = {
-    CODEX_PROVIDER: {".codex": ("sessions",)},
-}
+def _narrowed_writable_leaves(profile: ProviderProfile) -> dict[str, tuple[str, ...]]:
+    """Return, per state directory, the leaves a provider is granted instead of the whole directory.
+
+    A provider that declares ``ProviderProfile.resume_state_paths`` is known to
+    run from its authentication files plus that conversation history, so its
+    state directory is not granted whole: a Codex checkout may itself live under
+    the CLI's own state root (``$CODEX_HOME/worktrees`` by default), and a whole
+    grant would expose sibling tasks to the agent. A provider that declares none
+    keeps the whole-directory grant. The outer key is the default state
+    directory, regardless of where a state-root environment variable relocates
+    it at runtime; :func:`_state_root` resolves the actual root.
+
+    Authentication leaves come from ``ProviderProfile.auth_files`` and are
+    mounted read-write: a CLI that refreshes its OAuth login writes the new
+    tokens back, and when the provider rotates its refresh token on use (Codex
+    does) a refresh that cannot be saved leaves the stored login holding a token
+    the server already rejects, logging the operator out. The history leaves must
+    persist too: without them the rollout a turn writes lands in the sandbox's
+    ephemeral view of the state root and is gone by the next turn, so a resume
+    reports no rollout for the thread, the driver restarts the conversation, and
+    a confined run silently loses continuity it was told it had.
+    """
+    narrowed: dict[str, tuple[str, ...]] = {}
+    for state_dir in profile.state_dirs:
+        leaves = tuple(
+            path.removeprefix(f"{state_dir}/")
+            for path in profile.resume_state_paths
+            if path.startswith(f"{state_dir}/")
+        )
+        if leaves:
+            narrowed[state_dir] = leaves
+    return narrowed
 
 
 def _state_root(
@@ -262,7 +266,7 @@ def declare_provider_state_resources(
         state_dirs.extend(profile.darwin_state_dirs)
 
     resources: list[HostResource] = []
-    narrowed = _NARROWED_WRITABLE_STATE_DIRS.get(profile.name, {})
+    narrowed = _narrowed_writable_leaves(profile)
     for state_dir in state_dirs:
         root = _state_root(state_dir, home=Path(home), ctx=ctx, profile=profile)
         writable_leaves = narrowed.get(state_dir)
@@ -311,7 +315,7 @@ def prepare_provider_state(env: Mapping[str, str], *, profile: ProviderProfile) 
     if not home:
         return
     ctx = HostResourceContext(env=env, provider=profile.name)
-    for state_dir, leaves in _NARROWED_WRITABLE_STATE_DIRS.get(profile.name, {}).items():
+    for state_dir, leaves in _narrowed_writable_leaves(profile).items():
         root = _state_root(state_dir, home=Path(home), ctx=ctx, profile=profile)
         for leaf in leaves:
             (root / leaf).mkdir(parents=True, exist_ok=True)

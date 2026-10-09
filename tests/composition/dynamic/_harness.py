@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 from tests.support.fake_run_clock import FakeRunClock
 from tests.support.liveness import Budget, End, Journal, assert_live
 from tests.support.loop_invariants import RunRecords, check, terminal_event
+from tests.support.world_git import IN_MEMORY_GIT
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
@@ -551,6 +552,7 @@ def run_request(  # noqa: PLR0913
             backend_factory=backend_factory,
             stop_timer=stop_timer or FakeStopTimer(),
             timing=None if clock is None else RunTiming(clock, PRODUCTION_LEASE_SECONDS),
+            git_repository=IN_MEMORY_GIT.repository,
         )
     )
     events: list[CoreEvent] = []

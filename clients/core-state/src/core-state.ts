@@ -60,6 +60,35 @@ export interface UsageMeter {
   readonly model: string | null;
 }
 
+/**
+ * The provider capacity stop a run is parked on.
+ *
+ * `resetsAt` is when the provider said capacity returns and `resumesAt` when the
+ * run's quota policy resumes it by itself, both epoch seconds or `null`.
+ * `fallback` is the provider and model an operator may resume with, `null` when
+ * the run has none configured.
+ */
+export interface QuotaPause {
+  readonly provider: string;
+  readonly condition: 'quota_exhausted' | 'rate_limited';
+  readonly detail: string;
+  readonly resetsAt: number | null;
+  readonly resumesAt: number | null;
+  readonly policy: string | null;
+  readonly fallback: {readonly provider: string; readonly model: string | null} | null;
+}
+
+/**
+ * The latest capacity stop fact. `sequence` is the newest quota event folded,
+ * `0` before any; `pause` is `null` once that event settled the stop (resumed,
+ * abandoned or switched). Whether the run is still parked is the run status's
+ * to say, so a consumer shows `pause` only while the status is pausing or paused.
+ */
+export interface QuotaState {
+  readonly sequence: number;
+  readonly pause: QuotaPause | null;
+}
+
 export interface BenchmarkRecord {
   readonly sequence: number;
   readonly roundNumber: number | null;
@@ -238,6 +267,7 @@ export interface CoreState {
   readonly chatThreads: readonly ChatThread[];
   readonly todos: readonly ExecutionTodos[];
   readonly usage: UsageMeter | null;
+  readonly quota: QuotaState;
   readonly benchmarks: readonly BenchmarkRecord[];
   readonly diagnostics: readonly CoreDiagnostic[];
   /** Sequence of the latest semantic experiment invalidation. */
@@ -283,6 +313,7 @@ export function initialCoreState(): CoreState {
     chatThreads: [{id: DEFAULT_CHAT_THREAD_ID, title: '', provider: null, model: null}],
     todos: [],
     usage: null,
+    quota: {sequence: 0, pause: null},
     benchmarks: [],
     diagnostics: [],
     experimentsRevision: 0,
@@ -561,11 +592,8 @@ export function reduceEventPrefix(
       prefix.acceptedEvents,
       older.usage,
     ),
-    // Sorted rather than concatenated for the same reason the transcript is
-    // merged: a tail batch can carry events from below its own floor.
-    benchmarks: [...older.benchmarks, ...state.benchmarks].sort(
-      (left, right) => left.sequence - right.sequence,
-    ),
+    quota: state.quota.sequence > 0 ? state.quota : older.quota,
+    benchmarks: mergeBenchmarksPrefix(older.benchmarks, state.benchmarks),
     diagnostics: state.diagnostics.reduce(upsertDiagnostic, older.diagnostics),
     experimentsRevision: Math.max(older.experimentsRevision, state.experimentsRevision),
     typedToolEvents: older.typedToolEvents || state.typedToolEvents,
@@ -576,6 +604,17 @@ export function reduceEventPrefix(
   };
   indexRunMapArrays(merged);
   return publishCoreState(merged);
+}
+
+/**
+ * Sorted rather than concatenated for the same reason the transcript is merged:
+ * a tail batch can carry events from below its own floor.
+ */
+function mergeBenchmarksPrefix(
+  older: readonly BenchmarkRecord[],
+  newer: readonly BenchmarkRecord[],
+): readonly BenchmarkRecord[] {
+  return [...older, ...newer].sort((left, right) => left.sequence - right.sequence);
 }
 
 /**
@@ -1041,6 +1080,8 @@ function applyRunFacts(state: CoreState, event: RunEvent, sequence: number): Cor
       model: data.model ?? null,
     };
   }
+  const quota = quotaFromEvent(state.quota, event, sequence);
+  if (quota !== state.quota) mutable.quota = quota;
   const benchmark = benchmarkFromEvent(event, sequence);
   if (benchmark !== null) mutable.benchmarks = [...state.benchmarks, benchmark];
   if (data?.kind === 'experiments_changed') mutable.experimentsRevision = sequence;
@@ -1048,6 +1089,35 @@ function applyRunFacts(state: CoreState, event: RunEvent, sequence: number): Cor
   // so the projection folds the status it is told rather than inferring one.
   if (data?.kind === 'run_status_changed') return applyRunStatus(state, data.status);
   return state;
+}
+
+/** The quota state after `event`: a pause sets it, any event that settles the stop clears it. */
+function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): QuotaState {
+  const data = event.data;
+  switch (data?.kind) {
+    case 'quota_paused':
+      return {
+        sequence,
+        pause: {
+          provider: data.provider,
+          condition: data.condition,
+          detail: data.detail,
+          resetsAt: data.resets_at ?? null,
+          resumesAt: data.resumes_at ?? null,
+          policy: data.policy ?? null,
+          fallback:
+            data.fallback_provider == null
+              ? null
+              : {provider: data.fallback_provider, model: data.fallback_model ?? null},
+        },
+      };
+    case 'quota_resumed':
+    case 'quota_abandoned':
+    case 'provider_switched':
+      return {sequence, pause: null};
+    default:
+      return quota;
+  }
 }
 
 /**

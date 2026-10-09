@@ -36,9 +36,9 @@ it, so it has no slash name of its own.
 | `/chat` | Open experiment chat. Puts the pane keys on the docked chat, or opens it as a modal where it cannot dock; `/chat <question>` asks immediately. Command bar only, since the chat has nothing to open. | |
 | | Every command below works in the chat too, and does the same thing as in the command bar. | |
 | `/pause` | Pause after the current agent call. Takes effect once the current call finishes. | |
-| `/resume` | Resume a paused run. Works from the command bar and the chat. | |
+| `/resume` | Resume a paused run. Works from the command bar and the chat. When the run is paused on a provider quota or rate-limit stop, a banner names the choices: wait (the run stays paused, or resumes itself when its `[agent.quota]` policy says), `/resume` to try the same provider again, or `/resume fallback` to continue on the configured fallback provider and model. The turn in flight ends and later sessions are fresh conversations on the fallback. The fallback choice is offered only when the run configures one. | |
 | `/stop` | Stop the run after the current agent call. Takes effect once the current call finishes. The journal records the stop and the run reads `stopped`, not failed; it can be reopened or resumed later. Signals remain the escalation path for a backend that stopped responding. | |
-| `/steer <message>` | Guide the next agent invocation: `/steer <message>`. Queues an instruction that is appended to the next agent invocation's prompt. | |
+| `/steer <message>` | Guide the running agent, else the next turn: `/steer <message>`. The instruction is delivered into the running turn when the provider accepts messages mid-turn, and otherwise appended to the next agent invocation's prompt. | |
 | `/open-round` | Open the selected hypothesis, or `/open-round --N` for round N. With no argument, opens the rounds behind the selected hypothesis. | |
 | `/open-round --N` | Open round N, inside whichever hypothesis owns it. | |
 | `/perf` | Plot performance by round in the right pane. Uses the recorded performance metric. | |

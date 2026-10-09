@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from vibesys.config import Config
     from vibesys.constants import ComputeBackend
     from vs_agent.api import AgentEventSink
-    from vs_project.api import Project
+    from vs_project.api import GitRepositoryFactory, Project
     from vs_runtime.api.infrastructure import (
         ProjectRunResources,
         RunEnvironmentResources,
@@ -290,8 +290,13 @@ class LocalRunIntegration:
     `RunSession`.
     """
 
-    def __init__(self) -> None:
-        """Compose a durable journal with direct invocation control."""
+    def __init__(self, git_repository: GitRepositoryFactory | None = None) -> None:
+        """Compose a durable journal with direct invocation control.
+
+        ``git_repository`` builds the run's ``GitRepository`` implementations; ``None``
+        runs the Git CLI.
+        """
+        self.git_repository = git_repository
         self.events = EventJournal()
         self.agent_events = CoreAgentEventSink(self.events.record)
         self.control = create_run_control_channel(_CoreRunControlEvents(self.events))

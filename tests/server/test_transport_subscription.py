@@ -149,7 +149,8 @@ def _subscribed_client(
     socket_path: Path, request: SubscribeRequest
 ) -> Generator[Callable[[], dict]]:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(10)
+        # No read timeout: the server closes the connection when its handler ends,
+        # so a reader never waits on an absent reply, only on a slow one.
         client.connect(str(socket_path))
         with client.makefile("rwb") as stream:
             stream.write(request.model_dump_json().encode() + b"\n")
@@ -325,8 +326,7 @@ def test_bootstrap_tail_stays_bounded_under_concurrent_appends(tmp_path: Path) -
         _subscribed, batch = _subscribe(parts.api, SubscribeRequest(after_sequence=0, tail=tail))
     finally:
         stop.set()
-        writer.join(timeout=5)
-    assert not writer.is_alive()
+        writer.join()
 
     floor = batch["history_after_sequence"]
     ordinary = [event for event in batch["events"] if event["sequence"] > floor]
@@ -589,22 +589,25 @@ def test_disconnect_wait_blocks_until_last_subscriber_closes(
 
         with _subscribed_client(socket_path, request) as read:
             assert read()["type"] == "subscribed"
-            unblocked = threading.Event()
+            order: list[str] = []
+            returned = threading.Event()
 
             def wait_for_disconnect() -> None:
                 server.wait_for_subscriber_disconnect()
-                unblocked.set()
+                order.append("wait returned")
+                returned.set()
 
             waiter = threading.Thread(target=wait_for_disconnect, daemon=True)
             waiter.start()
             # The first client's earlier disconnect must not unblock the wait
-            # while the second subscription is still streaming.
-            assert not unblocked.wait(timeout=1.0)
+            # while the second subscription is still streaming: the wait may
+            # return only after the second client has hung up.
+            order.append("second client hanging up")
         parts.journal.publish_output("stdout", "wake the second handler")
 
-        assert unblocked.wait(timeout=5)
-        waiter.join(timeout=5)
-        assert not waiter.is_alive()
+        returned.wait()
+        waiter.join()
+        assert order == ["second client hanging up", "wait returned"]
 
 
 def test_wait_for_change_does_not_parse_events(

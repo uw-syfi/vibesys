@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, ClassVar
 
 from vs_project._exclude_file import append_excludes
 from vs_project._git_process import git_environment, run_git
-from vs_project._head_reader import Commit, Unborn, locate_git_dir, read_head
 from vs_project.api.git_repository import (
     COMMIT_IDENTITY_EMAIL,
     COMMIT_IDENTITY_NAME,
@@ -170,13 +169,6 @@ class CliGitRepository:
     # -- reading history -----------------------------------------------------
 
     def head(self) -> str | None:
-        git_dir = self._git_dir or locate_git_dir(self._root)
-        if git_dir is not None:
-            state = read_head(git_dir)
-            if isinstance(state, Commit):
-                return state.sha
-            if isinstance(state, Unborn):
-                return None
         try:
             result = self._run(["rev-parse", "HEAD"])
         except (OSError, subprocess.SubprocessError):

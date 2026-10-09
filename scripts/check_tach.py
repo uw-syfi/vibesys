@@ -47,9 +47,7 @@ def stage_source_roots(repo_root: Path, destination: Path) -> None:
     roots = tomllib.loads(config_path.read_text(encoding="utf-8"))["source_roots"]
     shutil.copy(config_path, destination / "tach.toml")
     for relative in roots:
-        shutil.copytree(
-            repo_root / relative, destination / relative, ignore=_keep_python_sources
-        )
+        shutil.copytree(repo_root / relative, destination / relative, ignore=_keep_python_sources)
 
 
 def main() -> int:

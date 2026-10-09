@@ -1,4 +1,5 @@
 import type {RequestInput} from '@vibesys/backend-client';
+import {RESUME_FALLBACK_ARGUMENT} from './quota-projection.js';
 import type {PaneView} from './session-model.js';
 import {isThemeName, THEME_NAMES, type ThemeName} from './theme.js';
 
@@ -171,10 +172,17 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     id: 'resume',
     name: '/resume',
     description: 'Resume a paused run',
-    args: 'none',
+    args: 'optional',
+    usage: '/resume [fallback]',
     surfaces: BOTH,
     section: 'run',
-    parse: () => ({kind: 'request', request: {type: 'command.resume'}}),
+    parse: argument => {
+      if (argument === '') return {kind: 'request', request: {type: 'command.resume'}};
+      if (argument === RESUME_FALLBACK_ARGUMENT) {
+        return {kind: 'request', request: {type: 'command.resume', fallback: true}};
+      }
+      return {kind: 'error', error: 'Usage: /resume [fallback]'};
+    },
   },
   {
     id: 'stop',
@@ -188,7 +196,7 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
   {
     id: 'steer',
     name: '/steer',
-    description: 'Guide the next agent invocation: /steer <message>',
+    description: 'Guide the running agent, else the next turn: /steer <message>',
     args: 'required',
     usage: '/steer <message>',
     surfaces: BOTH,

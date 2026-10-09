@@ -7,6 +7,7 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.world_git import IN_MEMORY_GIT
 
 from launch.testing import create_session
 from vibesys.api import ComputeBackend, Config, OrchestrationRegistry
@@ -123,6 +124,7 @@ def execute(
             registry=registry,
             agent_client_factory=agent_client_factory(clients),
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            git_repository=IN_MEMORY_GIT.repository,
         )
         session.start()
         try:

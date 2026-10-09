@@ -13,10 +13,11 @@ constructed response objects, and this module never runs an external agent.
 
 from __future__ import annotations
 
+import functools
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, Self, TypeVar
+from typing import TYPE_CHECKING, Concatenate, Literal, Self, TypeVar
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -27,9 +28,12 @@ from vs_agent.contracts import (
     AgentEvent,
     AgentEventKind,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentSkillUse,
+    AgentTurnRequest,
     AgentTurnResult,
     AgentUsage,
+    SteerOutcome,
     session_spec_fingerprint,
 )
 from vs_agent.runner import validate_typed_response
@@ -43,7 +47,7 @@ from vs_mcp.api import StdioServerDescriptor
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_agent.contracts import AgentObserver, AgentSessionSpec, AgentTurnRequest
+    from vs_agent.contracts import AgentObserver, AgentSessionSpec, CapacityGate
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
     from vs_agent.skills import SkillSelection
@@ -130,6 +134,27 @@ def _pop(queues: dict[str, list[_PopT]], kind: str) -> _PopT | None:
     return queue.pop(0)
 
 
+def _turn_in_flight[**P, R](
+    method: Callable[Concatenate[FakeAgentClient, P], R],
+) -> Callable[Concatenate[FakeAgentClient, P], R]:
+    """Mark the wrapped call as a turn in flight, for :meth:`FakeAgentClient.steer`.
+
+    When the turn ends, every steer the fake accepted and was scripted to
+    refuse is handed back through its ``on_rejected``, as a provider refusing
+    an accepted message would.
+    """
+
+    @functools.wraps(method)
+    def run(self: FakeAgentClient, *args: P.args, **kwargs: P.kwargs) -> R:
+        self._begin_turn()
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._end_turn()
+
+    return run
+
+
 class FakeAgentClient:
     """Configurable in-memory double for :class:`~vs_agent.contracts.AgentClientProtocol`.
 
@@ -202,6 +227,15 @@ class FakeAgentClient:
         self._last_turn_sessions: dict[AgentSessionKey, str] = {}
         self._raw_fingerprints: dict[AgentSessionKey, str] = {}
 
+        #: Messages accepted mid-turn by :meth:`steer`, in order.
+        self.steers: list[str] = []
+        self._steer_outcome = SteerOutcome.UNSUPPORTED
+        self._refuses_accepted_steers = False
+        self._refusals: list[Callable[[], None]] = []
+        self._turns_in_flight = 0
+        self._steer_lock = threading.Lock()
+
+        self._capacity_gate: CapacityGate | None = None
         self._closed = False
         self.cancel_count = 0
         self.cancelled_sessions: list[AgentSessionKey] = []
@@ -253,6 +287,42 @@ class FakeAgentClient:
         """Record a cancellation request and release turns waiting for one."""
         self.cancel_count += 1
         self._cancelled.set()
+
+    # -- optional capability: steering a running turn ---------------------------
+
+    def set_steering(self, outcome: SteerOutcome, *, refuses_after_accepting: bool = False) -> Self:
+        """Script how :meth:`steer` answers while a turn is in flight.
+
+        The default is ``UNSUPPORTED``, like a driver on a one-shot transport.
+        With ``refuses_after_accepting`` a ``DELIVERED`` message is handed back
+        through its ``on_rejected`` when the turn ends.
+        """
+        self._steer_outcome = outcome
+        self._refuses_accepted_steers = refuses_after_accepting
+        return self
+
+    def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
+        """Offer *text* to the turn in flight, answering as scripted."""
+        with self._steer_lock:
+            if self._turns_in_flight == 0:
+                return SteerOutcome.NO_RUNNING_TURN
+            outcome = self._steer_outcome
+            if outcome is SteerOutcome.DELIVERED:
+                self.steers.append(text)
+                if self._refuses_accepted_steers:
+                    self._refusals.append(on_rejected)
+            return outcome
+
+    def _begin_turn(self) -> None:
+        with self._steer_lock:
+            self._turns_in_flight += 1
+
+    def _end_turn(self) -> None:
+        with self._steer_lock:
+            self._turns_in_flight -= 1
+            refusals, self._refusals = self._refusals, []
+        for refusal in refusals:
+            refusal()
 
     def cancel_session(self, key: AgentSessionKey) -> None:
         """Record a cancellation of one key and release turns waiting for a cancellation."""
@@ -395,6 +465,7 @@ class FakeAgentClient:
 
     # -- AgentClientProtocol: turns ------------------------------------------
 
+    @_turn_in_flight
     def run(
         self,
         *,
@@ -436,7 +507,7 @@ class FakeAgentClient:
         self._write_usage(
             session_spec.role, turn.label, session_spec.model, session_spec.reasoning_effort
         )
-        self._maybe_raise(session_spec.role)
+        self._maybe_raise(session_spec.role, turn.message, turn.label, turn.invocation_id)
         self._update_session(reuse_session=True, session_key=session_key)
         if session_key is not None:
             self._raw_fingerprints[session_key] = fingerprint
@@ -524,6 +595,7 @@ class FakeAgentClient:
         if known_fingerprint != fingerprint:
             raise SessionResumeError(str(key), "session specification changed")
 
+    @_turn_in_flight
     def invoke(  # noqa: PLR0913  # lint-waiver: LW-010178 [PLR0913]; Preserve FakeAgentClient.invoke's named-argument contract because callers pass these independent settings directly.
         self,
         *,
@@ -557,11 +629,12 @@ class FakeAgentClient:
             session_key=session_key,
         )
         self._write_usage(kind, round_label, self.model_for_kind(kind), None)
-        self._maybe_raise(kind)
+        self._maybe_raise(kind, user_prompt, round_label, invocation_id)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
         return self._resolve_response(kind, invocation, response_cls)
 
+    @_turn_in_flight
     def invoke_text(  # noqa: PLR0913  # lint-waiver: LW-010179 [PLR0913]; Preserve FakeAgentClient.invoke_text's named-argument contract because callers pass these independent settings directly.
         self,
         *,
@@ -594,7 +667,7 @@ class FakeAgentClient:
             session_key=session_key,
         )
         self._write_usage(kind, round_label, self.model_for_kind(kind), None)
-        self._maybe_raise(kind)
+        self._maybe_raise(kind, user_prompt, round_label, invocation_id)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
         return self._resolve_text(kind, invocation)
@@ -655,7 +728,31 @@ class FakeAgentClient:
             skills=AgentSkillUse(),
         )
 
-    def _maybe_raise(self, kind: str) -> None:
+    def set_capacity_gate(self, gate: CapacityGate) -> None:
+        """Route a scripted ``AgentQuotaError`` through ``gate``, as the real client does."""
+        self._capacity_gate = gate
+
+    def _maybe_raise(
+        self, kind: str, message: str, label: str | None, invocation_id: str | None
+    ) -> None:
+        """Raise the scripted failure; a quota limit waits at the gate and sends the turn again."""
+        stops = 0
+        while True:
+            try:
+                self._raise_scripted(kind)
+            except AgentQuotaError as error:
+                gate = self._capacity_gate
+                if gate is None:
+                    raise
+                stops += 1
+                request = AgentTurnRequest(
+                    message=message, label=label, invocation_id=invocation_id
+                )
+                gate.wait_for_capacity(error, request, role=kind, attempt=stops)
+            else:
+                return
+
+    def _raise_scripted(self, kind: str) -> None:
         state = self._failures.get(kind)
         if state is None:
             return

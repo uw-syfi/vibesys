@@ -46,6 +46,7 @@ from vs_agent.api import (
     AgentBackend,
     auth_bind_mounts,
     auth_copy_paths,
+    reap_orphaned_agents,
 )
 
 # lint-waiver: LW-014514 [TC001]; Pydantic resolves this dataclass field annotation at runtime
@@ -491,8 +492,20 @@ class RunEnvironment(Protocol):
         """Remove a workspace-relative child and report whether it is absent."""
         ...
 
+    def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
+        """End the agent processes and containers a dead host left for *run_id*.
+
+        Called when a run resumes, before anything else touches its workspace.
+        Raises if an orphan could not be ended: the run must not resume beside
+        an agent that may still be writing.
+        """
+        ...
+
 
 class _NoopWorkspaceRecovery:
+    def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
+        del run_id, log
+
     def repair_workspace(
         self,
         workspace: Path,
@@ -881,13 +894,15 @@ class DockerEnvironment:
     def from_options(cls, options: Mapping[str, object]) -> DockerEnvironment:
         """Build Docker configuration from CLI options.
 
-        ``build_runner`` is the unrecorded injection seam for the agent image build.
+        ``build_runner`` is the unrecorded injection seam for the agent image build,
+        ``docker`` the one for the host's ``docker`` client.
         """
         image = options.get("image")
         build_runner = options.get("build_runner")
         return cls(
             DockerEnvironmentConfig(
                 image=str(image) if image else None,
+                docker=cast("DockerCli | None", options.get("docker")),
                 build_runner=cast("DockerBuildRunner | None", build_runner),
             )
         )
@@ -979,6 +994,10 @@ class DockerEnvironment:
                 env_kind="docker",
             ),
         )
+
+    def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
+        """End the agents and containers a previous host process left for *run_id*."""
+        reap_orphaned_agents(run_id, docker=self.config.docker or SubprocessDockerCli(), log=log)
 
     def repair_workspace(
         self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]

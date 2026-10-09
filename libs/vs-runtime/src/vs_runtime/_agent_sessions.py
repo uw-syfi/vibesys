@@ -33,6 +33,7 @@ from vs_runtime._agent_declarations import (
     validate_extra_tools,
 )
 from vs_runtime._agent_execution import AgentResumeConfiguration, RuntimeAgentExecution
+from vs_runtime._capacity_gate import PAUSE_ONLY, CapacityHandling
 from vs_runtime._prepared_conversations import prepare_agent_conversation
 from vs_runtime._workspace_access import AccessGrant, enforce_workspace_access
 from vs_runtime.contracts import (
@@ -391,7 +392,9 @@ class RuntimeWorkspaceAgentSessions:
         log: Callable[[str], None],
         session_transport: AgentSessions | None = None,
         invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None,
+        capacity: CapacityHandling = PAUSE_ONLY,
     ) -> None:
+        self._capacity = capacity
         self._session_transport = session_transport
         self._invocation_store = invocation_store
         self._roles = {role.id: role for role in roles}
@@ -459,7 +462,7 @@ class RuntimeWorkspaceAgentSessions:
 
             managed_workspace = self._workspaces.workspace_for(workspace)
             async with self._workspaces._mutation(managed_workspace):  # noqa: SLF001  # lint-waiver: LW-837220 [SLF001]; session construction holds the owning workspace alive through execution binding.
-                configuration = self._resolve_configuration(role)
+                configuration = self._capacity.fallback.apply(self._resolve_configuration(role))
                 scope = self._workspaces.resource_for(managed_workspace).agent_scope()
                 if AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities:
                     scope = replace(scope, invocation_store=self._invocation_store)
@@ -472,6 +475,7 @@ class RuntimeWorkspaceAgentSessions:
                     agent_events=self._agent_events,
                     route_message=self._route_message,
                     client_factory=self._client_factory,
+                    capacity=self._capacity,
                 )
                 try:
                     binding_context = AgentToolBindingContext(

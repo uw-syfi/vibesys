@@ -48,6 +48,51 @@ belongs here.
 New provider behavior therefore goes upstream, not into a VibeSys driver
 workaround.
 
+## Transports
+
+A containerized session of a provider that agentshim lists in
+`stream_provider_names()` (Claude Code and Codex today) keeps one long-lived
+process per conversation (`TransportKind.STREAM`) instead of starting a CLI per
+turn. The driver reads that registry; it never branches on a provider name.
+Every other session (Gemini, opencode, and every host session) stays one process
+per turn (`TransportKind.ONE_SHOT`). `AgentShimDriver(transport=...)` fixes the
+choice for tests.
+
+A long-lived process lets a turn receive a message while it runs
+(`Session.steer`) and report rate-limit windows as they change, and it keeps the
+model's context between turns without a resume.
+
+The container process is started by agentshim through
+`vs_agent.docker_confinement.DockerContainerConfinement`, an
+`agentshim.Confinement` over the run's `DockerSandbox`:
+
+- `docker exec -i` with the environment passed by name, so a credential never
+  appears in the host process table;
+- an `AGENTSHIM_CONFINED=1` marker on every process it starts, which
+  `Confinement.reap()` uses to kill them, including processes a dead host
+  process left behind;
+- the container id read at every call, because a GPU reselect replaces the
+  container.
+
+agentshim maps the working directory, MCP server paths and the schema directory
+into the container itself, so a confined session passes host paths through.
+
+### Startup recovery
+
+A long-lived agent outlives a turn, so a host process that dies leaves agents
+running in the run's container. A resumed run holds the run's exclusive host
+lock, so the previous host is dead by then and every container labelled
+`vibesys.run-id=<run id>` is an orphan. `RunEnvironment.reap_orphans` (Docker
+environments; a no-op elsewhere) calls `vs_agent.reap_orphaned_agents` before the
+workspace is repaired or any journal turn is reconciled: for each labelled
+container it runs agentshim's `Confinement.reap()` (kills the marked agent
+processes), then `docker rm -f`. A failure raises `OrphanReapError` naming the
+container, and the resume stops: it must not run beside an agent that may still
+be writing. After the reap, in-flight turns in the journal are reconciled by the
+existing core semantics: a turn whose outcome is unknown is inspected and never
+dispatched again, and a conversation the provider lost is not silently replaced
+by a fresh one.
+
 ## Provider readiness
 
 A missing CLI or a logged-out account would otherwise surface as the first
@@ -78,9 +123,78 @@ the event is resolved once, in `AgentRateLimit.is_exhausted`: the provider's own
 statement wins, otherwise usage at or past 100%. Unstated values stay `None`.
 The headless frontend prints a line only for an exhausted window.
 
-This is observation only. Pausing the run on an exhausted window and the
-fallback policy (#798) consume this event later; nothing here changes how a
-quota failure ends a turn.
+## Quota and rate-limit stops
+
+agentshim classifies why a turn failed (`FailureKind`); the AgentShim driver
+turns the two capacity cases into one typed error, `AgentQuotaError`
+(`provider`, `condition`, `detail`, `resets_at`):
+
+| `FailureKind` from agentshim | Also required | `QuotaCondition` |
+| --- | --- | --- |
+| `USAGE_LIMIT` | none | `QUOTA_EXHAUSTED` |
+| `TRANSIENT` (agentshim's own waits ran out) | the provider reported an exhausted window during the turn | `RATE_LIMITED` |
+
+An overload or server error with no exhausted window stays a plain failure, as
+do `AUTH`, `OTHER` and `SCHEMA`. `resets_at` is the latest reset among the
+exhausted windows the turn reported, else `None`.
+
+`AgentClient` hands the error to a `CapacityGate` when one is installed
+(`set_capacity_gate`, an optional `CapacityGated` capability) and sends the same
+turn again on the same live session when the gate returns; the gate raises to end
+the turn. Without a gate the error propagates. The run installs
+`PolicyCapacityGate` (`vs_runtime`), configured by `[agent.quota]`
+(`QuotaPolicy`, decided by the pure `decide_quota`). Under `pause` it publishes
+the typed `quota_paused` event, requests the run's cooperative pause (so the
+server reports PAUSING, then PAUSED), parks until the run resumes, then
+publishes `quota_resumed`. Under `wait` it parks for a bounded time (the
+provider's reset time plus a margin, else `retry_seconds`, cut to what is left of
+`wait_seconds`) and resumes the run itself. Under `fail`, or when the budget is
+spent or the reset lies beyond it, it publishes `quota_abandoned` and raises the
+quota error, so the turn fails as it did before. A stop request ends any wait.
+
+Under `fallback`, or when an operator resumes a paused run with the fallback
+(`command.resume` with `fallback: true`, `RunControlChannel.resume_with_fallback`),
+the gate records the replaced provider in the run's `ProviderFallback` and publishes
+`provider_switched`. The turn in flight ends with the quota error, because a
+session cannot change provider. `RuntimeWorkspaceAgentSessions.create_session` applies
+the substitution to the configuration it resolves, so the next session of a role is a
+fresh conversation on the fallback provider and model (per-role model and
+reasoning-effort overrides named the old provider's models and are dropped). A
+session still open on the replaced provider abandons its next capacity stop at once. A run that waited and resumed has the same experiment
+state as one that never stopped, because the paused turn is the same invocation
+held in place. The `quota_paused` event is the operator notification: headless
+prints a `[quota]` line, and a consumer of the event stream (the event-hooks
+work in #787) can act on it.
+
+## Operator steering
+
+An operator message waits in the run's steering queue, the single source of
+truth, and leaves it at one of two drain points:
+
+| Drain point | When | Journaled as |
+|---|---|---|
+| Invocation boundary | the next agent turn starts and the message is spliced into its prompt | `steer_consumed` |
+| Mid-turn | a turn is running and its provider takes the message now | `steer_delivered` |
+
+Mid-turn delivery is an optional capability. `RuntimeAgentExecution` offers each
+running turn to the channel as a `SteerTarget`; `RuntimeRunControlChannel.queue_steer`
+offers a new message to the turn that began first, through the client's
+`SteerableAgentClient.steer`. The AgentShim session answers
+`SteerOutcome.DELIVERED` only when its transport's profile says it can take a
+message (`ProviderProfile.supports_steer`). The one-shot transport, which reads
+no input after launch, answers `UNSUPPORTED` without asking the library, so
+steering is live only on stream transports (Claude stream-json, Codex
+app-server; selected with `AgentShimDriver(transport=TransportKind.STREAM)`).
+
+Anything not delivered mid-turn keeps today's behavior: it stays queued for the
+next boundary. That includes a message offered before the provider reports the
+turn running (`NO_RUNNING_TURN`), a driver without the capability, and a message
+the provider accepts and then refuses (`SteerRejected`): the channel queues it
+again at the head and journals `steer_queued` a second time. `delivered` means
+the provider accepted the message into the running turn, not that the model has
+read it; a provider that reports consumption does so on the diagnostic channel.
+No sub-agent targeting is offered: with several turns in flight the oldest one
+is offered the message.
 
 ## Provider session resume
 
@@ -368,16 +482,6 @@ everything else to a container.
   for a containerized session (the run context's `gpu_env()`, the only source
   `AgentClient.invoke` draws it from, returns an empty mapping whenever
   `capabilities.container_execution` is true).
-- Every container session runs through a `CodexRolloutWatchdogExecutor`,
-  regardless of provider; it no-ops for any command that is not a resumed
-  `codex exec --json` run. A resumed one inside a container regularly
-  finishes its work, writes the terminal events to its rollout file, and
-  never exits; the watchdog reads the rollout, replays the completion into
-  the stream, and stops the process. It derives the rollout-sessions
-  directory it polls from the sandbox's own `env["HOME"]` and the Codex
-  provider profile's state directory, instead of a hardcoded `/home/agent` or
-  `/root`. It is provider-behaviour compensation and stays in VibeSys until
-  the behaviour is verified fixed upstream.
 
 ### A failed health check is a typed agent fault
 
@@ -546,12 +650,12 @@ approvals and their own sandboxes off, so this is the only boundary.
 
 Provider state comes from `ProviderProfile.state_dirs` and is granted whole,
 because a CLI writes session history and caches there and needs them back on
-resume. Codex is the exception: a Codex checkout may itself live under
-`$CODEX_HOME/worktrees`, so only named leaves are granted (`auth.json`
-read-write, `sessions`). `sessions` is not optional: a rollout that does
-not outlive its turn makes `codex exec resume` report no rollout for the
-thread, and a confined run then loses the conversation continuity it was told
-it had.
+resume. A provider whose profile declares `resume_state_paths` is the exception:
+its state directory may hold checkouts (a Codex checkout can live under
+`$CODEX_HOME/worktrees`), so only its authentication files (read-write) and
+those paths are granted. The history paths are not optional: a rollout that does
+not outlive its turn makes a resume report no rollout for the thread, and a
+confined run then loses the conversation continuity it was told it had.
 
 ## End-to-end tests
 

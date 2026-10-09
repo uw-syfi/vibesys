@@ -101,6 +101,42 @@ def test_steering_is_injected_once(tmp_path: Path) -> None:
     assert _enter_boundary(parts, "judge", "round 1", "Review it") == "Review it"
 
 
+class _RunningTurn:
+    """A turn in flight whose provider takes any message offered to it."""
+
+    agent_kind = "implementer"
+    round_label = "round 1"
+
+    def __init__(self, execution_id: str | None) -> None:
+        self.execution_id = execution_id
+
+    def offer_steer(self, text: str, on_rejected: object) -> bool:
+        del text, on_rejected
+        return True
+
+
+def test_a_steer_delivered_into_a_running_turn_is_journaled_once_and_not_spliced_again(
+    tmp_path: Path,
+) -> None:
+    parts = build_server_parts(tmp_path)
+    execution = parts.start_execution("implementer", "round 1", "work")
+    detach = parts.control.attach_steer_target(_RunningTurn(execution.execution_id))
+
+    parts.control.queue_steer("focus on the KV cache")
+    detach()
+
+    controls = [(e.text, e.status) for e in parts.journal.read() if e.type is EventType.CONTROL]
+    assert controls == [
+        ("/steer: focus on the KV cache", EventStatus.PENDING),
+        ("/steer", EventStatus.DELIVERED),
+    ]
+    delivered = [e for e in parts.journal.read() if e.status is EventStatus.DELIVERED]
+    assert [(e.agent_kind, e.round_label, e.execution_id) for e in delivered] == [
+        ("implementer", "round 1", execution.execution_id)
+    ]
+    assert _enter_boundary(parts, "judge", "round 1", "Review it") == "Review it"
+
+
 def test_steering_queued_while_paused_applies_on_resume(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.start_execution("implementer", "round 1", "work")
@@ -136,6 +172,20 @@ def test_api_control_commands_ack_and_reach_controller(tmp_path: Path) -> None:
     assert (resume.ack.action, resume.ack.status) == ("resume", "consumed")
     assert (steer.ack.action, steer.ack.status) == ("steer", "pending")
     assert "prioritize latency" in _enter_boundary(parts, "implementer", "round 1", "Work")
+
+
+def test_a_resume_command_can_ask_for_the_fallback_and_a_plain_one_cannot(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+
+    parts.api.execute(ResumeCommand())
+    assert parts.control.consume_fallback_request() is False
+
+    ack = parts.api.execute(ResumeCommand(fallback=True)).ack
+
+    assert ack is not None
+    assert (ack.action, ack.status) == ("resume", "consumed")
+    assert parts.control.consume_fallback_request() is True
+    assert parts.control.consume_fallback_request() is False  # taken once
 
 
 def test_finish_is_idempotent_and_interrupts_controlled_executions(tmp_path: Path) -> None:

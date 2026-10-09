@@ -54,6 +54,8 @@ from vs_runtime.api import PollingEvaluationExecutor, RunCleanupError
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
+    CapacityHandling,
+    QuotaPolicy,
     RunHostComponents,
     WorkspaceResourceFactory,
     bounded_stop,
@@ -79,7 +81,7 @@ if TYPE_CHECKING:
     from vibesys.run.contracts import RunRequest
     from vibesys.run.integration import CommittedStateProjector, LocalRunIntegration
     from vibesys.run.resources import _PreparedRun
-    from vs_agent.api import AgentClientProtocol, AgentInvocationStore
+    from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
     from vs_core.api import LifecycleCapability
     from vs_evaluation.api import EvaluationLifecycleEvent
     from vs_mcp.api import ToolServerDescriptor
@@ -184,6 +186,7 @@ class _ProductHostFactory:
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
         )
+        _require_distinct_fallback(self.request.config.agent.quota.to_policy(), agent_specs)
         resources = open_run_resources(
             self.request,
             self.integration,
@@ -385,6 +388,7 @@ class _ProductHostFactory:
                 for tool_id, resolver in dict(self.agent_tool_bindings or {}).items()
             },
             log=resources.project_resources.logger.lprint,
+            capacity=CapacityHandling.for_policy(self.request.config.agent.quota.to_policy()),
         )
 
     def _install_evaluation_service(
@@ -911,3 +915,16 @@ __all__ = [
     "open_product_core_host",
     "open_product_run_host",
 ]
+
+
+def _require_distinct_fallback(policy: QuotaPolicy, agent_specs: Mapping[str, AgentSpec]) -> None:
+    """Reject a fallback provider that some role already runs on, before the run starts."""
+    if policy.fallback is None:
+        return
+    for role_id, spec in agent_specs.items():
+        if spec.provider == policy.fallback.provider:
+            message = (
+                f"agent.quota.fallback_provider {policy.fallback.provider!r} is the provider "
+                f"role {role_id!r} already runs on; a fallback must be a different provider"
+            )
+            raise ValueError(message)

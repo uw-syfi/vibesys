@@ -29,9 +29,6 @@ declarations nor a container install recipe for, so it is not offered here.
 DEFAULT_CLI_PROVIDER = "codex"
 """The CLI provider selected when neither a flag nor config names one."""
 
-CODEX_PROVIDER = "codex"
-"""The provider name naming Codex itself, to look up its ``agentshim`` profile."""
-
 
 # --- Docker container environment -------------------------------------------
 
@@ -61,10 +58,13 @@ Used as the canonical "supported in Docker" registry: providers absent
 from this dict are rejected up front in ``build_agent_client``.
 """
 
-CODEX_DOCKER_CLI_VERSION = "0.144.4"
+CODEX_DOCKER_CLI_VERSION = "0.160.0"
 """Keep the editor container aligned with the verified host CLI feature set.
 
 Luna and its Max reasoning level require a newer CLI than the old 0.125 pin.
+It must also be at least the CLI version agentshim generated its ``codex
+app-server`` protocol from: an older server omits fields that protocol requires,
+and a container turn then fails to decode ``thread/start``.
 """
 
 

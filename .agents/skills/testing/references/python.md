@@ -35,7 +35,8 @@ For a differential test, use a Hypothesis `RuleBasedStateMachine`.
 
 ## Properties
 
-- The root `conftest.py` registers three profiles, all with `deadline=None`
+- The root `conftest.py` registers four profiles (`nightly` is in
+  [properties-and-goldens.md](properties-and-goldens.md)), all with `deadline=None`
   (Hypothesis's deadline is a wall-clock dependence), so do not set a deadline
   on a property. `ci` is derandomized and is selected automatically when `CI`
   is set, so CI runs are a pure function of the code. `dev` is the local

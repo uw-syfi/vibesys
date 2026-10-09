@@ -80,6 +80,10 @@ class EventType(StrEnum):
     TODO_UPDATE = "todo_update"
     USAGE_UPDATE = "usage_update"
     RATE_LIMIT_UPDATE = "rate_limit_update"
+    QUOTA_PAUSED = "quota_paused"
+    QUOTA_RESUMED = "quota_resumed"
+    QUOTA_ABANDONED = "quota_abandoned"
+    PROVIDER_SWITCHED = "provider_switched"
     GATE_STARTED = "gate_started"
     GATE_FINISHED = "gate_finished"
     WORKSPACE_SNAPSHOT = "workspace_snapshot"
@@ -94,6 +98,7 @@ class EventStatus(StrEnum):
     ANSWERED = "answered"
     PENDING = "pending"
     CONSUMED = "consumed"
+    DELIVERED = "delivered"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -364,6 +369,63 @@ class RateLimitUpdateData(EventPayload):
     exhausted: bool
 
 
+class QuotaPausedData(EventPayload):
+    """A turn stopped on a provider capacity limit and the run paused for it.
+
+    ``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or
+    ``rate_limited`` (sustained rate limiting); ``detail`` is the provider's
+    diagnostic and ``resets_at`` the epoch second the provider said capacity
+    returns, when it said. The run stays paused until it resumes; ``resumes_at`` is the
+    epoch second the run's quota policy resumes it by itself, ``None`` when only the
+    operator can. ``policy`` is the unattended quota policy; the fallback fields name the
+    provider and model an operator may resume with, ``None`` when none is configured.
+    """
+
+    kind: Literal["quota_paused"] = "quota_paused"
+    provider: str
+    condition: Literal["quota_exhausted", "rate_limited"]
+    detail: str
+    resets_at: float | None = None
+    resumes_at: float | None = None
+    policy: Literal["pause", "wait", "fail", "fallback"] = "pause"
+    fallback_provider: str | None = None
+    fallback_model: str | None = None
+
+
+class QuotaResumedData(EventPayload):
+    """A run paused on a capacity limit resumed on the same provider and sent the turn again."""
+
+    kind: Literal["quota_resumed"] = "quota_resumed"
+    provider: str
+    reason: Literal["operator", "wait_elapsed"] = "operator"
+
+
+class ProviderSwitchedData(EventPayload):
+    """The run replaced a provider by its fallback.
+
+    Sessions opened from now on run on ``to_provider`` and ``to_model`` as fresh
+    conversations; a session already open does not move. Every later event
+    carries the provider and model it actually ran on.
+    """
+
+    kind: Literal["provider_switched"] = "provider_switched"
+    from_provider: str
+    to_provider: str
+    to_model: str
+    reason: Literal["policy", "operator"]
+    detail: str
+
+
+class QuotaAbandonedData(EventPayload):
+    """The quota policy ended a turn with the quota error instead of pausing or waiting longer."""
+
+    kind: Literal["quota_abandoned"] = "quota_abandoned"
+    provider: str
+    condition: Literal["quota_exhausted", "rate_limited"]
+    detail: str
+    reason: str
+
+
 class SubprocessOutputData(EventPayload):
     """Captured output from a managed subprocess."""
 
@@ -514,6 +576,10 @@ EventData = Annotated[
     | TodoUpdateData
     | UsageUpdateData
     | RateLimitUpdateData
+    | QuotaPausedData
+    | QuotaResumedData
+    | QuotaAbandonedData
+    | ProviderSwitchedData
     | GateStartedData
     | GateFinishedData
     | WorkspaceSnapshotData

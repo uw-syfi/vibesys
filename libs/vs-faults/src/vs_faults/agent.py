@@ -24,12 +24,15 @@ from vs_agent.api import (
     AgentOutputSchemaError,
     AgentTurnExecutor,
     AgentTurnTimeoutError,
+    SteerableAgentClient,
+    SteerOutcome,
     describe_validation_error,
 )
 from vs_faults.plan import AgentFault, Boundary, FaultPlan
 from vs_faults.replies import ReplyGenerator, prompt_vocabulary
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
     from typing import TextIO
 
@@ -166,6 +169,16 @@ class FaultyAgentClient:
     def release_session(self, key: AgentSessionKey) -> None:
         """Forward the keyed conversation's release."""
         self._inner.release_session(key)
+
+    def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
+        """Forward a mid-turn message; ``UNSUPPORTED`` when the inner client takes none.
+
+        Steering is not a fault boundary, so a fault-injected run keeps the
+        mid-turn delivery the inner client offers.
+        """
+        if isinstance(self._inner, SteerableAgentClient):
+            return self._inner.steer(text, on_rejected=on_rejected)
+        return SteerOutcome.UNSUPPORTED
 
     def cancel(self) -> None:
         """Forward cancellation."""

@@ -1,9 +1,9 @@
 """``GitTracker.current_sha`` always equals ``git rev-parse HEAD``.
 
-The tracker reads ``HEAD`` without spawning Git. These properties drive real
-Git through tracker-owned writes, writes by other processes, ref packing,
-detached heads and tracker restarts, and require the answer to match Git after
-every step. A stale answer would be worse than a slow one.
+The tracker never caches ``HEAD``. These properties drive real Git through
+tracker-owned writes, writes by other processes, ref packing, detached heads and
+tracker restarts, on every Git backend, and require the answer to match Git
+after every step. A stale answer would be worse than a slow one.
 """
 
 from __future__ import annotations
@@ -11,11 +11,12 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
 
-from vs_project.api import GitTracker, NullGitTrackerEvents
+from vs_project.api import GIT_BACKEND_ENV, GitTracker, NullGitTrackerEvents
 
 if TYPE_CHECKING:
     import subprocess
@@ -40,6 +41,11 @@ _OPERATIONS = st.sampled_from(
         "restart",
     ]
 )
+
+
+@pytest.fixture(autouse=True, params=["cli", "pygit2"])
+def _backend(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(GIT_BACKEND_ENV, request.param)
 
 
 def _git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:

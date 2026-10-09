@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, suppress
@@ -20,12 +21,15 @@ from vs_agent.api import (
     AgentSpawnError,
     AgentTurnExecutor,
     AgentTurnRequest,
+    CapacityGated,
     ClientAgentSessions,
     Completed,
     InvalidResponse,
     MCPServerSpec,
     SessionConfigurationError,
     SessionResumeError,
+    SteerableAgentClient,
+    SteerOutcome,
     Unknown,
     build_agent_client,
     parse_typed_response,
@@ -36,6 +40,12 @@ from vs_runtime._agent_lifecycle import (
     AgentExecutionLifecycleSink,
     AgentExecutionStarted,
     AgentExecutionStatus,
+)
+from vs_runtime._capacity_gate import (
+    PAUSE_ONLY,
+    CapacityHandling,
+    ControlCapacityTimer,
+    PolicyCapacityGate,
 )
 from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
 
@@ -270,6 +280,28 @@ def _status(error: BaseException | None) -> AgentExecutionStatus:
     return AgentExecutionStatus.FAILED
 
 
+@dataclass(frozen=True, slots=True)
+class _TurnSteerTarget:
+    """A turn in flight, offered to the run's steering queue while it runs.
+
+    Delivery is the client's optional ``SteerableAgentClient`` capability. A
+    client without it, or a driver that cannot take a message mid-turn, declines,
+    and the message stays queued for the next invocation boundary: today's
+    behavior, so mid-turn delivery is never worse than none.
+    """
+
+    client: AgentClientProtocol
+    agent_kind: str
+    round_label: str
+    execution_id: str | None
+
+    def offer_steer(self, text: str, on_rejected: Callable[[], None]) -> bool:
+        client = self.client
+        if not isinstance(client, SteerableAgentClient):
+            return False
+        return client.steer(text, on_rejected=on_rejected) is SteerOutcome.DELIVERED
+
+
 class RuntimeAgentExecution:
     """One environment and client confined to a single worker thread."""
 
@@ -312,6 +344,7 @@ class RuntimeAgentExecution:
         agent_events: AgentEventSink,
         route_message: AgentMessageRouter,
         client_factory: AgentClientFactory = build_agent_client,
+        capacity: CapacityHandling = PAUSE_ONLY,
     ) -> RuntimeAgentExecution:
         executor = ThreadPoolExecutor(
             max_workers=1,
@@ -330,6 +363,7 @@ class RuntimeAgentExecution:
                 agent_events=agent_events,
                 route_message=route_message,
                 client_factory=client_factory,
+                capacity=capacity,
             ),
         )
         try:
@@ -361,6 +395,7 @@ class RuntimeAgentExecution:
         agent_events: AgentEventSink,
         route_message: AgentMessageRouter,
         client_factory: AgentClientFactory,
+        capacity: CapacityHandling,
     ) -> RuntimeAgentExecution:
         with ExitStack() as resources:
             environment = scope.open_environment(configuration)
@@ -389,6 +424,9 @@ class RuntimeAgentExecution:
             except (OSError, ImportError) as error:
                 raise AgentSpawnError(configuration.spec.provider, str(error)) from error
             resources.callback(client.close)
+            if isinstance(client, CapacityGated):
+                timer = capacity.timer or ControlCapacityTimer(control, time.time)
+                client.set_capacity_gate(PolicyCapacityGate(control, agent_events, capacity, timer))
             return cls(
                 configuration,
                 scope,
@@ -506,6 +544,9 @@ class RuntimeAgentExecution:
         )
         result: str | ResponseT | None = None
         error: BaseException | None = None
+        detach_steering = self._control.attach_steer_target(
+            _TurnSteerTarget(self._client, agent_id, label, execution_id)
+        )
         try:
             environment = (
                 {} if self._environment.use_docker else dict(self._scope.environment_variables())
@@ -559,6 +600,7 @@ class RuntimeAgentExecution:
         else:
             return result
         finally:
+            detach_steering()
             self._lifecycle(
                 AgentExecutionFinished(
                     agent_id=agent_id,

@@ -10,7 +10,8 @@ repository in memory.
 
 Implementations: ``CliGitRepository`` (the reference, runs ``git``) and
 ``Pygit2GitRepository`` (libgit2 in process for the portable operations, the
-CLI for the rest). The contract suite in ``libs/vs-project/tests/git_contract`` runs every case against
+CLI for the rest), and ``FakeGitRepository`` (``vs_project.api.testing``: history and
+index in memory, the working tree is the real directory). The contract suite in ``libs/vs-project/tests/git_contract`` runs every case against
 every registered implementation; its CLI run is the oracle for the rest.
 
 Conventions
@@ -72,7 +73,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
 COMMIT_IDENTITY_NAME = "vibesys"
@@ -165,6 +166,14 @@ class GitFaultSink(Protocol):
         ...
 
 
+type GitRepositoryFactory = Callable[[Path, GitFaultSink], GitRepository]
+"""Build the implementation serving the worktree at a path, reporting faults to the sink.
+
+``GitTracker`` builds ``CliGitRepository`` when it is given none; a composition that
+wants another implementation (a Fake in tests) passes a factory instead.
+"""
+
+
 class GitRepository(Protocol):
     """Semantic Git operations on one project repository."""
 
@@ -212,8 +221,7 @@ class GitRepository(Protocol):
     def head(self) -> str | None:
         """The commit ``HEAD`` resolves to, or ``None`` when unborn or unreadable.
 
-        Never cached; must not require starting a process in the plain
-        layout, it is called many times per run (portable).
+        Never cached: it reflects writes made by any process (portable).
         """
         ...
 

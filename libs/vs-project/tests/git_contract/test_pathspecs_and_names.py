@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.git_contract import Sandbox
+from tests.support.git_contract import Sandbox, twin
 
 from vs_project.api import GitCommandError
 
@@ -105,9 +105,23 @@ def populated(sandbox: Sandbox) -> Sandbox:
 
 
 @pytest.fixture
-def started(sandbox: Sandbox) -> Sandbox:
+def populated_oracle(populated: Sandbox, oracle_factory: RepositoryFactory) -> Sandbox:
+    return twin(populated, oracle_factory, _populate)
+
+
+def _start(sandbox: Sandbox) -> None:
     sandbox.start({"a.txt": "1\n"})
+
+
+@pytest.fixture
+def started(sandbox: Sandbox) -> Sandbox:
+    _start(sandbox)
     return sandbox
+
+
+@pytest.fixture
+def started_oracle(started: Sandbox, oracle_factory: RepositoryFactory) -> Sandbox:
+    return twin(started, oracle_factory, _start)
 
 
 def _outcome(call: Callable[[], object]) -> object:
@@ -121,10 +135,10 @@ def _outcome(call: Callable[[], object]) -> object:
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=40)
 @given(specs=_SPEC_LISTS)
 def test_pathspec_reads_agree_with_the_oracle(
-    populated: Sandbox, oracle_factory: RepositoryFactory, specs: list[str]
+    populated: Sandbox, populated_oracle: Sandbox, specs: list[str]
 ) -> None:
     # Reads only: one populated sandbox serves every example.
-    oracle = oracle_factory(populated.root)
+    oracle = populated_oracle.repo
     repo = populated.repo
 
     assert _outcome(lambda: repo.tracked_changes_since_head(specs)) == _outcome(
@@ -247,20 +261,27 @@ def test_non_ascii_paths_are_reported_as_they_are_named(sandbox: Sandbox) -> Non
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=40)
 @given(length=st.integers(min_value=1, max_value=40), unknown=st.booleans())
 def test_revisions_resolve_like_the_oracle(
-    started: Sandbox, oracle_factory: RepositoryFactory, length: int, *, unknown: bool
+    started: Sandbox, started_oracle: Sandbox, length: int, *, unknown: bool
 ) -> None:
-    sandbox = started
-    head = sandbox.repo.head()
-    assert head is not None
-    revision = ("f" * length) if unknown else head[:length]
-    oracle = oracle_factory(sandbox.root)
+    # Commit ids differ between implementations, so compare what each abbreviation resolves to.
+    answers = []
+    for sandbox in (started, started_oracle):
+        head = sandbox.repo.head()
+        assert head is not None
+        revision = ("f" * length) if unknown else head[:length]
+        resolved = sandbox.repo.resolve_commit(revision)
+        answers.append(
+            (
+                None if resolved is None else resolved == head,
+                sandbox.repo.is_ancestor(revision, "HEAD"),
+            )
+        )
 
-    assert sandbox.repo.resolve_commit(revision) == oracle.resolve_commit(revision)
-    assert sandbox.repo.is_ancestor(revision, "HEAD") == oracle.is_ancestor(revision, "HEAD")
+    assert answers[0] == answers[1]
 
 
 def _subjects(repo: GitRepository, limit: int) -> object:
-    return _outcome(lambda: [(e.sha, e.subject) for e in repo.recent_subjects(limit)])
+    return _outcome(lambda: [e.subject for e in repo.recent_subjects(limit)])
 
 
 _LINES = st.sampled_from(["fix", "part two", "  indented", "trail  ", "\t", "", " ", "é"])
@@ -272,16 +293,15 @@ _LINES = st.sampled_from(["fix", "part two", "  indented", "trail  ", "\t", "", 
     limit=st.integers(min_value=0, max_value=4),
 )
 def test_subjects_read_like_the_oracle(
-    started: Sandbox, oracle_factory: RepositoryFactory, lines: Sequence[str], limit: int
+    started: Sandbox, started_oracle: Sandbox, lines: Sequence[str], limit: int
 ) -> None:
-    sandbox = started
     message = "\n".join(lines)
     if not message.strip():
         return
-    try:
-        sandbox.repo.commit(message, allow_empty=True)
-    except GitCommandError:
-        return
-    oracle = oracle_factory(sandbox.root)
+    outcomes = [
+        _outcome(lambda sandbox=sandbox: sandbox.repo.commit(message, allow_empty=True))
+        for sandbox in (started, started_oracle)
+    ]
+    assert outcomes[0] == outcomes[1]
 
-    assert _subjects(sandbox.repo, limit) == _subjects(oracle, limit)
+    assert _subjects(started.repo, limit) == _subjects(started_oracle.repo, limit)

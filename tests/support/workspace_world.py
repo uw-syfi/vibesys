@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from tests.support.run_execution import run_execution_record
+from tests.support.world_git import GitKind
 
 from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
 from vs_project.api import (
@@ -20,6 +21,7 @@ from vs_project.api import (
     Project,
     RunEnvironmentRecord,
 )
+from vs_project.api.testing import FakeGitRepositories
 from vs_runtime.api.infrastructure import (
     AgentPaths,
     BlockingOperations,
@@ -97,6 +99,8 @@ class WorkspaceEnv:
     project: Project
     factory: WorkspaceResourceProvider
     hosts: list[RuntimeWorkspaces] = field(default_factory=list)
+    git_disk: FakeGitRepositories | None = None
+    """The in-memory repositories of a world on ``GitKind.FAKE``; ``None`` on real Git."""
 
     def start_host(self) -> RuntimeWorkspaces:
         """Start another host over the same disk state, as after a process restart."""
@@ -121,8 +125,13 @@ class WorkspaceEnv:
 
 
 @contextmanager
-def open_workspace_env(tmp_path: Path) -> Iterator[WorkspaceEnv]:
-    """A fresh run with one started host. The caller closes ``env.hosts`` (async) before exit."""
+def open_workspace_env(tmp_path: Path, *, git: GitKind = GitKind.FAKE) -> Iterator[WorkspaceEnv]:
+    """A fresh run with one started host. The caller closes ``env.hosts`` (async) before exit.
+
+    ``git`` selects the repository implementation: the in-memory Fake spawns no process;
+    ``GitKind.REAL`` runs real Git.
+    """
+    disk = FakeGitRepositories() if git is GitKind.FAKE else None
     root = tmp_path / "project"
     root.mkdir()
     (root / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
@@ -143,7 +152,10 @@ def open_workspace_env(tmp_path: Path) -> Iterator[WorkspaceEnv]:
         raise AssertionError(message)
 
     effects = ProjectRunEffects(
-        git_events=NullGitTrackerEvents(), log_emit=_emit, on_log_ready=lambda _path: None
+        git_events=NullGitTrackerEvents(),
+        log_emit=_emit,
+        on_log_ready=lambda _path: None,
+        git_repository=None if disk is None else disk.repository,
     )
     with open_project_run_resources(
         request, effects=effects, resolve_resume=unexpected_resume
@@ -174,6 +186,6 @@ def open_workspace_env(tmp_path: Path) -> Iterator[WorkspaceEnv]:
                 host_resources=(),
                 events=lambda _event: None,
             )
-            env = WorkspaceEnv(project.project, factory)
+            env = WorkspaceEnv(project.project, factory, git_disk=disk)
             env.start_host()
             yield env

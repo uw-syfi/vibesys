@@ -25,10 +25,8 @@ if TYPE_CHECKING:
 
 _PROVIDER_LITERALS = frozenset({"claude", "codex", "gemini", "opencode", "copilot"})
 
-_SCAN_ROOTS = (
-    PROJECT_ROOT / "libs" / "vs-agent" / "src" / "vs_agent",
-    PROJECT_ROOT / "src" / "entrypoints",
-)
+# Every shipped Python source tree: each library's package and the product code.
+_SCAN_ROOTS = (*sorted((PROJECT_ROOT / "libs").glob("*/src")), PROJECT_ROOT / "src")
 
 # Files (or directories) exempt from the "no bare provider literal" rule, and
 # why. Each entry maps a path (relative to the repository root, POSIX-style)
@@ -40,11 +38,9 @@ _ALLOWED_LITERALS_BY_PATH: dict[str, frozenset[str] | None] = {
     # test is guarding, both are expected to name providers directly.
     "libs/vs-agent/src/vs_agent/provider_policy.py": None,
     "libs/vs-agent/src/vs_agent/provider_profiles.py": None,
-    # docker_executor.py: the Codex rollout watchdog recognizes a resumed
-    # `codex exec --json` process and rollout file by name. It is documented
-    # provider-behaviour compensation that "stays in VibeSys until the
-    # behaviour is verified fixed upstream" (docs/contributing/agent-drivers.md).
-    "libs/vs-agent/src/vs_agent/docker_executor.py": frozenset({"codex"}),
+    # The chat model picker's suggestion catalog is keyed by shipped provider.
+    # It is a list of model names to offer, not a behavior branch.
+    "src/server/chat/options.py": None,
 }
 
 

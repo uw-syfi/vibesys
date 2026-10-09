@@ -54,6 +54,13 @@ settings.register_profile("ci", deadline=None, derandomize=True, print_blob=True
 settings.register_profile(
     "explore", deadline=None, derandomize=False, max_examples=500, print_blob=True
 )
+# `nightly` is the deep sweep of `.github/workflows/nightly.yml`: randomized, so
+# each night draws examples the derandomized PR tier never reaches, and
+# `print_blob` makes a failure print its `@reproduce_failure` line, which
+# replays it under any profile. Pin the result with `@example(...)`.
+settings.register_profile(
+    "nightly", deadline=None, derandomize=False, max_examples=100, print_blob=True
+)
 settings.load_profile(
     os.environ.get("HYPOTHESIS_PROFILE") or ("ci" if os.environ.get("CI") else "dev")
 )

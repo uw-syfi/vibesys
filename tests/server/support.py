@@ -60,6 +60,9 @@ class _ControlBridge:
     def resume(self) -> None:
         self._channel.resume()
 
+    def resume_with_fallback(self) -> None:
+        self._channel.resume_with_fallback()
+
     def stop(self) -> None:
         self._channel.request_stop()
 

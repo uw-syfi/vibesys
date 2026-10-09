@@ -13,6 +13,10 @@ from vibesys.events import (
     CoreEvent,
     CoreEventType,
     JsonResultPayload,
+    ProviderSwitchedData,
+    QuotaAbandonedData,
+    QuotaPausedData,
+    QuotaResumedData,
     RateLimitUpdateData,
     TodoItemData,
     TodoUpdateData,
@@ -24,7 +28,14 @@ from vibesys.events import (
 )
 
 if TYPE_CHECKING:
-    from vs_agent.api import AgentRateLimit
+    from vs_agent.api import (
+        AgentQuotaError,
+        AgentRateLimit,
+        Attribution,
+        ProviderSwitch,
+        QuotaPlan,
+        QuotaResumeReason,
+    )
 
 EventSink = Callable[[CoreEvent], object]
 
@@ -65,7 +76,11 @@ class CoreAgentEventSink:
         | ToolResultData
         | TodoUpdateData
         | UsageUpdateData
-        | RateLimitUpdateData,
+        | RateLimitUpdateData
+        | QuotaPausedData
+        | QuotaResumedData
+        | QuotaAbandonedData
+        | ProviderSwitchedData,
         *,
         agent_kind: str | None,
         round_label: str | None,
@@ -215,4 +230,70 @@ class CoreAgentEventSink:
             agent_kind=agent_kind,
             round_label=round_label,
             invocation_id=invocation_id,
+        )
+
+    def quota_paused(self, error: AgentQuotaError, plan: QuotaPlan, where: Attribution) -> None:
+        """Emit that a turn stopped on a provider capacity limit and the run paused."""
+        self._attributed(
+            CoreEventType.QUOTA_PAUSED,
+            QuotaPausedData.model_validate(
+                {
+                    "provider": error.provider,
+                    "condition": error.condition.value,
+                    "detail": error.detail,
+                    "resets_at": error.resets_at,
+                    "resumes_at": plan.resumes_at,
+                    "policy": plan.policy,
+                    "fallback_provider": plan.fallback_provider,
+                    "fallback_model": plan.fallback_model,
+                }
+            ),
+            where,
+        )
+
+    def quota_resumed(self, provider: str, reason: QuotaResumeReason, where: Attribution) -> None:
+        """Emit that the paused turn is being sent again on the same provider."""
+        self._attributed(
+            CoreEventType.QUOTA_RESUMED, QuotaResumedData(provider=provider, reason=reason), where
+        )
+
+    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
+        """Emit that the turn ended with the quota error."""
+        self._attributed(
+            CoreEventType.QUOTA_ABANDONED,
+            QuotaAbandonedData(
+                provider=error.provider,
+                condition=error.condition.value,
+                detail=error.detail,
+                reason=reason,
+            ),
+            where,
+        )
+
+    def provider_switched(self, switch: ProviderSwitch, where: Attribution) -> None:
+        """Emit that sessions opened from now on run on the fallback provider."""
+        self._attributed(
+            CoreEventType.PROVIDER_SWITCHED,
+            ProviderSwitchedData(
+                from_provider=switch.from_provider,
+                to_provider=switch.to_provider,
+                to_model=switch.to_model,
+                reason=switch.reason,
+                detail=switch.detail,
+            ),
+            where,
+        )
+
+    def _attributed(
+        self,
+        event_type: CoreEventType,
+        data: QuotaPausedData | QuotaResumedData | QuotaAbandonedData | ProviderSwitchedData,
+        where: Attribution,
+    ) -> None:
+        self._emit(
+            event_type,
+            data,
+            agent_kind=where.agent_kind,
+            round_label=where.round_label,
+            invocation_id=where.invocation_id,
         )

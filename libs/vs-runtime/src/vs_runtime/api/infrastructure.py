@@ -49,6 +49,7 @@ from vs_runtime._bundled_paths import (
     resolve_bundled_tree,
     resolve_packaged_tree,
 )
+from vs_runtime._capacity_gate import PAUSE_ONLY, CapacityHandling, CapacityTimer
 from vs_runtime._checkpoint import (
     CompletedRound,
     MultiSlotRoundTransaction,
@@ -77,6 +78,7 @@ from vs_runtime._failure_classification import (
     job_failure,
     signal_of,
 )
+from vs_runtime._fallback import FallbackTarget, ProviderFallback
 from vs_runtime._input_project import InputDependency, materialize_input_project
 from vs_runtime._linux_cpu_profiler import (
     Capability as LinuxProfilerCapability,
@@ -150,6 +152,19 @@ from vs_runtime._project_run import (
     ProjectStateDeclaration,
     open_project_run_resources,
 )
+from vs_runtime._quota_policy import (
+    DEFAULT_RETRY_SECONDS,
+    PAUSE_FOR_OPERATOR,
+    RESET_MARGIN_SECONDS,
+    GiveUp,
+    Hold,
+    QuotaAction,
+    QuotaDecision,
+    QuotaPolicy,
+    Switch,
+    WaitFor,
+    decide_quota,
+)
 from vs_runtime._recorded_environment import migrate_recorded_run_environment
 from vs_runtime._run_control import (
     RunControlChannel,
@@ -158,6 +173,7 @@ from vs_runtime._run_control import (
     RunControlTransitionKind,
     RunStopped,
     RuntimeRunControlChannel,
+    SteerTarget,
 )
 from vs_runtime._run_environment import (
     AgentPaths,
@@ -304,6 +320,7 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
     log: Callable[[str], None] = print,
     session_transport: AgentSessions | None = None,
     invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None,
+    capacity: CapacityHandling = PAUSE_ONLY,
 ) -> WorkspaceRuntime:
     """Create one owner for workspace handles and their bound agent sessions."""
     workspaces = RuntimeWorkspaces(workspace_resources)
@@ -321,6 +338,7 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
         log=log,
         session_transport=session_transport,
         invocation_store=invocation_store,
+        capacity=capacity,
     )
     workspaces._attach_sessions(agents)  # noqa: SLF001  # lint-waiver: LW-837221 [SLF001]; this sole factory completes the private ownership cycle before either capability escapes.
     commands = RuntimeCommands(workspaces, blocking)
@@ -439,8 +457,11 @@ def create_model_request_reconciler(
 
 
 __all__ = [
+    "DEFAULT_RETRY_SECONDS",
     "PACKAGE_ROOT_TOKEN",
+    "PAUSE_FOR_OPERATOR",
     "REMOTE_EVALUATOR_TOOLS_ROOT",
+    "RESET_MARGIN_SECONDS",
     "SANDBOX_EVALUATOR_TOOLS_ROOT",
     "TOOL_TOKEN_PREFIX",
     "AgentConfigurationResolver",
@@ -457,6 +478,8 @@ __all__ = [
     "AgentToolResolver",
     "BlockingOperations",
     "BundledResources",
+    "CapacityHandling",
+    "CapacityTimer",
     "CommandExecutionResult",
     "CommittedStateObserver",
     "CompletedRound",
@@ -470,10 +493,13 @@ __all__ = [
     "EvaluatorPackageNotFoundError",
     "EvaluatorPackageRequirement",
     "EventCodec",
+    "FallbackTarget",
     "FrameworkValidationResult",
     "FreshProjectError",
     "FreshProjectErrorKind",
     "GitSourceMaterialization",
+    "GiveUp",
+    "Hold",
     "HostEnvironment",
     "InputDependency",
     "InputProjectError",
@@ -522,6 +548,10 @@ __all__ = [
     "ProjectStateDeclaration",
     "ProjectTreeCopy",
     "ProtocolBenchmarkContract",
+    "ProviderFallback",
+    "QuotaAction",
+    "QuotaDecision",
+    "QuotaPolicy",
     "RecordState",
     "ResolvedEvaluatorPackage",
     "RoundRecoveryOutcome",
@@ -558,8 +588,10 @@ __all__ = [
     "SlurmEnvironmentFacts",
     "SlurmGpuEnvironmentFacts",
     "StageFailureText",
+    "SteerTarget",
     "StopGraceError",
     "StopTimer",
+    "Switch",
     "TerminalSignal",
     "TrustedAccuracyResult",
     "TrustedBenchmarkContract",
@@ -571,6 +603,7 @@ __all__ = [
     "TrustedEvaluatorRequirements",
     "TrustedMetricDeclaration",
     "ValidationRecipe",
+    "WaitFor",
     "WorkspaceEvaluationSpec",
     "WorkspaceResource",
     "WorkspaceResourceEvent",
@@ -594,6 +627,7 @@ __all__ = [
     "create_state",
     "create_trusted_evaluation_executor",
     "create_workspace_runtime",
+    "decide_quota",
     "decode_trusted_benchmark_output",
     "decode_trusted_benchmark_run",
     "detect_linux_profiler",

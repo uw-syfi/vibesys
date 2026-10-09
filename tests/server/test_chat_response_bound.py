@@ -24,17 +24,21 @@ def test_chat_response_excludes_concurrent_run_events(tmp_path: Path) -> None:
 
     def handler(_question: str) -> ChatAnswer:
         handler_started.set()
-        assert release_handler.wait(timeout=2)
+        release_handler.wait()
         return ChatAnswer(text="bounded answer", invocation_id="exec-bounded")
 
     parts.chat.install_default_handler(handler)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         pending = pool.submit(parts.api.execute, ChatQuery(text="what changed?"))
-        assert handler_started.wait(timeout=2)
-        for index in range(1_000):
-            parts.journal.publish_output("stdout", f"optimizer output {index}\n")
-        release_handler.set()
-        response = pending.result(timeout=2)
+        try:
+            # The handler is parked until released, so the output below is
+            # guaranteed to land while the chat request is in flight.
+            handler_started.wait()
+            for index in range(1_000):
+                parts.journal.publish_output("stdout", f"optimizer output {index}\n")
+        finally:
+            release_handler.set()
+        response = pending.result()
 
     assert response.chat is not None
     assert response.chat.answer == "bounded answer"

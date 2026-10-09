@@ -162,7 +162,7 @@ class _LocalRunSession:
             backend=request.agent_backend,
             provider=request.cli_provider,
         )
-        self._integration = LocalRunIntegration()
+        self._integration = LocalRunIntegration(implementations.git_repository)
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
         self._committed_view_listener: Callable[[RunView, tuple[str, ...] | None], None] | None = (
@@ -383,6 +383,10 @@ class _LocalRunSession:
     def resume(self) -> None:
         """Request the run acquire the write lease and continue from checkpoint."""
         self._integration.control.resume()
+
+    def resume_with_fallback(self) -> None:
+        """Resume the run and switch a quota-paused run to its configured fallback."""
+        self._integration.control.resume_with_fallback()
 
     def stop(self) -> None:
         """Request the run terminate."""

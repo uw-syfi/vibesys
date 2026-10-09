@@ -14,7 +14,6 @@ import dataclasses
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
@@ -28,6 +27,7 @@ from tests.support.session_world import (
 from tests.support.skeleton_faults import FaultingExecutors, FaultingReceipts, FaultingStore
 from tests.support.skeleton_strategy import DECLARATION, DIGEST, SkeletonState, SkeletonStrategy
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
+from tests.support.world_git import CliWorldGit, GitKind, WorldGit, world_git
 
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
@@ -41,7 +41,6 @@ from vs_core.api import (
     TurnSpec,
 )
 from vs_evaluation.api import ExecutorPoll, PollPhase
-from vs_project.api import run_git
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import render_stage_failure
 from vs_runtime.api.core import (
@@ -76,6 +75,7 @@ from vs_slurm.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
+    from pathlib import Path
 
     from vs_agent.api import AgentSessionSpec, AgentTurnRequest
     from vs_core.api import CoreState
@@ -169,6 +169,8 @@ class World:
     commits: CommitObserver | None = None
     """Told of every confirmed commit of each shell this world starts."""
     gate: FaultGate | None = None
+    git: WorldGit | None = None
+    """The Git the world runs on, as the scripted agent and the assertions see it."""
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -368,39 +370,39 @@ class CandidateWriter:
     answer: dict[str, object] = field(default_factory=lambda: {"commit": ""})
     turns: int = 0
     invocations: list[str | None] = field(default_factory=list)
+    vcs: WorldGit = field(init=False)
+    """The Git the agent commits with; real Git until a world binds its own (``use``)."""
+
+    def __post_init__(self) -> None:
+        """Start on real Git, as a standalone writer would."""
+        self.vcs = CliWorldGit(self.root)
+
+    def use(self, vcs: WorldGit) -> None:
+        """Commit through ``vcs``, the Git of the world this writer plays in."""
+        self.vcs = vcs
 
     def worktree(self) -> Path:
         """The path of the run's single candidate worktree."""
-        listing = self._git(self.root, "worktree", "list", "--porcelain")
-        paths = [
-            Path(line.removeprefix("worktree "))
-            for line in listing.splitlines()
-            if line.startswith("worktree ")
-        ]
+        paths = self.vcs.worktrees()
         # An attempt's candidate lives in a member directory ``m-attempt-<id>``; the
         # evaluation executor keeps its own measurement worktrees (``s<id>``) beside it.
         candidates = [path for path in paths if path.parent.name.startswith("m-attempt-")]
         # A probe that runs a turn with no attempt has only the root checkout to write in.
         candidates = candidates or [self.root]
-        assert len(candidates) == 1, listing
+        assert len(candidates) == 1, paths
         return candidates[0]
 
     def __call__(self, request: AgentTurnRequest) -> None:
         """Write and commit one change, then name the commit in the reply."""
         self.invocations.append(request.invocation_id)
+        self.commit_change()
+
+    def commit_change(self) -> None:
+        """Write and commit one change; ``answer`` then names the commit."""
         self.turns += 1
         tree = self.worktree()
         (tree / "candidate.py").write_text(f"VALUE = {self.turns + 1}\n", encoding="utf-8")
-        self._git(tree, "add", "-A")
-        self._git(tree, "commit", "-m", f"implement {self.turns}")
-        self.answer["commit"] = self._git(tree, "rev-parse", "HEAD").strip()
-
-    @staticmethod
-    def _git(cwd: Path, *args: str) -> str:
-        identity = ["-c", "user.name=agent", "-c", "user.email=agent@example.com"]
-        result = run_git([*identity, *args], cwd=cwd)
-        assert result.returncode == 0, result.stderr
-        return result.stdout.decode()
+        self.answer["commit"] = self.vcs.commit_all(tree, f"implement {self.turns}")
 
 
 @dataclass
@@ -433,17 +435,25 @@ def _open_agents(root: Path) -> SessionHost:
 
 
 @contextmanager
-def open_skeleton_world(
+def open_skeleton_world(  # noqa: PLR0913  # lint-waiver: LW-731842 [PLR0913]; every parameter after tmp_path is an independent optional seam of the world, and a settings object would be a wrapper type each of ~40 call sites must build.
     tmp_path: Path,
     strategy: SkeletonStrategy | None = None,
     cluster: ScenarioCluster | None = None,
     timed: tuple[FakeRunClock, float] | None = None,
     agents: Callable[[Path], SessionHost] | None = None,
+    git: GitKind = GitKind.FAKE,
 ) -> Iterator[World]:
-    """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
-    with open_workspace_env(tmp_path) as env:
+    """A fresh run on in-memory Git (or ``git=GitKind.REAL``, real Git) with the Fake Slurm cluster.
+
+    Closes every host on exit.
+    """
+    with open_workspace_env(tmp_path, git=git) as env:
+        vcs = world_git(tmp_path / "project", env.git_disk)
         hosted = (agents or _open_agents)(tmp_path / "project")
+        if isinstance(hosted.resolver, CandidateResolver) and hosted.resolver.writer is not None:
+            hosted.resolver.writer.use(vcs)
         yield World(
+            git=vcs,
             env=env,
             root=tmp_path / "project",
             cluster=cluster or ScenarioCluster(),

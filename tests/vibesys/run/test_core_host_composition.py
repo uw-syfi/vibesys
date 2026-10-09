@@ -140,12 +140,12 @@ def _write_project(root: Path) -> None:
     )
 
 
-def _request(project_root: Path) -> RunRequest:
+def _request(project_root: Path, config: Config | None = None) -> RunRequest:
     return RunRequest(
         run_environment=fake_docker_environment(),
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id="core-test", config_version=1, options={}),
-        config=Config.model_validate({"model": {"name": "core-test"}}),
+        config=config or Config.model_validate({"model": {"name": "core-test"}}),
         input_bundle=load_input_bundle(project_root),
         objective="Improve the queue.",
         exp_name="core-test",
@@ -161,6 +161,7 @@ def _open(
     *,
     client_factory: Callable[..., AgentClientProtocol] | None,
     journal: bool,
+    config: Config | None = None,
 ) -> Callable[[], CoreServices]:
     project_root = tmp_path / "project"
     templates = tmp_path / "templates"
@@ -171,7 +172,7 @@ def _open(
     async def exercise() -> CoreServices:
         try:
             async with open_product_core_host(
-                _request(project_root),
+                _request(project_root, config),
                 integration,
                 plugin=_plugin(templates),
                 options=EmptyOptions(),
@@ -218,6 +219,20 @@ def test_missing_resource_fails_at_composition_naming_it(
     with pytest.raises(CoreCompositionError, match=missing) as raised:
         _open(tmp_path, client_factory=client_factory, journal=journal)()
     assert raised.value.resource == missing
+
+
+def test_a_fallback_that_is_the_providers_own_fails_at_startup_naming_the_key(
+    tmp_path: Path,
+) -> None:
+    config = Config.model_validate(
+        {
+            "model": {"name": "core-test"},
+            "agent": {"quota": {"fallback_provider": "claude", "fallback_model": "opus"}},
+        }
+    )
+
+    with pytest.raises(ValueError, match=r"agent\.quota\.fallback_provider"):
+        _open(tmp_path, client_factory=_resumable_client, journal=True, config=config)()
 
 
 @pytest.mark.parametrize(

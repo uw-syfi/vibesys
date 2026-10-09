@@ -8,6 +8,10 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    ProviderSwitchedData,
+    QuotaAbandonedData,
+    QuotaPausedData,
+    QuotaResumedData,
     RateLimitUpdateData,
     RunConfiguredData,
     WorkspaceSnapshotData,
@@ -242,6 +246,100 @@ class TestRateLimitEvents:
             RateLimitUpdateData(provider="claude", window="five_hour", exhausted=False),
         )
         assert out == ""
+
+
+class TestQuotaEvents:
+    def test_a_quota_pause_names_the_provider_the_diagnostic_and_the_reset_time(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_PAUSED,
+            QuotaPausedData(
+                provider="claude",
+                condition="quota_exhausted",
+                detail="You've hit your limit",
+                resets_at=1_791_954_019,
+            ),
+        )
+        assert out == (
+            "[quota] claude quota exhausted: You've hit your limit; the run is paused "
+            "(capacity returns 2026-10-14 05:00 UTC)\n"
+        )
+
+    def test_sustained_rate_limiting_without_a_reset_time_omits_it(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_PAUSED,
+            QuotaPausedData(provider="codex", condition="rate_limited", detail="429"),
+        )
+        assert out == "[quota] codex rate limited: 429; the run is paused\n"
+
+    def test_a_waiting_policy_says_when_the_run_resumes_by_itself(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_PAUSED,
+            QuotaPausedData(
+                provider="claude",
+                condition="quota_exhausted",
+                detail="limit",
+                resumes_at=1_791_954_019,
+            ),
+        )
+        assert out == (
+            "[quota] claude quota exhausted: limit; the run is paused; "
+            "resuming by itself at 2026-10-14 05:00 UTC\n"
+        )
+
+    def test_a_resume_is_shown(self) -> None:
+        out = _render_event(CoreEventType.QUOTA_RESUMED, QuotaResumedData(provider="claude"))
+        assert out == "[quota] resumed; sending the paused claude turn again\n"
+
+    def test_a_wait_that_elapsed_is_shown(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_RESUMED, QuotaResumedData(provider="claude", reason="wait_elapsed")
+        )
+        assert out == "[quota] the wait elapsed; sending the paused claude turn again\n"
+
+    def test_an_abandoned_turn_names_the_policys_reason(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_ABANDONED,
+            QuotaAbandonedData(
+                provider="codex",
+                condition="rate_limited",
+                detail="429",
+                reason="the quota policy is fail",
+            ),
+        )
+        assert out == "[quota] codex rate limited: 429; the quota policy is fail\n"
+
+
+class TestProviderSwitch:
+    def test_a_pause_names_the_fallback_an_operator_may_choose(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_PAUSED,
+            QuotaPausedData(
+                provider="claude",
+                condition="quota_exhausted",
+                detail="limit",
+                fallback_provider="codex",
+                fallback_model="gpt-5",
+            ),
+        )
+        assert out == (
+            "[quota] claude quota exhausted: limit; the run is paused; fallback: codex (gpt-5)\n"
+        )
+
+    def test_a_switch_names_both_providers_the_model_and_who_chose_it(self) -> None:
+        out = _render_event(
+            CoreEventType.PROVIDER_SWITCHED,
+            ProviderSwitchedData(
+                from_provider="claude",
+                to_provider="codex",
+                to_model="gpt-5",
+                reason="policy",
+                detail="waited 3600s for capacity, the whole budget",
+            ),
+        )
+        assert out == (
+            "[quota] switched from claude to codex (gpt-5) by the policy; new sessions start "
+            "there (waited 3600s for capacity, the whole budget)\n"
+        )
 
 
 class TestToolEvents:
