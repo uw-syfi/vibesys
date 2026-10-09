@@ -379,7 +379,7 @@ package = true
 # `sdk/vs-evaluator` ships a protocol spec, conformance fixtures, and non-Python
 # SDKs, so it has no `pyproject.toml` and is not a uv workspace member.
 exclude = ["exp_env/**", "sdk/vs-evaluator"]
-members = ["sdk/*", "libs/vs-core", "libs/vs-evaluator-protocol", "libs/vs-async-ops", "libs/vs-github", "libs/vs-project", "libs/vs-prompts", "libs/vs-slurm", "libs/vs-issue-tracker", "libs/vs-mcp"]
+members = ["sdk/*", "libs/vs-core", "libs/vs-evaluator-protocol", "libs/vs-async-ops", "libs/vs-github", "libs/vs-project", "libs/vs-prompts", "libs/vs-slurm", "libs/vs-issue-tracker", "libs/vs-mcp", "libs/vs-evaluation"]
 
 [tool.uv.sources]
 vs-bench = { workspace = true }

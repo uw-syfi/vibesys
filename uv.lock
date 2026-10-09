@@ -19,6 +19,7 @@ members = [
     "vs-async-ops",
     "vs-bench",
     "vs-core",
+    "vs-evaluation",
     "vs-evaluator-protocol",
     "vs-github",
     "vs-issue-tracker",
@@ -2941,6 +2942,27 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+
+[[package]]
+name = "vs-evaluation"
+version = "0.1.0"
+source = { editable = "libs/vs-evaluation" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "vs-async-ops" },
+    { name = "vs-evaluator-protocol" },
+    { name = "vs-mcp" },
+    { name = "vs-project" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-async-ops", editable = "libs/vs-async-ops" },
+    { name = "vs-evaluator-protocol", editable = "libs/vs-evaluator-protocol" },
+    { name = "vs-mcp", editable = "libs/vs-mcp" },
+    { name = "vs-project", editable = "libs/vs-project" },
+]
 
 [[package]]
 name = "vs-evaluator-protocol"
