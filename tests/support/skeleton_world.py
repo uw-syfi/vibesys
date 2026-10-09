@@ -388,6 +388,10 @@ class CandidateWriter:
     def __call__(self, request: AgentTurnRequest) -> None:
         """Write and commit one change, then name the commit in the reply."""
         self.invocations.append(request.invocation_id)
+        self.commit_change()
+
+    def commit_change(self) -> None:
+        """Write and commit one change; ``answer`` then names the commit."""
         self.turns += 1
         tree = self.worktree()
         (tree / "candidate.py").write_text(f"VALUE = {self.turns + 1}\n", encoding="utf-8")

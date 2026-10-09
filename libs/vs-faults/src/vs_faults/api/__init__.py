@@ -20,17 +20,21 @@ from vs_faults.connector import (
 from vs_faults.connector import (
     handle as handle_cluster_request,
 )
+from vs_faults.conversation import FaultyTransport
 from vs_faults.host import Crossing, FaultGate, HostCrashError
 from vs_faults.plan import (
     AgentFault,
     Boundary,
     ClusterFault,
     ClusterOperation,
+    ConversationFault,
     FaultPlan,
     FaultRule,
     HostFault,
+    ProcessFault,
     ToolFault,
 )
+from vs_faults.process import FaultyExecutor
 from vs_faults.replies import ReplyGenerator, prompt_vocabulary
 from vs_faults.tools import FaultyToolDispatch, ToolCallFailedError
 
@@ -40,15 +44,19 @@ __all__ = [
     "Boundary",
     "ClusterFault",
     "ClusterOperation",
+    "ConversationFault",
     "Crossing",
     "DurableAgentClient",
     "FaultGate",
     "FaultPlan",
     "FaultRule",
     "FaultyAgentClient",
+    "FaultyExecutor",
     "FaultyToolDispatch",
+    "FaultyTransport",
     "HostCrashError",
     "HostFault",
+    "ProcessFault",
     "ReplyGenerator",
     "ToolCallFailedError",
     "ToolFault",
