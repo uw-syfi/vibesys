@@ -37,6 +37,7 @@ from vs_sandbox.api.slurm import (
 )
 
 # test-isolation: main is the CLI entry point and is intentionally absent from the library API.
+from vs_sandbox.benchmark_output import BenchmarkOutputKind, classify_benchmark_output
 from vs_sandbox.host_command_client import main as client_main
 
 if TYPE_CHECKING:
@@ -317,10 +318,10 @@ class TestGateOperation:
 
         assert gates.runs[0][1] == (_OUTPUT_ARGUMENT, ".vibesys-benchmark-x1.json")
 
-    def test_a_framework_result_is_written_privately_and_relayed_to_the_caller(
+    def test_a_framework_result_is_written_on_the_host_and_relayed_to_the_caller(
         self, tmp_path: Path, workspace: Path
     ) -> None:
-        """The gate writes under the broker's private directory; the caller gets the file."""
+        """The gate writes a host file of the same allowed shape; the caller gets its contents."""
         gates = _RecordingGates(result=b'{"ok": true}')
         with _serving(tmp_path, workspace, gates=_gates(gates)) as broker:
             frames = _frames(
@@ -336,7 +337,9 @@ class TestGateOperation:
         argument = gates.runs[0][1]
         assert argument[0] == _OUTPUT_ARGUMENT
         assert argument[1] != _FRAMEWORK_RESULT
-        assert not Path(argument[1]).exists()  # the broker removed its scratch on close
+        # The wrapper that runs the gate accepts exactly this shape, and the broker removed it.
+        assert classify_benchmark_output(argument[1]) is BenchmarkOutputKind.FRAMEWORK
+        assert not Path(argument[1]).exists()
         files = [frame["file"] for frame in frames if "file" in frame]
         assert len(files) == 1
         assert files[0]["path"] == _FRAMEWORK_RESULT
@@ -399,6 +402,10 @@ class TestGateOperation:
                 and arguments[1] in valid_results
             )
             assert (len(gates.runs) > runs_before) == expected
+            if expected and kind is GateKind.BENCHMARK:
+                # What the broker hands the gate wrapper is itself an allowed result path:
+                # the wrapper validates it again with the same function.
+                assert classify_benchmark_output(gates.runs[-1][1][1]) is not None
             if not expected:
                 assert "invalid arguments" in str(frames[0]["error"])
 

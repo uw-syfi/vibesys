@@ -27,10 +27,8 @@ import contextlib
 import json
 import os
 import secrets
-import shutil
 import socketserver
 import stat
-import tempfile
 import threading
 from dataclasses import dataclass
 from enum import StrEnum
@@ -62,6 +60,8 @@ _MAX_FRAME_BYTES = 4 * 1024 * 1024
 # How often the serving loop checks for shutdown; bounds close() latency.
 _POLL_SECONDS = 0.05
 _MAX_RELAYED_FILE_BYTES = 8 * 1024 * 1024
+# The directory the framework's own benchmark result path names; see ``benchmark_output``.
+_FRAMEWORK_TMP = "/tmp"  # noqa: S108  # lint-waiver: LW-954393 [S108]; the fixed framework result directory, not a scratch choice.
 # Variables that would point the job at the agent host's devices or at the
 # broker itself. Slurm sets the device variables for the allocation.
 _DROPPED_ENV_PREFIXES = ("VIBESYS_COMMAND_BROKER_", "SLURM_")
@@ -287,15 +287,19 @@ class _Handler(socketserver.StreamRequestHandler):
             except OSError:
                 cancel.set()
 
-        status = job.run(write, cancel)
-        if cancel.is_set():
-            return
         try:
+            status = job.run(write, cancel)
+            if cancel.is_set():
+                return
+            try:
+                if job.relay is not None:
+                    _relay_file(self.connection, *job.relay)
+                _send(self.connection, {"exit": status})
+            except OSError:
+                return
+        finally:
             if job.relay is not None:
-                _relay_file(self.connection, *job.relay)
-            _send(self.connection, {"exit": status})
-        except OSError:
-            return
+                job.relay[0].unlink(missing_ok=True)
 
 
 def _parse_call(frame: bytes) -> GpuCall | GateCall:
@@ -335,6 +339,18 @@ def _read_owned_file(path: Path) -> bytes | None:
         ):
             return None
         return handle.read()
+
+
+def _reserve_result_file() -> Path:
+    """Create an empty, private result file under the host's ``/tmp``.
+
+    The name is unguessable and the file is created exclusively and without
+    following links, so nothing else can claim it before the gate writes it.
+    """
+    path = Path(f"{_FRAMEWORK_TMP}/vibesys-framework-benchmark-{secrets.token_hex(16)}.json")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    os.close(descriptor)
+    return path
 
 
 def _cancel_on_hangup(connection: socket.socket, cancel: threading.Event) -> None:
@@ -393,7 +409,6 @@ class HostCommandBroker:
         self._launcher: GpuLauncher | None = (
             None if gpu is None else (gpu.launcher or SlurmGpuLauncher(gpu.config))
         )
-        self._scratch: Path | None = None
         self._server: _Server | None = None
         self._thread: threading.Thread | None = None
         self._socket_identity: tuple[int, int] | None = None
@@ -401,7 +416,6 @@ class HostCommandBroker:
     def start(self) -> None:
         """Bind the private socket and start serving requests."""
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
-        self._scratch = Path(tempfile.mkdtemp(prefix="vibesys-gate-"))
         server = _Server(self)
         try:
             info = self.socket_path.stat()
@@ -418,7 +432,6 @@ class HostCommandBroker:
         except BaseException:
             server.server_close()
             self._unlink_owned_socket()
-            self._remove_scratch()
             raise
 
     def close(self) -> None:
@@ -437,7 +450,6 @@ class HostCommandBroker:
         if thread is not None:
             thread.join()
         self._unlink_owned_socket()
-        self._remove_scratch()
 
     def _unlink_owned_socket(self) -> None:
         identity, self._socket_identity = self._socket_identity, None
@@ -449,11 +461,6 @@ class HostCommandBroker:
             return
         if (info.st_dev, info.st_ino) == identity:
             self.socket_path.unlink(missing_ok=True)
-
-    def _remove_scratch(self) -> None:
-        scratch, self._scratch = self._scratch, None
-        if scratch is not None:
-            shutil.rmtree(scratch, ignore_errors=True)
 
     def prepare(self, call: GpuCall | GateCall) -> _Job:
         """Authorize *call* and return the job it asks for."""
@@ -483,10 +490,9 @@ class HostCommandBroker:
 
     def _prepare_gate(self, call: GateCall, cwd: Path) -> _Job:
         gates = self._gates
-        scratch = self._scratch
-        if gates is None or scratch is None:
+        if gates is None:
             raise HostCommandBrokerError.unsupported("gate")
-        arguments, relay = self._gate_arguments(call, gates, scratch)
+        arguments, relay = self._gate_arguments(call, gates)
         return _Job(
             run=lambda write, cancel: gates.runner.run(
                 call.kind, arguments, cwd=cwd, write=write, cancel=cancel
@@ -496,7 +502,7 @@ class HostCommandBroker:
 
     @staticmethod
     def _gate_arguments(
-        call: GateCall, gates: Gates, scratch: Path
+        call: GateCall, gates: Gates
     ) -> tuple[tuple[str, ...], tuple[Path, str] | None]:
         """Validate a gate's arguments against the plan; return them and any file to relay.
 
@@ -519,7 +525,7 @@ class HostCommandBroker:
             raise HostCommandBrokerError.invalid_gate_arguments(call.kind)
         if kind is BenchmarkOutputKind.WORKSPACE:
             return arguments, None
-        host_file = scratch / f"{secrets.token_hex(16)}.json"
+        host_file = _reserve_result_file()
         return (output_argument, str(host_file)), (host_file, arguments[1])
 
     def _workspace_for(self, cwd: Path) -> Path:
