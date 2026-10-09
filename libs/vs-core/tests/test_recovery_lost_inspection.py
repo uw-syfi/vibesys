@@ -59,14 +59,15 @@ def _session_intent() -> Intent:
 
 
 def _lost_inspection(target: Intent, phase: IntentPhase) -> Intent:
+    request_id = RequestId(root="inspection")
     request = InspectRequest(
-        request_id=RequestId(root="inspection"),
+        request_id=request_id,
         scope=target.request.scope,
         deadline_at=100.0,
         target=target.request_id,
     )
     return Intent(
-        request_id=request.request_id,
+        request_id=request_id,
         request=request,
         payload_digest=_digest(request),
         lifecycle=LifecycleClass.QUERY,
