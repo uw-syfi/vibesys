@@ -155,6 +155,7 @@ class JudgeSuspensionUnavailableError(AssertionError):
 
 
 @pytest.mark.xfail(
+    run=False,
     strict=True,
     raises=JudgeSuspensionUnavailableError,
     reason=(

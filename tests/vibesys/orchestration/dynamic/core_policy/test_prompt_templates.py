@@ -40,6 +40,8 @@ if TYPE_CHECKING:
 
 _ROOT = Path(templates.__file__).parent
 _OBJECTIVE = "Raise queue throughput."
+# Immutable once built; its compiled-template cache is shared by every example.
+_RENDERER = TemplateRenderer(_ROOT)
 
 
 def _revision(name: str) -> RevisionRef:
@@ -147,9 +149,8 @@ def test_a_template_renders_for_every_context_of_its_kind(
     template: PromptTemplate, data: st.DataObject
 ) -> None:
     context = data.draw(_CONTEXTS[template])
-    renderer = TemplateRenderer(_ROOT)
 
-    text = renderer.render_template(f"{template.value}.j2", **_variables(context))
+    text = _RENDERER.render_template(f"{template.value}.j2", **_variables(context))
 
     assert text.strip()
     if template in (PromptTemplate.PORTFOLIO, PromptTemplate.IMPLEMENT, PromptTemplate.REVIEW):
@@ -163,7 +164,7 @@ def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
 ) -> None:
     context = data.draw(_CONTEXTS[template])
 
-    text = TemplateRenderer(_ROOT).render_template(
+    text = _RENDERER.render_template(
         f"{template.value}.j2", **_variables(context, agent_evaluation=offered)
     )
 
@@ -172,11 +173,10 @@ def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
 
 
 def _planner_texts(context: PlannerPrompt) -> list[str]:
-    renderer = TemplateRenderer(_ROOT)
     correction = PlannerCorrectionPrompt(planner=context, error=None, scheduled=0)
     return [
-        renderer.render_template("portfolio.j2", **_variables(context)),
-        renderer.render_template("portfolio_correction.j2", **_variables(correction)),
+        _RENDERER.render_template("portfolio.j2", **_variables(context)),
+        _RENDERER.render_template("portfolio_correction.j2", **_variables(correction)),
     ]
 
 
@@ -208,7 +208,7 @@ def test_the_implementer_is_told_to_submit_early_and_not_to_repeat_a_passed_chec
     # live-1: implementer turns ran the local check 11 to 14 times and took 12 to 13 minutes.
     context = data.draw(_CONTEXTS[PromptTemplate.IMPLEMENT])
 
-    text = TemplateRenderer(_ROOT).render_template(
+    text = _RENDERER.render_template(
         "implement.j2", **_variables(context, agent_evaluation=offered)
     )
 
@@ -225,9 +225,7 @@ def test_the_judge_reads_evidence_and_the_diff_before_running_anything(
     # live-1: judges ran the local check 10 to 19 times in turns of 96 to 166 s.
     context = data.draw(_CONTEXTS[PromptTemplate.REVIEW])
 
-    text = TemplateRenderer(_ROOT).render_template(
-        "review.j2", **_variables(context, agent_evaluation=offered)
-    )
+    text = _RENDERER.render_template("review.j2", **_variables(context, agent_evaluation=offered))
 
     assert "Start from the referenced evidence and the candidate's diff" in text
     assert "do not run local checks, benchmarks" in text
@@ -249,7 +247,7 @@ def test_a_retried_implementer_is_shown_its_own_blocker_and_narrowed_step(
         update={"blocker": blocker, "narrowed_step": step, "turns_without_candidate": 1}
     )
 
-    text = TemplateRenderer(_ROOT).render_template("implement.j2", **_variables(context))
+    text = _RENDERER.render_template("implement.j2", **_variables(context))
 
     assert "The blocker you stated:" in text
     assert blocker in text
@@ -266,7 +264,7 @@ def test_a_first_attempt_is_not_shown_a_blocker(data: st.DataObject) -> None:
         update={"blocker": None, "narrowed_step": None, "turns_without_candidate": 0}
     )
 
-    text = TemplateRenderer(_ROOT).render_template("implement.j2", **_variables(context))
+    text = _RENDERER.render_template("implement.j2", **_variables(context))
 
     assert "The blocker you stated:" not in text
 
@@ -274,13 +272,12 @@ def test_a_first_attempt_is_not_shown_a_blocker(data: st.DataObject) -> None:
 @given(data=st.data())
 def test_planner_and_implementer_share_one_first_measurable_step(data: st.DataObject) -> None:
     # live-2: the planner chose architecture-scale hypotheses that no single turn could finish.
-    renderer = TemplateRenderer(_ROOT)
     planner = data.draw(_PLANNER)
     implement = data.draw(_CONTEXTS[PromptTemplate.IMPLEMENT])
 
-    assert "first measurable step" in renderer.render_template(
+    assert "first measurable step" in _RENDERER.render_template(
         "portfolio.j2", **_variables(planner)
     )
-    assert "first measurable step" in renderer.render_template(
+    assert "first measurable step" in _RENDERER.render_template(
         "implement.j2", **_variables(implement)
     )
