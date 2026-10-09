@@ -359,7 +359,7 @@ class FakeWorkspaceAgentSessions:
         self._roles = {role.id: role for role in agents}
         self._responder = responder
         self._bindings = bindings or {
-            role.id: AgentBinding(backend="fake", driver="fake", provider="fake") for role in agents
+            role.id: AgentBinding(backend="fake", provider="fake") for role in agents
         }
         self._supported_extra_tools = frozenset(supported_extra_tools or ())
         default_capabilities = {AgentCapability.SESSION_REUSE}

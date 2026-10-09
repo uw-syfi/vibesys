@@ -87,5 +87,4 @@ def test_stub_fake_is_constructible_and_usable() -> None:
     """The fake constructs with no arguments and answers basic queries."""
     fake = StubAgentClient()
     assert fake.backend_name == "stub"
-    assert fake.driver_name == "stub"
     assert fake.capabilities is not None

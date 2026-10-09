@@ -316,7 +316,7 @@ class AgentClientProtocol(Protocol):
     Each backend supplies one implementation: the CLI
     :class:`~vs_agent.client.AgentClient`, the deterministic stub, and
     the plain loop's tracker wrapper. Attribution
-    (``backend_name``, ``driver_name``, ``provider``, ``model_for_kind``) is
+    (``backend_name``, ``provider``, ``model_for_kind``) is
     part of this contract because the loop stamps it onto every round record,
     so a consumer never has to probe an implementation for it.
     """
@@ -329,11 +329,6 @@ class AgentClientProtocol(Protocol):
     @property
     def capabilities(self) -> AgentCapabilities:
         """Return the features this client's execution system can enforce."""
-        ...
-
-    @property
-    def driver_name(self) -> str | None:
-        """Return the stable configured driver name, or ``None`` when unnamed."""
         ...
 
     @property

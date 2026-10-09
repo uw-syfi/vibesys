@@ -156,7 +156,6 @@ class RuntimeAgentSession:
         self._log = log
         self._binding = AgentBinding(
             backend=execution.backend_name,
-            driver=execution.driver_name,
             provider=execution.provider,
             model=execution.model,
             reasoning_effort=execution.reasoning_effort,

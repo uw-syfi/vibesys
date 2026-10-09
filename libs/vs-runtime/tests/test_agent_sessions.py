@@ -197,7 +197,6 @@ def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: 
             driver,
             provider="fake",
             model_name="fake-model",
-            driver_name="fake",
             session_store=store,
         )
 
@@ -272,7 +271,6 @@ def test_member_keyed_candidate_resumes_its_provider_session_from_a_new_revision
             driver,
             provider="fake",
             model_name="fake-model",
-            driver_name="fake",
             session_store=cast("SessionStore | None", kwargs["session_store"]),
         )
         clients.append(client)

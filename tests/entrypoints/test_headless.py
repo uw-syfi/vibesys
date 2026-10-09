@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import TypedDict
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -197,7 +197,6 @@ def test_cli_rejects_mixed_generic_and_compatibility_environment_flags(tmp_path:
 class _CommonConfiguration(TypedDict):
     model: str
     agent_backend: str
-    agent_driver: Literal["agentshim"]
     cli_provider: str
     cli_timeout: int
     compute_backend: str
@@ -221,9 +220,6 @@ def _common_configuration() -> _CommonConfiguration:
     return {
         "model": "gpt-recorded",
         "agent_backend": "cli",
-        # Runs created while a second driver existed recorded this field; they must
-        # still resume. New runs omit it.
-        "agent_driver": "agentshim",
         "cli_provider": "claude",
         "cli_timeout": 321,
         "compute_backend": "cpu",
@@ -240,7 +236,6 @@ def _execution_record(
     return RunExecutionRecord(
         model=common["model"],
         agent_backend=common["agent_backend"],
-        agent_driver=common["agent_driver"],
         cli_provider=common["cli_provider"],
         cli_timeout=common["cli_timeout"],
         compute_backend=common["compute_backend"],

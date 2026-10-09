@@ -31,7 +31,6 @@ class AgentAttribution:
     """Which runtime produced the round's implementation."""
 
     backend: str
-    driver: str | None
     provider: str | None
     model: str | None
 
@@ -293,7 +292,6 @@ def build_round_record(data: RecordInput) -> RoundRecord:
         perf_delta_pct=metrics.delta_pct,
         perf_comparison=metrics.comparison,
         perf_provenance=projection.provenance,
-        implementer_driver=data.implementer.driver if data.implementer else None,
         implementer_provider=data.implementer.provider if data.implementer else None,
         implementer_model=data.implementer.model if data.implementer else None,
         attempts=attempt.retry,

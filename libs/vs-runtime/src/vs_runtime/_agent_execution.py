@@ -415,10 +415,6 @@ class RuntimeAgentExecution:
         return self._client.backend_name
 
     @property
-    def driver_name(self) -> str | None:
-        return self._client.driver_name
-
-    @property
     def provider(self) -> str | None:
         return self._client.provider
 

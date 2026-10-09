@@ -90,9 +90,7 @@ def _record_input() -> RecordInput:
         framework_benchmark_configured=True,
         accuracy_configured=True,
         candidate_commit="candidate-commit",
-        implementer=AgentAttribution(
-            backend="cli", driver="agentshim", provider="codex", model="model-a"
-        ),
+        implementer=AgentAttribution(backend="cli", provider="codex", model="model-a"),
     )
 
 
@@ -106,7 +104,6 @@ def test_official_record_uses_benchmark_row_and_causal_parent() -> None:
     assert record.perf_baseline_metric == 10.0
     assert record.perf_delta_pct == 20.0
     assert record.candidate_retained
-    assert record.implementer_driver == "agentshim"
     assert record.implementer_provider == "codex"
     assert record.implementer_model == "model-a"
 
@@ -115,7 +112,7 @@ def test_official_status_needs_known_non_stub_attribution() -> None:
     data = _record_input()
     assert build_round_record(data).official_evaluation
 
-    stub = AgentAttribution(backend="stub", driver=None, provider=None, model=None)
+    stub = AgentAttribution(backend="stub", provider=None, model=None)
     for implementer in (None, stub):
         record = build_round_record(replace(data, implementer=implementer))
         assert not record.official_evaluation

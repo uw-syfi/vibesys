@@ -270,7 +270,7 @@ def test_same_session_continues_and_second_creation_is_fresh() -> None:
         assert first.role == role
         assert first.workspace is workspace
         assert first.member_id == "candidate-1"
-        assert first.binding == AgentBinding(backend="fake", driver="fake", provider="fake")
+        assert first.binding == AgentBinding(backend="fake", provider="fake")
         await run.close()
 
     asyncio.run(scenario())
@@ -335,7 +335,6 @@ def test_fake_binding_is_explicitly_configurable_and_immutable() -> None:
         role = _role()
         binding = AgentBinding(
             backend="cli",
-            driver="agentshim",
             provider="codex",
             model="gpt-6-sol",
             reasoning_effort="high",

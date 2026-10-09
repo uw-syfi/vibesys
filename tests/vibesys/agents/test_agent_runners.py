@@ -165,7 +165,7 @@ class TestBuildAgentClient:
         runner = _build_client(config, require_host_sandbox=True)
 
         assert isinstance(runner, AgentClient)
-        assert runner.driver_name == "agentshim"
+        assert runner.provider == "codex"
 
     def test_required_project_enforcement_permits_stub(self) -> None:
         runner = _build_client(_agent_config(backend="stub"), require_host_sandbox=True)
