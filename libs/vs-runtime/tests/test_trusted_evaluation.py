@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 import threading
 from collections import deque
 from typing import TYPE_CHECKING, cast
@@ -24,7 +26,7 @@ from vs_runtime.api.infrastructure import (
     create_trusted_evaluation_executor,
 )
 from vs_runtime.api.testing import FakeModelVolumeProvisioner
-from vs_sandbox.api import CommandResult
+from vs_sandbox.api import CommandResult, LocalShellRunner
 from vs_sandbox.api.testing import FakeCommandRunner
 
 if TYPE_CHECKING:
@@ -201,6 +203,56 @@ def test_truncated_benchmark_output_reads_the_result_file_alone(tmp_path: Path) 
     assert sandbox.calls[1].command.startswith("printf ")
     assert f"cat {output_path}" in sandbox.calls[1].command
     assert sandbox.calls[-1].command == f"rm -f -- {output_path}"
+
+
+_BULKY_BENCHMARK = """
+import json, sys
+path = sys.argv[sys.argv.index("--output-json") + 1]
+size = int(sys.argv[1])
+print("evaluator log line " * 20000)
+# Place a two-byte character across the 48,000-byte chunk boundary.
+pad = "x" * (48_000 - len('{"note": "'))
+note = pad[:-1] + "\u00e9" + "y" * max(0, size - 48_000)
+with open(path, "w", encoding="utf-8") as file:
+    json.dump({"note": note, "score": 7.25}, file, ensure_ascii=False)
+"""
+
+
+def _bulky_executor(
+    tmp_path: Path, size: int, *, max_output_chars: int = 100_000
+) -> TrustedEvaluationExecutor:
+    script = tmp_path / "bench.py"
+    script.write_text(_BULKY_BENCHMARK, encoding="utf-8")
+    sandbox = LocalShellRunner(
+        tmp_path, env={"PATH": os.environ["PATH"]}, max_output_chars=max_output_chars
+    )
+    return _executor(
+        tmp_path,
+        TrustedEvaluationPlan(
+            benchmark_command=f"{sys.executable} {script} {size}",
+            benchmark_contract=ScalarBenchmarkContract(
+                output_argument="--output-json",
+                metric="score",
+            ),
+        ),
+        sandbox,
+    )
+
+
+@pytest.mark.parametrize("size", [120_000, 250_000])
+def test_result_file_larger_than_the_output_cap_is_read_whole(tmp_path: Path, size: int) -> None:
+    result = asyncio.run(_bulky_executor(tmp_path, size).benchmark())
+
+    assert result.passed, result.output
+    assert result.row == {"score": 7.25}
+
+
+def test_result_file_that_cannot_be_read_in_chunks_names_its_size(tmp_path: Path) -> None:
+    # A cap smaller than one encoded chunk cannot carry the result file.
+    result = asyncio.run(_bulky_executor(tmp_path, 120_000, max_output_chars=2_000).benchmark())
+
+    assert not result.passed
+    assert "could not be read back in 48000-byte chunks" in result.output
 
 
 def test_scalar_benchmark_preserves_legacy_nested_result_shape(tmp_path: Path) -> None:
