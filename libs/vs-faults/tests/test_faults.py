@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import subprocess
 import sys
@@ -13,7 +14,15 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from vs_agent.api import AgentOutputSchemaError, AgentTurnTimeoutError
+from vs_agent.api import (
+    AgentClientProtocol,
+    AgentExecutionPolicy,
+    AgentOutputSchemaError,
+    AgentSessionSpec,
+    AgentTurnExecutor,
+    AgentTurnRequest,
+    AgentTurnTimeoutError,
+)
 from vs_agent.api.testing import FakeAgentClient
 from vs_faults.api import (
     AgentCrashError,
@@ -101,6 +110,89 @@ def test_an_agent_fault_fires_on_its_turn_only(fault: AgentFault) -> None:
     # Transport faults strike after the agent worked; output faults replace its answer.
     worked = fault in {AgentFault.CRASH, AgentFault.TIMEOUT, AgentFault.EXTRA_KEYS}
     assert len(inner.calls) == (3 if worked else 2)
+
+
+def _raw_turn(client: FaultyAgentClient | FakeAgentClient, prompt: str = "Use `H1`.") -> _Reply:
+    """One durable-journal turn: the path the runtime takes for every turn with an invocation id."""
+    result = client.run(
+        session_spec=AgentSessionSpec(
+            role=_KIND, provider="fake", workspace=Path(), policy=AgentExecutionPolicy()
+        ),
+        turn=AgentTurnRequest(message=prompt, output_schema=_Reply, invocation_id="i"),
+    )
+    return _Reply.model_validate_json(result.text)
+
+
+# Static: mypy rejects the wrapper the day a Protocol the runtime dispatches
+# through gains a member it lacks.
+def _as_protocols(client: FaultyAgentClient) -> tuple[AgentClientProtocol, AgentTurnExecutor]:
+    return client, client
+
+
+def _public_members(protocol: type) -> dict[str, object]:
+    return {
+        name: member
+        for name, member in vars(protocol).items()
+        if not name.startswith("_") and (callable(member) or isinstance(member, property))
+    }
+
+
+@pytest.mark.parametrize("protocol", [AgentClientProtocol, AgentTurnExecutor])
+def test_the_wrapper_matches_every_member_of_the_interfaces_the_runtime_dispatches_through(
+    protocol: type,
+) -> None:
+    """Same members, same parameters: a future interface change cannot leave the wrapper behind."""
+    for name, member in _public_members(protocol).items():
+        mine = getattr(FaultyAgentClient, name, None)
+        assert mine is not None, f"FaultyAgentClient lacks {protocol.__name__}.{name}"
+        if isinstance(member, property):
+            assert isinstance(mine, property), name
+            continue
+        expected = inspect.signature(getattr(protocol, name))
+        actual = inspect.signature(mine)
+        # Annotations are source text (postponed evaluation), so a spelling
+        # difference fails loudly rather than slipping through.
+        assert _shape(actual) == _shape(expected), name
+
+
+def _shape(signature: inspect.Signature) -> tuple[object, ...]:
+    return (
+        tuple((p.name, p.kind, p.default, p.annotation) for p in signature.parameters.values()),
+        signature.return_annotation,
+    )
+
+
+def test_a_wrapped_turn_executor_stays_a_turn_executor() -> None:
+    """The runtime refuses a durable turn on a client that is not an AgentTurnExecutor."""
+    client = FaultyAgentClient(FakeAgentClient().set_response(_KIND, _ANSWER), FaultPlan(seed=1))
+
+    assert isinstance(client, AgentTurnExecutor)
+    assert _as_protocols(client) == (client, client)
+    assert [_raw_turn(client) for _ in range(3)] == [_ANSWER] * 3
+
+
+@pytest.mark.parametrize("fault", list(AgentFault))
+def test_an_agent_fault_fires_on_a_durable_turn_too(fault: AgentFault) -> None:
+    rule = FaultRule(boundary=Boundary.AGENT_TURN, target=_KIND, at=2, fault=fault)
+    inner = FakeAgentClient().set_response(_KIND, _ANSWER)
+    client = FaultyAgentClient(inner, FaultPlan(seed=7, rules=(rule,)))
+
+    assert _raw_turn(client) == _ANSWER
+    # A raw turn returns text; the caller parses it, so output faults surface as parse errors.
+    expected = {
+        AgentFault.CRASH: AgentCrashError,
+        AgentFault.TIMEOUT: AgentTurnTimeoutError,
+        AgentFault.MALFORMED: ValidationError,
+        AgentFault.SCHEMA_INVALID: ValidationError,
+        AgentFault.EXTRA_KEYS: ValidationError,
+    }.get(fault)
+    if expected is None:
+        assert isinstance(_raw_turn(client), _Reply)
+    else:
+        with pytest.raises(expected):
+            _raw_turn(client)
+    assert _raw_turn(client) == _ANSWER
+    assert client.injected == [(_KIND, 2, fault)]
 
 
 @given(seed=st.integers(0, 2**32), bold=st.booleans())
@@ -270,3 +362,15 @@ def test_a_killed_job_is_never_run_and_reports_how_it_died(tmp_path: Path) -> No
     state = str(call(f"sacct -n -P -j {job} -o State,ExitCode")["stdout"]).split()[0]
     assert state in {"OUT_OF_MEMORY", "PREEMPTED", "NODE_FAIL", "FAILED"}
     assert not (tmp_path / "c" / "requests.jsonl").exists()
+
+
+class _Target(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target: str | None = Field(description="An existing id, or null.")
+
+
+@given(seed=st.integers(0, 2**32))
+def test_a_careful_agent_answers_null_rather_than_invent_a_reference(seed: int) -> None:
+    reply = ReplyGenerator(FaultPlan(seed=seed).rng("t"), ("H1",)).valid(_Target)
+
+    assert reply == _Target(target=None)

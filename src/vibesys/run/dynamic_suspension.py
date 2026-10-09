@@ -104,6 +104,7 @@ from vs_runtime.api import (
     SessionTransportUnavailableError,
     StructuredResponseError,
     Unknown,
+    UnresolvedDispatchError,
 )
 
 if TYPE_CHECKING:
@@ -329,7 +330,7 @@ class EvaluationSuspension:
             message = (
                 f"{current.hypothesis_id}: unresolved provider dispatch requires reconciliation"
             )
-            raise RuntimeContractError(message) from error
+            raise UnresolvedDispatchError(message) from error
 
     async def bind_evidence_reply[ReplyT: BaseModel](self, reply: ReplyT) -> ReplyT:
         """Preserve measured revision attribution before the core binds local references."""
