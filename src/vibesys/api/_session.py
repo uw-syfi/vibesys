@@ -39,8 +39,8 @@ if TYPE_CHECKING:
         AgentEventSink,
         AgentInvocationStore,
         AgentSessionKey,
-        ToolServerDescriptor,
     )
+    from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import OrchestrationDescriptor
     from vs_runtime.api import (
         AgentToolBindingContext,

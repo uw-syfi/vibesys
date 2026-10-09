@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 
 from vibesys.api import agent_spec_from_config
 from vibesys.api.wiring import platform_skill_selection
-from vs_agent.api import ToolServerDescriptor, build_agent_client, expose_as_tools
+from vs_agent.api import build_agent_client
+from vs_mcp.api import ToolServerDescriptor, expose_as_tools
 from vs_runtime.api.infrastructure import (
     ManagedConversationSpec,
     open_agent_execution_environment,

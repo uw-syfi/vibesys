@@ -32,7 +32,6 @@ from vs_agent.api import (
     SessionDisposition,
     SessionResumeError,
     SessionScope,
-    StdioServerDescriptor,
 )
 from vs_agent.contracts import (
     AgentExecutionPolicy,
@@ -44,6 +43,7 @@ from vs_agent.contracts import (
     AgentTurnResult,
     MCPServerSpec,
 )
+from vs_mcp.api import StdioServerDescriptor
 
 
 class _Response(BaseModel):

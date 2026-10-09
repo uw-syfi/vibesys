@@ -9,7 +9,6 @@ from typing import Any, TypedDict, Unpack
 
 from pydantic import BaseModel, ConfigDict
 
-from vs_agent.api import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, serve_stdio
 from vs_evaluation.agent_models import (
     MAX_AGENT_AWAIT_S,
     AvailabilityCall,
@@ -41,6 +40,7 @@ from vs_evaluation.profiler_models import (
     NoArgs,
     ProfilerHandleArgs,
 )
+from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, serve_stdio
 
 
 def evaluation_mcp_descriptor(grant: EvaluationGrant, socket_path: str) -> ToolServerDescriptor:

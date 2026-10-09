@@ -40,7 +40,7 @@ from pydantic import BaseModel, Field
 
 from launch import open_run_store
 from vibesys.api.hypothesis import agent_projection
-from vs_agent.api import ToolSpec, serve_stdio
+from vs_mcp.api import ToolSpec, serve_stdio
 from vs_project.api import Project
 
 if TYPE_CHECKING:

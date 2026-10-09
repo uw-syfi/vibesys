@@ -67,8 +67,8 @@ if TYPE_CHECKING:
         AgentSessions,
         InvocationOutcome,
         SessionStore,
-        ToolServerDescriptor,
     )
+    from vs_mcp.api import ToolServerDescriptor
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._agent_execution import (
         AgentExecutionLifecycleSink,

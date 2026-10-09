@@ -79,13 +79,10 @@ if TYPE_CHECKING:
     from vibesys.run.contracts import RunRequest
     from vibesys.run.integration import CommittedStateProjector, LocalRunIntegration
     from vibesys.run.resources import _PreparedRun
-    from vs_agent.api import (
-        AgentClientProtocol,
-        AgentInvocationStore,
-        ToolServerDescriptor,
-    )
+    from vs_agent.api import AgentClientProtocol, AgentInvocationStore
     from vs_core.api import LifecycleCapability
     from vs_evaluation.api import EvaluationLifecycleEvent
+    from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import StateNamespace
     from vs_runtime.api import (
         AgentRole,

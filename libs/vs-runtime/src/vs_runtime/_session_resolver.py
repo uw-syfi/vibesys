@@ -34,12 +34,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_agent.api import (
-        AgentInvocationStore,
-        AgentSessionSpec,
-        AgentTurnExecutor,
-        ToolServerDescriptor,
-    )
+    from vs_agent.api import AgentInvocationStore, AgentSessionSpec, AgentTurnExecutor
     from vs_core.api import (
         ArtifactRef,
         RoleId,
@@ -48,6 +43,7 @@ if TYPE_CHECKING:
         TurnSpec,
         WorkspaceRef,
     )
+    from vs_mcp.api import ToolServerDescriptor
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._receipt_store import ReceiptStore

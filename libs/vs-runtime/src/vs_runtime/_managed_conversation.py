@@ -15,12 +15,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vs_agent.api import (
-        AgentClientProtocol,
-        AgentEventSink,
-        AgentSpec,
-        ToolServerDescriptor,
-    )
+    from vs_agent.api import AgentClientProtocol, AgentEventSink, AgentSpec
+    from vs_mcp.api import ToolServerDescriptor
     from vs_runtime._agent_execution import AgentExecutionEnvironment
     from vs_sandbox.api import HostResource
 

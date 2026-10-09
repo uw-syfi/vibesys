@@ -18,9 +18,9 @@ from vs_agent.api import (
     AgentInvocationStore,
     AgentSessionKey,
     SessionStore,
-    ToolServerDescriptor,
     build_agent_client,
 )
+from vs_mcp.api import ToolServerDescriptor
 from vs_runtime._agent_execution import (
     AgentExecutionConfiguration,
     AgentExecutionEnvironment,

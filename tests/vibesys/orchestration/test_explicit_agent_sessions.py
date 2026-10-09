@@ -31,17 +31,12 @@ from vibesys.orchestration.single import PLUGIN
 from vibesys.run.contracts import RunRequest
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
-from vs_agent.api import (
-    AgentCapabilities,
-    AgentSessionKey,
-    SessionScope,
-    StdioServerDescriptor,
-    ToolServerDescriptor,
-)
+from vs_agent.api import AgentCapabilities, AgentSessionKey, SessionScope
 from vs_agent.api import (
     AgentTurnTimeoutError as DriverAgentTurnTimeoutError,
 )
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
+from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
     AgentCapability,

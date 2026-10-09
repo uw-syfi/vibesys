@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
-    from vs_agent.tools import ToolServerDescriptor
+    from vs_mcp.api import ToolServerDescriptor
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 T = TypeVar("T", bound=BaseModel)

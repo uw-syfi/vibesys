@@ -1,7 +1,7 @@
 """Transport-neutral declarations for tools exposed to an agent turn.
 
 Libraries describe subprocess-hosted tools through the structural
-``ToolServerDescriptor`` contract. ``vs_agent`` owns the translation to the
+``ToolServerDescriptor`` contract. The host library owns the translation to the
 transport understood by the selected driver.
 """
 
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class ToolSpec[T: BaseModel]:
-    """One tool a :func:`vs_agent.mcp_server.serve_stdio` server registers.
+    """One tool a :func:`vs_mcp.server.serve_stdio` server registers.
 
     ``handler`` is only ever built and invoked inside the subprocess that
     runs the server, so it may close over live objects (an open store, a
@@ -40,7 +40,7 @@ class ToolSpec[T: BaseModel]:
 class ToolServerDescriptor(Protocol):
     """Structural description of a subprocess tool server.
 
-    Libraries can provide this shape without depending on ``vs_agent``. The
+    Libraries can provide this shape without depending on the host. The
     agent runtime maps it onto the tool transport supported by the selected
     driver.
     """

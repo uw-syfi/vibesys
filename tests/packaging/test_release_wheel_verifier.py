@@ -36,6 +36,7 @@ FRAMEWORK_PACKAGES = (
     "vs_runtime",
     "vs_sandbox",
     "vs_slurm",
+    "vs_mcp",
 )
 PLATLIB = ""
 DIST_INFO = "vibesys-0.1.0.dist-info"
@@ -75,6 +76,7 @@ dependencies = ["example>=1"]
         "vs_runtime": "libs/vs-runtime/src/vs_runtime",
         "vs_sandbox": "libs/vs-sandbox/src/vs_sandbox",
         "vs_slurm": "libs/vs-slurm/src/vs_slurm",
+        "vs_mcp": "libs/vs-mcp/src/vs_mcp",
     }
     for package, source in roots.items():
         _source_file(root, f"{source}/__init__.py", f"PACKAGE = {package!r}\n".encode())
@@ -121,6 +123,7 @@ def _packaged_source_files(source_root: Path) -> dict[str, bytes]:
         "libs/vs-runtime/src/vs_runtime": "vs_runtime",
         "libs/vs-sandbox/src/vs_sandbox": "vs_sandbox",
         "libs/vs-slurm/src/vs_slurm": "vs_slurm",
+        "libs/vs-mcp/src/vs_mcp": "vs_mcp",
         "resources/evaluators": "vibesys/_resources/evaluators",
         "resources/profilers": "vibesys/_resources/profilers",
         "resources/skills": "vibesys/_resources/skills",

@@ -19,8 +19,8 @@ if TYPE_CHECKING:
         AgentEventSink,
         AgentInvocationStore,
         AgentSessionKey,
-        ToolServerDescriptor,
     )
+    from vs_mcp.api import ToolServerDescriptor
     from vs_runtime.api import AgentToolBindingContext
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment, StopTimer

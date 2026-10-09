@@ -34,6 +34,7 @@ INTERNAL_DISTRIBUTIONS = {
     "vs-runtime",
     "vs-sandbox",
     "vs-slurm",
+    "vs-mcp",
 }
 INTERNAL_IMPORT_PACKAGES = {
     "vs_async_ops",
@@ -47,6 +48,7 @@ INTERNAL_IMPORT_PACKAGES = {
     "vs_runtime",
     "vs_sandbox",
     "vs_slurm",
+    "vs_mcp",
 }
 
 

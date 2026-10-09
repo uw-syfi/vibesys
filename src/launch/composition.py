@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from vs_agent.api import StdioServerDescriptor, ToolServerDescriptor, expose_as_tools
 from vs_evaluation.api import EvaluationAgentRole, evaluation_principal
 from vs_evaluation.api.tools import evaluation_mcp_descriptor
+from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor, expose_as_tools
 from vs_runtime.api import AgentCapability
 
 if TYPE_CHECKING:

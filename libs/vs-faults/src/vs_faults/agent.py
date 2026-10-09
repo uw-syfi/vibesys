@@ -41,9 +41,9 @@ if TYPE_CHECKING:
         AgentSessionSpec,
         AgentTurnRequest,
         AgentTurnResult,
-        ToolServerDescriptor,
     )
     from vs_agent.api.testing import FakeInvocation
+    from vs_mcp.api import ToolServerDescriptor
 
 T = TypeVar("T", bound=BaseModel)
 

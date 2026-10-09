@@ -50,7 +50,6 @@ from vs_agent.host_resource_declarations import (
     declare_provider_state_resources,
     task_agent_host_resources,
 )
-from vs_agent.mcp_server import register_tool, serve_stdio
 from vs_agent.progress import AgentProgress, CandidateProgress, RoundProgress
 from vs_agent.provider_policy import (
     CLI_VERSIONS,
@@ -107,7 +106,6 @@ from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink, NullAgentEventS
 from vs_agent.skills import NULL_SKILL_SELECTION, SkillSelection
 from vs_agent.spec import AgentBackend, AgentSpec
 from vs_agent.todos import todos_from_tool_call
-from vs_agent.tools import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, expose_as_tools
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -185,11 +183,8 @@ __all__ = [
     "SessionScope",
     "SessionStore",
     "SkillSelection",
-    "StdioServerDescriptor",
     "TodoItemData",
     "ToolResultPayload",
-    "ToolServerDescriptor",
-    "ToolSpec",
     "Unknown",
     "agent_driver_supports_tool_servers",
     "auth_bind_mounts",
@@ -203,12 +198,9 @@ __all__ = [
     "declare_command_host_resources",
     "declare_provider_state_resources",
     "describe_validation_error",
-    "expose_as_tools",
     "inspect_invocation_journal",
     "materialize_skills",
     "parse_typed_response",
-    "register_tool",
-    "serve_stdio",
     "session_env_allowlist",
     "session_environment",
     "task_agent_host_resources",

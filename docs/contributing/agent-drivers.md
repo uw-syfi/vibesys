@@ -49,7 +49,7 @@ workaround.
 ## Provider session resume
 
 MCP session identity includes its command, arguments, stable environment, and
-launch-only environment key names. `StdioServerDescriptor.runtime_env` carries
+launch-only environment key names. `vs_mcp`'s `StdioServerDescriptor.runtime_env` carries
 fresh credentials and service endpoints. Its values are excluded from session
 equality, fingerprints, and representations; the drivers inject them into the
 MCP process on creation. Keys may not overlap the stable environment. Grant

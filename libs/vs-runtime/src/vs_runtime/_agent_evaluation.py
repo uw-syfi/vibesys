@@ -92,8 +92,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vs_agent.api import ToolServerDescriptor
     from vs_core.api import CoreEvent, CoreState
+    from vs_mcp.api import ToolServerDescriptor
     from vs_runtime._workspace_receipts import WorkspaceReceipts
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
     from vs_runtime.contracts import AgentRole

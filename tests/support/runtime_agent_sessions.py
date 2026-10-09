@@ -63,12 +63,8 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_agent.api import (
-        AgentClientProtocol,
-        AgentInvocationStore,
-        AgentSessions,
-        ToolServerDescriptor,
-    )
+    from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSessions
+    from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import StateSlot
 
 

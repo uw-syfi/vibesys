@@ -105,11 +105,13 @@ graph TD
     entrypoints --> vs_agent
     entrypoints --> vs_github
     entrypoints --> vs_issue_tracker
+    entrypoints --> vs_mcp
     entrypoints --> vs_project
     headless --> vibesys
     launch --> vibesys
     launch --> vs_agent
     launch --> vs_evaluation
+    launch --> vs_mcp
     launch --> vs_project
     launch --> vs_runtime
     launch --> vs_sandbox
@@ -121,25 +123,29 @@ graph TD
     vibesys --> vs_evaluator_protocol
     vibesys --> vs_github
     vibesys --> vs_issue_tracker
+    vibesys --> vs_mcp
     vibesys --> vs_project
     vibesys --> vs_prompts
     vibesys --> vs_runtime
     vibesys --> vs_sandbox
     vibesys --> vs_slurm
+    vs_agent --> vs_mcp
     vs_agent --> vs_project
     vs_agent --> vs_prompts
     vs_agent --> vs_sandbox
-    vs_evaluation --> vs_agent
     vs_evaluation --> vs_async_ops
     vs_evaluation --> vs_evaluator_protocol
+    vs_evaluation --> vs_mcp
     vs_evaluation --> vs_project
     vs_faults --> vs_agent
+    vs_faults --> vs_mcp
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
     vs_runtime --> vs_async_ops
     vs_runtime --> vs_core
     vs_runtime --> vs_evaluation
     vs_runtime --> vs_evaluator_protocol
+    vs_runtime --> vs_mcp
     vs_runtime --> vs_project
     vs_runtime --> vs_prompts
     vs_runtime --> vs_sandbox
