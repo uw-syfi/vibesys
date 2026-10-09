@@ -18,10 +18,12 @@ on:
     types: [checks_requested]
 
 env:
-  # Wall-clock budget for a whole run, enforced as a warning by `ci-budget`
-  # below (issue #474). Kept here so raising or lowering the budget is a
-  # one-line change and the guard and the documentation can't disagree.
-  CI_WALL_TIME_BUDGET_SECONDS: '300'
+  # Wall-clock thresholds for a whole run, checked by `ci-budget` below (issue
+  # #474): a warning above the first, a failure above the second. Kept here so
+  # raising or lowering them is a one-line change and the guard and the
+  # documentation can't disagree.
+  CI_WALL_TIME_WARN_SECONDS: '360'
+  CI_WALL_TIME_ERROR_SECONDS: '600'
 
 jobs:
   # This job decides which parts of the tree a change can affect. The workflow
@@ -591,11 +593,13 @@ jobs:
               raise SystemExit(f"Required test jobs did not succeed: {failed}")
           PY
 
-  # Reports the run's wall time against CI_WALL_TIME_BUDGET_SECONDS (issue
-  # #474). Warns rather than fails: a green run that is merely slow should still
-  # be mergeable, and macOS runner queueing can push a run over the budget for
-  # reasons no workflow change can fix, so the summary reports queue time
-  # separately from execution time.
+  # Reports the run's wall time against CI_WALL_TIME_WARN_SECONDS and
+  # CI_WALL_TIME_ERROR_SECONDS (issue #474). Over the warn threshold it
+  # annotates the run; over the error threshold the job fails, so a slow run is
+  # visibly red instead of a green run nobody inspects. It is not a required
+  # check (Required PR CI does not need it), so a slow run is still mergeable.
+  # The summary reports queue time separately from execution time because
+  # runner queueing can push a run over for reasons no workflow change can fix.
   #
   # `typecheck` is deliberately absent from `needs`; Required PR CI owns that
   # dependency. It still appears in the table because this step reads every job
@@ -625,7 +629,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
-          BUDGET_SECONDS: ${{ env.CI_WALL_TIME_BUDGET_SECONDS }}
+          WARN_SECONDS: ${{ env.CI_WALL_TIME_WARN_SECONDS }}
+          ERROR_SECONDS: ${{ env.CI_WALL_TIME_ERROR_SECONDS }}
         run: |
           set -euo pipefail
           gh api "repos/$REPO/actions/runs/$RUN_ID" --jq '.created_at' > run_created.txt
@@ -642,7 +647,8 @@ jobs:
           def moment(value: str) -> datetime | None:
               return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
 
-          budget = int(os.environ["BUDGET_SECONDS"])
+          warn_after = int(os.environ["WARN_SECONDS"])
+          error_after = int(os.environ["ERROR_SECONDS"])
           created = moment(Path("run_created.txt").read_text().strip())
           assert created is not None
 
@@ -671,7 +677,7 @@ jobs:
           slowest, _, slowest_queue, slowest_run, _ = rows[0]
 
           lines = [
-              f"## CI wall time: {wall:.0f}s (budget {budget}s)",
+              f"## CI wall time: {wall:.0f}s (warn {warn_after}s, error {error_after}s)",
               "",
               "Measured from the run's `created_at` to the last job's `completed_at`,"
               " which is what a reviewer waiting on the run experiences.",
@@ -685,12 +691,18 @@ jobs:
               )
           Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text("\n".join(lines) + "\n")
 
-          if wall > budget:
+          long_pole = f"Long pole: {slowest} ({slowest_queue:.0f}s queued, {slowest_run:.0f}s running)."
+          if wall > error_after:
               print(
-                  f"::warning title=CI over wall-time budget::Run took {wall:.0f}s against a"
-                  f" {budget}s budget. Long pole: {slowest} ({slowest_queue:.0f}s queued,"
-                  f" {slowest_run:.0f}s running)."
+                  f"::error title=CI over wall-time limit::Run took {wall:.0f}s, over the"
+                  f" {error_after}s limit. {long_pole}"
+              )
+              raise SystemExit(1)
+          if wall > warn_after:
+              print(
+                  f"::warning title=CI over wall-time budget::Run took {wall:.0f}s, over the"
+                  f" {warn_after}s warning threshold. {long_pole}"
               )
           else:
-              print(f"Run took {wall:.0f}s, within the {budget}s budget.")
+              print(f"Run took {wall:.0f}s, within the {warn_after}s warning threshold.")
           PY
