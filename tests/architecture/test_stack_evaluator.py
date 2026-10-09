@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import tomllib
@@ -9,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.fast_cargo import fast_cargo_env
 from tests.support.shared_build import shared_build
 
 from vibesys.inputs import load_input_bundle
@@ -54,6 +54,9 @@ def _boost_lockfree_is_available() -> bool:
     return probe.returncode == 0
 
 
+CARGO_TARGET_DIRNAME = "cargo-target"
+
+
 def _copy_input_bundle(source: Path, target: Path) -> None:
     shutil.copytree(
         source,
@@ -92,7 +95,12 @@ def compiled_stack_candidate(tmp_path_factory) -> Path:  # noqa: ANN001  # lint-
 
     def build(directory: Path) -> None:
         _copy_input_bundle(starter, directory / "starter")
-        subprocess.run(["make"], cwd=directory / "starter", check=True)  # noqa: S607  # lint-waiver: LW-994619 [S607]; Executable name is a project tool resolved from PATH in tests.
+        subprocess.run(
+            ["make"],  # noqa: S607  # lint-waiver: LW-994619 [S607]; Executable name is a project tool resolved from PATH in tests.
+            cwd=directory / "starter",
+            check=True,
+            env=fast_cargo_env(CARGO_TARGET_DIR=str(directory / CARGO_TARGET_DIRNAME)),
+        )
 
     build_dir = shared_build(tmp_path_factory, "stack-rs-build", build) / "starter"
 
@@ -125,6 +133,7 @@ def stack_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: ANN001  # 
             ],
             cwd=source,
             check=True,
+            env=fast_cargo_env(),
         )
 
     target_dir = shared_build(tmp_path_factory, "stack-native-runner", build) / "target"
@@ -217,23 +226,12 @@ def test_stack_inputs_use_shared_editable_rust_starter():  # noqa: ANN201  # lin
             assert not (input_dir / relative).exists()
 
 
-def test_starter_make_honors_cargo_target_dir(tmp_path):  # noqa: ANN001, ANN201  # lint-waiver: LW-994626 [ANN001, ANN201]; Pytest fixture argument and unused test return are left unannotated.
-    if shutil.which("cargo") is None:
-        pytest.skip("Rust is required by the trusted stack evaluator")
-
-    project_root = Path(__file__).parents[2]
-    starter = project_root / "examples" / "starters" / "stack-rs"
-    build_dir = tmp_path / "starter"
-    _copy_input_bundle(starter, build_dir)
-    cargo_target = tmp_path / "cargo-target"
-    subprocess.run(
-        ["make"],  # noqa: S607  # lint-waiver: LW-994627 [S607]; Executable name is a project tool resolved from PATH in tests.
-        cwd=build_dir,
-        check=True,
-        env=os.environ | {"CARGO_TARGET_DIR": str(cargo_target)},
-    )
+def test_starter_make_honors_cargo_target_dir(compiled_stack_candidate: Path) -> None:
+    # The shared starter build ran ``make`` with CARGO_TARGET_DIR set, so its
+    # layout is the observable effect of the Makefile honoring that variable.
+    build_dir = compiled_stack_candidate.parent
+    built = build_dir.parent / CARGO_TARGET_DIRNAME / "release"
     assert (build_dir / "stack-candidate.so").is_file()
-    built = cargo_target / "release"
     assert (built / "libstack_candidate.so").is_file() or (
         built / "libstack_candidate.dylib"
     ).is_file()
@@ -313,7 +311,9 @@ def test_materialized_rust_starter_passes_accuracy(  # noqa: ANN201  # lint-waiv
 
 
 @pytest.mark.usefixtures("stack_native_runner")
-def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # noqa: ANN001, ANN201  # lint-waiver: LW-994637 [ANN001, ANN201]; Pytest fixture argument and unused test return are left unannotated.
+def test_materialized_manifest_commands_run_go_evaluator_directly(
+    tmp_path: Path, compiled_stack_candidate: Path
+) -> None:
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted stack evaluator")
 
@@ -325,7 +325,7 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # 
         workspace,
     )
     assert (workspace / "_evaluator" / "stack" / "DESIGN.md").is_file()
-    subprocess.run(["make"], cwd=workspace, check=True)  # noqa: S607  # lint-waiver: LW-994638 [S607]; Executable name is a project tool resolved from PATH in tests.
+    shutil.copy2(compiled_stack_candidate, workspace / "stack-candidate.so")
     manifest = tomllib.loads((input_dir / "vibesys.input.toml").read_text())
 
     accuracy = [

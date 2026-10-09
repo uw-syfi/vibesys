@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -11,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.fast_cargo import fast_cargo_env
 
 from vibesys.inputs import (
     load_input_bundle,
@@ -46,6 +46,9 @@ PRIORITY_QUEUE_BASELINES = {
     "prioqueue-locked-heap": "locked_heap.c",
     "prioqueue-sharded-heap": "sharded_heap.c",
 }
+
+
+CARGO_TARGET_DIRNAME = "cargo-target"
 
 
 def _copy_input_bundle(source: Path, target: Path) -> None:
@@ -103,7 +106,12 @@ def compiled_priority_queue_candidate(tmp_path_factory: pytest.TempPathFactory) 
     starter = project_root / "examples" / "starters" / "priority-queue-rs"
     build_dir = tmp_path_factory.mktemp("priority-queue-rs-build") / "starter"
     _copy_input_bundle(starter, build_dir)
-    run_test_command(["make"], cwd=build_dir, check=True)
+    run_test_command(
+        ["make"],
+        cwd=build_dir,
+        check=True,
+        env=fast_cargo_env(CARGO_TARGET_DIR=str(build_dir.parent / CARGO_TARGET_DIRNAME)),
+    )
 
     candidate = build_dir / "priority-queue-candidate.so"
     assert candidate.is_file()
@@ -133,6 +141,7 @@ def priority_queue_native_runner(tmp_path_factory: pytest.TempPathFactory) -> It
         ],
         cwd=source,
         check=True,
+        env=fast_cargo_env(),
     )
     runner = target_dir / "release" / "vibesys-priority-queue-native-runner"
     assert runner.is_file()
@@ -253,23 +262,12 @@ def test_priority_queue_inputs_use_shared_editable_rust_starter() -> None:
             assert not (input_dir / relative).exists()
 
 
-def test_starter_make_honors_cargo_target_dir(tmp_path):  # noqa: ANN001, ANN201  # lint-waiver: LW-994689 [ANN001, ANN201]; Pytest fixture argument and unused test return are left unannotated.
-    if shutil.which("cargo") is None:
-        pytest.skip("Rust is required by the trusted priority-queue evaluator")
-
-    project_root = Path(__file__).parents[2]
-    starter = project_root / "examples" / "starters" / "priority-queue-rs"
-    build_dir = tmp_path / "starter"
-    _copy_input_bundle(starter, build_dir)
-    cargo_target = tmp_path / "cargo-target"
-    subprocess.run(
-        ["make"],  # noqa: S607  # lint-waiver: LW-994690 [S607]; Executable name is a project tool resolved from PATH in tests.
-        cwd=build_dir,
-        check=True,
-        env=os.environ | {"CARGO_TARGET_DIR": str(cargo_target)},
-    )
+def test_starter_make_honors_cargo_target_dir(compiled_priority_queue_candidate: Path) -> None:
+    # The shared starter build ran ``make`` with CARGO_TARGET_DIR set, so its
+    # layout is the observable effect of the Makefile honoring that variable.
+    build_dir = compiled_priority_queue_candidate.parent
+    built = build_dir.parent / CARGO_TARGET_DIRNAME / "release"
     assert (build_dir / "priority-queue-candidate.so").is_file()
-    built = cargo_target / "release"
     assert (built / "libpriority_queue_candidate.so").is_file() or (
         built / "libpriority_queue_candidate.dylib"
     ).is_file()
@@ -351,7 +349,9 @@ def test_materialized_rust_starter_passes_accuracy(
 
 
 @pytest.mark.usefixtures("priority_queue_native_runner")
-def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path: Path) -> None:
+def test_materialized_manifest_commands_run_go_evaluator_directly(
+    tmp_path: Path, compiled_priority_queue_candidate: Path
+) -> None:
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted priority-queue evaluator")
 
@@ -363,7 +363,7 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path: Path
         workspace,
     )
     assert (workspace / "_evaluator" / "priority-queue" / "DESIGN.md").is_file()
-    run_test_command(["make"], cwd=workspace, check=True)
+    shutil.copy2(compiled_priority_queue_candidate, workspace / "priority-queue-candidate.so")
     manifest = tomllib.loads((input_dir / "vibesys.input.toml").read_text())
 
     accuracy = [
