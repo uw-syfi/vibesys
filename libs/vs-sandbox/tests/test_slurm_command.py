@@ -134,6 +134,8 @@ def _write_plan(
                 "/etc/vibesys-framework-benchmark-0.json",
                 "/tmp/x/vibesys-framework-benchmark-0.json",  # noqa: S108  # lint-waiver: LW-954368 [S108]; rejected path under test.
                 "/tmp/vibesys-framework-benchmark-../x.json",  # noqa: S108  # lint-waiver: LW-805374 [S108]; rejected path under test.
+                ".vibesys-benchmark-/../../escape.json",
+                ".vibesys-benchmark-a/b.json",
             )
         ),
     ],

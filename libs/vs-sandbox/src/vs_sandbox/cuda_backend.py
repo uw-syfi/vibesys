@@ -84,6 +84,7 @@ class CudaBackend:
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
         docker_in_docker: bool = False,
+        same_path_workspace: bool = False,
         run_id: str | None = None,
     ) -> CommandRunner:
         """Construct a sandbox configured for CUDA execution."""
@@ -126,6 +127,7 @@ class CudaBackend:
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
                 docker_in_docker=docker_in_docker,
+                same_path_workspace=same_path_workspace,
                 run_id=run_id,
             )
         else:

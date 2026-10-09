@@ -5,6 +5,23 @@ loads that file by path and supplies trusted stage payloads to the generic
 evaluation executor.
 """
 
+from pathlib import Path
+
+from vs_sandbox import host_command_client
+from vs_sandbox.benchmark_output import BenchmarkOutputKind, classify_benchmark_output
+from vs_sandbox.gate_runners import SlurmCommandGateRunner, SrunGateRunner
+from vs_sandbox.host_command_broker import (
+    GateKind,
+    GateRunner,
+    Gates,
+    GpuCommands,
+    HostCommandBroker,
+    HostCommandBrokerError,
+    RunRoots,
+)
+from vs_sandbox.host_command_client import SOCKET_ENV as COMMAND_BROKER_SOCKET_ENV
+from vs_sandbox.host_command_client import TOKEN_ENV as COMMAND_BROKER_TOKEN_ENV
+from vs_sandbox.job_confinement import HostJobConfinement, JobConfinement
 from vs_sandbox.slurm_broker import SlurmProcessBroker, SlurmProcessBrokerError
 from vs_sandbox.slurm_broker_client import run_brokered_process
 from vs_sandbox.slurm_capture_plan import (
@@ -53,16 +70,33 @@ from vs_sandbox.slurm_profile import (
     trusted_profile_command,
 )
 
+#: The single-file, standard-library-only client an agent's container runs.
+HOST_COMMAND_CLIENT = Path(host_command_client.__file__).resolve()
+
 __all__ = [
+    "COMMAND_BROKER_SOCKET_ENV",
+    "COMMAND_BROKER_TOKEN_ENV",
     "GPU_BROKER_SOCKET_ENV",
     "GPU_BROKER_TOKEN_ENV",
+    "HOST_COMMAND_CLIENT",
     "PROFILE_OUTPUT_ROOT",
+    "BenchmarkOutputKind",
+    "GateKind",
+    "GateRunner",
+    "Gates",
     "GpuCommand",
+    "GpuCommands",
     "GpuJobRequest",
+    "HostCommandBroker",
+    "HostCommandBrokerError",
+    "HostJobConfinement",
+    "JobConfinement",
     "ProfileCaptureDescriptor",
+    "RunRoots",
     "SharedSlurmAdmission",
     "SlurmCapturePlan",
     "SlurmCapturePlanError",
+    "SlurmCommandGateRunner",
     "SlurmCommandResult",
     "SlurmEvaluationExecutor",
     "SlurmEvaluationPlan",
@@ -79,7 +113,9 @@ __all__ = [
     "SlurmProcessBrokerError",
     "SlurmStagePayload",
     "SlurmTargetLifecycle",
+    "SrunGateRunner",
     "choose_partition",
+    "classify_benchmark_output",
     "configured_capture_lifecycle",
     "load_slurm_gpu_config",
     "load_slurm_policy",

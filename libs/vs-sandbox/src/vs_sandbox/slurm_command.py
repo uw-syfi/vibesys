@@ -8,7 +8,6 @@ this command therefore never leaves its job queued.
 from __future__ import annotations
 
 import argparse
-import re
 import signal
 import sys
 import threading
@@ -23,6 +22,7 @@ from vs_sandbox.api.slurm import (
     load_slurm_policy,
     read_slurm_evaluation_plan,
 )
+from vs_sandbox.benchmark_output import OUTPUT_ARGUMENT_COUNT, classify_benchmark_output
 from vs_sandbox.signal_relay import relay_signals
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
@@ -52,14 +52,6 @@ if TYPE_CHECKING:
         SlurmConfig,
     )
 
-_BENCHMARK_OUTPUT_PREFIX = ".vibesys-benchmark-"
-_BENCHMARK_OUTPUT_SUFFIX = ".json"
-# The trusted framework benchmark writes to this fixed transport path with a
-# hex nonce (vs_runtime._trusted_evaluation); accept exactly that shape.
-_FRAMEWORK_BENCHMARK_OUTPUT = re.compile(
-    r"/tmp/vibesys-framework-benchmark-[0-9a-f]+\.json"  # noqa: S108  # lint-waiver: LW-352320 [S108]; the fixed framework benchmark transport path, not a temp file.
-)
-_BENCHMARK_OUTPUT_ARGUMENT_COUNT = 2
 _CANCELLED_EXIT_CODE = 128 + signal.SIGTERM
 _CANCEL_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 
@@ -244,13 +236,10 @@ def _benchmark_command(
         if arguments:
             raise SlurmCommandError.invalid_benchmark_arguments()
         return (*plan.benchmark_command, *extra_arguments), ()
-    if len(arguments) != _BENCHMARK_OUTPUT_ARGUMENT_COUNT or arguments[0] != output_argument:
+    if len(arguments) != OUTPUT_ARGUMENT_COUNT or arguments[0] != output_argument:
         raise SlurmCommandError.invalid_benchmark_arguments()
     local_output = arguments[1]
-    workspace_output = local_output.startswith(_BENCHMARK_OUTPUT_PREFIX) and local_output.endswith(
-        _BENCHMARK_OUTPUT_SUFFIX
-    )
-    if not workspace_output and _FRAMEWORK_BENCHMARK_OUTPUT.fullmatch(local_output) is None:
+    if classify_benchmark_output(local_output) is None:
         raise SlurmCommandError.invalid_benchmark_output()
     remote_output = ".vibesys-framework-benchmark.json"
     return (

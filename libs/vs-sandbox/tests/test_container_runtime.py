@@ -235,8 +235,8 @@ def test_every_host_path_under_the_workspace_is_the_same_path_in_the_container(
 
     nested = workspace.joinpath(*relative)
     assert sandbox.agent_path(nested) == str(nested)
-    assert workspace_container_root(str(workspace), docker_in_docker=True) == str(workspace)
-    assert workspace_container_root(str(workspace), docker_in_docker=False) == "/workspace"
+    assert workspace_container_root(str(workspace), same_path=True) == str(workspace)
+    assert workspace_container_root(str(workspace), same_path=False) == "/workspace"
 
 
 @settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])
@@ -257,5 +257,32 @@ def test_exec_runs_in_the_agent_cwd_at_the_host_path(
         argv = sandbox.wrap(["true"], cwd)
         assert argv[argv.index("-w") + 1] == str(cwd)
         assert PurePosixPath(argv[argv.index("-w") + 1]).is_absolute()
+    finally:
+        sandbox.stop()
+
+
+@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(workspace=_ABSOLUTE_DIRS, relative=st.lists(_SEGMENT, max_size=3))
+def test_a_same_path_workspace_needs_no_container_runtime(
+    tmp_path: Path, workspace: Path, relative: list[str]
+) -> None:
+    """The workspace is mounted at its host path on a plain runtime, with no Sysbox."""
+    engine = _engine(tmp_path, runtimes=("runc",))
+    sandbox = DockerSandbox(
+        host_workspace=str(workspace),
+        image=_IMAGE,
+        docker=engine,
+        same_path_workspace=True,
+    )
+    sandbox.start()
+    try:
+        nested = workspace.joinpath(*relative)
+        run = _run_call(engine)
+        assert f"{workspace}:{workspace}" in _flag_values(run, "-v")
+        assert "--runtime" not in run
+        assert sandbox.agent_path(nested) == str(nested)
+        argv = sandbox.wrap(["true"], nested)
+        assert argv[argv.index("-w") + 1] == str(nested)
+        assert "info" not in [call[1] for call in engine.calls]
     finally:
         sandbox.stop()

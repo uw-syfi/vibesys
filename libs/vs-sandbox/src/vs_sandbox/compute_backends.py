@@ -90,6 +90,7 @@ class ComputeBackendImpl(Protocol):
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
         docker_in_docker: bool = False,
+        same_path_workspace: bool = False,
         run_id: str | None = None,
     ) -> CommandRunner:
         """Construct (do not start) a sandbox configured for this backend.
