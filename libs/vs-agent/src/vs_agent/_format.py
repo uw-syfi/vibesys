@@ -6,9 +6,11 @@ frontends such as ``headless``.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from vs_agent.contracts import AgentRateLimit
     from vs_agent.events import AgentStatusData
 
 _THOUSAND = 1_000
@@ -47,3 +49,18 @@ def format_status_prefix(status: AgentStatusData | None) -> str:
         parts.append(status.agent_label)
     parts.extend([f"{status.elapsed_seconds:.1f}s", tokens_str])
     return f"[{' | '.join(parts)}] "
+
+
+def format_rate_limit(rate_limit: AgentRateLimit) -> str:
+    """Build the run-log line for one provider-reported rate-limit window."""
+    name = " ".join(
+        part for part in (rate_limit.provider, rate_limit.limit, rate_limit.window) if part
+    )
+    state = "EXHAUSTED" if rate_limit.is_exhausted else "ok"
+    parts = [f"[rate limit] {name or 'window'}: {state}"]
+    if rate_limit.used_fraction is not None:
+        parts.append(f"{rate_limit.used_fraction:.0%} used")
+    if rate_limit.resets_at is not None:
+        reset = datetime.fromtimestamp(rate_limit.resets_at, tz=UTC)
+        parts.append(f"resets {reset:%Y-%m-%d %H:%M} UTC")
+    return ", ".join(parts)

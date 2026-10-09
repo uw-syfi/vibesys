@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vibesys.events import (
     AgentOutputChannel,
@@ -13,6 +13,7 @@ from vibesys.events import (
     CoreEvent,
     CoreEventType,
     JsonResultPayload,
+    RateLimitUpdateData,
     TodoItemData,
     TodoUpdateData,
     ToolCallData,
@@ -21,6 +22,9 @@ from vibesys.events import (
     UsageUpdateData,
     make_core_event,
 )
+
+if TYPE_CHECKING:
+    from vs_agent.api import AgentRateLimit
 
 EventSink = Callable[[CoreEvent], object]
 
@@ -60,7 +64,8 @@ class CoreAgentEventSink:
         | ToolCallData
         | ToolResultData
         | TodoUpdateData
-        | UsageUpdateData,
+        | UsageUpdateData
+        | RateLimitUpdateData,
         *,
         agent_kind: str | None,
         round_label: str | None,
@@ -181,6 +186,31 @@ class CoreAgentEventSink:
                 input_tokens=input_tokens,
                 context_window=context_window,
                 model=model,
+            ),
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+        )
+
+    def rate_limit_update(
+        self,
+        rate_limit: AgentRateLimit,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Emit one provider-reported rate-limit window with its resolved exhaustion."""
+        self._emit(
+            CoreEventType.RATE_LIMIT_UPDATE,
+            RateLimitUpdateData(
+                provider=rate_limit.provider,
+                window=rate_limit.window,
+                limit=rate_limit.limit,
+                used_fraction=rate_limit.used_fraction,
+                resets_at=rate_limit.resets_at,
+                window_minutes=rate_limit.window_minutes,
+                exhausted=rate_limit.is_exhausted,
             ),
             agent_kind=agent_kind,
             round_label=round_label,

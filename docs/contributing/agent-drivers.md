@@ -67,6 +67,21 @@ container is probed where the agent will run. No model is called.
 `ProviderNotReadyError` is permanent (`retryable = False`). A driver with no
 probe (Omnigent) is skipped, not guessed at.
 
+## Rate-limit reports
+
+A provider that reports its rate-limit windows (Claude Code's `rate_limit_event`,
+Codex's `account/rateLimits/updated`) reaches VibeSys as one `AgentRateLimit`
+per window, carried by an `AgentEventKind.RATE_LIMIT` driver event. `AgentLogger`
+writes a plain `[rate limit]` line to the run log and publishes the typed
+`rate_limit_update` event (`RateLimitUpdateData`) for frontends. `exhausted` on
+the event is resolved once, in `AgentRateLimit.is_exhausted`: the provider's own
+statement wins, otherwise usage at or past 100%. Unstated values stay `None`.
+The headless frontend prints a line only for an exhausted window.
+
+This is observation only. Pausing the run on an exhausted window and the
+fallback policy (#798) consume this event later; nothing here changes how a
+quota failure ends a turn.
+
 ## Provider session resume
 
 MCP session identity includes its command, arguments, stable environment, and
