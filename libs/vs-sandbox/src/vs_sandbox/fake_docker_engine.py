@@ -79,10 +79,22 @@ _RUN_ERROR_EXIT = 125
 _DEFAULT_RUNTIMES = ("runc",)
 
 
+@dataclass(frozen=True, slots=True)
+class FakeContainer:
+    """What ``docker ps -a`` shows of one container the daemon still holds."""
+
+    container_id: str
+    name: str
+    labels: dict[str, str]
+    running: bool
+
+
 @dataclass(slots=True)
 class _Container:
     mounts: dict[str, Path]
     workdir: str
+    name: str = ""
+    labels: dict[str, str] = field(default_factory=dict)
     runtime: str | None = None
     running: bool = True
     nested_daemon_started: bool = False
@@ -178,6 +190,24 @@ class FakeDockerEngine:
         self._containers: dict[str, _Container] = {}
         self.calls: list[tuple[str, ...]] = []
         self._signal_requests_finding_nothing = 0
+        self._runs_lost_after_creating: list[bool] = []
+
+    def containers(self) -> tuple[FakeContainer, ...]:
+        """Every container the daemon still holds, stopped ones included."""
+        return tuple(
+            FakeContainer(identifier, container.name, dict(container.labels), container.running)
+            for identifier, container in self._containers.items()
+        )
+
+    def runs_lost_after_creating(self, outcomes: Sequence[bool]) -> None:
+        """Fault: each next ``docker run`` creates its container, then the client is lost.
+
+        One entry per upcoming ``run``: ``False`` ends the client with an error
+        and no container id on stdout (an interrupted or crashed client);
+        ``True`` makes it raise ``subprocess.TimeoutExpired`` (a client that
+        gave up waiting). The daemon has created the container either way.
+        """
+        self._runs_lost_after_creating = list(outcomes)
 
     def signal_requests_find_nothing(self, count: int) -> None:
         """Fault: the next *count* signal requests reach no process.
@@ -254,10 +284,17 @@ class FakeDockerEngine:
 
     def _create(self, arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         mounts: dict[str, Path] = {}
+        labels: dict[str, str] = {}
         workdir = "/"
         runtime: str | None = None
+        name = ""
         for index, argument in enumerate(arguments):
-            if argument == "-v":
+            if argument == "--name":
+                name = arguments[index + 1]
+            elif argument == "--label":
+                key, _, value = arguments[index + 1].partition("=")
+                labels[key] = value
+            elif argument == "-v":
                 host, container, *_ = arguments[index + 1].split(":")
                 mounts[container] = Path(host)
             elif argument == "--workdir":
@@ -270,14 +307,26 @@ class FakeDockerEngine:
             )
             return subprocess.CompletedProcess(arguments, _RUN_ERROR_EXIT, "", stderr)
         identifier = f"fake{len(self._containers):04d}{uuid.uuid4().hex[:8]}"
-        self._containers[identifier] = _Container(mounts, workdir, runtime)
+        self._containers[identifier] = _Container(mounts, workdir, name, labels, runtime)
+        if self._runs_lost_after_creating:
+            if self._runs_lost_after_creating.pop(0):
+                raise subprocess.TimeoutExpired(arguments, 0)
+            return subprocess.CompletedProcess(arguments, 130, "", "")
         return subprocess.CompletedProcess(arguments, 0, f"{identifier}\n", "")
 
     def _end(self, arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-        identifier = arguments[-1]
+        reference = arguments[-1]
+        identifier = next(
+            (
+                known
+                for known, candidate in self._containers.items()
+                if reference in {known, candidate.name}
+            ),
+            reference,
+        )
         container = self._containers.get(identifier)
         if container is None:
-            return self._no_such_container(arguments, identifier)
+            return self._no_such_container(arguments, reference)
         for marker in container.markers:
             self._signal_marker(marker, signal.SIGKILL)
         container.running = False

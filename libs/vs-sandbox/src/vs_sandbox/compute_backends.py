@@ -90,6 +90,7 @@ class ComputeBackendImpl(Protocol):
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
         docker_in_docker: bool = False,
+        run_id: str | None = None,
     ) -> CommandRunner:
         """Construct (do not start) a sandbox configured for this backend.
 
@@ -122,6 +123,10 @@ class ComputeBackendImpl(Protocol):
         still builds its own mount tuples directly; the two combine rather
         than one replacing the other. Ignored by non-Docker sandboxes, whose
         accelerator device and model-volume mounts stay backend-specific.
+
+        ``run_id`` labels a Docker sandbox's container with the id of the run
+        that started it, so a later reap can find a dead run's leftovers.
+        Ignored by non-Docker sandboxes.
         """
         ...
 

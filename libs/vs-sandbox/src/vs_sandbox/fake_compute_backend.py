@@ -71,6 +71,7 @@ class FakeRunnerCreation:
     auth_files: tuple[tuple[str, str], ...]
     resources: tuple[HostResource, ...]
     docker_in_docker: bool = False
+    run_id: str | None = None
 
 
 class FakeComputeBackend:
@@ -116,6 +117,7 @@ class FakeComputeBackend:
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
         docker_in_docker: bool = False,
+        run_id: str | None = None,
     ) -> CommandRunner:
         """Return a fresh :class:`FakeCommandRunner` keyed by *kind* and *host_workspace*."""
         self.creations.append(
@@ -133,6 +135,7 @@ class FakeComputeBackend:
                 auth_files=tuple(auth_files or ()),
                 resources=tuple(resources),
                 docker_in_docker=docker_in_docker,
+                run_id=run_id,
             )
         )
         key = f"{kind.value}:{host_workspace}"
