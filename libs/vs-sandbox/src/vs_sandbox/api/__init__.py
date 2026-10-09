@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from vs_sandbox.cuda_backend import CudaBackend
     from vs_sandbox.device_lease import DeviceLease
     from vs_sandbox.docker_cli import DockerCli, SubprocessDockerCli
-    from vs_sandbox.docker_sandbox import AGENT_HOME, DockerSandbox
+    from vs_sandbox.docker_sandbox import AGENT_HOME, RUN_ID_LABEL, DockerSandbox
     from vs_sandbox.execution import CommandResult, CommandRunner
     from vs_sandbox.gpu_monitor import (
         GpuContentionMonitor,
@@ -85,6 +85,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AGENT_HOME",
+    "RUN_ID_LABEL",
     "SANDBOX_DISABLE_ENV",
     "SANDBOX_GPU_DEVICES_ENV",
     "AcceleratorDiscovery",
@@ -179,6 +180,7 @@ _LAZY_EXPORTS = {
     "RocmBackend": ("rocm_backend", "RocmBackend"),
     "TrainiumBackend": ("trainium_backend", "TrainiumBackend"),
     "AGENT_HOME": ("docker_sandbox", "AGENT_HOME"),
+    "RUN_ID_LABEL": ("docker_sandbox", "RUN_ID_LABEL"),
     "DockerCli": ("docker_cli", "DockerCli"),
     "SubprocessDockerCli": ("docker_cli", "SubprocessDockerCli"),
     "DockerSandbox": ("docker_sandbox", "DockerSandbox"),

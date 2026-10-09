@@ -85,6 +85,7 @@ class LocalBackend:
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
         docker_in_docker: bool = False,
+        run_id: str | None = None,
     ) -> CommandRunner:
         """Create a local or supported Docker sandbox for this backend."""
         # Deferred: importing DockerSandbox registers process-wide signal and
@@ -128,6 +129,7 @@ class LocalBackend:
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
                 docker_in_docker=docker_in_docker,
+                run_id=run_id,
             )
         if kind is SandboxKind.DOCKER:
             _exception_message = f"{self.name.value} backend only supports local execution; SandboxKind.{kind.name} is unavailable ({self._unavailable_reason})."

@@ -962,6 +962,7 @@ class DockerEnvironment:
             container_image=container_image,
             docker_in_docker=request.docker_in_docker,
             attach_accelerator=attaches_accelerator(docker_in_docker=request.docker_in_docker),
+            run_id=request.run_id,
         )
         log(f"[docker] starting container with image {container_image}")
         return SandboxSession.start(
@@ -1223,6 +1224,7 @@ class SkyPilotEnvironment(DockerEnvironment):
                 lifecycle_hooks=symlink_lifecycle_hooks(docker_symlinks),
                 container_image=container_image,
                 attach_accelerator=False,
+                run_id=request.run_id,
             )
             start_sandbox(sandbox)
         except Exception:
@@ -1413,6 +1415,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             lifecycle_hooks=lifecycle_hooks,
             container_image=container_image,
             attach_accelerator=False,
+            run_id=request.run_id,
         )
         log: Callable[[str], None] = request.log or (lambda _: None)
         log(

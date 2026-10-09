@@ -60,10 +60,16 @@ _REDACTED_VALUE = "<redacted>"
 #: creates this user with a real HOME; nothing here creates it.
 AGENT_HOME = "/home/agent"
 
+#: Label every container carries with the id of the run that started it, so a
+#: later reap can list a dead run's leftovers with
+#: ``docker ps -a --filter label=vibesys.run-id=<id>``.
+RUN_ID_LABEL = "vibesys.run-id"
+
 _AGENT_USER = "agent"
 _ROOT_SETUP_TIMEOUT_S = 60
 _CONTAINER_IDENTITY_LINE_COUNT = 2
 _EXEC_STOP_TIMEOUT_S = 30
+_NAMED_REMOVE_TIMEOUT_S = 30
 
 
 class DockerSandboxNotStartedError(RuntimeError):
@@ -256,6 +262,7 @@ class DockerSandbox(WorkspaceSandbox):
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
         docker: DockerCli | None = None,
         docker_in_docker: bool = False,
+        run_id: str | None = None,
     ) -> None:
         """Initialize Docker sandbox configuration.
 
@@ -330,6 +337,9 @@ class DockerSandbox(WorkspaceSandbox):
                 Sysbox; nothing falls back to the host socket. Sysbox cannot
                 forward accelerators, so combining it with *gpus* or
                 *devices* is rejected here.
+            run_id: Id of the run this container belongs to, recorded as the
+                :data:`RUN_ID_LABEL` label. ``None`` leaves the container
+                unlabelled.
         """
         if docker_in_docker and (gpus is not None or devices):
             message = (
@@ -339,6 +349,7 @@ class DockerSandbox(WorkspaceSandbox):
             raise ValueError(message)
         self._host_workspace = host_workspace
         self._docker_in_docker = docker_in_docker
+        self._run_id = run_id
         #: Where the workspace is mounted in the container.
         self._container_root = workspace_container_root(
             host_workspace, docker_in_docker=docker_in_docker
@@ -432,6 +443,7 @@ class DockerSandbox(WorkspaceSandbox):
             "-v",
             f"{self._host_workspace}:{self._container_root}",
         ]
+        cmd.extend(self._label_arguments())
         cmd.extend(self._container_runtime_arguments())
         if self._auto_remove:
             # Auto-remove the container (and its overlay, which can hold many GB
@@ -475,6 +487,10 @@ class DockerSandbox(WorkspaceSandbox):
         )
         return cmd
 
+    def _label_arguments(self) -> list[str]:
+        """Return the ``docker run`` flags that label the container with its run."""
+        return [] if self._run_id is None else ["--label", f"{RUN_ID_LABEL}={self._run_id}"]
+
     def _container_runtime_arguments(self) -> list[str]:
         """Return the ``docker run`` flags a docker-in-docker sandbox adds."""
         return ["--runtime", SYSBOX_DOCKER_RUNTIME] if self._docker_in_docker else []
@@ -489,7 +505,12 @@ class DockerSandbox(WorkspaceSandbox):
         self._log_cmd(cmd)
         try:
             result = self._docker.run(cmd, timeout_seconds=self._start_timeout)
-        except subprocess.TimeoutExpired as exc:
+        except BaseException as exc:
+            # The daemon may have created the container before the client
+            # died, timed out, or was interrupted; its name is the only handle.
+            self._remove_container_named(self._container_name)
+            if not isinstance(exc, subprocess.TimeoutExpired):
+                raise
             self._log_cmd(
                 cmd,
                 error=f"docker run timed out after {self._start_timeout}s",
@@ -508,6 +529,10 @@ class DockerSandbox(WorkspaceSandbox):
                 self._container_id = container_id
                 _live_containers[container_id] = self._container_name
                 self._discard_started_container()
+            else:
+                # A client that failed after the daemon created the container
+                # prints no id; remove it by the name this sandbox chose.
+                self._remove_container_named(self._container_name)
             message = (
                 f"Failed to start Docker container (exit {result.returncode}):\n"
                 f"  stdout: {result.stdout.strip()}\n"
@@ -689,6 +714,13 @@ class DockerSandbox(WorkspaceSandbox):
         if self._stop_and_remove_container(container_id, suppress_errors=True):
             self._container_id = None
             _live_containers.pop(container_id, None)
+
+    def _remove_container_named(self, name: str) -> None:
+        """Best-effort ``docker rm -f`` of a container known only by its name."""
+        cmd = ["docker", "rm", "-f", name]
+        with suppress(Exception):
+            result = self._docker.run(cmd, timeout_seconds=_NAMED_REMOVE_TIMEOUT_S)
+            self._log_cmd(cmd, result)
 
     def _stop_and_remove_container(self, container_id: str, *, suppress_errors: bool) -> bool:
         """Stop and remove a container, retaining ownership until removal succeeds."""

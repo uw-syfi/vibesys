@@ -62,6 +62,7 @@ class HostExecutedContainerBackend(LocalBackend):
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
         docker_in_docker: bool = False,
+        run_id: str | None = None,
     ) -> CommandRunner:
         """Return a host-executing container for ``DOCKER``; defer to the CPU backend otherwise."""
         if kind is not SandboxKind.DOCKER:
@@ -79,9 +80,10 @@ class HostExecutedContainerBackend(LocalBackend):
                 auth_files=auth_files,
                 resources=resources,
                 docker_in_docker=docker_in_docker,
+                run_id=run_id,
             )
         del bind_mounts, log_path, extra_init_commands, attach_accelerator, ephemeral
-        del container_image, auth_files, resources, docker_in_docker
+        del container_image, auth_files, resources, docker_in_docker, run_id
         container = HostExecutedContainer(host_workspace, env=extra_env, inherit_env=True)
         SandboxLifecycle(lifecycle_hooks).before_ready(container)
         return container
