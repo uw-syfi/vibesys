@@ -232,3 +232,19 @@ def test_an_agent_record_beside_the_official_one_never_changes_the_accuracy_proo
     ]
     state = core.EvaluationState(evidence=tuple(evidence))
     assert state.accuracy_proof(baseline) == (qualifying[0] if len(qualifying) == 1 else None)
+
+
+@given(commit=COMMITS, other=COMMITS)
+def test_a_value_hashes_and_compares_like_a_fresh_copy_however_it_was_made(
+    commit: str, other: str
+) -> None:
+    """The memoized hash tracks the fields: equal values hash equal, and a copy is not stale."""
+    ref = core.RevisionRef.of_git_commit(commit)
+    assert hash(ref) == hash(ref)  # the second call reads the memo
+    assert hash(ref) == hash(core.RevisionRef.of_git_commit(commit))
+    assert hash(ref) == hash(core.RevisionRef.model_validate_json(ref.model_dump_json()))
+    changed = ref.model_copy(update={"digest": f"{core.DigestScheme.GIT_COMMIT}:{other}"})
+    fresh = core.RevisionRef(revision_id=ref.revision_id, digest=changed.digest)
+    assert hash(changed) == hash(fresh)
+    assert (changed == ref) == (other == commit)
+    assert len({ref, changed, fresh}) == (1 if other == commit else 2)
