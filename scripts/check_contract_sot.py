@@ -31,6 +31,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from scripts.ast_identity import node_identity
 from vs_project.api import run_git
 
 __all__ = ["Scan", "main", "measure", "ratchet"]
@@ -449,7 +450,7 @@ def import_argument(node: ast.Call) -> ast.AST | None:
 def fingerprint(node: ast.ClassDef) -> tuple[str, ...]:
     """Fingerprint declared fields and enum values, excluding names/docstrings."""
     fields = (child for child in node.body if isinstance(child, (ast.AnnAssign, ast.Assign)))
-    return tuple(sorted(ast.dump(child, include_attributes=False) for child in fields))
+    return tuple(sorted(node_identity(child) for child in fields))
 
 
 def read_manifest(root: Path) -> dict[str, str]:
@@ -490,7 +491,7 @@ def class_definitions(parsed: tuple[Source, ...]) -> dict[str, ast.ClassDef]:
 
 def class_bases(node: ast.ClassDef) -> tuple[str, ...]:
     """Fingerprint declared inheritance and class metaclass keyword arguments."""
-    return tuple(ast.dump(base, include_attributes=False) for base in [*node.bases, *node.keywords])
+    return tuple(node_identity(base) for base in [*node.bases, *node.keywords])
 
 
 def shape_errors(manifest: Manifest, definitions: dict[str, ast.ClassDef]) -> list[str]:

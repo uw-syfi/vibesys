@@ -16,6 +16,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from scripts.ast_identity import node_identity
 from vs_project.api import run_git
 
 # Each export is reviewed as deterministic value construction or transformation.
@@ -712,17 +713,17 @@ class PurityVisitor(ast.NodeVisitor):
 
     def visit_Await(self, node: ast.Await) -> None:
         """Await syntax is forbidden even if the awaited name is pure."""
-        self.record("await", ast.dump(node.value, include_attributes=False))
+        self.record("await", node_identity(node.value))
         self.generic_visit(node)
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
         """Async iteration is shell behavior."""
-        self.record("async-for", ast.dump(node.iter, include_attributes=False))
+        self.record("async-for", node_identity(node.iter))
         self.generic_visit(node)
 
     def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
         """Async resource scope belongs in the shell."""
-        self.record("async-with", ast.dump(node.items[0].context_expr, include_attributes=False))
+        self.record("async-with", node_identity(node.items[0].context_expr))
         self.generic_visit(node)
 
 
