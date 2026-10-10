@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import threading
 
 
-async def wait_until_started(started: threading.Event, operation: asyncio.Future[object]) -> None:
+async def wait_until_started(started: threading.Event, operation: asyncio.Future[Any]) -> None:
     """Return once *started* is set; surface the outcome of *operation* if it ends first.
 
     A test that parks a worker on ``started.wait`` hangs forever when the
