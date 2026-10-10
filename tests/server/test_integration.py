@@ -231,7 +231,6 @@ def test_an_async_operation_lifecycle_event_reaches_the_wire_journal_with_its_sc
     assert event.data.scope_id == "hypothesis-7"
 
 
-
 def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     _emit_execution_started(parts, "round-1", _execution_started_data("implementer", "work"))
