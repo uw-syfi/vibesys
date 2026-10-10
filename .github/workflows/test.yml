@@ -36,6 +36,7 @@ jobs:
       tui: ${{ steps.filter.outputs.tui }}
       examples: ${{ steps.filter.outputs.examples }}
       agent_image: ${{ steps.filter.outputs.agent_image }}
+      real_tiers: ${{ steps.filter.outputs.real_tiers }}
       evaluators: ${{ steps.filter.outputs.evaluators }}
       native_targets: ${{ steps.filter.outputs.native_targets }}
       native_languages: ${{ steps.filter.outputs.native_languages }}
@@ -765,6 +766,143 @@ jobs:
       - name: Run workspace-confinement tests
         run: ./support/repoctl/repoctl run-checks --group sandbox_tests
 
+  # The real-Slurm tier (issue #1732): the `slurm` and `slurm-gpu` run environments
+  # against a two-container Slurm cluster in Docker, through the real host
+  # command broker, gates and signal relay. Runs beside the test shards, when
+  # the change filter selects `real_tiers` and on every merge-queue entry.
+  # The cluster's shared directory is bind-mounted at the same host path, so it
+  # lives on the runner's local disk.
+  real-tiers-slurm:
+    needs: changes
+    if: needs.changes.outputs.real_tiers == 'true' || github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The host-side job confinement the tier exercises needs bubblewrap; see
+      # the sandbox-linux job for why the AppArmor userns restriction is lifted.
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Set up Go for repoctl
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
+          cache-dependency-path: support/repoctl/go.sum
+
+      # Same Docker layer cache as `agent-image` (scripts/ci_docker_data_root.sh),
+      # keyed on this tier's image inputs and the ISO week (floating base images).
+      - name: Compute the Docker layer cache key
+        id: docker-cache-week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Docker layer cache
+        id: docker-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/docker-data.tar.zst
+          key: real-tiers-slurm-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('tests/slurm_cluster/image/**', 'tests/slurm_cluster/cluster.py', 'tests/slurm_cluster/harness.py', 'scripts/run_slurm_cluster_tests.sh', 'scripts/ci_docker_data_root.sh') }}
+
+      - name: Point Docker at the layer cache storage
+        run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
+
+      - name: Run the tier
+        env:
+          VIBESYS_SLURM_CLUSTER_DIR: ${{ runner.temp }}/slurm-cluster
+        run: ./support/repoctl/repoctl run-checks --group slurm_cluster_tests
+
+      - name: Snapshot Docker layer cache
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
+
+      - name: Save Docker layer cache
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/docker-data.tar.zst
+          key: ${{ steps.docker-cache.outputs.cache-primary-key }}
+
+  # The minimal-container tier (issue #1732): every in-container process (agent
+  # CLIs, evaluation tool server, profiler MCP server, broker clients) started
+  # in a container built from the real agent image. CPU and the ubuntu uid stand-in bases only; the CUDA and
+  # ROCm bases are about 25 GB each to pull.
+  real-tiers-minimal-container:
+    needs: changes
+    if: needs.changes.outputs.real_tiers == 'true' || github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Set up Go for repoctl
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
+          cache-dependency-path: support/repoctl/go.sum
+
+      # Same Docker layer cache as `agent-image` (scripts/ci_docker_data_root.sh),
+      # keyed on this tier's image inputs and the ISO week (floating base images).
+      - name: Compute the Docker layer cache key
+        id: docker-cache-week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Docker layer cache
+        id: docker-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/docker-data.tar.zst
+          key: real-tiers-minimal-container-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-agent/src/vs_agent/images/agent.Dockerfile', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/images.py', 'scripts/run_minimal_container_tests.sh', 'scripts/ci_docker_data_root.sh') }}
+
+      - name: Point Docker at the layer cache storage
+        run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
+
+      - name: Run the tier
+        env:
+          VIBESYS_MINIMAL_CONTAINER_DIR: ${{ runner.temp }}/minimal-container
+          VIBESYS_MINIMAL_CONTAINER_BASES: cpu,ubuntu-uid-1000
+        run: ./support/repoctl/repoctl run-checks --group minimal_container_tests
+
+      - name: Snapshot Docker layer cache
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
+
+      - name: Save Docker layer cache
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/docker-data.tar.zst
+          key: ${{ steps.docker-cache.outputs.cache-primary-key }}
+
   # One stable, always-present result for branch protection and delegated merge
   # policy. Filtered jobs may skip, but every job that ran must succeed. Keep
   # this independent of ci-budget, which is intentionally advisory.
@@ -784,6 +922,8 @@ jobs:
       - validate-examples
       - validate-examples-cpu-check
       - agent-image
+      - real-tiers-slurm
+      - real-tiers-minimal-container
       - test
       - record-durations
       - coverage
@@ -837,6 +977,8 @@ jobs:
       - validate-examples
       - validate-examples-cpu-check
       - agent-image
+      - real-tiers-slurm
+      - real-tiers-minimal-container
       - test
       - coverage
       - sandbox-linux

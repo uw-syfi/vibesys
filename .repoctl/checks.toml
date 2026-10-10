@@ -166,6 +166,34 @@ commands = [
   ["uv", "run", "pytest", "tests/e2e/test_agent_image_e2e.py", "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "tests/e2e/test_credential_sharing_e2e.py", "-v", "-s", "--no-cov"],
 ]
 
+# The real-system tiers. They need Docker and are opt-in locally, so neither is
+# in `repoctl test`; CI runs each in its own `real-tiers-*` job (test.yml) and
+# the Nightly workflow runs both on main. VIBESYS_SLURM_CLUSTER_DIR and
+# VIBESYS_MINIMAL_CONTAINER_DIR come from the job (local disk the daemon can mount).
+[[check_groups]]
+name = "slurm_cluster_tests"
+trigger_job = "real_tiers"
+language = "python"
+directory = "."
+timeout_seconds = 1200
+commands = [
+  ["docker", "info", "--format", "{{.ServerVersion}}"],
+  ["./scripts/run_slurm_cluster_tests.sh"],
+]
+
+# CI builds only the CPU base (VIBESYS_MINIMAL_CONTAINER_BASES=cpu in the job):
+# the CUDA and ROCm bases are about 25 GB each to pull.
+[[check_groups]]
+name = "minimal_container_tests"
+trigger_job = "real_tiers"
+language = "python"
+directory = "."
+timeout_seconds = 1200
+commands = [
+  ["docker", "info", "--format", "{{.ServerVersion}}"],
+  ["./scripts/run_minimal_container_tests.sh"],
+]
+
 [[check_groups]]
 name = "repoctl_tests"
 trigger_job = "impact"

@@ -39,7 +39,7 @@ pnpm_packages = []
 [[cases]]
 name = "repoctl code and policy changes select all checks"
 paths = ["support/repoctl/main.go", ".repoctl/components.toml", ".repoctl/checks.toml"]
-jobs = ["agent_image", "evaluators", "examples", "impact", "python", "tui"]
+jobs = ["agent_image", "evaluators", "examples", "impact", "python", "real_tiers", "tui"]
 [cases.collections]
 native_languages = ["go", "rust"]
 native_targets = [
@@ -76,6 +76,24 @@ pnpm_packages = []
 name = "website files do not start application CI"
 paths = ["website/package.json"]
 jobs = []
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "broker and Slurm runner changes start the real-system tiers"
+paths = ["libs/vs-sandbox/src/vs_sandbox/slurm_broker.py", "libs/vs-slurm/src/vs_slurm/runner.py"]
+jobs = ["agent_image", "python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "the real-system tiers' own files start their job"
+paths = ["tests/slurm_cluster/image/slurm.conf", "scripts/run_minimal_container_tests.sh"]
+jobs = ["python", "real_tiers"]
 [cases.collections]
 native_languages = []
 native_targets = []

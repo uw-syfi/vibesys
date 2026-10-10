@@ -81,3 +81,50 @@ jobs:
           name: hypothesis-examples
           path: .hypothesis/examples
           if-no-files-found: ignore
+
+  # The real-system tiers (issue #1732) on main, a backstop for changes the
+  # pull-request change filter (`real_tiers` in .repoctl/components.toml)
+  # misses. A failed job fails the workflow. The minimal-container tier builds
+  # the CPU base only; CUDA and ROCm bases are about 25 GB each to pull.
+  real-tiers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [slurm_cluster_tests, minimal_container_tests]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The host-side job confinement the tier exercises needs bubblewrap; see
+      # the sandbox-linux job for why the AppArmor userns restriction is lifted.
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Set up Go for repoctl
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
+          cache-dependency-path: support/repoctl/go.sum
+
+      - name: Run the tier
+        env:
+          VIBESYS_SLURM_CLUSTER_DIR: ${{ runner.temp }}/slurm-cluster
+          VIBESYS_MINIMAL_CONTAINER_DIR: ${{ runner.temp }}/minimal-container
+          VIBESYS_MINIMAL_CONTAINER_BASES: cpu,ubuntu-uid-1000
+        run: ./support/repoctl/repoctl run-checks --group ${{ matrix.group }}

@@ -1,6 +1,6 @@
 # Repository component ownership, discovery, and change impact policy.
 default_base = "main"
-jobs = ["python", "tui", "examples", "agent_image", "evaluators", "impact"]
+jobs = ["python", "tui", "examples", "agent_image", "real_tiers", "evaluators", "impact"]
 
 ignored_roots = ["website", "third_party", ".agents", ".claude", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
@@ -141,6 +141,47 @@ class = "manual"
 job = "agent_image"
 roots = ["libs/vs-agent/src/vs_agent/images", "libs/vs-sandbox"]
 files = ["libs/vs-agent/src/vs_agent/images.py", "libs/vs-agent/src/vs_agent/provider_policy.py", "scripts/ci_docker_data_root.sh"]
+
+[[components]]
+id = "real_tiers"
+class = "manual"
+job = "real_tiers"
+# The two real-system tiers (tests/slurm_cluster, tests/minimal_container). Read
+# off what they import and start, not guessed:
+#   - vs-sandbox: the Slurm executor, host command broker and its client, gate
+#     runners, process execution, signal relay and the Docker sandbox they drive;
+#   - vs-slurm: the cluster connector and runner behind the `slurm` environment;
+#   - vs-agent: the agent image (agent.Dockerfile, built by both tiers) and the
+#     containerized in-container servers;
+#   - vs-runtime and vs-evaluation: run environments, trusted evaluation and the
+#     evaluation tool server started in the editor container;
+#   - vs-mcp, vs-project, vs-sim: tool descriptors, run resources, simulation seams;
+#   - src/vibesys/run and src/launch: `open_run_environment` and the tool bindings;
+#   - src/entrypoints: the in-container tool-server entrypoints;
+#   - the profiler MCP server's bundled support directory.
+roots = [
+  "libs/vs-sandbox",
+  "libs/vs-slurm",
+  "libs/vs-agent",
+  "libs/vs-runtime",
+  "libs/vs-evaluation",
+  "libs/vs-mcp",
+  "libs/vs-project",
+  "libs/vs-sim",
+  "src/vibesys/run",
+  "src/launch",
+  "src/entrypoints",
+  "resources/profilers",
+  "tests/slurm_cluster",
+  "tests/minimal_container",
+]
+files = [
+  "src/vibesys/config.py",
+  "src/vibesys/orchestration/profilers.py",
+  "scripts/run_slurm_cluster_tests.sh",
+  "scripts/run_minimal_container_tests.sh",
+  "scripts/ci_docker_data_root.sh",
+]
 
 [[components]]
 id = "microservice_evaluator"
