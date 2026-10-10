@@ -151,6 +151,32 @@ def test_bad_normalizer_results_raise_named_contract_error(
 
 
 @pytest.mark.parametrize("family", ["turn", "reopen"])
+@given(mutable=st.lists(st.booleans(), min_size=1, max_size=12))
+def test_a_value_is_judged_on_its_own_content_after_any_earlier_verdicts(
+    family: Literal["turn", "reopen"], mutable: list[bool]
+) -> None:
+    """The immutability verdict of one value never depends on the values judged before it.
+
+    Verdicts for immutable values are remembered by value, so the values are short-lived
+    and rebuilt in generated order: a mutable one, an equal immutable one, a repeat.
+    """
+    for is_mutable in mutable:
+        value = (
+            _bad_result(family, BadNormalization.MUTABLE_VALUE)
+            if is_mutable
+            else (_turn() if family == "turn" else _reopen())
+        )
+        registry, request = _registry(family, value)
+        normalize = registry.normalize_turn if family == "turn" else registry.normalize_scope_reopen
+        for _ in range(2):
+            if is_mutable:
+                with pytest.raises(core.ContractError):
+                    normalize(request)
+            else:
+                assert normalize(request) == value
+
+
+@pytest.mark.parametrize("family", ["turn", "reopen"])
 def test_valid_normalization_preserves_contract_and_input(
     family: Literal["turn", "reopen"],
 ) -> None:

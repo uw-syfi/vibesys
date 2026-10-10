@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 from enum import Enum
-from functools import cache
+from functools import cache, lru_cache
 from hashlib import sha256
 from types import UnionType
-from typing import Annotated, Literal, TypeAliasType, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAliasType, Union, get_args, get_origin
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class ImmutableSchemaError(ValueError):
@@ -19,9 +22,16 @@ class ImmutableSchemaError(ValueError):
         super().__init__(f"{'.'.join(path)}: {detail}")
 
 
+@cache
+def _validated_schema(model: type[BaseModel]) -> None:
+    # A class's fields and config are fixed once it is defined, so a verdict of "valid" holds for
+    # the rest of the process. `cache` stores only returns: an invalid model raises every time.
+    _validate_annotation(model, (), set())
+
+
 def validate_immutable_schema(model: type[BaseModel]) -> None:
     """Reject mutable containers, open types and mutable nested models."""
-    _validate_annotation(model, (), set())
+    _validated_schema(model)
 
 
 def _validate_annotation(annotation: object, path: tuple[str, ...], seen: set[type]) -> None:
@@ -101,13 +111,29 @@ def _wire_names(model: type[BaseModel]) -> dict[str, str]:
     }
 
 
+#: Models whose immutability verdict is remembered, by value. Every durable write checks the
+#: whole run envelope, and each write shares almost all of its models with the last, so without
+#: this the check repeats the walk over the unchanged history on every step. The verdict of a
+#: frozen model depends only on its class and field values, which its hash and equality cover.
+_REMEMBERED_MODELS = 65536
+
+
+@lru_cache(maxsize=_REMEMBERED_MODELS)
+def _frozen_model_is_deeply_immutable(model: BaseModel) -> bool:
+    return _walk_immutable(getattr(model, name) for name in _field_names(type(model)))
+
+
 def deeply_immutable(value: object) -> bool:
     """Copied values and defaults cannot bypass registered schema guarantees."""
+    return _walk_immutable((value,))
+
+
+def _walk_immutable(values: Iterable[object]) -> bool:
     # Iterative: every persisted envelope is checked on each step, so the walk
     # avoids a Python call (and a generator) per leaf. An exact-type test cannot
     # match a model, tuple, frozenset or Enum, so it only skips checks that
     # would fail.
-    pending = [value]
+    pending = list(values)
     while pending:
         node = pending.pop()
         if type(node) in _IMMUTABLE_LEAF_TYPES:
@@ -115,7 +141,13 @@ def deeply_immutable(value: object) -> bool:
         if isinstance(node, BaseModel):
             if not node.model_config.get("frozen"):
                 return False
-            pending.extend(getattr(node, name) for name in _field_names(type(node)))
+            try:
+                known = _frozen_model_is_deeply_immutable(node)
+            except TypeError:
+                # Unhashable: a field holds a list, dict or set, which is mutable.
+                return False
+            if not known:
+                return False
         elif isinstance(node, tuple | frozenset):
             pending.extend(node)
         elif not isinstance(node, Enum) or type(node.value) not in _IMMUTABLE_LEAF_TYPES:

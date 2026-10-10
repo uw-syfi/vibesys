@@ -95,12 +95,16 @@ def _identity(owner: AttemptView, suffix: str) -> RequestId:
 
 
 def _intent(context: AttemptsContext, identity: RequestId) -> Intent | None:
-    rows = tuple(row for row in context.intents.intents if row.request_id == identity)
+    # Compare the id strings: a `RequestId` differs from another only by its root, and the ledger
+    # holds every intent of the run, so a model comparison per row dominated each step.
+    root = identity.root
+    rows = tuple(row for row in context.intents.intents if row.request_id.root == root)
     return rows[0] if len(rows) == 1 and rows[0].request.request_id == identity else None
 
 
 def _pending(owner: AttemptView, context: AttemptsContext) -> Settlement | None:
-    rows = tuple(row for row in context.settlement.pending if row.attempt == _ref(owner))
+    attempt = _ref(owner)
+    rows = tuple(row for row in context.settlement.pending if row.attempt == attempt)
     return rows[0] if len(rows) == 1 else None
 
 
