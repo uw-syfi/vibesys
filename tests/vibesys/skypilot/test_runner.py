@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 import yaml
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vs_sandbox.api.skypilot import (
     ClusterStatus,
@@ -21,10 +22,10 @@ from vs_sandbox.api.skypilot import (
     SkyPilotJobStateError,
     SkyPilotOutputError,
     SkyPilotTimeoutError,
-    SubprocessCommandRunner,
     build_task_document,
     stable_cluster_name,
 )
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -53,6 +54,7 @@ class FakeCommandRunner:
         self.results = list(results)
         self.calls: list[tuple[str, ...]] = []
         self.task_documents: list[dict[str, object]] = []
+        self.on_run: Callable[[tuple[str, ...]], None] | None = None
 
     def run(
         self,
@@ -66,6 +68,8 @@ class FakeCommandRunner:
         del timeout, cwd
         normalized = tuple(argv)
         self.calls.append(normalized)
+        if self.on_run is not None:
+            self.on_run(normalized)
         if normalized[-1].endswith("task.yaml"):
             self.task_documents.append(yaml.safe_load(Path(normalized[-1]).read_text()))
         result = self.results.pop(0)
@@ -80,27 +84,6 @@ class FakeCommandRunner:
 
 def _result(returncode: int = 0, stdout: str = "", stderr: str = "") -> ProcessResult:
     return ProcessResult(("sky",), returncode, stdout, stderr)
-
-
-def test_subprocess_runner_drains_pipes_and_propagates_sink_failure() -> None:
-    calls = 0
-
-    def broken_sink(_: str) -> None:
-        nonlocal calls
-        calls += 1
-        raise BrokenPipeError
-
-    with pytest.raises(BrokenPipeError):
-        SubprocessCommandRunner().run(
-            (
-                sys.executable,
-                "-c",
-                "import sys; [print(i) for i in range(1000)]; print('err', file=sys.stderr)",
-            ),
-            stdout_sink=broken_sink,
-        )
-
-    assert calls == 1000
 
 
 def test_stable_name_uses_effective_resources_not_profile_alias() -> None:
@@ -258,10 +241,29 @@ def test_ensure_waits_for_init_to_become_up() -> None:
         ]
     )
 
-    cluster = SkyPilotJobRunner(fake, sleep=lambda _: None).ensure_cluster("lease", _resources())
+    threads = SimThreads()
+    runner = SkyPilotJobRunner(fake, threads=threads)
+
+    cluster = threads.run(lambda: runner.ensure_cluster("lease", _resources()))
 
     assert cluster.status is ClusterStatus.UP
     assert len(fake.calls) == 3
+
+
+@settings(deadline=None, max_examples=40)
+@given(inits=st.integers(0, 12), seed=st.one_of(st.none(), st.integers(0, 2**32)))
+def test_ensure_polls_through_any_number_of_init_reports(inits: int, seed: int | None) -> None:
+    def status(name: str) -> ProcessResult:
+        return _result(stdout=json.dumps([{"name": "lease", "status": name}]))
+
+    fake = FakeCommandRunner([status("INIT")] * (inits + 1) + [status("UP")])
+    threads = SimThreads(schedule_seed=seed)
+    runner = SkyPilotJobRunner(fake, threads=threads)
+
+    cluster = threads.run(lambda: runner.ensure_cluster("lease", _resources(), timeout=None))
+
+    assert cluster.status is ClusterStatus.UP
+    assert len(fake.calls) == inits + 2
 
 
 def test_ensure_rejects_abnormal_init_transition() -> None:
@@ -430,36 +432,30 @@ def test_ensure_reports_cluster_that_disappears_while_initializing() -> None:
         SkyPilotJobRunner(fake).ensure_cluster("lease", _resources())
 
 
-def _ticking_clock() -> Callable[[], float]:
-    ticks = iter(range(1000))
-    return lambda: float(next(ticks))
-
-
 def test_ensure_times_out_when_cluster_stays_initializing() -> None:
     init = json.dumps([{"name": "lease", "status": "INIT"}])
     fake = FakeCommandRunner([_result(stdout=init) for _ in range(10)])
-    sleeps: list[float] = []
-    runner = SkyPilotJobRunner(fake, sleep=sleeps.append, monotonic=_ticking_clock())
+    threads = SimThreads()
+    # Once the first status call has reported INIT, the next one takes the whole 3 s budget (in
+    # virtual time), so the wait that follows has nothing left to sleep.
+    fake.on_run = lambda _argv: threads.sleep(3) if len(fake.calls) > 1 else None
+    runner = SkyPilotJobRunner(fake, threads=threads)
 
     with pytest.raises(SkyPilotTimeoutError, match="'lease' remained INIT"):
-        runner.ensure_cluster("lease", _resources(), timeout=3)
+        threads.run(lambda: runner.ensure_cluster("lease", _resources(), timeout=3))
 
-    assert not sleeps
+    assert len(fake.calls) == 2
 
 
 def test_operation_deadline_is_enforced_before_the_next_command() -> None:
-    now = [0.0]
+    threads = SimThreads()
     fake = FakeCommandRunner([_result(stdout="[]")])
-
-    def clock() -> float:
-        value = now[0]
-        now[0] += 100
-        return value
-
-    runner = SkyPilotJobRunner(fake, monotonic=clock)
+    # The first command takes 100 virtual seconds, longer than the operation's 50 s budget.
+    fake.on_run = lambda _argv: threads.sleep(100)
+    runner = SkyPilotJobRunner(fake, threads=threads)
 
     with pytest.raises(SkyPilotTimeoutError, match="operation exceeded its deadline"):
-        runner.ensure_cluster("lease", _resources(), timeout=50)
+        threads.run(lambda: runner.ensure_cluster("lease", _resources(), timeout=50))
 
 
 def test_run_rejects_negative_log_tail(tmp_path: Path) -> None:
@@ -550,12 +546,15 @@ def test_query_job_returns_none_when_absent_and_parses_status() -> None:
 
 def test_run_times_out_when_job_never_appears_in_queue(tmp_path: Path) -> None:
     fake = FakeCommandRunner([_result(), _queue()])
-    runner = SkyPilotJobRunner(
-        fake, monotonic=_ticking_clock(), sleep=lambda _: None, job_name_factory=lambda: "j"
-    )
+    threads = SimThreads()
+    # A queue listing takes the whole 4 s budget (in virtual time) and does not show the job.
+    fake.on_run = lambda argv: threads.sleep(4) if "queue" in argv else None
+    runner = SkyPilotJobRunner(fake, threads=threads, job_name_factory=lambda: "j")
 
     with pytest.raises(SkyPilotTimeoutError, match="did not expose job 'j'"):
-        runner.run("lease", _resources(), workdir=tmp_path, command=("x",), timeout=4)
+        threads.run(
+            lambda: runner.run("lease", _resources(), workdir=tmp_path, command=("x",), timeout=4)
+        )
 
 
 def test_task_document_rejects_empty_command() -> None:

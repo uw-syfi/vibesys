@@ -8,8 +8,6 @@ import re
 import shlex
 import subprocess
 import tempfile
-import threading
-import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -18,6 +16,8 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING, Protocol
 
 import yaml
+
+from vs_sim.api import OsThreads, Threads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
@@ -204,6 +204,10 @@ class CommandRunner(Protocol):
 class SubprocessCommandRunner:
     """Run one process without a shell while forwarding both output streams."""
 
+    def __init__(self, threads: Threads | None = None) -> None:
+        """Drain the output pipes on *threads* (operating-system threads by default)."""
+        self._threads: Threads = threads or OsThreads()
+
     def run(
         self,
         argv: Sequence[str],
@@ -227,7 +231,7 @@ class SubprocessCommandRunner:
         stdout_parts: list[str] = []
         stderr_parts: list[str] = []
         sink_errors: list[Exception] = []
-        sink_errors_lock = threading.Lock()
+        sink_errors_lock = self._threads.lock()
 
         def forward(
             stream: IO[str],
@@ -248,14 +252,12 @@ class SubprocessCommandRunner:
             raise AssertionError
         stdout = process.stdout
         stderr = process.stderr
-        stdout_thread = threading.Thread(
-            target=forward, args=(stdout, stdout_parts, stdout_sink), daemon=True
+        stdout_thread = self._threads.spawn(
+            lambda: forward(stdout, stdout_parts, stdout_sink), name="sky-stdout", daemon=True
         )
-        stderr_thread = threading.Thread(
-            target=forward, args=(stderr, stderr_parts, stderr_sink), daemon=True
+        stderr_thread = self._threads.spawn(
+            lambda: forward(stderr, stderr_parts, stderr_sink), name="sky-stderr", daemon=True
         )
-        stdout_thread.start()
-        stderr_thread.start()
         try:
             returncode = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -364,21 +366,19 @@ def build_task_document(
 class SkyPilotJobRunner:
     """Inspect, launch, use, cancel, and release named SkyPilot clusters."""
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-009054 [PLR0913]; separate test seams for clock, sleep, subprocess, and job naming remain independently injectable.
+    def __init__(
         self,
         command_runner: CommandRunner | None = None,
         *,
         executable: str = "sky",
-        sleep: Callable[[float], None] = time.sleep,
-        monotonic: Callable[[], float] = time.monotonic,
+        threads: Threads | None = None,
         poll_interval: float = _POLL_INTERVAL_SECONDS,
         job_name_factory: Callable[[], str] | None = None,
     ) -> None:
         """Create a runner around an injectable external-process boundary."""
-        self._command_runner = command_runner or SubprocessCommandRunner()
+        self._threads: Threads = threads or OsThreads()
+        self._command_runner = command_runner or SubprocessCommandRunner(self._threads)
         self._executable = executable
-        self._sleep = sleep
-        self._monotonic = monotonic
         self._poll_interval = poll_interval
         self._job_name_factory = job_name_factory or (lambda: f"vibesys-job-{uuid.uuid4().hex}")
 
@@ -433,7 +433,7 @@ class SkyPilotJobRunner:
         timeout: float | None = 300,
     ) -> ClusterInfo:
         """Reuse an active named cluster or replace an inactive one."""
-        deadline = None if timeout is None else self._monotonic() + timeout
+        deadline = None if timeout is None else self._threads.now() + timeout
         current = self.inspect_cluster(name, timeout=self._remaining(deadline, default=60) or 60)
         if current is not None and current.status is ClusterStatus.UP:
             return current
@@ -464,7 +464,7 @@ class SkyPilotJobRunner:
         if log_tail < 0:
             message = "SkyPilot log tail must be nonnegative"
             raise ValueError(message)
-        deadline = None if timeout is None else self._monotonic() + timeout
+        deadline = None if timeout is None else self._threads.now() + timeout
         resolved_job_name = job_name or self._job_name_factory()
         if existing_job_id is None:
             task = build_task_document(
@@ -552,7 +552,7 @@ class SkyPilotJobRunner:
             self._pause(deadline, f"SkyPilot cluster {name!r} remained INIT")
 
     def _discover_job_id(self, cluster_name: str, job_name: str, deadline: float | None) -> int:
-        discovery_deadline = self._monotonic() + _JOB_DISCOVERY_TIMEOUT_SECONDS
+        discovery_deadline = self._threads.now() + _JOB_DISCOVERY_TIMEOUT_SECONDS
         if deadline is not None:
             discovery_deadline = min(discovery_deadline, deadline)
         while True:
@@ -584,17 +584,17 @@ class SkyPilotJobRunner:
 
     def _pause(self, deadline: float | None, detail: str) -> None:
         if deadline is not None:
-            remaining = deadline - self._monotonic()
+            remaining = deadline - self._threads.now()
             if remaining <= 0:
                 raise SkyPilotTimeoutError.waiting_timed_out(detail)
-            self._sleep(min(self._poll_interval, remaining))
+            self._threads.sleep(min(self._poll_interval, remaining))
         else:
-            self._sleep(self._poll_interval)
+            self._threads.sleep(self._poll_interval)
 
     def _remaining(self, deadline: float | None, *, default: float | None = None) -> float | None:
         if deadline is None:
             return default
-        remaining = deadline - self._monotonic()
+        remaining = deadline - self._threads.now()
         if remaining <= 0:
             raise SkyPilotTimeoutError.operation_deadline_exceeded()
         return remaining
