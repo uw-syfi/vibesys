@@ -4,187 +4,105 @@ r14: Ctrl-C reached both the launcher and its headless engine. The launcher's
 ``subprocess.call`` SIGKILLed the engine 0.25 seconds later, so the engine's
 teardown never cancelled the run's Slurm job.
 
-The launcher runs in a subprocess with a stand-in ``entrypoints.headless``
-first on ``PYTHONPATH``, so ``main(["--headless"])`` starts the stand-in. The
-stand-in reports each signal it receives, then exits with
-:data:`_ENGINE_STATUS` only once the test releases it.
+The launcher runs its child through a Fake foreground launcher and receives its signals
+from a Fake signal source, so no signal reaches this process. The real processes and
+signals are in ``tests/e2e/test_launcher_signals.py``.
 """
 
 from __future__ import annotations
 
-import os
-import select
+import asyncio
 import signal
-import subprocess
-import sys
-import threading
-from contextlib import suppress
-from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
-from entrypoints.launcher import call_child
-from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
+from entrypoints.launcher import run_child
+from vs_sim.api.testing import (
+    FakeForegroundLauncher,
+    FakeSignalSource,
+    ForegroundScript,
+    arrival,
+)
 
-_SOURCE = Path(__file__).resolve().parents[2] / "src"
 _ENGINE_STATUS = 7
-_ENGINE = f"""
-import os, signal, sys
-handled = {{signal.SIGINT, signal.SIGTERM, signal.SIGHUP}}
-signal.pthread_sigmask(signal.SIG_BLOCK, handled)
-release = os.open(os.environ["ENGINE_RELEASE"], os.O_RDWR)
-events = open(os.environ["ENGINE_EVENTS"], "w", buffering=1)
-events.write(f"ready {{os.getpid()}}\\n")
-events.write(f"signal {{signal.sigwait(handled)}}\\n")
-os.read(release, 1)
-sys.exit({_ENGINE_STATUS})
-"""
-_LAUNCHER = (
-    "import sys\n"
-    f"sys.path.insert(0, {str(_SOURCE)!r})\n"
-    "from entrypoints.launcher import main\n"
-    "sys.exit(main(['--headless']))\n"
-)
+_HANDLED = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+_FORWARDED = (signal.SIGTERM, signal.SIGHUP)
 
 
-class _Engine:
-    """The stand-in engine's event stream, read while the launcher lives."""
-
-    def __init__(self, events: Path, launcher_alive: int) -> None:
-        # Reaches end-of-file when the launcher, its only writer, exits.
-        self._launcher = launcher_alive
-        # Opening blocks until the engine opens its end for writing.
-        self._events = events.open(encoding="utf-8")
-
-    def next_event(self) -> str | None:
-        """Return the engine's next line, or ``None`` once the launcher exited."""
-        readable, _, _ = select.select([self._events, self._launcher], [], [])
-        if self._events in readable:
-            return self._events.readline().strip()
-        return None
-
-    def close(self) -> None:
-        self._events.close()
-        os.close(self._launcher)
+def _engine(_argv: tuple[str, ...]) -> ForegroundScript:
+    """An engine that survives its signals and ends only when the test lets it."""
+    return ForegroundScript(ignored_signals=frozenset(_HANDLED))
 
 
-@pytest.mark.parametrize(
-    ("number", "to_group"),
-    [
-        (signal.SIGINT, True),
-        (signal.SIGHUP, True),
-        (signal.SIGTERM, False),
-        (signal.SIGHUP, False),
-    ],
-    ids=["ctrl-c-to-group", "hangup-to-group", "sigterm-to-launcher", "sighup-to-launcher"],
-)
-def test_the_launcher_waits_for_its_engine_to_finish_tearing_down(
-    tmp_path: Path, number: signal.Signals, *, to_group: bool
+async def _run_with_signals(
+    delivered: list[signal.Signals],
+) -> tuple[int, FakeForegroundLauncher, FakeSignalSource]:
+    launcher = FakeForegroundLauncher(_engine)
+    signals = FakeSignalSource()
+    launch = asyncio.ensure_future(run_child(["engine"], children=launcher, signals=signals))
+    engine = await arrival(launcher.child(), launch)
+    for number in delivered:
+        assert signals.deliver(number), f"the launcher installed no {number.name} handler"
+        # The launcher keeps waiting: the engine owns its teardown.
+        assert not launch.done()
+    engine.exit(_ENGINE_STATUS)
+    return await launch, launcher, signals
+
+
+@given(st.lists(st.sampled_from(_HANDLED), max_size=8))
+@pytest.mark.asyncio
+async def test_the_launcher_waits_for_its_engine_and_forwards_termination(
+    delivered: list[signal.Signals],
 ) -> None:
-    fake = tmp_path / "fake" / "entrypoints"
-    fake.mkdir(parents=True)
-    (fake / "__init__.py").write_text("", encoding="utf-8")
-    (fake / "headless.py").write_text(_ENGINE, encoding="utf-8")
-    events, release = tmp_path / "events", tmp_path / "release"
-    os.mkfifo(events)
-    os.mkfifo(release)
-    environment = {
-        **os.environ,
-        "PYTHONPATH": str(fake.parent),
-        "ENGINE_EVENTS": str(events),
-        "ENGINE_RELEASE": str(release),
-    }
-    launcher_alive, held_by_launcher = os.pipe()
-    # lint-waiver: LW-731103 [S603]; the test runs the real launcher process.
-    # > Calling `main` in-process would put the launcher in the test's process
-    # > group and signal pytest itself; a fixed argv here is the boundary.
-    launcher = subprocess.Popen(  # noqa: S603
-        [sys.executable, "-c", _LAUNCHER],
-        cwd=tmp_path,
-        env=environment,
-        start_new_session=True,
-        # The launcher starts the engine without it (close_fds).
-        pass_fds=(held_by_launcher,),
-    )
-    os.close(held_by_launcher)
-    engine = _Engine(events, launcher_alive)
-    engine_pid: int | None = None
-    try:
-        ready = engine.next_event()
-        assert ready is not None
-        assert ready.startswith("ready ")
-        engine_pid = int(ready.split()[1])
-        if to_group:
-            os.killpg(launcher.pid, number)
-        else:
-            os.kill(launcher.pid, number)
-
-        # The engine sees the signal while the launcher still waits for it.
-        assert engine.next_event() == f"signal {int(number)}"
-        with release.open("wb", buffering=0) as stream:
-            stream.write(b"x")
-        assert launcher.wait(timeout=HANG_GUARD_S) == _ENGINE_STATUS
-    finally:
-        engine.close()
-        if launcher.poll() is None:
-            launcher.kill()
-            launcher.wait(timeout=HANG_GUARD_S)
-        if engine_pid is not None:
-            # At the merge base the engine outlives a SIGTERMed launcher.
-            with suppress(ProcessLookupError):
-                os.kill(engine_pid, signal.SIGKILL)
-
-
-# In-process: the child signals this process (its launcher) itself, so the
-# test needs no timing. These run `call_child` on pytest's main thread, where
-# its handlers apply, and prove pytest is neither interrupted nor terminated.
-_SIGNAL_PARENT = """
-import os, signal, sys
-number = signal.Signals[sys.argv[1]]
-forwarded = sys.argv[2] == "forwarded"
-signal.pthread_sigmask(signal.SIG_BLOCK, {number})
-os.kill(os.getppid(), number)
-if forwarded:
-    signal.sigwait({number})
-sys.exit(7)
-"""
-
-
-@pytest.mark.parametrize(
-    ("number", "forwarded"),
-    [(signal.SIGINT, False), (signal.SIGTERM, True), (signal.SIGHUP, True)],
-    ids=["sigint-waits", "sigterm-forwarded", "sighup-forwarded"],
-)
-def test_call_child_waits_through_sigint_and_forwards_termination(
-    number: signal.Signals, *, forwarded: bool
-) -> None:
-    status = call_child(
-        [
-            sys.executable,
-            "-c",
-            _SIGNAL_PARENT,
-            number.name,
-            "forwarded" if forwarded else "waited",
-        ]
-    )
+    status, launcher, signals = await _run_with_signals(delivered)
 
     assert status == _ENGINE_STATUS
+    # Ctrl-C reaches the engine from the terminal; only termination is forwarded.
+    assert launcher.children[0].received == [n for n in delivered if n in _FORWARDED]
+    assert not any(signals.handles(number) for number in _HANDLED)
 
 
-def test_call_child_reports_a_signal_death_as_a_shell_does() -> None:
-    status = call_child(
-        [sys.executable, "-c", "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"]
+@given(
+    st.sampled_from([*signal.Signals]).filter(lambda n: n not in (signal.SIGKILL, signal.SIGSTOP))
+)
+@pytest.mark.asyncio
+async def test_a_child_ended_by_a_signal_reports_128_plus_the_signal(
+    number: signal.Signals,
+) -> None:
+    launcher = FakeForegroundLauncher(lambda _argv: ForegroundScript())
+    launch = asyncio.ensure_future(
+        run_child(["engine"], children=launcher, signals=FakeSignalSource())
+    )
+    engine = await arrival(launcher.child(), launch)
+
+    engine.send_signal(number)
+
+    assert await launch == 128 + number
+
+
+@pytest.mark.asyncio
+async def test_the_launcher_returns_the_exit_status_of_a_child_that_ends_at_once() -> None:
+    launcher = FakeForegroundLauncher(
+        lambda _argv: ForegroundScript(returncode=3, exits_immediately=True)
     )
 
-    assert status == 128 + signal.SIGKILL
+    status = await run_child(["engine"], children=launcher, signals=FakeSignalSource())
+
+    assert status == 3
 
 
-def test_call_child_from_a_worker_thread_only_waits() -> None:
-    statuses: list[int] = []
-    worker = threading.Thread(
-        target=lambda: statuses.append(call_child([sys.executable, "-c", "raise SystemExit(3)"]))
-    )
-    worker.start()
-    join_or_fail(worker)
+@pytest.mark.asyncio
+async def test_a_child_that_cannot_start_leaves_no_handlers_behind() -> None:
+    def missing(argv: tuple[str, ...]) -> ForegroundScript:
+        raise FileNotFoundError(argv[0])
 
-    assert statuses == [3]
+    signals = FakeSignalSource()
+
+    with pytest.raises(FileNotFoundError):
+        await run_child(
+            ["no-such-program"], children=FakeForegroundLauncher(missing), signals=signals
+        )
+
+    assert not any(signals.handles(number) for number in _HANDLED)

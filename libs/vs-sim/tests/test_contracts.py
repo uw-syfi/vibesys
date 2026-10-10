@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_sim.api import (
+    InheritedStdioLauncher,
     LoopSignalSource,
     MonotonicClock,
     PidfdProcessSignaller,
@@ -24,9 +25,13 @@ from vs_sim.api.testing import (
     BlockingRunnerContract,
     ClockContract,
     ClockUnderTest,
+    FakeForegroundLauncher,
     FakeProcessLauncher,
     FakeProcessSignaller,
     FakeSignalSource,
+    ForegroundLauncherContract,
+    ForegroundScript,
+    ForegroundUnderTest,
     GatedBlockingRunner,
     InlineBlockingRunner,
     ManualClock,
@@ -247,6 +252,38 @@ class TestFakeProcessLauncher(ProcessLauncherContract):
             lambda main: run_virtual(clock, main),
             exit_with_stdout=lambda status, output: ("exit", str(status), output.hex()),
             echo_stdin=("cat",),
+            blocks_until_signalled=("block",),
+            missing_program=("no-such-program",),
+        )
+
+
+class TestInheritedStdioLauncher(ForegroundLauncherContract):
+    def foreground_under_test(self) -> ForegroundUnderTest:
+        return ForegroundUnderTest(
+            InheritedStdioLauncher(),
+            asyncio.run,
+            exit_with=lambda status: _python("import sys; sys.exit(int(sys.argv[1]))", str(status)),
+            blocks_until_signalled=_python("import signal; signal.pause()"),
+            missing_program=("/nonexistent/vs-sim-no-such-program",),
+        )
+
+
+def _foreground_script(argv: tuple[str, ...]) -> ForegroundScript:
+    match argv:
+        case ("exit", status):
+            return ForegroundScript(returncode=int(status), exits_immediately=True)
+        case ("block",):
+            return ForegroundScript()
+        case _:
+            raise FileNotFoundError(argv[0])
+
+
+class TestFakeForegroundLauncher(ForegroundLauncherContract):
+    def foreground_under_test(self) -> ForegroundUnderTest:
+        return ForegroundUnderTest(
+            FakeForegroundLauncher(_foreground_script),
+            asyncio.run,
+            exit_with=lambda status: ("exit", str(status)),
             blocks_until_signalled=("block",),
             missing_program=("no-such-program",),
         )

@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    import signal
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
 
@@ -97,3 +98,53 @@ class SubprocessLauncher:
             stderr=subprocess.PIPE,
         )
         return _SubprocessHandle(process, spec.input)
+
+
+class ForegroundChild(Protocol):
+    """A started child that shares this process's terminal."""
+
+    async def wait(self) -> int:
+        """Wait for it to end; its exit status, negative when a signal ended it."""
+        ...
+
+    def send_signal(self, number: signal.Signals) -> None:
+        """Deliver ``number`` to it; a no-op once it has ended."""
+        ...
+
+
+class ForegroundLauncher(Protocol):
+    """Starts children that inherit stdin, stdout and stderr, as a shell's foreground job does."""
+
+    async def start(
+        self, argv: Sequence[str], env: Mapping[str, str] | None = None
+    ) -> ForegroundChild:
+        """Start ``argv`` (the environment of this process when ``env`` is ``None``).
+
+        Raises ``OSError`` when the program cannot be started.
+        """
+        ...
+
+
+class _InheritedHandle:
+    def __init__(self, process: asyncio.subprocess.Process) -> None:
+        self._process = process
+
+    async def wait(self) -> int:
+        return await self._process.wait()
+
+    def send_signal(self, number: signal.Signals) -> None:
+        if self._process.returncode is None:
+            self._process.send_signal(number)
+
+
+class InheritedStdioLauncher:
+    """Starts real operating-system processes that use this process's terminal."""
+
+    async def start(
+        self, argv: Sequence[str], env: Mapping[str, str] | None = None
+    ) -> ForegroundChild:
+        """Start ``argv`` on the running event loop with inherited standard streams."""
+        process = await asyncio.create_subprocess_exec(
+            *argv, env=None if env is None else dict(env)
+        )
+        return _InheritedHandle(process)
