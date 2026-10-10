@@ -113,7 +113,7 @@ def _release(loop: asyncio.AbstractEventLoop, future: asyncio.Future[None]) -> N
 
 
 async def wait_until_started(
-    started: threading.Event | asyncio.Event, operation: asyncio.Future[Any]
+    started: Event | asyncio.Event, operation: asyncio.Future[Any]
 ) -> None:
     """Return once *started* is set; surface the outcome of *operation* if it ends first.
 

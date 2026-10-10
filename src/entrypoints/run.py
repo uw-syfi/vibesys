@@ -7,15 +7,18 @@ import signal
 import sys
 import threading
 from contextlib import contextmanager
+from functools import partial
 from typing import TYPE_CHECKING
 
 from headless import run as render_run
 from vibesys.api import RunStopped
+from vs_sim.api import LoopSignalSource
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Iterator
 
     from vibesys.api import RunHandle, RunRequest, RunResult, Runs
+    from vs_sim.api import SignalSource
 
 # Ctrl-C asks for a cooperative stop. These, and any repeated signal, end the
 # run now: its task is cancelled, so its teardown cancels external work (Slurm
@@ -71,6 +74,7 @@ async def supervise(
     work: Awaitable[RunResult] | None = None,
     *,
     handle_signals: bool = True,
+    signals: SignalSource | None = None,
 ) -> RunResult:
     """Await the run; a stop or signal unwinds it through its own teardown.
 
@@ -79,10 +83,12 @@ async def supervise(
     requests that stop and returns the typed stopped result; SIGTERM, SIGHUP,
     or a repeated signal cancel the run and end in ``SystemExit(128 + n)``.
     The handlers run on the event loop, so no signal raises inside a teardown step.
+    *signals* is where they arrive: the process's own signals by default, a Fake
+    that a test delivers by hand otherwise.
     """
     execution = asyncio.ensure_future(work if work is not None else session.result())
     supervisor = _Supervisor(session, execution)
-    with _signal_scope(supervisor, enabled=handle_signals):
+    with _signal_scope(supervisor, signals, enabled=handle_signals):
         completed = False
         try:
             result = await _await_completion(supervisor, execution)
@@ -121,22 +127,26 @@ async def _await_completion(
 
 
 @contextmanager
-def _signal_scope(supervisor: _Supervisor, *, enabled: bool) -> Iterator[None]:
-    """Temporarily install event-loop callbacks and restore process signals."""
-    loop = asyncio.get_running_loop()
+def _signal_scope(
+    supervisor: _Supervisor, signals: SignalSource | None, *, enabled: bool
+) -> Iterator[None]:
+    """Temporarily install signal callbacks and, for the process's own, restore its signals."""
+    own = signals is None
+    source = LoopSignalSource() if signals is None else signals
     installed: list[signal.Signals] = []
     previous = {}
     try:
-        if enabled and threading.current_thread() is threading.main_thread():
+        if enabled and (not own or threading.current_thread() is threading.main_thread()):
             for number in _HANDLED_SIGNALS:
-                previous[number] = signal.getsignal(number)
-                loop.add_signal_handler(number, supervisor.on_signal, number)
+                if own:
+                    previous[number] = signal.getsignal(number)
+                source.add_handler(number, partial(supervisor.on_signal, number))
                 installed.append(number)
         yield
     finally:
         for number in installed:
-            loop.remove_signal_handler(number)
-            if previous[number] is not None:
+            source.remove_handler(number)
+            if previous.get(number) is not None:
                 signal.signal(number, previous[number])
 
 

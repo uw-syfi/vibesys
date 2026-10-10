@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,7 +59,8 @@ from vs_runtime.api import (
 )
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_sandbox.api import HostResource, HostResourceAccess
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
@@ -926,13 +926,13 @@ def test_run_cleanup_closes_sessions_in_reverse_creation_order(tmp_path: Path) -
 
 def test_canceled_session_construction_closes_the_opened_agent(tmp_path: Path) -> None:
     client = FakeAgentClient(session_reuse=True)
-    factory_started = threading.Event()
-    factory_release = threading.Event()
+    factory_started = OsThreads().event()
+    factory_release = OsThreads().event()
     role = AgentRole(id="worker", system_prompt="Work.")
 
     def create_client(**_kwargs: object) -> FakeAgentClient:
         factory_started.set()
-        factory_release.wait()
+        wait_or_fail(factory_release, "the held client factory to be released")
         return client
 
     async def body(ctx: Run) -> None:

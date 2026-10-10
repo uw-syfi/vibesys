@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 from typing import TYPE_CHECKING
 
 from vibesys.api.auxiliary import (
@@ -21,6 +20,7 @@ from vibesys.run.integration import LocalRunIntegration, RunResources
 from vibesys.run.profilers import validate_run_request
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import RunStopped
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -53,6 +53,7 @@ if TYPE_CHECKING:
         StopTimer,
     )
     from vs_sandbox.api import ComputeBackendImpl, HostResource
+    from vs_sim.api import Threads
 
 
 def _create_session(
@@ -175,7 +176,8 @@ class _LocalRunSession:
         self._ready_listener: Callable[[RunReady], None] | None = None
         self._resources: RunResources | None = None
         self._auxiliary_scope: InProcessAuxiliaryAgents | None = None
-        self._auxiliary_lock = threading.Lock()
+        self._threads = implementations.threads or OsThreads()
+        self._auxiliary_lock = self._threads.lock()
         self._closed = False
         self._unsubscribe: Callable[[], None] | None = None
         # A session exists to run its request, so it reads as active from
@@ -272,7 +274,10 @@ class _LocalRunSession:
 
     def _new_auxiliary_scope(self, resources: RunResources) -> InProcessAuxiliaryAgents:
         return InProcessAuxiliaryAgents(
-            resources, self._implementations.agents, self._integration.agent_events
+            resources,
+            self._implementations.agents,
+            self._integration.agent_events,
+            self._threads,
         )
 
     def start(self) -> None:
@@ -415,12 +420,13 @@ class InProcessAuxiliaryAgents:
         resources: RunResources,
         agents: SessionAgents,
         events: AgentEventSink,
+        threads: Threads,
     ) -> None:
         self._resources = resources
         self._agents = agents
         self._events = events
         self._conversations: list[ManagedAgent] = []
-        self._lock = threading.Lock()
+        self._lock = threads.lock()
         self._closed = False
 
     def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> ManagedAgent:

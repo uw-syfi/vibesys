@@ -6,7 +6,6 @@ import asyncio
 import json
 import shlex
 import sys
-import threading
 from dataclasses import replace
 from functools import partial
 from typing import TYPE_CHECKING, cast
@@ -54,7 +53,8 @@ from vs_runtime.api import (
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeRun, FakeWorkspace
 from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_sim.api.testing import ManualClock, arrival
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock, arrival, wait_or_fail
 from vs_slurm.api import (
     FakeCluster,
     FakeConnector,
@@ -80,7 +80,10 @@ if TYPE_CHECKING:
     from tests.support.evaluation_scenarios import EvaluationScenario
 
     from vs_runtime.api import CandidateWorkspace, Workspace, Workspaces
+    from vs_sim.api import Event
 
+# The blocking wait runs on a worker thread of the Slurm runner, so its latches are the OS's.
+_THREADS = OsThreads()
 _PHASES = {
     SlurmJobStatus.PENDING: SlurmPhase.PENDING,
     SlurmJobStatus.RUNNING: SlurmPhase.RUNNING,
@@ -233,9 +236,9 @@ class _Runner(SlurmJobRunner):
         self.handle: SlurmBatchHandle | None = None
         self.cancellations = 0
         self.job_status = SlurmJobStatus.PENDING
-        self.wait_started = threading.Event()
-        self.wait_finished = threading.Event()
-        self._release_wait = threading.Event()
+        self.wait_started = _THREADS.event()
+        self.wait_finished = _THREADS.event()
+        self._release_wait = _THREADS.event()
         self._fail_cancel = fail_cancel
         if not block_wait:
             self._release_wait.set()
@@ -271,11 +274,11 @@ class _Runner(SlurmJobRunner):
         handle: SlurmBatchHandle,
         *,
         timeout_seconds: float | None = None,
-        cancel_event: threading.Event | None = None,
+        cancel_event: Event | None = None,
     ) -> SlurmBatchWaitResult:
         del timeout_seconds, cancel_event
         self.wait_started.set()
-        self._release_wait.wait()
+        wait_or_fail(self._release_wait, "the held Slurm wait to be released")
         self.wait_finished.set()
         if self.job_status is SlurmJobStatus.RUNNING:
             self.job_status = SlurmJobStatus.COMPLETED

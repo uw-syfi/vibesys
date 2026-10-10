@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import threading
 from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -18,6 +17,7 @@ from vs_project.api import (
     ProjectStateError,
     is_project_state_path,
 )
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from vibesys.api.contracts import RunView
     from vibesys.plugin_catalog import OrchestrationRegistration, OrchestrationRegistry
     from vs_project.api import OrchestrationRunManifest, Project
+    from vs_sim.api import Threads
 
 
 class WorkspaceChangeKind(StrEnum):
@@ -138,9 +139,10 @@ def _open_run_store(
     project: Project,
     *,
     registry: OrchestrationRegistry,
+    threads: Threads | None = None,
 ) -> RunStore:
     """Compose a product store over one canonical project."""
-    return _LocalRunStore(project, registry=registry)
+    return _LocalRunStore(project, registry=registry, threads=threads or OsThreads())
 
 
 class _GitReadEvents(NullGitTrackerEvents):
@@ -165,7 +167,9 @@ class _LocalRunRecord:
         run_id: str,
         *,
         registry: OrchestrationRegistry,
+        threads: Threads,
     ) -> None:
+        self._threads = threads
         self._project = project
         self._run_id = run_id
         self._registry = registry
@@ -174,7 +178,7 @@ class _LocalRunRecord:
         ]
         self._git_events = _GitReadEvents()
         self._git = GitTracker(project.root, run_id=run_id, events=self._git_events)
-        self._git_lock = threading.Lock()
+        self._git_lock = threads.lock()
         registration = self._registration(self._manifest())
         self._framework_prefixes = (
             registration.plugin.memory_paths if registration is not None else ()
@@ -289,9 +293,12 @@ class _LocalRunRecord:
 class _LocalRunStore:
     """`RunStore` backed by one `vs_project.Project`'s persisted state."""
 
-    def __init__(self, project: Project, *, registry: OrchestrationRegistry) -> None:
+    def __init__(
+        self, project: Project, *, registry: OrchestrationRegistry, threads: Threads
+    ) -> None:
         self._project = project
         self._registry = registry
+        self._threads = threads
 
     def list_runs(self) -> Sequence[RunView]:
         manifests = self._project.state.list_runs()
@@ -304,7 +311,9 @@ class _LocalRunStore:
         # Load now so a missing or unsupported run fails at this boundary, not
         # on the record's first later use.
         self._project.state.load_run(run_id)
-        return _LocalRunRecord(self._project, run_id, registry=self._registry)
+        return _LocalRunRecord(
+            self._project, run_id, registry=self._registry, threads=self._threads
+        )
 
 
 def _parse_name_status(output: str) -> tuple[WorkspaceChange, ...]:
