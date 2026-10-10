@@ -372,6 +372,7 @@ class DesktopApp {
               status: statusLabel(run.status),
               detail: statusDetail(run.status, run.run.hostName),
               stuck: isTerminal(run.status),
+              ended: run.status.kind === 'run-ended',
             },
     };
   }

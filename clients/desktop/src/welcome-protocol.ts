@@ -46,8 +46,10 @@ export interface ChromeState {
     /** A short status (`connected`, `reconnecting (attempt 2)`, ...). */
     readonly status: string;
     readonly detail: string;
-    /** True when the connection stopped trying: offer Retry. */
+    /** True when the connection stopped trying: offer Retry, unless the run ended. */
     readonly stuck: boolean;
+    /** True when the run is no longer running: offer Resume, not Retry. */
+    readonly ended: boolean;
   } | null;
   /** The stop flows past idle, by `stopKey` (host, newline, instance id). */
   readonly stops: Readonly<Record<string, StopView>>;
