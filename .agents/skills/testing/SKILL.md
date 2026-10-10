@@ -78,7 +78,9 @@ a per-language reference; read the one for the language you are editing:
    a property test, not only the uppercase one. The class is the mechanism
    named under the `software-design` skill's Mechanism checkpoint; a test that
    replays the one reply or exit path that triggered the bug does not cover
-   it.
+   it. A flaky test whose defect is in the test itself is not a product bug:
+   fix the test and show the deterministic reproduction in the PR, without a
+   test of the test (see [references/flakiness.md](references/flakiness.md)).
 7. **Test the unhappy paths at boundaries.** Canned replies that match what
    the code expects test only the happy path. Where code meets an agent, a
    cluster, an MCP client, or a subprocess, drive it with generated behavior:
