@@ -8,7 +8,7 @@ import {ownProjectionInput, type ReadonlyProjection} from './publication.js';
 import {type RoundKey, roundKeyFor, roundNumberFor} from './round-key.js';
 
 type RunEventData = NonNullable<RunEvent['data']>;
-type TypedToolResult = ReadonlyProjection<Extract<RunEventData, {kind?: 'tool_result'}>>;
+type TypedToolResult = ReadonlyProjection<Extract<RunEventData, {kind: 'tool_result'}>>;
 
 /**
  * Structural copy of the `TranscriptEntry` interface `core-state.ts` exports.
@@ -168,7 +168,7 @@ function eventTypeToTranscriptEntry(
 }
 
 function chatTranscriptEntry(
-  data: Extract<RunEventData, {kind?: 'chat'}>,
+  data: Extract<RunEventData, {kind: 'chat'}>,
   fields: TranscriptFields,
 ): TranscriptEntry {
   // The invocation id names the turn this answer closes. Records written before
@@ -187,7 +187,7 @@ function chatTranscriptEntry(
 
 function outputTranscriptEntry(
   event: RunEvent,
-  data: Extract<RunEventData, {kind?: 'agent_output_chunk'}>,
+  data: Extract<RunEventData, {kind: 'agent_output_chunk'}>,
   fields: TranscriptFields,
 ): TranscriptEntry {
   const kind = outputKind(data.channel);
@@ -209,27 +209,13 @@ function outputTranscriptEntry(
   };
 }
 
-/**
- * `kind` is optional on the wire (older records predate the field), so a plain
- * `data.kind === 'tool_call'` check narrows the matching branch but not the
- * fallthrough: structurally, a `ToolResultData` with `kind` omitted still
- * satisfies `ToolCallData`, so TypeScript can't rule it out of the remainder.
- * A type predicate is authoritative instead of inferred, so it narrows both
- * sides.
- */
-function isToolCallData(
-  data: Extract<RunEventData, {kind?: 'tool_call' | 'tool_result'}>,
-): data is Extract<RunEventData, {kind?: 'tool_call'}> {
-  return data.kind === 'tool_call';
-}
-
 function toolTranscriptEntry(
   event: RunEvent,
-  data: Extract<RunEventData, {kind?: 'tool_call' | 'tool_result'}>,
+  data: Extract<RunEventData, {kind: 'tool_call' | 'tool_result'}>,
   fields: TranscriptFields,
 ): TranscriptEntry {
   const invocationId = event.invocation_id ?? undefined;
-  if (isToolCallData(data)) {
+  if (data.kind === 'tool_call') {
     return {
       id: fields.id,
       kind: 'tool',
@@ -261,27 +247,12 @@ function toolTranscriptEntry(
   };
 }
 
-/** See `isToolCallData`: a type predicate, because the optional `kind` field
- * defeats plain-comparison narrowing of the non-matching branches. */
-function isJudgeResultData(
-  data: Extract<RunEventData, {kind?: 'judge_result' | 'benchmark_result' | 'round_finished'}>,
-): data is Extract<RunEventData, {kind?: 'judge_result'}> {
-  return data.kind === 'judge_result';
-}
-
-/** See `isToolCallData`. */
-function isBenchmarkResultData(
-  data: Extract<RunEventData, {kind?: 'benchmark_result' | 'round_finished'}>,
-): data is Extract<RunEventData, {kind?: 'benchmark_result'}> {
-  return data.kind === 'benchmark_result';
-}
-
 function resultTranscriptEntry(
   event: RunEvent,
-  data: Extract<RunEventData, {kind?: 'judge_result' | 'benchmark_result' | 'round_finished'}>,
+  data: Extract<RunEventData, {kind: 'judge_result' | 'benchmark_result' | 'round_finished'}>,
   fields: TranscriptFields,
 ): TranscriptEntry {
-  if (isJudgeResultData(data)) {
+  if (data.kind === 'judge_result') {
     return {
       id: fields.id,
       kind: 'result',
@@ -292,7 +263,7 @@ function resultTranscriptEntry(
       ...fields.roundFields,
     };
   }
-  if (isBenchmarkResultData(data)) {
+  if (data.kind === 'benchmark_result') {
     return {
       id: fields.id,
       kind: 'result',
@@ -320,39 +291,15 @@ function resultTranscriptEntry(
   };
 }
 
-/** See `isToolCallData`. */
-function isGateStartedData(
-  data: Extract<
-    RunEventData,
-    {kind?: 'gate_started' | 'gate_finished' | 'workspace_snapshot' | 'run_configured'}
-  >,
-): data is Extract<RunEventData, {kind?: 'gate_started'}> {
-  return data.kind === 'gate_started';
-}
-
-/** See `isToolCallData`. */
-function isGateFinishedData(
-  data: Extract<RunEventData, {kind?: 'gate_finished' | 'workspace_snapshot' | 'run_configured'}>,
-): data is GateFinishedData {
-  return data.kind === 'gate_finished';
-}
-
-/** See `isToolCallData`. */
-function isWorkspaceSnapshotData(
-  data: Extract<RunEventData, {kind?: 'workspace_snapshot' | 'run_configured'}>,
-): data is WorkspaceSnapshotData {
-  return data.kind === 'workspace_snapshot';
-}
-
 function frameworkTranscriptEntry(
   event: RunEvent,
   data: Extract<
     RunEventData,
-    {kind?: 'gate_started' | 'gate_finished' | 'workspace_snapshot' | 'run_configured'}
+    {kind: 'gate_started' | 'gate_finished' | 'workspace_snapshot' | 'run_configured'}
   >,
   fields: TranscriptFields,
 ): TranscriptEntry {
-  if (isGateStartedData(data)) {
+  if (data.kind === 'gate_started') {
     const recipe = data.recipe == null ? '' : ` ${data.recipe}`;
     return {
       id: fields.id,
@@ -363,10 +310,10 @@ function frameworkTranscriptEntry(
       ...(data.command == null ? {} : {command: data.command}),
     };
   }
-  if (isGateFinishedData(data)) {
+  if (data.kind === 'gate_finished') {
     return gateFinishedEntry(event, data, fields.id, fields.roundFields);
   }
-  if (isWorkspaceSnapshotData(data)) {
+  if (data.kind === 'workspace_snapshot') {
     return {
       id: fields.id,
       kind: 'status',
@@ -437,9 +384,9 @@ function labelFor(event: RunEvent, fallback: string): string {
   return event.round_label ? `${phase} · ${event.round_label}` : phase;
 }
 
-type GateFinishedData = Extract<RunEventData, {kind?: 'gate_finished'}>;
-type WorkspaceSnapshotData = Extract<RunEventData, {kind?: 'workspace_snapshot'}>;
-type RunConfiguredData = Extract<RunEventData, {kind?: 'run_configured'}>;
+type GateFinishedData = Extract<RunEventData, {kind: 'gate_finished'}>;
+type WorkspaceSnapshotData = Extract<RunEventData, {kind: 'workspace_snapshot'}>;
+type RunConfiguredData = Extract<RunEventData, {kind: 'run_configured'}>;
 /** The generated closed set of framework subsystems, never a local copy. */
 type FrameworkSource = NonNullable<GateFinishedData['source']>;
 

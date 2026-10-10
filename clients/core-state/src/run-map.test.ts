@@ -352,7 +352,7 @@ describe('expected phase seeding', () => {
     ]);
   });
 
-  it('folds the advertised roles onto the state for consumers and prefix merges', () => {
+  it('folds the advertised roles onto the state for consumers and prefix replay', () => {
     const state = applyRunMapEvent(initialRunMap(), runStarted('plain', ['implementer', 'judge']));
 
     expect(state.expectedRoles).toEqual(['implementer', 'judge']);

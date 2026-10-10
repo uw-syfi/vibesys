@@ -3,8 +3,6 @@ import {
   applyExecutionStatus,
   applyExecutionStatusUsage,
   type ExecutionStatus,
-  mergeExecutionStatusesPrefix,
-  mergeExecutionStatusUsagePrefix,
   reconcileExecutionStatuses,
   removeExecutionStatus,
 } from './execution-status.js';
@@ -14,15 +12,7 @@ import {
   type ReadonlyProjection,
 } from './publication.js';
 import {type RoundKey, roundKeyFor, roundNumberFor, sameRoundKey} from './round-key.js';
-import {
-  type AgentPhase,
-  adoptRunMapArrays,
-  applyRunMapEvent,
-  indexRunMapArrays,
-  mergePhaseLists,
-  mergeRoundLists,
-  type RoundState,
-} from './run-map.js';
+import {type AgentPhase, adoptRunMapArrays, applyRunMapEvent, type RoundState} from './run-map.js';
 
 export type AgentExecutionMode = 'thinking' | 'responding' | 'tool' | 'waiting';
 
@@ -99,7 +89,7 @@ export interface BenchmarkRecord {
 }
 
 type RunEventData = NonNullable<RunEvent['data']>;
-export type TypedToolResult = ReadonlyProjection<Extract<RunEventData, {kind?: 'tool_result'}>>;
+export type TypedToolResult = ReadonlyProjection<Extract<RunEventData, {kind: 'tool_result'}>>;
 /** Typed structure a producer preserved alongside the raw tool-result text. */
 export type ToolResultPayload = NonNullable<TypedToolResult['payload']>;
 
@@ -275,6 +265,8 @@ export interface CoreState {
   readonly typedToolEvents: boolean;
   /** Per thread id: typed tool events seen, so legacy tool chunks are dropped. */
   readonly chatTypedToolEvents: Readonly<Record<string, boolean>>;
+  /** Count of forward-compatible event-data kinds this client could not project. */
+  readonly unknownEventKinds: number;
   /**
    * Every event this state folded had `sequence > historyAfterSequence`.
    *
@@ -319,6 +311,7 @@ export function initialCoreState(): CoreState {
     experimentsRevision: 0,
     typedToolEvents: false,
     chatTypedToolEvents: {},
+    unknownEventKinds: 0,
     historyAfterSequence: 0,
   });
 }
@@ -357,11 +350,14 @@ function endedRunStatus(status: CoreRunStatus): EndedRunStatus | null {
     case 'paused':
     case 'stopping':
       return null;
-    default: {
-      const unhandled: never = status;
-      return unhandled;
-    }
+    default:
+      return unknownRunStatus(status);
   }
+}
+
+/** #869 accepts future statuses; an unknown member carries no evidence of termination. */
+function unknownRunStatus(_status: never): null {
+  return null;
 }
 
 /** The transcript for one chat thread; unknown threads read as empty. */
@@ -437,11 +433,12 @@ export function reduceEventBatch(
   historyAfterSequence?: number,
 ): CoreState {
   const batch = foldIdentityAwareBatch(state, events);
-  if (!batch.acceptsMetadata) return publishCoreState(batch.state);
+  const retained = retainReplayDeliveries(state, batch.state, batch.retainedDeliveries);
+  if (!batch.acceptsMetadata) return publishCoreState(retained);
   const reduced =
     historyAfterSequence === undefined
-      ? batch.state
-      : cloneCoreStateWith(batch.state, {historyAfterSequence});
+      ? retained
+      : cloneCoreStateWith(retained, {historyAfterSequence});
   return publishCoreState(
     activeExecutions === undefined
       ? reduced
@@ -471,8 +468,9 @@ export function reduceEventRebootstrap(
   throughSequence: number | undefined,
   historyAfterSequence: number,
 ): CoreState {
-  const batch = foldIdentityAwareBatch(initialCoreState(), events);
-  let reduced = batch.state;
+  const empty = initialCoreState();
+  const batch = foldIdentityAwareBatch(empty, events);
+  let reduced = retainReplayDeliveries(empty, batch.state, batch.retainedDeliveries);
   if (batch.acceptsMetadata) {
     reduced = cloneCoreStateWith(reduced, {historyAfterSequence});
     if (activeExecutions !== undefined) {
@@ -485,327 +483,77 @@ export function reduceEventRebootstrap(
   if (state.runId === null || reduced.runId !== state.runId || !batch.acceptsMetadata) {
     return publishCoreState(reduced);
   }
-  return publishCoreState(
-    cloneCoreStateWith(reduced, {
-      chatThreads: mergeChatThreadsPrefix(state.chatThreads, reduced.chatThreads),
-    }),
-  );
+  return publishCoreState(retainRegisteredChatThreads(reduced, state.chatThreads));
 }
 
 /**
- * Folds a chunk of events strictly older than everything `state` has folded,
- * i.e. every `event.sequence <= state.historyAfterSequence`.
+ * Folds a chunk older than the state's declared history floor.
  *
- * The chunk folds into a fresh state rather than onto `state`: `foldEvent` drops
- * events the cursor already covers, so folding backwards onto the live state
- * would be a no-op, and a fresh fold keeps the work proportional to the chunk.
- * The two states then merge with prefix semantics, the newer one winning
- * wherever a field is last-write-wins. `historyAfterSequence` is the new floor.
+ * Core state retains the deliveries that produced it. Backfill prepends the
+ * new chunk, orders the combined journal by sequence, and runs the ordinary
+ * fold once. Every projection therefore uses the same code path as a full
+ * replay instead of maintaining field-specific prefix merge rules.
+ *
+ * The backend checkpoint remains authoritative for liveness, and the newer
+ * state remains authoritative for status and stream cursor metadata. Those
+ * are inputs outside the journal, not alternate projection folds.
  */
 export function reduceEventPrefix(
   state: CoreState,
   events: readonly RunEvent[],
   historyAfterSequence: number,
 ): CoreState {
-  const prefix = foldIdentityAwareBatch({...initialCoreState(), runId: state.runId}, events);
-  const sequences = new Set(
-    prefix.acceptedEvents.map(event => event.sequence).filter(sequence => sequence !== undefined),
+  const prefixAcceptsMetadata = acceptsRunMetadata(state.runId, events);
+  const deliveries = [...ownedReplayEvents(events, 'stream'), ...retainedReplayEvents(state)].sort(
+    compareReplayDeliveries,
   );
-  const boundaries = state.runLifetimeBoundaries.filter(
-    boundary => boundary.event.sequence !== undefined && !sequences.has(boundary.event.sequence),
-  );
-  // Run-level spine events may carry terminal
-  // transcript and diagnostic facts that the tail already has, so replaying
-  // them through this fold would duplicate those facts during the merge.
-  const olderData = prefix.state;
-  // Rebuild just the run-map projection with every retained lifetime boundary.
-  // This keeps a narrow older chunk in the same run configuration as a full
-  // replay, and re-applies terminal/resume boundaries without duplicating
-  // their non-map projections.
-  const runMapReplay = reduceEventBatch(
-    {
-      ...initialCoreState(),
-      runId: state.runId,
-      runLifetimeBoundaries: state.runLifetimeBoundaries,
-    },
-    [...prefix.acceptedEvents, ...boundaries.map(replayBoundaryEvent)].sort(
-      (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0),
-    ),
-  );
-  const older = cloneCoreStateWith(olderData, {
-    outerLoop: runMapReplay.outerLoop,
-    expectedRoles: runMapReplay.expectedRoles,
-    lastEventTimestamp: runMapReplay.lastEventTimestamp,
-    lastRunMapSequence: runMapReplay.lastRunMapSequence,
-    runLifetimeBoundaries: mergeRunLifetimeBoundaries(
-      runMapReplay.runLifetimeBoundaries,
-      state.runLifetimeBoundaries,
-    ),
-  });
-  adoptRunMapArrays(older, runMapReplay);
-  const chatTranscripts = mergeChatTranscriptsPrefix(older.chatTranscripts, state.chatTranscripts);
-  const merged: CoreState = {
-    runId: state.runId ?? older.runId,
+  const empty = cloneCoreStateWith(initialCoreState(), {runId: state.runId});
+  const replay = foldReplayDeliveries(empty, deliveries);
+  let reduced = retainRegisteredChatThreads(replay.state, state.chatThreads);
+  reduced = cloneCoreStateWith(reduced, {
+    runId: state.runId ?? replay.state.runId,
     sequence: state.sequence,
-    // A prefix chunk sits entirely below the history floor, and the floor is
-    // never above the cursor, so nothing the chunk carried can be one of the
-    // sequences folded out of band above it. The newer state owns the list for
-    // the same reason it owns the cursor.
     foldedOutOfBand: state.foldedOutOfBand,
-    // The newer events own run termination.
     status: state.status,
-    agentKind: state.agentKind ?? older.agentKind,
-    roundLabel: state.roundLabel ?? older.roundLabel,
-    outerLoop: state.outerLoop ?? older.outerLoop,
-    expectedRoles: state.expectedRoles ?? older.expectedRoles,
-    maxRounds: state.maxRounds ?? older.maxRounds,
-    rounds: mergeRoundLists(older.rounds, state.rounds),
-    phases: mergePhaseLists(older.phases, state.phases),
-    // The newer batch folded the newer events, so it saw the run more recently.
-    lastEventTimestamp: state.lastEventTimestamp ?? older.lastEventTimestamp,
-    lastRunMapSequence:
-      state.lastRunMapSequence > 0 ? state.lastRunMapSequence : older.lastRunMapSequence,
-    runLifetimeBoundaries: mergeRunLifetimeBoundaries(
-      older.runLifetimeBoundaries,
-      state.runLifetimeBoundaries,
-    ),
-    // Liveness comes from the backend checkpoint, never from replayed history.
+    agentKind: state.agentKind ?? replay.state.agentKind,
+    roundLabel: state.roundLabel ?? replay.state.roundLabel,
     activeExecutions: state.activeExecutions,
-    executionStatuses: mergeExecutionStatusesPrefix(
-      older.executionStatuses,
-      state.executionStatuses,
+    executionStatuses: reconcileExecutionStatuses(
+      reduced.executionStatuses,
       state.activeExecutions,
     ),
-    transcript: mergeTranscriptPrefix(older.transcript, state.transcript),
-    chatTranscripts,
-    chatTranscript: chatTranscripts[DEFAULT_CHAT_THREAD_ID] ?? [],
-    chatThreads: mergeChatThreadsPrefix(older.chatThreads, state.chatThreads),
-    todos: mergeTodosPrefix(older.todos, state.todos),
-    usage: mergeExecutionStatusUsagePrefix(
-      state.usage ?? older.usage,
-      mergeExecutionStatusesPrefix(
-        older.executionStatuses,
-        state.executionStatuses,
-        state.activeExecutions,
-      ),
-      older.executionStatuses,
-      prefix.acceptedEvents,
-      older.usage,
-    ),
-    quota: state.quota.sequence > 0 ? state.quota : older.quota,
-    benchmarks: mergeBenchmarksPrefix(older.benchmarks, state.benchmarks),
-    diagnostics: state.diagnostics.reduce(upsertDiagnostic, older.diagnostics),
-    experimentsRevision: Math.max(older.experimentsRevision, state.experimentsRevision),
-    typedToolEvents: older.typedToolEvents || state.typedToolEvents,
-    chatTypedToolEvents: mergeTypedToolFlags(older.chatTypedToolEvents, state.chatTypedToolEvents),
-    historyAfterSequence: prefix.acceptsMetadata
-      ? historyAfterSequence
-      : state.historyAfterSequence,
+    historyAfterSequence: prefixAcceptsMetadata ? historyAfterSequence : state.historyAfterSequence,
+  });
+  replaceReplayEvents(reduced, deliveries);
+  return publishCoreState(reduced);
+}
+
+/** Adds snapshot-only thread registry facts without merging an event projection. */
+function retainRegisteredChatThreads(
+  state: CoreState,
+  registered: readonly ChatThread[],
+): CoreState {
+  return registered.reduce(retainRegisteredChatThread, state);
+}
+
+function retainRegisteredChatThread(state: CoreState, thread: ChatThread): CoreState {
+  const existing = state.chatThreads.find(candidate => candidate.id === thread.id);
+  if (existing === undefined) return upsertChatThread(state, thread);
+  const retained = {
+    ...thread,
+    title: thread.title || existing.title,
+    provider: thread.provider ?? existing.provider,
+    model: thread.model ?? existing.model,
   };
-  indexRunMapArrays(merged);
-  return publishCoreState(merged);
-}
-
-/**
- * Sorted rather than concatenated for the same reason the transcript is merged:
- * a tail batch can carry events from below its own floor.
- */
-function mergeBenchmarksPrefix(
-  older: readonly BenchmarkRecord[],
-  newer: readonly BenchmarkRecord[],
-): readonly BenchmarkRecord[] {
-  return [...older, ...newer].sort((left, right) => left.sequence - right.sequence);
-}
-
-/**
- * Folds two transcripts into the one a full replay of both their event streams
- * would have built.
- *
- * A plain concatenation is wrong twice over. The fold merges entries (streamed
- * text concatenates, a tool result lands on its open call) and those merges
- * straddle the chunk boundary. And `newer` is not entirely newer: a tail
- * subscription's batch also carries the run-level spine from below its floor,
- * so a backfilled chunk interleaves with what the state already holds rather
- * than sitting wholly before it.
- *
- * So the two sequence-ordered lists are merged in sequence order and each entry
- * re-folded through `foldTranscriptEntry`, with terminal chat answers taking the
- * `foldChatAnswer` step instead so an answer folds over the streamed turn it
- * closes even when the two straddle the floor. That is exact: entries are already
- * maximally merged within each list and the step is idempotent over an
- * already merged entry, so re-folding in replay order reproduces replay.
- *
- * O(older + newer) with an O(1) step per entry. Re-folding only the entries near
- * the boundary would be faster by a constant, but no bounded window is provably
- * enough, so every entry is re-folded.
- *
- * Known boundaries, neither worth machinery:
- * - `capTranscript` evicts the oldest round once a transcript passes
- *   MAX_TRANSCRIPT_ENTRIES, so a transcript that grew past the cap by replay and
- *   one that grew past it by backfill are not required to agree.
- * - Two typed `tool_result` events carrying the same `call_id`, which only a
- *   malformed producer emits, diverge.
- */
-
-function mergeTranscriptPrefix(
-  older: readonly TranscriptEntry[],
-  newer: readonly TranscriptEntry[],
-): TranscriptEntry[] {
-  const replay = new TranscriptPrefixReplay();
-  const ordered = new ReplayOrderedTranscriptEntries(older, newer);
-  for (let entry = ordered.next(); entry !== undefined; entry = ordered.next()) {
-    replay.append(entry);
-  }
-  return replay.entries;
-}
-
-/**
- * Aligns two already ordered transcript projections into replay order.
- *
- * Entries with the same sequence retain the older projection first. That is
- * the original event order at the prefix boundary and lets the newer entry
- * update or extend it through the normal transcript fold.
- */
-class ReplayOrderedTranscriptEntries {
-  readonly #older: readonly TranscriptEntry[];
-  readonly #newer: readonly TranscriptEntry[];
-  #olderAt = 0;
-  #newerAt = 0;
-
-  constructor(older: readonly TranscriptEntry[], newer: readonly TranscriptEntry[]) {
-    this.#older = older;
-    this.#newer = newer;
-  }
-
-  next(): TranscriptEntry | undefined {
-    if (this.#olderAt >= this.#older.length) return this.#takeNewer();
-    if (this.#newerAt >= this.#newer.length) return this.#takeOlder();
-    if (entryOrder(this.#newer[this.#newerAt]) < entryOrder(this.#older[this.#olderAt])) {
-      return this.#takeNewer();
-    }
-    return this.#takeOlder();
-  }
-
-  #takeOlder(): TranscriptEntry | undefined {
-    const entry = this.#older[this.#olderAt];
-    this.#olderAt += 1;
-    return entry;
-  }
-
-  #takeNewer(): TranscriptEntry | undefined {
-    const entry = this.#newer[this.#newerAt];
-    this.#newerAt += 1;
-    return entry;
-  }
-}
-
-/** Applies ordinary transcript folding to entries selected for prefix replay. */
-class TranscriptPrefixReplay {
-  readonly entries: TranscriptEntry[] = [];
-  readonly #openTools = new OpenToolCallIndex();
-
-  append(entry: TranscriptEntry): void {
-    // A terminal chat answer carries no turn id and, in replay, folds over its
-    // own still-open streamed turn through `foldChatAnswer` (which matches the
-    // answer's invocation id, so an abandoned turn's stream is never claimed).
-    // When the turn's chunks sit below the history floor and the answer above
-    // it, the two arrive from opposite lists, so reconcile them here as replay
-    // would; a second entry would otherwise survive. Anything else takes the
-    // normal step.
-    if (isTerminalChatAnswer(entry) && foldChatAnswer(this.entries, entry)) return;
-    foldTranscriptEntry(this.entries, entry, this.#openTools);
-  }
-}
-
-/** Whether `entry` is eligible to close a streamed chat turn during replay. */
-function isTerminalChatAnswer(entry: TranscriptEntry): boolean {
-  return entry.kind === 'assistant' && entry.turnId === undefined;
-}
-
-/**
- * Replay position of an entry, from the sequence its id was built from.
- *
- * An entry recorded from an event with no sequence has a non-numeric id. It
- * cannot be placed against the other list, so it sorts last within its own,
- * which keeps it after the entries it followed there.
- */
-function entryOrder(entry: TranscriptEntry | undefined): number {
-  if (entry === undefined) return Number.POSITIVE_INFINITY;
-  const sequence = Number(entry.id);
-  return Number.isFinite(sequence) ? sequence : Number.POSITIVE_INFINITY;
-}
-
-function mergeChatTranscriptsPrefix(
-  older: Readonly<Record<string, readonly TranscriptEntry[]>>,
-  newer: Readonly<Record<string, readonly TranscriptEntry[]>>,
-): Record<string, TranscriptEntry[]> {
-  const merged: Record<string, TranscriptEntry[]> = {};
-  for (const [threadId, entries] of Object.entries(older)) {
-    merged[threadId] = mergeTranscriptPrefix(entries, newer[threadId] ?? []);
-  }
-  for (const [threadId, entries] of Object.entries(newer)) {
-    if (merged[threadId] === undefined) merged[threadId] = [...entries];
-  }
-  return merged;
-}
-
-/**
- * Keeps `older`'s replay order, then upserts `newer`'s threads on top.
- *
- * The implicit default thread heads both lists, so it stays first and is never
- * duplicated. A newer record that only names a thread (a titled turn whose
- * `chat_thread_created` fell in the chunk) must not erase the agent selection
- * the chunk carried, hence `??` rather than a plain overwrite.
- */
-function mergeChatThreadsPrefix(
-  older: readonly ChatThread[],
-  newer: readonly ChatThread[],
-): ChatThread[] {
-  const merged = [...older];
-  for (const thread of newer) {
-    const at = merged.findIndex(candidate => candidate.id === thread.id);
-    const existing = merged[at];
-    if (existing === undefined) {
-      merged.push(thread);
-      continue;
-    }
-    merged[at] = {
-      id: thread.id,
-      title: thread.title || existing.title,
-      provider: thread.provider ?? existing.provider,
-      model: thread.model ?? existing.model,
-    };
-  }
-  return merged;
-}
-
-function mergeTodosPrefix(
-  older: readonly ExecutionTodos[],
-  newer: readonly ExecutionTodos[],
-): ExecutionTodos[] {
-  const retained = older.filter(item => !newer.some(incoming => sameTodoTarget(item, incoming)));
-  return [...retained, ...newer].slice(-100);
-}
-
-/** The identity `updateTodos` replaces on: execution id, else role and round. */
-function sameTodoTarget(candidate: ExecutionTodos, incoming: ExecutionTodos): boolean {
-  if (incoming.executionId != null) return candidate.executionId === incoming.executionId;
-  return (
-    candidate.executionId == null &&
-    candidate.agentKind === incoming.agentKind &&
-    sameRoundKey(candidate.roundKey, incoming.roundKey)
-  );
-}
-
-function mergeTypedToolFlags(
-  older: Record<string, boolean>,
-  newer: Record<string, boolean>,
-): Record<string, boolean> {
-  const merged = {...older};
-  for (const [threadId, seen] of Object.entries(newer)) {
-    merged[threadId] = merged[threadId] === true || seen;
-  }
-  return merged;
+  return retained.title === existing.title &&
+    retained.provider === existing.provider &&
+    retained.model === existing.model
+    ? state
+    : cloneCoreStateWith(state, {
+        chatThreads: state.chatThreads.map(candidate =>
+          candidate.id === thread.id ? retained : candidate,
+        ),
+      });
 }
 
 /** Retain each boundary and its closest known predecessor. */
@@ -828,11 +576,6 @@ function mergeRunLifetimeBoundaries(
   return [...merged.values()].sort(
     (left, right) => (left.event.sequence ?? 0) - (right.event.sequence ?? 0),
   );
-}
-
-/** Restores the generated input view for replay; the fold never mutates events. */
-function replayBoundaryEvent(boundary: RunLifetimeBoundary): RunEvent {
-  return boundary.event as RunEvent;
 }
 
 function boundaryFor(
@@ -861,7 +604,10 @@ function boundaryFor(
 }
 
 export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
-  return publishCoreState(foldEvent(state, event, null));
+  const folded = foldEvent(state, event, null);
+  return publishCoreState(
+    retainReplayDeliveries(state, folded, ownedReplayEvents([event], 'stream')),
+  );
 }
 
 /**
@@ -882,11 +628,82 @@ export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
  * and only advance the cursor over them.
  */
 export function reduceResponseEvents(state: CoreState, events: readonly RunEvent[]): CoreState {
-  return publishCoreState(foldIdentityAwareBatch(state, events, 'response').state);
+  const batch = foldIdentityAwareBatch(state, events, 'response');
+  return publishCoreState(retainReplayDeliveries(state, batch.state, batch.retainedDeliveries));
 }
 
 /** Which of the two routes a journal event reached the fold by. */
 type DeliveryRoute = 'stream' | 'response';
+
+interface ReplayDelivery {
+  readonly event: RunEvent;
+  readonly route: DeliveryRoute;
+}
+
+interface ReplayChunk {
+  readonly previous: ReplayChunk | null;
+  readonly deliveries: readonly ReplayDelivery[];
+}
+
+/**
+ * Event provenance retained behind the published projection until #875 makes
+ * the remaining reducer internals serializable. Immutable chunks keep a live
+ * one-event fold O(1); prefix replay compacts them into one ordered chunk.
+ */
+const replayChunks = new WeakMap<object, ReplayChunk>();
+
+function retainReplayDeliveries(
+  source: CoreState,
+  target: CoreState,
+  deliveries: readonly ReplayDelivery[],
+): CoreState {
+  if (deliveries.length === 0 || target === source) return target;
+  replayChunks.set(target, {
+    previous: replayChunks.get(source) ?? null,
+    deliveries,
+  });
+  return target;
+}
+
+function ownedReplayEvents(events: readonly RunEvent[], route: DeliveryRoute): ReplayDelivery[] {
+  return events.map(event => ({event: ownProjectionInput(event) as RunEvent, route}));
+}
+
+function retainedReplayEvents(state: CoreState): ReplayDelivery[] {
+  const chunks: ReplayChunk[] = [];
+  for (
+    let chunk = replayChunks.get(state);
+    chunk !== undefined;
+    chunk = chunk.previous ?? undefined
+  ) {
+    chunks.push(chunk);
+  }
+  const deliveries: ReplayDelivery[] = [];
+  for (let index = chunks.length - 1; index >= 0; index -= 1) {
+    deliveries.push(...(chunks[index]?.deliveries ?? []));
+  }
+  return deliveries;
+}
+
+function replaceReplayEvents(state: CoreState, deliveries: readonly ReplayDelivery[]): void {
+  if (deliveries.length === 0) return;
+  replayChunks.set(state, {previous: null, deliveries});
+}
+
+function compareReplayDeliveries(left: ReplayDelivery, right: ReplayDelivery): number {
+  return (left.event.sequence ?? 0) - (right.event.sequence ?? 0);
+}
+
+function acceptsRunMetadata(runId: string | null, events: readonly RunEvent[]): boolean {
+  let owned = runId;
+  for (const event of events) {
+    const incoming = event.run_id;
+    if (incoming === undefined || incoming === null || incoming === '') continue;
+    if (owned === null) owned = incoming;
+    else if (owned !== incoming) return false;
+  }
+  return true;
+}
 
 interface RunIdentityFold {
   state: CoreState;
@@ -896,8 +713,8 @@ interface RunIdentityFold {
 interface IdentityAwareBatchFold {
   /** State after folding exactly the accepted events and all mismatch diagnostics. */
   state: CoreState;
-  /** Events authorized by the state's latched run identity, in delivery order. */
-  acceptedEvents: readonly RunEvent[];
+  /** Deliveries that changed the projection and must participate in prefix replay. */
+  retainedDeliveries: readonly ReplayDelivery[];
   /** Whether checkpoint and history metadata describe one accepted identity. */
   acceptsMetadata: boolean;
 }
@@ -912,24 +729,34 @@ function foldIdentityAwareBatch(
   events: readonly RunEvent[],
   route: DeliveryRoute = 'stream',
 ): IdentityAwareBatchFold {
+  return foldReplayDeliveries(state, ownedReplayEvents(events, route));
+}
+
+function foldReplayDeliveries(
+  state: CoreState,
+  deliveries: readonly ReplayDelivery[],
+): IdentityAwareBatchFold {
   const folder = new TranscriptFolder();
-  const acceptedEvents: RunEvent[] = [];
   let folded = state;
   let acceptsMetadata = true;
-  for (const event of events) {
+  const retainedDeliveries: ReplayDelivery[] = [];
+  for (const delivery of deliveries) {
+    const {event, route} = delivery;
+    const before = folded;
     const sequence = event.sequence ?? 0;
     const identity = foldRunIdentity(folded, event.run_id, sequence);
     folded = identity.state;
     if (!identity.accepted) {
       acceptsMetadata = false;
+      if (folded !== before) retainedDeliveries.push(delivery);
       continue;
     }
-    acceptedEvents.push(event);
     folded = foldAcceptedEvent(folded, event, folder, route);
+    if (folded !== before) retainedDeliveries.push(delivery);
   }
   return {
     state: folder.commit(folded),
-    acceptedEvents,
+    retainedDeliveries,
     acceptsMetadata,
   };
 }
@@ -1010,18 +837,18 @@ function foldAcceptedEvent(
     mutable.foldedOutOfBand = [...state.foldedOutOfBand, sequence];
   }
   next = applyDiagnosticEvent(next, event);
-  next = applyAgentExecutionEvent(next, event);
+  const dataHandlers = eventDataHandlers(event.data);
+  next = applyExecutionEventData(next, event, sequence, dataHandlers);
   // The chat return sits above the status fold, not below it. The chat agent
   // runs its own session with its own context window, and the backend attaches
   // that session's status block to every chat chunk it publishes, so folding
   // one would report the chat's token count as the run's. The same exclusion
   // covers chat `usage_update` events, which `applyRunFacts` never sees.
   if (event.agent_kind === 'chat') return applyChatEvent(next, event, folder);
-  next = applyAgentStatusEvent(next, event);
+  next = applyRunEventData(next, event, sequence, dataHandlers);
   if (event.agent_kind) (next as MutableCoreState).agentKind = event.agent_kind;
   if (event.round_label) (next as MutableCoreState).roundLabel = event.round_label;
   next = applyRunMapProjection(next, state, event, sequence);
-  next = applyRunFacts(next, event, sequence);
   next = applyRunTranscript(next, event, folder);
   return applyRunLifecycle(next, event);
 }
@@ -1068,27 +895,166 @@ function applyRunMapProjection(
   return next;
 }
 
-function applyRunFacts(state: CoreState, event: RunEvent, sequence: number): CoreState {
-  const mutable = state as MutableCoreState;
+type EventDataKind = RunEventData['kind'];
+type EventDataHandler = (state: CoreState, event: RunEvent, sequence: number) => CoreState;
+interface EventDataHandlers {
+  readonly execution: EventDataHandler;
+  readonly run: EventDataHandler;
+}
+
+const ignoreEventData: EventDataHandler = state => state;
+const ignoredEventData: EventDataHandlers = {
+  execution: ignoreEventData,
+  run: ignoreEventData,
+};
+
+function runEventData(run: EventDataHandler): EventDataHandlers {
+  return {execution: ignoreEventData, run};
+}
+
+function executionEventData(
+  execution: EventDataHandler,
+  run: EventDataHandler = ignoreEventData,
+): EventDataHandlers {
+  return {execution, run};
+}
+
+/** Applies execution bookkeeping before chat events branch to their transcript. */
+function applyExecutionEventData(
+  state: CoreState,
+  event: RunEvent,
+  sequence: number,
+  handlers: EventDataHandlers | null | undefined,
+): CoreState {
+  if (handlers === null) {
+    return cloneCoreStateWith(state, {unknownEventKinds: state.unknownEventKinds + 1});
+  }
+  return handlers?.execution(state, event, sequence) ?? state;
+}
+
+/** Applies facts owned by the run after chat-session events have branched. */
+function applyRunEventData(
+  state: CoreState,
+  event: RunEvent,
+  sequence: number,
+  handlers: EventDataHandlers | null | undefined,
+): CoreState {
+  return handlers?.run(state, event, sequence) ?? applyTerminalExecutionStatus(state, event);
+}
+
+function composeEventDataHandlers(...handlers: readonly EventDataHandler[]): EventDataHandler {
+  return (state, event, sequence) =>
+    handlers.reduce((current, handler) => handler(current, event, sequence), state);
+}
+
+/**
+ * One exhaustive dispatch table for every generated event-data kind.
+ *
+ * `satisfies` makes a protocol kind addition a compile error here. At runtime
+ * #869 permits a newer server's unknown string through the wire boundary, so
+ * `eventDataHandlers` reports that separate forward-compatibility case.
+ */
+const EVENT_DATA_HANDLERS = {
+  chat: ignoredEventData,
+  chat_thread_created: ignoredEventData,
+  invocation_started: ignoredEventData,
+  invocation_finished: ignoredEventData,
+  agent_execution_started: executionEventData(
+    applyAgentExecutionStartedData,
+    reconcileStartedExecutionStatus,
+  ),
+  agent_execution_activity_changed: executionEventData(applyAgentExecutionActivityData),
+  agent_execution_finished: executionEventData(
+    applyAgentExecutionFinishedData,
+    removeFinishedExecutionStatus,
+  ),
+  output: ignoredEventData,
+  server_ready: ignoredEventData,
+  run_started: ignoredEventData,
+  run_failed: runEventData(applyTerminalExecutionStatus),
+  run_interrupted: runEventData(applyTerminalExecutionStatus),
+  run_status_changed: runEventData(
+    composeEventDataHandlers(applyTerminalExecutionStatus, applyRunStatusData),
+  ),
+  experiments_changed: runEventData(applyExperimentsChangedData),
+  configuration_failed: runEventData(applyTerminalExecutionStatus),
+  phase: ignoredEventData,
+  agent_output_chunk: runEventData(applyAgentStatusData),
+  subprocess_output: ignoredEventData,
+  judge_result: ignoredEventData,
+  benchmark_result: runEventData(applyBenchmarkData),
+  round_finished: ignoredEventData,
+  tool_call: runEventData(composeEventDataHandlers(applyAgentStatusData, applyTypedToolData)),
+  tool_result: runEventData(applyTypedToolData),
+  todo_update: runEventData(applyTodoData),
+  usage_update: runEventData(applyUsageData),
+  rate_limit_update: ignoredEventData,
+  quota_paused: runEventData(applyQuotaData),
+  quota_resumed: runEventData(applyQuotaData),
+  quota_abandoned: runEventData(applyQuotaData),
+  provider_switched: runEventData(applyQuotaData),
+  gate_started: ignoredEventData,
+  gate_finished: runEventData(applyBenchmarkData),
+  workspace_snapshot: ignoredEventData,
+  run_configured: ignoredEventData,
+  framework_warning: ignoredEventData,
+} satisfies Record<EventDataKind, EventDataHandlers>;
+
+function eventDataHandlers(data: RunEvent['data']): EventDataHandlers | null | undefined {
+  if (data === undefined || data === null) return undefined;
+  return isKnownEventDataKind(data.kind) ? EVENT_DATA_HANDLERS[data.kind] : null;
+}
+
+function isKnownEventDataKind(kind: string): kind is EventDataKind {
+  return Object.hasOwn(EVENT_DATA_HANDLERS, kind);
+}
+
+function applyTypedToolData(state: CoreState): CoreState {
+  return state.typedToolEvents ? state : cloneCoreStateWith(state, {typedToolEvents: true});
+}
+
+function applyTodoData(state: CoreState, event: RunEvent): CoreState {
+  return cloneCoreStateWith(state, {todos: updateTodos(state.todos, event)});
+}
+
+function applyUsageData(state: CoreState, event: RunEvent): CoreState {
   const data = event.data;
-  if (data?.kind === 'tool_call' || data?.kind === 'tool_result') mutable.typedToolEvents = true;
-  if (data?.kind === 'todo_update') mutable.todos = updateTodos(state.todos, event);
-  if (data?.kind === 'usage_update') {
-    mutable.usage = {
+  if (data?.kind !== 'usage_update') return state;
+  return cloneCoreStateWith(state, {
+    usage: {
       inputTokens: data.input_tokens,
       contextWindow: data.context_window ?? null,
       model: data.model ?? null,
-    };
-  }
+    },
+  });
+}
+
+function applyQuotaData(state: CoreState, event: RunEvent, sequence: number): CoreState {
   const quota = quotaFromEvent(state.quota, event, sequence);
-  if (quota !== state.quota) mutable.quota = quota;
+  return quota === state.quota ? state : cloneCoreStateWith(state, {quota});
+}
+
+function applyBenchmarkData(state: CoreState, event: RunEvent, sequence: number): CoreState {
   const benchmark = benchmarkFromEvent(event, sequence);
-  if (benchmark !== null) mutable.benchmarks = [...state.benchmarks, benchmark];
-  if (data?.kind === 'experiments_changed') mutable.experimentsRevision = sequence;
+  return benchmark === null
+    ? state
+    : cloneCoreStateWith(state, {benchmarks: [...state.benchmarks, benchmark]});
+}
+
+function applyExperimentsChangedData(
+  state: CoreState,
+  _event: RunEvent,
+  sequence: number,
+): CoreState {
+  return cloneCoreStateWith(state, {experimentsRevision: sequence});
+}
+
+function applyRunStatusData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'run_status_changed') return state;
   // The backend owns the run's lifecycle and publishes every move through it,
   // so the projection folds the status it is told rather than inferring one.
-  if (data?.kind === 'run_status_changed') return applyRunStatus(state, data.status);
-  return state;
+  return applyRunStatus(state, data.status);
 }
 
 /** The quota state after `event`: a pause sets it, any event that settles the stop clears it. */
@@ -1205,10 +1171,13 @@ function applyRunLifecycle(state: CoreState, event: RunEvent): CoreState {
 }
 
 function cloneCoreState(state: CoreState): CoreState {
-  return Object.create(
+  const clone = Object.create(
     Object.getPrototypeOf(state),
     Object.getOwnPropertyDescriptors(state),
   ) as CoreState;
+  const replay = replayChunks.get(state);
+  if (replay !== undefined) replayChunks.set(clone, replay);
+  return clone;
 }
 
 function cloneCoreStateWith(state: CoreState, patch: Partial<CoreState>): CoreState {
@@ -1312,80 +1281,94 @@ function activeExecutionFromCheckpoint(
   };
 }
 
-function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState {
+function applyAgentExecutionStartedData(state: CoreState, event: RunEvent): CoreState {
   const executionId = event.execution_id;
   const data = event.data;
-  if (executionId == null) return state;
-  if (data?.kind === 'agent_execution_started') {
-    const roundKey = roundKeyFor(event);
-    return cloneCoreStateWith(state, {
-      activeExecutions: {
-        ...state.activeExecutions,
-        [executionId]: {
-          executionId,
-          agentKind: event.agent_kind ?? 'agent',
-          roundLabel: event.round_label ?? null,
-          roundNumber: roundNumberFor(roundKey),
-          roundKey,
-          stage: data.stage,
-          attempt: data.attempt ?? null,
-          assignment: data.user_prompt ?? '',
-          startedAt: event.timestamp,
-          activity: {
-            mode: data.activity.mode,
-            summary: data.activity.summary,
-            tool: data.activity.tool ?? null,
-          },
-          provider: data.provider ?? null,
-          model: data.model ?? null,
+  if (executionId == null || data?.kind !== 'agent_execution_started') return state;
+  const roundKey = roundKeyFor(event);
+  return cloneCoreStateWith(state, {
+    activeExecutions: {
+      ...state.activeExecutions,
+      [executionId]: {
+        executionId,
+        agentKind: event.agent_kind ?? 'agent',
+        roundLabel: event.round_label ?? null,
+        roundNumber: roundNumberFor(roundKey),
+        roundKey,
+        stage: data.stage,
+        attempt: data.attempt ?? null,
+        assignment: data.user_prompt ?? '',
+        startedAt: event.timestamp,
+        activity: {
+          mode: data.activity.mode,
+          summary: data.activity.summary,
+          tool: data.activity.tool ?? null,
         },
+        provider: data.provider ?? null,
+        model: data.model ?? null,
       },
-    });
-  }
-  if (data?.kind === 'agent_execution_activity_changed') {
-    const current = state.activeExecutions[executionId];
-    if (current === undefined) return state;
-    return cloneCoreStateWith(state, {
-      activeExecutions: {
-        ...state.activeExecutions,
-        [executionId]: {
-          ...current,
-          activity: {mode: data.mode, summary: data.summary, tool: data.tool ?? null},
-        },
-      },
-    });
-  }
-  if (data?.kind === 'agent_execution_finished') {
-    const {[executionId]: _finished, ...remaining} = state.activeExecutions;
-    return cloneCoreStateWith(state, {activeExecutions: remaining});
-  }
-  return state;
+    },
+  });
 }
 
-function applyAgentStatusEvent(state: CoreState, event: RunEvent): CoreState {
-  const data = event.data;
+function applyAgentExecutionActivityData(state: CoreState, event: RunEvent): CoreState {
   const executionId = event.execution_id;
-  let executionStatuses =
-    Object.keys(state.activeExecutions).length === 0
-      ? state.executionStatuses
-      : reconcileExecutionStatuses(state.executionStatuses, state.activeExecutions);
-  if (data?.kind === 'agent_execution_started') {
-    executionStatuses = reconcileExecutionStatuses(executionStatuses, state.activeExecutions);
-  } else if (data?.kind === 'agent_execution_finished' && executionId != null) {
-    executionStatuses = removeExecutionStatus(executionStatuses, executionId);
-  } else if (endsRun(event)) {
-    executionStatuses = {};
-  } else {
-    executionStatuses = applyExecutionStatus(executionStatuses, event);
-  }
-  const usage = applyExecutionStatusUsage(
-    state.usage,
+  const data = event.data;
+  if (executionId == null || data?.kind !== 'agent_execution_activity_changed') return state;
+  const current = state.activeExecutions[executionId];
+  if (current === undefined) return state;
+  return cloneCoreStateWith(state, {
+    activeExecutions: {
+      ...state.activeExecutions,
+      [executionId]: {
+        ...current,
+        activity: {mode: data.mode, summary: data.summary, tool: data.tool ?? null},
+      },
+    },
+  });
+}
+
+function applyAgentExecutionFinishedData(state: CoreState, event: RunEvent): CoreState {
+  const executionId = event.execution_id;
+  if (executionId == null || event.data?.kind !== 'agent_execution_finished') return state;
+  const {[executionId]: _finished, ...remaining} = state.activeExecutions;
+  return cloneCoreStateWith(state, {activeExecutions: remaining});
+}
+
+function reconcileStartedExecutionStatus(state: CoreState): CoreState {
+  const executionStatuses = reconcileExecutionStatuses(
     state.executionStatuses,
-    executionStatuses,
     state.activeExecutions,
-    event,
   );
-  if (executionStatuses === state.executionStatuses && usage === state.usage) return state;
+  return executionStatuses === state.executionStatuses
+    ? state
+    : cloneCoreStateWith(state, {executionStatuses});
+}
+
+function removeFinishedExecutionStatus(state: CoreState, event: RunEvent): CoreState {
+  const executionId = event.execution_id;
+  if (executionId == null) return state;
+  const executionStatuses = removeExecutionStatus(state.executionStatuses, executionId);
+  return executionStatuses === state.executionStatuses
+    ? state
+    : cloneCoreStateWith(state, {executionStatuses});
+}
+
+function applyTerminalExecutionStatus(state: CoreState, event: RunEvent): CoreState {
+  return endsRun(event) && Object.keys(state.executionStatuses).length > 0
+    ? cloneCoreStateWith(state, {executionStatuses: {}})
+    : state;
+}
+
+function applyAgentStatusData(state: CoreState, event: RunEvent): CoreState {
+  const previousStatuses = state.executionStatuses;
+  const reconciled =
+    Object.keys(state.activeExecutions).length === 0
+      ? previousStatuses
+      : reconcileExecutionStatuses(previousStatuses, state.activeExecutions);
+  const executionStatuses = applyExecutionStatus(reconciled, event);
+  const usage = applyExecutionStatusUsage(state.usage, previousStatuses, executionStatuses, event);
+  if (executionStatuses === previousStatuses && usage === state.usage) return state;
   return cloneCoreStateWith(state, {executionStatuses, usage});
 }
 
@@ -1728,7 +1711,6 @@ import {
   configurationFailureContent,
   eventToTranscriptEntry,
   foldTranscriptEntry,
-  OpenToolCallIndex,
   RUN_TRANSCRIPT,
   TranscriptBuffer,
   type TranscriptEntry as TranscriptModuleEntry,

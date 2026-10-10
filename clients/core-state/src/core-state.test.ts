@@ -10,6 +10,8 @@ import {
   type CoreRunStatus,
   type CoreState,
   DEFAULT_CHAT_THREAD_ID,
+  executionStatusFor,
+  hasActiveAgentTiming,
   hasRunEnded,
   initialCoreState,
   latestDiagnosticChange,
@@ -19,10 +21,8 @@ import {
   reduceEventRebootstrap,
   reduceResponseEvents,
   reduceSnapshot,
-} from './core-state.js';
-import {executionStatusFor} from './execution-status.js';
-import {hasActiveAgentTiming} from './round-timing.js';
-import {roundAgentElapsedMs} from './run-map.js';
+  roundAgentElapsedMs,
+} from './index.js';
 
 describe('core state projection', () => {
   it('latches the first non-empty run identity before stale-event checks', () => {
@@ -260,6 +260,20 @@ describe('core state projection', () => {
 
     expect(replayed).toBe(once);
     expect(replayed.transcript.map(entry => entry.content)).toEqual(['one']);
+  });
+
+  it('counts an unknown event-data kind while retaining the stream cursor', () => {
+    const future = {
+      ...outputEvent(1, ''),
+      type: 'future_event',
+      data: {kind: 'future_event_data', detail: 'preserved by the wire client'},
+    } as unknown as RunEvent;
+
+    const projected = reduceEvent(initialCoreState(), future);
+
+    expect(projected.sequence).toBe(1);
+    expect(projected.unknownEventKinds).toBe(1);
+    expect(reduceEvent(projected, outputEvent(2, 'known')).unknownEventKinds).toBe(1);
   });
 
   it('preserves published run-map arrays through core-state clone paths', () => {
@@ -1199,6 +1213,16 @@ describe('whether a run has ended', () => {
     const state = reduceSnapshot(initialCoreState(), snapshot);
 
     expect(hasRunEnded(state)).toBe(true);
+  });
+
+  it('treats a forward-compatible run status as non-terminal', () => {
+    const snapshot = {
+      run_id: 'run',
+      status: 'waiting_for_capacity',
+      sequence: 4,
+    } as unknown as RunSnapshot;
+
+    expect(hasRunEnded(reduceSnapshot(initialCoreState(), snapshot))).toBe(false);
   });
 
   // A resumed run replays the previous process's failure ahead of its own

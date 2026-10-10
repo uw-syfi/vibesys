@@ -20,26 +20,6 @@ interface ExecutionUsage {
   model: string | null;
 }
 
-interface StatusUsageSource {
-  executionId: string;
-  sequence: number;
-  generationStartedAt: string | null;
-  status: ExecutionStatus;
-}
-
-interface ResolvedStatusUsageSource {
-  generationStartedAt: string | null;
-  status: ExecutionStatus;
-}
-
-interface UsageModelBackfill {
-  model: string | null;
-  unresolved: boolean;
-}
-
-const statusUsageSources = new WeakMap<object, StatusUsageSource>();
-const unresolvedStatusUsageModels = new WeakSet<object>();
-
 /** Returns status only when it belongs to the active execution generation. */
 export function executionStatusFor(
   statuses: Readonly<StatusMap>,
@@ -86,7 +66,6 @@ export function applyExecutionStatusUsage(
   current: ExecutionUsage | null,
   previousStatuses: StatusMap,
   nextStatuses: StatusMap,
-  active: ActiveExecutionMap,
   event: RunEvent,
 ): ExecutionUsage | null {
   const raw = executionStatusData(event);
@@ -95,13 +74,11 @@ export function applyExecutionStatusUsage(
   if (rawInputTokens == null) return current;
   const executionId = executionIdentity(event);
   if (executionId === null) {
-    const usage: ExecutionUsage = {
+    return {
       inputTokens: rawInputTokens,
       contextWindow: raw.context_window ?? current?.contextWindow ?? null,
       model: current?.model ?? null,
     };
-    if (needsModelBackfill(current)) unresolvedStatusUsageModels.add(usage);
-    return usage;
   }
   const status = nextStatuses[executionId];
   if (
@@ -111,106 +88,11 @@ export function applyExecutionStatusUsage(
   ) {
     return current;
   }
-  const usage: ExecutionUsage = {
+  return {
     inputTokens: status.inputTokens,
     contextWindow: status.contextWindow,
     model: current?.model ?? null,
   };
-  statusUsageSources.set(usage, {
-    executionId,
-    sequence: status.sequence,
-    generationStartedAt: active[executionId]?.startedAt ?? null,
-    status,
-  });
-  if (needsModelBackfill(current)) unresolvedStatusUsageModels.add(usage);
-  return usage;
-}
-
-/** Restores fields supplied by an older status when a partial tail status owns usage. */
-export function mergeExecutionStatusUsagePrefix(
-  usage: ExecutionUsage | null,
-  statuses: StatusMap,
-  olderStatuses: StatusMap,
-  prefixEvents: readonly RunEvent[],
-  olderUsage: ExecutionUsage | null = null,
-): ExecutionUsage | null {
-  if (usage === null) return null;
-  const olderUsageCandidate = olderUsage === usage ? null : olderUsage;
-  const source = statusUsageSources.get(usage);
-  if (source === undefined) {
-    return mergeUnresolvedUsageModel(usage, olderUsageCandidate);
-  }
-  const resolved = resolveStatusUsageSource(source, statuses, olderStatuses, prefixEvents);
-  if (resolved.status.inputTokens === null) return usage;
-  const model = backfillUsageModel(usage, olderUsageCandidate);
-  const merged: ExecutionUsage = {
-    inputTokens: resolved.status.inputTokens,
-    contextWindow: resolved.status.contextWindow,
-    model: model.model,
-  };
-  statusUsageSources.set(merged, {
-    ...source,
-    generationStartedAt: resolved.generationStartedAt,
-    status: resolved.status,
-  });
-  if (model.unresolved) unresolvedStatusUsageModels.add(merged);
-  return merged;
-}
-
-/** Preserves identity unless a source-less status usage still needs an older model. */
-function mergeUnresolvedUsageModel(
-  usage: ExecutionUsage,
-  olderUsage: ExecutionUsage | null,
-): ExecutionUsage {
-  if (!unresolvedStatusUsageModels.has(usage) || olderUsage === null) return usage;
-  const model = backfillUsageModel(usage, olderUsage);
-  const merged = {...usage, model: model.model};
-  if (model.unresolved) unresolvedStatusUsageModels.add(merged);
-  return merged;
-}
-
-/** Resolves the status fields owned by the usage-producing suffix update. */
-function resolveStatusUsageSource(
-  source: StatusUsageSource,
-  statuses: StatusMap,
-  olderStatuses: StatusMap,
-  prefixEvents: readonly RunEvent[],
-): ResolvedStatusUsageSource {
-  const generationStartedAt =
-    source.generationStartedAt ??
-    latestExecutionStart(prefixEvents, source.executionId, source.sequence);
-  const older = olderStatuses[source.executionId];
-  const eligibleOlder =
-    older !== undefined &&
-    (generationStartedAt === null ||
-      Date.parse(older.observedAt) >= Date.parse(generationStartedAt))
-      ? older
-      : undefined;
-  const projected = statuses[source.executionId];
-  const status =
-    projected !== undefined && projected.sequence === source.sequence
-      ? projected
-      : mergeStatus(eligibleOlder, source.status);
-  return {generationStartedAt, status};
-}
-
-/** Backfills only models that originated from status events without model metadata. */
-function backfillUsageModel(
-  usage: ExecutionUsage,
-  olderUsage: ExecutionUsage | null,
-): UsageModelBackfill {
-  if (!unresolvedStatusUsageModels.has(usage) || olderUsage === null) {
-    return {model: usage.model, unresolved: unresolvedStatusUsageModels.has(usage)};
-  }
-  const model = olderUsage.model;
-  return {
-    model,
-    unresolved: model === null && unresolvedStatusUsageModels.has(olderUsage),
-  };
-}
-
-function needsModelBackfill(current: ExecutionUsage | null): boolean {
-  return current === null || unresolvedStatusUsageModels.has(current);
 }
 
 /** Drops status for an execution that is no longer active. */
@@ -235,40 +117,6 @@ export function reconcileExecutionStatuses(
   return retained.length === entries.length ? statuses : Object.fromEntries(retained);
 }
 
-/** Merges an older prefix under a newer suffix, retaining each execution's latest status. */
-export function mergeExecutionStatusesPrefix(
-  older: StatusMap,
-  newer: StatusMap,
-  active: ActiveExecutionMap,
-): StatusMap {
-  const eligibleOlder = reconcileExecutionStatuses(older, active);
-  const eligibleNewer = reconcileExecutionStatuses(newer, active);
-  const merged = {...eligibleOlder};
-  for (const [executionId, status] of Object.entries(eligibleNewer)) {
-    const previous = merged[executionId];
-    if (
-      previous === undefined ||
-      status.sequence > previous.sequence ||
-      (status.sequence === 0 && previous.sequence === 0)
-    ) {
-      merged[executionId] = mergeStatus(previous, status);
-    }
-  }
-  return merged;
-}
-
-function mergeStatus(older: ExecutionStatus | undefined, newer: ExecutionStatus): ExecutionStatus {
-  if (older === undefined) return newer;
-  return {
-    ...newer,
-    progress: newer.progress ?? older.progress,
-    agentLabel: newer.agentLabel ?? older.agentLabel,
-    elapsedSeconds: newer.elapsedSeconds ?? older.elapsedSeconds,
-    inputTokens: newer.inputTokens ?? older.inputTokens,
-    contextWindow: newer.contextWindow ?? older.contextWindow,
-  };
-}
-
 /** Reads structured status from the two protocol events that carry it. */
 function executionStatusData(event: RunEvent): AgentStatusData | null {
   const data = event.data;
@@ -290,25 +138,4 @@ function executionIdentity(event: RunEvent): string | null {
  */
 function reportedInputTokens(value: number | null | undefined): number | null {
   return value != null && value > 0 ? value : null;
-}
-
-function latestExecutionStart(
-  events: readonly RunEvent[],
-  executionId: string,
-  throughSequence: number,
-): string | null {
-  let startedAt: string | null = null;
-  let latestSequence = -1;
-  for (const event of events) {
-    if (event.execution_id !== executionId || event.data?.kind !== 'agent_execution_started') {
-      continue;
-    }
-    const sequence = event.sequence ?? 0;
-    if (throughSequence > 0 && sequence > throughSequence) continue;
-    if (sequence >= latestSequence) {
-      latestSequence = sequence;
-      startedAt = event.timestamp;
-    }
-  }
-  return startedAt;
 }

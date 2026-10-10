@@ -5,6 +5,7 @@ import {
   type ProtocolResponse,
   type RequestInput,
   type RunEvent,
+  type ScheduleTimeout,
   ServerError,
   type ServerMessage,
   type ServerTransport,
@@ -307,11 +308,13 @@ export class SocketSessionController implements SessionController {
      * immediate instead of half a second away.
      */
     reconnectDelaysMs: readonly number[] = DEFAULT_RECONNECT_DELAYS_MS,
+    scheduleTimeout?: ScheduleTimeout,
   ) {
     this.#state = initialSessionState(themeName);
     this.#stream = new PersistentEventStream(client, {
       tail: BOOTSTRAP_TAIL,
       reconnectDelaysMs,
+      ...(scheduleTimeout === undefined ? {} : {scheduleTimeout}),
     });
   }
 

@@ -12,7 +12,6 @@ import {
   closeActiveAgentTimings,
   finishAgentTiming,
   hasActiveAgentTiming,
-  mergeAgentTimingPrefix,
   type RoundTimingState,
   startAgentTiming,
 } from './round-timing.js';
@@ -208,32 +207,6 @@ export function adoptRunMapArrays(target: object, source: RunMapProjection): voi
   }
 }
 
-/** Indexes arrays produced by a whole-history operation and publishes them lazily. */
-export function indexRunMapArrays(state: RunMapProjection): void {
-  // A whole-history merge can itself return an internal persistent array. Do
-  // not publish that proxy: materialize one ordinary consumer array, just as
-  // the incremental path does, then retain the persistent copy behind it.
-  const publishedRounds = publishProjectionValue([...state.rounds]);
-  const publishedPhases = publishProjectionValue([...state.phases]);
-  const rounds = runMapArrayFrom(publishedRounds);
-  const phases = runMapArrayFrom(publishedPhases);
-  phaseIndexes.set(phases, buildPhaseIndex(phases));
-  publishedArrays.set(rounds, publishedRounds);
-  publishedArrays.set(phases, publishedPhases);
-  publishedInternals.set(publishedRounds, rounds);
-  publishedInternals.set(publishedPhases, phases);
-  adoptRunMapArrays(
-    state,
-    publishRunMapState({
-      outerLoop: state.outerLoop,
-      expectedRoles: state.expectedRoles,
-      rounds,
-      phases,
-      lastEventTimestamp: state.lastEventTimestamp,
-    }),
-  );
-}
-
 function runMapInternal(state: RunMapProjection): RunMapInternal {
   const existing = (state as IndexedRunMapState)[RUN_MAP_INTERNAL];
   if (existing !== undefined) return existing;
@@ -373,115 +346,6 @@ export function phasesForRound(
   roundNumber: number | null,
 ): AgentPhase[] {
   return phases.filter(phase => phase.roundNumber === roundNumber);
-}
-
-/**
- * Merges a round list folded from older events under one folded from newer
- * events, as a backfilled history prefix does.
- *
- * `mergeRound` already resolves every scalar the way replay would: the newer
- * patch wins, the earliest start survives. Agent timing is the exception.
- * Intervals recorded on either side are both real, so they concatenate instead
- * of last-write-wins, and open starts union.
- *
- * Unmatched finishes retained in the newer suffix reconcile with starts in the
- * older prefix by event sequence, so a chunk boundary does not lose intervals.
- */
-export function mergeRoundLists(
-  older: readonly RoundState[],
-  newer: readonly RoundState[],
-): RoundState[] {
-  const merged = new Map<string, RoundState>();
-  const fallbackOrder: string[] = [];
-  for (const round of older) {
-    const token = roundKeyToken(round.key);
-    merged.set(token, round);
-    if (round.key.kind === 'label') fallbackOrder.push(token);
-  }
-  for (const round of newer) {
-    const token = roundKeyToken(round.key);
-    const existing = merged.get(token);
-    merged.set(token, existing === undefined ? round : mergeRoundPrefix(existing, round));
-    if (existing === undefined && round.key.kind === 'label') fallbackOrder.push(token);
-  }
-  const numbered = [...merged.values()]
-    .filter(round => round.key.kind === 'number')
-    .sort((left, right) => numberedRound(left) - numberedRound(right));
-  const fallback = fallbackOrder.flatMap(token => {
-    const round = merged.get(token);
-    return round === undefined ? [] : [round];
-  });
-  return [...numbered, ...fallback];
-}
-
-/**
- * Merges a phase list folded from older events under one folded from newer
- * events.
- *
- * A phase is identified by role, round, and execution id. A newer phase that
- * carries an execution id lands on the matching older phase, else on the slot
- * the older fold seeded for that role, following `upsertPhase`'s precedence. A
- * newer phase with no execution id is a slot the newer fold seeded for itself;
- * replay would never have seeded it once the older phases existed, so it is
- * dropped when the older list already covers that role and round.
- */
-export function mergePhaseLists(
-  older: readonly AgentPhase[],
-  newer: readonly AgentPhase[],
-): AgentPhase[] {
-  let merged = runMapArrayFrom(older);
-  phaseIndexes.set(merged, buildPhaseIndex(merged));
-  for (const phase of newer) {
-    const target = prefixPhaseTarget(merged, phase);
-    const existing = runMapArrayAt(merged, target);
-    if (existing !== undefined) {
-      merged = replacePhase(merged, target, mergePhase(existing, phase));
-      continue;
-    }
-    if (
-      phase.executionId === undefined &&
-      phaseSlotFor(phaseIndexFor(merged), phase) !== undefined
-    ) {
-      continue;
-    }
-    merged = appendPhase(merged, phase);
-  }
-  return merged;
-}
-
-function mergeRoundPrefix(older: RoundState, newer: RoundState): RoundState {
-  const round = mergeRound(older, newer);
-  const timing = mergeAgentTimingPrefix(older, newer);
-  const preserveRunBoundary =
-    older.closedByRunBoundary === true && newer.closedByRoundFinished !== true;
-  return {
-    ...round,
-    // A resume keeps the interrupted round closed even once its next attempt
-    // starts. This matches `applyRoundEvent`, which never reopens a terminal
-    // round during a chronological replay.
-    ...(preserveRunBoundary
-      ? {
-          status: older.status,
-          ...(older.finishedAt === undefined ? {} : {finishedAt: older.finishedAt}),
-          closedByRunBoundary: true as const,
-        }
-      : isRoundClosed(older.status) && !isRoundClosed(newer.status)
-        ? {status: older.status}
-        : {}),
-    ...timing,
-  };
-}
-
-/** Where `patch` lands in `phases` under a prefix merge, or -1 to append. */
-function prefixPhaseTarget(phases: AgentPhase[], patch: AgentPhase): number {
-  if (patch.executionId === undefined) return -1;
-  const slot = phaseSlotFor(phaseIndexFor(phases), patch);
-  return (
-    slot?.executions.get(patch.executionId) ??
-    slot?.placeholderIndex ??
-    slot?.activeIndices[0] ??
-    -1
-  );
 }
 
 function phaseIndexFor(phases: AgentPhase[]): PhaseIndex {
@@ -798,10 +662,6 @@ function mergeRound(round: RoundState, patch: RoundState): RoundState {
       ? {activeAgentStarts: patch.activeAgentStarts ?? round.activeAgentStarts}
       : {}),
   };
-}
-
-function numberedRound(round: RoundState): number {
-  return round.key.kind === 'number' ? round.key.number : Number.POSITIVE_INFINITY;
 }
 
 function earliestTimestamp(
