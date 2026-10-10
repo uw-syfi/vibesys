@@ -345,7 +345,6 @@ class CoreRuntime[S: StrategyState]:
         self._flights: list[_Flight] = []
         self._dispatched = 0
         self._authorizations = 0
-        self._last_kind: str | None = None
         self._kinds: dict[str, int] = {}
         # A delivery failure waits here, with publishing paused, until nothing is running.
         self._publication_failure: OSError | ContractError | None = None
@@ -935,7 +934,6 @@ class CoreRuntime[S: StrategyState]:
         for event in outcome.owner_events:
             self._validate_owner_event(intent.request, event)
         self._dispatched += 1
-        self._last_kind = intent.request.kind
         self._kinds[intent.request.kind] = self._kinds.get(intent.request.kind, 0) + 1
         self._queue.append(
             _Input[S](

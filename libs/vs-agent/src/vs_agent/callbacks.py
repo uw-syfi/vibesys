@@ -99,8 +99,6 @@ class AgentLogger:
         self._clock = clock or MonotonicClock()
         self._start_time = self._clock.now()
         self._input_tokens = 0
-        # Most recent usage dict from the cli backend (see ``update_usage``).
-        self._latest_usage: dict[str, Any] | None = None
         self._context_window_lookup = context_window_lookup or _default_context_window_lookup
         self._context_window = self._context_window_lookup(model_name)
         self._pending_tool_calls: dict[str, deque[str]] = defaultdict(deque)
@@ -326,7 +324,6 @@ class AgentLogger:
         """
         if not usage:
             return
-        self._latest_usage = usage
         input_tokens = usage.get("input_tokens") or 0
         if input_tokens:
             self._input_tokens = input_tokens
