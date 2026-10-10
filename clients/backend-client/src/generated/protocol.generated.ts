@@ -259,7 +259,8 @@ export type EventType =
   | "gate_finished"
   | "workspace_snapshot"
   | "run_configured"
-  | "framework_warning";
+  | "framework_warning"
+  | "async_operation_lifecycle";
 export type Text2 = string;
 /**
  * Lifecycle and command states reported in events.
@@ -302,6 +303,7 @@ export type Data =
       | WorkspaceSnapshotData
       | RunConfiguredData
       | FrameworkWarningData
+      | AsyncOperationLifecycleData
     )
   | null;
 export type Kind1 = "chat";
@@ -465,6 +467,34 @@ export type Detail1 = string | null;
  */
 export type FrameworkSource4 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel2 = string | null;
+export type Kind31 = "async_operation_lifecycle";
+/**
+ * Framework-owned categories of asynchronous operation.
+ */
+export type AsyncOperationKind = "evaluation" | "profiler";
+export type OperationId = string;
+/**
+ * Union of backend-neutral lifecycle states published by operation services.
+ */
+export type AsyncOperationState =
+  | "submitted"
+  | "queued"
+  | "starting"
+  | "running"
+  | "succeeded"
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "interrupted"
+  | "superseded"
+  | "timed_out";
+export type Revision2 = number | null;
+export type ScopeId = string | null;
+export type CurrentStage = string | null;
+/**
+ * Closed set of framework subsystems that emit framework events.
+ */
+export type FrameworkSource5 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type Events = RunEvent[];
 export type Round = number;
 export type PerfMetric1 = number;
@@ -1347,6 +1377,20 @@ export interface FrameworkWarningData {
   detail?: Detail1;
   source?: FrameworkSource4;
   source_label?: SourceLabel2;
+  [k: string]: unknown;
+}
+/**
+ * Backend-neutral lifecycle fact for host-owned asynchronous work.
+ */
+export interface AsyncOperationLifecycleData {
+  kind: Kind31;
+  operation_kind: AsyncOperationKind;
+  operation_id: OperationId;
+  state: AsyncOperationState;
+  revision?: Revision2;
+  scope_id?: ScopeId;
+  current_stage?: CurrentStage;
+  source?: FrameworkSource5;
   [k: string]: unknown;
 }
 /**

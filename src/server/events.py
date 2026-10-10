@@ -83,6 +83,7 @@ class EventType(StrEnum):
     WORKSPACE_SNAPSHOT = "workspace_snapshot"
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
+    ASYNC_OPERATION_LIFECYCLE = "async_operation_lifecycle"
 
 
 class EventStatus(StrEnum):
@@ -119,6 +120,29 @@ class FrameworkSource(StrEnum):
     GPU = "gpu"
     SKYPILOT = "skypilot"
     OTHER = "other"
+
+
+class AsyncOperationKind(StrEnum):
+    """Framework-owned categories of asynchronous operation."""
+
+    EVALUATION = "evaluation"
+    PROFILER = "profiler"
+
+
+class AsyncOperationState(StrEnum):
+    """Union of backend-neutral lifecycle states published by operation services."""
+
+    SUBMITTED = "submitted"
+    QUEUED = "queued"
+    STARTING = "starting"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELED = "canceled"
+    INTERRUPTED = "interrupted"
+    SUPERSEDED = "superseded"
+    TIMED_OUT = "timed_out"
 
 
 class EventPayload(BaseModel):
@@ -462,6 +486,23 @@ class FrameworkWarningData(EventPayload):
     source_label: str | None = None
 
 
+class AsyncOperationLifecycleData(EventPayload):
+    """Backend-neutral lifecycle fact for host-owned asynchronous work."""
+
+    kind: Literal["async_operation_lifecycle"] = "async_operation_lifecycle"
+    operation_kind: AsyncOperationKind
+    # Plain `str`, not `Field(min_length=1)` as the core payload declares it:
+    # the wire schema generator's supported keyword set
+    # (`_RESPONSE_DESCRIPTOR_KEYWORDS` in `server.api.schema`) has no
+    # `minLength`, and core already enforces non-emptiness at the source.
+    operation_id: str
+    state: AsyncOperationState
+    revision: int | None = Field(default=None, ge=0)
+    scope_id: str | None = None
+    current_stage: str | None = None
+    source: FrameworkSource = FrameworkSource.LOOP
+
+
 EventData = Annotated[
     ChatData
     | ChatThreadCreatedData
@@ -491,7 +532,8 @@ EventData = Annotated[
     | GateFinishedData
     | WorkspaceSnapshotData
     | RunConfiguredData
-    | FrameworkWarningData,
+    | FrameworkWarningData
+    | AsyncOperationLifecycleData,
     Field(discriminator="kind"),
 ]
 
