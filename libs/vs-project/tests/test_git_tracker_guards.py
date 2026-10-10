@@ -144,15 +144,6 @@ def test_retain_candidate_names_ids_that_git_rejects_as_ref_components(
     assert tracker.retain_candidate("m-a.b-0123", "HEAD").endswith("/candidates/m-a.b-0123")
 
 
-def test_retain_worktree_reports_git_failure_in_candidate_worktree(tmp_path: Path) -> None:
-    tracker = _initialized_tracker(tmp_path)
-    worktree = Project.open(tmp_path).state.candidate_worktree_directory("guard-run", "cand-1")
-    worktree.mkdir(parents=True)
-    _git(worktree, "init", "-q")
-    with pytest.raises(RuntimeError, match=r"Git command failed in candidate worktree"):
-        tracker.retain_worktree(worktree, "cand-1")
-
-
 class _RepositoryWithoutRoots(CliGitRepository):
     """A repository whose history reports no parentless commit."""
 

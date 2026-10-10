@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.inputs import ProfileGuidedInput
-from vibesys.metrics import MetricSpace, Objective
-
-if TYPE_CHECKING:
-    from vibesys.inputs import BenchmarkResult
+from vibesys.metrics import MetricSpace
 
 PortableText = Annotated[str, Field(min_length=1, max_length=256)]
 
@@ -29,16 +26,3 @@ class AgentOrchestrationOptions(BaseModel):
     operator_constraints: tuple[str, ...] = ()
     metric_space: MetricSpace = Field(default_factory=MetricSpace)
     profile_guided: ProfileGuidedInput | None = None
-
-
-def recorded_metric_space(
-    metrics: MetricSpace, benchmark_result: BenchmarkResult | None
-) -> MetricSpace:
-    """Include the benchmark axis without losing task noise tolerance."""
-    if benchmark_result is None or metrics.axis(benchmark_result.metric) is not None:
-        return metrics
-    return metrics.model_copy(
-        update={
-            "objectives": (*metrics.objectives, Objective(benchmark_result.metric, "max")),
-        }
-    )
