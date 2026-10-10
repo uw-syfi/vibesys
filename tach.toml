@@ -747,7 +747,7 @@ depends_on = []
 [[modules]]
 path = "vs_sim.virtual"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.trace"]
+depends_on = ["vs_sim.randomness", "vs_sim.trace"]
 
 [[modules]]
 path = "vs_sim.waits"

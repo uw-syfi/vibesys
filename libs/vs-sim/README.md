@@ -27,5 +27,9 @@ interfaces, so a test can run it on the simulator.
 the repository's root `conftest.py`. It runs unmarked async tests on the virtual clock,
 provides the `sim` fixture (`vs_sim.api.testing.Sim`), prints the seed of a failing sim
 test (`--sim-seed=N` replays it) and, with `--sim-determinism-check`, runs each sim test
-twice and compares their event traces. Domain fakes register with
+twice and compares their event traces. `--sim-explore=N` runs each selected sim test under
+N different seeds, each also breaking scheduling ties (ready callbacks, equal-time timers)
+in its own seeded order via `run_virtual(schedule_seed=...)`; a failure prints
+`--sim-seed=S --sim-schedule-seed=S` to replay it. The pull-request job `seed-exploration`
+uses it on the tests a PR adds or changes (`scripts/explore_changed_tests.py`). Domain fakes register with
 `vs_sim.api.testing.WORLDS` and are built per test by `sim.world(name)`.

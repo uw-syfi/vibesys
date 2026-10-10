@@ -5,6 +5,7 @@ from __future__ import annotations
 from vs_sim.randomness import SeededRandom, derive_seed
 
 SEED_OPTION = "--sim-seed"
+SCHEDULE_SEED_OPTION = "--sim-schedule-seed"
 
 
 def seed_for_test(test_id: str, override: int | None = None) -> int:
@@ -16,9 +17,15 @@ def seed_for_test(test_id: str, override: int | None = None) -> int:
     return override if override is not None else derive_seed(0, test_id)
 
 
-def replay_hint(seed: int) -> str:
-    """The command-line option that runs a test under ``seed`` again."""
-    return f"{SEED_OPTION}={seed}"
+def explore_seed(test_id: str, run: int) -> int:
+    """The seed of exploration run ``run`` of ``test_id``; each run also seeds its schedule."""
+    return derive_seed(derive_seed(0, test_id), f"explore-{run}")
+
+
+def replay_hint(seed: int, schedule_seed: int | None = None) -> str:
+    """The command-line options that run a test under ``seed`` (and its schedule seed) again."""
+    hint = f"{SEED_OPTION}={seed}"
+    return hint if schedule_seed is None else f"{hint} {SCHEDULE_SEED_OPTION}={schedule_seed}"
 
 
 def random_for(seed: int, label: str) -> SeededRandom:

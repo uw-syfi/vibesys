@@ -20,11 +20,21 @@ What it does:
 * **``--sim-determinism-check``** runs each sim test twice with the same seed and compares
   the :class:`~vs_sim.api.testing.EventTrace` of the two runs (clock advances, task steps
   and input from outside the simulation), failing the second run at the first difference.
+* **Exploration** (``--sim-explore=N``, used by the pull-request CI step). Each selected sim
+  test runs ``N`` more times, every run under its own seed *and* its own schedule seed, so
+  work that is ready at the same time runs in a different order each time (see
+  ``run_virtual``). A test that passes only in the default order fails here, and the failure
+  prints ``--sim-seed=S --sim-schedule-seed=S`` to replay that exact run. Other tests (not
+  sim, not in a real-system tier) run ``--sim-repeat=K`` times to expose flakiness; real-system
+  tiers are deselected. ``--sim-explore-budget=SECONDS`` stops starting extra runs once that
+  much wall time has passed (the first run of every test always happens), and the terminal
+  summary reports how many runs happened and how long they took.
 """
 
 from __future__ import annotations
 
 import inspect
+import time
 from typing import TYPE_CHECKING
 
 import hypothesis
@@ -35,11 +45,12 @@ from _pytest.runner import runtestprotocol
 pytest.register_assert_rewrite("vs_sim.contracts")
 
 from vs_sim.api.testing import (  # noqa: E402  # LW-163810 [E402]; the assert-rewrite registration must run before vs_sim.contracts is first imported, which this import does.
+    SCHEDULE_SEED_OPTION,
     SEED_OPTION,
     EventTrace,
     Sim,
+    explore_seed,
     replay_hint,
-    run_virtual,
     seed_for_test,
 )
 
@@ -49,7 +60,23 @@ if TYPE_CHECKING:
 SIM_ATTRIBUTE = "_vs_sim"
 _ORIGINAL_INNER = "_vs_sim_inner_test"
 DEFAULT_REAL_TIERS = ["tests/e2e", "tests/slurm_cluster", "tests/minimal_container"]
-_TRACES = pytest.StashKey[list[EventTrace]]()
+_RUN = pytest.StashKey[int]()
+"""The exploration run (from 0) a sim test is currently in; absent outside exploration."""
+_EXPLORATION = pytest.StashKey["_Exploration"]()
+
+
+class _Exploration:
+    """What exploration planned, did and skipped, for the terminal summary and the budget."""
+
+    def __init__(self, budget: float | None) -> None:
+        self.started = time.monotonic()
+        self.budget = budget
+        self.planned = 0
+        self.done = 0
+        self.skipped = 0
+
+    def out_of_budget(self) -> bool:
+        return self.budget is not None and time.monotonic() - self.started >= self.budget
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -66,6 +93,33 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         default=False,
         help="run each sim test twice with the same seed and compare their event traces",
+    )
+    group.addoption(
+        SCHEDULE_SEED_OPTION,
+        type=int,
+        default=None,
+        help="break scheduling ties in every sim test by this seed (a failure prints the one to use)",
+    )
+    group.addoption(
+        "--sim-explore",
+        type=int,
+        default=0,
+        metavar="N",
+        help="run each selected sim test N times under different seeds and schedules",
+    )
+    group.addoption(
+        "--sim-repeat",
+        type=int,
+        default=0,
+        metavar="K",
+        help="with --sim-explore, run each selected non-sim test K times; real-system tiers are deselected",
+    )
+    group.addoption(
+        "--sim-explore-budget",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="with --sim-explore, start no extra run after this many wall seconds",
     )
     parser.addini(
         "sim_real_tiers",
@@ -124,8 +178,12 @@ def _is_sim_test(item: pytest.Item) -> bool:
     )
 
 
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Reject a test that asks for two schedulers."""
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Reject a test that asks for two schedulers; when exploring, keep only what can be repeated."""
+    if config.getoption("sim_explore") > 0:
+        repeatable = [item for item in items if _is_explorable(item)]
+        config.hook.pytest_deselected(items=[item for item in items if item not in repeatable])
+        items[:] = repeatable
     for item in items:
         if (
             isinstance(item, pytest.Function)
@@ -145,13 +203,29 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             )
 
 
+def _is_explorable(item: pytest.Item) -> bool:
+    """Exploration repeats sim tests under new seeds, and repeats other tests outside the real tiers."""
+    if _is_sim_test(item):
+        return True
+    return (
+        item.config.getoption("sim_repeat") > 0
+        and isinstance(item, pytest.Function)
+        and not _in_real_tier(item)
+    )
+
+
 def _sim_for(item: pytest.Item) -> Sim:
     existing = getattr(item, SIM_ATTRIBUTE, None)
     if existing is not None:
         return existing
-    seed = seed_for_test(item.nodeid, item.config.getoption("sim_seed"))
+    run = item.stash.get(_RUN, None)
+    if run is None:
+        seed = seed_for_test(item.nodeid, item.config.getoption("sim_seed"))
+        schedule_seed = item.config.getoption("sim_schedule_seed")
+    else:
+        seed = schedule_seed = explore_seed(item.nodeid, run)
     trace = EventTrace() if item.config.getoption("sim_determinism_check") else None
-    sim = Sim(seed=seed, trace=trace)
+    sim = Sim(seed=seed, trace=trace, schedule_seed=schedule_seed)
     setattr(item, SIM_ATTRIBUTE, sim)
     return sim
 
@@ -187,14 +261,14 @@ def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> object | None:
         handle = pyfuncitem.obj.hypothesis
 
         def run_example(*args: object, **kwargs: object) -> None:
-            run_virtual(sim_for_test.clock, inner(*args, **kwargs), trace=sim_for_test.trace)
+            sim_for_test.run(inner(*args, **kwargs))
 
         setattr(handle, _ORIGINAL_INNER, inner)
         handle.inner_test = run_example
         return None
     parameters = inspect.signature(pyfuncitem.obj).parameters
     arguments = {name: pyfuncitem.funcargs[name] for name in parameters}
-    run_virtual(sim_for_test.clock, pyfuncitem.obj(**arguments), trace=sim_for_test.trace)
+    sim_for_test.run(pyfuncitem.obj(**arguments))
     return True
 
 
@@ -207,14 +281,20 @@ def pytest_runtest_makereport(
     sim_for_test = getattr(item, SIM_ATTRIBUTE, None)
     if report.failed and sim_for_test is not None:
         report.sections.append(
-            ("vs-sim", f"seed {sim_for_test.seed}; replay with {replay_hint(sim_for_test.seed)}")
+            (
+                "vs-sim",
+                f"seed {sim_for_test.seed}; replay with "
+                f"{replay_hint(sim_for_test.seed, sim_for_test.schedule_seed)}",
+            )
         )
     return report
 
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> bool | None:
-    """With ``--sim-determinism-check``, run a sim test twice and compare the traces."""
+    """Run a sim test twice and compare traces (``--sim-determinism-check``), or explore it (``--sim-explore``)."""
+    if item.config.getoption("sim_explore") > 0 and isinstance(item, pytest.Function):
+        return _explore(item, nextitem)
     if not item.config.getoption("sim_determinism_check") or not _is_sim_test(item):
         return None
     item.ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
@@ -236,6 +316,56 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     _log(item, second)
     item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
     return True
+
+
+def _exploration(config: pytest.Config) -> _Exploration:
+    state = config.stash.get(_EXPLORATION, None)
+    if state is None:
+        state = _Exploration(config.getoption("sim_explore_budget"))
+        config.stash[_EXPLORATION] = state
+    return state
+
+
+def _explore(item: pytest.Function, nextitem: pytest.Item | None) -> bool:
+    """Run the test ``N`` (sim) or ``K`` (other) times, stopping at the first failure or the budget."""
+    config = item.config
+    state = _exploration(config)
+    is_sim = _is_sim_test(item)
+    runs = config.getoption("sim_explore" if is_sim else "sim_repeat")
+    state.planned += runs
+    item.ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
+    reports: list[pytest.TestReport] = []
+    for run in range(runs):
+        # The first run of a test always happens: a budget bounds the extra work, not coverage.
+        if run > 0 and state.out_of_budget():
+            state.skipped += runs - run
+            break
+        if is_sim:
+            item.stash[_RUN] = run
+        reports = runtestprotocol(item, nextitem=nextitem, log=False)
+        state.done += 1
+        if not all(report.passed or report.skipped for report in reports):
+            state.skipped += runs - run - 1
+            break
+        if getattr(item, SIM_ATTRIBUTE, None) is not None:
+            delattr(item, SIM_ATTRIBUTE)
+    _log(item, reports)
+    item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
+    return True
+
+
+def pytest_terminal_summary(
+    terminalreporter: pytest.TerminalReporter, config: pytest.Config
+) -> None:
+    """Report what exploration ran, so its cost is visible in every log."""
+    state = config.stash.get(_EXPLORATION, None)
+    if state is None:
+        return
+    elapsed = time.monotonic() - state.started
+    terminalreporter.write_line(
+        f"vs-sim exploration: {state.done} of {state.planned} planned runs in {elapsed:.1f} s"
+        f" ({state.skipped} not run: budget or an earlier failure)"
+    )
 
 
 def _take_trace(item: pytest.Item) -> EventTrace | None:
