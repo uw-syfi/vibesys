@@ -55,7 +55,8 @@ that item instead of opening a duplicate.
 - **Changes.** Update the roadmap body when the plan changes, with a dated
   one-line note of what changed and why. Post a short progress comment at
   milestones (a sub-issue closed, a plan change, a blocker), not on a timer.
-- **Closing.** Close the roadmap when its last sub-issue closes, with a comment
+- **Closing.** Close the roadmap when its End state is reached (all known
+  sub-issues closed and no work remains toward it), with a comment
   summarizing the outcome and where follow-ups went. Parked work closes as not
   planned with the reason, or stays open with Status `Blocked` if it will
   resume.
