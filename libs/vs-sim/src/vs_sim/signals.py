@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import os
 import signal
+import sys
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -49,14 +51,19 @@ class ProcessSignaller(Protocol):
 
 
 class PidfdProcessSignaller:
-    """Linux pidfd-backed signalling that cannot target a reused process ID."""
+    """Linux pidfd-backed signalling that cannot target a reused process ID.
+
+    It uses the interpreter's pidfd wrappers when it has them and calls the
+    Linux system calls directly otherwise; ``direct_syscalls`` forces the latter.
+    """
+
+    def __init__(self, *, direct_syscalls: bool = False) -> None:
+        """Choose the interpreter wrappers (default) or force direct system calls."""
+        self._direct_syscalls = direct_syscalls
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Open ``pid``, revalidate caller identity, and send SIGTERM through its pidfd."""
-        pidfd_open = getattr(os, "pidfd_open", None)
-        pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
-        if pidfd_open is None or pidfd_send_signal is None:
-            raise NotImplementedError("safe process signalling requires Linux pidfds")
+        pidfd_open, pidfd_send_signal = _pidfd_calls(direct=self._direct_syscalls)
         descriptor = pidfd_open(pid)
         try:
             if not current():
@@ -65,3 +72,44 @@ class PidfdProcessSignaller:
             return True
         finally:
             os.close(descriptor)
+
+
+# Linux assigns these two system calls one number on every architecture (they
+# arrived after the syscall tables were unified), so they can be called directly
+# when the interpreter was built without the wrappers, as the standalone builds
+# uv installs are.
+_SYS_PIDFD_SEND_SIGNAL = 424
+_SYS_PIDFD_OPEN = 434
+
+
+def _pidfd_calls(*, direct: bool) -> tuple[Callable[[int], int], Callable[[int, int], None]]:
+    """The interpreter's pidfd wrappers, else (or when *direct*) Linux system calls."""
+    pidfd_open = getattr(os, "pidfd_open", None)
+    pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
+    if not direct and pidfd_open is not None and pidfd_send_signal is not None:
+        return pidfd_open, pidfd_send_signal
+    if not sys.platform.startswith("linux"):
+        raise NotImplementedError("safe process signalling requires Linux pidfds")
+    libc = ctypes.CDLL(None, use_errno=True)
+
+    def checked(result: int) -> int:
+        if result < 0:
+            number = ctypes.get_errno()
+            raise OSError(number, os.strerror(number))
+        return result
+
+    def open_pidfd(pid: int) -> int:
+        return checked(libc.syscall(_SYS_PIDFD_OPEN, ctypes.c_int(pid), ctypes.c_uint(0)))
+
+    def send_signal(descriptor: int, number: int) -> None:
+        checked(
+            libc.syscall(
+                _SYS_PIDFD_SEND_SIGNAL,
+                ctypes.c_int(descriptor),
+                ctypes.c_int(number),
+                None,
+                ctypes.c_uint(0),
+            )
+        )
+
+    return open_pidfd, send_signal
