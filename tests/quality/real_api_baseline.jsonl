@@ -3,16 +3,6 @@
 {"path": "libs/vs-agent/src/vs_agent/images.py", "rule": "subprocess", "count": 9}
 {"path": "libs/vs-agent/src/vs_agent/orphans.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-agent/tests/test_hostsandbox.py", "rule": "subprocess", "count": 2}
-{"path": "libs/vs-agent/tests/test_image_push.py", "rule": "subprocess", "count": 8}
-{"path": "libs/vs-agent/tests/test_images.py", "rule": "subprocess", "count": 3}
-{"path": "libs/vs-agent/tests/test_orphans.py", "rule": "subprocess", "count": 4}
-{"path": "libs/vs-agent/tests/test_session_launch.py", "rule": "threading", "count": 5}
-{"path": "libs/vs-agent/tests/test_session_launch.py", "rule": "time", "count": 3}
-{"path": "libs/vs-agent/tests/test_sessions_contract.py", "rule": "bare_wait", "count": 3}
-{"path": "libs/vs-agent/tests/test_sessions_contract.py", "rule": "threading", "count": 5}
-{"path": "libs/vs-agent/tests/test_stream_transport.py", "rule": "bare_wait", "count": 1}
-{"path": "libs/vs-agent/tests/test_stream_transport.py", "rule": "threading", "count": 4}
-{"path": "libs/vs-agent/tests/test_task_image.py", "rule": "subprocess", "count": 5}
 {"path": "libs/vs-core/tests/test_payload_contracts.py", "rule": "bare_wait", "count": 1}
 {"path": "libs/vs-core/tests/test_payload_contracts.py", "rule": "subprocess", "count": 5}
 {"path": "libs/vs-evaluation/src/vs_evaluation/agent_service.py", "rule": "socket", "count": 8}

@@ -9,7 +9,6 @@ their run environment resolves the agent image it needs to run from.
 
 from __future__ import annotations
 
-import subprocess
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
@@ -21,6 +20,7 @@ from vs_agent.api.images import (
     ensure_pushed,
     push_agent_image,
 )
+from vs_agent.api.testing import DockerResult, docker_result, docker_timed_out
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -73,7 +73,7 @@ class _FakeRegistryRunner:
         *,
         cwd: Path,
         timeout: float,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> DockerResult:
         del cwd, timeout
         normalized = tuple(argv)
         self.calls.append(normalized)
@@ -81,28 +81,24 @@ class _FakeRegistryRunner:
             if marker in normalized:
                 raise exc
         if normalized[1] == "tag":
-            return subprocess.CompletedProcess(normalized, self.tag_returncode, "", "")
+            return docker_result(normalized, self.tag_returncode, "", "")
         if normalized[1] == "push":
-            return subprocess.CompletedProcess(
-                normalized, self.push_returncode, "", self.push_stderr
-            )
+            return docker_result(normalized, self.push_returncode, "", self.push_stderr)
         if normalized[1] == "manifest":
             reference = normalized[-1]
             returncode = (
                 1 if reference in self.unverifiable_references else self.manifest_returncode
             )
-            return subprocess.CompletedProcess(normalized, returncode, "", "")
+            return docker_result(normalized, returncode, "", "")
         if normalized[1] == "image" and normalized[2] == "inspect":
             # The cached-digest fast path: `docker image inspect --format
             # {{json .RepoDigests}} <image_id>`.
             stdout = self.cached_repo_digests if self.cached_repo_digests is not None else "[]"
-            return subprocess.CompletedProcess(normalized, 0, stdout, "")
+            return docker_result(normalized, 0, stdout, "")
         if normalized[1] == "inspect":
             # The post-push digest resolution: `docker inspect --format
             # {{json .RepoDigests}} <tag>`.
-            return subprocess.CompletedProcess(
-                normalized, self.inspect_returncode, self.inspect_stdout, ""
-            )
+            return docker_result(normalized, self.inspect_returncode, self.inspect_stdout, "")
         _failure_message = f"unexpected command: {normalized}"
         raise AssertionError(_failure_message)
 
@@ -194,7 +190,7 @@ class TestPushAgentImage:
             push_agent_image(_IMAGE_ID, command_runner=runner)
 
     def test_timeout_raises(self) -> None:
-        runner = _FakeRegistryRunner(raise_on={"tag": subprocess.TimeoutExpired("docker", 5)})
+        runner = _FakeRegistryRunner(raise_on={"tag": docker_timed_out("docker", 5)})
         with pytest.raises(ImagePushError, match="timed out"):
             push_agent_image(_IMAGE_ID, command_runner=runner)
 
@@ -214,7 +210,7 @@ class TestAgentImageIsPushed:
         assert agent_image_is_pushed(_DIGEST, command_runner=runner) is False
 
     def test_false_on_timeout(self) -> None:
-        runner = _FakeRegistryRunner(raise_on={"manifest": subprocess.TimeoutExpired("docker", 5)})
+        runner = _FakeRegistryRunner(raise_on={"manifest": docker_timed_out("docker", 5)})
         assert agent_image_is_pushed(_DIGEST, command_runner=runner) is False
 
 

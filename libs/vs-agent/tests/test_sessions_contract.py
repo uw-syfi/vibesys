@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from functools import partial
-from threading import Event
 from typing import TYPE_CHECKING
 
 import pytest
@@ -52,7 +50,7 @@ from vs_project.api import (
     RunExecutionRecord,
 )
 from vs_prompts.api import TemplateRenderer
-from vs_sim.api.testing import wait_until_started_sync
+from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -61,6 +59,7 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentInvocationStore
     from vs_project.api import StateNamespace
     from vs_prompts.api import RenderedPrompt
+    from vs_sim.api.testing import Sim
 
 
 KEY = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
@@ -212,20 +211,27 @@ def test_reused_identity_with_changed_payload_is_conflict(harness: _Harness) -> 
     assert harness.boundary.calls == 2
 
 
-def test_missing_and_recovered_unfinished_invocation_is_unknown(harness: _Harness) -> None:
+def test_missing_and_recovered_unfinished_invocation_is_unknown(
+    harness: _Harness, sim: Sim
+) -> None:
     assert isinstance(harness.sessions.inspect(KEY, "absent"), Unknown)
-    entered, release, ready = Event(), Event(), Event()
+    threads = sim.threads()
+    entered, release = threads.event(), threads.event()
 
     def block() -> None:
         entered.set()
-        ready.set()
-        release.wait()
+        release.wait(HANG_GUARD_S)
 
     harness.boundary.effect = block
-    with ThreadPoolExecutor(max_workers=1) as workers:
-        result = workers.submit(harness.sessions.resume, KEY, harness.message, "resume-1")
+    outcome: list[object] = []
+
+    def scenario() -> None:
+        resume = threads.spawn(
+            lambda: outcome.append(harness.sessions.resume(KEY, harness.message, "resume-1")),
+            name="resume",
+        )
         try:
-            wait_until_started_sync(ready, result)
+            entered.wait(HANG_GUARD_S)
             assert entered.is_set()
             assert isinstance(harness.sessions.inspect(KEY, "resume-1"), Pending)
             with pytest.raises(InvocationConflictError, match="active"):
@@ -243,7 +249,12 @@ def test_missing_and_recovered_unfinished_invocation_is_unknown(harness: _Harnes
             assert harness.boundary.calls == 2
         finally:
             release.set()
-    assert isinstance(result.result(), Completed)
+        resume.join(HANG_GUARD_S)
+
+    threads.run(scenario)
+    assert threads.errors == []
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], Completed)
 
 
 def test_unexpected_boundary_failure_is_unknown_and_never_replayed(harness: _Harness) -> None:
@@ -503,18 +514,21 @@ def test_strict_turn_identity_matches_adoption_and_prior_turn(
 
 
 @pytest.mark.parametrize("implementation", ["fake", "agentshim"])
-def test_session_cannot_adopt_while_turn_is_in_flight(tmp_path: Path, implementation: str) -> None:
-    entered = Event()
-    release = Event()
+def test_session_cannot_adopt_while_turn_is_in_flight(
+    tmp_path: Path, implementation: str, sim: Sim
+) -> None:
+    threads = sim.threads()
+    entered = threads.event()
+    release = threads.event()
 
     def block_turn(_request: object) -> FakeRun:
         entered.set()
-        release.wait()
+        release.wait(HANG_GUARD_S)
         return scripted_turn("codex", session_id="thread-1", text="done")
 
     def block_fake_turn(_request: AgentTurnRequest) -> None:
         entered.set()
-        release.wait()
+        release.wait(HANG_GUARD_S)
 
     launcher = (
         FakeProvider(answer="done", on_turn=block_fake_turn)
@@ -528,15 +542,24 @@ def test_session_cannot_adopt_while_turn_is_in_flight(tmp_path: Path, implementa
         policy=AgentExecutionPolicy(require_enforcement=False),
     )
     session = launcher.launch(spec)
+    texts: list[str] = []
+
+    def scenario() -> None:
+        turn = threads.spawn(
+            lambda: texts.append(session.run_turn(AgentTurnRequest(message="first")).text),
+            name="turn",
+        )
+        try:
+            entered.wait(HANG_GUARD_S)
+            assert not session.adopt("late-thread")
+        finally:
+            release.set()
+        turn.join(HANG_GUARD_S)
+
     try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            turn = pool.submit(session.run_turn, AgentTurnRequest(message="first"))
-            try:
-                wait_until_started_sync(entered, turn)
-                assert not session.adopt("late-thread")
-            finally:
-                release.set()
-            assert turn.result().text == "done"
+        threads.run(scenario)
+        assert threads.errors == []
+        assert texts == ["done"]
     finally:
         release.set()
         session.close()

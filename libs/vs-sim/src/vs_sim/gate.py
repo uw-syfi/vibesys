@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from vs_sim.concurrency import Event
+
 
 async def arrival[T](awaited: Awaitable[T], *operations: asyncio.Future[Any]) -> T:
     """Await *awaited* (an event wait or queue get) unless an operation ends first.
@@ -133,9 +135,7 @@ async def wait_until_started(
         raise AssertionError(message)
 
 
-def wait_until_started_sync(
-    started: threading.Event, operation: concurrent.futures.Future[Any]
-) -> None:
+def wait_until_started_sync(started: Event, operation: concurrent.futures.Future[Any]) -> None:
     """Return once *started* is set; surface the outcome of *operation* if it ends first.
 
     The test-thread form of :func:`wait_until_started`: a bare ``started.wait()``

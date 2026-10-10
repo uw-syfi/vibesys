@@ -9,7 +9,6 @@ real frames. Which providers take this path is read from agentshim's registry
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast
@@ -42,10 +41,12 @@ from vs_agent.api import (
     AgentTurnTimeoutError,
     SteerOutcome,
 )
-from vs_sim.api.testing import join_or_fail
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import start_thread, wait_until_started_sync
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from concurrent.futures import Future
     from pathlib import Path
 
     from agentshim.execution.process import SpawnRequest
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
     # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
     from vs_agent.shim_turns import LaunchedSession
     from vs_sandbox.api import DockerSandbox
+    from vs_sim.api import Event, Threads
 
 STREAM_PROVIDERS = tuple(agentshim.stream_provider_names())
 ONE_SHOT_PROVIDERS = tuple(
@@ -108,14 +110,20 @@ def test_every_stream_provider_has_a_script() -> None:
 @dataclass
 class _Observer:
     events: list[AgentEvent] = field(default_factory=list)
-    seen: dict[AgentEventKind, threading.Event] = field(default_factory=dict)
+    seen: dict[AgentEventKind, Event] = field(default_factory=dict)
+    threads: Threads = field(default_factory=OsThreads)
 
     def on_event(self, event: AgentEvent) -> None:
         self.events.append(event)
-        self.seen.setdefault(event.kind, threading.Event()).set()
+        self._seen(event.kind).set()
 
-    def wait_for(self, kind: AgentEventKind) -> None:
-        self.seen.setdefault(kind, threading.Event()).wait()
+    def _seen(self, kind: AgentEventKind) -> Event:
+        # setdefault is atomic, and the observer is called from the turn's thread.
+        return self.seen.setdefault(kind, self.threads.event())
+
+    def wait_for(self, kind: AgentEventKind, turn: Future[None]) -> None:
+        """Return once an event of *kind* arrived; surface the turn's outcome if it ends first."""
+        wait_until_started_sync(self._seen(kind), turn)
 
     def kinds(self) -> list[AgentEventKind]:
         return [event.kind for event in self.events]
@@ -245,13 +253,12 @@ def test_a_rate_limit_report_reaches_the_observer_while_the_turn_still_runs(
         except agentshim.TurnCancelledError as error:
             failures.append(error)
 
-    worker = threading.Thread(target=turn)
-    worker.start()
-    observer.wait_for(AgentEventKind.RATE_LIMIT)
+    worker = start_thread(turn)
+    observer.wait_for(AgentEventKind.RATE_LIMIT, worker)
     # The turn has not ended: the report arrived over the live process.
-    assert worker.is_alive()
+    assert not worker.done()
     session.cancel()
-    join_or_fail(worker)
+    worker.result()
 
     assert isinstance(failures[0], agentshim.TurnCancelledError)
 

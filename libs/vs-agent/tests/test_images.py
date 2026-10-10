@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import importlib.resources
 import re
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,6 +32,7 @@ from vs_agent.api import (
     RUST_TOOLCHAIN_VERSION,
 )
 from vs_agent.api.images import agent_image
+from vs_agent.api.testing import DockerResult, docker_result
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
@@ -65,16 +65,16 @@ class _FakeRunner:
         *,
         cwd: Path,
         timeout: float,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> DockerResult:
         normalized = tuple(argv)
         self.calls.append((normalized, cwd, timeout))
         if normalized[1] == "build":
-            return subprocess.CompletedProcess(("docker",), 0, "", "")
+            return docker_result(("docker",), 0, "", "")
         tag = normalized[-1]
         image_id = (
             self.task_image_id if tag.startswith("vibesys-task-build:") else self.agent_image_id
         )
-        return subprocess.CompletedProcess(("docker",), 0, image_id, "")
+        return docker_result(("docker",), 0, image_id, "")
 
 
 def _expected_version_args() -> tuple[str, ...]:

@@ -9,8 +9,6 @@
 {"path": "libs/vs-agent/tests/test_host_resource_declarations.py", "rule": "patch", "count": 4}
 {"path": "libs/vs-agent/tests/test_hostsandbox.py", "rule": "patch", "count": 11}
 {"path": "libs/vs-agent/tests/test_session_launch.py", "rule": "patch", "count": 2}
-{"path": "libs/vs-agent/tests/test_session_launch.py", "rule": "sleep", "count": 1}
-{"path": "libs/vs-agent/tests/test_session_launch.py", "rule": "timeout_verdict", "count": 1}
 {"path": "libs/vs-issue-tracker/tests/test_issue_board_core.py", "rule": "mock", "count": 4}
 {"path": "libs/vs-issue-tracker/tests/test_issue_board_core.py", "rule": "patch", "count": 1}
 {"path": "libs/vs-issue-tracker/tests/test_issue_board_core.py", "rule": "sleep", "count": 2}
