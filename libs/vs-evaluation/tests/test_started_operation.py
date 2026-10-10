@@ -145,7 +145,7 @@ def test_watching_for_a_held_step_never_moves_the_schedulers_time(yields: int) -
 
     async def scenario() -> None:
         executor = _SchedulerPollingExecutor(clock)
-        started = threading.Event()
+        started = asyncio.Event()
 
         async def step_starts() -> None:
             for _ in range(yields):
