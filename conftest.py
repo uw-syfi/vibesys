@@ -74,7 +74,7 @@ _SERIAL_GROUP = "serial"
 
 # Markers whose tests drive real processes, images or an exhaustive sweep and
 # carry their own, longer deadlines (the largest is a 1800 s image build). They
-# get a higher hard backstop than the 600 s default in pyproject.toml; a test
+# get a higher hard backstop than the 300 s default in pyproject.toml; a test
 # that sets `@pytest.mark.timeout` itself keeps its own value.
 _LONG_RUNNING_MARKERS = ("e2e", "real_contract", "slow")
 _LONG_RUNNING_TIMEOUT_S = 3600

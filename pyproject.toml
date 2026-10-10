@@ -108,18 +108,19 @@ pythonpath = [".", "packaging"]
 # A test still running after this many seconds dumps every thread's stack to
 # stderr (xdist workers inherit the controller's stderr, so it reaches the CI
 # log). It never kills or fails the test, so it is a diagnostic and not a
-# wall-clock assertion. It sits far above the slowest legitimate test.
-faulthandler_timeout = 300
+# wall-clock assertion. It sits above the slowest legitimate test (about 93 s).
+faulthandler_timeout = 120
 # Hard backstop for a hung test, not a test condition: no test may rely on it to
 # pass (a test synchronizes on the thing it waits for). CI's slowest legitimate
-# test takes about 93 s, so 600 s is more than six times that. `thread` dumps all
+# test takes about 93 s and a whole 16-way shard finishes in 2 to 2.5 minutes, so
+# 300 s is over three times the slowest test. `thread` dumps all
 # stacks and exits the worker process, which xdist reports as a failure of that
 # one test and replaces; `signal` would raise in a main thread that a hung
 # `asyncio.run` shutdown can keep blocked. Under xdist the plugin's own dump is
-# lost with the worker, so the stack in the log is faulthandler's, from 300 s.
+# lost with the worker, so the stack in the log is faulthandler's, from 120 s.
 # Tests marked e2e, real_contract or slow get a higher bound from the root
 # conftest.py.
-timeout = 600
+timeout = 300
 timeout_method = "thread"
 markers = [
     # Applied by `pytest_collection_modifyitems` in the root conftest.py, which
