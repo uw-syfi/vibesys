@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from tests.support.started_operation import wait_until_started
 
 import vs_evaluation.api.testing as evaluation_testing
 from vs_evaluation.api import (
@@ -1063,7 +1064,7 @@ async def test_a_cancelled_cancel_still_finishes_the_scancel_before_it_returns(
         await executor.submit(_request(), handle_id="eval-double-cancel")
         await asyncio.to_thread(runner.wait_started.wait)
         canceller = asyncio.create_task(executor.cancel("eval-double-cancel"))
-        await asyncio.to_thread(runner.scancel_entered.wait)
+        await wait_until_started(runner.scancel_entered, canceller)
 
         # A second cancellation (teardown cancelling a task already being cancelled)
         # must not abandon the scancel worker thread mid-flight.

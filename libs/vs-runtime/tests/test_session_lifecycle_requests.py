@@ -30,6 +30,7 @@ from tests.support.session_world import (
     ensure_request,
     inspect_request,
 )
+from tests.support.started_operation import wait_until_started
 
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_agent.api.testing import FakeAgentSessions
@@ -135,7 +136,7 @@ async def test_cancel_of_a_running_turn_is_unknown_until_it_ends() -> None:
         w.sessions = FakeAgentSessions(w.host.client, w.host.journal)  # one live process
         assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
         running = asyncio.create_task(w.execute(dispatch_request()))
-        await asyncio.to_thread(gate.started.wait)
+        await wait_until_started(gate.started, running)
         try:
             early = await w.execute(cancel_request())
             assert status(early) is ObservationStatus.UNKNOWN
@@ -158,7 +159,7 @@ async def test_a_restarted_host_cannot_claim_a_cancelled_turn_it_never_ran() -> 
         assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
         w.sessions = FakeAgentSessions(w.host.client, w.host.journal)
         running = asyncio.create_task(w.execute(dispatch_request()))
-        await asyncio.to_thread(gate.started.wait)
+        await wait_until_started(gate.started, running)
         w.sessions = None  # the next call starts a new host over the same journal
         try:
             cancelled = await w.execute(cancel_request())
@@ -447,7 +448,7 @@ async def test_run_snapshot_proof_accepts_a_released_turn_but_not_a_recovered_on
         snapshot = run_snapshot_request()
         assert proof.unproven(snapshot) is not None, "never dispatched"
         running = asyncio.create_task(w.execute(dispatch_request()))
-        await asyncio.to_thread(gate.started.wait)
+        await wait_until_started(gate.started, running)
         gate.proceed.set()
         await running
         assert proof.unproven(snapshot) is None, "settled"

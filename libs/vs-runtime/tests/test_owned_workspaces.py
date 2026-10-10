@@ -8,6 +8,7 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.started_operation import wait_until_started
 
 from vs_agent.api import NULL_AGENT_EVENT_SINK
 from vs_runtime.api import RuntimeContractError
@@ -320,7 +321,7 @@ def test_workspace_mutations_are_serialized(tmp_path: Path) -> None:
     async def exercise() -> None:
         workspaces = _runtime(provider).workspaces
         first = asyncio.create_task(workspaces.root.snapshot("first"))
-        await asyncio.to_thread(entered.wait)
+        await wait_until_started(entered, first)
         second_scheduled = asyncio.Event()
 
         async def second_snapshot() -> str:
@@ -528,7 +529,7 @@ def test_cancelled_candidate_construction_drains_and_closes_partial_resource(
     async def exercise() -> None:
         workspaces = _runtime(provider).workspaces
         construction = asyncio.create_task(workspaces.create_candidate())
-        await asyncio.to_thread(started.wait)
+        await wait_until_started(started, construction)
         construction.cancel()
         release.set()
         with pytest.raises(asyncio.CancelledError):
@@ -557,7 +558,7 @@ def test_cancelled_close_keeps_owned_root_cleanup_alive(tmp_path: Path) -> None:
     async def exercise() -> None:
         workspaces = _runtime(provider).workspaces
         waiter = asyncio.create_task(workspaces.close())
-        await asyncio.to_thread(close_started.wait)
+        await wait_until_started(close_started, waiter)
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
             await waiter

@@ -34,6 +34,7 @@ from tests.support.runtime_agent_sessions import (
     _WorkspaceResource,
     _WorkspaceResources,
 )
+from tests.support.started_operation import wait_until_started
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
@@ -395,7 +396,7 @@ def test_same_session_turns_are_serialized(implementation: str) -> None:
         opened = await _open_session_contract(implementation, role, (workspace,))
         session = opened.sessions[0]
         first = asyncio.create_task(session.turn("first"))
-        await workspace.gate.wait_entered()
+        await workspace.gate.wait_entered(first)
 
         queued = asyncio.Event()
 
@@ -431,8 +432,8 @@ def test_different_sessions_can_turn_concurrently(implementation: str) -> None:
         )
         first = asyncio.create_task(opened.sessions[0].turn("first"))
         second = asyncio.create_task(opened.sessions[1].turn("second"))
-        await first_workspace.gate.wait_entered()
-        await second_workspace.gate.wait_entered()
+        await first_workspace.gate.wait_entered(first)
+        await second_workspace.gate.wait_entered(second)
 
         first_workspace.gate.open()
         second_workspace.gate.open()
@@ -456,7 +457,7 @@ def test_close_waits_for_active_turn_and_rejects_queued_and_new_turns(
         opened = await _open_session_contract(implementation, role, (workspace,))
         session = opened.sessions[0]
         active = asyncio.create_task(session.turn("active"))
-        await workspace.gate.wait_entered()
+        await workspace.gate.wait_entered(active)
 
         queued_started = asyncio.Event()
 
@@ -503,7 +504,7 @@ def test_cancelled_close_preserves_owned_cleanup_for_a_later_waiter(
         opened = await _open_session_contract(implementation, role, (workspace,))
         session = opened.sessions[0]
         active = asyncio.create_task(session.turn("active"))
-        await workspace.gate.wait_entered()
+        await workspace.gate.wait_entered(active)
 
         close_started = asyncio.Event()
 
@@ -1000,7 +1001,7 @@ def test_cancelled_session_close_does_not_cancel_owned_cleanup() -> None:
         )
         session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
         waiter = asyncio.create_task(session.close())
-        await asyncio.to_thread(close_started.wait)
+        await wait_until_started(close_started, waiter)
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
             await waiter
@@ -1032,7 +1033,7 @@ def test_cancelled_turn_drains_worker_before_workspace_enforcement() -> None:
         )
         session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
         waiter = asyncio.create_task(session.turn("work"))
-        await asyncio.to_thread(turn_started.wait)
+        await wait_until_started(turn_started, waiter)
         waiter.cancel()
         cancellation_observed = asyncio.get_running_loop().create_future()
         asyncio.get_running_loop().call_soon(cancellation_observed.set_result, None)

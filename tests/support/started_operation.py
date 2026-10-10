@@ -9,7 +9,9 @@ if TYPE_CHECKING:
     import threading
 
 
-async def wait_until_started(started: threading.Event, operation: asyncio.Future[Any]) -> None:
+async def wait_until_started(
+    started: threading.Event | asyncio.Event, operation: asyncio.Future[Any]
+) -> None:
     """Return once *started* is set; surface the outcome of *operation* if it ends first.
 
     A test that parks a worker on ``started.wait`` hangs forever when the
@@ -24,7 +26,10 @@ async def wait_until_started(started: threading.Event, operation: asyncio.Future
         BaseException: whatever *operation* raised before it started.
     """
     operation.add_done_callback(lambda _done: started.set())
-    await asyncio.to_thread(started.wait)
+    if isinstance(started, asyncio.Event):
+        await started.wait()
+    else:
+        await asyncio.to_thread(started.wait)
     if operation.done():
         operation.result()
         message = "the operation finished without reaching its held step"

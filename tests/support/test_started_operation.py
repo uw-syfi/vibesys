@@ -63,3 +63,17 @@ def test_the_wait_ends_with_the_operations_own_outcome_at_any_point(
     else:
         with pytest.raises(AssertionError, match="without reaching its held step"):
             _run(ending, yields=yields)
+
+
+def test_an_asyncio_event_wait_ends_when_the_operation_ends_first() -> None:
+    async def scenario() -> None:
+        started = asyncio.Event()
+
+        async def operation() -> None:
+            raise _FailureError
+
+        task = asyncio.ensure_future(operation())
+        with pytest.raises(_FailureError):
+            await wait_until_started(started, task)
+
+    asyncio.run(scenario())

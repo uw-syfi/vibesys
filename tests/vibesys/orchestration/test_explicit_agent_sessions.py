@@ -13,6 +13,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.host_environment import unconfined_host_spec
+from tests.support.started_operation import wait_until_started
 from tests.support.world_git import IN_MEMORY_GIT
 from tests.vibesys.orchestration.plugin import capability_plugin
 
@@ -938,7 +939,7 @@ def test_canceled_session_construction_closes_the_opened_agent(tmp_path: Path) -
         creation = asyncio.create_task(
             ctx.agents.create_session(role, workspace=ctx.workspaces.root)
         )
-        await asyncio.to_thread(factory_started.wait)
+        await wait_until_started(factory_started, creation)
         creation.cancel()
         factory_release.set()
         with pytest.raises(asyncio.CancelledError):

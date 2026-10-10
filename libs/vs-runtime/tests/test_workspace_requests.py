@@ -19,6 +19,7 @@ from tests.support.executor_context import RevocableLease
 from tests.support.observation_contract import assert_core_accepts
 from tests.support.run_execution import run_execution_record
 from tests.support.session_world import RunningRunInvocations, SettledRunInvocations
+from tests.support.started_operation import wait_until_started
 
 from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
 from vs_core.api import (
@@ -1561,7 +1562,7 @@ def test_f12_a_slow_discard_does_not_block_another_attempt(tmp_path: Path) -> No
             slow = asyncio.create_task(
                 _run(executor, DiscardWorkspace(**_common(a, "da"), attempt=a))
             )
-            await asyncio.to_thread(faults.close_entered.wait)
+            await wait_until_started(faults.close_entered, slow)
             try:
                 base = revision_ref(workspaces.root.revision or "")
                 other = await asyncio.wait_for(
