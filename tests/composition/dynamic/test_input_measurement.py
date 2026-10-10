@@ -53,12 +53,11 @@ def _candidate_jobs(rounds: int) -> int:
     return rounds
 
 
-@pytest.mark.parametrize("on_disk_state", [False, True], ids=["memory-store", "fsynced-store"])
-def test_permanent_input_failure_survives_a_crash_and_resume(
-    tmp_path: Path, *, on_disk_state: bool
-) -> None:
-    # The fsynced store is the product's: one crash and resume proves it end to end.
-    loop_input = LoopInput.create(tmp_path, on_disk_state=on_disk_state)
+def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> None:
+    # The fsynced store is the product's: one crash and resume proves it end to end. The
+    # in-memory store this scenario also ran on is held to the same behavior by the
+    # StateStore contract suite, so a second whole run would only repeat it.
+    loop_input = LoopInput.create(tmp_path, on_disk_state=True)
     _failing_input(loop_input)
     request = loop_input.request(max_rounds=2)
     clock = simulated_clock()
