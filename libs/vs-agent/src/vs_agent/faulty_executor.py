@@ -18,13 +18,18 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING, cast
 
-from vs_agent.api.testing import KILLED_STATUS, MALFORMED_LINE, FaultingExecutor, ProcessFaultKind
-from vs_faults.plan import Boundary, FaultPlan, ProcessFault
+from vs_agent.fault_injection import (
+    KILLED_STATUS,
+    MALFORMED_LINE,
+    FaultingExecutor,
+    ProcessFaultKind,
+)
+from vs_faults.api import Boundary, FaultPlan, ProcessFault
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_agent.api.testing import CommandExecutor
+    from vs_agent.fault_injection import CommandExecutor
 
 __all__ = ["KILLED_STATUS", "MALFORMED_LINE", "FaultyExecutor"]
 

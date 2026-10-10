@@ -37,6 +37,7 @@ from vs_sim.fakes import (
     InlineBlockingRunner,
     ProcessScript,
 )
+from vs_sim.faults import CallCounter, ScheduledRule, fault_stream, match_rule
 from vs_sim.file_effects import file_size_limit
 from vs_sim.gate import Gate, arrival, start_thread, wait_until_started, wait_until_started_sync
 from vs_sim.host_clock import CrashableClock, HostCrashedError, ProbedClock, clock_from
@@ -82,6 +83,7 @@ __all__ = [
     "WORKER_GUARD_S",
     "WORLDS",
     "BlockingRunnerContract",
+    "CallCounter",
     "Changes",
     "ChildDiedError",
     "ClockContract",
@@ -108,6 +110,7 @@ __all__ = [
     "RestartLimitError",
     "Restarted",
     "RunnerUnderTest",
+    "ScheduledRule",
     "SignalSourceContract",
     "SignalSourceUnderTest",
     "Sim",
@@ -133,10 +136,12 @@ __all__ = [
     "current_virtual_clock",
     "evenly_spaced",
     "explore_seed",
+    "fault_stream",
     "file_size_limit",
     "first_of_each_kind",
     "get_or_fail",
     "join_or_fail",
+    "match_rule",
     "non_main_thread_ids",
     "pairwise_rows",
     "random_for",

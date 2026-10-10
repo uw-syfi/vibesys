@@ -1,4 +1,7 @@
 {"path": "libs/vs-agent/src/vs_agent/fake_docker_build_runner.py", "rule": "subprocess", "count": 4}
+{"path": "libs/vs-agent/src/vs_agent/faulty_agent.py", "rule": "threading", "count": 2}
+{"path": "libs/vs-agent/src/vs_agent/faulty_executor.py", "rule": "threading", "count": 1}
+{"path": "libs/vs-agent/src/vs_agent/faulty_transport.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-agent/src/vs_agent/host_resource_declarations.py", "rule": "process", "count": 1}
 {"path": "libs/vs-agent/src/vs_agent/host_resource_declarations.py", "rule": "subprocess", "count": 3}
 {"path": "libs/vs-agent/src/vs_agent/images.py", "rule": "subprocess", "count": 9}
@@ -21,12 +24,9 @@
 {"path": "libs/vs-evaluation/tests/test_started_operation.py", "rule": "executor", "count": 1}
 {"path": "libs/vs-evaluation/tests/test_started_operation.py", "rule": "threading", "count": 5}
 {"path": "libs/vs-evaluation/tests/test_tool_server_properties.py", "rule": "threading", "count": 2}
-{"path": "libs/vs-faults/src/vs_faults/agent.py", "rule": "threading", "count": 2}
 {"path": "libs/vs-faults/src/vs_faults/connector.py", "rule": "fs_sync", "count": 1}
 {"path": "libs/vs-faults/src/vs_faults/connector.py", "rule": "process", "count": 1}
 {"path": "libs/vs-faults/src/vs_faults/connector.py", "rule": "subprocess", "count": 1}
-{"path": "libs/vs-faults/src/vs_faults/conversation.py", "rule": "threading", "count": 1}
-{"path": "libs/vs-faults/src/vs_faults/process.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-faults/src/vs_faults/tools.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-faults/tests/test_faults.py", "rule": "process", "count": 2}
 {"path": "libs/vs-faults/tests/test_faults.py", "rule": "subprocess", "count": 2}

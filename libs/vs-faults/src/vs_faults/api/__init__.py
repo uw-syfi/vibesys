@@ -1,17 +1,11 @@
-"""The public API of ``vs_faults``: one fault plan and its boundary wrappers.
+"""The public API of ``vs_faults``: one fault plan, its host and cluster boundaries and reply generator.
 
-Each wrapper implements the interface it wraps and, with no rule for its
-boundary, passes every call through unchanged. Production code has no fault
-branches; tests and scripts compose these wrappers at the seams a run already
-injects (the agent client factory, the connector command, the tool dispatch).
+The wrappers for the agent, its processes and conversations live in ``vs_agent.api.testing``
+; the tool-dispatch wrapper stays here because it wraps a plain callable. Each library owns the faults of
+the interface it exposes and reads the plan defined here. With no rule for its boundary, every
+wrapper passes every call through unchanged. Production code has no fault branches.
 """
 
-from vs_faults.agent import (
-    AgentCrashError,
-    DurableAgentClient,
-    FaultyAgentClient,
-    generated_replies,
-)
 from vs_faults.connector import (
     classify,
     connector_command,
@@ -20,7 +14,6 @@ from vs_faults.connector import (
 from vs_faults.connector import (
     handle as handle_cluster_request,
 )
-from vs_faults.conversation import FaultyTransport
 from vs_faults.host import Crossing, FaultGate, HostCrashError
 from vs_faults.plan import (
     AgentFault,
@@ -34,26 +27,20 @@ from vs_faults.plan import (
     ProcessFault,
     ToolFault,
 )
-from vs_faults.process import FaultyExecutor
 from vs_faults.replies import ReplyGenerator, prompt_vocabulary
 from vs_faults.tools import FaultyToolDispatch, ToolCallFailedError
 
 __all__ = [
-    "AgentCrashError",
     "AgentFault",
     "Boundary",
     "ClusterFault",
     "ClusterOperation",
     "ConversationFault",
     "Crossing",
-    "DurableAgentClient",
     "FaultGate",
     "FaultPlan",
     "FaultRule",
-    "FaultyAgentClient",
-    "FaultyExecutor",
     "FaultyToolDispatch",
-    "FaultyTransport",
     "HostCrashError",
     "HostFault",
     "ProcessFault",
@@ -62,7 +49,6 @@ __all__ = [
     "ToolFault",
     "classify",
     "connector_command",
-    "generated_replies",
     "handle_cluster_request",
     "injected_faults",
     "prompt_vocabulary",

@@ -21,16 +21,8 @@ from agentshim.testing import FakeClock, FakeExecutor, SequentialIds
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_agent.api.testing import StreamPeers, stream_peers
-from vs_faults.api import (
-    Boundary,
-    ConversationFault,
-    FaultPlan,
-    FaultRule,
-    FaultyExecutor,
-    FaultyTransport,
-    ProcessFault,
-)
+from vs_agent.api.testing import FaultyExecutor, FaultyTransport, StreamPeers, stream_peers
+from vs_faults.api import Boundary, ConversationFault, FaultPlan, FaultRule, ProcessFault
 
 PROVIDERS = tuple(agentshim.stream_provider_names())
 TURN_BUDGET_S = 5.0

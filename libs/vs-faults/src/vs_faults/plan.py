@@ -10,14 +10,17 @@ matches passes through unchanged, so an empty plan is the identity.
 
 from __future__ import annotations
 
-import random
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vs_sim.api.testing import fault_stream, match_rule
+
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vs_sim.api import SeededRandom
 
 
 class Boundary(StrEnum):
@@ -176,18 +179,11 @@ class FaultPlan(BaseModel):
 
     def match(self, boundary: Boundary, target: str, ordinal: int) -> FaultRule | None:
         """Return the rule for the ``ordinal``-th call at ``boundary`` on ``target``, if any."""
-        for rule in self.rules:
-            if (
-                rule.boundary is boundary
-                and rule.at == ordinal
-                and (rule.target is None or rule.target == target)
-            ):
-                return rule
-        return None
+        return match_rule(self.rules, boundary.value, target, ordinal)
 
-    def rng(self, *scope: object) -> random.Random:
-        """Return a generator seeded by the plan seed and ``scope`` (stable across runs)."""
-        return random.Random(repr((self.seed, *scope)))  # noqa: S311  # LW-150001 [S311]; fault schedules and generated replies must be reproducible from a seed; the secrets module cannot be seeded and nothing here is security-sensitive.
+    def rng(self, *scope: object) -> SeededRandom:
+        """Return a stream seeded by the plan seed and ``scope`` (stable across runs)."""
+        return fault_stream(self.seed, *scope)
 
     def save(self, path: Path) -> Path:
         """Write the plan as JSON (the cluster wrapper runs in another process)."""

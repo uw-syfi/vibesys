@@ -14,11 +14,11 @@ handled here, so wrappers do not change.
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 from vs_faults.plan import Boundary, FaultPlan, HostFault
+from vs_sim.api.testing import CallCounter
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -56,7 +56,7 @@ class FaultGate:
 
     plan: FaultPlan
     calls: list[Crossing] = field(default_factory=list)
-    _counts: Counter[tuple[Boundary, str]] = field(default_factory=Counter)
+    _counts: CallCounter = field(default_factory=CallCounter)
 
     def heal(self) -> None:
         """Stop injecting faults."""
@@ -66,8 +66,7 @@ class FaultGate:
         if boundary not in _HOST_BOUNDARIES:
             message = f"not a host boundary: {boundary.value}"
             raise ValueError(message)
-        self._counts[boundary, target] += 1
-        crossing = Crossing(boundary, target, self._counts[boundary, target])
+        crossing = Crossing(boundary, target, self._counts.next(boundary.value, target))
         self.calls.append(crossing)
         return crossing
 

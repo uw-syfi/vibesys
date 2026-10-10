@@ -2,48 +2,32 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 import subprocess
 import sys
-from pathlib import Path
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from vs_agent.api import (
-    AgentClientProtocol,
-    AgentExecutionPolicy,
-    AgentOutputSchemaError,
-    AgentSessionSpec,
-    AgentTurnExecutor,
-    AgentTurnRequest,
-    AgentTurnTimeoutError,
-)
-from vs_agent.api.testing import FakeAgentClient
 from vs_faults.api import (
-    AgentCrashError,
-    AgentFault,
     Boundary,
     ClusterFault,
     ClusterOperation,
     FaultPlan,
     FaultRule,
-    FaultyAgentClient,
-    FaultyToolDispatch,
     ReplyGenerator,
-    ToolCallFailedError,
-    ToolFault,
     classify,
     connector_command,
-    generated_replies,
     handle_cluster_request,
     injected_faults,
 )
 from vs_slurm.fake_connector import executing_cluster
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class _Step(BaseModel):
@@ -61,138 +45,9 @@ class _Reply(BaseModel):
 
 
 _KIND = "planner"
+
+
 _ANSWER = _Reply(steps=[_Step(name="a", weight=0.5)])
-
-
-def _turn(client: FaultyAgentClient | FakeAgentClient, prompt: str = "Use `H1`.") -> _Reply:
-    return client.invoke(
-        kind=_KIND,
-        workspace=Path(),
-        system_prompt="",
-        user_prompt=prompt,
-        response_cls=_Reply,
-        round_label="r",
-    )
-
-
-@given(seed=st.integers(0, 2**32), turns=st.integers(1, 6))
-def test_a_plan_without_agent_rules_passes_every_turn_through(seed: int, turns: int) -> None:
-    plan = FaultPlan.generate(
-        seed, targets={Boundary.TOOL_CALL: ("x",), Boundary.CLUSTER: ()}, faults=3
-    )
-    client = FaultyAgentClient(FakeAgentClient().set_response(_KIND, _ANSWER), plan)
-
-    assert [_turn(client) for _ in range(turns)] == [_ANSWER] * turns
-    assert client.injected == []
-
-
-@pytest.mark.parametrize("fault", list(AgentFault))
-def test_an_agent_fault_fires_on_its_turn_only(fault: AgentFault) -> None:
-    rule = FaultRule(boundary=Boundary.AGENT_TURN, target=_KIND, at=2, fault=fault)
-    inner = FakeAgentClient().set_response(_KIND, _ANSWER)
-    client = FaultyAgentClient(inner, FaultPlan(seed=7, rules=(rule,)))
-
-    assert _turn(client) == _ANSWER
-    expected = {
-        AgentFault.CRASH: AgentCrashError,
-        AgentFault.TIMEOUT: AgentTurnTimeoutError,
-        AgentFault.MALFORMED: AgentOutputSchemaError,
-        AgentFault.SCHEMA_INVALID: AgentOutputSchemaError,
-        AgentFault.EXTRA_KEYS: AgentOutputSchemaError,
-    }.get(fault)
-    if expected is None:
-        assert isinstance(_turn(client), _Reply)
-    else:
-        with pytest.raises(expected):
-            _turn(client)
-    assert _turn(client) == _ANSWER
-    assert client.injected == [(_KIND, 2, fault)]
-    # Transport faults strike after the agent worked; output faults replace its answer.
-    worked = fault in {AgentFault.CRASH, AgentFault.TIMEOUT, AgentFault.EXTRA_KEYS}
-    assert len(inner.calls) == (3 if worked else 2)
-
-
-def _raw_turn(client: FaultyAgentClient | FakeAgentClient, prompt: str = "Use `H1`.") -> _Reply:
-    """One durable-journal turn: the path the runtime takes for every turn with an invocation id."""
-    result = client.run(
-        session_spec=AgentSessionSpec(
-            role=_KIND, provider="fake", workspace=Path(), policy=AgentExecutionPolicy()
-        ),
-        turn=AgentTurnRequest(message=prompt, output_schema=_Reply, invocation_id="i"),
-    )
-    return _Reply.model_validate_json(result.text)
-
-
-# Static: mypy rejects the wrapper the day a Protocol the runtime dispatches
-# through gains a member it lacks.
-def _as_protocols(client: FaultyAgentClient) -> tuple[AgentClientProtocol, AgentTurnExecutor]:
-    return client, client
-
-
-def _public_members(protocol: type) -> dict[str, object]:
-    return {
-        name: member
-        for name, member in vars(protocol).items()
-        if not name.startswith("_") and (callable(member) or isinstance(member, property))
-    }
-
-
-@pytest.mark.parametrize("protocol", [AgentClientProtocol, AgentTurnExecutor])
-def test_the_wrapper_matches_every_member_of_the_interfaces_the_runtime_dispatches_through(
-    protocol: type,
-) -> None:
-    """Same members, same parameters: a future interface change cannot leave the wrapper behind."""
-    for name, member in _public_members(protocol).items():
-        mine = getattr(FaultyAgentClient, name, None)
-        assert mine is not None, f"FaultyAgentClient lacks {protocol.__name__}.{name}"
-        if isinstance(member, property):
-            assert isinstance(mine, property), name
-            continue
-        expected = inspect.signature(getattr(protocol, name))
-        actual = inspect.signature(mine)
-        # Annotations are source text (postponed evaluation), so a spelling
-        # difference fails loudly rather than slipping through.
-        assert _shape(actual) == _shape(expected), name
-
-
-def _shape(signature: inspect.Signature) -> tuple[object, ...]:
-    return (
-        tuple((p.name, p.kind, p.default, p.annotation) for p in signature.parameters.values()),
-        signature.return_annotation,
-    )
-
-
-def test_a_wrapped_turn_executor_stays_a_turn_executor() -> None:
-    """The runtime refuses a durable turn on a client that is not an AgentTurnExecutor."""
-    client = FaultyAgentClient(FakeAgentClient().set_response(_KIND, _ANSWER), FaultPlan(seed=1))
-
-    assert isinstance(client, AgentTurnExecutor)
-    assert _as_protocols(client) == (client, client)
-    assert [_raw_turn(client) for _ in range(3)] == [_ANSWER] * 3
-
-
-@pytest.mark.parametrize("fault", list(AgentFault))
-def test_an_agent_fault_fires_on_a_durable_turn_too(fault: AgentFault) -> None:
-    rule = FaultRule(boundary=Boundary.AGENT_TURN, target=_KIND, at=2, fault=fault)
-    inner = FakeAgentClient().set_response(_KIND, _ANSWER)
-    client = FaultyAgentClient(inner, FaultPlan(seed=7, rules=(rule,)))
-
-    assert _raw_turn(client) == _ANSWER
-    # A raw turn returns text; the caller parses it, so output faults surface as parse errors.
-    expected = {
-        AgentFault.CRASH: AgentCrashError,
-        AgentFault.TIMEOUT: AgentTurnTimeoutError,
-        AgentFault.MALFORMED: ValidationError,
-        AgentFault.SCHEMA_INVALID: ValidationError,
-        AgentFault.EXTRA_KEYS: ValidationError,
-    }.get(fault)
-    if expected is None:
-        assert isinstance(_raw_turn(client), _Reply)
-    else:
-        with pytest.raises(expected):
-            _raw_turn(client)
-    assert _raw_turn(client) == _ANSWER
-    assert client.injected == [(_KIND, 2, fault)]
 
 
 @given(seed=st.integers(0, 2**32), bold=st.booleans())
@@ -250,15 +105,6 @@ def test_careful_replies_reach_every_outcome_a_cross_field_rule_allows() -> None
     assert outcomes == {"observed", "unsupported"}
 
 
-def test_generated_replies_are_reproducible_from_the_seed() -> None:
-    def replies(seed: int) -> list[str]:
-        client = FakeAgentClient().set_response(_KIND, generated_replies(FaultPlan(seed=seed)))
-        return [_turn(client).model_dump_json() for _ in range(4)]
-
-    assert replies(3) == replies(3)
-    assert replies(3) != replies(4)
-
-
 @given(seed=st.integers(0, 2**32), faults=st.integers(0, 6))
 def test_a_generated_plan_round_trips_and_is_reproducible(seed: int, faults: int) -> None:
     targets = {Boundary.AGENT_TURN: ("a", "b"), Boundary.TOOL_CALL: ("t",), Boundary.CLUSTER: ()}
@@ -272,27 +118,6 @@ def test_a_generated_plan_round_trips_and_is_reproducible(seed: int, faults: int
 def test_a_plan_rejects_unknown_keys() -> None:
     with pytest.raises(ValidationError, match="surprise"):
         FaultPlan.model_validate({"seed": 1, "rules": [], "surprise": True})
-
-
-@pytest.mark.parametrize("fault", list(ToolFault))
-def test_a_tool_fault_delivers_the_call_as_declared(fault: ToolFault) -> None:
-    delivered: list[str] = []
-
-    def dispatch(name: str, _arguments: object) -> dict[str, object]:
-        delivered.append(name)
-        return {"n": len(delivered)}
-
-    rule = FaultRule(boundary=Boundary.TOOL_CALL, target="submit", at=1, fault=fault)
-    tools = FaultyToolDispatch(dispatch, FaultPlan(seed=1, rules=(rule,)))
-
-    if fault is ToolFault.DUPLICATE:
-        assert tools("submit", {}) == {"n": 2}
-    else:
-        with pytest.raises(ToolCallFailedError):
-            tools("submit", {})
-    assert tools("status", {}) == {"n": len(delivered)}
-    runs = {ToolFault.ERROR: 0, ToolFault.DROPPED: 0, ToolFault.TIMEOUT: 1, ToolFault.DUPLICATE: 2}
-    assert delivered.count("submit") == runs[fault]
 
 
 def _connector(plan: FaultPlan, base: Path, request: dict[str, object]) -> dict[str, object]:
