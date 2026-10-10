@@ -17,7 +17,7 @@ import os
 import runpy
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import Protocol, cast
 
 import pytest
 from tests.support import run_test_command
@@ -27,8 +27,6 @@ from vs_sandbox import host_sandbox, landlock
 from vs_sandbox.host_sandbox import LandlockSandbox, LinuxBackend
 from vs_sandbox.project_paths import ProjectPathPolicy
 
-if TYPE_CHECKING:
-    import subprocess
 requires_landlock = pytest.mark.skipif(
     landlock.abi_version() is None,
     reason="requires a kernel with Landlock support",
@@ -102,7 +100,15 @@ def _confined(
     )
 
 
-def _run(sandbox: LandlockSandbox, script: str) -> subprocess.CompletedProcess[str]:
+class _Finished(Protocol):
+    """What a test reads from a finished command."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def _run(sandbox: LandlockSandbox, script: str) -> _Finished:
     return run_test_command(
         sandbox.wrap(["/bin/sh", "-c", script]),
         capture_output=True,

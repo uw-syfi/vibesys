@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import socket
+import os
+import stat
 from itertools import pairwise
 from pathlib import Path
 
@@ -16,7 +17,6 @@ from vs_sandbox.api import (
     host_resource_for_mount,
 )
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api.testing import HANG_GUARD_S
 
 
 def test_host_sandbox_creates_parent_directories_for_imported_sockets(tmp_path: Path) -> None:
@@ -25,16 +25,15 @@ def test_host_sandbox_creates_parent_directories_for_imported_sockets(tmp_path: 
     socket_root = tmp_path / "runtime" / "ssh-agent"
     socket_root.mkdir(parents=True)
     socket_path = socket_root / "agent.sock"
-    with socket.socket(socket.AF_UNIX) as agent_socket:
-        agent_socket.settimeout(HANG_GUARD_S)
-        agent_socket.bind(str(socket_path))
-        sandbox = HostSandbox(
-            workspace=workspace,
-            bwrap_path="/usr/bin/bwrap",
-            read_paths=(socket_path,),
-        )
+    # A socket file on disk is all the sandbox sees; `mknod` makes one without binding a socket.
+    os.mknod(socket_path, stat.S_IFSOCK | 0o600)
+    sandbox = HostSandbox(
+        workspace=workspace,
+        bwrap_path="/usr/bin/bwrap",
+        read_paths=(socket_path,),
+    )
 
-        command = sandbox.wrap(["true"])
+    command = sandbox.wrap(["true"])
 
     pairs = list(pairwise(command))
     assert ("--dir", str(socket_root)) in pairs

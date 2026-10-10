@@ -16,8 +16,9 @@ from vs_sandbox.api.symlink_mounts import (
 )
 
 if TYPE_CHECKING:
-    import threading
     from pathlib import Path
+
+    from vs_sim.api import Event
 
 
 @dataclass
@@ -35,7 +36,7 @@ class _RecordingSandbox:
         command: str,
         *,
         timeout: int | None = None,
-        cancel: threading.Event | None = None,
+        cancel: Event | None = None,
     ) -> CommandResult:
         assert timeout is None
         assert cancel is None

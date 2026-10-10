@@ -7,12 +7,11 @@ subprocess.
 
 from __future__ import annotations
 
-import threading
-
 from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_sandbox.api.testing import FakeCommandRunner
+from vs_sim.api.testing import SimThreads
 
 _NOTICE_ROOM = 200
 _TIMEOUT_STATUS = 124
@@ -72,7 +71,7 @@ def test_a_stopped_command_within_the_cap_keeps_partial_output_and_ends_with_its
 ) -> None:
     sandbox = FakeCommandRunner(max_output_chars=len(stdout) + len(stderr) + _NOTICE_ROOM)
     sandbox.script_hang("cmd", stdout=stdout, stderr=stderr)
-    cancel = threading.Event()
+    cancel = SimThreads().event()
     cancel.set()
 
     timed_out = sandbox.execute("cmd", timeout=timeout)

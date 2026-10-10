@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -106,14 +105,18 @@ def test_docker_probe_enforces_the_shared_resource_contract(tmp_path: Path) -> N
             Path(sandbox.agent_path(readonly_path)),
             unlisted_path,
         )
-        result = run_test_command(
-            sandbox.wrap(["/bin/sh", "-c", script], workspace),
-            capture_output=True,
-            text=True,
-            check=False,
-            stdin=subprocess.DEVNULL,
-            timeout=30,
-        )
+        no_input = os.open(os.devnull, os.O_RDONLY)
+        try:
+            result = run_test_command(
+                sandbox.wrap(["/bin/sh", "-c", script], workspace),
+                capture_output=True,
+                text=True,
+                check=False,
+                stdin=no_input,
+                timeout=30,
+            )
+        finally:
+            os.close(no_input)
         assert result.returncode == 0, result.stderr
         fields = _parse_probe_output(result.stdout)
 

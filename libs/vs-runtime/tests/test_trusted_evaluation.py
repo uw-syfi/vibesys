@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
     from vs_project.api import GitTracker
     from vs_sandbox.api import CommandRunner
+    from vs_sim.api import Event
 
 
 _MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
@@ -163,7 +164,7 @@ class _TruncatingRunner(FakeCommandRunner):
         command: str,
         *,
         timeout: int | None = None,
-        cancel: threading.Event | None = None,
+        cancel: Event | None = None,
     ) -> CommandResult:
         del cancel  # every command here finishes at once
         super().execute(command, timeout=timeout)
@@ -423,7 +424,7 @@ class _FailingSandbox:
         command: str,
         *,
         timeout: int | None = None,
-        cancel: threading.Event | None = None,
+        cancel: Event | None = None,
     ) -> CommandResult:
         del cancel  # every command here finishes at once
         del timeout
@@ -499,7 +500,7 @@ class _BlockingSandbox:
         command: str,
         *,
         timeout: int | None = None,
-        cancel: threading.Event | None = None,
+        cancel: Event | None = None,
     ) -> CommandResult:
         del cancel  # every command here finishes at once
         del timeout
