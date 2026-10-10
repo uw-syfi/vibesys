@@ -57,8 +57,8 @@ def test_strategy_operation_event_keeps_typed_outcome_through_wire(values: list[
     )
     validated = codec.validate_event(event)
     assert type(validated.outcome) is Outcome
-    wire = codec.encode_event(validated)
-    restored = codec.decode_event(wire)
+    wire = validated.model_dump_json()
+    restored = core.OperationResult.model_validate_json(wire, context={"operation_registry": codec})
     assert restored == validated
     assert type(restored.outcome) is Outcome
     assert isinstance(restored.outcome, Outcome)

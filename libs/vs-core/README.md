@@ -45,8 +45,7 @@ owning area. Ordinary queries and idempotent writes remain intents-owned.
 The shell supplies `operation_schema` on registered `RequestObserved` values and
 calls `OperationRegistry.validate_event` before `step`. Intents uses
 `operation_result(operation_id, observation)` to forward the registered concrete
-outcome to `Strategy.on_event`. `encode_event` and `decode_event` retain durable
-`outcome_json` and restore the owner subtype. Typed payload and schema proofs
+outcome to `Strategy.on_event`. `OperationResult` restores the owner subtype from durable `outcome_json`. Typed payload and schema proofs
 must match before an observation or callback can enter the kernel; arbitrary
 models and copied mismatches are rejected. Envelope decoding restores typed
 intent outcomes through the same registry. Registered payload and strategy

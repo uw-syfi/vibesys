@@ -206,21 +206,6 @@ class ProfilerOperationReference(BaseModel):
     state: ProfilerOperationState
 
 
-class ProfilerOperationLifecycle(BaseModel):
-    """Bounded framework view of one principal's profiler operation."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    operation_id: str = Field(min_length=1)
-    session_id: str = Field(min_length=1)
-    request: str = Field(min_length=1, max_length=MAX_PROFILER_REQUEST_CHARS)
-    work: ProfilerWorkKey
-    candidate_snapshot_id: str = Field(min_length=1)
-    state: ProfilerOperationState
-    outcome: ProfilerResultOutcome | None = None
-    trusted_evidence_ids: tuple[EvidenceId, ...] = ()
-
-
 class ProfilerRunObservation(BaseModel):
     """Run-wide trusted view of one delegated profiler conversation turn."""
 
@@ -463,7 +448,6 @@ __all__ = [
     "ProfilerHandleArgs",
     "ProfilerLifecycleEvent",
     "ProfilerOperation",
-    "ProfilerOperationLifecycle",
     "ProfilerOperationReference",
     "ProfilerOperationResult",
     "ProfilerOperationState",

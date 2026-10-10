@@ -23,7 +23,6 @@ from vs_evaluation.api import (
     ContentDigest,
     EvaluationAgentRole,
     EvaluationAgentService,
-    EvaluationDependencyError,
     EvaluationState,
     EvidenceKind,
     ProfilerAgentResult,
@@ -353,11 +352,8 @@ async def test_profiler_exit_withdraws_only_its_requester_association(
             else:
                 await provision.close()
         assert child.discarded
-        with pytest.raises(EvaluationDependencyError):
-            await service.association_generation(handle, scope_id=child.id)
         if shared:
             assert handle == owner_handle
-            assert await service.association_generation(handle, scope_id=owner.id) == 0
             assert executor.cancellations == []
             await service.cancel_scope(owner.id)
         assert executor.cancellations == [handle]

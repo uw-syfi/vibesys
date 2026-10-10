@@ -823,16 +823,6 @@ class EvaluationAgentService:
         )
         return tuple(handle for _, handle in sorted(history, key=lambda item: item[0]))
 
-    async def association_generation(self, handle_id: str, scope_id: str) -> int:
-        """Read the current live requester's generation, preserving canonical ownership."""
-        generation = self._scope_generation(scope_id)
-        if not any(
-            item.scope_id == scope_id and item.generation == generation and item.active
-            for item in await self._recorded_associations(handle_id)
-        ):
-            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
-        return generation
-
     async def requester_generation(self, handle_id: str, scope_id: str) -> int:
         """Read the latest recorded requester generation, including withdrawn waits.
 

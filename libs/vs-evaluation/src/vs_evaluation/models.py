@@ -183,10 +183,6 @@ class AvailabilitySnapshot(BaseModel):
     supported_profile_fields: tuple[ProfileField, ...] = ()
     supported_capabilities: tuple[str, ...] = ()
 
-    def is_fresh(self, now: float) -> bool:
-        """Return whether this observation remains within its declared age."""
-        return 0 <= now - self.observed_at <= self.fresh_for_s
-
 
 STAGE_OUTPUT_TAIL_CHARS = 4000
 """The most output kept per stream of one stage, from the end where the cause usually is."""
