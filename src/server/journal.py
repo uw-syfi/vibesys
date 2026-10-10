@@ -34,8 +34,9 @@ from server.events import (
 )
 
 if TYPE_CHECKING:
-    import threading
     from pathlib import Path
+
+    from vs_sim.api import Condition, Threads
 
 _MAX_EXCEPTION_CHAIN = 8
 DIAGNOSTIC_FAILURE_EVENTS = frozenset(
@@ -125,9 +126,10 @@ def _read_only_run_id(headers: list[EventHeader], explicit: str | None) -> str:
 class WireJournal:
     """Own event serialization, replay compatibility, and failure identity."""
 
-    def __init__(self, condition: threading.Condition) -> None:
+    def __init__(self, condition: Condition, *, threads: Threads | None = None) -> None:
         """Initialize journal state over the shared server condition."""
         self._condition = condition
+        self._threads = threads
         self._store: EventStore | None = None
         self._pending_events: list[RunEvent] = []
         self._canonical_execution_ids: set[str] = set()
@@ -166,9 +168,9 @@ class WireJournal:
                 self._read_only = read_only
                 return
             durable = (
-                EventStore(events_path, run_id=run_id or log_dir.parent.name)
+                EventStore(events_path, run_id=run_id or log_dir.parent.name, threads=self._threads)
                 if not read_only
-                else EventStore(events_path, run_id="", read_only=True)
+                else EventStore(events_path, run_id="", read_only=True, threads=self._threads)
             )
             if read_only:
                 durable.run_id = _read_only_run_id(durable.event_headers(), run_id)

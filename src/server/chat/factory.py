@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
@@ -24,6 +23,7 @@ from server.chat.session import (
 from server.events import ChatThreadCreatedData
 from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.api import AuxiliaryAgentLaunch, AuxiliaryReadableInput
+from vs_sim.api import OsThreads, SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from server.controller import RunController
     from server.execution import ExecutionTracker
     from vibesys.api import ManagedAgent
+    from vs_sim.api import Clock, Threads
 
 
 #: Session-key identifier for the run's default chat, which has no thread ID of
@@ -111,8 +112,12 @@ class ExperimentChatFactory:
         attachment: RunAttachment,
         build_agent: ChatAgentBuilder,
         fallback: Callable[[str], str],
+        threads: Threads | None = None,
+        clock: Clock | None = None,
     ) -> None:
         """Configure session construction and resource ownership for one run."""
+        self._threads = threads or OsThreads()
+        self._clock = clock or SystemClock()
         self._manager = manager
         self._controller = controller
         self._executions = executions
@@ -126,7 +131,7 @@ class ExperimentChatFactory:
         self._session = session
         self._build_agent = build_agent
         self._fallback = fallback
-        self._lock = threading.Lock()
+        self._lock = self._threads.lock()
         self._closed = False
         self._sessions: list[ExperimentChatSession] = []
         self._default_retained = False
@@ -192,7 +197,7 @@ class ExperimentChatFactory:
                 thread_id=thread_id,
                 provider=selection.provider,
                 model=selection.model,
-                created_at=datetime.now(UTC),
+                created_at=datetime.fromtimestamp(self._clock.now(), UTC),
             ),
             handler=session.ask,
             close=session.close,
@@ -253,6 +258,7 @@ class ExperimentChatFactory:
                     provider=selection.provider,
                     model=selection.model,
                     fallback=self._fallback,
+                    threads=self._threads,
                 ),
                 agent,
             )

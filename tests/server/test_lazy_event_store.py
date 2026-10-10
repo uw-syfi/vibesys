@@ -34,6 +34,7 @@ from server.events import (
     make_event,
 )
 from server.journal import _canonical_execution_events
+from vs_sim.api import Threads
 
 _TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -400,8 +401,10 @@ def test_attaching_to_a_large_log_does_not_parse_the_whole_log(
     created_stores: list[EventStore] = []
     event_store = journal_module.EventStore
 
-    def track_store(path: Path, run_id: str) -> EventStore:
-        store = event_store(path, run_id)
+    def track_store(
+        path: Path, run_id: str, *, read_only: bool = False, threads: Threads | None = None
+    ) -> EventStore:
+        store = event_store(path, run_id, read_only=read_only, threads=threads)
         created_stores.append(store)
         return store
 

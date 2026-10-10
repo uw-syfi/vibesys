@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import concurrent.futures
-import threading
 from typing import TYPE_CHECKING
 
-from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
+from tests.server.support import Task, build_server_parts
 
-from vs_sim.api.testing import wait_or_fail
+from vs_sim.api.testing import SimThreads, wait_or_fail
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,9 +30,10 @@ def test_installing_handler_takes_over_from_fallback(tmp_path: Path) -> None:
 
 
 def test_retained_resource_remains_available_until_explicit_close(tmp_path: Path) -> None:
-    parts = build_server_parts(tmp_path)
+    threads = SimThreads()
+    parts = build_server_parts(tmp_path, threads=threads)
     parts.chat.enable_terminal_retention()
-    closed = threading.Event()
+    closed = threads.event()
     resource = TerminalChatResource(
         handler=lambda _question: ChatAnswer(text="terminal agent answer", invocation_id="exec-1"),
         close=closed.set,
@@ -51,10 +50,11 @@ def test_retained_resource_remains_available_until_explicit_close(tmp_path: Path
 
 
 def test_terminal_cleanup_waits_for_in_flight_answer(tmp_path: Path) -> None:
-    parts = build_server_parts(tmp_path)
+    threads = SimThreads()
+    parts = build_server_parts(tmp_path, threads=threads)
     parts.chat.enable_terminal_retention()
-    handler_started = threading.Event()
-    release_handler = threading.Event()
+    handler_started = threads.event()
+    release_handler = threads.event()
     order: list[str] = []
 
     def handler(_question: str) -> ChatAnswer:
@@ -63,43 +63,48 @@ def test_terminal_cleanup_waits_for_in_flight_answer(tmp_path: Path) -> None:
         order.append("answer finished")
         return ChatAnswer(text="finished answer", invocation_id="exec-1")
 
-    assert parts.chat.retain_terminal_resource(
-        TerminalChatResource(handler=handler, close=lambda: order.append("resource closed"))
-    )
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        answer = pool.submit(parts.chat.chat, "what happened?")
-        assert handler_started.wait(timeout=DEADLOCK_GUARD_S)
-        cleanup = pool.submit(parts.chat.close_terminal_resource)
+    def scenario() -> str:
+        assert parts.chat.retain_terminal_resource(
+            TerminalChatResource(handler=handler, close=lambda: order.append("resource closed"))
+        )
+        answer = Task(threads, lambda: parts.chat.chat("what happened?"), name="answer")
+        wait_or_fail(handler_started, "the handler to start")
+        cleanup = Task(threads, parts.chat.close_terminal_resource, name="cleanup")
         release_handler.set()
-        assert answer.result(timeout=DEADLOCK_GUARD_S) == "finished answer"
-        cleanup.result(timeout=DEADLOCK_GUARD_S)
+        cleanup.result()
+        return answer.result()
 
+    assert threads.run(scenario) == "finished answer"
     # The resource closes only after the answer that was using it is done.
     assert order == ["answer finished", "resource closed"]
 
 
 def test_terminal_cleanup_bounds_wait_and_defers_close(tmp_path: Path) -> None:
-    # A zero drain bound: the cleanup gives up on the in-flight answer at once.
-    parts = build_server_parts(tmp_path, chat_drain_timeout_seconds=0.0)
+    # The drain bound elapses on the simulated clock: the cleanup gives up on the
+    # in-flight answer, returns, and leaves the resource open until the answer ends.
+    threads = SimThreads()
+    parts = build_server_parts(tmp_path, threads=threads)
     parts.chat.enable_terminal_retention()
-    handler_started = threading.Event()
-    release_handler = threading.Event()
-    resource_closed = threading.Event()
+    handler_started = threads.event()
+    release_handler = threads.event()
+    resource_closed = threads.event()
 
     def handler(_question: str) -> ChatAnswer:
         handler_started.set()
         wait_or_fail(release_handler, "the test to release the handler")
         return ChatAnswer(text="late answer", invocation_id="exec-1")
 
-    assert parts.chat.retain_terminal_resource(
-        TerminalChatResource(handler=handler, close=resource_closed.set)
-    )
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        answer = pool.submit(parts.chat.chat, "what happened?")
-        assert handler_started.wait(timeout=DEADLOCK_GUARD_S)
-        # Returns without the answer finishing, and leaves the resource open.
+    def scenario() -> str:
+        assert parts.chat.retain_terminal_resource(
+            TerminalChatResource(handler=handler, close=resource_closed.set)
+        )
+        answer = Task(threads, lambda: parts.chat.chat("what happened?"), name="answer")
+        wait_or_fail(handler_started, "the handler to start")
         parts.chat.close_terminal_resource()
         assert not resource_closed.is_set()
         release_handler.set()
-        assert answer.result(timeout=DEADLOCK_GUARD_S) == "late answer"
-        assert resource_closed.wait(timeout=DEADLOCK_GUARD_S)
+        late = answer.result()
+        wait_or_fail(resource_closed, "the deferred close")
+        return late
+
+    assert threads.run(scenario) == "late answer"
