@@ -1,0 +1,53 @@
+name: Roadmap
+description: Plan a multi-outcome direction that lasts weeks or more, tracked through sub-issues.
+labels:
+  - type/roadmap
+projects:
+  - uw-syfi/1
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check existing roadmaps first and file new work as a sub-issue under one when it fits. A new roadmap needs maintainer approval of its plan.
+
+  - type: textarea
+    id: intent
+    attributes:
+      label: Intent
+      description: The problem and why it matters now, in a few sentences.
+    validations:
+      required: true
+
+  - type: textarea
+    id: end_state
+    attributes:
+      label: End state
+      description: What is true when the roadmap closes, as observable outcomes someone could check, not tasks.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      description: What is in and what is explicitly out.
+      placeholder: |
+        In scope:
+        - ...
+
+        Not in scope:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: decisions
+    attributes:
+      label: Decisions
+      description: Only decisions that constrain every sub-issue, each with its reason.
+
+  - type: textarea
+    id: phases
+    attributes:
+      label: Phases
+      description: The rough order of work and dependencies between phases. Phases are an ordering, not a contract, and may be reshaped as work proceeds; the sub-issues show the current plan. Do not prescribe how to get there unless there is really only one way (for example a mechanical refactor or a migration with a fixed target); then say so.
