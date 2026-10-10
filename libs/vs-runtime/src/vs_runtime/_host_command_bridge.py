@@ -20,6 +20,7 @@ from vs_sandbox.api.slurm import (
     COMMAND_BROKER_SOCKET_ENV,
     COMMAND_BROKER_TOKEN_ENV,
     HOST_COMMAND_CLIENT,
+    GateKind,
 )
 
 if TYPE_CHECKING:
@@ -28,6 +29,15 @@ if TYPE_CHECKING:
     from vs_sandbox.api.slurm import HostCommandBroker
 
 _SHEBANG = "#!/usr/bin/env python3\n"
+#: Where the client appears in the container. Every image has it on ``PATH``,
+#: including a login shell's, which resets any ``PATH`` set through the environment.
+CLIENT_BIN_DIR = "/usr/local/bin"
+
+
+def planned_gates(accuracy_command: str | None, benchmark_command: str | None) -> tuple[str, ...]:
+    """Return the gate kinds the task plans, as the client names them."""
+    planned = {GateKind.ACCURACY: accuracy_command, GateKind.BENCHMARK: benchmark_command}
+    return tuple(kind.value for kind, command in planned.items() if command)
 
 
 def new_broker_socket_path() -> Path:
@@ -55,12 +65,19 @@ def bridge_editor_extras(
     The socket (read-write) and the launcher's directory (read-only) are mounted
     at their host paths, the workspace is mounted at its host path too, and the
     container gets no accelerator: whatever it computes on, it computes through
-    the broker.
+    the broker. The launcher is also mounted under ``/usr/local/bin`` so its bare
+    name resolves on the agent's ``PATH``.
     """
     return EditorExtras(
         resources=(
             HostResource(broker.socket_path, HostResourceAccess.READ_WRITE, "host command broker"),
             HostResource(launcher.parent, HostResourceAccess.READ_ONLY, "host command client"),
+            HostResource(
+                launcher,
+                HostResourceAccess.READ_ONLY,
+                "host command client on PATH",
+                agent_path=f"{CLIENT_BIN_DIR}/{launcher.name}",
+            ),
         ),
         env={
             COMMAND_BROKER_SOCKET_ENV: str(broker.socket_path),

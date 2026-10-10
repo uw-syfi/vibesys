@@ -239,9 +239,14 @@ class SlurmEnvironmentFacts:
     ``service_command`` is the operator-configured argv (remote interpreter
     already substituted) that trusted jobs use to start the candidate service
     from the candidate root, or empty when the operator configured none.
+    ``gate_client`` is the name the agent runs, on its ``PATH``, to request a
+    trusted gate (``gate_client --gate KIND``), and ``gates`` the kinds the
+    task plans.
     """
 
     service_command: tuple[str, ...] = ()
+    gate_client: str = ""
+    gates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -270,6 +275,7 @@ class SlurmGpuEnvironmentFacts:
     max_gpus: int
     max_time_minutes: int
     gate_gpus: int
+    gates: tuple[str, ...] = ()
 
 
 RunEnvironmentPresentationFacts = (

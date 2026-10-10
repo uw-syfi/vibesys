@@ -8,6 +8,7 @@ program stands in for the cluster, so nothing patches the code under test.
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -85,6 +86,7 @@ def _request(
     backend: DaemonBackend,
     *,
     accuracy: str | None = "python accuracy.py",
+    benchmark: str | None = "python benchmark.py",
     framework_root: Path | None = None,
 ) -> RunEnvironmentRequest:
     workspace = tmp_path / "workspace"
@@ -99,16 +101,20 @@ def _request(
         run_id="run-1",
         framework_root=framework_root or tmp_path / "framework",
         accuracy_command=accuracy,
-        benchmark_command="python benchmark.py",
+        benchmark_command=benchmark,
         evaluator_requirements=TrustedEvaluatorRequirements(),
     )
 
 
 def _open(
-    tmp_path: Path, name: str, *, accuracy: str | None = "python accuracy.py"
+    tmp_path: Path,
+    name: str,
+    *,
+    accuracy: str | None = "python accuracy.py",
+    benchmark: str | None = "python benchmark.py",
 ) -> tuple[DaemonBackend, RunEnvironmentRequest, RunEnvironmentSession]:
     backend = DaemonBackend(daemon_engine(tmp_path))
-    request = _request(tmp_path, backend, accuracy=accuracy)
+    request = _request(tmp_path, backend, accuracy=accuracy, benchmark=benchmark)
     return backend, request, open_run_environment(_environment(tmp_path, name, backend), request)
 
 
@@ -222,3 +228,51 @@ def test_the_profiler_server_can_import_the_slurm_adapter_in_a_plain_image(
 
     assert probe.returncode == 0, probe.stderr
     assert probe.stdout.strip() == ""
+
+
+# What the agent types to reach the host broker's gates, per environment.
+_GATE_CLIENTS = {"slurm": "vibesys-gate", "slurm-gpu": "vibesys-gpu"}
+
+
+@pytest.mark.parametrize("name", ["slurm", "slurm-gpu"])
+def test_the_gate_client_is_mounted_where_the_agents_path_finds_it(
+    tmp_path: Path, name: str
+) -> None:
+    """Regression for #1646: the client was reachable only by its absolute host path."""
+    backend, _, session = _open(tmp_path, name)
+    try:
+        run = next(call for call in backend.engine.calls if call[1] == "run")
+        mounts = [run[i + 1] for i, flag in enumerate(run) if flag == "-v"]
+        client = _GATE_CLIENTS[name]
+        [mount] = [mount for mount in mounts if mount.endswith(f":/usr/local/bin/{client}:ro")]
+        launcher = Path(mount.split(":", 1)[0])
+        assert launcher.name == client
+        assert launcher.is_file()
+        # The gate commands the run hands out name that same program.
+        gate = session.view.paths.accuracy_command
+        assert gate is not None
+        assert shlex.split(gate)[0] == str(launcher)
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize("name", ["slurm", "slurm-gpu"])
+@pytest.mark.parametrize("accuracy", [None, "python accuracy.py"])
+@pytest.mark.parametrize("benchmark", [None, "python benchmark.py"])
+def test_the_environment_notes_name_the_gate_client_and_exactly_the_planned_gates(
+    tmp_path: Path, name: str, accuracy: str | None, benchmark: str | None
+) -> None:
+    """Regression for #1646: no prompt told the agent a gate client exists."""
+    _backend, _, session = _open(tmp_path, name, accuracy=accuracy, benchmark=benchmark)
+    try:
+        notes = session.view.prompt_notes
+        client = _GATE_CLIENTS[name]
+        assert (f"`{client} --gate accuracy`" in notes) is (accuracy is not None)
+        assert (f"`{client} --gate benchmark`" in notes) is (benchmark is not None)
+        if name == "slurm" and accuracy is None and benchmark is None:
+            assert client not in notes
+        # The notes and the gate commands handed to the run agree on what is planned.
+        assert (session.view.paths.accuracy_command is not None) is (accuracy is not None)
+        assert (session.view.paths.benchmark_command is not None) is (benchmark is not None)
+    finally:
+        session.close()

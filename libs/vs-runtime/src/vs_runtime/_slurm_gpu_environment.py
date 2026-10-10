@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession
 from vs_runtime._container_runtime_policy import reject_docker_in_docker
+from vs_runtime._host_command_bridge import planned_gates
 from vs_runtime._run_environment import (
     AgentPaths,
     DockerEnvironment,
@@ -79,6 +80,7 @@ class SlurmGpuEnvironment(_NoopWorkspaceRecovery):
             config.max_gpus,
             config.max_time_minutes,
             gpus,
+            planned_gates(request.accuracy_command, request.benchmark_command),
         )
         return _PreparedRunEnvironment(facts, partial(self._open, request, config, gpus))
 
