@@ -402,8 +402,38 @@ jobs:
           go-version-file: support/repoctl/go.mod
           cache-dependency-path: support/repoctl/go.sum
 
+      # The tests build through `docker build` against the daemon's own
+      # builder, so layer reuse needs the daemon's storage itself (images and
+      # build cache), not buildx cache flags. The key covers every file that
+      # decides what the layers contain; a miss builds cold, as before. The
+      # ISO week refreshes the floating python:3.12-bookworm base weekly.
+      - name: Compute the Docker layer cache key
+        id: docker-cache-week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Docker layer cache
+        id: docker-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/docker-data.tar.zst
+          key: agent-image-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-agent/src/vs_agent/images/agent.Dockerfile', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/images.py', 'tests/e2e/test_agent_image_e2e.py', 'libs/vs-sandbox/tests/test_docker_conformance_e2e.py', 'tests/e2e/test_credential_sharing_e2e.py', 'scripts/ci_docker_data_root.sh') }}
+
+      - name: Point Docker at the layer cache storage
+        run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
+
       - name: Build the CPU agent image, run every shipped CLI in it, and prove the Docker sandbox contract
         run: ./support/repoctl/repoctl run-checks --group agent_image_tests
+
+      - name: Snapshot Docker layer cache
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
+
+      - name: Save Docker layer cache
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/docker-data.tar.zst
+          key: ${{ steps.docker-cache.outputs.cache-primary-key }}
 
   # Several tests read clients/ directly (packaging, theme, and distribution
   # tests), so a TypeScript-only change still needs this job. Documentation-only
