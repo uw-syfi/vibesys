@@ -137,6 +137,7 @@ markers = [
     # The exhaustive crash-sequence sweep: deselected by default, run with `-m slow`.
     "slow: an exhaustive sweep too long for every run; select it with -m slow",
     "slurm_cluster: runs the slurm and slurm-gpu environments against a real Slurm cluster in Docker; opt in with VIBESYS_SLURM_CLUSTER=1",
+    "minimal_container: starts every in-container process in a real container built on each default base image, on a host without GPUs; opt in with VIBESYS_MINIMAL_CONTAINER=1",
     "real_contract: runs a Fake-vs-real contract suite against the real implementation (real DB, subprocess, or service); opt in with VIBESYS_REAL_CONTRACTS=1",
 ]
 
