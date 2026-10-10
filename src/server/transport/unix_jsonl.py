@@ -7,8 +7,6 @@ import json
 import socket
 import socketserver
 import sys
-import threading
-import time
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
@@ -23,11 +21,13 @@ from server.api.protocol import (
     SubscribeRequest,
 )
 from server.transport.subscriptions import SubscriptionTracker
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from server.api.service import RunApi, SubscriptionBootstrap
+    from vs_sim.api import Threads, Worker
 
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 
@@ -40,6 +40,8 @@ _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 # window overran that grace.
 _DISCONNECT_POLL_SECONDS = 0.1
 _SHUTDOWN_POLL_SECONDS = 0.1
+# Pause between idle checks of a stream whose cursor has not moved.
+_IDLE_BACKOFF_SECONDS = 0.05
 MAX_SOCKET_PATH_BYTES = 103 if sys.platform == "darwin" else 107
 
 
@@ -134,7 +136,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             if not api.wait_for_change(cursor, timeout=_DISCONNECT_POLL_SECONDS):
                 if self._client_disconnected():
                     return
-                time.sleep(0.05)
+                self.server.threads.sleep(_IDLE_BACKOFF_SECONDS)
                 continue
             if request.tail is not None and api.latest_sequence - cursor > request.tail:
                 # More live output landed in one wait than the tail bound was
@@ -234,10 +236,12 @@ class _JsonlUnixServer(socketserver.ThreadingUnixStreamServer):
         path: Path,
         api: RunApi,
         subscriptions: SubscriptionTracker,
+        threads: Threads,
     ) -> None:
-        """Bind the socket server to its API and subscription tracker."""
+        """Bind the socket server to its API, subscription tracker and thread source."""
         self.api = api
         self.subscriptions = subscriptions
+        self.threads = threads
         super().__init__(str(path), _RequestHandler)
 
 
@@ -249,12 +253,18 @@ class UnixJsonlServer:
         path: Path,
         api: RunApi,
         subscriptions: SubscriptionTracker | None = None,
+        threads: Threads | None = None,
     ) -> None:
-        """Create a Unix server, optionally sharing subscription accounting."""
+        """Create a Unix server, optionally sharing subscription accounting.
+
+        ``threads`` runs the accept loop and paces idle streams; it defaults to the
+        operating system's.
+        """
         self.path = path
         self.api = api
+        self._threads = threads or OsThreads()
         self._server: _JsonlUnixServer | None = None
-        self._thread: threading.Thread | None = None
+        self._thread: Worker | None = None
         self._subscriptions = subscriptions or SubscriptionTracker()
 
     def start(self) -> None:
@@ -262,15 +272,14 @@ class UnixJsonlServer:
         validate_socket_path(self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.unlink(missing_ok=True)
-        self._server = _JsonlUnixServer(self.path, self.api, self._subscriptions)
+        self._server = _JsonlUnixServer(self.path, self.api, self._subscriptions, self._threads)
         self.path.chmod(0o600)
-        self._thread = threading.Thread(
-            target=self._server.serve_forever,
-            kwargs={"poll_interval": _SHUTDOWN_POLL_SECONDS},
+        server = self._server
+        self._thread = self._threads.spawn(
+            lambda: server.serve_forever(poll_interval=_SHUTDOWN_POLL_SECONDS),
             name="vibesys-server-jsonl",
             daemon=True,
         )
-        self._thread.start()
 
     def wait_for_subscriber(self, timeout: float) -> bool:
         """Wait until a presentation client has established its event stream."""
