@@ -78,7 +78,7 @@ class _Timer(asyncio.TimerHandle):
         """Enter the loop's timer heap at ``rank``, marked as scheduled so ``cancel`` tells the loop."""
         self._rank = rank
         heapq.heappush(heap, self)
-        self._scheduled = True  # ty: ignore[unresolved-attribute]
+        self._scheduled = True
 
 
 class _VirtualSelector(selectors.DefaultSelector):
