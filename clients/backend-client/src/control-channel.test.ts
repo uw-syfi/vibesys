@@ -5,6 +5,7 @@ import {
   type ControlConnection,
   type ControlConnectionHandlers,
   type IssuedRequest,
+  type ScheduleTimeout,
 } from './control-channel.js';
 import {BackendClientError} from './errors.js';
 import type {ProtocolResponse} from './protocol.js';
@@ -20,8 +21,9 @@ import {expect} from './test-support/expect.js';
  *   close is reported once and never again.
  * - `faultsWhileDialing`: the same window, but with unreadable bytes, which is
  *   not an outage a redial recovers.
+ * - `rejects`: the connector cannot establish a connection at all.
  */
-type ConnectionBehavior = 'answers' | 'dropsWhileDialing' | 'faultsWhileDialing';
+type ConnectionBehavior = 'answers' | 'dropsWhileDialing' | 'faultsWhileDialing' | 'rejects';
 
 /**
  * A `ControlConnector` with no transport under it: connections are plain
@@ -45,7 +47,9 @@ class FakeConnector {
   readonly open = async (handlers: ControlConnectionHandlers): Promise<ControlConnection> => {
     const behavior = this.#script.shift() ?? this.fallback;
     this.opened.push(behavior);
-    if (behavior === 'dropsWhileDialing') {
+    if (behavior === 'rejects') {
+      throw new BackendClientError('disconnected', 'dial refused');
+    } else if (behavior === 'dropsWhileDialing') {
       handlers.onDrop(
         new BackendClientError('disconnected', 'socket closed before the dial returned'),
       );
@@ -79,6 +83,27 @@ class FakeConnector {
   };
 }
 
+class FakeScheduler {
+  readonly #scheduled = new Map<() => void, number>();
+
+  readonly schedule: ScheduleTimeout = (callback, delayMs) => {
+    this.#scheduled.set(callback, delayMs);
+    return () => this.#scheduled.delete(callback);
+  };
+
+  pendingDelays(): number[] {
+    return [...this.#scheduled.values()];
+  }
+}
+
+function deferred(): {readonly promise: Promise<void>; readonly resolve: () => void} {
+  let settle = (): void => {};
+  const promise = new Promise<void>(resolve => {
+    settle = () => resolve();
+  });
+  return {promise, resolve: settle};
+}
+
 function channelWith(
   connector: FakeConnector,
   reconnectDelaysMs: readonly number[],
@@ -100,6 +125,116 @@ function channelWith(
 }
 
 describe('ControlChannel', () => {
+  it('does not open a connection after a state callback closes the channel', async () => {
+    const connector = new FakeConnector(['answers']);
+    const adopted: {handlers?: ControlConnectionHandlers} = {};
+    let closing: Promise<void> | null = null;
+    let channel: ControlChannel;
+    channel = new ControlChannel(connector, {
+      clientId: 'test-client',
+      reconnectDelaysMs: [],
+      onConnectionState: state => {
+        if (state.status !== 'disconnected') return;
+        if (state.retrying) closing = channel.close();
+        else channel.reconnect();
+      },
+    });
+    channel.adopt(handlers => {
+      adopted.handlers = handlers;
+      return {send: () => undefined, close: async () => undefined};
+    });
+
+    if (adopted.handlers === undefined) throw new Error('The adopted connection has no handlers');
+    adopted.handlers.onDrop(new BackendClientError('disconnected', 'socket closed'));
+    if (closing === null) throw new Error('The retrying callback did not close the channel');
+    await closing;
+
+    expect(connector.opened).toEqual([]);
+    expect(channel.connected).toBe(false);
+  });
+
+  for (const report of ['drop', 'fault'] as const) {
+    it(`lets close own teardown from the initial ${report} callback`, async () => {
+      const connector = new FakeConnector([]);
+      const scheduler = new FakeScheduler();
+      const connectionClosed = deferred();
+      const adopted: {handlers?: ControlConnectionHandlers} = {};
+      let connectionCloseCalls = 0;
+      let closing: Promise<void> | null = null;
+      let channel: ControlChannel;
+      channel = new ControlChannel(connector, {
+        clientId: 'test-client',
+        reconnectDelaysMs: [10],
+        scheduleTimeout: scheduler.schedule,
+        onConnectionState: state => {
+          if (state.status === 'disconnected' && !state.retrying) closing = channel.close();
+        },
+      });
+      channel.adopt(handlers => {
+        adopted.handlers = handlers;
+        return {
+          send: () => undefined,
+          close: () => {
+            connectionCloseCalls += 1;
+            return connectionClosed.promise;
+          },
+        };
+      });
+
+      if (adopted.handlers === undefined) throw new Error('The adopted connection has no handlers');
+      const error = new BackendClientError(
+        report === 'drop' ? 'disconnected' : 'parse',
+        report === 'drop' ? 'socket closed' : 'invalid frame',
+      );
+      if (report === 'drop') adopted.handlers.onDrop(error);
+      else adopted.handlers.onFault(error);
+      const closePromise = closing as Promise<void> | null;
+      if (closePromise === null) throw new Error('The disconnected callback did not close');
+      let closeSettled = false;
+      void closePromise.then(() => {
+        closeSettled = true;
+      });
+      await Promise.resolve();
+
+      expect(connectionCloseCalls).toBe(1);
+      expect(closeSettled).toBe(false);
+      expect(scheduler.pendingDelays()).toEqual([]);
+
+      connectionClosed.resolve();
+      await closePromise;
+      expect(closeSettled).toBe(true);
+      expect(channel.connected).toBe(false);
+    });
+  }
+
+  it('does not leave a retry timer when a failed-dial callback closes the channel', async () => {
+    const connector = new FakeConnector(['rejects']);
+    const scheduler = new FakeScheduler();
+    const reported = deferred();
+    let closing: Promise<void> | null = null;
+    let channel: ControlChannel;
+    channel = new ControlChannel(connector, {
+      clientId: 'test-client',
+      reconnectDelaysMs: [10],
+      scheduleTimeout: scheduler.schedule,
+      onConnectionState: state => {
+        if (state.status !== 'disconnected' || state.retrying) return;
+        closing = channel.close();
+        reported.resolve();
+      },
+    });
+
+    channel.reconnect();
+    await reported.promise;
+    const closePromise = closing as Promise<void> | null;
+    if (closePromise === null) throw new Error('The failed-dial callback did not close');
+    await closePromise;
+
+    expect(connector.opened).toEqual(['rejects']);
+    expect(scheduler.pendingDelays()).toEqual([]);
+    expect(channel.connected).toBe(false);
+  });
+
   it('does not install a connection that failed before the dial returned', async () => {
     // Two attempts: the first connection dies in the window between the
     // handlers being bound and `open()` resolving, the second works.
