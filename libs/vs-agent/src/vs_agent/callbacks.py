@@ -1,7 +1,6 @@
 """Agent callback implementation for logging and publishing provider output."""
 
 import json
-import time
 import uuid
 from collections import defaultdict, deque
 from collections.abc import Callable
@@ -14,6 +13,7 @@ from vs_agent.events import AgentOutputChannel, AgentStatusData, ToolResultPaylo
 from vs_agent.progress import AgentProgress
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vs_agent.todos import todos_from_tool_call
+from vs_sim.api import Clock, MonotonicClock
 
 ContextWindowLookup = Callable[[str | None], int | None]
 """Resolves a model name to its context window size in tokens.
@@ -84,6 +84,7 @@ class AgentLogger:
         round_label: str | None = None,
         invocation_id: str | None = None,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
+        clock: Clock | None = None,
     ) -> None:
         """Initialize callback state and its output destinations."""
         self._external_text_streaming = False
@@ -95,7 +96,8 @@ class AgentLogger:
         self._model_name = model_name
         self._agent_label = agent_label
         self._progress = progress
-        self._start_time = time.monotonic()
+        self._clock = clock or MonotonicClock()
+        self._start_time = self._clock.now()
         self._input_tokens = 0
         # Most recent usage dict from the cli backend (see ``update_usage``).
         self._latest_usage: dict[str, Any] | None = None
@@ -116,7 +118,7 @@ class AgentLogger:
         return AgentStatusData(
             progress=self._progress.label() if self._progress is not None else None,
             agent_label=self._agent_label,
-            elapsed_seconds=time.monotonic() - self._start_time,
+            elapsed_seconds=self._clock.now() - self._start_time,
             input_tokens=self._input_tokens,
             context_window=self._context_window,
         )

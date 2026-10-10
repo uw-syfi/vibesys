@@ -2988,6 +2988,7 @@ dependencies = [
     { name = "vs-project" },
     { name = "vs-prompts" },
     { name = "vs-sandbox" },
+    { name = "vs-sim" },
 ]
 
 [package.metadata]
@@ -2998,6 +2999,7 @@ requires-dist = [
     { name = "vs-project", editable = "libs/vs-project" },
     { name = "vs-prompts", editable = "libs/vs-prompts" },
     { name = "vs-sandbox", editable = "libs/vs-sandbox" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 
 [[package]]

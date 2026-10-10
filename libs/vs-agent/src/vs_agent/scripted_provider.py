@@ -20,7 +20,6 @@ knowledge of application response schemas or policy defaults.
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
@@ -38,6 +37,7 @@ from vs_agent.contracts import (
 )
 from vs_agent.shim_translation import default_agent_path
 from vs_agent.shim_turns import LaunchedSession, SteerLedger, TurnEvents
+from vs_sim.api import OsThreads, Threads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -120,11 +120,11 @@ class FakeProviderError(RuntimeError):
 class FakeCancels:
     """Cancellation requests every session of one fake provider received."""
 
-    def __init__(self) -> None:
+    def __init__(self, threads: Threads) -> None:
         """Start with no request."""
-        self._lock = threading.Lock()
+        self._lock = threads.lock()
         self._count = 0
-        self._event = threading.Event()
+        self._event = threads.event()
 
     def record(self) -> None:
         """Count one request and release anything waiting for it."""
@@ -163,8 +163,12 @@ class FakeTurnScript:
 
 @dataclass(slots=True)
 class _InFlight:
-    """The VibeSys request of the turn running now, which the library never sees."""
+    """The VibeSys request of the turn running now, which the library never sees.
 
+    It also carries the :class:`Threads` its session's locks come from.
+    """
+
+    threads: Threads
     request: AgentTurnRequest | None = None
     on_turn: Callable[[AgentTurnRequest], None] | None = None
     barrier_error: BaseException | None = None
@@ -259,7 +263,7 @@ class _ScriptedTransport:
         self._profile = profile
         self._ids = ids
         self._invocations = 0
-        self._lock = threading.Lock()
+        self._lock = in_flight.threads.lock()
 
     @property
     def profile(self) -> agentshim.ProviderProfile:
@@ -310,7 +314,7 @@ class ScriptedSession(LaunchedSession):
         self.hooks = hooks
         self.in_flight = in_flight
         self.turns_in_progress = 0
-        self.state_lock = threading.Lock()
+        self.state_lock = in_flight.threads.lock()
 
     @override
     def run_turn(
@@ -360,7 +364,7 @@ class ScriptedSession(LaunchedSession):
 class FakeProvider:
     """Open scripted sessions that stream fixed turns instead of running an agent."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-168417 [PLR0913]; Preserve FakeProvider.__init__'s named-argument contract because tests pass these independent settings directly.
         self,
         *,
         turn: Sequence[agentshim.AgentEvent] | None = None,
@@ -368,6 +372,7 @@ class FakeProvider:
         answer: BaseModel | Mapping[str, object] | str | None = None,
         script: FakeTurnScript | None = None,
         on_turn: Callable[[AgentTurnRequest], None] | None = None,
+        threads: Threads | None = None,
     ) -> None:
         """Create a provider whose sessions emit ``turn``/``turns`` and answer with ``answer``.
 
@@ -400,14 +405,15 @@ class FakeProvider:
             resolved_turns = ((),)
         if script is not None and answer is not None:
             raise FakeProviderError.conflicting_turn_inputs()
-        self._cancels = FakeCancels()
+        self._threads = threads or OsThreads()
+        self._cancels = FakeCancels(self._threads)
         self._resumed: list[str] = []
         self._on_turn = on_turn
         self._turns = resolved_turns
         self._script = script if script is not None else FakeTurnScript((answer,))
         self._sessions: list[ScriptedSession] = []
         self._session_count = 0
-        self._lock = threading.Lock()
+        self._lock = self._threads.lock()
         self._closed = False
 
     @property
@@ -442,7 +448,7 @@ class FakeProvider:
             self._session_count += 1
             ordinal = self._session_count
         profile = _profile(spec.provider, self._script.reset_after_turn)
-        in_flight = _InFlight(on_turn=self._on_turn)
+        in_flight = _InFlight(self._threads, on_turn=self._on_turn)
         transport = _ScriptedTransport(
             turns=self._turns,
             script=self._script,
@@ -450,7 +456,7 @@ class FakeProvider:
             in_flight=in_flight,
             ids=lambda: f"fake-{spec.role}-{ordinal}",
         )
-        steers = SteerLedger()
+        steers = SteerLedger(self._threads)
         events = TurnEvents(steers)
         agent = agentshim.Agent(
             transport,
@@ -641,18 +647,21 @@ class HandSession(LaunchedSession):
     inert library session, so nothing runs unless a subclass says so.
     """
 
-    def __init__(self, spec: AgentSessionSpec | None = None) -> None:
+    def __init__(
+        self, spec: AgentSessionSpec | None = None, *, threads: Threads | None = None
+    ) -> None:
         """Wrap an inert library session for ``spec`` (a placeholder when omitted)."""
+        threads = threads or OsThreads()
         resolved = spec if spec is not None else _placeholder_spec()
         profile = _profile(resolved.provider, None)
-        steers = SteerLedger()
+        steers = SteerLedger(threads)
         events = TurnEvents(steers)
         agent = agentshim.Agent(
             _ScriptedTransport(
                 turns=((),),
                 script=FakeTurnScript((None,)),
                 profile=profile,
-                in_flight=_InFlight(),
+                in_flight=_InFlight(threads),
                 ids=lambda: "hand-session",
             ),
             permissions=agentshim.NativePermissions.bypass(),

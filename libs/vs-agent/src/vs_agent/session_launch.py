@@ -20,7 +20,6 @@ a backend.
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -43,12 +42,14 @@ from vs_agent.session_environment import (
 )
 from vs_agent.shim_turns import LaunchedSession, SteerLedger, TurnEvents
 from vs_sandbox.api import build_host_sandbox
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from vs_agent.contracts import AgentSessionSpec, ProviderReadiness
     from vs_sandbox.api import DockerSandbox, WorkspaceSandbox
+    from vs_sim.api import Threads
 
 AGENTSHIM_CAPABILITIES = AgentCapabilities(
     tool_servers=True,
@@ -317,6 +318,7 @@ class ConfinedSessionLauncher:
         transport: agentshim.TransportKind | None = None,
         clock: agentshim.Clock | None = None,
         ids: agentshim.IdAllocator | None = None,
+        threads: Threads | None = None,
     ) -> None:
         """Configure one provider; ``executor_factory`` replaces the base executor.
 
@@ -388,7 +390,8 @@ class ConfinedSessionLauncher:
         self._agent_homes = agent_homes
         self._env_passthrough = validate_env_names(env_passthrough)
         self._dropped_names_logged = False
-        self._dropped_names_lock = threading.Lock()
+        self._threads = threads or OsThreads()
+        self._dropped_names_lock = self._threads.lock()
         self._launcher_env = launcher_env
         self._transport = transport
         self._clock = clock
@@ -516,7 +519,7 @@ class ConfinedSessionLauncher:
         launch = self._launch_for(spec)
         sandbox = launch.sandbox
         config_scope = launch.config_scope
-        steers = SteerLedger()
+        steers = SteerLedger(self._threads)
         event_handler = TurnEvents(steers)
         agent = agentshim.Agent(
             spec.provider,

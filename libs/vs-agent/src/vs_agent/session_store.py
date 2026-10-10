@@ -21,18 +21,19 @@ keys whose scope opts into durability are ever written (see
 
 from __future__ import annotations
 
-from threading import RLock
 from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from vs_agent.session_key import AgentSessionKey
 from vs_project.api import ProjectError
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_project.api import StateSlot
+    from vs_sim.api import Threads
 
 
 class ProviderSessionRecord(BaseModel):
@@ -167,11 +168,12 @@ class DurableSessionStore:
         slot: StateSlot[AgentSessionState],
         *,
         log: Callable[[str], None] = _ignore_diagnostic,
+        threads: Threads | None = None,
     ) -> None:
         """Bind the store to a local-namespace ``sessions.json`` slot."""
         self._slot = slot
         self._log = log
-        self._mutation_lock = RLock()
+        self._mutation_lock = (threads or OsThreads()).rlock()
 
     def get(self, key: AgentSessionKey) -> ProviderSessionRecord | None:
         """Return the checkpoint for ``key``, or ``None``."""

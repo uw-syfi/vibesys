@@ -14,6 +14,7 @@ dependencies = [
     "vs-project",
     "vs-prompts",
     "vs-sandbox",
+    "vs-sim",
 ]
 
 [tool.setuptools.packages.find]
@@ -27,3 +28,4 @@ vs-mcp = { workspace = true }
 vs-project = { workspace = true }
 vs-prompts = { workspace = true }
 vs-sandbox = { workspace = true }
+vs-sim = { workspace = true }
