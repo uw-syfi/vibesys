@@ -84,6 +84,10 @@ class AtomicWriteEffects(Protocol):
         """Persist the flushed stream before publishing its name."""
         ...
 
+    def sync_existing_file(self, path: Path) -> None:
+        """Persist the current bytes of an already published file."""
+        ...
+
     def replace(self, temporary: Path, destination: Path) -> None:
         """Atomically publish a complete temporary file."""
         ...
@@ -116,6 +120,14 @@ class LocalAtomicWriteEffects:
     def sync_file(self, stream: AtomicWriteStream) -> None:
         """Persist the complete staging file."""
         os.fsync(stream.fileno())
+
+    def sync_existing_file(self, path: Path) -> None:
+        """Persist a published file, refusing to follow a symlink at ``path``."""
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     def replace(self, temporary: Path, destination: Path) -> None:
         """Atomically publish the staging file."""

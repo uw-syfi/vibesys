@@ -21,6 +21,7 @@ from vs_project._state_store import LocalStateStore
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from vs_project._state_io import AtomicWriteEffects
     from vs_project.api.state_store import (
         CommitFault,
         ObservationFault,
@@ -80,15 +81,22 @@ class Project:
         fault_plan: Iterable[CommitFault] = (),
         lease_fault_plan: Iterable[CommitFault | None] = (),
         observation_fault_plan: Iterable[ObservationFault | None] = (),
+        effects: AtomicWriteEffects | None = None,
     ) -> StateStore:
         """Open the shared atomic record and host fence for one validated run.
 
-        Fault plans drive the local store only; a project opened with injected
+        Fault plans and ``effects`` (the durability operations; default the local
+        filesystem) drive the local store only; a project opened with injected
         ``state_stores`` rejects them, since its stores take their faults at
         construction.
         """
         if self._state_stores is not None:
-            if tuple(fault_plan) or tuple(lease_fault_plan) or tuple(observation_fault_plan):
+            if (
+                tuple(fault_plan)
+                or tuple(lease_fault_plan)
+                or tuple(observation_fault_plan)
+                or effects is not None
+            ):
                 message = "fault plans apply to the local state store, not injected state_stores"
                 raise ValueError(message)
             return self._state_stores(self, run_id)
@@ -98,6 +106,7 @@ class Project:
             fault_plan=fault_plan,
             lease_fault_plan=lease_fault_plan,
             observation_fault_plan=observation_fault_plan,
+            effects=effects,
         )
 
     def stored_record(self, run_id: str) -> StoreRecord | None:
