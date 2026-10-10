@@ -37,7 +37,6 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from vs_sandbox.agent_gpu import (
     AgentGpuConfig,
-    AgentGpuLauncher,
     GpuCommand,
     GpuLauncher,
 )
@@ -220,13 +219,13 @@ class GpuCommands:
 
     *host_env* is the submit host's environment a job may inherit; only its
     baseline subset reaches the job. *confinement* is the job's explicit
-    confinement policy.
+    confinement policy. *launcher* starts the job's ``srun``.
     """
 
     config: AgentGpuConfig
     confinement: JobConfinement
     host_env: Mapping[str, str]
-    launcher: GpuLauncher | None = None
+    launcher: GpuLauncher
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,9 +378,7 @@ class HostCommandBroker:
         self._worktree_roots = tuple(path.resolve() for path in roots.worktree_roots)
         self._gpu = gpu
         self._gates = gates
-        self._launcher: GpuLauncher | None = (
-            None if gpu is None else (gpu.launcher or AgentGpuLauncher(gpu.config))
-        )
+        self._launcher: GpuLauncher | None = None if gpu is None else gpu.launcher
         self._listener: Listener | None = None
         self._acceptor: Worker | None = None
         self._in_flight: set[Event] = set()

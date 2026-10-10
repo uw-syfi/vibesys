@@ -58,7 +58,7 @@ _agent_gpus = st.builds(
     max_gpus=st.integers(1, 8),
     max_time_minutes=st.just(120),
     default_time_minutes=st.integers(1, 120),
-    srun_command=_argv,
+    srun_arguments=st.lists(_word, max_size=2).map(tuple),
     windows_command=st.none() | _argv,
 )
 _services = st.builds(

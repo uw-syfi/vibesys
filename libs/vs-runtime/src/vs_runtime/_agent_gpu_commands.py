@@ -17,6 +17,7 @@ from vs_agent.api import declare_command_host_resources
 from vs_sandbox.api.slurm import AgentGpuLauncher, GpuCommands, HostJobConfinement
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from vs_sandbox.api import ProjectPathPolicy
@@ -33,15 +34,16 @@ def agent_gpu_commands(
     *,
     workspace: Path,
     project_path_policy: ProjectPathPolicy,
+    shell_command: Sequence[str],
     confinement: JobConfinement | None = None,
-    launcher: AgentGpuLauncher | None = None,
 ) -> GpuCommands:
     """Return what the broker needs to offer the ``gpu`` operation under *config*.
 
     The job confinement is chosen here, explicitly: *confinement*, or by default
     the host sandbox. The job runs on a compute node, where Docker is normally
-    unavailable, whatever the agent itself runs in. *launcher* is the ``srun``
-    launcher, shared with a caller that runs its own jobs through it.
+    unavailable, whatever the agent itself runs in. *shell_command* is how this
+    host reaches Slurm (the local transport's shell): ``srun`` and ``scancel``
+    run through it, so the operator names the Slurm binaries in one place.
     """
     host_env = dict(os.environ)
     confinement = confinement or HostJobConfinement(
@@ -52,7 +54,9 @@ def agent_gpu_commands(
     # Fail closed now, not at the first GPU command: a host that cannot confine
     # a job must not start a run whose agent can only use GPUs through jobs.
     confinement.wrap(workspace, [])
-    return GpuCommands(config, confinement, host_env, launcher=launcher or AgentGpuLauncher(config))
+    return GpuCommands(
+        config, confinement, host_env, launcher=AgentGpuLauncher(config, shell_command)
+    )
 
 
 def agent_gpu_env(launcher: Path) -> dict[str, str]:

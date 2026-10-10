@@ -67,9 +67,12 @@ WINDOWS: Mapping[str, object] = {
     ],
 }
 
-# Stands in for srun and scancel: records its argv, then runs what follows `--`.
+# Stands in for the Slurm shell (the local transport's `bash -c`): it receives the
+# command line of `srun` or `scancel` as its one argument, records the arguments,
+# then runs what follows `--`.
 FAKE_SLURM = """\
-import os, sys
+import os, shlex, sys
+sys.argv = [sys.argv[0], *shlex.split(sys.argv[1])[1:]]
 with open(os.environ["FAKE_SLURM_LOG"], "a") as log:
     log.write(repr(sys.argv[1:]) + "\\n")
 if "--" in sys.argv:
@@ -78,15 +81,17 @@ if "--" in sys.argv:
 """
 
 
-def _config(tmp_path: Path, **updates: object) -> AgentGpuConfig:
+def _launcher(tmp_path: Path, **updates: object) -> AgentGpuLauncher:
     fake = tmp_path / "fake_slurm.py"
     fake.write_text(FAKE_SLURM)
+    return AgentGpuLauncher(_config(**updates), (sys.executable, str(fake)))
+
+
+def _config(**updates: object) -> AgentGpuConfig:
     values: dict[str, object] = {
         "partitions": ("main", "priority"),
         "max_gpus": 8,
         "max_time_minutes": 120,
-        "srun_command": (sys.executable, str(fake)),
-        "scancel_command": (sys.executable, str(fake)),
     }
     values.update(updates)
     return AgentGpuConfig.model_validate(values)
@@ -101,7 +106,7 @@ def slurm_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 class TestConfig:
     def test_requests_above_the_limits_are_rejected_not_clamped(self, tmp_path: Path) -> None:
-        config = _config(tmp_path, max_gpus=4, max_time_minutes=30)
+        config = _config(max_gpus=4, max_time_minutes=30)
         assert config.request(None, None) == GpuJobRequest(gpus=1, time_minutes=30)
         with pytest.raises(AgentGpuRequestError, match="limit of 4"):
             config.request(8, 10)
@@ -122,17 +127,17 @@ class TestPartition:
         self, tmp_path: Path, gpus: int, minutes: int, expected: str
     ) -> None:
         request = GpuJobRequest(gpus=gpus, time_minutes=minutes)
-        assert choose_partition(_config(tmp_path), request, WINDOWS) == expected
+        assert choose_partition(_config(), request, WINDOWS) == expected
 
     def test_uses_priority_for_a_short_job_main_cannot_start(self, tmp_path: Path) -> None:
-        config = _config(tmp_path)
+        config = _config()
         request = GpuJobRequest(gpus=2, time_minutes=20)
         busy = json.loads(json.dumps(WINDOWS))
         busy["partitions"][0]["groups"][0]["options"][0]["start"] = "2026-10-08T23:31"
         assert choose_partition(config, request, busy) == "priority"
 
     def test_never_picks_a_partition_whose_limit_is_too_short(self, tmp_path: Path) -> None:
-        config = _config(tmp_path, partitions=("priority", "main"))
+        config = _config(partitions=("priority", "main"))
         request = GpuJobRequest(gpus=8, time_minutes=60)
         assert choose_partition(config, request, WINDOWS) == "main"
 
@@ -141,7 +146,7 @@ class TestPartition:
         self, tmp_path: Path, windows: Mapping[str, object] | None
     ) -> None:
         request = GpuJobRequest(gpus=1, time_minutes=5)
-        assert choose_partition(_config(tmp_path), request, windows) == "main"
+        assert choose_partition(_config(), request, windows) == "main"
 
 
 class TestLauncher:
@@ -149,7 +154,7 @@ class TestLauncher:
         self, tmp_path: Path, slurm_log: Path
     ) -> None:
         output = bytearray()
-        status = AgentGpuLauncher(_config(tmp_path)).run(
+        status = _launcher(tmp_path).run(
             GpuJobRequest(gpus=2, time_minutes=7),
             GpuCommand(
                 argv=("sh", "-c", "echo from-job; exit 3"), cwd=tmp_path, env=dict(os.environ)
@@ -170,7 +175,7 @@ class TestLauncher:
         cancel = threading.Event()
         cancel.set()
         output = bytearray()
-        AgentGpuLauncher(_config(tmp_path)).run(
+        _launcher(tmp_path).run(
             GpuJobRequest(gpus=1, time_minutes=5),
             GpuCommand(argv=("sleep", "60"), cwd=tmp_path, env=dict(os.environ)),
             write=output.extend,

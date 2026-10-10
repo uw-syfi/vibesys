@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from vs_runtime._agent_gpu_commands import (
     AGENT_GPU_LAUNCHER,
@@ -74,16 +74,152 @@ if TYPE_CHECKING:
     from vs_sandbox.api.slurm import JobConfinement
 
 _GATE_LAUNCHER = "vibesys-gate"
-#: Where the deprecated ``slurm-gpu`` alias stages its gates: a directory the
-#: operator's home shares with the compute nodes, as the old environment required
-#: of the workspace.
-SLURM_GPU_STAGE_ROOT = Path("~/.cache/vibesys/slurm-gpu-stage")
 _REMOTE_PROFILER_IDS = frozenset({"auto", "none", "rocprof"})
+_NO_PROFILER_IDS = frozenset({"auto", "none"})
 
 
 def _slurm_service_command(policy: SlurmExecutionPolicy) -> tuple[str, ...]:
     service = policy.remote_service()
     return () if service is None else service.command
+
+
+class _Mode(Protocol):
+    """How the agent profiles and reaches GPUs, derived once from the operator settings.
+
+    Every choice that depends on whether the agent runs its own GPU commands
+    (which gate client it is given, which profilers it may select, whether
+    the run offers parallel candidates) is read from here, so none re-tests
+    the capability.
+    """
+
+    @property
+    def gate_client(self) -> str:
+        """The program the agent runs for gates (and GPU commands)."""
+        ...
+
+    @property
+    def agent_gpu_facts(self) -> AgentGpuFacts | None:
+        """The limits the agent is told, or ``None`` without the capability."""
+        ...
+
+    @property
+    def remote_capture(self) -> bool:
+        """Whether profiling is an ad hoc capture the cluster runs."""
+        ...
+
+    @property
+    def materialize_local_model_weights(self) -> bool:
+        """Whether external symlinks are copied in (agent jobs read the workspace directly)."""
+        ...
+
+    @property
+    def default_profiler_id(self) -> str:
+        """The profiler a run uses by default."""
+        ...
+
+    @property
+    def supported_profiler_ids(self) -> frozenset[str] | None:
+        """The profilers a run may select, or ``None`` for any."""
+        ...
+
+    @property
+    def requires_local_profiler_preflight(self) -> bool:
+        """Whether the profiler's tool must exist on this host."""
+        ...
+
+    @property
+    def parallel_candidate_blocker(self) -> str | None:
+        """Why parallel candidates are unavailable, or ``None``."""
+        ...
+
+    def gpu_commands(
+        self, request: RunEnvironmentRequest, confinement: JobConfinement | None
+    ) -> GpuCommands | None:
+        """What the gate broker offers as GPU commands, if anything."""
+        ...
+
+    def editor_env(self, launcher: Path) -> dict[str, str] | None:
+        """The container variables the client launcher needs, if any."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class _ClusterGates:
+    """Gates only. Profiling is a remote capture over SSH, and unavailable otherwise.
+
+    The capture's profiler server reaches the cluster through a second host
+    broker that exists only for the SSH transport; without it the profiler
+    would have nowhere to run, so none is offered.
+    """
+
+    remote_capture: bool
+    gate_client = _GATE_LAUNCHER
+    agent_gpu_facts = None
+    materialize_local_model_weights = False
+    requires_local_profiler_preflight = False
+    parallel_candidate_blocker = None
+
+    @property
+    def default_profiler_id(self) -> str:
+        return "rocprof" if self.remote_capture else "none"
+
+    @property
+    def supported_profiler_ids(self) -> frozenset[str]:
+        return _REMOTE_PROFILER_IDS if self.remote_capture else _NO_PROFILER_IDS
+
+    def gpu_commands(
+        self, request: RunEnvironmentRequest, confinement: JobConfinement | None
+    ) -> None:
+        del request, confinement
+
+    def editor_env(self, launcher: Path) -> None:
+        del launcher
+
+
+@dataclass(frozen=True, slots=True)
+class _AgentGpuMode:
+    """The agent runs its own GPU commands as Slurm jobs and profiles with them."""
+
+    config: AgentGpuConfig
+    #: How this host reaches Slurm: the local transport's shell.
+    shell_command: tuple[str, ...]
+    gate_client = AGENT_GPU_LAUNCHER
+    remote_capture = False
+    materialize_local_model_weights = True
+    default_profiler_id = "nsys"
+    supported_profiler_ids = None
+    requires_local_profiler_preflight = True
+    # Gates run on the sbatch path whichever way the agent runs, and that path serves
+    # one candidate per session as the plain slurm environment does, so only the agent
+    # GPU broker needs a blocker: its launcher and worktree-root checks have never run
+    # with one broker per candidate (#1624 made the blocker a computed, quoted reason).
+    parallel_candidate_blocker = "it has not been verified to run one GPU broker per candidate"
+
+    @property
+    def agent_gpu_facts(self) -> AgentGpuFacts:
+        return AgentGpuFacts(self.config.max_gpus, self.config.max_time_minutes)
+
+    def gpu_commands(
+        self, request: RunEnvironmentRequest, confinement: JobConfinement | None
+    ) -> GpuCommands:
+        return agent_gpu_commands(
+            self.config,
+            workspace=request.workspace,
+            project_path_policy=request.project_path_policy,
+            shell_command=self.shell_command,
+            confinement=confinement,
+        )
+
+    def editor_env(self, launcher: Path) -> dict[str, str]:
+        return agent_gpu_env(launcher)
+
+
+def _mode(settings: SlurmOperatorSettings) -> _Mode:
+    """Derive the run's mode from the settings, once."""
+    shell_command = settings.agent_gpu_shell_command
+    if settings.agent_gpu is not None and shell_command is not None:
+        return _AgentGpuMode(settings.agent_gpu, shell_command)
+    return _ClusterGates(remote_capture=isinstance(settings.config.transport, SlurmSshTransport))
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,42 +275,40 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         confined; the default is the host sandbox.
         """
         self._settings = settings
+        self._mode = _mode(settings)
         self._docker = DockerEnvironment(docker or DockerEnvironmentConfig())
         self._gate_wrapper = tuple(gate_wrapper)
         self._job_confinement = job_confinement
         self._deprecation = deprecation
 
-    def _agent_gpu(self) -> AgentGpuConfig | None:
-        """Return the operator's agent GPU limits, or ``None`` when the capability is off."""
-        return self._settings.agent_gpu
-
     # What the run consults before it prepares the environment. The profiler
-    # follows the capability: the agent's own GPU commands run where the agent's
-    # jobs do, while without them profiling is a remote capture.
+    # follows the mode: the agent's own GPU commands run where the agent's
+    # jobs do, while without them profiling is a remote capture, and where
+    # there is no way to run one, none is offered.
 
     @property
     def materialize_local_model_weights(self) -> bool:
         """Whether external symlinks are copied in: agent jobs read the workspace directly."""
-        return self._agent_gpu() is not None
+        return self._mode.materialize_local_model_weights
 
     @property
     def default_profiler_id(self) -> str:
-        """The profiler a run uses by default: the agent's own, or the remote ROCprof capture."""
-        return "rocprof" if self._agent_gpu() is None else "nsys"
+        """The profiler a run uses by default: the agent's own, the remote capture, or none."""
+        return self._mode.default_profiler_id
 
     @property
     def supported_profiler_ids(self) -> frozenset[str] | None:
         """The profilers the run may select; any, when the agent runs its own GPU commands."""
-        return _REMOTE_PROFILER_IDS if self._agent_gpu() is None else None
+        return self._mode.supported_profiler_ids
 
     @property
     def requires_local_profiler_preflight(self) -> bool:
         """Whether the profiler's tool must exist on this host: only the agent's own profiler."""
-        return self._agent_gpu() is not None
+        return self._mode.requires_local_profiler_preflight
 
     def validate_profile(self, profile_command: tuple[str, ...] | None) -> None:
         """Validate the remote capture's workload; the agent's own profiling has none."""
-        if self._agent_gpu() is None:
+        if self._mode.remote_capture:
             configured_capture_lifecycle(
                 self._settings.config, self._settings.policy, profile_command
             )
@@ -213,14 +347,13 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         if resources is not None and resources.nodes != 1:
             message = "the slurm-gpu run environment runs single-node jobs only"
             raise ValueError(message)
-        stage_root = str(SLURM_GPU_STAGE_ROOT.expanduser())
         path = config_path.expanduser()
+        settings = load_slurm_gpu_alias_settings(
+            path, task_gpus=None if resources is None else resources.accelerators_per_node
+        )
+        stage_root = settings.config.remote_workspace_root
         return cls(
-            load_slurm_gpu_alias_settings(
-                path,
-                task_gpus=None if resources is None else resources.accelerators_per_node,
-                stage_root=stage_root,
-            ),
+            settings,
             docker=docker,
             gate_wrapper=gate_wrapper,
             job_confinement=job_confinement,
@@ -238,18 +371,12 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         if self._deprecation is not None and request.log is not None:
             request.log(f"[environment] {self._deprecation}")
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="slurm")
-        policy = self._settings.policy
-        agent_gpu = self._settings.agent_gpu
         return _PreparedRunEnvironment(
             SlurmEnvironmentFacts(
-                service_command=_slurm_service_command(policy),
-                gate_client=_GATE_LAUNCHER if agent_gpu is None else AGENT_GPU_LAUNCHER,
+                service_command=_slurm_service_command(self._settings.policy),
+                gate_client=self._mode.gate_client,
                 gates=planned_gates(request.accuracy_command, request.benchmark_command),
-                agent_gpu=(
-                    None
-                    if agent_gpu is None
-                    else AgentGpuFacts(agent_gpu.max_gpus, agent_gpu.max_time_minutes)
-                ),
+                agent_gpu=self._mode.agent_gpu_facts,
             ),
             partial(self._open, request),
         )
@@ -259,14 +386,8 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         request: RunEnvironmentRequest,
         presentation: RunEnvironmentPresentation,
     ) -> RunEnvironmentSession:
-        config, policy, agent_gpu = (
-            self._settings.config,
-            self._settings.policy,
-            self._settings.agent_gpu,
-        )
-        # Without the agent's own GPU commands, profiling is a remote capture
-        # the cluster runs; with them, the agent profiles through its commands.
-        remote_profiling = agent_gpu is None
+        config, policy, mode = self._settings.config, self._settings.policy, self._mode
+        remote_profiling = mode.remote_capture
         profiler_tree = request.profiler_support_name if remote_profiling else None
         if profiler_tree is not None and request.profiler_support_path is not None:
             # Validate the trusted load before opening resources owned by the editor.
@@ -283,16 +404,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         plans = self._write_plans(
             request, config, policy, profiler_tree, remote_profiling=remote_profiling
         )
-        gpu = (
-            None
-            if agent_gpu is None
-            else agent_gpu_commands(
-                agent_gpu,
-                workspace=request.workspace,
-                project_path_policy=request.project_path_policy,
-                confinement=self._job_confinement,
-            )
-        )
+        gpu = mode.gpu_commands(request, self._job_confinement)
         brokers: list[HostBroker] = []
         try:
             transport_env, transport_resources = _start_transport_broker(
@@ -300,15 +412,10 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             )
             gates = self._start_gate_broker(request, plans, gpu)
             brokers.append(gates)
-            launcher = write_client_launcher(
-                request.log_dir / "slurm-gate",
-                _GATE_LAUNCHER if gpu is None else AGENT_GPU_LAUNCHER,
-            )
+            launcher = write_client_launcher(request.log_dir / "slurm-gate", mode.gate_client)
             sandbox = self._docker.build_editor(
                 request,
-                bridge_editor_extras(
-                    gates, launcher, env=None if gpu is None else agent_gpu_env(launcher)
-                ),
+                bridge_editor_extras(gates, launcher, env=mode.editor_env(launcher)),
             )
             profiler_mcp = _remote_profiler_mcp(plans, transport_env, transport_resources)
             session = SandboxSession.start(
@@ -327,16 +434,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                     host_device_reselect=False,
                     env_kind="slurm",
                     profile_execution="remote" if remote_profiling else "local",
-                    # Gates run on the sbatch path whichever way the agent runs, and that
-                    # path serves one candidate per session as the plain slurm environment
-                    # does, so only the agent GPU broker needs a blocker: its launcher and
-                    # worktree-root checks have never run with one broker per candidate
-                    # (#1624 made the blocker a computed, quoted reason).
-                    parallel_candidate_blocker=(
-                        None
-                        if gpu is None
-                        else "it has not been verified to run one GPU broker per candidate"
-                    ),
+                    parallel_candidate_blocker=mode.parallel_candidate_blocker,
                     framework_setup_timeout_seconds=config.job_timeout_seconds,
                     profiler_mcp_env=profiler_mcp[0],
                     profiler_mcp_resources=profiler_mcp[1],

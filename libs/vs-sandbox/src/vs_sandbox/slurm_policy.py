@@ -188,6 +188,18 @@ class SlurmOperatorSettings:
         """The agent's GPU limits, or ``None`` when the capability is off."""
         return self.policy.agent_gpu
 
+    @property
+    def agent_gpu_shell_command(self) -> tuple[str, ...] | None:
+        """How the agent's GPU jobs reach Slurm: the local transport's shell, or ``None``.
+
+        It is ``None`` exactly when the capability is off, since construction
+        guarantees the capability has a local transport.
+        """
+        transport = self.config.transport
+        if self.policy.agent_gpu is None or not isinstance(transport, SlurmLocalTransport):
+            return None
+        return transport.shell_command
+
 
 def load_slurm_operator_settings(path: Path) -> SlurmOperatorSettings:
     """Parse the operator file once; failures name the file and the offending fields."""

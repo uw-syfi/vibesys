@@ -55,8 +55,11 @@ _RESULT = "/tmp/vibesys-framework-benchmark-{}.json"  # noqa: S108  # lint-waive
 # Stands in for srun and scancel: records its argv and cwd, then runs what follows
 # `--`. Without a `--` it is scancel, and it reports the cancellation on a FIFO the
 # test blocks on, so the test waits for the event itself rather than polling for it.
+# Stands in for the Slurm shell: it receives the command line (`srun ...` or
+# `scancel ...`) as its one argument, as the local transport's shell does.
 _FAKE_SLURM = """\
-import os, sys
+import os, shlex, sys
+sys.argv = [sys.argv[0], *shlex.split(sys.argv[1])[1:]]
 with open({log!r}, "a") as log:
     log.write(repr(sys.argv[1:]) + " cwd=" + os.getcwd() + "\\n")
 if "--" in sys.argv:
@@ -120,11 +123,9 @@ def _broker(
             "partitions": ("main",),
             "max_gpus": 8,
             "max_time_minutes": 60,
-            "srun_command": (sys.executable, str(fake)),
-            "scancel_command": (sys.executable, str(fake)),
         }
     )
-    launcher = AgentGpuLauncher(config)
+    launcher = AgentGpuLauncher(config, (sys.executable, str(fake)))
     env = dict(os.environ)
     workspace = tmp_path / "workspace"
     (workspace / "sub").mkdir(parents=True)

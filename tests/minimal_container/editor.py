@@ -52,10 +52,12 @@ RUN_ID_PREFIX = "minimal-container-"
 #: Longest a base image pull may take; the ROCm default is tens of gigabytes.
 PULL_TIMEOUT_SECONDS = 3600.0
 
-#: Stands in for ``srun`` and ``scancel``: runs what follows ``--`` right here.
+#: Stands in for the Slurm shell (the transport's ``bash -c``): it receives an ``srun`` or
+#: ``scancel`` command line as one argument and runs what follows ``--`` right here.
 _FAKE_SLURM = textwrap.dedent(
     """\
-    import os, sys
+    import os, shlex, sys
+    sys.argv = [sys.argv[0], *shlex.split(sys.argv[1])[1:]]
     if "--" in sys.argv:
         command = sys.argv[sys.argv.index("--") + 1 :]
         os.execvp(command[0], command)
@@ -199,13 +201,12 @@ def _slurm_config(directory: Path) -> Path:
 
             [slurm.transport]
             kind = "local"
+            shell_command = ["{sys.executable}", "{fake}"]
 
             [vibesys.agent_gpu]
             partitions = ["main"]
             max_gpus = 8
             max_time_minutes = 120
-            srun_command = ["{sys.executable}", "{fake}"]
-            scancel_command = ["{sys.executable}", "{fake}"]
             """
         ),
         encoding="utf-8",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -11,15 +13,23 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_sandbox.api.slurm import (
+    SlurmEvaluationPlan,
     SlurmGpuAliasError,
+    SlurmOperatorSettings,
     load_slurm_gpu_alias_settings,
     load_slurm_operator_settings,
     render_slurm_operator_toml,
     translate_slurm_gpu,
+    write_slurm_evaluation_plan,
 )
+
+# test-isolation: main is the CLI entry point and is intentionally absent from the library API.
+from vs_sandbox.slurm_command import main
 from vs_slurm.api import SlurmLocalTransport
+from vs_slurm.fake_connector import executing_cluster, recorded_commands
 
 _STAGE = "/shared/stage"
+_BASE: dict[str, Any] = {"partitions": ["main"], "max_gpus": 4, "max_time_minutes": 60}
 _name = st.from_regex(r"[a-z][a-z0-9]{0,6}", fullmatch=True)
 _prefixes = st.lists(st.from_regex(r"[a-z][a-z0-9/]{0,6}", fullmatch=True), max_size=2).map(tuple)
 
@@ -38,7 +48,9 @@ def _tables(draw: st.DrawFn) -> dict[str, Any]:
         "gate_time_minutes": draw(st.integers(1, max_time)),
         "srun_command": [*prefix, "/usr/bin/srun"],
         "scancel_command": [*prefix, "scancel"],
-        "srun_arguments": draw(st.lists(st.just("--account=lab"), max_size=1)),
+        "srun_arguments": draw(
+            st.lists(st.sampled_from(["--pty", "--account=lab", "--mem=4G"]), max_size=2)
+        ),
     }
     if draw(st.booleans()):
         table["windows_command"] = ["slurm-windows", "--json"]
@@ -62,7 +74,7 @@ def test_the_translation_keeps_the_limits_and_sizes_the_gates(
     assert agent.partitions == tuple(table["partitions"])
     assert (agent.max_gpus, agent.max_time_minutes) == (max_gpus, table["max_time_minutes"])
     assert agent.default_time_minutes == table["default_time_minutes"]
-    assert agent.srun_command == tuple(table["srun_command"])
+    assert agent.srun_arguments == tuple(table["srun_arguments"])
     assert agent.windows_command == (
         tuple(table["windows_command"]) if "windows_command" in table else None
     )
@@ -71,7 +83,14 @@ def test_the_translation_keeps_the_limits_and_sizes_the_gates(
     assert f"--gres=gpu:{gpus}" in gates
     assert f"--time={table['gate_time_minutes']}" in gates
     assert f"--partition={','.join(table['partitions'])}" in gates
-    assert set(table["srun_arguments"]) <= set(gates)
+    # srun-only flags (--pty) are invalid for sbatch, so gates get nothing of them.
+    assert sorted(gates) == sorted(
+        [
+            f"--partition={','.join(table['partitions'])}",
+            f"--gres=gpu:{gpus}",
+            f"--time={table['gate_time_minutes']}",
+        ]
+    )
     transport = result.config.transport
     assert isinstance(transport, SlurmLocalTransport)
     wrapper = tuple(table["srun_command"][:-1])
@@ -109,9 +128,6 @@ def test_an_unknown_key_is_rejected_naming_it(table: dict[str, Any], key: str) -
             load_slurm_gpu_alias_settings(path, task_gpus=None, stage_root=_STAGE)
 
 
-_BASE: dict[str, Any] = {"partitions": ["main"], "max_gpus": 4, "max_time_minutes": 60}
-
-
 @pytest.mark.parametrize(
     ("override", "key"),
     [
@@ -136,3 +152,47 @@ def test_an_error_does_not_echo_the_values_of_the_file(tmp_path: Path) -> None:
     with pytest.raises(SlurmGpuAliasError) as error:
         load_slurm_gpu_alias_settings(path, task_gpus=None, stage_root=_STAGE)
     assert "secret-account" not in str(error.value)
+
+
+def test_runs_sharing_the_alias_stage_root_stage_into_separate_invocation_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every alias run stages under one root; two gates of the same file never share a directory."""
+    stage = tmp_path / "stage"
+    translated = translate_slurm_gpu(dict(_BASE), task_gpus=None, stage_root=str(stage))
+    state = executing_cluster(tmp_path / "cluster")
+    shell = (sys.executable, "-m", "vs_slurm.fake_connector", str(state), "shell")
+    config = translated.config.model_copy(
+        update={"transport": SlurmLocalTransport(kind="local", shell_command=shell)}
+    )
+    config_path = tmp_path / "slurm.toml"
+    config_path.write_text(
+        render_slurm_operator_toml(SlurmOperatorSettings(config, translated.policy)),
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    plan = tmp_path / "plan.json"
+    write_slurm_evaluation_plan(
+        plan,
+        SlurmEvaluationPlan(
+            config_path=config_path,
+            cluster_state_root=tmp_path / "state",
+            accuracy_command=("true",),
+        ),
+    )
+
+    for _ in range(2):
+        assert main(("--plan", str(plan), "accuracy")) == 0
+
+    invocations = [
+        path for path in (stage / config.name).iterdir() if (path / "workspace").is_dir()
+    ]
+    assert len(invocations) == 2
+    job_names = {
+        match.group(1)
+        for command in recorded_commands(state)
+        if (match := re.search(r"--job-name[= ](\S+)", command))
+    }
+    assert len(job_names) == 2

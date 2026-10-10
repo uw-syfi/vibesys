@@ -18,7 +18,6 @@ import pytest
 from vibesys.run.environment import open_run_environment
 from vs_project.api import RunResourceRequest
 from vs_runtime.api.infrastructure import (
-    SLURM_GPU_STAGE_ROOT,
     RunEnvironment,
     RunEnvironmentRequest,
     SlurmEnvironment,
@@ -51,21 +50,30 @@ remote_workspace_root = "/shared/vibesys"
 
 [slurm.transport]
 kind = "local"
+shell_command = [{srun}]
 
 [vibesys.agent_gpu]
 partitions = ["main"]
 max_gpus = 4
 max_time_minutes = 90
-srun_command = [{srun}]
-scancel_command = [{srun}]
 """
-# Stands in for srun: records its argv, then runs what follows ``--``.
+# Stands in for the Slurm shell (the local transport's ``bash -c``): it receives the
+# ``srun`` command line as one argument, records the arguments, then runs what follows ``--``.
 _FAKE_SRUN = """\
-import os, sys
+import os, shlex, sys
+sys.argv = [sys.argv[0], *shlex.split(sys.argv[1])[1:]]
 with open({log!r}, "a") as log:
     log.write(" ".join(sys.argv[1:]) + "\\n")
 command = sys.argv[sys.argv.index("--") + 1 :]
 os.execvp(command[0], command)
+"""
+# The local transport without the agent's GPU commands: gates only, and no remote capture.
+_SLURM_LOCAL_CONFIG = """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/shared/vibesys"
+
+[slurm.transport]
+kind = "local"
 """
 _SLURM_GPU_CONFIG = """[slurm_gpu]
 partitions = ["main"]
@@ -82,7 +90,7 @@ sys.exit(7 if "benchmark" in sys.argv else 0)
 
 # The interpreter that runs the fake programs standing in for the cluster.
 _PYTHON = sys.executable
-_ENVIRONMENTS = ["slurm", "slurm-gpu", "slurm+gpu"]
+_ENVIRONMENTS = ["slurm", "slurm-local", "slurm-gpu", "slurm+gpu"]
 
 
 class _PassThroughConfinement:
@@ -113,9 +121,11 @@ def _environment(tmp_path: Path, name: str, backend: DaemonBackend) -> RunEnviro
             gate_wrapper=(_PYTHON, str(gate)),
             job_confinement=_PassThroughConfinement(),
         )
-    if name == "slurm":
+    if name in ("slurm", "slurm-local"):
         config = tmp_path / "slurm.toml"
-        config.write_text(_SLURM_CONFIG, encoding="utf-8")
+        config.write_text(
+            _SLURM_CONFIG if name == "slurm" else _SLURM_LOCAL_CONFIG, encoding="utf-8"
+        )
         gate = tmp_path / "fake_gate.py"
         gate.write_text(_FAKE_GATE, encoding="utf-8")
         return SlurmEnvironment(
@@ -246,7 +256,12 @@ def test_closing_the_session_removes_every_host_socket(tmp_path: Path, name: str
 
 
 # What the agent types to reach the host broker's gates, per environment.
-_GATE_CLIENTS = {"slurm": "vibesys-gate", "slurm-gpu": "vibesys-gpu", "slurm+gpu": "vibesys-gpu"}
+_GATE_CLIENTS = {
+    "slurm": "vibesys-gate",
+    "slurm-local": "vibesys-gate",
+    "slurm-gpu": "vibesys-gpu",
+    "slurm+gpu": "vibesys-gpu",
+}
 
 
 @pytest.mark.parametrize("name", _ENVIRONMENTS)
@@ -305,7 +320,7 @@ def test_the_container_gets_the_gpu_launcher_exactly_when_the_agent_may_run_gpu_
     try:
         run = _run_tokens(backend)
         mounts = [run[i + 1] for i, flag in enumerate(run) if flag == "-v"]
-        has_gpu = name != "slurm"
+        has_gpu = name not in ("slurm", "slurm-local")
         assert any(token.startswith("VIBESYS_GPU=") for token in run) is has_gpu
         assert ("CUDA_VISIBLE_DEVICES=" in run) is has_gpu
         assert any(mount.endswith(":/usr/local/bin/vibesys-gpu:ro") for mount in mounts) is has_gpu
@@ -396,7 +411,9 @@ def test_agent_gpu_commands_are_rejected_without_the_local_transport(
         "ssh": 'kind = "ssh"\nhost = "login"',
         "connector": 'kind = "connector"\ncommand = ["c"]',
     }[transport]
-    text = config.read_text(encoding="utf-8").replace('kind = "local"', replacement)
+    text = config.read_text(encoding="utf-8")
+    shell = next(line for line in text.splitlines() if line.startswith("shell_command"))
+    text = text.replace(f'kind = "local"\n{shell}', replacement)
     config.write_text(text, encoding="utf-8")
     del backend
 
@@ -417,4 +434,38 @@ def test_the_slurm_gpu_alias_logs_one_deprecation_naming_the_replacement_and_the
     [warning] = [line for line in logged if "deprecated" in line]
     assert "--run-environment slurm" in warning
     assert "[vibesys.agent_gpu]" in warning
-    assert str(SLURM_GPU_STAGE_ROOT.expanduser()) in warning
+    assert str(Path("~/.cache/vibesys/slurm-gpu-stage").expanduser()) in warning
+
+
+# What each configuration lets a run select: the remote capture needs the SSH transport's
+# profiler broker, the agent's own commands lift the restriction, and the rest offers none.
+_PROFILERS = {
+    "slurm": ("rocprof", frozenset({"auto", "none", "rocprof"})),
+    "slurm-local": ("none", frozenset({"auto", "none"})),
+    "slurm-gpu": ("nsys", None),
+    "slurm+gpu": ("nsys", None),
+}
+
+
+@pytest.mark.parametrize("name", _ENVIRONMENTS)
+def test_the_profilers_a_run_may_select_follow_how_the_environment_can_run_one(
+    tmp_path: Path, name: str
+) -> None:
+    backend = DaemonBackend(daemon_engine(tmp_path))
+    environment = _environment(tmp_path, name, backend)
+
+    default, supported = _PROFILERS[name]
+    assert environment.default_profiler_id == default
+    assert environment.supported_profiler_ids == supported
+
+
+def test_without_a_remote_profiler_transport_the_agent_is_offered_no_remote_capture(
+    tmp_path: Path,
+) -> None:
+    _backend, _request, session = _open(tmp_path, "slurm-local")
+    try:
+        assert session.view.profile_execution == "local"
+        assert session.view.profiler_mcp_env == ()
+        assert session.view.profiler_mcp_resources == ()
+    finally:
+        session.close()

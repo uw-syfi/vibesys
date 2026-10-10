@@ -11,6 +11,7 @@ import json
 import math
 import os
 import secrets
+import shlex
 import shutil
 import subprocess
 import threading
@@ -54,8 +55,6 @@ class AgentGpuConfig(BaseModel):
     max_gpus: Annotated[int, Field(gt=0)]
     max_time_minutes: Annotated[int, Field(gt=0)]
     default_time_minutes: Annotated[int, Field(gt=0)] = 30
-    srun_command: tuple[str, ...] = ("srun",)
-    scancel_command: tuple[str, ...] = ("scancel",)
     windows_command: tuple[str, ...] | None = None
     srun_arguments: tuple[str, ...] = ()
     job_name_prefix: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")] = (
@@ -64,8 +63,6 @@ class AgentGpuConfig(BaseModel):
 
     @field_validator(
         "partitions",
-        "srun_command",
-        "scancel_command",
         "windows_command",
         "srun_arguments",
         mode="before",
@@ -74,7 +71,7 @@ class AgentGpuConfig(BaseModel):
     def _normalize_arrays(cls, value: object) -> object:
         return tuple(value) if isinstance(value, list) else value
 
-    @field_validator("partitions", "srun_command", "scancel_command", "srun_arguments")
+    @field_validator("partitions", "srun_arguments")
     @classmethod
     def _non_empty_items(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if any(not item for item in value):
@@ -215,9 +212,13 @@ def srun_argv(
     job_name: str,
     command: Sequence[str],
 ) -> tuple[str, ...]:
-    """Build one single-task ``srun`` that allocates *request* and runs *command*."""
+    """Build one single-task ``srun`` that allocates *request* and runs *command*.
+
+    The argv is a command line for the Slurm shell (the local transport's
+    ``shell_command``), which finds ``srun`` where the operator's Slurm is.
+    """
     return (
-        *config.srun_command,
+        "srun",
         f"--partition={partition}",
         f"--gres=gpu:{request.gpus}",
         f"--time={request.time_minutes}",
@@ -253,19 +254,24 @@ class GpuLauncher(Protocol):
 class AgentGpuLauncher:
     """Run commands with ``srun`` and cancel their jobs when asked to stop.
 
-    *popen* starts processes and *probe* runs the scheduler report and ``scancel``;
-    tests inject both to drive the lifecycle with a fake ``srun``.
+    ``srun`` and ``scancel`` run through *shell_command*, the local transport's
+    shell (a login-container wrapper may precede ``bash -c``), so the operator
+    names how to reach the Slurm binaries in one place. *popen* starts processes
+    and *probe* runs the scheduler report and ``scancel``; tests inject both to
+    drive the lifecycle with a fake shell.
     """
 
     def __init__(
         self,
         config: AgentGpuConfig,
+        shell_command: Sequence[str],
         *,
         popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
         probe: CommandProbe | None = None,
     ) -> None:
         """Bind the operator configuration and the process boundary."""
         self._config = config
+        self._shell = tuple(shell_command)
         self._popen = popen
         self._probe: CommandProbe = probe or SubprocessProbe()
 
@@ -293,7 +299,7 @@ class AgentGpuLauncher:
             f"time={request.time_minutes}m job-name={job_name}\n".encode()
         )
         process = self._popen(
-            argv,
+            (*self._shell, shlex.join(argv)),
             cwd=command.cwd,
             env=dict(command.env),
             stdin=subprocess.DEVNULL,
@@ -343,7 +349,7 @@ class AgentGpuLauncher:
     def cancel(self, job_name: str) -> None:
         """Cancel this user's job named *job_name*, pending or running."""
         self._probe.run(
-            (*self._config.scancel_command, f"--name={job_name}", "--me"),
+            (*self._shell, shlex.join(("scancel", f"--name={job_name}", "--me"))),
             timeout_seconds=_SCANCEL_TIMEOUT_SECONDS,
         )
 
