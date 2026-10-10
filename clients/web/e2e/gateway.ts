@@ -377,7 +377,7 @@ class MatrixGatewayProcess implements MatrixGateway, MatrixGatewayResource {
         'run',
         'python',
         '-m',
-        'tests.support.web_matrix_gateway',
+        'tests.e2e.web_matrix_gateway',
         '--store-directory',
         this.#storeDirectory,
         '--web-assets',

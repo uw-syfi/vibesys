@@ -2,7 +2,7 @@
 
 from io import BytesIO
 
-from tests.support.web_matrix_gateway import wait_for_owner_close
+from tests.e2e.web_matrix_gateway import wait_for_owner_close
 
 
 def test_owner_pipe_eof_requests_gateway_shutdown() -> None:

@@ -65,7 +65,7 @@ def main() -> int:
     ).start()
 
     def live_run() -> None:
-        runtime.journal.publish_output("stdout", f"{arguments.marker}\n", source="web-matrix")
+        runtime.executions.publish_agent_output(f"{arguments.marker}\n")
         stopped.wait()
 
     runtime.run(live_run)
