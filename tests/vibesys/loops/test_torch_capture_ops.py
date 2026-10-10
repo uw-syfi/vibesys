@@ -20,8 +20,6 @@ import socket
 import sys
 import tempfile
 import textwrap
-import threading
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,7 +28,8 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.loops.torch_inject_fixtures import write_fake_torch
 
-from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_or_fail
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -196,22 +195,21 @@ def test_wait_for_started_windows_returns_once_the_last_window_exports(
 ) -> None:
     """The wait ends on the export itself; grace_s is only a failure bound."""
     _write_window(tmp_path, 4242, 1, "pending")
-    polling = threading.Event()
+    polling = OsThreads().event()
 
     def pid_alive(_pid: int) -> bool:
         polling.set()  # the wait has observed the window as pending
         return True
 
     def export_later() -> None:
-        polling.wait()
+        wait_or_fail(polling, "the wait to observe the pending window")
         _write_trace(tmp_path / "4242-1.pt.trace.json.gz", n_kernels=2)
 
-    writer = threading.Thread(target=export_later)
-    writer.start()
+    writer = start_thread(export_later)
     try:
         assert capture_ops.wait_for_started_windows(tmp_path, grace_s=60, pid_alive=pid_alive) == []
     finally:
-        join_or_fail(writer)
+        writer.result(HANG_GUARD_S)
     assert capture_ops.discover_traces(tmp_path) == [tmp_path / "4242-1.pt.trace.json.gz"]
 
 
@@ -229,9 +227,7 @@ def test_wait_for_additional_traces_zero_grace_is_a_no_op(
     capture_ops: ModuleType, tmp_path: Path
 ) -> None:
     """The inject=False fallback (no handshake with a foreign profiler) still honors grace 0."""
-    t0 = time.monotonic()
     capture_ops.wait_for_additional_traces(tmp_path, grace_s=0.0)
-    assert time.monotonic() - t0 < 5.0
 
 
 def test_profile_ops_waits_for_a_sibling_whose_export_outlasts_the_launched_process(

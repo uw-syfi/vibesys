@@ -52,12 +52,16 @@ from vs_faults.api import (
     prompt_vocabulary,
 )
 from vs_runtime.api import UnresolvedDispatchError
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vs_agent.api import SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
+    from vs_sim.api import Lock
+
+_THREADS = OsThreads()
 
 ROLES = (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id, PROFILER.id)
 TOOLS = (
@@ -174,7 +178,7 @@ class ChaosAgents:
     dispatch: FaultyToolDispatch = field(init=False)
     _turn: threading.local = field(default_factory=threading.local, init=False)
     _counts: Counter[str] = field(default_factory=Counter)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _lock: Lock = field(default_factory=_THREADS.lock)
 
     def __post_init__(self) -> None:
         """Build the run's single tool dispatch."""
@@ -425,8 +429,7 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
         except BaseException as error:  # noqa: BLE001
             escaped.append(error)
 
-    thread = threading.Thread(target=drive, daemon=True)
-    thread.start()
+    thread = _THREADS.spawn(drive, name="chaos-run")
     thread.join(RUN_GUARD_S)
     injected = [str(item) for item in (agents.faulty.injected if agents.faulty else [])]
     injected += [f"tool {item}" for item in agents.dispatch.injected]

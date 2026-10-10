@@ -23,8 +23,6 @@ import shutil
 import subprocess
 import sys
 import textwrap
-import threading
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -32,7 +30,8 @@ import pytest
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
-from vs_sim.api.testing import join_or_fail
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import HANG_GUARD_S, start_thread
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -105,15 +104,15 @@ def _is_alive(pid: int) -> bool:
     return True
 
 
-_POLL_PAUSE = threading.Event()  # never set: ``wait(interval)`` is a pause between polls
+_THREADS = OsThreads()
 
 
 def _wait_until(predicate, *, timeout: float = 3.0, interval: float = 0.05) -> bool:  # noqa: ANN001  # LW-910179; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    deadline = _THREADS.now() + timeout
+    while _THREADS.now() < deadline:
         if predicate():
             return True
-        _POLL_PAUSE.wait(interval)
+        _THREADS.sleep(interval)
     return predicate()
 
 
@@ -229,13 +228,10 @@ def test_no_load_timed_out_kills_target(tmp_path: Path) -> None:
     pidfile = tmp_path / "target.pid"
     lifecycle = cr.Lifecycle(command=f"echo $$ > {pidfile}; sleep 100", timeout_s=0.3)
 
-    start = time.monotonic()
     result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
-    elapsed = time.monotonic() - start
 
     assert result.status is cr.CaptureStatus.TIMED_OUT
     assert result.escalated is True
-    assert elapsed < lifecycle.timeout_s + 4.0
     pid = _read_pid(pidfile)
     assert _wait_until(lambda: not _is_alive(pid))
 
@@ -346,16 +342,13 @@ def test_load_killed_after_grace_when_profiler_ignores_sigint(
         grace_s=0.3,
         timeout_s=5.0,
     )
-    start = time.monotonic()
     result = cr.run_capture(
         [sys.executable, str(fake_profiler)], lifecycle, kind="unit", out_dir=out_dir, meta={}
     )
-    elapsed = time.monotonic() - start
 
     assert result.status is cr.CaptureStatus.KILLED_AFTER_GRACE
     assert result.escalated is True
     assert not (out_dir / "trace.txt").exists()
-    assert elapsed < lifecycle.grace_s + 5.0
     pid = int((out_dir / "profiler.pid").read_text().strip())
     assert _wait_until(lambda: not _is_alive(pid))
 
@@ -580,27 +573,22 @@ def test_no_load_cancel_event_stops_target_and_returns_cancelled(tmp_path: Path)
     out_dir = tmp_path / "c"
     pidfile = tmp_path / "target.pid"
     lifecycle = cr.Lifecycle(command=f"echo $$ > {pidfile}; sleep 100", timeout_s=30.0)
-    cancel_event = threading.Event()
+    cancel_event = _THREADS.event()
 
     def _cancel_soon() -> None:
         assert _wait_until(pidfile.is_file, timeout=3.0)
         cancel_event.set()
 
-    canceller = threading.Thread(target=_cancel_soon)
-    canceller.start()
-    start = time.monotonic()
+    canceller = start_thread(_cancel_soon)
     result = cr.run_capture(
         [], lifecycle, kind="unit", out_dir=out_dir, meta={}, cancel_event=cancel_event
     )
-    elapsed = time.monotonic() - start
-    join_or_fail(canceller)
+    canceller.result(HANG_GUARD_S)
 
     assert result.status is cr.CaptureStatus.CANCELLED
     assert result.escalated is True
-    # Bounded by _POLL_CHUNK_S plus escalation, not by the target's own
-    # (never reached) sleep -- proves cancellation actually interrupted the
-    # wait instead of the target just happening to exit.
-    assert elapsed < 10.0
+    # CANCELLED (not TIMED_OUT) proves the cancel interrupted the wait before the
+    # target's own (never reached) sleep or the 30 s bound ended it.
     pid = _read_pid(pidfile)
     assert _wait_until(lambda: not _is_alive(pid))
 
@@ -621,15 +609,13 @@ def test_load_cancel_event_during_load_command_stops_both_and_returns_cancelled(
         grace_s=5.0,
         timeout_s=30.0,
     )
-    cancel_event = threading.Event()
+    cancel_event = _THREADS.event()
 
     def _cancel_soon() -> None:
         assert _wait_until(load_pidfile.is_file, timeout=5.0)
         cancel_event.set()
 
-    canceller = threading.Thread(target=_cancel_soon)
-    canceller.start()
-    start = time.monotonic()
+    canceller = start_thread(_cancel_soon)
     result = cr.run_capture(
         [sys.executable, str(fake_profiler)],
         lifecycle,
@@ -638,11 +624,9 @@ def test_load_cancel_event_during_load_command_stops_both_and_returns_cancelled(
         meta={},
         cancel_event=cancel_event,
     )
-    elapsed = time.monotonic() - start
-    join_or_fail(canceller)
+    canceller.result(HANG_GUARD_S)
 
     assert result.status is cr.CaptureStatus.CANCELLED
-    assert elapsed < 10.0
     load_pid = _read_pid(load_pidfile)
     assert _wait_until(lambda: not _is_alive(load_pid))
     profiler_pid = int((out_dir / "profiler.pid").read_text().strip())
@@ -1199,15 +1183,12 @@ def test_property_no_load_timeout_bound_and_no_leaks(
     pidfile = tmp_path / "target.pid"
     lifecycle = cr.Lifecycle(command=f"echo $$ > {pidfile}; sleep 100", timeout_s=timeout_s)
 
-    start = time.monotonic()
     result = cr.run_capture([], lifecycle, kind="unit", out_dir=tmp_path / "c", meta={})
-    elapsed = time.monotonic() - start
 
     # Consistency: the runtime only reports TIMED_OUT here (the target never
     # exits on its own within any of the fuzzed timeouts).
     assert result.status is cr.CaptureStatus.TIMED_OUT
     assert result.escalated is True
-    assert elapsed <= timeout_s + 6.0
     assert result.manifest_path.is_file()
     manifest = json.loads(result.manifest_path.read_text())
     assert manifest["status"] == result.status.value

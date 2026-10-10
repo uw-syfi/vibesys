@@ -23,10 +23,6 @@ ALLOWED: dict[str, tuple[int, str]] = {
         1,
         "the cancellation future's done callback sets the event, so it opens even if the cancel ends first",
     ),
-    "tests/vibesys/skypilot/test_evaluator_helper.py": (
-        1,
-        "`ready` is set in the server thread's `finally`, so it opens even if the thread fails",
-    ),
 }
 
 
