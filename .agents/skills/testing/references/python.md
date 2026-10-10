@@ -86,6 +86,11 @@ uv run python scripts/check_test_isolation.py      # ratchet; --write only lower
 uv run pytest path/to/test.py -n auto --no-cov -q  # parallel
 ```
 
+`tests/quality/test_real_apis_confined.py` fails a deterministic-tier test (or product
+code outside `libs/vs-sim`) that uses real time, threads, processes, sockets or signals,
+against the exact-count baseline `tests/quality/real_api_baseline.jsonl`; counts only go
+down.
+
 `scripts/check_test_isolation.py` counts patching, mocking, sleeps
 (`time.sleep`, `asyncio.sleep` other than `asyncio.sleep(0)`), timeout
 verdicts, and non-`api` imports of a library inside its own tests. The baseline
