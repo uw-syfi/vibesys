@@ -1,5 +1,5 @@
 import {expect, test} from 'bun:test';
-import {parseCampaignFrame} from './campaign-frames.js';
+import {isTerminalPhase, parseCampaignFrame} from './campaign-frames.js';
 
 const validWorkstream = {
   id: 'ws-1',
@@ -79,4 +79,54 @@ test('rejects an invalid status value', () => {
 test('rejects a non-object frame', () => {
   expect(() => parseCampaignFrame(null)).toThrow(/\$/);
   expect(() => parseCampaignFrame([])).toThrow(/\$/);
+});
+
+test('isTerminalPhase treats parked as still live, like implementing', () => {
+  expect(isTerminalPhase('parked')).toBe(false);
+  expect(isTerminalPhase('implementing')).toBe(false);
+  expect(isTerminalPhase('evaluated')).toBe(true);
+  expect(isTerminalPhase('failed')).toBe(true);
+  expect(isTerminalPhase('cancelled')).toBe(true);
+});
+
+test('rejects an invalid workstream outcome and names the nested path', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'workstream-upsert',
+      seq: 1,
+      workstream: {...validWorkstream, outcome: 'maybe'},
+    }),
+  ).toThrow(/\$\.workstream\.outcome/);
+});
+
+test('rejects a wrong-typed finishedAt and names the nested path', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'workstream-upsert',
+      seq: 1,
+      workstream: {...validWorkstream, finishedAt: 1234},
+    }),
+  ).toThrow(/\$\.workstream\.finishedAt/);
+});
+
+test('rejects a wrong-typed lastSequence and names the nested path', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'workstream-upsert',
+      seq: 1,
+      workstream: {...validWorkstream, lastSequence: 'nine'},
+    }),
+  ).toThrow(/\$\.workstream\.lastSequence/);
+});
+
+test('rejects a wrong-typed tokens value and names the path', () => {
+  expect(() =>
+    parseCampaignFrame({kind: 'tokens', seq: 1, workstreamId: 'ws-1', tokens: '10'}),
+  ).toThrow(/\$\.tokens/);
+});
+
+test('rejects a wrong-typed tokens workstreamId and names the path', () => {
+  expect(() => parseCampaignFrame({kind: 'tokens', seq: 1, workstreamId: 7, tokens: 10})).toThrow(
+    /\$\.workstreamId/,
+  );
 });

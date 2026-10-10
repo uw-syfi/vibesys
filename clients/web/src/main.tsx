@@ -28,7 +28,7 @@ async function start(): Promise<void> {
   // frame stream (see docs/design/live-campaign-streaming.md). It takes no
   // gateway and no capability token. `?interval=<ms>` paces playback.
   const launchParams = new URL(launchUrl).searchParams;
-  if (launchParams.has('campaign-live')) {
+  if (import.meta.env.DEV && launchParams.has('campaign-live')) {
     const interval = launchParams.get('interval');
     const streamUrl =
       interval === null

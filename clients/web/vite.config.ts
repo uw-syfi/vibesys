@@ -22,6 +22,10 @@ function replayFixturePlugin(): Plugin {
 }
 
 function clampInterval(raw: string | null): number {
+  // `Number(null)` and `Number('')` are both 0, a finite number, so an absent
+  // or empty `interval` param must be rejected before the numeric conversion
+  // or it silently clamps to the 20ms floor instead of this default.
+  if (raw === null || raw === '') return 350;
   const value = Number(raw);
   if (!Number.isFinite(value)) return 350;
   return Math.min(5000, Math.max(20, value));

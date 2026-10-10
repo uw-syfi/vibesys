@@ -189,8 +189,8 @@ SSE, the real gateway would carry it over its existing websocket). Frame kinds:
 
 | Frame | Carries | Maps to the gap |
 | --- | --- | --- |
-| `campaign-init` | id, title, summary, objective (metrics catalog, target, gates), benchmark versions + boundary | the self-describing header, like evaluator `hello` |
-| `workstream-upsert` | one workstream: id, title, hypothesis, window, **phase**, outcome | gap 1 + 2 (`WorkstreamPhase`, `workstream_id`) |
+| `campaign-init` | id, title, summary, provenance, objective (metrics catalog, target, gates), benchmark versions + boundary, trajectories | the self-describing header, like evaluator `hello` |
+| `workstream-upsert` | one workstream: id, title, hypothesis, window, **phase**, `active`, outcome, outcomeSummary | gap 1 + 2 (`WorkstreamPhase`, `workstream_id`) |
 | `agent-upsert` | one agent: id, name, role, workstreamIds | agent roster |
 | `measurement` | one measurement: sequence, workstreamId, values, gates, disposition, benchmark version | the already-real telemetry |
 | `tokens` | workstreamId, cumulative tokens | gap 3 |
@@ -203,9 +203,18 @@ is what keeps a days-long, hundreds-of-measurement run cheap to stream and cheap
 to re-fold on reconnect.
 
 `phase` is the closed set the backend already has (`WorkstreamPhase`: PENDING,
-IMPLEMENTING, IMPLEMENTED, REVIEWED, EVALUATED, FAILED, PARKED, CANCELLED). The
-UI derives "active vs accepted vs rejected" from phase plus outcome, instead of
-the replay-only trick of comparing the cursor time to `finishedAt`.
+IMPLEMENTING, IMPLEMENTED, REVIEWED, EVALUATED, FAILED, PARKED, CANCELLED).
+Only the fold sees `phase`: `projectWorkstream` (`campaign-fold.ts:91-111`) uses
+`phase`, `active`, and `finishedAt` together to decide, per workstream, whether
+to project a real `finishedAt` or a synthetic one placed just past "now".
+`CampaignRecord['workstreams']` itself still carries no `phase` or `active`
+field, and the existing dashboard's own "is this active" check is unchanged:
+cursor time versus `finishedAt`. Live streaming does not replace that trick, it
+feeds it a manufactured `finishedAt` for anything still in flight. One phase is
+worth flagging because it is easy to miss: `isTerminalPhase`
+(`campaign-frames.ts:259-261`) groups PARKED with the live phases, not the
+terminal ones, so a parked workstream keeps projecting a moving `finishedAt`
+and rendering as active until it is explicitly re-evaluated or cancelled.
 
 ### Parse at the boundary, typed inside
 
@@ -287,8 +296,9 @@ adds no backend, core, or wire-protocol code, and no new dependency.
   telemetry is push-only and needs no dependency; the frame schema is identical
   over any transport.
 - `EventSourceCampaignStream` is the browser transport (native `EventSource`);
-  `FakeCampaignStream` is an in-memory implementation of the same interface used
-  by tests.
+  `FakeCampaignStream` is an in-memory implementation of the same interface,
+  meant for driving the hook from memory with no server, timers, or sleeps. It
+  is not yet wired into an automated test; see "Verification" for that gap.
 - `main.tsx` mounts the live path on `?campaign-live`, wiring
   `useLiveCampaign` + `CampaignDashboard`.
 
@@ -304,7 +314,8 @@ cd clients && pnpm --filter @vibesys/web dev
 What it demonstrates: measurements appearing one by one with the graph, the
 running-best line, and the timer bar growing with no delay; the status chip
 going active then completed; workstream lanes and the Kanban filling as phases
-advance; the scrubber pausing follow and looking back mid-stream. What it stubs:
+advance; the scrubber pausing follow and looking back over the completed run.
+What it stubs:
 the frames come from the curated record, not a live orchestrator; token values
 are the record's reconstructed spend; `dynamic`'s real concurrency is not
 exercised (it cannot be, locally).
@@ -383,13 +394,31 @@ the client does not need to change when the source does.
 ## Verification
 
 - `campaign-frames.test.ts`: `parseCampaignFrame` accepts every valid frame kind
-  and rejects unknown kinds, unknown keys, and wrong types, naming the offender.
+  and rejects an unknown kind, an unknown key, and a wrong type on every frame
+  field exercised (including the workstream `outcome` enum, `finishedAt`,
+  `lastSequence`, and the `tokens` frame's own fields), naming the offender.
 - `campaign-fold.test.ts`: round-trip (`fold(framesFromRecord(R))` reconstructs
-  `R`), sequence-sorting regardless of arrival order, keyed-upsert dedup,
-  cumulative token spend, status transitions, idempotent replay, and the
-  in-flight-workstream projection, over the campaign fixture and constructed
-  frame sequences, with no sleeps.
+  `R`), sequence-sorting regardless of arrival order, keyed-upsert dedup for
+  measurements, workstreams, and agents, cumulative token spend, status
+  transitions, idempotent replay, the in-flight-workstream projection (including
+  a regression case for a workstream that starts after the latest measurement
+  elsewhere in the run), and PARKED's non-terminal liveness, over the campaign
+  fixture and constructed frame sequences, with no sleeps.
 - `e2e/campaign-live.spec.ts`: against the dev stream, measurement count and the
-  chart grow over time, best-goodput updates, status goes active -> completed,
-  and scrubbing back pauses follow. This is the one place the React + transport
-  wiring is exercised, matching the repo's unit-core / e2e-integration split.
+  chart grow while the run is active, status goes active -> completed, the
+  final best-goodput value renders once the run settles, and scrubbing back
+  pauses follow without rewriting the already-completed status. This is the one
+  place the React + transport wiring is exercised, matching the repo's
+  unit-core / e2e-integration split.
+- Known gaps, named rather than silently dropped: `FakeCampaignStream` and the
+  `useLiveCampaign` hook it exists to test (tail-follow, scrubbing while still
+  active, and the `streamError` surface) have no automated test yet. This
+  package has no React-hook-render test infrastructure today (no
+  `jsdom`/`happy-dom`/testing-library dependency anywhere in `clients/`), and
+  adding it is a bigger step than this prototype; the e2e spec is the only
+  place the hook currently runs, and it never induces a stream error or scrubs
+  a still-active run. The round-trip property above is checked against one
+  committed fixture, not a generator, matching this package's existing
+  precedent (`replay-scenario.test.ts`) rather than the `testing` skill's
+  preference; a seeded generator over frame sequences would be a stronger
+  version of the same test.

@@ -162,7 +162,13 @@ export function useLiveCampaign(stream: CampaignStream): LiveCampaignState {
     setFold(initialFoldState());
     setStreamError(null);
     return stream.subscribe(
-      frame => setFold(current => foldCampaignFrame(current, frame)),
+      frame => {
+        // A frame arriving proves the stream recovered, so any earlier error
+        // (including one from a connection drop the browser already retried)
+        // must not leave the banner stuck on past the problem it reported.
+        setStreamError(null);
+        setFold(current => foldCampaignFrame(current, frame));
+      },
       error => setStreamError(error),
     );
   }, [stream]);

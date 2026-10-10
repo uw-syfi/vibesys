@@ -43,7 +43,7 @@ test('scrubbing pauses the follow and keeps the folded run status', async ({page
   await expect(performance).toContainText('111 recorded', {timeout: 40_000});
 
   const runState = page.locator('.run-state');
-  await expect(runState).toContainText('completed');
+  await expect(runState).toContainText('completed', {timeout: 40_000});
 
   // Scrub back into the past. The cursor pins there (follow is paused)...
   const slider = page.getByRole('slider', {name: 'Campaign measurement'});

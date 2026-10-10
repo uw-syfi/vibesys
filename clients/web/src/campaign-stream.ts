@@ -22,6 +22,7 @@ interface MessageLike {
 interface EventSourceLike {
   onmessage: ((event: MessageLike) => void) | null;
   onerror: ((event: unknown) => void) | null;
+  readonly readyState: number;
   close(): void;
 }
 
@@ -49,12 +50,19 @@ export class EventSourceCampaignStream implements CampaignStream {
       onFrame(frame);
     };
     source.onerror = () => {
-      // The browser reconnects on its own and replays the log; the fold ignores
-      // already-applied sequences, so a reconnect is a no-op. A terminal failure
-      // still surfaces here for the banner.
-      onError(new Error('Campaign stream connection error'));
+      // The browser retries a dropped connection on its own (readyState goes
+      // back to CONNECTING, not CLOSED) and replays the log; the fold ignores
+      // already-applied sequences, so a reconnect is a no-op and must not raise
+      // the banner. Only a closed connection is a terminal failure worth
+      // surfacing.
+      if (source.readyState === EventSource.CLOSED)
+        onError(new Error('Campaign stream connection error'));
     };
-    return () => source.close();
+    return () => {
+      source.onmessage = null;
+      source.onerror = null;
+      source.close();
+    };
   }
 }
 

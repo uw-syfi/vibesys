@@ -8,7 +8,13 @@ import {
   initialFoldState,
   latestMoment,
 } from './campaign-fold.js';
-import type {CampaignFrame, CampaignHeader, FrameMeasurement} from './campaign-frames.js';
+import type {
+  CampaignFrame,
+  CampaignHeader,
+  FrameAgent,
+  FrameMeasurement,
+  FrameWorkstream,
+} from './campaign-frames.js';
 import {framesFromRecord} from './campaign-replay.js';
 import {type CampaignRecord, parseReplayScenario} from './replay-scenario.js';
 
@@ -71,6 +77,27 @@ function measurement(sequence: number, id: string, value = sequence * 10): Frame
     gates: [],
     disposition: 'accepted',
   };
+}
+
+function workstream(overrides: Partial<FrameWorkstream> = {}): FrameWorkstream {
+  return {
+    id: 'ws-1',
+    title: 'Workstream',
+    hypothesis: 'h',
+    startedAt: '2026-01-01T00:00:00Z',
+    firstSequence: 1,
+    phase: 'implementing',
+    active: true,
+    finishedAt: null,
+    lastSequence: null,
+    outcome: null,
+    outcomeSummary: '',
+    ...overrides,
+  };
+}
+
+function agent(overrides: Partial<FrameAgent> = {}): FrameAgent {
+  return {id: 'agent-1', name: 'Agent', role: 'implementer', workstreamIds: ['ws-1'], ...overrides};
 }
 
 const initFrame: CampaignFrame = {kind: 'campaign-init', seq: 1, header};
@@ -170,13 +197,99 @@ test('an in-flight workstream is projected to end just after the current moment'
   expect(Date.parse(workstream?.finishedAt ?? '')).toBeGreaterThan(at);
 });
 
-test('latestMoment prefers measurements, falls back to workstream starts, then zero', () => {
+test('latestMoment is the newest measurement when there are no workstreams yet, else zero', () => {
   expect(latestMoment(initialFoldState())).toBe(0);
   const withMeasurement = foldFrames([
     initFrame,
     {kind: 'measurement', seq: 2, measurement: measurement(9, 'm9')},
   ]);
   expect(latestMoment(withMeasurement)).toBe(Date.parse('2026-01-01T00:00:09Z'));
+});
+
+test('latestMoment falls back to the latest workstream start when there are no measurements yet', () => {
+  const state = foldFrames([
+    initFrame,
+    {
+      kind: 'workstream-upsert',
+      seq: 2,
+      workstream: workstream({startedAt: '2026-01-01T00:00:20Z'}),
+    },
+  ]);
+  expect(latestMoment(state)).toBe(Date.parse('2026-01-01T00:00:20Z'));
+});
+
+test('latestMoment also accounts for a workstream that starts after the latest measurement', () => {
+  // Regression: an earlier version only consulted workstream starts when the
+  // run had zero measurements anywhere, so a workstream starting after an
+  // unrelated measurement elsewhere in the run was invisible to "now", and
+  // foldStateToRecord could then project that workstream's finishedAt before
+  // its own startedAt.
+  const frames: CampaignFrame[] = [
+    initFrame,
+    {kind: 'measurement', seq: 2, measurement: measurement(1, 'm1')},
+    {
+      kind: 'workstream-upsert',
+      seq: 3,
+      workstream: workstream({id: 'ws-late', startedAt: '2026-01-01T00:00:30Z'}),
+    },
+  ];
+  const state = foldFrames(frames);
+  const now = latestMoment(state);
+  expect(now).toBe(Date.parse('2026-01-01T00:00:30Z'));
+  const projected = foldStateToRecord(state, now) as CampaignRecord;
+  const lateWorkstream = projected.workstreams.find(item => item.id === 'ws-late');
+  expect(lateWorkstream).toBeDefined();
+  expect(Date.parse(lateWorkstream?.finishedAt ?? '')).toBeGreaterThan(
+    Date.parse(lateWorkstream?.startedAt ?? ''),
+  );
+});
+
+test('a repeated workstream upsert merges rather than duplicates', () => {
+  const state = foldFrames([
+    initFrame,
+    {kind: 'workstream-upsert', seq: 2, workstream: workstream({phase: 'pending', title: 'first'})},
+    {
+      kind: 'workstream-upsert',
+      seq: 3,
+      workstream: workstream({phase: 'implementing', title: 'second'}),
+    },
+  ]);
+  expect(state.workstreams.size).toBe(1);
+  expect(state.workstreams.get('ws-1')?.title).toBe('second');
+});
+
+test('a repeated agent upsert merges rather than duplicates', () => {
+  const state = foldFrames([
+    initFrame,
+    {kind: 'agent-upsert', seq: 2, agent: agent({name: 'first'})},
+    {kind: 'agent-upsert', seq: 3, agent: agent({name: 'second'})},
+  ]);
+  expect(state.agents.size).toBe(1);
+  expect(state.agents.get('agent-1')?.name).toBe('second');
+});
+
+test('a parked workstream still projects as live even once inactive with a real finishedAt', () => {
+  // PARKED is not a terminal phase (isTerminalPhase), so a parked workstream
+  // keeps rendering as live until it is explicitly re-evaluated or cancelled,
+  // even once the backend marks it inactive with a settled finishedAt.
+  const frames: CampaignFrame[] = [
+    initFrame,
+    {
+      kind: 'workstream-upsert',
+      seq: 2,
+      workstream: workstream({
+        phase: 'parked',
+        active: false,
+        finishedAt: '2026-01-01T00:00:05Z',
+        lastSequence: 5,
+      }),
+    },
+  ];
+  const now = Date.parse('2026-01-01T00:10:00Z');
+  const projected = foldStateToRecord(foldFrames(frames), now) as CampaignRecord;
+  const parked = projected.workstreams[0];
+  expect(parked).toBeDefined();
+  expect(Date.parse(parked?.finishedAt ?? '')).toBeGreaterThan(now);
 });
 
 test('the header must arrive before a record can be projected', () => {

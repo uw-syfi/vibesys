@@ -110,15 +110,18 @@ function projectWorkstream(
   };
 }
 
-/** The live "now" in epoch ms: the newest measurement, else the latest workstream
- * start, else 0. Used to end in-flight workstream bars at the current moment. */
+/** The live "now" in epoch ms: the latest of every measurement timestamp and
+ * every workstream start, else 0. Used to end in-flight workstream bars at the
+ * current moment. Must consider workstream starts unconditionally, not only
+ * when there are no measurements yet: a workstream can start after the latest
+ * measurement elsewhere in the run, and a one-sided fallback would then place
+ * "now" before that workstream's own start. */
 export function latestMoment(state: FoldState): number {
   let moment = 0;
   for (const measurement of state.measurements.values())
     moment = Math.max(moment, Date.parse(measurement.timestamp));
-  if (moment === 0)
-    for (const workstream of state.workstreams.values())
-      moment = Math.max(moment, Date.parse(workstream.startedAt));
+  for (const workstream of state.workstreams.values())
+    moment = Math.max(moment, Date.parse(workstream.startedAt));
   return moment;
 }
 
