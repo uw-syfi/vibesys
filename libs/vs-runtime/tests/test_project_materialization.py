@@ -92,6 +92,40 @@ def test_copy_tree_applies_exact_relative_path_exclusions(tmp_path: Path) -> Non
     assert (destination / "references" / "models" / "rocm" / "note.md").is_file()
 
 
+@pytest.mark.parametrize("nested", [False, True], ids=["one-link", "nested-links"])
+def test_copy_tree_accepts_a_source_reached_through_symlinked_directories(
+    tmp_path: Path, *, nested: bool
+) -> None:
+    # A virtualenv's ``lib64 -> lib`` puts installed package data behind a link.
+    real = tmp_path / "lib"
+    source_real = real / "pkg" / "profilers" / "rocprof"
+    (source_real / "nested").mkdir(parents=True)
+    (source_real / "server.py").write_text("server\n")
+    (source_real / "nested" / "capture.py").write_text("capture\n")
+    (source_real / "hidden").mkdir()
+    (source_real / "hidden" / "skip.py").write_text("skip\n")
+    link = tmp_path / "lib64"
+    link.symlink_to(real)
+    source = link / "pkg" / "profilers" / "rocprof"
+    if nested:
+        outer = tmp_path / "venv-link"
+        outer.symlink_to(tmp_path)
+        source = outer / "lib64" / "pkg" / "profilers" / "rocprof"
+    destination = tmp_path / "workspace"
+
+    _materializer(destination).copy_tree(
+        ProjectTreeCopy(
+            src=source,
+            dest=destination,
+            excluded_relative_paths=frozenset({Path("hidden")}),
+        )
+    )
+
+    assert (destination / "server.py").read_text() == "server\n"
+    assert (destination / "nested" / "capture.py").read_text() == "capture\n"
+    assert not (destination / "hidden").exists()
+
+
 @pytest.mark.parametrize("isolated", [False, True], ids=["host", "isolated"])
 def test_copy_tree_normalizes_external_symlinks(tmp_path: Path, *, isolated: bool) -> None:
     outside = tmp_path / "outside"
