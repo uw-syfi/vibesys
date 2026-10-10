@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
-from tests.support.bounded_waits import HANG_GUARD_S
 
 from vs_sandbox.api.slurm import (
     COMMAND_BROKER_SOCKET_ENV,
@@ -42,6 +41,7 @@ from vs_sandbox.api.slurm import (
     SlurmGpuLauncher,
     SrunGateRunner,
 )
+from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence

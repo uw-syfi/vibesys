@@ -13,7 +13,6 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.host_environment import unconfined_host_spec
-from tests.support.started_operation import wait_until_started
 from tests.support.world_git import IN_MEMORY_GIT
 from tests.vibesys.orchestration.plugin import capability_plugin
 
@@ -61,6 +60,7 @@ from vs_runtime.api import (
 )
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_sandbox.api import HostResource, HostResourceAccess
+from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping

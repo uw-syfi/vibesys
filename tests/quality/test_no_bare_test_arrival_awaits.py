@@ -2,7 +2,7 @@
 
 ``await gate.entered.wait()`` and ``await queue.get()`` in a test function hang
 forever when the task that should produce the arrival fails or returns first.
-Use ``tests.support.started_operation.arrival(<awaitable>, <task>)``, which raises
+Use ``vs_sim.api.testing.arrival(<awaitable>, <task>)``, which raises
 the task's own outcome instead.
 
 The check is syntactic: a zero-argument ``await <x>.wait()`` or ``await <x>.get()``
@@ -116,6 +116,6 @@ def test_no_new_bare_arrival_awaits_in_tests() -> None:
     allowed = {path: count for path, (count, _reason) in ALLOWED.items()}
     assert found == allowed, (
         "an awaited arrival hangs when its producer ends first; use "
-        "tests.support.started_operation.arrival(<awaitable>, <task>), and lower the "
+        "vs_sim.api.testing.arrival(<awaitable>, <task>), and lower the "
         f"ALLOWED count of any site you converted. found: {found}"
     )

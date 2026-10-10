@@ -17,7 +17,6 @@ from hypothesis import strategies as st
 from pydantic import BaseModel
 from tests.support.run_execution import run_execution_record
 from tests.support.runtime_agent_sessions import _OpenedSessionContract, _resume_transport
-from tests.support.started_operation import arrival, wait_until_started
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
@@ -80,6 +79,7 @@ from vs_sandbox.api import (
     HostResourceAccess,
     ProjectPathPolicy,
 )
+from vs_sim.api.testing import arrival, wait_until_started
 
 if TYPE_CHECKING:
     from vs_agent.api import AgentInvocationStore

@@ -4,8 +4,6 @@ import socket
 from itertools import pairwise
 from pathlib import Path
 
-from tests.support.bounded_waits import HANG_GUARD_S
-
 from vs_sandbox.api import (
     EnvironmentBindMount,
     HostResource,
@@ -18,6 +16,7 @@ from vs_sandbox.api import (
     host_resource_for_mount,
 )
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api.testing import HANG_GUARD_S
 
 
 def test_host_sandbox_creates_parent_directories_for_imported_sockets(tmp_path: Path) -> None:

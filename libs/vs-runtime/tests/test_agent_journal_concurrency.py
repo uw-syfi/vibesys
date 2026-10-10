@@ -9,8 +9,6 @@ from queue import SimpleQueue
 from threading import Event, get_ident
 from typing import TYPE_CHECKING, Literal
 
-from tests.support.started_operation import wait_until_started
-
 from vs_agent.api import (
     AgentCapabilities,
     AgentExecutionPolicy,
@@ -24,6 +22,7 @@ from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, Fake
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import AgentCapability, AgentRole
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaceAgentSessions
+from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

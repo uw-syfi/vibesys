@@ -7,7 +7,6 @@ from typing import Any, Never
 
 import pytest
 from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
-from tests.support.bounded_waits import HANG_GUARD_S
 
 from server.api.protocol import (
     ChatQuery,
@@ -26,6 +25,7 @@ from server.transport.unix_jsonl import (
     UnixJsonlServer,
     validate_socket_path,
 )
+from vs_sim.api.testing import HANG_GUARD_S
 
 
 def _request(socket_path: Path, request: Request) -> dict[str, Any]:

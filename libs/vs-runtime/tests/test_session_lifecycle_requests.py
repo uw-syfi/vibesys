@@ -30,7 +30,6 @@ from tests.support.session_world import (
     ensure_request,
     inspect_request,
 )
-from tests.support.started_operation import wait_until_started
 
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_agent.api.testing import FakeAgentSessions
@@ -42,6 +41,7 @@ from vs_runtime.api.core import (
     ReceiptStore,
     ReleasedRunInvocations,
 )
+from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

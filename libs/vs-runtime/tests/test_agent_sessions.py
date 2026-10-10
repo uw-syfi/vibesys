@@ -34,7 +34,6 @@ from tests.support.runtime_agent_sessions import (
     _WorkspaceResource,
     _WorkspaceResources,
 )
-from tests.support.started_operation import wait_until_started
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
@@ -91,6 +90,7 @@ from vs_runtime.api.testing import (
     FakeWorkspaces,
 )
 from vs_sandbox.api import ProjectPathPolicy
+from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
     from vs_agent.api import AgentClientProtocol, AgentSessions, SessionStore

@@ -9,7 +9,6 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.support.started_operation import arrival
 
 from vs_evaluation.api import (
     EVALUATION_ACCESS_STATE_PATH,
@@ -36,6 +35,7 @@ from vs_evaluation.api import (
     StageState,
 )
 from vs_evaluation.api.testing import FakeEvaluationSettlements
+from vs_sim.api.testing import arrival
 
 SettlementsFixture = tuple[FakeEvaluationSettlements, EvaluationSettlements]
 

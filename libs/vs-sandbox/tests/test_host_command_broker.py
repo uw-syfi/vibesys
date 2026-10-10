@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 
 from vs_sandbox.api.slurm import (
     COMMAND_BROKER_SOCKET_ENV,
@@ -42,6 +41,7 @@ from vs_sandbox.api.slurm import (
 
 # test-isolation: main is the CLI entry point and is intentionally absent from the library API.
 from vs_sandbox.host_command_client import main as client_main
+from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence

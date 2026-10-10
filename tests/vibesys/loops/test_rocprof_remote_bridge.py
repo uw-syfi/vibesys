@@ -10,8 +10,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge, capture_runtime
-from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
-from tests.support.started_operation import start_thread, wait_until_started_sync
 
 from vs_sandbox.api.slurm import (
     SlurmCapturePlan,
@@ -20,6 +18,7 @@ from vs_sandbox.api.slurm import (
     load_slurm_policy,
     write_slurm_capture_plan,
 )
+from vs_sim.api.testing import HANG_GUARD_S, join_or_fail, start_thread, wait_until_started_sync
 from vs_slurm.api import (
     SlurmError,
     SlurmJobRequest,

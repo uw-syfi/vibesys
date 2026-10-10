@@ -23,6 +23,7 @@ PACKAGE_SOURCE_ROOTS = (
     Path("libs/vs-slurm/src"),
     Path("libs/vs-mcp/src"),
     Path("libs/vs-faults/src"),
+    Path("libs/vs-sim/src"),
 )
 _BUILD_AND_CACHE_DIRECTORIES = frozenset(
     {

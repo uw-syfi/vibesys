@@ -8,7 +8,6 @@ import math
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.started_operation import arrival
 
 from vs_runtime.api import CandidateProfileStatus, Evaluation
 from vs_runtime.api.infrastructure import (
@@ -24,6 +23,7 @@ from vs_runtime.api.testing import (
     FakeStopTimer,
     FakeWorkspace,
 )
+from vs_sim.api.testing import arrival
 
 _GRACE_S = 60.0
 

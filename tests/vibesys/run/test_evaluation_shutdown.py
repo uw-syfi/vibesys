@@ -6,7 +6,6 @@ import asyncio
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from tests.support.started_operation import arrival
 
 from vibesys.run.host import close_evaluation_services
 from vs_evaluation.api import (
@@ -30,6 +29,7 @@ from vs_evaluation.api.testing import (
     FakeProfilerTurnProvision,
     InMemoryEvaluationNamespace,
 )
+from vs_sim.api.testing import arrival
 
 if TYPE_CHECKING:
     from pathlib import Path

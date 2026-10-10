@@ -25,7 +25,6 @@ from tests.support.session_world import (
     run_snapshot,
     turn_output,
 )
-from tests.support.started_operation import wait_until_started
 
 from vs_core.api import (
     ObservationStatus,
@@ -34,6 +33,7 @@ from vs_core.api import (
 )
 from vs_project.api import Project
 from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, ReceiptStore
+from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

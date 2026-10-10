@@ -12,7 +12,6 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.support.started_operation import wait_until_started_sync
 
 from vs_agent.api import (
     AgentCapabilities,
@@ -53,6 +52,7 @@ from vs_project.api import (
     RunExecutionRecord,
 )
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import wait_until_started_sync
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator

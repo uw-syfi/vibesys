@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import ValidationError
-from tests.support.started_operation import wait_until_started
 
 from vs_project.api import Project
 from vs_runtime.api import BenchmarkFailureKind
@@ -29,6 +28,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeModelVolumeProvisioner
 from vs_sandbox.api import CommandResult, LocalShellRunner
 from vs_sandbox.api.testing import FakeCommandRunner
+from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
     from pathlib import Path

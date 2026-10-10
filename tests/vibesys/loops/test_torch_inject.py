@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.bounded_waits import HANG_GUARD_S
 from tests.vibesys.loops.torch_inject_fixtures import (
     StderrTail,
     base_env,
@@ -39,6 +38,8 @@ from tests.vibesys.loops.torch_inject_fixtures import (
     run_python,
     write_fake_torch,
 )
+
+from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from pathlib import Path

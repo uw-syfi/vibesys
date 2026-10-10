@@ -11,10 +11,10 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 from pydantic import BaseModel, ConfigDict
-from tests.support.started_operation import arrival
 
 from vs_runtime.api.testing import FakeRuns
 from vs_runtime.api.wiring import InProcessRuns, TaskRunHandle
+from vs_sim.api.testing import arrival
 
 if TYPE_CHECKING:
     from collections.abc import Callable

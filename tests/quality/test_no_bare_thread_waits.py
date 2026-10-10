@@ -3,7 +3,7 @@
 ``await asyncio.to_thread(event.wait)`` hangs forever when the operation that
 should set the event fails or returns first, and ``asyncio.run`` then joins the
 parked worker at shutdown. Tests that hold the operation as a task or future use
-``tests.support.started_operation.wait_until_started``, which ends with it.
+``vs_sim.api.testing.wait_until_started``, which ends with it.
 
 Executor-owned setters use ``wait_until_executor_started``, which ends with the
 evaluation. The allowlist holds the remaining sites, where the gate is a fake's
@@ -18,13 +18,10 @@ REPO = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = (REPO / "tests", *sorted((REPO / "libs").glob("*/tests")))
 WAITING_METHODS = {"wait", "get"}
 
-# The helper's own wait: it is released by the operation's done callback.
-_HELPER = "tests/support/started_operation.py"
 # A fake's own gate, set by the creating test in a `finally`, so it opens on every path.
 _RELEASED_BY_FINALLY = "a fake's release gate, set in the creating test's finally block"
 
 ALLOWED: dict[str, tuple[int, str]] = {
-    _HELPER: (1, "released by the operation's done callback"),
     "libs/vs-runtime/tests/test_agent_journal_concurrency.py": (
         1,
         "the turn's done callback puts a sentinel, so the read returns even if the turn fails",
@@ -68,6 +65,6 @@ def test_no_new_bare_thread_waits_in_tests() -> None:
     allowed = {path: count for path, (count, _reason) in ALLOWED.items()}
     assert found == allowed, (
         "to_thread(<event>.wait) hangs when its setter ends first; use "
-        "tests.support.started_operation.wait_until_started with the operation, "
+        "vs_sim.api.testing.wait_until_started with the operation, "
         "and lower the ALLOWED count of any site you converted"
     )

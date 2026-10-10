@@ -7,7 +7,6 @@ optional runner seam; they do not inspect the packaged Dockerfile.
 
 from vs_agent.images import (
     DEFAULT_AGENT_IMAGE_REGISTRY,
-    DEFAULT_BUILD_TIMEOUT_SECONDS,
     DockerBuildRunner,
     ImagePushError,
     SubprocessDockerBuildRunner,
@@ -21,7 +20,6 @@ from vs_agent.images import (
 
 __all__ = [
     "DEFAULT_AGENT_IMAGE_REGISTRY",
-    "DEFAULT_BUILD_TIMEOUT_SECONDS",
     "DockerBuildRunner",
     "ImagePushError",
     "SubprocessDockerBuildRunner",

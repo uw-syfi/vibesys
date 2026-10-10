@@ -2,7 +2,7 @@
 
 ``thread.join()``, ``process.communicate()``, ``process.wait()`` and
 ``listener.accept()`` and a read on a socket with no timeout park the whole worker when the peer never finishes, and the
-failure names nothing. Use ``tests.support.bounded_waits`` (``join_or_fail``,
+failure names nothing. Use ``vs_sim.api.testing`` (``join_or_fail``,
 ``stop_process``, ``HANG_GUARD_S``) or pass ``timeout=``. The bound is a hang
 guard that a passing run never approaches, not a synchronization tool.
 
@@ -167,6 +167,6 @@ def test_no_test_blocks_without_a_bound_on_a_thread_process_or_socket() -> None:
         for line, what in unbounded_waits(path.read_text(encoding="utf-8"))
     ]
     assert not offenders, (
-        "use tests.support.bounded_waits (join_or_fail, stop_process, HANG_GUARD_S) "
+        "use vs_sim.api.testing (join_or_fail, stop_process, HANG_GUARD_S) "
         "or pass a timeout:\n" + "\n".join(offenders)
     )

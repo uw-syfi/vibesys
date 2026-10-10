@@ -26,7 +26,6 @@ from tests.entrypoints.support import (
     FakeDetachedGateway,
     gateway_record,
 )
-from tests.support.bounded_waits import HANG_GUARD_S, stop_process
 from tests.support.thread_signals import non_main_thread_ids, requires_tgkill, send_to_thread
 
 import entrypoints.server as server_entrypoint
@@ -51,6 +50,7 @@ from entrypoints.server import (
 )
 from server.transport.discovery import WebInstanceClaim, WebInstanceHold, WebInstanceRecord
 from server.transport.websocket import WebSocketLimits
+from vs_sim.api.testing import HANG_GUARD_S, stop_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable

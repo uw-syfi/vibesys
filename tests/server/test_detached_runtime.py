@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
-from tests.support.bounded_waits import stop_process
 
 from launch import default_runs
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
@@ -20,6 +19,7 @@ from server.events import EventType
 from server.runtime import ServerRuntime
 from server.transport.discovery import WebInstanceHold, WebInstanceRecord
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vs_sim.api.testing import stop_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable

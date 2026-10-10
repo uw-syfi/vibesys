@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from tests.support.started_operation import arrival
 
 from vs_evaluation.api import (
     ContentDigest,
@@ -22,6 +21,7 @@ from vs_runtime.api.infrastructure import (
     stop_gated_evaluation,
 )
 from vs_runtime.api.testing import FakeEvaluation, FakeRunControlEventSink
+from vs_sim.api.testing import arrival
 
 
 @pytest.mark.asyncio

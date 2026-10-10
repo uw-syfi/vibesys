@@ -15,7 +15,6 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue, RootModel
 from tests.support.evaluation_scenarios import ScenarioSpec, build_scenario
-from tests.support.started_operation import arrival
 from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.run.evaluation_backend import (
@@ -62,6 +61,7 @@ from vs_runtime.api.testing import (
     FakeWorkspace,
     FakeWorkspaces,
 )
+from vs_sim.api.testing import arrival
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

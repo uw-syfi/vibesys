@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from tests.support import run_test_command
-from tests.support.bounded_waits import HANG_GUARD_S
 
 import vs_sandbox.skypilot_bridge as bridge_module  # test-isolation: durable restart-offset behavior belongs to the bridge's private spool state machine.
 from vs_project.api import MAX_SOCKET_PATH_BYTES, SocketPathTooLongError, StateNamespace
@@ -37,6 +36,7 @@ from vs_sandbox.api.skypilot import (
     decode_response,
     encode_message,
 )
+from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

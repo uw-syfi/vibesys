@@ -28,11 +28,7 @@ from vs_agent import provider_policy
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
 
-#: Default limit of one ``docker build``. A cold agent-image build over the
-#: ``rocm/pytorch`` base took about 29 minutes (1740 s) on a host with a warm
-#: Docker cache, which a 1200 s limit killed twice in a row; 3600 s is about
-#: twice that observation. Callers that know better pass ``timeout``.
-DEFAULT_BUILD_TIMEOUT_SECONDS = 3600.0
+_DEFAULT_BUILD_TIMEOUT_SECONDS = 1200.0
 _DEFAULT_PUSH_TIMEOUT_SECONDS = 1200.0
 _DEFAULT_VERIFY_TIMEOUT_SECONDS = 60.0
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
@@ -267,7 +263,7 @@ def build_task_image(
     *,
     base_image: str | None = None,
     command_runner: DockerBuildRunner | None = None,
-    timeout: float = DEFAULT_BUILD_TIMEOUT_SECONDS,
+    timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
 ) -> str:
     """Build a task Dockerfile and return its immutable Docker image ID.
 
@@ -358,7 +354,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     toolchains: Collection[str] = (),
     pip_extras: Collection[str] = (),
     command_runner: DockerBuildRunner | None = None,
-    timeout: float = DEFAULT_BUILD_TIMEOUT_SECONDS,
+    timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
 ) -> str:
     """Build the agent layer on top of a task image, and return its image ID.
 

@@ -12,7 +12,6 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, Field
-from tests.support.started_operation import wait_until_started_sync
 
 from vibesys.api import CoreAgentEventSink
 from vibesys.events import (
@@ -44,6 +43,7 @@ from vs_agent.contracts import (
     MCPServerSpec,
 )
 from vs_mcp.api import StdioServerDescriptor
+from vs_sim.api.testing import wait_until_started_sync
 
 
 class _Response(BaseModel):

@@ -104,7 +104,7 @@ class FakeRunClock:
         time itself (another sleeper, or a controller that awaits one) cannot finish until
         this sleep returns, so waiting for every task unconditionally deadlocks as soon
         as two tasks wait on the clock. Work that needs real time to finish belongs on a
-        ``tests.support.virtual_time.VirtualClock``, which has no such bound.
+        ``vs_sim.api.testing.VirtualClock``, which has no such bound.
         """
         current = asyncio.current_task()
         if current is not None and current.get_name() == HEARTBEAT_TASK:

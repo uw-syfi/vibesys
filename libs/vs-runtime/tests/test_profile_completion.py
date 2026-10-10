@@ -6,9 +6,9 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.started_operation import arrival
 
 from vs_runtime.api import CandidateProfile, CandidateProfileStatus, complete_profile
+from vs_sim.api.testing import arrival
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable

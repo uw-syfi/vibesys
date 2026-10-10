@@ -28,8 +28,9 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 from tests.vibesys.loops.torch_inject_fixtures import write_fake_torch
+
+from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
 
 if TYPE_CHECKING:
     from types import ModuleType

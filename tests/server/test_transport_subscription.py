@@ -13,7 +13,6 @@ from typing import Never, TypedDict, Unpack
 
 import pytest
 from tests.server.support import ServerParts, build_server_parts
-from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 
 from server.api.protocol import EventsQuery, SnapshotQuery, SubscribeRequest
 from server.api.service import RunApi
@@ -30,6 +29,7 @@ from server.events import (
 )
 from server.journal import _BOOTSTRAP_SPINE_TYPES
 from server.transport.unix_jsonl import UnixJsonlServer
+from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
 
 _TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 _ROUND_EVERY = 25

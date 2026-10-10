@@ -31,7 +31,8 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.bounded_waits import HANG_GUARD_S
+
+from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

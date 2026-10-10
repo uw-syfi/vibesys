@@ -659,39 +659,12 @@ class DockerEnvironmentConfig:
     ``docker`` is the CLI the environment probes the host daemon with (before
     any image build, for a task that needs a container runtime) and
     ``build_runner`` is what runs the agent image's ``docker build``; ``None``
-    is the real ``docker`` binary for both. ``build_timeout_seconds`` limits
-    each ``docker build`` of the agent image; ``None`` is the library default,
-    ``vs_agent.api.images.DEFAULT_BUILD_TIMEOUT_SECONDS``.
+    is the real ``docker`` binary for both.
     """
 
     image: str | None = None
     docker: DockerCli | None = None
     build_runner: DockerBuildRunner | None = None
-    build_timeout_seconds: float | None = None
-
-    def __post_init__(self) -> None:
-        """Reject a limit that could never let a build finish."""
-        limit = self.build_timeout_seconds
-        if limit is not None and not (0 < limit < float("inf")):
-            message = f"agent image build timeout must be positive and finite, got {limit!r}"
-            raise ValueError(message)
-
-    @classmethod
-    def from_options(cls, options: Mapping[str, object]) -> DockerEnvironmentConfig:
-        """Read the Docker-editor settings every Docker-based environment shares.
-
-        ``build_runner`` is the unrecorded injection seam for the agent image
-        build, ``docker`` the one for the host's ``docker`` client, and
-        ``build_timeout_seconds`` the operator's limit for one image build.
-        """
-        image = options.get("image")
-        timeout = options.get("build_timeout_seconds")
-        return cls(
-            image=str(image) if image else None,
-            docker=cast("DockerCli | None", options.get("docker")),
-            build_runner=cast("DockerBuildRunner | None", options.get("build_runner")),
-            build_timeout_seconds=None if timeout is None else float(cast("float", timeout)),
-        )
 
 
 @dataclass(frozen=True)
@@ -729,9 +702,18 @@ class DockerEnvironment:
     def from_options(cls, options: Mapping[str, object]) -> DockerEnvironment:
         """Build Docker configuration from CLI options.
 
-        See :meth:`DockerEnvironmentConfig.from_options` for the keys.
+        ``build_runner`` is the unrecorded injection seam for the agent image build,
+        ``docker`` the one for the host's ``docker`` client.
         """
-        return cls(DockerEnvironmentConfig.from_options(options))
+        image = options.get("image")
+        build_runner = options.get("build_runner")
+        return cls(
+            DockerEnvironmentConfig(
+                image=str(image) if image else None,
+                docker=cast("DockerCli | None", options.get("docker")),
+                build_runner=cast("DockerBuildRunner | None", build_runner),
+            )
+        )
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve Docker presentation facts."""
@@ -782,17 +764,10 @@ class DockerEnvironment:
         # The task image, when a task has a Dockerfile, is built by the
         # headless entrypoint and arrives here as the backend image; only the
         # agent layer is applied on top of it.
-        build_timeout = self.config.build_timeout_seconds
-        if build_timeout is None:
-            build_timeout = image_helpers.DEFAULT_BUILD_TIMEOUT_SECONDS
-            log(f"[environment] agent image build timeout {build_timeout:g} s (default)")
-        else:
-            log(f"[environment] agent image build timeout {build_timeout:g} s")
         container_image = image_helpers.agent_image(
             _docker_backend_image(request),
             toolchains=toolchains,
             command_runner=self.config.build_runner,
-            timeout=build_timeout,
         )
         workspace_root = _workspace_root(request, same_path=extras.same_path_workspace)
         resources, docker_symlinks = _container_mount_plan(

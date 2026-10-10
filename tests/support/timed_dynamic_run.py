@@ -26,7 +26,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from tests.support.virtual_time import VirtualClock, run_virtual
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors, _lease
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
@@ -74,6 +73,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.testing import FakePublicationDelivery
+from vs_sim.api.testing import VirtualClock, run_virtual
 from vs_slurm.api import (
     ClusterObservation,
     ClusterSubmitted,

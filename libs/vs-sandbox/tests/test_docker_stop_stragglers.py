@@ -13,10 +13,9 @@ import select
 import threading
 from typing import TYPE_CHECKING
 
-from tests.support.bounded_waits import join_or_fail
-
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sim.api.testing import join_or_fail
 
 if TYPE_CHECKING:
     from pathlib import Path

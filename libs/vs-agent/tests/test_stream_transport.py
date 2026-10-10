@@ -29,7 +29,6 @@ from agentshim.testing import (
     SequentialIds,
     scripted_turn,
 )
-from tests.support.bounded_waits import join_or_fail
 from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
@@ -43,6 +42,7 @@ from vs_agent.api import (
     AgentTurnTimeoutError,
     SteerOutcome,
 )
+from vs_sim.api.testing import join_or_fail
 
 if TYPE_CHECKING:
     from collections.abc import Callable
