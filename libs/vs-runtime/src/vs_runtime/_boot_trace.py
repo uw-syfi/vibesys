@@ -33,7 +33,8 @@ the operator's terminal, not a diagnostics channel::
 
     VIBESYS_BOOT_TRACE=1 vibesys --input ... 2>trace.log
 
-This module imports nothing from VibeSys, so product entrypoints can use it
+This module imports nothing from VibeSys beyond the standard-library-only
+``vs_sim`` clocks, so product entrypoints can use it
 before importing product composition and concrete execution backends. There is no
 exporter, sampler, or propagation machinery: the span shape is the point, so
 one could be added later without touching call sites.
@@ -42,10 +43,11 @@ one could be added later without touching call sites.
 import functools
 import os
 import sys
-import time
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from typing import ParamSpec, TypeVar
+
+from vs_sim.api import Clock, MonotonicClock, SystemClock
 
 #: Set to exactly ``"1"`` to echo boot-trace lines to stderr.
 BOOT_TRACE_ENV = "VIBESYS_BOOT_TRACE"
@@ -69,15 +71,19 @@ def trace_enabled() -> bool:
     return os.environ.get(BOOT_TRACE_ENV) == "1"
 
 
-class _BootTrace:
-    """Process-lifetime span stack and line buffer.
+class BootTrace:
+    """Span stack and line buffer, timed by two injected clocks.
 
-    One instance (:data:`_TRACE`) backs the module-level functions, which are
-    its entire interface. Boot happens once per process on one thread, so the
-    state is deliberately unsynchronized.
+    One process-lifetime instance (:data:`_TRACE`) backs the module-level
+    functions. Boot happens once per process on one thread, so the state is
+    deliberately unsynchronized. ``wall`` is the epoch clock that anchors the
+    launch; ``elapsed`` measures span durations and only its differences matter.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, wall: Clock, elapsed: Clock) -> None:
+        """Time launches with ``wall`` and spans with ``elapsed``."""
+        self._wall = wall
+        self._elapsed = elapsed
         self._lines: list[str] = []
         self._open: list[str] = []
         self._launched_at_ms: int | None = None
@@ -88,9 +94,11 @@ class _BootTrace:
         return ".".join(self._open)
 
     def pop(self) -> None:
+        """Close the innermost open span."""
         self._open.pop()
 
     def record(self, line: str) -> None:
+        """Buffer ``line`` for the run log and echo it to stderr when tracing is on."""
         self._lines.append(line)
         if trace_enabled():
             # The process's own stderr, not whatever ``RunLogger`` may have
@@ -100,25 +108,43 @@ class _BootTrace:
             stream.write(f"{line}\n")
 
     def drain(self) -> list[str]:
+        """Pop every buffered line."""
         lines = list(self._lines)
         self._lines.clear()
         return lines
 
     def mark_launch(self) -> int:
-        self._launched_at_ms = int(time.time() * 1000)
+        """Anchor the launch at the wall clock's now, in epoch milliseconds."""
+        self._launched_at_ms = int(self._wall.now() * 1000)
         return self._launched_at_ms
 
     def launched_at_ms(self) -> int:
+        """The launch anchor, set now when nothing marked it yet."""
         if self._launched_at_ms is None:
             return self.mark_launch()
         return self._launched_at_ms
 
+    @contextmanager
+    def span(self, name: str) -> Generator[None]:
+        """Time this block and record ``boot span <qualified name>: <ms>ms``."""
+        qualified = self.push(name)
+        started = self._elapsed.now()
+        outcome = ""
+        try:
+            yield
+        except BaseException as exc:
+            outcome = f" (raised {type(exc).__name__})"
+            raise
+        finally:
+            elapsed_ms = (self._elapsed.now() - started) * 1000
+            self.pop()
+            self.record(f"boot span {qualified}: {elapsed_ms:.0f}ms{outcome}")
 
-_TRACE = _BootTrace()
+
+_TRACE = BootTrace(wall=SystemClock(), elapsed=MonotonicClock())
 
 
-@contextmanager
-def span(name: str) -> Generator[None]:
+def span(name: str) -> AbstractContextManager[None]:
     """Time this block and record ``boot span <qualified name>: <ms>ms``.
 
     Spans nest: *name* is qualified by whatever spans are still open, so an
@@ -126,18 +152,7 @@ def span(name: str) -> Generator[None]:
     parts. A body that raises is still recorded, tagged with the exception
     type, and the exception propagates unchanged.
     """
-    qualified = _TRACE.push(name)
-    started = time.perf_counter()
-    outcome = ""
-    try:
-        yield
-    except BaseException as exc:
-        outcome = f" (raised {type(exc).__name__})"
-        raise
-    finally:
-        elapsed_ms = (time.perf_counter() - started) * 1000
-        _TRACE.pop()
-        _TRACE.record(f"boot span {qualified}: {elapsed_ms:.0f}ms{outcome}")
+    return _TRACE.span(name)
 
 
 def traced(name: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
