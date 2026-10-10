@@ -158,12 +158,17 @@ class RocmBackend:
             )
 
         if kind is SandboxKind.DOCKER:
+            devices = list(self._devices) if attach_accelerator else []
             return docker_sandbox(
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=None,  # ROCm uses --device, not --gpus
-                devices=list(self._devices) if attach_accelerator else [],
-                group_add=list(_DEVICE_GROUPS),
+                devices=devices,
+                # The groups own the device nodes. A container without them
+                # forwarded must not name them: Docker refuses a group the
+                # image's group file lacks, and a host with no GPU may not
+                # have the groups either.
+                group_add=list(_DEVICE_GROUPS) if devices else [],
                 shm_size=_DEFAULT_SHM_SIZE,
                 bind_mounts=bind_mounts,
                 resources=resources,
