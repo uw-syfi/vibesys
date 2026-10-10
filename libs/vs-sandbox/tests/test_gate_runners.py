@@ -31,10 +31,39 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _WAIT_FOR_SIGTERM = """\
-import signal, sys, time
-signal.signal(signal.SIGTERM, lambda *_: (print("cancelled", flush=True), sys.exit(143)))
+import io, os, signal, sys
+
+def on_sigterm(*_):
+    # os.write, not print: the signal can land inside a print already in progress,
+    # and re-entering the buffered stdout there raises instead of printing.
+    os.write(1, b"cancelled\\n")
+    sys.exit(143)
+
+signal.signal(signal.SIGTERM, on_sigterm)
+# The wakeup fd gets a byte when the signal arrives, even if that is before the
+# wrapper parks, so waiting on it cannot miss the signal the way signal.pause can.
+wake_read, wake_write = os.pipe()
+os.set_blocking(wake_write, False)
+signal.set_wakeup_fd(wake_write)
+
+class Raw(io.RawIOBase):
+    # The first write reports "started", then parks inside that write until the
+    # signal arrives, so SIGTERM always lands mid-print, the interleaving that a
+    # busy machine only sometimes produces.
+    parked = False
+
+    def writable(self):
+        return True
+
+    def write(self, data):
+        count = os.write(1, data)
+        if not Raw.parked:
+            Raw.parked = True
+            os.read(wake_read, 1)
+        return count
+
+sys.stdout = io.TextIOWrapper(io.BufferedWriter(Raw()))
 print("started", flush=True)
-time.sleep(30)
 """
 _ECHO_ARGV = "import os, sys; print(os.getcwd(), *sys.argv[1:])"
 
