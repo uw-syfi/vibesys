@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentClientProtocol
     from vs_runtime.api import AgentRole
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration
+    from vs_sandbox.api import CommandRunner
 
 
 class _Resource:
@@ -107,6 +108,9 @@ class _Resource:
     def execute(self, command: str, timeout_seconds: int | None) -> CommandResult:
         self.executions.append((command, timeout_seconds))
         return self.scripted.popleft() if self.scripted else CommandResult("", 0)
+
+    def agent_sandbox(self) -> CommandRunner | None:
+        return None
 
     def agent_scope(self) -> AgentExecutionScope:
         pytest.fail("workspace-only test requested an agent execution scope")

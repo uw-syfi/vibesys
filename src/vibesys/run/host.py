@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from vibesys.composition import AgentToolContext, agent_spec_from_config, resolve_agent_specs
 from vibesys.events import (
@@ -104,7 +104,7 @@ if TYPE_CHECKING:
         StopTimer,
         WorkspaceRuntime,
     )
-    from vs_sandbox.api import ComputeBackendImpl
+    from vs_sandbox.api import ComputeBackendImpl, DockerSandbox
 
 
 type _AgentToolResolver = Callable[
@@ -553,6 +553,9 @@ class _ProductHostFactory:
             skill_source_dirs=list(environment.skill_source_dirs),
             skill_selection=environment.skill_selection,
             run_log_file=scope.current_log_file(),
+            # A turn runs in the container that mounts its workspace, so a
+            # candidate's turn is not sent to the root container.
+            workspace_sandboxes=partial(_candidate_agent_sandbox, agent_runtime),
             use_docker=environment.use_docker,
             log_dir=scope.log_directory,
             agent_homes_dir=scope.agent_homes_directory,
@@ -915,6 +918,11 @@ __all__ = [
     "open_product_core_host",
     "open_product_run_host",
 ]
+
+
+def _candidate_agent_sandbox(runtime: WorkspaceRuntime, path: Path) -> DockerSandbox | None:
+    """The container that mounts the candidate checked out at ``path``, if one is live."""
+    return cast("DockerSandbox | None", runtime.workspaces.agent_sandbox_at(path))
 
 
 def _require_distinct_fallback(policy: QuotaPolicy, agent_specs: Mapping[str, AgentSpec]) -> None:

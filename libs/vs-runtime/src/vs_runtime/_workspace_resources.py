@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         TrustedBenchmarkResult,
         TrustedEvaluationExecutor,
     )
+    from vs_sandbox.api import CommandRunner
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,6 +331,10 @@ class RuntimeWorkspaceResource:
 
     def execute(self, command: str, timeout_seconds: int | None) -> CommandExecutionResult:
         return self._environment.session.sandbox.execute(command, timeout=timeout_seconds)
+
+    def agent_sandbox(self) -> CommandRunner | None:
+        environment = self._environment
+        return environment.session.sandbox if environment.view.cli_sandboxed else None
 
     def agent_scope(self) -> AgentExecutionScope:
         return AgentExecutionScope(

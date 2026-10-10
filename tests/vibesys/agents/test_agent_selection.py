@@ -171,3 +171,19 @@ def test_built_client_reports_a_missing_provider_cli_before_its_first_turn(
         )
 
     assert provider in str(raised.value)
+
+
+def test_a_container_client_accepts_a_workspace_sandbox_lookup() -> None:
+    """The public builder passes the lookup a core run gives its client (#1552)."""
+    spec = agent_spec_from_config(_config(backend="cli", cli_provider="claude"), model="m")
+
+    client = build_agent_client(
+        spec=spec,
+        backends={},
+        workspace_sandboxes=lambda _path: None,
+        skill_source_dirs=[],
+        run_log_file=None,
+        use_docker=True,
+    )
+
+    assert isinstance(client, AgentClient)

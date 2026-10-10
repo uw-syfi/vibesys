@@ -74,6 +74,7 @@ if TYPE_CHECKING:
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import StateSlot
     from vs_runtime.api.infrastructure import RunControlChannel
+    from vs_sandbox.api import CommandRunner
 
 
 class _WorkspaceResource:
@@ -148,6 +149,9 @@ class _WorkspaceResource:
     def execute(self, command: str, timeout_seconds: int | None) -> CommandResult:
         del command, timeout_seconds
         return CommandResult("", 0)
+
+    def agent_sandbox(self) -> CommandRunner | None:
+        return None
 
     def agent_scope(self) -> AgentExecutionScope:
         assert self.scope_factory is not None

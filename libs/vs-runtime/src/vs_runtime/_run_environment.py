@@ -703,6 +703,10 @@ class DockerEnvironment:
                 isolated=True,
                 cli_sandboxed=True,
                 env_kind="docker",
+                # Each candidate gets its own worktree and its own container
+                # (see ``open_workspace``); the containers share the run's
+                # device lease like every other child workspace session.
+                supports_parallel_candidate_evaluation=True,
             ),
         )
 

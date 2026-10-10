@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
     from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
     from vs_runtime.contracts import CandidateWorkspace, Workspace
+    from vs_sandbox.api import CommandRunner
 
 
 class WorkspaceResource(Protocol):
@@ -76,6 +77,10 @@ class WorkspaceResource(Protocol):
     def execute(self, command: str, timeout_seconds: int | None) -> CommandExecutionResult: ...
 
     def agent_scope(self) -> AgentExecutionScope: ...
+
+    def agent_sandbox(self) -> CommandRunner | None:
+        """Return the sandbox an agent in this workspace runs in, or ``None`` on the host."""
+        ...
 
     @property
     def evaluation_spec(self) -> WorkspaceEvaluationSpec: ...
@@ -426,6 +431,18 @@ class RuntimeWorkspaces:
                 return workspace._resource  # noqa: SLF001  # lint-waiver: LW-228407 [SLF001]; the collection resolves its own handle to its private resource.
         message = "workspace must be a live handle from this run"
         raise TypeError(message)
+
+    def agent_sandbox_at(self, path: Path) -> CommandRunner | None:
+        """Return the sandbox of the live candidate checked out at ``path``.
+
+        ``None`` for the root and for a path no live candidate owns: a caller
+        serving several workspaces from one client falls back to its own
+        sandbox there.
+        """
+        for candidate in tuple(self._candidates.values()):
+            if candidate.path == path:
+                return self.resource_for(candidate).agent_sandbox()
+        return None
 
     def workspace_for(self, workspace: Workspace) -> RuntimeWorkspace:
         """Return one live handle owned by this collection."""

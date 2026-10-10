@@ -5,8 +5,9 @@ The process scenarios require ``VIBESYS_E2E_AGENTS=1`` and a provider CLI. Run t
 through ``scripts/smoke_dynamic_loop.sh`` before every live hardware run.
 
 Each process scenario launches the installed ``vibesys`` CLI as an operator does
-(launcher, then engine) with ``--outer-loop dynamic --headless`` against the
-Slurm run environment. The cluster is ``vs_slurm.fake_connector`` in executing
+(launcher, then engine) with ``--outer-loop dynamic --headless``. The invariants
+scenario uses the default Docker run environment (CPU backend); the Ctrl-C
+scenario asserts on cluster jobs, so it uses the Slurm run environment. The cluster is ``vs_slurm.fake_connector`` in executing
 mode: every production job script runs on this host. The GPU node's profiler
 capture is answered by the Fake remote interpreter (one trace and a summary),
 so the profile path runs end to end without a GPU. Agents are the real CLIs
@@ -25,16 +26,18 @@ import asyncio
 import importlib.util
 import json
 import os
+import pwd
 import shutil
 import signal
 import subprocess
 import sys
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import agentshim
 import pytest
 from tests.support import run_test_command
 from tests.support.docker_environment import host_container_backend
@@ -108,7 +111,7 @@ _PROVIDERS = {
     ),
     "codex": (
         "codex",
-        '[model]\nname = "gpt-6-luna"\n[thinking]\nlevel = "low"\n[agent]\ncli_provider = "codex"\n',
+        '[model]\nname = "gpt-5.6-luna"\n[thinking]\nlevel = "low"\n[agent]\ncli_provider = "codex"\n',
     ),
 }
 #: A deadlock guard for one run; a healthy run ends in a few minutes.
@@ -143,6 +146,9 @@ class SmokeRun:
     """One operator-style launch over a fresh project, state home, and Fake cluster."""
 
     base: Path
+    # "docker" is the default run environment; "slurm" runs over the Fake
+    # cluster, for scenarios that assert on cluster jobs.
+    environment: str = "docker"
     project: Path = field(init=False)
     cluster: Path = field(init=False)
     state_home: Path = field(init=False)
@@ -200,13 +206,15 @@ class SmokeRun:
             "--outer-loop", "dynamic", "--headless",
             "--project", str(self.project),
             "--config", str(self.base / "agent.toml"),
-            "--run-environment", "slurm",
-            "--slurm-config", str(self.base / "slurm.toml"),
-            "--profiler", "rocprof", "--backend", "rocm",
+            *self._environment_argv(),
             "--max-rounds", "1", "--max-in-flight", "2",
         ]  # fmt: skip
         environment: dict[str, str] = {**os.environ, "VIBESYS_STATE_HOME": str(self.state_home)}
         environment.pop("CLAUDECODE", None)
+        if self.environment == "docker":
+            # The container receives the provider login; the test environment's
+            # HOME is empty, so seed one with the operator's credential files.
+            environment["HOME"] = str(self._seeded_home())
         log = (self.base / "vibesys.log").open("wb")
         # lint-waiver: LW-994697 [S603]; the smoke tier must cross the real
         # > process boundary (launcher, engine, signals) that in-process runs skip;
@@ -219,6 +227,28 @@ class SmokeRun:
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+
+    def _seeded_home(self) -> Path:
+        """Return a HOME holding only the provider's credential files."""
+        home = self.base / "home"
+        home.mkdir(exist_ok=True)
+        operator_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        for auth_file in agentshim.get_provider(_provider()).profile.auth_files:
+            source = operator_home / auth_file
+            if source.is_file() and not source.name.startswith("settings"):
+                (home / auth_file).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, home / auth_file)
+        return home
+
+    def _environment_argv(self) -> list[str]:
+        """Return the run-environment, backend, and profiler arguments."""
+        if self.environment == "slurm":
+            return [
+                "--run-environment", "slurm",
+                "--slurm-config", str(self.base / "slurm.toml"),
+                "--profiler", "rocprof", "--backend", "rocm",
+            ]  # fmt: skip
+        return ["--run-environment", "docker", "--backend", "cpu", "--profiler", "none"]
 
     def logs_dir(self) -> Path | None:
         """Return the run's logs directory once the engine has created it."""
@@ -285,8 +315,12 @@ class SmokeRun:
         logs = self.logs_dir()
         assert logs is not None, (self.base / "vibesys.log").read_text(encoding="utf-8")[-4000:]
         run_id = next(str(event["run_id"]) for event in self.events() if event.get("run_id"))
-        state = Project.open(self.project).state.portable_namespace(run_id, PLUGIN.id)
-        return RunRecords.load(logs, state.external_directory() / "state.json", self.cluster)
+        stored = Project.open(self.project).state_store(run_id).load()
+        envelope = (
+            json.loads(stored.payload)["envelope"] if isinstance(stored, StoredEnvelope) else None
+        )
+        loaded = RunRecords.load(logs, None, self.cluster)
+        return replace(loaded, envelope=envelope)
 
     def verdict(self, *, stop_grace_s: float | None = None) -> list[Violation]:
         """Check the invariants and print the run's one-line summary."""
@@ -317,16 +351,16 @@ def test_a_dynamic_run_keeps_the_loop_invariants(tmp_path: Path) -> None:
 
     assert smoke.verdict() == []
     records = smoke.records()
-    assert records.state is not None
-    _require_successful_search(records.state)
+    assert records.envelope is not None
+    _require_successful_search(records.envelope)
     terminal = terminal_event(records)
     assert terminal is not None
     assert terminal["status"] == RunStatus.COMPLETED.value
     assert process.returncode == 0
 
 
-def _require_successful_search(raw_state: BaseModel | Mapping[str, object]) -> None:
-    """A successful smoke must measure its input and finish a trusted candidate."""
+def _require_successful_legacy_search(raw_state: BaseModel | Mapping[str, object]) -> None:
+    """A successful legacy-loop scenario must measure its input and finish a trusted candidate."""
     assert PLUGIN.state is not None
     state = PLUGIN.state.model_validate(raw_state).model_dump(mode="python")
     assert state["baseline"] is not None
@@ -341,6 +375,25 @@ def _require_successful_search(raw_state: BaseModel | Mapping[str, object]) -> N
         and item["evaluation"]["benchmark_passed"] is True
         for item in evaluated
     )
+
+
+def _require_successful_search(envelope: Mapping[str, object]) -> None:
+    """A successful smoke measures its input and adopts a candidate the trusted gates passed."""
+    core = envelope["core"]
+    assert isinstance(core, dict)
+    run = core["run"]
+    assert (run["status"], run["result"]["outcome"]) == ("terminal", "success")
+    selection = run["result"]["selection"]
+    assert selection["kind"] == "retained_candidate"
+    held = {
+        (item["candidate"]["digest"], item["purpose"], item["kind"])
+        for item in core["evaluation"]["evidence"]
+    }
+    baseline = run["facts"]["baseline"]["digest"]
+    adopted = selection["revision"]["digest"]
+    assert adopted != baseline
+    assert {(baseline, "baseline", "correctness"), (baseline, "baseline", "benchmark")} <= held
+    assert {(adopted, "official", "correctness"), (adopted, "official", "benchmark")} <= held
 
 
 def test_serving_smoke_fixture_builds_a_profiled_cli_request(tmp_path: Path) -> None:
@@ -450,7 +503,7 @@ def test_cli_built_dynamic_request_completes_a_trusted_search_without_provider_c
     assert agents.unscripted == []
     assert active_jobs(loop_input.cluster) == ()
     state = load_state(loop_input, run.run_id)
-    _require_successful_search(state)
+    _require_successful_legacy_search(state)
     assert state.baseline is not None
     assert state.baseline.metric_value == 1.0
     (member,) = state.workstreams
@@ -480,7 +533,7 @@ def _evaluation_submitted(events: list[dict[str, object]]) -> bool:
 @_requires_cli()
 @pytest.mark.e2e
 def test_ctrl_c_mid_run_stops_within_the_grace_and_leaves_no_job(tmp_path: Path) -> None:
-    smoke = SmokeRun(tmp_path)
+    smoke = SmokeRun(tmp_path, environment="slurm")
     process = smoke.launch()
     smoke.watch(process, until=_evaluation_submitted)
     assert process.poll() is None, "the run ended before any agent submitted an evaluation"

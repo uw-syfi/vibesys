@@ -89,6 +89,7 @@ if TYPE_CHECKING:
         TrustedBenchmarkResult,
         WorkspaceRuntime,
     )
+    from vs_sandbox.api import CommandRunner
 
 
 class Reply(BaseModel):
@@ -160,6 +161,9 @@ class WorkspaceResource:
     def execute(self, command: str, timeout_seconds: int | None) -> CommandResult:
         del command, timeout_seconds
         return CommandResult("", 0)
+
+    def agent_sandbox(self) -> CommandRunner | None:
+        return None
 
     def agent_scope(self) -> AgentExecutionScope:
         def environment(_: AgentExecutionConfiguration) -> FakeAgentExecutionEnvironment:
