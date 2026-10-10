@@ -153,7 +153,8 @@ def test_detached_runtime_unwinds_callback_failures_without_shutdown(
 
 def test_finished_journal_reopens_read_only_without_mutating_storage(tmp_path: Path) -> None:
     log_dir = tmp_path / "finished-run"
-    writer = build_server_parts(log_dir)
+    writer = build_server_parts()
+    writer.journal.attach(log_dir, run_id="finished-run")
     writer.controller.finish()
     writer.close()
     before = {path: path.read_bytes() for path in log_dir.iterdir() if path.is_file()}
@@ -178,7 +179,8 @@ def test_finished_journal_reopens_read_only_without_mutating_storage(tmp_path: P
 
 def test_relocated_journal_replays_its_recorded_identity(tmp_path: Path) -> None:
     original = tmp_path / "original" / "logs"
-    writer = build_server_parts(original)
+    writer = build_server_parts()
+    writer.journal.attach(original, run_id="recorded-run")
     writer.controller.finish()
     recorded_run_id = writer.journal.run_id_locked()
     writer.close()

@@ -446,6 +446,35 @@ def test_journal_recorded_with_the_removed_driver_field_still_replays(
     assert [thread.thread_id for thread in parts.chat.threads()] == ["thread-1"]
 
 
+_EXAMPLES = itertools.count()
+
+
+@settings(max_examples=25, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(
+    socket_parent=st.sampled_from(["runs", "T", "tmp", "vibesys-session-x"]),
+    early_events=st.integers(min_value=0, max_value=4),
+)
+def test_events_before_the_run_is_known_claim_no_run_identity(
+    tmp_path: Path, socket_parent: str, early_events: int
+) -> None:
+    # A server first journals into its control-socket directory and learns the
+    # run id only when the run is ready. A client latches the first nonempty
+    # run id it folds and ignores every later event that names another one, so
+    # an early event must not name a run the server invented from a path.
+    case = tmp_path / str(next(_EXAMPLES))
+    current = build_server_parts(case / socket_parent / "instance")
+    for _ in range(early_events):
+        current.journal.record(EventType.SERVER_READY, status=EventStatus.ACTIVE)
+    folded = current.journal.read()
+
+    current.journal.attach(case / "run-logs", run_id="run-1")
+    current.journal.record(EventType.RUN_STARTED, status=EventStatus.ACTIVE)
+    delivered = folded + current.journal.read(after_sequence=folded[-1].sequence)
+
+    assert {event.run_id for event in folded} == {""}
+    assert {event.run_id for event in delivered} - {""} == {"run-1"}
+
+
 def test_unknown_event_envelope_keys_stay_rejected() -> None:
     with pytest.raises(ValueError, match="driver"):
         RunEvent.model_validate_json(
