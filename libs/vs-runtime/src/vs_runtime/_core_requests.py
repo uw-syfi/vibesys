@@ -27,6 +27,7 @@ from vs_core.api import (
     ContractError,
     DiscardWorkspace,
     DispatchTurn,
+    DrainRole,
     EnsureSession,
     EnsureWorkspace,
     EvaluationEvent,
@@ -50,6 +51,7 @@ from vs_core.api import (
     SnapshotAndRetainRun,
     SubmitMeasurement,
     VerifyAdoption,
+    drain_role,
 )
 from vs_runtime._receipt_store import Settled, Transient
 
@@ -291,12 +293,12 @@ def counts_toward_concurrency(request: Request) -> bool:
 def settles_through_core(request: Request, intents: Iterable[Intent]) -> bool:
     """Whether a stop ends this running request through requests core itself issues.
 
-    A cancellation is such a request, and so are the session requests core issues to settle
-    a cancelled turn (inspect, close). A turn is one once core has asked to cancel its
-    invocation. Any other running request has no cancellation in core: it ends on its own
-    or not at all.
+    Core's own drain requests (cancellations, inspections, session and scope closes,
+    workspace discards, per `vs_core.api.drain_role`) are such requests. A turn is one once
+    core has asked to cancel its invocation. Any other running request starts external work
+    with no cancellation in core: it ends on its own or not at all.
     """
-    if not counts_toward_concurrency(request) or isinstance(request, InspectTurn | CloseSession):
+    if drain_role(request) is DrainRole.CLEANUP:
         return True
     if not isinstance(request, DispatchTurn | ResumeSessionTurn):
         return False

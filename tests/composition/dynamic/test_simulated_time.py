@@ -147,7 +147,11 @@ def test_a_stop_during_a_turn_is_acted_on_within_the_bound(
     # Core cancels the running turns and ends the run terminal; only a request core cannot
     # cancel (a submission, a poll) in flight makes the loop give up with RunStopped.
     assert run.error is None or isinstance(run.error, RunStopped), run.error
-    assert run.ended_at - run.stopped_at <= STOP_BOUND_S
+    # A job in flight is cancelled through core too, and core confirms the cancellation on its
+    # next poll before the run closes, so the bound adds one poll interval and the
+    # cancellation's completing time.
+    confirm = _POLL_SLACK_S + profile.slurm.completing_s.high
+    assert run.ended_at - run.stopped_at <= STOP_BOUND_S + confirm
     assert run.turns[-1].cancelled
     # Nothing new started after the stop.
     assert all(span.start <= run.stopped_at for span in run.turns)
@@ -174,6 +178,35 @@ def test_a_stop_during_a_turn_cancels_it_through_core_and_ends_the_run_terminal(
     assert run.outcome is not None
     assert run.outcome.status is RunStatus.TERMINAL
     assert run.ended_at - (run.stopped_at or run.ended_at) <= STOP_BOUND_S
+
+
+def test_a_stop_during_the_implementer_turns_ends_the_run_terminal_through_core() -> None:
+    """A stop while workstreams run makes core cancel their turns and close their scopes.
+
+    The scope closes core issues for the stop are its own drain, not work it cannot end, so
+    the loop must let them finish and the run must end terminal, as it does for a stop
+    during the planner's turn. The loop used to give up with ``RunStopped`` as soon as a
+    ``close_attempt_scope`` was in flight, leaving the record ``closing`` with the scopes
+    and sessions open.
+    """
+    reference = _finished(EXACT)
+    implementers = [span for span in reference.turns if span.role == "implementer"]
+    start = max(span.start for span in implementers)
+    end = min(span.end for span in implementers)
+    run = run_timed(EXACT, stop_after=(start + end) / 2 - reference.started_at)
+    assert run.stopped_at is not None
+    assert run.error is None, (
+        repr(run.error),
+        run.core.run.status,
+        [
+            (intent.request.kind, intent.phase.value)
+            for intent in run.core.intents.intents
+            if intent.phase.value != "completed"
+        ],
+    )
+    assert run.outcome is not None
+    assert run.outcome.status is RunStatus.TERMINAL
+    assert run.ended_at - run.stopped_at <= STOP_BOUND_S
 
 
 @_SETTINGS
