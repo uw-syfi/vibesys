@@ -74,7 +74,7 @@ id = "python_support"
 class = "python_support"
 job = "python"
 # Central tests and project tooling are outside Tach's source roots.
-roots = ["tests", "libs", "sdk", "scripts", "packaging", "benchmarks", "resources", "examples"]
+roots = ["tests", "libs", "sdk", "scripts", "packaging", "resources", "examples"]
 files = [
   "tach.toml",
   "pyproject.toml",
@@ -133,14 +133,14 @@ depends_on = ["example_validation", "microservice_evaluator"]
 [[components]]
 id = "example_validation"
 files = ["src/entrypoints/headless.py", "src/vibesys/run/project_policy.py", "scripts/example_repositories.py", "tests/vibesys/test_microservice_inputs.py", "tests/vibesys/test_kubernetes_inputs.py", "tests/vibesys/test_kubernetes_runtime.py", "tests/vibesys/test_input_sources.py", "tests/examples/test_example_registry.py", "tests/support/example_registry.py"]
-roots = ["src/vibesys/evaluators"]
+roots = ["src/vibesys/inputs"]
 
 [[components]]
 id = "agent_image"
 class = "manual"
 job = "agent_image"
-roots = ["src/vibesys/sandbox/images", "libs/vs-sandbox"]
-files = ["src/vibesys/sandbox/images.py", "src/vibesys/agents/provider_policy.py"]
+roots = ["libs/vs-agent/src/vs_agent/images", "libs/vs-sandbox"]
+files = ["libs/vs-agent/src/vs_agent/images.py", "libs/vs-agent/src/vs_agent/provider_policy.py", "scripts/ci_docker_data_root.sh"]
 
 [[components]]
 id = "microservice_evaluator"
@@ -181,8 +181,8 @@ to = "native:examples/data-structures/repositories/queue-rs"
 [[components]]
 id = "repo_policy"
 # Policy inputs affect every CI selection.
-roots = ["support/repoctl", ".repoctl", "support/ci_impact"]
-files = [".github/workflows/test.yml", "repoctl.toml", "tests/repoctl/cases.toml", "ci-impact.toml"]
+roots = ["support/repoctl", ".repoctl"]
+files = [".github/workflows/test.yml", "tests/repoctl/cases.toml"]
 select_all_jobs = true
 select_all_collections = true
 

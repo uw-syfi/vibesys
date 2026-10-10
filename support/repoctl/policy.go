@@ -212,6 +212,32 @@ func (g *graph) add(c component) error {
 	return nil
 }
 
+// readCurrentPolicy reads the policy of the checked-out tree and additionally
+// rejects any declared component root or file that is absent from it. A path
+// that does not exist never matches a changed file, so a stale entry silently
+// stops its component from selecting jobs. Historical snapshots (the base of a
+// comparison) go through readPolicy alone: they were valid when written.
+func readCurrentPolicy(root, configPath string) (graph, error) {
+	g, err := readPolicy(root, configPath)
+	if err != nil {
+		return g, err
+	}
+	for _, id := range g.Order {
+		c := g.Components[id]
+		for _, entry := range []struct {
+			key   string
+			paths []string
+		}{{"roots", c.Roots}, {"files", c.Files}} {
+			for _, rel := range entry.paths {
+				if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
+					return g, fmt.Errorf("component %q %s: path %q does not exist in the repository", id, entry.key, rel)
+				}
+			}
+		}
+	}
+	return g, nil
+}
+
 func (g graph) validate() error {
 	state := map[string]int{}
 	var visit func(string) error
