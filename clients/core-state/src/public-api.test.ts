@@ -36,6 +36,7 @@ describe('published core-state surface', () => {
       'reduceEventRebootstrap',
       'reduceResponseEvents',
       'reduceSnapshot',
+      'rehydrateCoreState',
       'roundAgentElapsedMs',
       'roundKeyFor',
       'roundOutcome',

@@ -34,6 +34,6 @@ export function sameRoundKey(left: RoundKey | null, right: RoundKey | null): boo
 }
 
 /** Collision-free scalar form used only by internal indexes. */
-export function roundKeyToken(key: RoundKey): string {
+function roundKeyToken(key: RoundKey): string {
   return key.kind === 'number' ? `number:${key.number}` : `label:${JSON.stringify(key.label)}`;
 }

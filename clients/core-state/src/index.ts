@@ -25,6 +25,7 @@ export {
   reduceEventRebootstrap,
   reduceResponseEvents,
   reduceSnapshot,
+  rehydrateCoreState,
   type TodoItem,
   type ToolResultPayload,
   type TranscriptEntry,
