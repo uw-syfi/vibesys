@@ -1,6 +1,12 @@
 """The test side of vs-sim: the deterministic scheduler, Fakes, waits and contract suites."""
 
 from vs_sim.child import ChildDiedError, run_in_child
+from vs_sim.concurrency_contracts import (
+    NetworkContract,
+    NetworkUnderTest,
+    ThreadsContract,
+    ThreadsUnderTest,
+)
 from vs_sim.contracts import (
     BlockingRunnerContract,
     ClockContract,
@@ -39,11 +45,14 @@ from vs_sim.seeds import (
     seed_for_test,
 )
 from vs_sim.sim import WORLDS, Sim, UnknownWorldError, WorldFactory, WorldRegistry
+from vs_sim.sim_network import SimNetwork
+from vs_sim.sim_threads import SimBlockingRunner, SimDeadlockError, SimThreads
 from vs_sim.states import Changes, wait_for_async_state, wait_for_state
 from vs_sim.threads import TGKILL_SUPPORTED, non_main_thread_ids, send_to_thread
 from vs_sim.trace import EventTrace, TraceEvent
 from vs_sim.virtual import (
     WORKER_GUARD_S,
+    IdleDriver,
     VirtualClock,
     VirtualDeadlockError,
     VirtualTimeLimitError,
@@ -76,8 +85,11 @@ __all__ = [
     "FakeSignalSource",
     "Gate",
     "GatedBlockingRunner",
+    "IdleDriver",
     "InlineBlockingRunner",
     "ManualClock",
+    "NetworkContract",
+    "NetworkUnderTest",
     "ProcessLauncherContract",
     "ProcessScript",
     "ProcessUnderTest",
@@ -87,8 +99,14 @@ __all__ = [
     "SignalSourceContract",
     "SignalSourceUnderTest",
     "Sim",
+    "SimBlockingRunner",
+    "SimDeadlockError",
+    "SimNetwork",
+    "SimThreads",
     "SleeperContract",
     "SleeperUnderTest",
+    "ThreadsContract",
+    "ThreadsUnderTest",
     "TraceEvent",
     "UnknownWorldError",
     "VirtualClock",

@@ -6,6 +6,8 @@ the simulators and Fakes from :mod:`vs_sim.api.testing`.
 
 from vs_sim.blocking import BlockingRunner, ThreadBlockingRunner
 from vs_sim.clock import Clock, MonotonicClock, Sleeper, SleepingClock, SystemClock
+from vs_sim.concurrency import Condition, Event, Lock, OsThreads, Threads, Worker
+from vs_sim.network import Connection, Listener, Network, UnixNetwork
 from vs_sim.processes import (
     ProcessLauncher,
     ProcessOutcome,
@@ -19,8 +21,15 @@ from vs_sim.signals import LoopSignalSource, SignalSource
 __all__ = [
     "BlockingRunner",
     "Clock",
+    "Condition",
+    "Connection",
+    "Event",
+    "Listener",
+    "Lock",
     "LoopSignalSource",
     "MonotonicClock",
+    "Network",
+    "OsThreads",
     "ProcessLauncher",
     "ProcessOutcome",
     "ProcessSpec",
@@ -34,5 +43,8 @@ __all__ = [
     "SystemClock",
     "SystemRandomSource",
     "ThreadBlockingRunner",
+    "Threads",
+    "UnixNetwork",
+    "Worker",
     "derive_seed",
 ]

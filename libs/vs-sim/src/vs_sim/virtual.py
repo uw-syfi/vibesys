@@ -28,7 +28,7 @@ import asyncio
 import collections.abc
 import heapq
 import selectors
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, Protocol, overload
 
 from vs_sim.randomness import SeededRandom
 
@@ -43,6 +43,35 @@ if TYPE_CHECKING:
 
 WORKER_GUARD_S = 60.0
 """Real seconds a worker thread may run before the loop gives up on it; a hang guard only."""
+
+
+class IdleDriver(Protocol):
+    """Work that runs whenever the loop is idle and owns timers on the loop's timeline.
+
+    :class:`~vs_sim.sim_threads.SimThreads` is the one implementation: while the loop has
+    nothing to do it runs the simulated threads until they all wait, and the clock then
+    jumps to whichever is due first, the loop's next timer or a thread's.
+    """
+
+    def run_until_blocked(self) -> None:
+        """Run until nothing the driver owns can run."""
+        ...
+
+    def next_timer(self) -> float | None:
+        """The earliest instant the driver wants the clock to reach, or ``None``."""
+        ...
+
+    def advance_to(self, instant: float) -> None:
+        """Move the clock to ``instant`` and let what is due there become runnable."""
+        ...
+
+    def describe(self) -> str:
+        """What the driver's work waits on, for a deadlock report."""
+        ...
+
+    def close(self) -> None:
+        """Release everything the driver holds when the run ends."""
+        ...
 
 
 class VirtualDeadlockError(RuntimeError):
@@ -96,6 +125,10 @@ class _VirtualSelector(selectors.DefaultSelector):
             if ready and self._trace is not None:
                 self._trace.io(len(ready))
             return ready
+        if self.loop is not None and self.loop.driver is not None:
+            driven = self._drive(self.loop.driver, timeout)
+            if driven is not None:
+                return driven
         if self.loop is not None and self.loop.workers_in_flight > 0:
             # Time stands still while a worker thread runs; its completion wakes this select.
             ready = super().select(WORKER_GUARD_S)
@@ -115,10 +148,32 @@ class _VirtualSelector(selectors.DefaultSelector):
         self._clock.at += timeout
         return []
 
+    def _drive(
+        self, driver: IdleDriver, timeout: float | None
+    ) -> list[tuple[selectors.SelectorKey, int]] | None:
+        """Let the driver run, and jump to its timers that fall before the loop's own.
+
+        Returns the ready events once something reaches the loop, or ``None`` when the
+        loop's own next timer (or the lack of any work) is what comes next.
+        """
+        while True:
+            driver.run_until_blocked()
+            ready = super().select(0)
+            if ready:
+                if self._trace is not None:
+                    self._trace.io(len(ready))
+                return ready
+            due = driver.next_timer()
+            if due is None or (timeout is not None and self._clock.at + timeout <= due):
+                return None
+            driver.advance_to(due)
+
     def _describe_waiters(self) -> str:
         message = "every task is waiting and no timer is scheduled"
         if self.loop is None:
             return message
+        if self.loop.driver is not None:
+            message = f"{message}; {self.loop.driver.describe()}"
         waiting = sorted(repr(task) for task in asyncio.all_tasks(self.loop))
         hint = (
             "; a task waiting on a real thread, process or socket cannot be woken here "
@@ -182,6 +237,7 @@ class _VirtualLoop(asyncio.SelectorEventLoop):
         self._timers_started = 0
         self.clock = clock
         self.workers_in_flight = 0
+        self.driver: IdleDriver | None = None
         if trace is not None:
             self._created = 0
             self.set_task_factory(self._recording_task)
@@ -314,6 +370,7 @@ def run_virtual[T](
     *,
     trace: EventTrace | None = None,
     schedule_seed: int | None = None,
+    driver: IdleDriver | None = None,
 ) -> T:
     """Run ``main`` to completion on a loop whose time is ``clock``.
 
@@ -322,6 +379,19 @@ def run_virtual[T](
     scheduling order of every task are recorded in it. With ``schedule_seed`` set, work that
     is ready at the same time runs in an order drawn from that seed (the same seed always
     gives the same order); without it, ties run in the order they were started.
+
+    A ``driver`` (simulated threads) runs whenever the loop is idle and shares the clock;
+    it is closed when the run ends.
     """
-    with asyncio.Runner(loop_factory=lambda: _VirtualLoop(clock, trace, schedule_seed)) as runner:
-        return runner.run(main)
+
+    def make_loop() -> _VirtualLoop:
+        loop = _VirtualLoop(clock, trace, schedule_seed)
+        loop.driver = driver
+        return loop
+
+    try:
+        with asyncio.Runner(loop_factory=make_loop) as runner:
+            return runner.run(main)
+    finally:
+        if driver is not None:
+            driver.close()
