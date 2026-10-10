@@ -61,6 +61,16 @@ _FAKE_SLURM = textwrap.dedent(
         os.execvp(command[0], command)
     """
 )
+#: Stands in for ``vs_sandbox.slurm_command``: runs the planned gate right here.
+_FAKE_GATE = textwrap.dedent(
+    """\
+    import json, os, sys
+    plan = json.load(open(sys.argv[sys.argv.index("--plan") + 1]))
+    kind = sys.argv[sys.argv.index("--plan") + 2]
+    command = plan[kind + "_command"] + sys.argv[sys.argv.index("--plan") + 3 :]
+    os.execvp(command[0], command)
+    """
+)
 ACCURACY_SCRIPT = 'print("accuracy ok")\n'
 BENCHMARK_SCRIPT = textwrap.dedent(
     """\
@@ -237,8 +247,11 @@ def open_editor(base: Base, directory: Path) -> Iterator[Editor]:
         profiler_support_name=definition.support_name,
         profiler_support_extra=profiler_support_extra(definition),
     )
+    gate = directory / "fake_gate.py"
+    gate.write_text(_FAKE_GATE, encoding="utf-8")
     environment = SlurmEnvironment(
         load_slurm_operator_settings(_slurm_config(directory)),
+        gate_wrapper=(sys.executable, str(gate)),
         docker=DockerEnvironmentConfig(),
         job_confinement=PassThroughConfinement(),
     )
