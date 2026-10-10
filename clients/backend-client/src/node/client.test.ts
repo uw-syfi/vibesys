@@ -773,6 +773,72 @@ describe('ServerClient', () => {
     );
   });
 
+  it('close() owns a control socket whose reconnect dial has already started', async () => {
+    socketPath = join('/tmp', `vs-${randomUUID().slice(0, 8)}.sock`);
+    const accepted = new Signal();
+    const closeStarted = new Signal();
+    const serverSockets = new Set<Socket>();
+    // test-isolation: ServerClient's public API owns real Unix sockets and has
+    // no socket-factory seam; Signals and FakeClock drive every relevant edge.
+    const server = createServer(socket => {
+      serverSockets.add(socket);
+      socket.on('error', () => undefined);
+      socket.once('close', () => serverSockets.delete(socket));
+      accepted.fire();
+    });
+    await listen(server, socketPath);
+    const clock = new FakeClock();
+    let client!: ServerClient;
+    let closing: Promise<void> | undefined;
+    client = await ServerClient.connect(socketPath, {
+      clock,
+      closeGraceMs: 40,
+      connectTimeoutMs: 5_000,
+      reconnectDelaysMs: [100],
+      onConnectionState: state => {
+        if (state.status !== 'disconnected') return;
+        if (!state.retrying) {
+          client.reconnect();
+          return;
+        }
+        // The reconnect has entered its dial synchronously when the callback
+        // returns. Close in the next microtask, before Node can deliver the
+        // socket's connect event, to pin the pending-dial ownership window.
+        queueMicrotask(() => {
+          closing = client.close();
+          closeStarted.fire();
+        });
+      },
+    });
+
+    try {
+      await accepted.fired;
+      const initialSocket = [...serverSockets][0];
+      if (initialSocket === undefined)
+        throw new Error('The initial control socket was not accepted');
+      initialSocket.destroy();
+      await closeStarted.fired;
+      const closePromise = closing;
+      if (closePromise === undefined)
+        throw new Error('The retrying callback did not close the client');
+      // Ownership moved into the first call's local teardown set. Every later
+      // caller must join terminal teardown, not observe an emptied set.
+      const repeatedClose = client.close();
+      await Promise.all([closePromise, repeatedClose]);
+
+      // Returning from close means the connecting socket was destroyed and
+      // joined, including cancellation of its outstanding connect deadline.
+      expect(clock.pendingDelays()).toEqual([]);
+      expect(client.connected).toBe(false);
+    } finally {
+      // Also makes the merge-base failure terminate without wall-clock waits:
+      // it leaves the reconnect deadline armed after close has returned.
+      clock.runPending();
+      for (const socket of serverSockets) socket.destroy();
+      await close(server);
+    }
+  });
+
   it('close() resolves within the grace deadline when the server never closes', async () => {
     socketPath = join('/tmp', `vs-${randomUUID().slice(0, 8)}.sock`);
     // Accept the connection and then ignore it forever: never respond, never end.
