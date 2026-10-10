@@ -35,17 +35,11 @@ Open a pull request for VibeSys changes without losing user work. Keep the scope
    - Do not invent motivation to make the PR body sound complete. Use "not applicable" or a clear limitation only when the uncertainty is minor and does not change reviewer understanding.
 
 5. Run the smallest relevant checks:
-   - Prefer narrow tests first, then broaden only when the change crosses boundaries.
-   - Common checks:
-
-```bash
-./scripts/format.sh
-./scripts/check_format.sh
-./scripts/check_lint.sh
-uv run pytest path/to/test.py
-uv run pytest -k keyword
-uv run pytest
-```
+   - While iterating, run the narrow target (`uv run pytest path/to/test.py`,
+     `pnpm --filter <pkg> test`; `./scripts/format.sh` auto-fixes formatting).
+   - Before pushing, run `./support/repoctl/repoctl check` (add `--all` for
+     shared config changes). The rule is stated in the Checks section of
+     `AGENTS.md`; do not substitute a full suite or separate lint runs.
 
 6. Commit intentionally:
    - Stage only the PR's files.

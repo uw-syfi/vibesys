@@ -1,4 +1,9 @@
 # Repository check groups and native target commands.
+#
+# `local = true` (with `trigger_job`) makes `repoctl check` run a group on a developer machine
+# whenever its job is selected by the diff (all of them with `--all`). CI is unaffected: workflow
+# jobs gated by `repoctl plan` call `repoctl run-checks --group NAME` explicitly. Groups without
+# `local` (tui_e2e, tui_package_smoke, the sharded Python run, coverage) stay CI-only.
 [native_checks]
 timeout_seconds = 600
 [native_checks.commands]
@@ -12,7 +17,7 @@ rust = [
 [[check_groups]]
 name = "python_tests"
 trigger_job = "python"
-include_in_test = true
+local = true
 language = "python"
 directory = "."
 timeout_seconds = 1800
@@ -20,6 +25,8 @@ commands = [["uv", "run", "python", "-m", "pytest", "-q"]]
 
 [[check_groups]]
 name = "python_quality"
+trigger_job = "python"
+local = true
 language = "python"
 directory = "."
 timeout_seconds = 600
@@ -41,6 +48,8 @@ commands = [
 
 [[check_groups]]
 name = "python_types"
+trigger_job = "python"
+local = true
 language = "python"
 directory = "."
 timeout_seconds = 600
@@ -49,7 +58,7 @@ commands = [["./scripts/check_types.sh"]]
 [[check_groups]]
 name = "tui_tests"
 trigger_job = "tui"
-include_in_test = true
+local = true
 language = "typescript"
 directory = "clients"
 collection = "pnpm_packages"
@@ -78,6 +87,8 @@ always_commands = [
 
 [[check_groups]]
 name = "tui_quality"
+trigger_job = "tui"
+local = true
 language = "typescript"
 directory = "clients"
 timeout_seconds = 1200
@@ -93,6 +104,8 @@ commands = [
 
 [[check_groups]]
 name = "tui_build"
+trigger_job = "tui"
+local = true
 language = "typescript"
 directory = "clients"
 timeout_seconds = 1200
@@ -115,7 +128,7 @@ commands = [["bash", "scripts/check_package_smoke.sh"]]
 [[check_groups]]
 name = "examples_tests"
 trigger_job = "examples"
-include_in_test = true
+local = true
 language = "python"
 directory = "."
 timeout_seconds = 1200
@@ -132,7 +145,7 @@ commands = [
 [[check_groups]]
 name = "agent_image_tests"
 trigger_job = "agent_image"
-include_in_test = true
+local = true
 language = "python"
 directory = "."
 timeout_seconds = 1200
@@ -145,7 +158,7 @@ commands = [
 [[check_groups]]
 name = "repoctl_tests"
 trigger_job = "impact"
-include_in_test = true
+local = true
 language = "go"
 directory = "support/repoctl"
 timeout_seconds = 600
@@ -154,6 +167,20 @@ commands = [
   ["go", "vet", "./..."],
   ["go", "test", "-run=^$", "-fuzz=^FuzzGraphSelection$", "-fuzztime=20000x", "-parallel=2", "."],
   ["go", "test", "-run=^$", "-fuzz=^FuzzParseNameStatusZ$", "-fuzztime=20000x", "-parallel=2", "."],
+]
+
+# The policy gates CI reads before any job runs. `impact` is selected by every change to the
+# policy, the planner, or the cases file.
+[[check_groups]]
+name = "repoctl_policy"
+trigger_job = "impact"
+local = true
+language = "go"
+directory = "."
+timeout_seconds = 600
+commands = [
+  ["./support/repoctl/repoctl", "validate"],
+  ["./support/repoctl/repoctl", "verify-policy", "--cases", "tests/repoctl/cases.toml"],
 ]
 
 [[check_groups]]

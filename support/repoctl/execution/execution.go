@@ -27,9 +27,15 @@ type Check struct {
 // collection; PackageCommands run once for each value. Commands run when the
 // collection is empty, or when no collection is set.
 type Suite struct {
-	Name            string            `toml:"name"`
-	TriggerJob      string            `toml:"trigger_job"`
-	IncludeInTest   bool              `toml:"include_in_test"`
+	Name       string `toml:"name"`
+	TriggerJob string `toml:"trigger_job"`
+	// Local marks a group that `repoctl check` runs on a developer machine when
+	// TriggerJob is selected. IncludeInTest is the deprecated spelling of the same
+	// key; policy loading rejects a group that sets both and stores the resolved
+	// answer in RunLocal, which is what callers read.
+	Local           *bool             `toml:"local"`
+	IncludeInTest   *bool             `toml:"include_in_test"`
+	RunLocal        bool              `toml:"-"`
 	Language        string            `toml:"language"`
 	Directory       string            `toml:"directory"`
 	AlwaysCommands  [][]string        `toml:"always_commands"`

@@ -22,8 +22,13 @@ func (g *graph) validateCheckGroups(groups []execution.Suite) error {
 		if suite.TriggerJob != "" && !contains(g.Jobs, suite.TriggerJob) {
 			return fmt.Errorf("check_groups.%s: unknown trigger_job %q", suite.Name, suite.TriggerJob)
 		}
-		if suite.IncludeInTest && suite.TriggerJob == "" {
-			return fmt.Errorf("check_groups.%s: include_in_test requires trigger_job", suite.Name)
+		if suite.Local != nil && suite.IncludeInTest != nil {
+			return fmt.Errorf("check_groups.%s: set local or its deprecated alias include_in_test, not both", suite.Name)
+		}
+		suite.RunLocal = suite.Local != nil && *suite.Local || suite.IncludeInTest != nil && *suite.IncludeInTest
+		suite.Local, suite.IncludeInTest = nil, nil
+		if suite.RunLocal && suite.TriggerJob == "" {
+			return fmt.Errorf("check_groups.%s: local requires trigger_job", suite.Name)
 		}
 		if suite.Directory != "." && !validPath(suite.Directory) {
 			return fmt.Errorf("check_groups.%s: unsafe directory %q", suite.Name, suite.Directory)

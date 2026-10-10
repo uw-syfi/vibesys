@@ -166,6 +166,65 @@ func snapshotConfigPath(root, snapshotRoot, configPath string) (string, error) {
 	return filepath.Join(snapshotRoot, rel), nil
 }
 
+// runCheckCommand implements `repoctl check`: plan from the diff (or take
+// everything with --all) and run every locally runnable group it selects.
+func runCheckCommand(root, configPath string, g graph, args []string, runner execution.Runner, nativeRun nativeCommand) error {
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	base := fs.String("base", g.DefaultBase, "Base revision (default: origin/<default_base> when it exists)")
+	head := fs.String("head", "HEAD", "Head revision")
+	event := fs.String("event", "pull_request", "Event type")
+	dryRun := fs.Bool("dry-run", false, "Print selected commands without running them")
+	all := fs.Bool("all", false, "Run every locally runnable group and native target regardless of the diff")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected check arguments")
+	}
+	if *all {
+		conflicting := ""
+		fs.Visit(func(option *flag.Flag) {
+			if option.Name == "base" || option.Name == "head" || option.Name == "event" {
+				conflicting = option.Name
+			}
+		})
+		if conflicting != "" {
+			return fmt.Errorf("--all cannot be combined with --%s", conflicting)
+		}
+		fmt.Println("Selected: every locally runnable check group and native target (--all)")
+		return runSelectedTests(root, g, allLocalPlan(g), *dryRun, runner, nativeRun)
+	}
+	baseGiven := false
+	fs.Visit(func(option *flag.Flag) { baseGiven = baseGiven || option.Name == "base" })
+	if !baseGiven {
+		*base = gitrepo.PreferRemoteBranch(root, g.DefaultBase)
+	}
+	p, err := planAtRevisions(root, configPath, g, *base, *head, *event)
+	if err != nil {
+		return err
+	}
+	localChanges, err := gitrepo.WorktreeChanges(root)
+	if err != nil {
+		return err
+	}
+	if len(localChanges) > 0 {
+		localBase, cleanup, err := policyGraphAtRevision(root, configPath, *head)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		localPlan, err := selectChangedRecords(localBase, g, localChanges)
+		if err != nil {
+			return err
+		}
+		p = mergePlans(p, localPlan)
+	}
+	if err := emit(p, false); err != nil {
+		return err
+	}
+	return runSelectedTests(root, g, p, *dryRun, runner, nativeRun)
+}
+
 func cli(args []string) error {
 	configPath := ".repoctl"
 	filtered := make([]string, 0, len(args))
@@ -186,7 +245,7 @@ func cli(args []string) error {
 	}
 	args = filtered
 	if len(args) == 0 {
-		return fmt.Errorf("usage: repoctl {plan|test|run-checks|run-native|verify-policy|explain|validate}")
+		return fmt.Errorf("usage: repoctl {plan|check|test|run-checks|run-native|verify-policy|explain|validate}")
 	}
 	root, err := rootPath(configPath)
 	if err != nil {
@@ -218,42 +277,11 @@ func cli(args []string) error {
 			return fmt.Errorf("--collection-json must be a JSON array of strings")
 		}
 		return runCheckGroup(root, g, *group, *collection, *dryRun, execution.OSRunner{})
-	case "test":
-		fs := flag.NewFlagSet("test", flag.ContinueOnError)
-		base := fs.String("base", g.DefaultBase, "Base revision")
-		head := fs.String("head", "HEAD", "Head revision")
-		event := fs.String("event", "pull_request", "Event type")
-		dryRun := fs.Bool("dry-run", false, "Print selected commands without running them")
-		if err := fs.Parse(args[1:]); err != nil {
-			return err
+	case "check", "test":
+		if args[0] == "test" {
+			fmt.Fprintln(os.Stderr, "repoctl: `test` is a deprecated alias of `check`; use `repoctl check`.")
 		}
-		if fs.NArg() != 0 {
-			return fmt.Errorf("unexpected test arguments")
-		}
-		p, err := planAtRevisions(root, configPath, g, *base, *head, *event)
-		if err != nil {
-			return err
-		}
-		localChanges, err := gitrepo.WorktreeChanges(root)
-		if err != nil {
-			return err
-		}
-		if len(localChanges) > 0 {
-			localBase, cleanup, err := policyGraphAtRevision(root, configPath, *head)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-			localPlan, err := selectChangedRecords(localBase, g, localChanges)
-			if err != nil {
-				return err
-			}
-			p = mergePlans(p, localPlan)
-		}
-		if err := emit(p, false); err != nil {
-			return err
-		}
-		return runSelectedTests(root, g, p, *dryRun, execution.OSRunner{}, runNativeCommand)
+		return runCheckCommand(root, configPath, g, args[1:], execution.OSRunner{}, runNativeCommand)
 	case "run-native":
 		fs := flag.NewFlagSet("run-native", flag.ContinueOnError)
 		targets := fs.String("targets-json", "", "Selected native roots as a JSON array")

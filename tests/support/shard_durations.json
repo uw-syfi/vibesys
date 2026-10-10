@@ -386,7 +386,6 @@
  "tests/packaging/test_wheel_targets.py": 0.01,
  "tests/quality/test_agent_text_parsing.py": 2.76,
  "tests/quality/test_biome_quality_rules.py": 0.0,
- "tests/quality/test_check_ci_script.py": 0.01,
  "tests/quality/test_check_file_length.py": 0.45,
  "tests/quality/test_check_lint_waivers.py": 0.02,
  "tests/quality/test_check_member_dependencies.py": 0.88,

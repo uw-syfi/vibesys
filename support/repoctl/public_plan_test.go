@@ -179,7 +179,7 @@ field = "name"
 [[check_groups]]
 name = "a"
 trigger_job = "build-a"
-include_in_test = true
+local = true
 language = "go"
 directory = "."
 timeout_seconds = 1
@@ -188,7 +188,7 @@ commands = [["true"]]
 [[check_groups]]
 name = "b"
 trigger_job = "build-b"
-include_in_test = true
+local = true
 language = "go"
 directory = "."
 timeout_seconds = 1

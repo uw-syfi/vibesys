@@ -124,3 +124,40 @@ packages = []
 		})
 	}
 }
+
+func TestVerifyPolicyCasesChecksLocalGroups(t *testing.T) {
+	root := fixtureRepo(t)
+	g, err := readPolicy(root, "repoctl.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fixture marks unit, web, and policy local (via the deprecated key).
+	tail := `
+[[cases]]
+name = "python service"
+paths = ["python/service/handler.py"]
+jobs = ["unit"]
+local_groups = LOCAL
+[cases.collections]
+native_targets = []
+native_languages = []
+packages = []
+`
+	for _, tt := range []struct{ name, all, local, want string }{
+		{"exact", `["policy", "unit", "web"]`, `["unit"]`, ""},
+		{"all drifts", `["unit"]`, `["unit"]`, "--all: local groups ="},
+		{"case drifts", `["policy", "unit", "web"]`, `["unit", "web"]`, "local groups ="},
+		{"unknown group", `["policy", "unit", "web"]`, `["missing"]`, "unknown check group"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writePolicyCases(t, root, "all_local_groups = "+tt.all+"\n"+strings.Replace(tail, "LOCAL", tt.local, 1))
+			cases, err := readPolicyCases(path, g)
+			if err == nil {
+				err = verifyPolicyCases(g, cases)
+			}
+			if tt.want == "" && err != nil || tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}

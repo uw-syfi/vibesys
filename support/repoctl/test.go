@@ -10,6 +10,44 @@ import (
 	"repoctl/execution"
 )
 
+// allLocalPlan selects every job that a local group or selected native target
+// serves, and no collection values, so each local group runs its full
+// configured commands.
+func allLocalPlan(g graph) plan {
+	p := plan{Jobs: map[string]bool{}, Components: map[string][]string{}, JobReasons: map[string][]string{}, Collections: map[string][]string{}}
+	for _, suite := range g.CheckGroups {
+		if suite.RunLocal {
+			p.Jobs[suite.TriggerJob] = true
+		}
+	}
+	for id, target := range g.NativeTargets {
+		if !target.Selected {
+			continue
+		}
+		p.Components[id] = []string{"--all"}
+		for _, job := range g.Components[id].Jobs {
+			p.Jobs[job] = true
+		}
+	}
+	for job := range p.Jobs {
+		p.JobReasons[job] = []string{"--all"}
+	}
+	return p
+}
+
+// selectedLocalGroups names, in run order, the local groups whose trigger job
+// the plan selects.
+func selectedLocalGroups(g graph, p plan) []string {
+	names := []string{}
+	for name, suite := range g.CheckGroups {
+		if suite.RunLocal && p.Jobs[suite.TriggerJob] {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 func selectedTestChecks(g graph, p plan) ([]execution.Check, []string, error) {
 	allTargets := false
 	for id := range p.Components {
@@ -31,16 +69,8 @@ func selectedTestChecks(g graph, p plan) ([]execution.Check, []string, error) {
 	}
 	sort.Strings(targets)
 	checks := []execution.Check{}
-	groups := make([]string, 0, len(g.CheckGroups))
-	for name := range g.CheckGroups {
-		groups = append(groups, name)
-	}
-	sort.Strings(groups)
-	for _, name := range groups {
+	for _, name := range selectedLocalGroups(g, p) {
 		suite := g.CheckGroups[name]
-		if !suite.IncludeInTest || !p.Jobs[suite.TriggerJob] {
-			continue
-		}
 		planner, ok := testPlanners[suite.Language]
 		if !ok {
 			return nil, nil, fmt.Errorf("check group %q: unknown language %q", suite.Name, suite.Language)

@@ -129,6 +129,17 @@ func Compare(root, base, head, event string) (Comparison, error) {
 	return Comparison{BaseRevision: base, Changes: changes}, nil
 }
 
+// PreferRemoteBranch returns "origin/<branch>" when that remote-tracking ref
+// exists and branch otherwise. A local branch such as main is often stale in
+// a worktree, which would make a diff against it include unrelated commits.
+func PreferRemoteBranch(root, branch string) string {
+	remote := "origin/" + branch
+	if _, err := command.Run(root, "git", "rev-parse", "--verify", "--quiet", remote+"^{commit}"); err == nil {
+		return remote
+	}
+	return branch
+}
+
 // ChangedPaths returns unique paths from a revision comparison.
 func ChangedPaths(root, base, head, event string) ([]string, error) {
 	comparison, err := Compare(root, base, head, event)
