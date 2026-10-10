@@ -76,6 +76,21 @@ The local machine needs OpenSSH and rsync. The login host needs rsync and the
 Slurm commands named by the configuration, and `remote_workspace_root` must be
 writable and visible from compute nodes.
 
+A host that is itself a Slurm submit node uses the local transport: scheduler
+and filesystem commands run through `shell_command` on this host, and
+transfers are local `rsync` copies.
+
+```toml
+[slurm.transport]
+kind = "local"
+# shell_command = ["bash", "-c"]   # receives the command line as its last argument
+# rsync_command = ["rsync"]
+```
+
+`remote_workspace_root` must then be a directory this host shares with the
+compute nodes. A wrapper may precede the shell in `shell_command`, for example
+one that runs the shell on a login node the host reaches without SSH.
+
 Sites whose gateway is not reachable through OpenSSH can provide the advanced
 versioned JSON connector transport:
 
