@@ -38,6 +38,7 @@ clients/*/.vibesys-node-tests-*/
 clients/web/artifacts/
 clients/web/test-results/
 clients/web/.browser-dist/
+clients/web/.desktop-dist/
 downloads/
 eggs/
 .eggs/

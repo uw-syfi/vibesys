@@ -9,6 +9,7 @@
     "prebuild": "pnpm --filter @vibesys/web^... build",
     "build": "vite build",
     "build:browser": "vite build --config vite.browser.config.ts",
+    "build:desktop": "vite build --config vite.desktop.config.ts",
     "precheck": "pnpm --filter @vibesys/web^... build",
     "check": "tsc -p tsconfig.check.json && tsc -p tsconfig.browser.json",
     "pretest": "pnpm --filter @vibesys/web^... build",

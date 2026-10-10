@@ -343,6 +343,43 @@ library decodes the target with `ascii`/`surrogateescape`, so a raw byte above
 
 ## Desktop app
 
+The desktop app (`clients/desktop`) ships its own copy of the web UI and
+reaches the server through its main process, without the web gateway:
+
+```bash
+# Start a local server for a project and open the window on it
+pnpm --dir clients --filter @vibesys/desktop start -- --project ~/proj [-- RUN_ARGS...]
+
+# Open the window on a server that is already listening on a control socket,
+# for example the TUI's replay server (clients/tui/dev/mock-server.ts)
+pnpm --dir clients --filter @vibesys/desktop start -- --socket /tmp/vs-mock.sock
+```
+
+`start` builds the app, including the UI bundle (`@vibesys/web`'s
+`build:desktop`, from `clients/web/desktop.html`), which the window loads from
+the `app://vibesys` origin. The page has no network access: the main process
+cancels every http(s) and ws(s) request and the page's Content Security Policy
+forbids connections. Its only way to the server is the preload bridge,
+`window.vibesysDesktop.connect()`, which takes no host or path: the main process
+binds each window to one server. Each connection is a MessagePort that the main
+process relays to a new Unix-socket stream (`clients/desktop/src/relay.ts`),
+reframing one port message as one newline-delimited line in each direction
+(see `wire-protocol.md`). The page drives those connections with the browser's
+own `WebSocketTransport` and `WebSession`, so redial, resume, and
+reconciliation behave as in the browser; the shell's wake-from-sleep report
+reaches the session as an `online` event.
+
+The main process reaches servers only through the `Host` interface
+(`clients/desktop/src/host.ts`): `startServer(args)`, `dial(endpoint)`,
+`invoke(argv)`, and `close()`. `LocalHost` starts
+`python -m entrypoints.server ARGS --control-socket <dir>/control.sock` as the
+TUI launcher does, using `VIBESYS_PYTHON` when set and otherwise `uv run` in
+the repository the app was built from. Every implementation, including the
+in-memory `FakeHost`, passes the contract suite in
+`clients/desktop/src/testing/host-contract.ts`.
+
+### Gateway window
+
 `scripts/run-desktop.sh` opens the same live web UI in an Electron window
 (`clients/desktop`). It starts the gateway with `entrypoints.web live`, then
 opens the window on the capability URL, passed in the `VIBESYS_DESKTOP_URL`
