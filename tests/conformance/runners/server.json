@@ -1,0 +1,21 @@
+{
+  "id": "server",
+  "description": "Scenarios executed against the real Unix and WebSocket server transports.",
+  "groups": {
+    "bootstrap": [
+      "full-replay-bootstrap",
+      "tail-bootstrap-spine-prepend"
+    ],
+    "control": [
+      "heartbeat-probe",
+      "command-ack-roundtrip",
+      "chat-dedicated-connection"
+    ],
+    "dual-client": [
+      "dual-transport-independent-subscriptions"
+    ],
+    "tail-overflow": [
+      "tail-overflow-rebootstrap"
+    ]
+  }
+}

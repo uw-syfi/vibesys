@@ -1,7 +1,8 @@
 # Corpus file formats
 
-Two file kinds live in this corpus: event fixtures under `events/` and connection scenarios under
-`scenarios/`. Both are plain JSON so any language can read them. The corpus gate
+Three file kinds live in this corpus: event fixtures under `events/`, connection scenarios under
+`scenarios/`, and runner inventories under `runners/`. All are plain JSON so any language can read
+them. The corpus gate
 (`clients/scripts/check_conformance_corpus.mjs`) validates every file against the rules below with no
 external schema library, so the rules are intentionally simple and structural. Deep payload
 validation happens when the runners fold a fixture through `core-state` (888b) or replay a scenario
@@ -71,6 +72,11 @@ Fields:
 - `decisions` (array): the wire-contract decision tokens this scenario exercises. Every token must
   appear as a decision in `docs/contributing/wire-protocol.md`. Across the whole corpus, every token
   in the contract must be tagged by at least one scenario.
+- `required_setup` (array, optional): machine-readable, kebab-case capabilities that a runner must
+  add before it can execute this scenario, beyond sending and receiving the declared `steps`.
+  Examples are `subscription-reconnect` and `replay-failure-injection`. This field is required only
+  while no runner registers the scenario, and forbidden once one does. Capability names are unique
+  within the array.
 - `clients` (object, optional): named actors for a simultaneous multi-client scenario. Each value
   has one `transport`, which must be listed by the scenario. Multi-client scenarios declare at
   least two actors; single-client scenarios omit this field.
@@ -85,6 +91,38 @@ Fields:
   - `type` inside `frame`/`expect` must be a known protocol message type: a `ProtocolRequest` member
     for `c2s`, or a `ServerMessage`/`Response` member for `s2c`.
 
-The gate validates structure and the decision anchoring. It does not execute the steps; the runners
-do. Keeping the steps declarative and partial lets one scenario file drive both a Python transport
-replay and a TypeScript fold without either owning the wire values.
+The gate validates structure, decision anchoring, and whether every scenario is either registered by
+a runner or declares `required_setup`. It does not execute the steps; the runners do. Keeping the
+steps declarative and partial lets one scenario file drive both a Python transport replay and a
+TypeScript fold without either owning the wire values.
+
+## Runner inventories: `runners/<id>.json`
+
+Each file is one runner's executable inventory. Groups correspond to distinct setup paths in that
+runner, and the runner consumes these arrays as its own test parametrization rather than keeping a
+second list in source.
+
+```json
+{
+  "id": "server",
+  "description": "Scenarios executed against the real server transports.",
+  "groups": {
+    "bootstrap": ["full-replay-bootstrap", "tail-bootstrap-spine-prepend"],
+    "tail-overflow": ["tail-overflow-rebootstrap"]
+  }
+}
+```
+
+Fields:
+
+- `id` (string): equals the filename stem.
+- `description` (string): human context for what the runner exercises.
+- `groups` (non-empty object): maps each kebab-case, runner-specific setup path to a non-empty array
+  of scenario ids. One runner registers a scenario in exactly one group. Different runners may
+  register the same scenario, since transport conformance is intentionally checked at multiple
+  boundaries.
+
+The gate rejects unknown runner fields or scenario ids, malformed groups, duplicate registration
+within one runner, an unregistered scenario without `required_setup`, and a registered scenario that
+still carries `required_setup`. The last rule makes removing a stale exemption part of adding runner
+coverage.

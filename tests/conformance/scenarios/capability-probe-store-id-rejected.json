@@ -10,6 +10,9 @@
   "decisions": [
     "WP-CAPABILITY-PROBE"
   ],
+  "required_setup": [
+    "legacy-server-without-store-id"
+  ],
   "steps": [
     {
       "dir": "c2s",

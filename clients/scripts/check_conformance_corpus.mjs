@@ -14,10 +14,13 @@ import {fileURLToPath} from 'node:url';
 const SCHEMA_RELATIVE = 'backend-client/src/generated/protocol.schema.json';
 const CONTRACT_RELATIVE = 'docs/contributing/wire-protocol.md';
 const CORPUS_RELATIVE = 'tests/conformance';
+const RUNNERS_RELATIVE = 'runners';
 
 const STEP_DIRECTIONS = new Set(['c2s', 's2c']);
 const SCENARIO_ROLES = new Set(['control', 'subscribe', 'chat']);
 const KNOWN_TRANSPORTS = new Set(['unix', 'websocket']);
+const RUNNER_FIELDS = new Set(['id', 'description', 'groups']);
+const SETUP_CAPABILITY = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 // A control-path reply is a `Response`, which has no `type` discriminant, so scenarios name it with
 // this pseudo-type. Every other frame type is derived from the schema. The name is not defined
 // here: it is the section the generated schema publishes `Response` under, derived in
@@ -141,6 +144,15 @@ function checkStep(step, index, label, frames) {
   return errors;
 }
 
+function validRequiredSetup(setup) {
+  return (
+    Array.isArray(setup) &&
+    setup.length > 0 &&
+    new Set(setup).size === setup.length &&
+    setup.every(capability => typeof capability === 'string' && SETUP_CAPABILITY.test(capability))
+  );
+}
+
 function scenarioShapeErrors(data, stem, label, decisions) {
   const errors = [];
   if (data?.id !== stem) {
@@ -161,6 +173,9 @@ function scenarioShapeErrors(data, stem, label, decisions) {
     if (!decisions.has(token)) {
       errors.push(`${label}: decision "${token}" is not in the wire contract`);
     }
+  }
+  if (data?.required_setup !== undefined && !validRequiredSetup(data.required_setup)) {
+    errors.push(`${label}: "required_setup" must contain unique kebab-case capability names`);
   }
   return {errors, used};
 }
@@ -214,6 +229,94 @@ function checkScenario(scenario, decisions, frames) {
   return {errors, used};
 }
 
+function runnerMetadataErrors(data, stem, label) {
+  const errors = [];
+  if (data?.id !== stem) {
+    errors.push(`${label}: "id" must equal the filename stem "${stem}"`);
+  }
+  if (typeof data?.description !== 'string' || data.description.trim() === '') {
+    errors.push(`${label}: "description" must be a non-empty string`);
+  }
+  for (const field of Object.keys(data ?? {})) {
+    if (!RUNNER_FIELDS.has(field)) errors.push(`${label}: unknown runner field "${field}"`);
+  }
+  return errors;
+}
+
+function validRunnerGroups(groups) {
+  return (
+    typeof groups === 'object' &&
+    groups !== null &&
+    !Array.isArray(groups) &&
+    Object.keys(groups).length > 0
+  );
+}
+
+function checkRunnerGroup(group, scenarios, label, registered, scenarioIds) {
+  const errors = [];
+  const executed = [];
+  if (!SETUP_CAPABILITY.test(group)) {
+    errors.push(`${label}: group name "${group}" must be kebab-case`);
+  }
+  if (!Array.isArray(scenarios) || scenarios.length === 0) {
+    errors.push(`${label}: group "${group}" must be a non-empty scenario array`);
+    return {errors, executed};
+  }
+  for (const scenario of scenarios) {
+    if (typeof scenario !== 'string' || scenario.length === 0) {
+      errors.push(`${label}: group "${group}" must contain scenario ids`);
+      continue;
+    }
+    if (registered.has(scenario)) {
+      errors.push(`${label}: scenario "${scenario}" is registered in more than one group`);
+      continue;
+    }
+    registered.add(scenario);
+    executed.push(scenario);
+    if (!scenarioIds.has(scenario)) {
+      errors.push(`${label}: group "${group}" names unknown scenario "${scenario}"`);
+    }
+  }
+  return {errors, executed};
+}
+
+function checkRunner(runner, scenarioIds) {
+  const label = `runners/${runner.name}`;
+  if (runner.parseError) {
+    return {errors: [`${label}: invalid JSON: ${runner.parseError}`], executed: []};
+  }
+  const errors = runnerMetadataErrors(runner.data, runner.stem, label);
+  const executed = [];
+  const groups = runner.data?.groups;
+  if (!validRunnerGroups(groups)) {
+    errors.push(`${label}: "groups" must be a non-empty object`);
+    return {errors, executed};
+  }
+  const registered = new Set();
+  for (const [group, scenarios] of Object.entries(groups)) {
+    const result = checkRunnerGroup(group, scenarios, label, registered, scenarioIds);
+    errors.push(...result.errors);
+    executed.push(...result.executed);
+  }
+  return {errors, executed};
+}
+
+function checkExecutionPartition(scenarios, executed) {
+  const errors = [];
+  for (const scenario of scenarios) {
+    if (scenario.parseError) continue;
+    const label = `scenarios/${scenario.name}`;
+    const isExecuted = executed.has(scenario.stem);
+    const declaresSetup = scenario.data?.required_setup !== undefined;
+    if (isExecuted && declaresSetup) {
+      errors.push(`${label}: runner-executed scenario must not declare "required_setup"`);
+    } else if (!isExecuted && !declaresSetup) {
+      errors.push(`${label}: scenario must be runner-executed or declare "required_setup"`);
+    }
+  }
+  return errors;
+}
+
 function checkDecisionCoverage(decisions, referenced) {
   const errors = [];
   for (const token of [...decisions].sort()) {
@@ -255,12 +358,24 @@ export async function corpusErrors(root) {
 
   const scenarios = await readJsonDir(join(corpus, 'scenarios'));
   if (scenarios.error) errors.push(scenarios.error);
+  const scenarioIds = new Set(
+    scenarios.files.filter(scenario => !scenario.parseError).map(scenario => scenario.stem),
+  );
+  const runners = await readJsonDir(join(corpus, RUNNERS_RELATIVE));
+  if (runners.error) errors.push(runners.error);
+  const executed = new Set();
+  for (const runner of runners.files) {
+    const result = checkRunner(runner, scenarioIds);
+    errors.push(...result.errors);
+    for (const scenario of result.executed) executed.add(scenario);
+  }
   const referenced = new Set();
   for (const scenario of scenarios.files) {
     const result = checkScenario(scenario, decisions, frames);
     errors.push(...result.errors);
     for (const token of result.used) referenced.add(token);
   }
+  errors.push(...checkExecutionPartition(scenarios.files, executed));
   errors.push(...checkDecisionCoverage(decisions, referenced));
   return errors;
 }

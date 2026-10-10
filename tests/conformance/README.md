@@ -18,6 +18,7 @@ tests/conformance/
   FORMAT.md                 the fixture and scenario file formats
   events/<kind>.json        one RunEvent fixture per EventType enum member
   scenarios/<id>.json       one connection scenario per file
+  runners/<id>.json         runner-owned executable scenario inventory
 ```
 
 - `events/` proves event-kind coverage. There is one file per member of the `EventType` enum in the
@@ -35,12 +36,16 @@ tests/conformance/
   probes, protocol error, and so on). Each scenario tags the wire-contract decisions it exercises,
   so every decision in the contract is covered by at least one scenario and no scenario references a
   decision that does not exist.
+- `runners/` holds the executable inventory each runner consumes as its own parametrization. The
+  corpus gate derives execution coverage from these files. A scenario no runner registers must
+  declare the machine-readable setup capability it still needs, and that declaration becomes an
+  error as soon as a runner registers it.
 
 ## What reads this
 
 | Reader | Language | Lands in | Uses |
 | --- | --- | --- | --- |
-| corpus gate | Node (`clients/scripts/check_conformance_corpus.mjs`) | 888a (this) | validates coverage, structure, and decision anchoring |
+| corpus gate | Node (`clients/scripts/check_conformance_corpus.mjs`) | 888a (this) | validates coverage, structure, decision anchoring, and the execution partition |
 | event fold runner | TypeScript (`clients/core-state/src/conformance.test.ts`) | follow-up to 888a | folds every shared event fixture through `core-state`, both batched and incrementally |
 | client scenario runner | TypeScript | 888b | replays connection scenarios through the client transport and `core-state` |
 | server scenario suite | Python (`tests/conformance/test_server_transports.py`) | follow-up to #811 | replays the bootstrap, control-path, and simultaneous two-client scenarios on every transport each declares |
@@ -51,18 +56,10 @@ that a scenario has executed against a transport.
 
 ### What executes today
 
-The Python suite replays seven scenarios, each against every transport it declares:
-`full-replay-bootstrap`, `tail-bootstrap-spine-prepend`, `heartbeat-probe`,
-`command-ack-roundtrip`, `chat-dedicated-connection`, and
-`dual-transport-independent-subscriptions`, and `tail-overflow-rebootstrap`.
-
-The remaining scenarios are not executed by any runner yet:
-
-| Scenario | Why not |
-| --- | --- |
-| `capability-probe-tail-rejected` | Needs a server that predates the field. This one supports `tail`, so it answers `subscribed` rather than the rejecting `Response` the scenario asserts. Executing it needs a compatibility fixture (an old server, or a request validator that rejects the field), which is separate work. |
-| `capability-probe-store-id-rejected` | Same, for `store_id`. |
-| `framer-partial-read`, `protocol-error-then-close`, `resume-after-drop`, `store-swap-rebootstrap` | Each needs setup the step list does not describe: a read boundary inside one message, an injected replay failure, a reconnect, or a durable log attaching mid-subscription. A runner cannot drive them from the steps alone. |
+The checked-in inventory is `runners/server.json`, consumed directly by the Python server scenario
+suite. The remaining scenarios carry `required_setup` in their own files. This section deliberately
+does not repeat either list: `node clients/scripts/check_conformance_corpus.mjs` derives the complete
+partition and fails when a scenario is in neither half or both.
 
 A control-path reply is a `Response`, which is deliberately outside the `type`-discriminated
 `ServerMessage` union, so scenarios name it with the pseudo-type `response`. The Python runner
@@ -95,5 +92,8 @@ The gate checks, with no external dependency:
 4. Every wire-contract decision token (`WP-*` in `wire-protocol.md`) is exercised by at least one
    scenario, and every decision a scenario tags exists in the contract. This is what keeps the
    document and the corpus from drifting apart.
+5. Every scenario is registered by at least one runner or declares the setup capability still
+   required, never both. Runner inventories may name only checked-in scenarios and cannot register
+   one scenario twice within the same runner.
 
 See [`FORMAT.md`](FORMAT.md) for the exact file shapes.
