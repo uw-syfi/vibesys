@@ -195,6 +195,11 @@ vibesys \
   --input /path/to/input
 ```
 
+Keep the runs directory outside any existing Git repository. For example, if
+the VibeSys checkout is `/work/vibesys`, use `/work/vibesys-runs`, rather than
+`/work/vibesys/runs`. Each copied project needs to own its Git repository;
+VibeSys rejects a runs directory nested inside another repository.
+
 VibeSys provisions a self-contained project below the runs directory. Candidate
 source is at the copied project's root, and a declared evaluator is copied
 below `_evaluator/`. The source input's `.git/`, `.vibesys/`, `agent.toml`, and
