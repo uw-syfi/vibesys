@@ -166,6 +166,10 @@ class WebSocketBindError(RuntimeError):
         super().__init__(f"WebSocket gateway could not bind {host}:{port}: {reason}")
 
 
+class _WriteDeadlineError(RuntimeError):
+    """The gateway aborted a peer whose protocol-frame write did not drain."""
+
+
 class StartupSynchronization(Protocol):
     """Coordinate gateway startup without coupling lifecycle tests to a clock."""
 
@@ -1079,7 +1083,7 @@ class WebSocketGateway:
         try:
             async with asyncio.timeout(self.limits.write_deadline_seconds):
                 await websocket.send(payload)
-        except TimeoutError:
+        except TimeoutError as error:
             # Reported here, where the decision is made, rather than in
             # ``_handle_connection``'s handler: that handler also absorbs a
             # browser closing its tab, so it cannot say anything above debug
@@ -1089,7 +1093,7 @@ class WebSocketGateway:
                 self.limits.write_deadline_seconds,
             )
             websocket.transport.abort()
-            raise
+            raise _WriteDeadlineError from error
 
     async def _handle_connection(self, connection: ServerConnection) -> None:
         websocket = connection
@@ -1121,24 +1125,34 @@ class WebSocketGateway:
         request_id, client_id = _request_metadata(raw)
         try:
             request = _REQUEST_ADAPTER.validate_json(raw)
-            if isinstance(request, SubscribeRequest):
-                with self.subscriptions.track():
-                    await self._stream(websocket, request)
-                return True
-            response = self.api.execute(request)
-        except TimeoutError:
-            # A write deadline is not a request failure, and ``TimeoutError``
-            # is an ``OSError`` subclass, so without this the broad handler
-            # below would convert it into a control-path ``Response`` and hand
-            # it to ``_send`` for the transport that was just aborted: a second
-            # doomed write, on the wrong envelope, costing a second deadline.
-            raise
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101017 [BLE001]; convert malformed browser frames into protocol responses
             response = Response.from_exception(
                 request_id,
                 error,
                 operation="Request",
             ).model_copy(update={"client_id": client_id})
+        else:
+            if isinstance(request, SubscribeRequest):
+                with self.subscriptions.track():
+                    try:
+                        await self._stream(websocket, request)
+                    except _WriteDeadlineError:
+                        raise
+                    # lint-waiver: LW-101018 [BLE001]; the transport boundary converts every replay or serialization failure into the stream protocol's typed error.
+                    # > Enumerating implementation exception classes would make new API or serializer failures escape the protocol contract; a wrapper would only move this same boundary catch.
+                    except Exception as error:  # noqa: BLE001
+                        await self._write_stream_error(websocket, request, error)
+                return True
+            try:
+                response = self.api.execute(request)
+            # lint-waiver: LW-101111 [BLE001]; the request boundary converts arbitrary API failures into the protocol's typed response.
+            # > Listing current service exceptions would leak future request failures out of the transport; a helper would retain the same broad boundary catch with more indirection.
+            except Exception as error:  # noqa: BLE001
+                response = Response.from_exception(
+                    request_id,
+                    error,
+                    operation="Request",
+                ).model_copy(update={"client_id": client_id})
         await self._send(websocket, response.model_dump_json())
         return False
 
@@ -1147,19 +1161,22 @@ class WebSocketGateway:
             bootstrap = self.api.subscription_bootstrap(
                 request.after_sequence, request.tail, store_id=request.store_id
             )
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101018 [BLE001]; convert API failures into protocol responses at the transport boundary
+        except Exception:
+            # A bootstrap failure must not reject the accepted subscription.
+            # Browser clients use pre-handshake failures to detect unsupported
+            # fields and would retry the same broken replay as a capability
+            # fallback. Match the Unix transport: acknowledge first, then let
+            # the subscription boundary report the failure in band.
             await self._send(
                 websocket,
-                ProtocolErrorMessage.from_exception(
-                    error,
-                    operation="Event stream",
-                    code="stream_failed",
+                SubscribedMessage(
                     request_id=request.request_id,
-                )
-                .model_copy(update={"client_id": request.client_id})
-                .model_dump_json(),
+                    client_id=request.client_id,
+                    run_id=self.api.snapshot().run_id,
+                    latest_sequence=self.api.latest_sequence,
+                ).model_dump_json(),
             )
-            return
+            raise
         await self._send(
             websocket,
             SubscribedMessage(
@@ -1216,6 +1233,21 @@ class WebSocketGateway:
                 ),
             )
             cursor = checkpoint.through_sequence
+
+    async def _write_stream_error(
+        self,
+        websocket: ServerConnection,
+        request: SubscribeRequest,
+        error: Exception,
+    ) -> None:
+        """Report a subscription failure with the stream protocol envelope."""
+        protocol_error = ProtocolErrorMessage.from_exception(
+            error,
+            operation="Event stream",
+            code="stream_failed",
+            request_id=request.request_id,
+        ).model_copy(update={"client_id": request.client_id})
+        await self._send(websocket, protocol_error.model_dump_json())
 
     async def _write_bootstrap(
         self,

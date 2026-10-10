@@ -29,7 +29,7 @@ from hypothesis import strategies as st
 from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
-from websockets.exceptions import ConnectionClosedError, InvalidStatus
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, InvalidStatus
 from websockets.protocol import State
 
 from entrypoints import web as web_entrypoint
@@ -60,13 +60,15 @@ from vs_sim.api.testing import HANG_GUARD_S, join_or_fail, wait_or_fail
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from typing import Literal, Never
 
     from websockets.asyncio.client import ClientConnection
     from websockets.asyncio.server import ServerConnection
     from websockets.http11 import Request
     from websockets.typing import Origin
 
-    from server.api.service import RunApi
+    from server.api.protocol import RunSnapshot
+    from server.api.service import RunApi, SubscriptionBootstrap, SubscriptionCheckpoint
     from vs_sim.api import Event
 
 # The burst has to be larger than the send path can absorb, or the producing
@@ -1214,35 +1216,143 @@ def test_gateway_handles_text_protocol_errors_and_subscriptions(tmp_path: Path) 
     assert messages[1]["type"] == "event_batch"
 
 
-def test_gateway_reports_subscription_bootstrap_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+class _InjectedSubscriptionError(RuntimeError):
+    """A deliberate subscription failure from the gateway test fake."""
+
+
+class _ControlTimeoutApi:
+    """A request API fake whose control operation timed out."""
+
+    def execute(self, request: object) -> Never:
+        del request
+        raise TimeoutError
+
+
+class _SubscriptionFailureApi:
+    """A subscription API fake that fails at one explicit stream boundary."""
+
+    def __init__(
+        self,
+        delegate: RunApi,
+        failure: Literal["bootstrap", "checkpoint"],
+        error_type: type[Exception] = _InjectedSubscriptionError,
+    ) -> None:
+        self._delegate = delegate
+        self._failure = failure
+        self._error_type = error_type
+
+    def snapshot(self) -> RunSnapshot:
+        return self._delegate.snapshot()
+
+    @property
+    def latest_sequence(self) -> int:
+        return self._delegate.latest_sequence
+
+    def subscription_bootstrap(
+        self,
+        after_sequence: int,
+        tail: int | None,
+        *,
+        store_id: str | None = None,
+    ) -> SubscriptionBootstrap:
+        if self._failure == "bootstrap":
+            raise self._error_type
+        return self._delegate.subscription_bootstrap(after_sequence, tail, store_id=store_id)
+
+    def wait_for_change(self, after_sequence: int, timeout: float | None = None) -> bool:
+        del after_sequence, timeout
+        assert self._failure == "checkpoint"
+        return True
+
+    def subscription_checkpoint(
+        self,
+        after_sequence: int,
+        *,
+        store_id: str | None = None,
+        bootstrap_spine: bool = False,
+    ) -> SubscriptionCheckpoint:
+        del after_sequence, store_id, bootstrap_spine
+        raise self._error_type
+
+
+async def _assert_subscription_failure_lifecycle(
+    gateway: WebSocketGateway,
+    expected_types: Sequence[str],
+) -> None:
+    """Assert the public subscription frames and the normal close that follows."""
+    origin = f"http://127.0.0.1:{gateway.bound_port}"
+    async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
+        request = SubscribeRequest(client_id="failing-browser-client")
+        await websocket.send(request.model_dump_json())
+        async with asyncio.timeout(DEADLOCK_GUARD_S):
+            messages = [json.loads(await websocket.recv()) for _ in expected_types]
+            assert [message.get("type") for message in messages] == list(expected_types)
+            error = messages[-1]
+            assert messages[0]["request_id"] == request.request_id
+            assert error["request_id"] == request.request_id
+            assert error["client_id"] == "failing-browser-client"
+            assert error["code"] == "stream_failed"
+            assert error["diagnostic"]["detail"] in {
+                "TimeoutError",
+                "_InjectedSubscriptionError",
+            }
+            assert "ok" not in error
+            with pytest.raises(ConnectionClosedOK):
+                await websocket.recv()
+
+
+def test_gateway_converts_control_api_timeout_into_response() -> None:
+    with WebSocketGateway(cast("RunApi", _ControlTimeoutApi())) as gateway:
+        response = asyncio.run(_request(gateway, SnapshotQuery()))
+
+    assert response["ok"] is False
+    assert response["error"] == "Request timed out"
+    assert response["diagnostic"]["detail"] == "TimeoutError"
+
+
+def test_gateway_acknowledges_subscription_before_bootstrap_failure(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+    api = _SubscriptionFailureApi(parts.api, "bootstrap")
+
+    with WebSocketGateway(cast("RunApi", api)) as gateway:
+        asyncio.run(
+            _assert_subscription_failure_lifecycle(
+                gateway,
+                ("subscribed", "protocol_error"),
+            )
+        )
+
+
+def test_gateway_reports_post_handshake_stream_failure_in_band(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+    api = _SubscriptionFailureApi(parts.api, "checkpoint")
+
+    with WebSocketGateway(cast("RunApi", api)) as gateway:
+        asyncio.run(
+            _assert_subscription_failure_lifecycle(
+                gateway,
+                ("subscribed", "event_batch", "protocol_error"),
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_types"),
+    [
+        ("bootstrap", ("subscribed", "protocol_error")),
+        ("checkpoint", ("subscribed", "event_batch", "protocol_error")),
+    ],
+)
+def test_gateway_reports_subscription_api_timeout_in_band(
+    tmp_path: Path,
+    failure: Literal["bootstrap", "checkpoint"],
+    expected_types: tuple[str, ...],
 ) -> None:
     parts = build_server_parts(tmp_path / "logs")
+    api = _SubscriptionFailureApi(parts.api, failure, TimeoutError)
 
-    def fail_bootstrap(*args: object, **kwargs: object) -> object:
-        del args, kwargs
-        raise RuntimeError("boom")
-
-    # test-isolation: force bootstrap failure to exercise the protocol error response
-    monkeypatch.setattr(
-        parts.api,
-        "subscription_bootstrap",
-        fail_bootstrap,
-    )
-
-    async def request() -> dict[str, Any]:
-        origin = f"http://127.0.0.1:{gateway.bound_port}"
-        async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
-            await websocket.send(
-                SubscribeRequest(client_id="failing-browser-client").model_dump_json()
-            )
-            return json.loads(await websocket.recv())
-
-    with WebSocketGateway(parts.api) as gateway:
-        response = asyncio.run(request())
-    assert response["type"] == "protocol_error"
-    assert response["client_id"] == "failing-browser-client"
-    assert response["code"] == "stream_failed"
+    with WebSocketGateway(cast("RunApi", api)) as gateway:
+        asyncio.run(_assert_subscription_failure_lifecycle(gateway, expected_types))
 
 
 class _HalfOpenPeer:
