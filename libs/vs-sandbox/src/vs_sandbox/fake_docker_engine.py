@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 # ``docker exec`` client does; only a signal request through the daemon
 # reaches the program.
 _EXEC_CLIENT = r"""
-import json, os, signal, subprocess, sys, threading
+import json, os, select, signal, subprocess, sys
 spec = json.loads(sys.argv[1])
 STOPS = {signal.SIGTERM, signal.SIGINT, signal.SIGHUP}
 
@@ -54,22 +54,51 @@ child = subprocess.Popen(
     stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
     preexec_fn=register,
 )
+
+# One thread relays both streams, so a stop never finds a chunk half-relayed. A
+# stop request wakes the loop through a pipe; the client then delivers whatever the
+# program already wrote, as the daemon's side of a real exec has, and dies by the
+# signal.
+wake_read, wake_write = os.pipe()
+os.set_blocking(wake_write, False)
+signal.set_wakeup_fd(wake_write)
+for number in STOPS:
+    signal.signal(number, lambda *_: None)
 signal.pthread_sigmask(signal.SIG_UNBLOCK, STOPS)
 
-def pump(source, sink):
-    for chunk in iter(lambda: source.read1(65536), b""):
+sources = {child.stdout.fileno(): sys.stdout.buffer, child.stderr.fileno(): sys.stderr.buffer}
+for source in sources:
+    os.set_blocking(source, False)
+
+def relay(source):
+    # True once the stream ended. Reads what is available now, never waits for more.
+    while True:
+        try:
+            chunk = os.read(source, 65536)
+        except BlockingIOError:
+            return False
+        if not chunk:
+            return True
+        sink = sources[source]
         sink.write(chunk)
         sink.flush()
 
-pumps = [
-    threading.Thread(target=pump, args=(child.stdout, sys.stdout.buffer)),
-    threading.Thread(target=pump, args=(child.stderr, sys.stderr.buffer)),
-]
-for thread in pumps:
-    thread.start()
+open_sources = set(sources)
+stopped = False
+while open_sources and not stopped:
+    ready, _, _ = select.select([*open_sources, wake_read], [], [])
+    stopped = wake_read in ready
+    for source in ready:
+        if source != wake_read and relay(source):
+            open_sources.discard(source)
+if stopped:
+    for source in open_sources:
+        relay(source)
+    number = os.read(wake_read, 1)[0]
+    signal.signal(number, signal.SIG_DFL)
+    os.kill(os.getpid(), number)
+    signal.pause()
 status = child.wait()
-for thread in pumps:
-    thread.join()
 sys.exit(128 - status if status < 0 else status)
 """
 
