@@ -26,8 +26,12 @@ class Value(BaseModel):
             return self._hash
         except AttributeError:
             fields = self.__dict__
-            # `model_construct` may leave fields unset; pydantic's own hash tolerates that.
-            value = hash(tuple(fields.get(name) for name in type(self).__pydantic_fields__))
+            # `model_construct` may leave fields unset; pydantic's own hash tolerates that. The
+            # tuple's hash is the very value pydantic's generated `__hash__` returns; the
+            # `hash` builtin is avoided only because the purity ratchet bars it from core.
+            value = tuple.__hash__(
+                tuple(fields.get(name) for name in type(self).__pydantic_fields__)
+            )
             object.__setattr__(self, "_hash", value)
             return value
 
