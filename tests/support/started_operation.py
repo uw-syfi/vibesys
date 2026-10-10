@@ -15,9 +15,8 @@ from vs_evaluation.api import EvaluationState
 from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
-    import threading
-
     from vs_evaluation.api import EvaluationExecutor
+    from vs_sim.api import Event
 
 
 _ENDED = frozenset(
@@ -41,7 +40,7 @@ async def _ended(executor: EvaluationExecutor, handle_id: str) -> None:
 
 
 async def wait_until_executor_started(
-    started: threading.Event | asyncio.Event, executor: EvaluationExecutor, handle_id: str
+    started: Event | asyncio.Event, executor: EvaluationExecutor, handle_id: str
 ) -> None:
     """Return once *started* is set; fail if the evaluation *handle_id* ends first.
 

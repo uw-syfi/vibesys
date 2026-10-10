@@ -10,10 +10,8 @@ to adopt it. A broken store must never cost a completed turn.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Barrier
 from typing import TYPE_CHECKING, override
 
 import pytest
@@ -42,10 +40,11 @@ from vs_project.api import (
     Project,
     RunEnvironmentRecord,
 )
-from vs_sim.api.testing import HANG_GUARD_S
+from vs_sim.api.testing import HANG_GUARD_S, wait_or_fail
 
 if TYPE_CHECKING:
     from vs_agent.shim_turns import LaunchedSession
+    from vs_sim.api.testing import Sim
 
 HYPOTHESIS = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
 ROLE = AgentSessionKey(SessionScope.ROLE, "judge")
@@ -187,24 +186,34 @@ def test_checkpoint_survives_a_new_store_instance(tmp_path: Path) -> None:
     assert reloaded.session_id == "thr-xyz"
 
 
-def test_one_store_preserves_checkpoints_from_concurrent_clients(tmp_path: Path) -> None:
-    store = _store(tmp_path)
+def test_one_store_preserves_checkpoints_from_concurrent_clients(tmp_path: Path, sim: Sim) -> None:
+    threads = sim.threads()
+    project = _project(tmp_path)
+    slot = project.state.local_namespace("run-1", "agent").slot("sessions.json", AgentSessionState)
+    store = DurableSessionStore(slot, threads=threads)
     clients = 16
-    ready = Barrier(clients)
+    start = threads.event()
 
     def checkpoint(client: int) -> None:
-        ready.wait(HANG_GUARD_S)
+        wait_or_fail(start, "the start signal")
         _checkpoint(
             store,
             f"thread-{client}",
             key=AgentSessionKey(SessionScope.MEMBER, f"worker-{client}"),
         )
 
-    with ThreadPoolExecutor(max_workers=clients) as executor:
-        futures = [executor.submit(checkpoint, client) for client in range(clients)]
-        for future in futures:
-            future.result()
+    def scenario() -> None:
+        workers = [
+            threads.spawn(lambda client=client: checkpoint(client), name=f"client-{client}")
+            for client in range(clients)
+        ]
+        start.set()
+        for worker in workers:
+            worker.join(HANG_GUARD_S)
 
+    threads.run(scenario)
+
+    assert threads.errors == []
     for client in range(clients):
         record = store.get(AgentSessionKey(SessionScope.MEMBER, f"worker-{client}"))
         assert record is not None

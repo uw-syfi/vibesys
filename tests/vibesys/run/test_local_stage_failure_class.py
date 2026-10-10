@@ -112,7 +112,8 @@ class _LosesStageCommands(FakeCommandRunner):
         timeout: int | None = None,
         cancel: Event | None = None,
     ) -> CommandResult:
-        result = super().execute(command, timeout=timeout, cancel=cancel)
+        del cancel  # no stage of this test is cancelled
+        result = super().execute(command, timeout=timeout)
         if _ACCURACY in command or _BENCHMARK in command:
             return self.lost
         return result

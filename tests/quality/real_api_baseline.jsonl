@@ -396,14 +396,11 @@
 {"path": "tests/support/session_lifecycle_world.py", "rule": "threading", "count": 4}
 {"path": "tests/support/session_world.py", "rule": "threading", "count": 3}
 {"path": "tests/support/shared_build.py", "rule": "fs_sync", "count": 2}
-{"path": "tests/support/started_operation.py", "rule": "threading", "count": 1}
 {"path": "tests/support/test_started_operation.py", "rule": "bare_wait", "count": 4}
 {"path": "tests/support/test_started_operation.py", "rule": "executor", "count": 1}
 {"path": "tests/support/test_started_operation.py", "rule": "threading", "count": 5}
 {"path": "tests/vibesys/agents/test_agent_client.py", "rule": "executor", "count": 1}
 {"path": "tests/vibesys/agents/test_api_surface.py", "rule": "process", "count": 1}
-{"path": "tests/vibesys/agents/test_session_store.py", "rule": "executor", "count": 1}
-{"path": "tests/vibesys/agents/test_session_store.py", "rule": "threading", "count": 1}
 {"path": "tests/vibesys/api/test_agent_facade.py", "rule": "process", "count": 1}
 {"path": "tests/vibesys/api/test_agent_facade.py", "rule": "subprocess", "count": 1}
 {"path": "tests/vibesys/backends/test_backend_registry_imports.py", "rule": "process", "count": 1}
