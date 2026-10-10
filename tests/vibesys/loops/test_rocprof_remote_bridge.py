@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge, capture_runtime
-from tests.support.bounded_waits import join_or_fail
+from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
+from tests.support.started_operation import start_thread, wait_until_started_sync
 
 from vs_sandbox.api.slurm import (
     SlurmCapturePlan,
@@ -264,9 +265,8 @@ def test_remote_capture_rejects_overlap_without_submitting_another_job(
     def capture_first() -> None:
         outputs.append(bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event()))
 
-    worker = Thread(target=capture_first)
-    worker.start()
-    runner.entered.wait()
+    worker = start_thread(capture_first)
+    wait_until_started_sync(runner.entered, worker)
 
     try:
         with pytest.raises(RuntimeError) as failed:
@@ -274,7 +274,7 @@ def test_remote_capture_rejects_overlap_without_submitting_another_job(
         overlap = getattr(failed.value, "report", None)
     finally:
         runner.release.set()
-        join_or_fail(worker)
+        worker.result(timeout=HANG_GUARD_S)
 
     assert overlap == (
         "error: a remote Slurm ROCprof capture is already in progress; "

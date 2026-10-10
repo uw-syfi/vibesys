@@ -15,6 +15,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, initialize, precondition, rule
+from tests.support.started_operation import wait_until_started_sync
 
 from vs_slurm.api import (
     Cluster,
@@ -502,10 +503,14 @@ def test_cancel_during_scheduler_acceptance_remains_reconcilable(case: _Case) ->
     case.on_accept("during", barrier)
     with ThreadPoolExecutor(max_workers=2) as threads:
         submission = threads.submit(case.cluster.submit, _request(case), operation_id="during")
-        accepted.wait()
-        cancellation = threads.submit(cancel)
-        cancel_started.wait()
-        return_reply.set()
+        try:
+            wait_until_started_sync(accepted, submission)
+            cancellation = threads.submit(cancel)
+            # The cancel may finish before the reply is released, so its end also counts as started.
+            cancellation.add_done_callback(lambda _done: cancel_started.set())
+            cancel_started.wait()
+        finally:
+            return_reply.set()
         assert isinstance(submission.result(), ClusterSubmitted)
         assert isinstance(cancellation.result(), ClusterCancelRequested)
 
@@ -653,7 +658,7 @@ def test_concurrent_local_caches_do_not_allocate_duplicate_jobs(case: _Case) -> 
     second_cluster = case.fresh()
     with ThreadPoolExecutor(max_workers=2) as threads:
         first = threads.submit(first_cluster.submit, _request(case), operation_id="concurrent")
-        accepted.wait()
+        wait_until_started_sync(accepted, first)
         try:
             second = second_cluster.submit(_request(case), operation_id="concurrent")
             assert isinstance(second, ClusterSubmitted | ClusterUnknown)
@@ -733,7 +738,7 @@ def test_durable_acceptance_recovers_identity_after_name_history_expires(case: _
     second_cluster = case.fresh()
     with ThreadPoolExecutor(max_workers=2) as threads:
         first = threads.submit(first_cluster.submit, _request(case), operation_id="accepted-record")
-        accepted.wait()
+        wait_until_started_sync(accepted, first)
         try:
             case.forget_name_history("accepted-record")
             unresolved = second_cluster.submit(_request(case), operation_id="accepted-record")

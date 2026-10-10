@@ -11,8 +11,10 @@ from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.started_operation import (
     arrival,
+    start_thread,
     wait_until_executor_started,
     wait_until_started,
+    wait_until_started_sync,
 )
 
 from vs_evaluation.api import EvaluationState
@@ -191,3 +193,34 @@ def test_an_arrival_that_is_already_there_wins_over_a_finished_producer() -> Non
         await arrival(event.wait(), task)
 
     asyncio.run(scenario())
+
+
+def _run_sync(ending: _Ending) -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    def operation() -> None:
+        if ending is _Ending.RAISES:
+            raise _FailureError
+        if ending is _Ending.STARTS_THEN_HOLDS:
+            started.set()
+            release.wait()
+
+    future = start_thread(operation)
+    try:
+        wait_until_started_sync(started, future)
+    finally:
+        release.set()
+        future.result()
+
+
+@given(ending=st.sampled_from(_Ending))
+def test_the_sync_wait_ends_with_the_operations_own_outcome(ending: _Ending) -> None:
+    if ending is _Ending.STARTS_THEN_HOLDS:
+        _run_sync(ending)
+    elif ending is _Ending.RAISES:
+        with pytest.raises(_FailureError):
+            _run_sync(ending)
+    else:
+        with pytest.raises(AssertionError, match="without reaching its held step"):
+            _run_sync(ending)

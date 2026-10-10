@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.server.support import build_server_parts
+from tests.support.started_operation import wait_until_started_sync
 
 from server.api.protocol import ChatQuery
 from server.chat.manager import ChatAnswer
@@ -33,7 +34,7 @@ def test_chat_response_excludes_concurrent_run_events(tmp_path: Path) -> None:
         try:
             # The handler is parked until released, so the output below is
             # guaranteed to land while the chat request is in flight.
-            handler_started.wait()
+            wait_until_started_sync(handler_started, pending)
             for index in range(1_000):
                 parts.journal.publish_output("stdout", f"optimizer output {index}\n")
         finally:

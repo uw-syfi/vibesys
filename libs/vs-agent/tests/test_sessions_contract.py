@@ -12,6 +12,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.support.started_operation import wait_until_started_sync
 
 from vs_agent.api import (
     AgentCapabilities,
@@ -223,10 +224,9 @@ def test_missing_and_recovered_unfinished_invocation_is_unknown(harness: _Harnes
     harness.boundary.effect = block
     with ThreadPoolExecutor(max_workers=1) as workers:
         result = workers.submit(harness.sessions.resume, KEY, harness.message, "resume-1")
-        result.add_done_callback(lambda _: ready.set())
         try:
-            ready.wait()
-            assert entered.is_set(), result.result()
+            wait_until_started_sync(ready, result)
+            assert entered.is_set()
             assert isinstance(harness.sessions.inspect(KEY, "resume-1"), Pending)
             with pytest.raises(InvocationConflictError, match="active"):
                 harness.sessions.release_interrupted(KEY, "resume-1")
@@ -532,7 +532,7 @@ def test_session_cannot_adopt_while_turn_is_in_flight(tmp_path: Path, implementa
         with ThreadPoolExecutor(max_workers=1) as pool:
             turn = pool.submit(session.run_turn, AgentTurnRequest(message="first"))
             try:
-                entered.wait()
+                wait_until_started_sync(entered, turn)
                 assert not session.adopt("late-thread")
             finally:
                 release.set()
