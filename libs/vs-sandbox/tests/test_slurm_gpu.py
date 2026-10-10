@@ -101,10 +101,6 @@ def slurm_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return log
 
 
-def _no_windows(_config: SlurmGpuConfig) -> None:
-    return None
-
-
 class TestConfig:
     def test_loads_the_operator_table(self, tmp_path: Path) -> None:
         path = tmp_path / "slurm-gpu.toml"
@@ -175,7 +171,7 @@ class TestLauncher:
         self, tmp_path: Path, slurm_log: Path
     ) -> None:
         output = bytearray()
-        status = SlurmGpuLauncher(_config(tmp_path), windows=_no_windows).run(
+        status = SlurmGpuLauncher(_config(tmp_path)).run(
             GpuJobRequest(gpus=2, time_minutes=7),
             GpuCommand(
                 argv=("sh", "-c", "echo from-job; exit 3"), cwd=tmp_path, env=dict(os.environ)
@@ -196,7 +192,7 @@ class TestLauncher:
         cancel = threading.Event()
         cancel.set()
         output = bytearray()
-        SlurmGpuLauncher(_config(tmp_path), windows=_no_windows).run(
+        SlurmGpuLauncher(_config(tmp_path)).run(
             GpuJobRequest(gpus=1, time_minutes=5),
             GpuCommand(argv=("sleep", "60"), cwd=tmp_path, env=dict(os.environ)),
             write=output.extend,

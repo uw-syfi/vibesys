@@ -15,6 +15,10 @@ import vs_sandbox.api as sandbox_api
 from vs_sandbox import host_sandbox
 from vs_sandbox.host_resources import HostResource
 from vs_sandbox.project_paths import ProjectPathPolicy, ProjectPathPolicyError
+from vs_sim.api import ProbeResult
+from vs_sim.api.testing import ScriptedProbe
+
+_WORKING_BWRAP = ScriptedProbe(lambda _argv: ProbeResult(0, ""))
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -329,15 +333,13 @@ class TestBubblewrapProjectPaths:
             "which",
             lambda *_args, **_kwargs: "/usr/bin/bwrap",
         )
-        # The builder probes that bwrap can actually unshare a user namespace;
-        # this test supplies a path rather than a working binary.
-        monkeypatch.setattr(host_sandbox, "_bwrap_confines", lambda _path: True)
 
         sandbox = host_sandbox.build(
             workspace,
             env={},
             project_path_policy=policy,
             require_enforcement=True,
+            probe=_WORKING_BWRAP,
         )
 
         assert isinstance(sandbox, host_sandbox.HostSandbox)
@@ -435,13 +437,13 @@ class TestHostResourceAgentPathRejection:
         monkeypatch.setattr(
             host_sandbox.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/bwrap"
         )
-        monkeypatch.setattr(host_sandbox, "_bwrap_confines", lambda _path: True)
 
         sandbox = host_sandbox.build(
             workspace,
             env={},
             resources=(resource,),
             require_enforcement=True,
+            probe=_WORKING_BWRAP,
         )
 
         assert isinstance(sandbox, host_sandbox.HostSandbox)
@@ -547,10 +549,11 @@ class TestWorkspaceSandboxEnv:
         monkeypatch.setattr(
             host_sandbox.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/bwrap"
         )
-        monkeypatch.setattr(host_sandbox, "_bwrap_confines", lambda _path: True)
         env = {"HOME": "/home/agent", "PATH": "/usr/bin"}
 
-        sandbox = host_sandbox.build(workspace, env=env, require_enforcement=True)
+        sandbox = host_sandbox.build(
+            workspace, env=env, require_enforcement=True, probe=_WORKING_BWRAP
+        )
 
         assert isinstance(sandbox, host_sandbox.HostSandbox)
         assert sandbox.env == env
@@ -598,8 +601,9 @@ class TestBuildSelectsDocker:
         monkeypatch.setattr(
             host_sandbox.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/bwrap"
         )
-        monkeypatch.setattr(host_sandbox, "_bwrap_confines", lambda _path: True)
 
-        sandbox = host_sandbox.build(workspace, env={}, require_enforcement=True)
+        sandbox = host_sandbox.build(
+            workspace, env={}, require_enforcement=True, probe=_WORKING_BWRAP
+        )
 
         assert isinstance(sandbox, host_sandbox.HostSandbox)

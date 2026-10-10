@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
@@ -23,7 +22,7 @@ from vs_sandbox.gpu_monitor import (
     NvidiaSmiTelemetry,
     pick_gpu,
 )
-from vs_sim.api import OsThreads, Threads
+from vs_sim.api import OsThreads, SubprocessProbe, Threads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -34,6 +33,7 @@ if TYPE_CHECKING:
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
     from vs_sandbox.local_shell import LocalShellRunner
+    from vs_sim.api import CommandProbe
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
 _DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
@@ -49,7 +49,7 @@ class CudaBackend:
 
     name = ComputeBackend.CUDA
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692102 [PLR0913]; the backend's three collaborators (GPU telemetry, threads, Docker CLI) are keyword-only seams on top of its three settings; bundling them in a holder object would only rename the same parameters.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692102 [PLR0913]; the backend's four collaborators (GPU telemetry, threads, Docker CLI, command probe) are keyword-only seams on top of its three settings; bundling them in a holder object would only rename the same parameters.
         self,
         log_dir: Path,
         *,
@@ -58,9 +58,11 @@ class CudaBackend:
         gpu_telemetry: GpuTelemetry | None = None,
         threads: Threads | None = None,
         docker: DockerCli | None = None,
+        probe: CommandProbe | None = None,
     ) -> None:
         """Configure CUDA execution with its log directory, image override and GPU telemetry."""
-        self._telemetry: GpuTelemetry = gpu_telemetry or NvidiaSmiTelemetry()
+        self._probe: CommandProbe = probe or SubprocessProbe()
+        self._telemetry: GpuTelemetry = gpu_telemetry or NvidiaSmiTelemetry(probe=self._probe)
         self._threads: Threads = threads or OsThreads()
         self._docker = docker
         self.log_dir = Path(log_dir)
@@ -263,29 +265,18 @@ class CudaBackend:
             return "all"
         return f"device={self.selected_device.index}"
 
-    @staticmethod
-    def _pytorch_index_env() -> dict[str, str]:
+    def _pytorch_index_env(self) -> dict[str, str]:
         """Return ``UV_EXTRA_INDEX_URL`` matched to the host's CUDA driver.
 
         ``uv add torch`` will pick a wheel from this index instead of the
         default PyPI one (which may target a newer CUDA than the driver).
         Empty dict if nvidia-smi is missing or the driver version is unknown.
         """
-        try:
-            result = subprocess.run(
-                [  # noqa: S607  # lint-waiver: LW-009059 [S607]; invoke the administrator-installed NVIDIA CLI by its standard executable name.
-                    "nvidia-smi",
-                    "--query-gpu=driver_version",
-                    "--format=csv,noheader",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=10,
-            )
-            if result.returncode != 0:
-                return {}
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        result = self._probe.run(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+            timeout_seconds=10,
+        )
+        if result is None or result.returncode != 0:
             return {}
 
         driver_ver = result.stdout.strip().split("\n")[0]

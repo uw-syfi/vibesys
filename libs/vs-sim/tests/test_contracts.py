@@ -16,7 +16,9 @@ from vs_sim.api import (
     LoopSignalSource,
     MonotonicClock,
     PidfdProcessSignaller,
+    ProbeResult,
     SubprocessLauncher,
+    SubprocessProbe,
     SystemClock,
     ThreadBlockingRunner,
 )
@@ -25,6 +27,7 @@ from vs_sim.api.testing import (
     BlockingRunnerContract,
     ClockContract,
     ClockUnderTest,
+    CommandProbeContract,
     FakeForegroundLauncher,
     FakeProcessLauncher,
     FakeProcessSignaller,
@@ -35,12 +38,14 @@ from vs_sim.api.testing import (
     GatedBlockingRunner,
     InlineBlockingRunner,
     ManualClock,
+    ProbeUnderTest,
     ProcessLauncherContract,
     ProcessScript,
     ProcessSignallerContract,
     ProcessSignallerUnderTest,
     ProcessUnderTest,
     RunnerUnderTest,
+    ScriptedProbe,
     SignalSourceContract,
     SignalSourceUnderTest,
     SleeperContract,
@@ -285,5 +290,37 @@ class TestFakeForegroundLauncher(ForegroundLauncherContract):
             asyncio.run,
             exit_with=lambda status: ("exit", str(status)),
             blocks_until_signalled=("block",),
+            missing_program=("no-such-program",),
+        )
+
+
+class TestSubprocessProbe(CommandProbeContract):
+    def probe_under_test(self) -> ProbeUnderTest:
+        return ProbeUnderTest(
+            SubprocessProbe(),
+            exit_with_stdout=lambda status, text: _python(
+                "import sys; sys.stdout.write(sys.argv[2]); sys.exit(int(sys.argv[1]))",
+                str(status),
+                text,
+            ),
+            blocks_forever=_python("import signal; signal.pause()"),
+            missing_program=("/nonexistent/vs-sim-no-such-program",),
+        )
+
+
+def _probe_script(argv: tuple[str, ...]) -> ProbeResult | None:
+    match argv:
+        case ("exit", status, text):
+            return ProbeResult(int(status), text)
+        case _:
+            return None
+
+
+class TestScriptedProbe(CommandProbeContract):
+    def probe_under_test(self) -> ProbeUnderTest:
+        return ProbeUnderTest(
+            ScriptedProbe(_probe_script),
+            exit_with_stdout=lambda status, text: ("exit", str(status), text),
+            blocks_forever=("block",),
             missing_program=("no-such-program",),
         )

@@ -8,6 +8,7 @@ from vs_sim.blocking import BlockingRunner, ThreadBlockingRunner
 from vs_sim.clock import Clock, MonotonicClock, Sleeper, SleepingClock, SystemClock
 from vs_sim.concurrency import Condition, Event, Lock, OsThreads, Threads, Worker
 from vs_sim.network import Connection, Listener, Network, UnixNetwork
+from vs_sim.probes import CommandProbe, ProbeResult, SubprocessProbe
 from vs_sim.processes import (
     ForegroundChild,
     ForegroundLauncher,
@@ -24,6 +25,7 @@ from vs_sim.signals import LoopSignalSource, PidfdProcessSignaller, ProcessSigna
 __all__ = [
     "BlockingRunner",
     "Clock",
+    "CommandProbe",
     "Condition",
     "Connection",
     "Event",
@@ -37,6 +39,7 @@ __all__ = [
     "Network",
     "OsThreads",
     "PidfdProcessSignaller",
+    "ProbeResult",
     "ProcessLauncher",
     "ProcessOutcome",
     "ProcessSignaller",
@@ -48,6 +51,7 @@ __all__ = [
     "Sleeper",
     "SleepingClock",
     "SubprocessLauncher",
+    "SubprocessProbe",
     "SystemClock",
     "SystemRandomSource",
     "ThreadBlockingRunner",

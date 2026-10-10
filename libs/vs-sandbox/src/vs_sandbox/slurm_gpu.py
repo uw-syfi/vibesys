@@ -21,11 +21,13 @@ from typing import TYPE_CHECKING, Annotated, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from vs_sim.api import SubprocessProbe
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
-    from vs_sim.api import Event
+    from vs_sim.api import CommandProbe, Event
 
 _UNLIMITED = "unlimited"
 _WINDOWS_TIMEOUT_SECONDS = 30
@@ -230,23 +232,16 @@ def choose_partition(
     return fits[0] if fits else config.partitions[0]
 
 
-def read_windows(config: SlurmGpuConfig) -> Mapping[str, object] | None:
+def read_windows(
+    config: SlurmGpuConfig, probe: CommandProbe | None = None
+) -> Mapping[str, object] | None:
     """Run the operator's window report command, or return ``None`` if unavailable."""
     if config.windows_command is None:
         return None
-    try:
-        completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-610001 [S603]; run the operator-configured window report argv without a shell.
-            # > Shell execution would add quoting risk; the argv comes only from the
-            # > operator file, so there is no safer equivalent to this call.
-            config.windows_command,
-            capture_output=True,
-            text=True,
-            timeout=_WINDOWS_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0:
+    completed = (probe or SubprocessProbe()).run(
+        config.windows_command, timeout_seconds=_WINDOWS_TIMEOUT_SECONDS
+    )
+    if completed is None or completed.returncode != 0:
         return None
     try:
         report = json.loads(completed.stdout)
@@ -301,8 +296,8 @@ class GpuLauncher(Protocol):
 class SlurmGpuLauncher:
     """Run commands with ``srun`` and cancel their jobs when asked to stop.
 
-    *popen* starts processes and *windows* reads the scheduler report; tests
-    inject both to drive the lifecycle with a fake ``srun``.
+    *popen* starts processes and *probe* runs the scheduler report and ``scancel``;
+    tests inject both to drive the lifecycle with a fake ``srun``.
     """
 
     def __init__(
@@ -310,12 +305,12 @@ class SlurmGpuLauncher:
         config: SlurmGpuConfig,
         *,
         popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
-        windows: Callable[[SlurmGpuConfig], Mapping[str, object] | None] = read_windows,
+        probe: CommandProbe | None = None,
     ) -> None:
         """Bind the operator configuration and the process boundary."""
         self._config = config
         self._popen = popen
-        self._windows = windows
+        self._probe: CommandProbe = probe or SubprocessProbe()
 
     def run(
         self,
@@ -331,7 +326,7 @@ class SlurmGpuLauncher:
         *cancel* (from any thread) cancels the job by its unique name, then
         stops ``srun``; the call still returns only after ``srun`` exits.
         """
-        partition = choose_partition(self._config, request, self._windows(self._config))
+        partition = choose_partition(self._config, request, read_windows(self._config, self._probe))
         job_name = new_job_name(self._config)
         argv = srun_argv(
             self._config, request, partition=partition, job_name=job_name, command=command.argv
@@ -390,17 +385,10 @@ class SlurmGpuLauncher:
 
     def cancel(self, job_name: str) -> None:
         """Cancel this user's job named *job_name*, pending or running."""
-        try:
-            subprocess.run(  # noqa: S603  # lint-waiver: LW-610002 [S603]; cancel by the generated job name with the operator-configured scancel argv.
-                # > The argv holds only operator configuration and a name this module
-                # > generated; a shell would only add quoting risk.
-                (*self._config.scancel_command, f"--name={job_name}", "--me"),
-                capture_output=True,
-                timeout=_SCANCEL_TIMEOUT_SECONDS,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return
+        self._probe.run(
+            (*self._config.scancel_command, f"--name={job_name}", "--me"),
+            timeout_seconds=_SCANCEL_TIMEOUT_SECONDS,
+        )
 
 
 def resolve_executable(command: tuple[str, ...]) -> tuple[str, ...]:

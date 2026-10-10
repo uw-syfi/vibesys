@@ -12,7 +12,6 @@ caught rather than silently assumed.
 from __future__ import annotations
 
 import ctypes
-import errno
 import os
 import runpy
 import sys
@@ -26,6 +25,7 @@ import vs_sandbox.api as sandbox_api
 from vs_sandbox import host_sandbox, landlock
 from vs_sandbox.host_sandbox import LandlockSandbox, LinuxBackend
 from vs_sandbox.project_paths import ProjectPathPolicy
+from vs_sim.api.testing import ScriptedProbe
 
 requires_landlock = pytest.mark.skipif(
     landlock.abi_version() is None,
@@ -367,13 +367,13 @@ class TestLinuxBackendSelection:
             lambda *_args, **_kwargs: "/opt/unpacked/bwrap",
         )
 
-        def cannot_run(*_args: object, **_kwargs: object) -> None:
-            raise OSError(errno.ENOEXEC, "Exec format error")
-
-        monkeypatch.setattr(host_sandbox.subprocess, "run", cannot_run)
-
         with pytest.raises(host_sandbox.SandboxUnavailableError, match="user namespace"):
-            host_sandbox.build(workspace, env={}, require_enforcement=True)
+            host_sandbox.build(
+                workspace,
+                env={},
+                require_enforcement=True,
+                probe=ScriptedProbe(lambda _argv: None),
+            )
 
     def test_unknown_backend_value_is_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

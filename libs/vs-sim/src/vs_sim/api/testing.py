@@ -11,8 +11,10 @@ from vs_sim.contracts import (
     BlockingRunnerContract,
     ClockContract,
     ClockUnderTest,
+    CommandProbeContract,
     ForegroundLauncherContract,
     ForegroundUnderTest,
+    ProbeUnderTest,
     ProcessLauncherContract,
     ProcessSignallerContract,
     ProcessSignallerUnderTest,
@@ -41,6 +43,7 @@ from vs_sim.fakes import (
     GatedBlockingRunner,
     InlineBlockingRunner,
     ProcessScript,
+    ScriptedProbe,
 )
 from vs_sim.faults import CallCounter, ScheduledRule, fault_stream, match_rule
 from vs_sim.file_effects import file_size_limit
@@ -93,6 +96,7 @@ __all__ = [
     "ChildDiedError",
     "ClockContract",
     "ClockUnderTest",
+    "CommandProbeContract",
     "CrashableClock",
     "EventTrace",
     "FakeForegroundChild",
@@ -111,6 +115,7 @@ __all__ = [
     "ManualClock",
     "NetworkContract",
     "NetworkUnderTest",
+    "ProbeUnderTest",
     "ProbedClock",
     "ProcessLauncherContract",
     "ProcessScript",
@@ -121,6 +126,7 @@ __all__ = [
     "Restarted",
     "RunnerUnderTest",
     "ScheduledRule",
+    "ScriptedProbe",
     "SignalSourceContract",
     "SignalSourceUnderTest",
     "Sim",
