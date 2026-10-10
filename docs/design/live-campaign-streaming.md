@@ -764,7 +764,8 @@ seven fields (`operation_kind`, `operation_id`, `state`, `revision`, `scope_id`,
 - `clients/backend-client/src/generated/protocol.schema.json` and
   `protocol.generated.ts`: regenerated via `pnpm generate:protocol`, and
   `tests/conformance/events/async_operation_lifecycle.json`: one new fixture,
-  following the `rate_limit_update.json`/`provider_switched.json` pattern.
+  following the corpus's established pattern (envelope fields only, no
+  `data`, e.g. `benchmark_result.json`).
   `node clients/scripts/check_conformance_corpus.mjs` confirms the corpus is
   complete.
 - `clients/core-state/src/core-state.ts`: **no change.** This package's fold
