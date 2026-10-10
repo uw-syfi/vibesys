@@ -9,10 +9,10 @@ import {withGateway} from './gateway.js';
  *
  * The page's two sockets share one URL and are told apart by their first client
  * frame, as in `controls-banner.spec.ts`: the control channel opens with
- * `query.snapshot`, the event stream with `subscribe`. Only the control socket
- * is proxied to the gateway, so the snapshot still arrives and the status chip
- * still reads `completed`; the stream's socket is refused, so no batch is ever
- * folded.
+ * `query.snapshot`, the event stream with `subscribe`. The first stream socket
+ * is refused, so the snapshot still arrives, the status chip still reads
+ * `completed`, and no batch is folded. A later stream socket is proxied so the
+ * rendered recovery action has a real successful outcome.
  *
  * Refused rather than closed after the batch, because the defect is about the
  * bootstrap: a drop after it leaves the caller holding the history it asked for
@@ -28,6 +28,7 @@ test('states that an ended run transcript stopped short when the stream drops', 
   context,
 }) => {
   await withGateway(async gateway => {
+    let refusedFirstStream = false;
     await context.routeWebSocket(
       url => url.pathname === '/ws',
       ws => {
@@ -35,18 +36,22 @@ test('states that an ended run transcript stopped short when the stream drops', 
         let classified = false;
         ws.onMessage(message => {
           const frame = typeof message === 'string' ? message : message.toString();
-          if (!classified) {
-            classified = true;
-            if (frame.includes('"subscribe"')) {
-              // Before `connectToServer()`, so the gateway never subscribes and
-              // no batch can arrive late and fill the fold under the assertions.
-              void ws.close();
-              return;
-            }
-            server = ws.connectToServer();
-            server.onMessage(reply => ws.send(reply));
+          if (classified) {
+            server?.send(frame);
+            return;
           }
-          server?.send(frame);
+          classified = true;
+          if (frame.includes('"subscribe"') && !refusedFirstStream) {
+            refusedFirstStream = true;
+            // Before `connectToServer()`, so the gateway never subscribes and
+            // no batch can arrive late under the fault assertions. A user
+            // recovery gets a second socket, which is proxied below.
+            void ws.close();
+            return;
+          }
+          server = ws.connectToServer();
+          server.onMessage(reply => ws.send(reply));
+          server.send(frame);
         });
       },
     );
@@ -62,8 +67,14 @@ test('states that an ended run transcript stopped short when the stream drops', 
     // The empty panel must describe the same unavailable stream, not promise
     // that an ended run will eventually replay activity into it.
     await expect(page.locator('.empty')).toHaveText(EMPTY_TRANSCRIPT_COPY.unavailable);
-    // An ended run cannot be resubscribed, so the affordance is withheld rather
-    // than offered as a no-op.
-    await expect(banner.getByRole('button', {name: 'Reattach'})).toHaveCount(0);
+    // Recovery is based on the observed stream fault, not suppressed by the
+    // terminal chip. The click refreshes the snapshot and opens a fresh
+    // bootstrap, which this harness lets through.
+    const reattach = banner.getByRole('button', {name: 'Reattach'});
+    await expect(reattach).toBeVisible();
+    await reattach.click();
+    await expect(banner).toHaveCount(0);
+    await expect(page.getByText('15 folded events')).toBeVisible();
+    await expect(page.locator('.status')).toHaveText('completed');
   });
 });

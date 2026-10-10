@@ -109,11 +109,11 @@ describe('connectionBanners', () => {
     expect(connectionBanners(store.getState(), lostChannel).controls).toBeNull();
 
     // The stream banner crosses the same transition the other way: the gap it
-    // names outlives the run, and what changes is that it can no longer close.
+    // names outlives the run, and the explicit reload remains available.
     const staleStream = sessionState('stale', 'up');
     expect(connectionBanners(store.getState(), staleStream).stream).toEqual({
       message: GAP_FINAL,
-      reattach: false,
+      reattach: true,
     });
   });
 
@@ -171,13 +171,13 @@ describe('connectionBanners', () => {
    * The #1044 render: an ended run's stream fault is a different statement
    * from an ended run's control outage, which is why one banner survives the
    * run ending and the other does not. A transcript that stopped short stays
-   * wrong once the run is over, and nothing will close the gap, so the copy
-   * says so and the `Reattach` that would be a no-op is withheld. A command
-   * path nobody can reach stops costing the reader anything, so it goes silent.
+   * wrong once the run is over, so the copy says so and `Reattach` offers the
+   * session's explicit fresh-bootstrap recovery. A command path nobody can
+   * reach stops costing the reader anything, so it goes silent.
    */
-  test('keeps the stream banner on an ended run, as a gap that will not close', () => {
+  test('keeps the stream banner and reload affordance on an ended run', () => {
     expect(connectionBanners(runWith('completed'), sessionState('stale', 'up'))).toEqual({
-      stream: {message: GAP_FINAL, reattach: false},
+      stream: {message: GAP_FINAL, reattach: true},
       controls: null,
     });
     expect(connectionBanners(runWith('running'), sessionState('stale', 'up'))).toEqual({
@@ -187,7 +187,7 @@ describe('connectionBanners', () => {
     // The same ended run, with the control channel down instead of the stream:
     // the opposite verdict, from the same `hasRunEnded`.
     expect(connectionBanners(runWith('completed'), sessionState('stale', 'lost'))).toEqual({
-      stream: {message: GAP_FINAL, reattach: false},
+      stream: {message: GAP_FINAL, reattach: true},
       controls: null,
     });
   });
@@ -264,12 +264,16 @@ function checkCombination(
   });
   // The controls' does, and only while the run can still act on a reconnect.
   expect({...where, shown: banners.controls !== null}).toEqual({...where, shown: down && !ended});
-  // No affordance is offered for a run that cannot act on it. Both live inside
-  // the banner that explains them, so an orphaned button is unrepresentable.
-  expect({
+  // Stream recovery follows observed stream state rather than run status: a
+  // stale ended transcript can be reloaded, while controls remain irrelevant.
+  expect({...where, reattach: banners.stream?.reattach ?? false}).toEqual({
     ...where,
-    offeredOnEnded: ended && (banners.stream?.reattach === true || banners.controls !== null),
-  }).toEqual({...where, offeredOnEnded: false});
+    reattach: sessionStatus === 'stale',
+  });
+  expect({...where, endedControls: ended && banners.controls !== null}).toEqual({
+    ...where,
+    endedControls: false,
+  });
   if (banners.stream !== null) {
     // The copy names whether the gap can still close, which is what decides
     // the reader's options, and it never shows the transport's own string.
@@ -282,7 +286,7 @@ function checkCombination(
       leaked: false,
     });
     // `Reattach` is offered exactly when `WebSession.reattach` would act.
-    expect({...where, reattach: banners.stream.reattach}).toEqual({...where, reattach: !ended});
+    expect({...where, reattach: banners.stream.reattach}).toEqual({...where, reattach: true});
   }
   if (banners.controls === null) return;
   // The copy describes the failure the channel reported, says nothing this
