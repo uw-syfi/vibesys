@@ -42,12 +42,17 @@ function validScenario(id, decisions) {
   };
 }
 
+function runnerInventory(id, scenarios) {
+  return {id, description: `${id} runner`, groups: {steps: scenarios}};
+}
+
 async function writeTree(spec) {
   const root = await mkdtemp(join(tmpdir(), 'vibesys-corpus-'));
   await mkdir(join(root, 'clients', 'backend-client', 'src', 'generated'), {recursive: true});
   await mkdir(join(root, 'docs', 'contributing'), {recursive: true});
   await mkdir(join(root, 'tests', 'conformance', 'events'), {recursive: true});
   await mkdir(join(root, 'tests', 'conformance', 'scenarios'), {recursive: true});
+  await mkdir(join(root, 'tests', 'conformance', 'runners'), {recursive: true});
   await writeFile(
     join(root, 'clients', 'backend-client', 'src', 'generated', 'protocol.schema.json'),
     JSON.stringify(spec.schema ?? SCHEMA),
@@ -61,6 +66,11 @@ async function writeTree(spec) {
   }
   for (const [name, data] of Object.entries(spec.scenarios ?? {})) {
     await writeFile(join(root, 'tests', 'conformance', 'scenarios', name), JSON.stringify(data));
+  }
+  const scenarioIds = Object.keys(spec.scenarios ?? {}).map(name => name.replace(/\.json$/, ''));
+  const runners = spec.runners ?? {'server.json': runnerInventory('server', scenarioIds)};
+  for (const [name, data] of Object.entries(runners)) {
+    await writeFile(join(root, 'tests', 'conformance', 'runners', name), JSON.stringify(data));
   }
   return root;
 }
@@ -174,4 +184,90 @@ test('a scenario id that disagrees with its filename is rejected', async () => {
   });
   const errors = await corpusErrors(root);
   assert.ok(errors.some(error => error.includes('"id" must equal the filename stem')));
+});
+
+test('every scenario is either runner-executed or declares its required setup, exclusively', async () => {
+  const cases = [
+    {
+      executed: false,
+      declaresSetup: false,
+      expected: [
+        'scenarios/boot.json: scenario must be runner-executed or declare "required_setup"',
+      ],
+    },
+    {executed: false, declaresSetup: true, expected: []},
+    {executed: true, declaresSetup: false, expected: []},
+    {
+      executed: true,
+      declaresSetup: true,
+      expected: ['scenarios/boot.json: runner-executed scenario must not declare "required_setup"'],
+    },
+  ];
+  for (const {executed, declaresSetup, expected} of cases) {
+    const scenario = validScenario('boot', ['WP-ALPHA', 'WP-BETA']);
+    if (declaresSetup) scenario.required_setup = ['subscription-redial'];
+    const root = await writeTree({
+      events: fullEvents(),
+      scenarios: {'boot.json': scenario},
+      runners: executed ? {'server.json': runnerInventory('server', ['boot'])} : {},
+    });
+    const errors = await corpusErrors(root);
+    const partitionErrors = errors.filter(
+      error => error.includes('runner') || error.includes('required_setup'),
+    );
+    assert.deepEqual(
+      partitionErrors,
+      expected,
+      `executed=${executed}, declaresSetup=${declaresSetup}`,
+    );
+  }
+});
+
+test('required setup names are non-empty capability tokens', async () => {
+  const scenario = validScenario('boot', ['WP-ALPHA', 'WP-BETA']);
+  scenario.required_setup = ['subscription-redial', 'not a token', 'subscription-redial'];
+  const root = await writeTree({
+    events: fullEvents(),
+    scenarios: {'boot.json': scenario},
+    runners: {},
+  });
+  const errors = await corpusErrors(root);
+  assert.ok(
+    errors.some(error => error.includes('must contain unique kebab-case capability names')),
+  );
+});
+
+test('a runner cannot register a scenario the corpus does not contain', async () => {
+  const scenario = validScenario('boot', ['WP-ALPHA', 'WP-BETA']);
+  const root = await writeTree({
+    events: fullEvents(),
+    scenarios: {'boot.json': scenario},
+    runners: {'server.json': runnerInventory('server', ['boot', 'missing'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.ok(errors.some(error => error.includes('unknown scenario "missing"')));
+});
+
+test('runner inventories reject empty metadata, groups, and duplicate registration', async () => {
+  const scenario = validScenario('boot', ['WP-ALPHA', 'WP-BETA']);
+  const root = await writeTree({
+    events: fullEvents(),
+    scenarios: {'boot.json': scenario},
+    runners: {
+      'server.json': {
+        id: 'server',
+        description: '',
+        extra: true,
+        groups: {first: ['boot'], second: ['boot'], 'bad group': []},
+      },
+    },
+  });
+  const errors = await corpusErrors(root);
+  assert.ok(errors.some(error => error.includes('"description" must be a non-empty string')));
+  assert.ok(errors.some(error => error.includes('unknown runner field "extra"')));
+  assert.ok(errors.some(error => error.includes('registered in more than one group')));
+  assert.ok(errors.some(error => error.includes('group name "bad group" must be kebab-case')));
+  assert.ok(
+    errors.some(error => error.includes('group "bad group" must be a non-empty scenario array')),
+  );
 });

@@ -12,6 +12,9 @@
     "WP-SUBSCRIBE-ACK",
     "WP-DISCONNECT"
   ],
+  "required_setup": [
+    "replay-failure-injection"
+  ],
   "steps": [
     {
       "dir": "c2s",

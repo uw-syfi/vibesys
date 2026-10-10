@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from websockets.typing import Origin
 
 _SCENARIOS = Path(__file__).parent / "scenarios"
+_RUNNER = Path(__file__).parent / "runners" / "server.json"
 _HISTORY_EVENTS = 100
 # A burst large enough that one batch per event would be unmistakable, split
 # into chunks so the coalescing bound is a ratio rather than a timing guess.
@@ -100,6 +101,12 @@ def _scenario(name: str) -> dict[str, Any]:
     return cast("dict[str, Any]", json.loads((_SCENARIOS / f"{name}.json").read_text()))
 
 
+def _runner_group(name: str) -> tuple[str, ...]:
+    """Return the scenario ids this runner executes through one setup path."""
+    inventory = cast("dict[str, Any]", json.loads(_RUNNER.read_text()))
+    return tuple(cast("list[str]", inventory["groups"][name]))
+
+
 def _parts_with_history(tmp_path: Path) -> ServerParts:
     parts = build_server_parts(tmp_path / "logs")
     for index in range(_HISTORY_EVENTS):
@@ -152,7 +159,7 @@ def _running_connection(
             connection.close()
 
 
-@pytest.mark.parametrize("scenario_name", ["full-replay-bootstrap", "tail-bootstrap-spine-prepend"])
+@pytest.mark.parametrize("scenario_name", _runner_group("bootstrap"))
 @pytest.mark.parametrize("transport", ["unix", "websocket"])
 def test_shared_bootstrap_scenarios_run_against_each_transport(
     tmp_path: Path,
@@ -175,14 +182,16 @@ def test_shared_bootstrap_scenarios_run_against_each_transport(
         parts.close()
 
 
+@pytest.mark.parametrize("scenario_name", _runner_group("tail-overflow"))
 @pytest.mark.parametrize("transport", ["unix", "websocket"])
 def test_tail_overflow_rebootstrap_scenario_marks_only_the_second_bootstrap(
     tmp_path: Path,
     socket_dir: Path,
+    scenario_name: str,
     transport: str,
 ) -> None:
     """Exercise the corpus's dynamic tail-overflow setup against both servers."""
-    scenario = _scenario("tail-overflow-rebootstrap")
+    scenario = _scenario(scenario_name)
     assert transport in scenario["transports"]
     parts = build_server_parts(tmp_path / "logs")
     try:
@@ -217,11 +226,6 @@ def _carries_a_chat_result(reply: Mapping[str, Any]) -> None:
 # Response scenarios exercised against every transport they declare. The
 # scenario steps carry the shared assertions; callbacks add checks that are
 # specific to server-side state or behavior outside the wire contract.
-_CONTROL_PATH_SCENARIOS = (
-    "heartbeat-probe",
-    "command-ack-roundtrip",
-    "chat-dedicated-connection",
-)
 _CONTROL_PATH_CALLBACKS = {
     "command-ack-roundtrip": _acknowledges_the_command,
     "chat-dedicated-connection": _carries_a_chat_result,
@@ -230,7 +234,7 @@ _CONTROL_PATH_CALLBACKS = {
 
 @pytest.mark.parametrize(
     ("scenario_name", "transport"),
-    _declared_runs(_CONTROL_PATH_SCENARIOS),
+    _declared_runs(_runner_group("control")),
 )
 def test_control_path_scenarios_run_against_each_declared_transport(
     tmp_path: Path,
@@ -332,11 +336,13 @@ def _disconnect_waiter(tracker: SubscriptionTracker) -> tuple[threading.Thread, 
     return threading.Thread(target=wait_for_disconnect, daemon=True), settled
 
 
+@pytest.mark.parametrize("scenario_name", _runner_group("dual-client"))
 def test_dual_transport_subscriptions_have_independent_floors_and_teardown(
     tmp_path: Path,
     socket_dir: Path,
+    scenario_name: str,
 ) -> None:
-    scenario = _scenario("dual-transport-independent-subscriptions")
+    scenario = _scenario(scenario_name)
     parts = _parts_with_history(tmp_path)
     settle = FakeSettleWindow()
     tracker = SubscriptionTracker(settle)

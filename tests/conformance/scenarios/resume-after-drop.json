@@ -12,6 +12,9 @@
     "WP-SUBSCRIBE-ACK",
     "WP-ROLES"
   ],
+  "required_setup": [
+    "subscription-reconnect"
+  ],
   "steps": [
     {
       "dir": "c2s",

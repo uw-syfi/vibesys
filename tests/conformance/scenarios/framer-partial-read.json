@@ -10,6 +10,9 @@
     "WP-FRAMER",
     "WP-NEWLINE"
   ],
+  "required_setup": [
+    "partial-read-boundary"
+  ],
   "steps": [
     {
       "dir": "c2s",

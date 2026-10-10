@@ -11,6 +11,9 @@
     "WP-REBOOTSTRAP",
     "WP-SUBSCRIBE-ACK"
   ],
+  "required_setup": [
+    "durable-store-swap"
+  ],
   "steps": [
     {
       "dir": "c2s",
