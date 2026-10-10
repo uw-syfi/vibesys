@@ -155,7 +155,7 @@ def start_thread[T](target: Callable[[], T]) -> concurrent.futures.Future[T]:
             return
         try:
             future.set_result(target())
-        except BaseException as error:  # noqa: BLE001 - relayed to the waiter through the future
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-159901 [BLE001]; relayed to the waiter through the future.
             future.set_exception(error)
 
     threading.Thread(target=run, daemon=True).start()
