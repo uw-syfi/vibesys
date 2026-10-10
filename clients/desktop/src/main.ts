@@ -62,6 +62,7 @@ import {
 import {type InstanceRecord, versionSkewMessage} from './instances.js';
 import {type LaunchPlan, parseLaunch} from './launch-args.js';
 import {isAllowedRequest, isAppUrl, type LaunchTarget, originOf} from './launch-url.js';
+import {QuitGate} from './quit-gate.js';
 import {recentStatus} from './recent.js';
 import {type RelayPort, relay} from './relay.js';
 import {shellWords} from './shell-words.js';
@@ -762,16 +763,14 @@ function runBundled(plan: Exclude<LaunchPlan, {kind: 'gateway'}>): void {
     {scheme: APP_SCHEME, privileges: {standard: true, secure: true}},
   ]);
   let desktop: DesktopApp | null = null;
-  let released = false;
-  app.on('will-quit', event => {
-    if (released || desktop === null) return;
-    event.preventDefault();
+  const quit = new QuitGate({
     // Runs are detached and keep going; quitting ends this app's streams and SSH masters only.
-    void desktop.pool.closeAll().finally(() => {
-      released = true;
-      app.quit();
-    });
+    release: async () => {
+      await desktop?.pool.closeAll();
+    },
+    exit: code => app.exit(code),
   });
+  app.on('will-quit', event => quit.willQuit(event));
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => app.quit());
   app.on('web-contents-created', (_event, contents) => guard(contents, isAppPage));
   app.on('window-all-closed', () => app.quit());
@@ -801,8 +800,7 @@ function runBundled(plan: Exclude<LaunchPlan, {kind: 'gateway'}>): void {
       await openPlan(desktop, plan);
     } catch (error) {
       log((error as Error).message);
-      released = true;
-      void desktop.pool.closeAll().finally(() => app.exit(1));
+      void quit.exit(1);
     }
   });
 }
