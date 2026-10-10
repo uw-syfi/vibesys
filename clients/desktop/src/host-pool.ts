@@ -42,6 +42,8 @@ export function hostKey(id: HostId): HostKey {
 export class HostPool {
   readonly #options: HostPoolOptions;
   readonly #hosts = new Map<HostKey, Host>();
+  /** Hosts replaced by a settings change, still serving the windows attached through them. */
+  readonly #retired: Host[] = [];
 
   constructor(options: HostPoolOptions) {
     this.#options = options;
@@ -131,7 +133,10 @@ export class HostPool {
     );
   }
 
-  /** Save `alias`'s vibesys command and drop its host, so the next use runs the new command. */
+  /**
+   * Save `alias`'s vibesys command. The next use of the host runs the new command; windows already
+   * attached keep their host (and its streams) until the app quits.
+   */
   async saveCommand(alias: string, command: unknown): Promise<void> {
     const vibesysCommand = validCommand(command, `the vibesys command for ${alias}`);
     const current = await this.#settings();
@@ -143,11 +148,11 @@ export class HostPool {
     const key = hostKey({kind: 'ssh', alias});
     const host = this.#hosts.get(key);
     this.#hosts.delete(key);
-    await host?.close();
+    if (host !== undefined) this.#retired.push(host);
   }
 
   async closeAll(): Promise<void> {
-    const hosts = [...this.#hosts.values()];
+    const hosts = [...this.#hosts.values(), ...this.#retired.splice(0)];
     this.#hosts.clear();
     await Promise.all(hosts.map(host => host.close()));
   }
