@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -160,7 +161,113 @@ def test_web_port_and_asset_parsers_cover_invalid_and_explicit_values(tmp_path: 
     with pytest.raises(ValueError, match="must be an integer"):
         _web_port_from_argv(["--web-port", "not-a-port"])
     asset_dir = tmp_path / "dist"
-    assert _web_assets_from_argv(["--web-assets", str(asset_dir)]) == asset_dir.resolve()
+    bundle = _web_assets_from_argv(["--web-assets", str(asset_dir)])
+    assert bundle is not None
+    assert bundle.directory == asset_dir.resolve()
+    assert bundle.build_id.startswith("sha256:")
+
+
+def _write_web_build_manifest(assets: Path, workspace: Path, source: Path) -> None:
+    source_file = source / "entry.ts"
+    asset_file = assets / "index.html"
+    asset_file.write_text("<!doctype html>\n", encoding="utf-8")
+    digest = hashlib.sha256(source_file.read_bytes()).hexdigest()
+    asset_digest = hashlib.sha256(asset_file.read_bytes()).hexdigest()
+    manifest = {
+        "version": 1,
+        "build_id": f"sha256:{'1' * 64}",
+        "workspace": os.path.relpath(workspace, assets),
+        "sources": [
+            {
+                "path": source.relative_to(workspace).as_posix(),
+                "files": {"entry.ts": digest},
+            }
+        ],
+        "assets": {"index.html": asset_digest},
+    }
+    (assets / ".vibesys-web-build.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def _asset_validation_arguments(tmp_path: Path, assets: Path) -> list[str]:
+    return [
+        "--web",
+        "--web-instance",
+        str(tmp_path / "web-gateway.json"),
+        "--control-socket",
+        str(tmp_path / "control.sock"),
+        "--web-assets",
+        str(assets),
+        "--zz-after-assets",
+    ]
+
+
+def test_web_gateway_rejects_a_manifest_after_its_source_changes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workspace = tmp_path / "workspace"
+    assets = workspace / "clients" / "web" / "dist"
+    source = workspace / "clients" / "web" / "src"
+    assets.mkdir(parents=True)
+    source.mkdir(parents=True)
+    source_file = source / "entry.ts"
+    source_file.write_text("export const version = 1;\n", encoding="utf-8")
+    _write_web_build_manifest(assets, workspace, source)
+    source_file.write_text("export const version = 2;\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(_asset_validation_arguments(tmp_path, assets))
+
+    diagnostic = capsys.readouterr().err
+    assert exit_info.value.code == 2
+    assert f"web assets {assets} are stale" in diagnostic
+    assert str(source_file) in diagnostic
+    assert "pnpm --dir clients/web build" in diagnostic
+    assert not (tmp_path / "web-gateway.json").exists()
+
+
+def test_web_gateway_accepts_a_manifest_that_matches_its_sources(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workspace = tmp_path / "workspace"
+    assets = workspace / "clients" / "web" / "dist"
+    source = workspace / "clients" / "web" / "src"
+    assets.mkdir(parents=True)
+    source.mkdir(parents=True)
+    (source / "entry.ts").write_text("export const version = 1;\n", encoding="utf-8")
+    _write_web_build_manifest(assets, workspace, source)
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(_asset_validation_arguments(tmp_path, assets))
+
+    diagnostic = capsys.readouterr().err
+    assert exit_info.value.code == 2
+    assert "unrecognized arguments: --zz-after-assets" in diagnostic
+    assert "stale" not in diagnostic
+
+
+def test_web_gateway_rejects_assets_that_do_not_match_their_build_id(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workspace = tmp_path / "workspace"
+    assets = workspace / "clients" / "web" / "dist"
+    source = workspace / "clients" / "web" / "src"
+    assets.mkdir(parents=True)
+    source.mkdir(parents=True)
+    (source / "entry.ts").write_text("export const version = 1;\n", encoding="utf-8")
+    _write_web_build_manifest(assets, workspace, source)
+    (assets / "index.html").write_text("corrupted\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(_asset_validation_arguments(tmp_path, assets))
+
+    diagnostic = capsys.readouterr().err
+    assert exit_info.value.code == 2
+    assert f"web assets {assets} do not match build" in diagnostic
+    assert str(assets / "index.html") in diagnostic
+    assert "pnpm --dir clients/web build" in diagnostic
 
 
 def test_web_reopen_accepts_a_log_directory_or_run_events_file(tmp_path: Path) -> None:
@@ -246,6 +353,11 @@ def test_second_web_launch_reuses_live_instance(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+    assets = tmp_path / "dist"
+    assets.mkdir()
+    (assets / "index.html").write_text("<!doctype html>\n", encoding="utf-8")
+    bundle = _web_assets_from_argv(["--web-assets", str(assets)])
+    assert bundle is not None
     record = WebInstanceRecord(
         pid=123,
         port=43_211,
@@ -253,6 +365,7 @@ def test_second_web_launch_reuses_live_instance(
         url="http://127.0.0.1:43211/?token=capability",
         project_root=str(tmp_path),
         started_at=1.0,
+        web_build_id=bundle.build_id,
     )
     opened: list[str] = []
     # test-isolation: inject the discovered live gateway to exercise reuse without a real launcher
@@ -262,7 +375,15 @@ def test_second_web_launch_reuses_live_instance(
         server_entrypoint.webbrowser, "open", lambda url, **_kwargs: opened.append(url)
     )
 
-    main(["--web", "--web-instance", str(instance_path)])
+    main(
+        [
+            "--web",
+            "--web-instance",
+            str(instance_path),
+            "--web-assets",
+            str(assets),
+        ]
+    )
 
     assert capsys.readouterr().out == f"VibeSys web UI: {record.url}\n"
     assert opened == [record.url]

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from entrypoints import cli
+from entrypoints.web_assets import WebAssetBundle
 from launch import default_runs
 from server.runtime import (
     WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
@@ -114,13 +115,17 @@ def _web_port_from_argv(argv: list[str]) -> int:
     return port
 
 
-def _web_assets_from_argv(argv: list[str]) -> Path | None:
+def _web_assets_from_argv(argv: list[str]) -> WebAssetBundle | None:
     value = cli._option_from_argv(argv, "--web-assets")  # noqa: SLF001  # lint-waiver: LW-101004 [SLF001]; reuse the CLI's private option scanner before full argument parsing
     if value is not None:
-        return Path(value).expanduser().resolve()
+        return WebAssetBundle.from_directory(Path(value), require_manifest=False)
     source_root = Path(__file__).resolve().parents[2]
     candidate = source_root / "clients" / "web" / "dist"
-    return candidate if candidate.is_dir() else None
+    return (
+        WebAssetBundle.from_directory(candidate, require_manifest=True)
+        if candidate.is_dir()
+        else None
+    )
 
 
 def _web_origins_from_argv(argv: list[str]) -> tuple[str, ...]:
@@ -752,12 +757,31 @@ def _serve(arguments: list[str]) -> None:  # noqa: C901, PLR0912, PLR0915  # lin
             code="invalid_arguments",
             stage="argument_parsing",
         )
+    try:
+        # Resolve the browser artifact before reusing or spawning a gateway.
+        # A detached parent otherwise bypasses the child's validation when an
+        # old instance is already running and silently reports its URL.
+        web_bundle = _web_assets_from_argv(arguments) if web else None
+    except ValueError as exc:
+        cli.configuration_error(
+            str(exc),
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
     instance_path = _web_instance_from_argv(arguments) if web else None
     if web and os.environ.get("VIBESYS_DETACHED_CHILD") != "1":
         if instance_path is None:  # pragma: no cover - web always supplies a path.
             raise RuntimeError("Web instance path was not resolved")  # noqa: TRY003  # lint-waiver: LW-101038 [TRY003]; guard an impossible parser/launcher invariant
         existing = _discover_web_instance(instance_path)
         if existing is not None:
+            if web_bundle is not None and existing.web_build_id != web_bundle.build_id:
+                cli.configuration_error(
+                    f"running gateway {instance_path} records web build "
+                    f"{existing.web_build_id or 'unknown'}, but {web_bundle.directory} is now "
+                    f"{web_bundle.build_id}; stop that gateway and retry",
+                    code="invalid_arguments",
+                    stage="argument_parsing",
+                )
             print(f"VibeSys web UI: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101039 [T201]; expose the reused capability URL to the launcher user
             webbrowser.open(existing.url, new=2)
             return
@@ -778,7 +802,6 @@ def _serve(arguments: list[str]) -> None:  # noqa: C901, PLR0912, PLR0915  # lin
     # every rejected invocation remains free of resources that need cleanup.
     try:
         web_port = _web_port_from_argv(arguments)
-        web_assets = _web_assets_from_argv(arguments)
         web_origins = _web_origins_from_argv(arguments)
         read_only_log = _read_only_log_from_argv(arguments)
     except ValueError as exc:
@@ -800,7 +823,8 @@ def _serve(arguments: list[str]) -> None:  # noqa: C901, PLR0912, PLR0915  # lin
                 tui_defaults=_tui_defaults_from_argv(arguments),
                 web=True,
                 web_port=web_port,
-                web_assets=web_assets,
+                web_assets=web_bundle.directory if web_bundle is not None else None,
+                web_build_id=web_bundle.build_id if web_bundle is not None else None,
                 web_origins=web_origins,
                 instance_path=instance_path,
                 detach=detach,

@@ -55,6 +55,7 @@ def _record() -> web.WebInstanceRecord:
         url=f"http://127.0.0.1:8765/?token={token}",
         project_root="project-root",
         started_at=0.0,
+        web_build_id=f"sha256:{'1' * 64}",
     )
 
 
@@ -135,6 +136,18 @@ def test_parser_builds_each_browser_workflow() -> None:
         _parser().parse_args(["status"])
     with pytest.raises(SystemExit):
         _parser().parse_args(["stop", "--instance", "record.json", "--port", "8765"])
+
+
+def test_live_help_states_that_no_build_still_checks_freshness(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        web.main(["live", "--help"])
+
+    assert exit_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "reuse the last verified clients/web build" in help_text
+    assert "rejects it if the workspace sources have changed" in help_text
 
 
 def test_tool_lookup_reports_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -240,6 +253,7 @@ def test_run_live_launches_gateway_and_prints_browser_links(
     assert calls[0][0][0] == ["pnpm", "build"]
     assert calls[1][0][0] == ["gateway"]
     output = capsys.readouterr().out
+    assert f"Web build: sha256:{'1' * 64}" in output
     assert "SSH tunnel:" in output
     assert "Browser harness URL:" in output
 
@@ -464,7 +478,9 @@ def test_status_reports_gateway_lifecycle(
     # test-isolation: only a live health endpoint settles what status reports.
     monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
     assert _run_status(argparse.Namespace(instance=instance)) == 0
-    assert "VibeSys web UI:" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "VibeSys web UI:" in output
+    assert f"Web build: sha256:{'1' * 64}" in output
 
 
 def test_port_status_identifies_a_gateway_without_reading_its_record(
