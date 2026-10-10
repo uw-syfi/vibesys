@@ -85,7 +85,7 @@ export type CampaignFrame =
     }
   | {readonly kind: 'status'; readonly seq: number; readonly status: 'active' | 'completed'};
 
-export type CampaignFrameKind = CampaignFrame['kind'];
+type CampaignFrameKind = CampaignFrame['kind'];
 
 const FRAME_KINDS: readonly CampaignFrameKind[] = [
   'campaign-init',

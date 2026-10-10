@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
-import {loadReplayScenario, parseReplayScenario, type CampaignRecord} from './replay-scenario.js';
+import {type CampaignRecord, loadReplayScenario, parseReplayScenario} from './replay-scenario.js';
 
 const fixturePath = resolve(import.meta.dir, '../dev/fixtures/trajectory-replay.json');
 const fixture = JSON.parse(readFileSync(fixturePath, 'utf8')) as unknown;
