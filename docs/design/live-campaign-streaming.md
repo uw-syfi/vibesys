@@ -740,15 +740,6 @@ seven fields (`operation_kind`, `operation_id`, `state`, `revision`, `scope_id`,
   forward-compatibility claim: a kind the client does not project is not a
   kind the client fails to compile on.
 
-An unplanned fix surfaced along the way: the wire schema generator
-(`server/api/schema.py`) only allows a fixed JSON-schema keyword whitelist,
-and rejected `operation_id`'s `Field(min_length=1)` the first time
-`generate:protocol` ran. No existing wire payload uses `min_length`; the wire
-side keeps `operation_id: str` unconstrained while the core payload keeps the
-stricter `Field(min_length=1)`, since core and wire are allowed to diverge in
-strictness (core validates what orchestration code must guarantee; wire
-validates what the schema generator supports today).
-
 One more fact this PoC confirms, relevant to "Scalable packaging design"'s
 correlation bullet: async-operation-lifecycle events carry no
 `agent_kind`/`round_label`/`execution_id` at all (`run/host.py` emits them

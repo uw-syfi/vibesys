@@ -491,11 +491,7 @@ class AsyncOperationLifecycleData(EventPayload):
 
     kind: Literal["async_operation_lifecycle"] = "async_operation_lifecycle"
     operation_kind: AsyncOperationKind
-    # Plain `str`, not `Field(min_length=1)` as the core payload declares it:
-    # the wire schema generator's supported keyword set
-    # (`_RESPONSE_DESCRIPTOR_KEYWORDS` in `server.api.schema`) has no
-    # `minLength`, and core already enforces non-emptiness at the source.
-    operation_id: str
+    operation_id: str = Field(min_length=1)
     state: AsyncOperationState
     revision: int | None = Field(default=None, ge=0)
     scope_id: str | None = None
