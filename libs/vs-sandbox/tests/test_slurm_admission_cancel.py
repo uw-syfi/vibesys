@@ -14,6 +14,7 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.started_operation import wait_until_executor_started
 
 from vs_evaluation.api import (
     EvaluationRequest,
@@ -111,7 +112,7 @@ async def _cancel_while_waiting_for_admission(
 ) -> None:
     """Fill the one admission slot, queue a second evaluation behind it, and cancel that one."""
     await executor.submit(_request("holder"), handle_id=_HOLDER)
-    await asyncio.to_thread(cluster.holder_accepted.wait)
+    await wait_until_executor_started(cluster.holder_accepted, executor, _HOLDER)
     await executor.submit(_request("waiter"), handle_id=_WAITER)
     # The waiter's task reaches the admission queue within a few loop turns.
     for _ in range(100):
@@ -174,7 +175,7 @@ async def test_closing_the_executor_ends_an_evaluation_still_awaiting_admission(
     cluster = _QueuedCluster()
     executor = _executor(tmp_path, cluster)
     await executor.submit(_request("holder"), handle_id=_HOLDER)
-    await asyncio.to_thread(cluster.holder_accepted.wait)
+    await wait_until_executor_started(cluster.holder_accepted, executor, _HOLDER)
     await executor.submit(_request("waiter"), handle_id=_WAITER)
     for _ in range(100):
         if (await executor.availability(ResourceRequirements())).queue_depth == 1:

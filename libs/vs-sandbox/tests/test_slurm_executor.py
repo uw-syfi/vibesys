@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.support.started_operation import wait_until_started
+from tests.support.started_operation import wait_until_executor_started, wait_until_started
 
 import vs_evaluation.api.testing as evaluation_testing
 from vs_evaluation.api import (
@@ -951,7 +951,7 @@ async def test_executor_recovers_deadline_persisted_before_interrupted_wait(
     )
     try:
         await first.submit(_request(), handle_id="eval-crash-during-wait")
-        await asyncio.to_thread(runner.wait_started.wait)
+        await wait_until_executor_started(runner.wait_started, first, "eval-crash-during-wait")
         await first.close()
 
         clock.advance(11)
@@ -989,7 +989,7 @@ async def test_executor_close_cancels_and_drains_background_execution(tmp_path: 
     )
     try:
         await executor.submit(_request(), handle_id="eval-close")
-        await asyncio.to_thread(runner.wait_started.wait)
+        await wait_until_executor_started(runner.wait_started, executor, "eval-close")
 
         await executor.close()
 
@@ -1025,7 +1025,7 @@ async def test_cancelling_the_execution_task_cancels_the_submitted_slurm_job(
     )
     try:
         await executor.submit(_request(), handle_id="eval-interrupted")
-        await asyncio.to_thread(runner.wait_started.wait)
+        await wait_until_executor_started(runner.wait_started, executor, "eval-interrupted")
 
         # What asyncio.run does to leftover tasks on a hard interrupt: cancel them
         # directly, without going through the executor's own cancel().
@@ -1062,7 +1062,7 @@ async def test_a_cancelled_cancel_still_finishes_the_scancel_before_it_returns(
     )
     try:
         await executor.submit(_request(), handle_id="eval-double-cancel")
-        await asyncio.to_thread(runner.wait_started.wait)
+        await wait_until_executor_started(runner.wait_started, executor, "eval-double-cancel")
         canceller = asyncio.create_task(executor.cancel("eval-double-cancel"))
         await wait_until_started(runner.scancel_entered, canceller)
 
@@ -1102,7 +1102,7 @@ async def test_a_failed_scancel_does_not_stop_the_cancellation_from_finishing(
     )
     try:
         await executor.submit(_request(), handle_id="eval-unreachable")
-        await asyncio.to_thread(runner.wait_started.wait)
+        await wait_until_executor_started(runner.wait_started, executor, "eval-unreachable")
         executions = [
             task for task in asyncio.all_tasks() if task.get_name().startswith("vibesys-slurm-")
         ]
@@ -1157,7 +1157,7 @@ async def test_scancel_acknowledgement_does_not_complete_release_or_suppress_ret
     )
     try:
         await executor.submit(_request(), handle_id="eval-pending-cancel")
-        await asyncio.to_thread(runner.wait_started.wait)
+        await wait_until_executor_started(runner.wait_started, executor, "eval-pending-cancel")
         await executor.cancel("eval-pending-cancel")
         observed = await executor.inspect("eval-pending-cancel")
         assert observed is not None
@@ -1213,7 +1213,7 @@ async def test_missing_external_identity_keeps_dispatched_cancellation_unresolve
     store = evaluation_testing.InMemoryEvaluationStore()
     coordinator = EvaluationCoordinator(executor, store, FakeClock())
     handle = await coordinator.submit(_request())
-    await asyncio.to_thread(runner.accepted.wait)
+    await wait_until_executor_started(runner.accepted, executor, handle.id)
     with pytest.raises(ExecutorCancellationUnknownError, match="unknown external identity"):
         await handle.cancel()
     record = await store.get(handle.id)
@@ -1310,7 +1310,7 @@ async def test_cancellation_during_rejected_staging_preserves_definite_failure(
     )
     try:
         await executor.submit(_request(), handle_id="staging-cancel")
-        await asyncio.to_thread(runner.staging_started.wait)
+        await wait_until_executor_started(runner.staging_started, executor, "staging-cancel")
         # cancel() dispatches cancellation before yielding to drain acceptance;
         # release the synchronous staging operation at that yield, without time.
         asyncio.get_running_loop().call_soon(runner.release_staging.set)
@@ -1541,7 +1541,7 @@ async def test_conflicting_executor_cannot_cancel_or_recover_another_payload(
     )
     try:
         await owner.submit(request, handle_id=operation_id)
-        await asyncio.to_thread(accepted.wait)
+        await wait_until_executor_started(accepted, owner, operation_id)
         await conflicting.submit(changed, handle_id=operation_id)
         observed = await _terminal(conflicting, operation_id)
         assert observed.state is EvaluationState.FAILED
@@ -1623,7 +1623,7 @@ async def test_read_only_pending_scheduler_does_not_regress_active_evaluation(
         executor, FilesystemEvaluationStore(tmp_path / "records"), FakeClock()
     )
     handle = await coordinator.submit(_request())
-    await asyncio.to_thread(runner.wait_started.wait)
+    await wait_until_executor_started(runner.wait_started, executor, handle.id)
     active = await coordinator.snapshot(handle.id)
     assert active.state is EvaluationState.RUNNING
     runner.script(handle.id, states=(SlurmJobStatus.PENDING,))

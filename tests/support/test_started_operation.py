@@ -9,7 +9,10 @@ from enum import StrEnum
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.started_operation import wait_until_started
+from tests.support.started_operation import wait_until_executor_started, wait_until_started
+
+from vs_evaluation.api import EvaluationState
+from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor
 
 
 class _Ending(StrEnum):
@@ -77,3 +80,55 @@ def test_an_asyncio_event_wait_ends_when_the_operation_ends_first() -> None:
             await wait_until_started(started, task)
 
     asyncio.run(scenario())
+
+
+_ENDED = (
+    EvaluationState.SUCCEEDED,
+    EvaluationState.FAILED,
+    EvaluationState.CANCELED,
+    EvaluationState.SUPERSEDED,
+)
+_LIVE = (
+    EvaluationState.QUEUED,
+    EvaluationState.STARTING,
+    EvaluationState.RUNNING,
+    EvaluationState.CANCELING,
+)
+
+
+def _executor_run(state: EvaluationState, *, yields: int, starts: bool) -> None:
+    async def scenario() -> None:
+        executor = FakeEvaluationExecutor(FakeClock(), advance_clock_on_timeout=False)
+        started = threading.Event()
+        if starts:
+            started.set()
+
+        async def evaluation_moves_on() -> None:
+            for _ in range(yields):
+                await asyncio.sleep(0)
+            executor.set_state(
+                "h", state, failure="failed" if state is EvaluationState.FAILED else None
+            )
+
+        mover = asyncio.ensure_future(evaluation_moves_on())
+        try:
+            await wait_until_executor_started(started, executor, "h")
+        finally:
+            await mover
+
+    asyncio.run(scenario())
+
+
+@given(state=st.sampled_from(_ENDED), yields=st.integers(min_value=0, max_value=5))
+def test_an_evaluation_that_ends_before_its_step_starts_fails_the_wait(
+    state: EvaluationState, yields: int
+) -> None:
+    with pytest.raises(AssertionError, match="without reaching its held step"):
+        _executor_run(state, yields=yields, starts=False)
+
+
+@given(state=st.sampled_from(_LIVE), yields=st.integers(min_value=0, max_value=5))
+def test_a_started_step_returns_while_the_evaluation_stays_live(
+    state: EvaluationState, yields: int
+) -> None:
+    _executor_run(state, yields=yields, starts=True)

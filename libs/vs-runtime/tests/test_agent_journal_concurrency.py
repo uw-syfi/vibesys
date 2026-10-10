@@ -39,7 +39,7 @@ class _JournalSaveGate(FakeAgentInvocationStore):
         self.saving_unknown = Event()
         self.release = Event()
         self.initial_thread: int | None = None
-        self.initial_access: SimpleQueue[Literal["transaction", "read"]] = SimpleQueue()
+        self.initial_access: SimpleQueue[Literal["transaction", "read", "ended"]] = SimpleQueue()
 
     def load_optional(self) -> AgentInvocationState | None:
         if get_ident() == self.initial_thread:
@@ -108,6 +108,8 @@ def test_concurrent_initial_and_unknown_resume_preserve_both_journal_entries(
             await wait_until_started(store.saving_unknown, resume)
             with ThreadPoolExecutor(max_workers=1) as workers:
                 initial = workers.submit(_initial_turn, two, store)
+                # The turn ending without reporting its access still releases the read below.
+                initial.add_done_callback(lambda _done: store.initial_access.put("ended"))
                 access = await asyncio.to_thread(store.initial_access.get)
                 if access == "transaction":
                     store.release.set()

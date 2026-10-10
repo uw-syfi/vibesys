@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
+from tests.support.started_operation import wait_until_executor_started
 
 import vs_evaluation.api.testing as evaluation_testing
 from vs_evaluation.api import (
@@ -399,7 +400,7 @@ async def _stopped_after(spec: _WorldSpec, delay_s: float) -> None:
         world = spec.build(Path(raw))
         executor, coordinator, idle, release = _after_submitter_idles(world)
         handle = await coordinator.submit(_request())
-        await asyncio.to_thread(idle.wait)
+        await wait_until_executor_started(idle, executor, handle.id)
         try:
             world.clock.advance(delay_s)
             record = await coordinator.cancel(handle.id)
@@ -474,7 +475,7 @@ async def test_a_stop_beyond_the_confirmation_bound_is_canceling_and_later_confi
     world = spec.build(tmp_path)
     executor, coordinator, idle, release = _after_submitter_idles(world)
     handle = await coordinator.submit(_request())
-    await asyncio.to_thread(idle.wait)
+    await wait_until_executor_started(idle, executor, handle.id)
     try:
         record = await coordinator.cancel(handle.id)
         assert record.state is EvaluationState.CANCELING
@@ -496,7 +497,7 @@ async def _finish_time(spec: _WorldSpec) -> tuple[float, float]:
         world = spec.build(Path(raw))
         executor, coordinator = _stack(world)
         handle = await coordinator.submit(_request())
-        await asyncio.to_thread(world.cluster.accepted.wait)
+        await wait_until_executor_started(world.cluster.accepted, executor, handle.id)
         submitted_at = world.clock.now()
         for _ in range(10_000):
             record = await coordinator.snapshot(handle.id)
@@ -536,7 +537,7 @@ async def _stages_reported_while_running(spec: _WorldSpec) -> list[str]:
 
         submitter, coordinator = _stack(world, pause=park)
         handle = await coordinator.submit(_request())
-        await asyncio.to_thread(world.cluster.accepted.wait)
+        await wait_until_executor_started(world.cluster.accepted, submitter, handle.id)
         reader = _executor(world)
         seen: list[str] = []
         try:
@@ -584,7 +585,7 @@ async def _poll_with_dropped_command(spec: _WorldSpec, delay_s: float, position:
         assert world.faults is not None
         submitter, coordinator, idle, release = _after_submitter_idles(world)
         handle = await coordinator.submit(_request())
-        await asyncio.to_thread(idle.wait)
+        await wait_until_executor_started(idle, submitter, handle.id)
         reader = _executor(world)
         try:
             world.clock.advance(delay_s)
@@ -629,7 +630,7 @@ async def _cancel_with_dropped_command(spec: _WorldSpec, delay_s: float, positio
         assert world.faults is not None
         executor, coordinator, idle, release = _after_submitter_idles(world)
         handle = await coordinator.submit(_request())
-        await asyncio.to_thread(idle.wait)
+        await wait_until_executor_started(idle, executor, handle.id)
         try:
             world.clock.advance(delay_s)
             world.faults.drop_command(position)

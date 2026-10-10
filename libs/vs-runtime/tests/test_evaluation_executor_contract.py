@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import pytest
 from tests.support.runtime_evaluation import ScenarioCluster, build_stack
+from tests.support.started_operation import wait_until_executor_started
 
 from vs_evaluation.api import (
     ContentDigest,
@@ -66,7 +67,7 @@ class _World:
     executor: _Executor
     snapshot: str
     stage_running: Callable[[], Awaitable[None]]
-    submission_visible: Callable[[], Awaitable[None]]
+    submission_visible: Callable[[str], Awaitable[None]]
 
 
 class _Script(StrEnum):
@@ -99,7 +100,7 @@ async def _local(root: Path, script: _Script) -> _World:
         if gate is not None:
             await gate.entered.wait()
 
-    async def visible() -> None:
+    async def visible(_handle_id: str) -> None:
         return None
 
     return _World(PollingEvaluationExecutor(evaluation, workspaces), snapshot, running, visible)
@@ -115,10 +116,10 @@ async def _slurm(root: Path, script: _Script) -> _World:
     async def running() -> None:
         return None
 
-    async def visible() -> None:
+    async def visible(handle_id: str) -> None:
         # submit() returns before the provider has the job: the cluster call runs
         # in a background task, and until it lands a poll honestly reports Unknown.
-        await asyncio.to_thread(cluster.accepted.wait)
+        await wait_until_executor_started(cluster.accepted, stack.executor, handle_id)
 
     return _World(stack.executor, stack.snapshot, running, visible)
 
@@ -232,7 +233,7 @@ async def test_poll_reports_each_phase_without_submitting_or_cancelling(
     assert await world.executor.inspect(_HANDLE) is None  # polling submitted nothing
 
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
-    await world.submission_visible()
+    await world.submission_visible(_HANDLE)
     polled: ExecutorPoll = await world.executor.poll(_HANDLE)
     while polled.phase is not PollPhase.ENDED:
         assert polled.phase in (PollPhase.QUEUED, PollPhase.RUNNING)

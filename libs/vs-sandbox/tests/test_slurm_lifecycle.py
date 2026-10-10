@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.started_operation import wait_until_executor_started
 
 import vs_evaluation.api.testing as evaluation_testing
 from vs_evaluation.api import (
@@ -281,7 +282,7 @@ async def _stopped_while_active(schedule: _Schedule) -> None:
         cluster = _ScheduledCluster(schedule)
         executor, coordinator, idle, release = _parked_submitter(cluster, Path(raw))
         handle = await coordinator.submit(_request())
-        await asyncio.to_thread(idle.wait)
+        await wait_until_executor_started(idle, executor, handle.id)
         try:
             record = await coordinator.cancel(handle.id)
             assert record.state is EvaluationState.CANCELED
@@ -316,7 +317,7 @@ async def test_a_stop_beyond_the_confirmation_bound_leaves_the_evaluation_cancel
     cluster = _ScheduledCluster(_Schedule(queue_wait_s=0, run_s=math.inf, completing_s=10**9))
     executor, coordinator, idle, release = _parked_submitter(cluster, tmp_path)
     handle = await coordinator.submit(_request())
-    await asyncio.to_thread(idle.wait)
+    await wait_until_executor_started(idle, executor, handle.id)
     try:
         record = await coordinator.cancel(handle.id)
         assert record.state is EvaluationState.CANCELING
@@ -343,7 +344,7 @@ async def test_recovery_of_a_stopped_job_ends_canceled_like_a_poll(tmp_path: Pat
     cluster = _ScheduledCluster(_Schedule(queue_wait_s=0, run_s=math.inf, completing_s=10**9))
     executor, coordinator, idle, release = _parked_submitter(cluster, tmp_path)
     handle = await coordinator.submit(_request())
-    await asyncio.to_thread(idle.wait)
+    await wait_until_executor_started(idle, executor, handle.id)
     try:
         record = await coordinator.cancel(handle.id)
         assert record.state is EvaluationState.CANCELING
@@ -377,7 +378,7 @@ async def test_an_ended_poll_names_the_attempt_that_ended(tmp_path: Path, requeu
     cluster = _ScheduledCluster(schedule)
     executor, coordinator, idle, release = _parked_submitter(cluster, tmp_path)
     handle = await coordinator.submit(_request())
-    await asyncio.to_thread(idle.wait)
+    await wait_until_executor_started(idle, executor, handle.id)
     phases: list[tuple[int, int]] = []
     try:
         for _ in range(1_000):
