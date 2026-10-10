@@ -53,6 +53,21 @@ gateway remains available until explicitly stopped, so the browser can inspect
 the completed state without an agent CLI or credentials. A second invocation
 from the same checkout reuses that gateway instead of competing for port 8765.
 
+The production build writes `clients/web/dist/.vibesys-web-build.json`. That
+manifest identifies the build and records the source contents from
+`clients/web/src`, `clients/backend-client/src`, and `clients/core-state/src`.
+The gateway refuses the checkout's default bundle when any recorded source has
+changed or the manifest is missing, and reports the changed path plus
+`pnpm --dir clients/web build`. `--no-build` still reuses the last build, but
+only while that build matches the current workspace. The build ID is stored in
+the instance record and printed by `live` and `status`, so an operator can tell
+which browser artifact a gateway is serving.
+
+The lower-level server option `--web-assets PATH` is an explicit opt-out for an
+operator-managed static bundle. If `PATH` contains a VibeSys build manifest it
+receives the same freshness check; otherwise the gateway identifies its current
+contents with a hash but cannot compare them with workspace sources.
+
 Use `status`, `rotate`, and `stop` with the instance path printed by the command
 when the gateway needs to be inspected, its launch URL must be invalidated, or
 it must be stopped. Rotation leaves attached pages and open sockets running and

@@ -7,7 +7,7 @@ import os
 import secrets
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from itertools import pairwise
 from pathlib import Path
@@ -149,6 +149,7 @@ class WebInstanceRecord:
     url: str
     project_root: str
     started_at: float
+    web_build_id: str | None = None
 
     @classmethod
     def discover(cls, path: Path, *, cleanup_stale: bool = True) -> WebInstanceRecord | None:
@@ -218,7 +219,12 @@ class WebInstanceRecord:
             url=f"http://127.0.0.1:{self.port}/?token={token}",
             project_root=self.project_root,
             started_at=self.started_at,
+            web_build_id=self.web_build_id,
         )
+
+    def with_web_build_id(self, web_build_id: str | None) -> WebInstanceRecord:
+        """Return this gateway record with its served browser artifact identity."""
+        return replace(self, web_build_id=web_build_id)
 
     @property
     def capability_rotation_url(self) -> str:
@@ -646,6 +652,11 @@ def _read_record(path: Path) -> WebInstanceRecord | None:
             url=_nonempty_string(raw["url"]),
             project_root=_nonempty_string(raw["project_root"]),
             started_at=float(raw["started_at"]),
+            web_build_id=(
+                _nonempty_string(raw["web_build_id"])
+                if raw.get("web_build_id") is not None
+                else None
+            ),
         )
     except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
         return None

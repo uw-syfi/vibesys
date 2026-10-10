@@ -92,6 +92,7 @@ class ServerRuntime:
         web: bool = False,
         web_port: int = 0,
         web_assets: Path | None = None,
+        web_build_id: str | None = None,
         web_origins: tuple[str, ...] = (),
         instance_path: Path | None = None,
         detach: bool = False,
@@ -103,6 +104,7 @@ class ServerRuntime:
         self.web = web
         self.web_port = web_port
         self.web_assets = web_assets
+        self.web_build_id = web_build_id
         self.web_origins = web_origins
         self.instance_path = instance_path
         self.detach = detach
@@ -201,6 +203,7 @@ class ServerRuntime:
                         WebSocketGateway(
                             self.api,
                             assets_dir=self.web_assets,
+                            web_build_id=self.web_build_id,
                             port=self.web_port,
                             allowed_origins=self.web_origins,
                             subscriptions=subscriptions,

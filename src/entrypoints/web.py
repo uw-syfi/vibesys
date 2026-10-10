@@ -80,7 +80,14 @@ def _parser() -> argparse.ArgumentParser:
     live.add_argument("--instance", type=Path, default=None)
     live.add_argument("--ssh-target", default=None, metavar="USER@HOST")
     live.add_argument("--browser-origin", action="append", default=[])
-    live.add_argument("--no-build", action="store_true")
+    live.add_argument(
+        "--no-build",
+        action="store_true",
+        help=(
+            "reuse the last verified clients/web build; the gateway rejects it if the "
+            "workspace sources have changed"
+        ),
+    )
     live.add_argument(
         "--open",
         action=argparse.BooleanOptionalAction,
@@ -263,6 +270,8 @@ def _run_live(
         return launch_status
     record = effects.wait_for_record(instance)
     print(f"VibeSys web UI ready: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101083 [T201]; expose the capability URL to the operator
+    if record.web_build_id is not None:
+        print(f"Web build: {record.web_build_id}", flush=True)  # noqa: T201  # lint-waiver: LW-106101 [T201]; expose the exact browser artifact served by the detached gateway
     print(f"Instance record: {instance}", flush=True)  # noqa: T201  # lint-waiver: LW-101084 [T201]; expose the lifecycle record path to the operator
     if args.ssh_target is not None:
         print(  # noqa: T201  # lint-waiver: LW-101085 [T201]; expose the exact SSH tunnel command to the operator
@@ -352,6 +361,8 @@ def _run_status(
         return 1
     print(f"VibeSys web UI: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101097 [T201]; expose the live capability URL in status output
     print(f"PID: {record.pid}", flush=True)  # noqa: T201  # lint-waiver: LW-101098 [T201]; expose the gateway process identity in status output
+    if record.web_build_id is not None:
+        print(f"Web build: {record.web_build_id}", flush=True)  # noqa: T201  # lint-waiver: LW-106102 [T201]; identify the browser artifact for lifecycle inspection
     return 0
 
 

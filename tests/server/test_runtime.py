@@ -492,6 +492,7 @@ def test_the_web_gateway_receives_its_assets_origins_and_instance_path(tmp_path:
         socket_path=socket_path,
         web=True,
         web_assets=assets,
+        web_build_id=f"sha256:{'2' * 64}",
         web_origins=(declared_origin,),
         instance_path=instance_path,
         detach=True,
@@ -528,6 +529,7 @@ def test_the_web_gateway_receives_its_assets_origins_and_instance_path(tmp_path:
     assert record is not None
     assert (record.pid, record.port, record.token) == (os.getpid(), target.port, token)
     assert record.url == observed["page_url"]
+    assert record.web_build_id == f"sha256:{'2' * 64}"
     assert not (assets / instance_path.name).exists()
     assert observed["page"] == (200, _INDEX_HTML.encode())
     assert observed["snapshot"]["ok"] is True

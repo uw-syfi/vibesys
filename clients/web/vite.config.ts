@@ -2,7 +2,10 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import react from '@vitejs/plugin-react';
 import {defineConfig, type Plugin} from 'vite';
+import {webBuildManifest} from './build-manifest.js';
 import {workspaceSourceAliases} from './workspace-source-aliases.js';
+
+const workspaceRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 function replayFixturePlugin(): Plugin {
   const fixture = fileURLToPath(
@@ -23,7 +26,18 @@ function replayFixturePlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), replayFixturePlugin()],
+  plugins: [
+    react(),
+    replayFixturePlugin(),
+    webBuildManifest({
+      workspaceRoot,
+      sourceRoots: [
+        fileURLToPath(new URL('./src', import.meta.url)),
+        fileURLToPath(new URL('../backend-client/src', import.meta.url)),
+        fileURLToPath(new URL('../core-state/src', import.meta.url)),
+      ],
+    }),
+  ],
   resolve: {
     alias: workspaceSourceAliases(),
   },

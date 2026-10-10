@@ -312,6 +312,7 @@ class WebSocketGateway:
         api: RunApi,
         *,
         assets_dir: Path | None = None,
+        web_build_id: str | None = None,
         port: int = 0,
         subscriptions: SubscriptionTracker | None = None,
         token: str | None = None,
@@ -329,6 +330,7 @@ class WebSocketGateway:
         """
         self.api = api
         self.assets_dir = assets_dir.resolve() if assets_dir is not None else None
+        self.web_build_id = web_build_id
         self.port = port
         self._token = token or secrets.token_urlsafe(32)
         # The launch capability is intentionally distinct from the credential
@@ -622,7 +624,7 @@ class WebSocketGateway:
                     token=self._token,
                     project_root=self.project_root,
                     clock=self._clock,
-                )
+                ).with_web_build_id(self.web_build_id)
             staged_path = self.instance_path.with_name(
                 f".{self.instance_path.name}.{os.getpid()}.{secrets.token_hex(6)}.startup"
             )
@@ -691,7 +693,7 @@ class WebSocketGateway:
                 token=current_token,
                 project_root=self.project_root,
                 clock=self._clock,
-            )
+            ).with_web_build_id(self.web_build_id)
             record.write(staged_path)
 
     async def _handle_attempt_connection(

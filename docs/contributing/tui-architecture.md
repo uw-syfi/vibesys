@@ -97,7 +97,10 @@ The browser launch path keeps the server composition shared. `vibesys --web` sta
 Unix adapter and a loopback WebSocket gateway around the same `RunApi` and
 `SubscriptionTracker`; the gateway changes only framing, not request dispatch, replay, batching, or
 store-identity handling. It binds `127.0.0.1`, serves the built `clients/web/dist` bundle from the
-same port, and prints a capability-bearing page URL. The first page response exchanges that launch
+same port, and prints a capability-bearing page URL. The bundle's build manifest inventories the
+three client source trees and supplies an opaque build ID to the instance record; the entrypoint
+rejects the checkout's default bundle when that inventory is stale. Server runtime receives only
+the resolved asset directory and build ID, not client-workspace layout. The first page response exchanges that launch
 capability for an HttpOnly browser-session cookie and scrubs the token from browser and WebSocket
 URLs. A separate-origin Vite harness retains only the minted browser-session credential in
 tab-scoped storage, because strict cookies do not cross site boundaries. WebSocket handshakes
