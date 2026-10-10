@@ -25,9 +25,9 @@ from vs_runtime.api import (
     AgentCapability,
     AgentOutputSchemaError,
     Completed,
-    RunCleanupError,
     RuntimeContractError,
 )
+from vs_runtime.api.infrastructure import release_all
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -317,15 +317,11 @@ class RuntimeProfilerTurnProvision:
                     raise RuntimeContractError(message)
                 await access.cancel_associations(conversation.workspace.id)
 
-        errors: list[BaseException] = []
         # Stop the producer before draining submissions and withdrawing its associations.
-        for release in (conversation.session.close, withdraw, conversation.workspace.discard):
-            try:
-                await release()
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930062 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-                errors.append(error)
-        if errors:
-            raise RunCleanupError(_CLEANUP_FAILURE, tuple(errors))
+        await release_all(
+            (conversation.session.close, withdraw, conversation.workspace.discard),
+            failure=_CLEANUP_FAILURE,
+        )
 
 
 __all__ = ["ProfilerEvaluationAccess", "RuntimeProfilerTurnProvision"]

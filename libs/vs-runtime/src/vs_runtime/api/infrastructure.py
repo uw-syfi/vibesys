@@ -166,6 +166,7 @@ from vs_runtime._quota_policy import (
     decide_quota,
 )
 from vs_runtime._recorded_environment import migrate_recorded_run_environment
+from vs_runtime._release import release_all
 from vs_runtime._run_control import (
     RunControlChannel,
     RunControlEventSink,
@@ -658,6 +659,7 @@ __all__ = [
     "prepare_trusted_evaluation_plan",
     "prepare_trusted_evaluator",
     "relative_sdk_source",
+    "release_all",
     "remote_evaluator_setup_command",
     "required_evaluator_tools_root",
     "resolve_bundled_tree",
