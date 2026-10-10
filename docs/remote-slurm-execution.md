@@ -29,7 +29,12 @@ The ROCprof server runs in the container and reaches the cluster through a
 second host broker. It imports the Slurm adapter from the framework's `libs`
 directory, mounted read-only at its host path, so the agent image needs only a
 `python3` (3.11 or newer) with `pydantic`, which its MCP library already
-requires. The GPU-side variant for a single-node cluster is described in
+requires. When the submit host is itself the machine that runs VibeSys, the
+configuration can use the `local` transport (`[slurm.transport] kind = "local"`,
+see the `vs-slurm` README) instead of SSH: gates run through the same
+sbatch, poll and collect path. The second broker exists only for the SSH
+transport, so a local-transport run offers the gates but not the agent's ad hoc
+ROCprof capture. The GPU-side variant for a single-node cluster is described in
 [GPU commands through Slurm](slurm-gpu-commands.md).
 
 ## SkyPilot configuration ownership

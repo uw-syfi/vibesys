@@ -328,6 +328,25 @@ accuracy_arguments = ["--endpoint", "private"]
     assert config.sbatch_arguments == ("-p", "accelerators", "-N", "1")
 
 
+@pytest.mark.parametrize("key", ["host", "ssh_command", "command"])
+def test_local_transport_rejects_settings_of_other_transports(tmp_path: Path, key: str) -> None:
+    path = tmp_path / "slurm.toml"
+    path.write_text(
+        f"""[slurm]
+name = "research-cluster"
+remote_workspace_root = "/shared/runs"
+
+[slurm.transport]
+kind = "local"
+{key} = ["value"]
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SlurmConfigError, match=f"transport.local.{key}"):
+        load_slurm_config(path)
+
+
 def test_runner_uses_versioned_connector_protocol_and_collects_artifacts(tmp_path: Path) -> None:
     workspace = tmp_path / "candidate"
     workspace.mkdir()
@@ -368,15 +387,18 @@ def test_runner_uses_versioned_connector_protocol_and_collects_artifacts(tmp_pat
 
 
 class _FakeSshProcess:
-    def __init__(self) -> None:
+    """Answer a transport's processes; *program* is what executes remote commands."""
+
+    def __init__(self, program: str = "ssh") -> None:
         self.calls: list[tuple[tuple[str, ...], str | None, float]] = []
+        self._program = program
 
     def __call__(
         self, argv: Sequence[str], *, stdin: str | None, timeout: float
     ) -> subprocess.CompletedProcess[str]:
         command = tuple(argv)
         self.calls.append((command, stdin, timeout))
-        if command[0] == "ssh":
+        if command[0] == self._program:
             remote_command = command[-1]
             if "sbatch" in remote_command:
                 stdout = "Submitted batch job 4567\n"
@@ -440,6 +462,68 @@ def test_runner_uses_builtin_ssh_and_rsync_transport(tmp_path: Path) -> None:
         "--",
     )
     assert ".tmp.ssh_01.workspace/payload/" in sync_argv[-1]
+
+
+def test_local_transport_runs_commands_and_copies_on_this_host(tmp_path: Path) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    process = _FakeSshProcess(program="/operator/bin/login-shell")
+    config = _config(
+        transport={
+            "kind": "local",
+            "shell_command": ["/operator/bin/login-shell", "-c"],
+            "rsync_command": ["/operator/bin/rsync"],
+        }
+    )
+
+    result = SlurmJobRunner(config, process=process, invocation_id=lambda: "local_01").run(
+        SlurmJobRequest(workspace=workspace, command=("true",))
+    )
+
+    assert result.job_id == "4567"
+    assert result.output == "ssh output\n"
+    assert process.calls[0][0] == (
+        "/operator/bin/login-shell",
+        "-c",
+        "mkdir -p /operator/campaign/runs/test-cluster/local_01 "
+        "/operator/campaign/runs/test-cluster/.vibesys-content-cache",
+    )
+    copies = [call[0] for call in process.calls if call[0][0] == "/operator/bin/rsync"]
+    assert copies
+    for argv in copies:
+        # No remote shell and no host: both operands are paths on this host.
+        assert "-e" not in argv
+        source, destination = argv[argv.index("--") + 1 :]
+        assert source.startswith("/")
+        assert destination.startswith("/")
+    assert all(
+        call[0][0] in {"/operator/bin/login-shell", "/operator/bin/rsync"} for call in process.calls
+    )
+
+
+@pytest.mark.parametrize("kind", ["ssh", "local"])
+def test_a_job_is_submitted_without_the_submitting_process_environment(
+    tmp_path: Path, kind: str
+) -> None:
+    """The host's environment holds credentials; the job must get the cluster's own."""
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    process = _FakeSshProcess(program="ssh" if kind == "ssh" else "bash")
+    transport: dict[str, object] = (
+        {"kind": "ssh", "host": "login.example"}
+        if kind == "ssh"
+        else {"kind": "local", "shell_command": ["bash", "-c"]}
+    )
+    config = _config(transport=transport)
+
+    SlurmJobRunner(config, process=process, invocation_id=lambda: "env_01").run(
+        SlurmJobRequest(workspace=workspace, command=("true",))
+    )
+
+    submit = next(shlex.split(call[0][-1]) for call in process.calls if "sbatch-rr" in call[0][-1])
+    options = submit[submit.index("/operator/bin/sbatch-rr") + 1 :]
+    # Before the operator's arguments, so an operator can still override it.
+    assert options.index("--export=NONE") < options.index("-p")
 
 
 def test_builtin_ssh_does_not_consume_embedding_process_stdin(tmp_path: Path) -> None:

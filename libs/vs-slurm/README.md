@@ -76,6 +76,28 @@ The local machine needs OpenSSH and rsync. The login host needs rsync and the
 Slurm commands named by the configuration, and `remote_workspace_root` must be
 writable and visible from compute nodes.
 
+A host that is itself a Slurm submit node uses the local transport: scheduler
+and filesystem commands run through `shell_command` on this host, and
+transfers are local `rsync` copies.
+
+```toml
+[slurm.transport]
+kind = "local"
+# shell_command = ["bash", "-c"]   # receives the command line as its last argument
+# rsync_command = ["rsync"]
+```
+
+`remote_workspace_root` must then be a directory this host shares with the
+compute nodes. A wrapper may precede the shell in `shell_command`, for example
+one that runs the shell on a login node the host reaches without SSH.
+
+The local transport runs whatever `shell_command` names with the host's
+privileges, so it is for the host's own trusted code only. VibeSys therefore
+does not offer it to the sandboxed agent: the host-side transport broker that
+lets an agent container make ad hoc Slurm calls (used by the ROCprof capture
+tool) accepts only the SSH transport, and a run configured with the local
+transport simply has no such broker. Gates still run through the full job path.
+
 Sites whose gateway is not reachable through OpenSSH can provide the advanced
 versioned JSON connector transport:
 

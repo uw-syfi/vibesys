@@ -1,9 +1,10 @@
-"""One process-boundary contract for the executable connector and its in-process Fake.
+"""One process-boundary contract for every transport and the in-process Fake.
 
-The runner reaches a connector through ``SlurmProcess``. The deterministic tiers
+The runner reaches a cluster through ``SlurmProcess``. The deterministic tiers
 inject ``FakeConnector`` so no process is spawned; the real connector is the
-executable ``python -m vs_slurm.fake_connector``. A caller written against the
-interface must observe the same replies from both, so the same job runs against
+executable ``python -m vs_slurm.fake_connector``, which also stands in for the
+local transport's shell and rsync programs. A caller written against the
+interface must observe the same replies from each, so the same job runs against
 each and the observable outcome and the scheduler commands issued must agree.
 """
 
@@ -22,6 +23,7 @@ from vs_slurm.api import (
     SlurmConnectorTransport,
     SlurmJobRequest,
     SlurmJobRunner,
+    SlurmLocalTransport,
 )
 
 # test-isolation: the Fake connector is the library's executable test double.
@@ -36,12 +38,31 @@ if TYPE_CHECKING:
 _JOB_NAME = re.compile(r"--job-name=\S+")
 
 
+def _connector_program(state: Path) -> tuple[str, ...]:
+    """The executable connector, which answers the connector protocol and the local programs."""
+    return (sys.executable, "-m", "vs_slurm.fake_connector", str(state))
+
+
 def _real_runner(root: Path, remote: Path) -> SlurmJobRunner:
     """Run the connector as the production runner does: one process per request."""
     state = executing_cluster(root / "cluster")
-    command = (sys.executable, "-m", "vs_slurm.fake_connector", str(state))
+    command = _connector_program(state)
     return SlurmJobRunner(
         _config(remote, SlurmConnectorTransport(kind="connector", command=command)),
+        scratch_root=root / "scratch",
+        invocation_id=lambda: "contract_01",
+    )
+
+
+def _local_runner(root: Path, remote: Path) -> SlurmJobRunner:
+    """Run the local transport's shell and rsync as processes, as a submit host does."""
+    state = executing_cluster(root / "cluster")
+    program = _connector_program(state)
+    transport = SlurmLocalTransport(
+        kind="local", shell_command=(*program, "shell"), rsync_command=(*program, "rsync")
+    )
+    return SlurmJobRunner(
+        _config(remote, transport),
         scratch_root=root / "scratch",
         invocation_id=lambda: "contract_01",
     )
@@ -58,7 +79,7 @@ def _fake_runner(root: Path, remote: Path) -> SlurmJobRunner:
     )
 
 
-def _config(remote: Path, transport: SlurmConnectorTransport) -> SlurmConfig:
+def _config(remote: Path, transport: SlurmConnectorTransport | SlurmLocalTransport) -> SlurmConfig:
     return SlurmConfig(name="fake", remote_workspace_root=str(remote), transport=transport)
 
 
@@ -99,6 +120,24 @@ def test_the_in_process_fake_answers_like_the_real_connector(
 
     assert fake == real
     assert real[0] == exit_code
+
+
+@settings(max_examples=4, deadline=None)
+@given(
+    exit_code=st.integers(min_value=0, max_value=3),
+    text=st.text(alphabet="abcxyz 012", min_size=1, max_size=12),
+)
+def test_the_local_transport_answers_like_the_connector(
+    tmp_path_factory: pytest.TempPathFactory, exit_code: int, text: str
+) -> None:
+    base = tmp_path_factory.mktemp("contract")
+    script = f"echo '{text}'; exit {exit_code}"
+
+    local = _observe(base / "local", base / "local-remote", _local_runner, script)
+    connector = _observe(base / "real", base / "real-remote", _real_runner, script)
+
+    assert local == connector
+    assert local[0] == exit_code
 
 
 def _exec_request(command: str) -> str:

@@ -24,6 +24,7 @@ from .config import (
     SlurmConfig,
     SlurmConfigError,
     SlurmConnectorTransport,
+    SlurmLocalTransport,
     SlurmService,
     SlurmSshTransport,
     shell_join_with_port,
@@ -1314,6 +1315,10 @@ class SlurmJobRunner:
     def _submit(self, base: PurePosixPath, script: PurePosixPath, output: PurePosixPath) -> str:
         argv = (
             *self._config.sbatch_command,
+            # The job gets the cluster's environment, never the submitting process's
+            # (the local transport submits from the host, whose environment holds
+            # credentials). Before sbatch_arguments so that an operator can override it.
+            "--export=NONE",
             *self._config.sbatch_arguments,
             f"--job-name={operation_job_name(self._config, base.name)}",
             f"--output={output.as_posix()}",
@@ -1376,23 +1381,22 @@ class _ProcessTransport:
         return result
 
 
-class _SshTransport(_ProcessTransport):
+class _RsyncTransport(_ProcessTransport):
+    """Transfers as rsync copies; *destination* prefixes the remote side's path."""
+
     def __init__(
         self,
-        config: SlurmSshTransport,
+        rsync_command: tuple[str, ...],
         *,
+        remote_shell: tuple[str, ...],
+        destination: str,
         process: SlurmProcess,
         timeout: float,
     ) -> None:
         super().__init__(process, timeout)
-        self._config = config
-
-    def exec(self, command: str) -> _TransportResponse:
-        result = self._run(
-            (*self._config.ssh_command, "--", self._config.host, command),
-            operation="exec",
-        )
-        return _TransportResponse(stdout=result.stdout, stderr=result.stderr)
+        self._rsync_command = rsync_command
+        self._remote_shell = remote_shell
+        self._destination = destination
 
     def sync_to(
         self,
@@ -1406,51 +1410,78 @@ class _SshTransport(_ProcessTransport):
         if delete:
             options.append("--delete")
         options.extend(f"--exclude={item}" for item in excludes)
-        self._run(
-            (
-                *self._config.rsync_command,
-                *options,
-                "-e",
-                shlex.join(self._config.ssh_command),
-                "--",
-                f"{local}/",
-                self._remote(remote, trailing_slash=True),
-            ),
-            operation="sync_to",
+        self._rsync(
+            options, f"{local}/", self._remote(remote, trailing_slash=True), operation="sync_to"
         )
 
     def put(self, local: Path, remote: PurePosixPath) -> None:
-        self._run(
-            (
-                *self._config.rsync_command,
-                "-a",
-                "-e",
-                shlex.join(self._config.ssh_command),
-                "--",
-                str(local),
-                self._remote(remote),
-            ),
-            operation="put",
-        )
+        self._rsync(["-a"], str(local), self._remote(remote), operation="put")
 
     def get(self, remote: PurePosixPath, local: Path, *, kind: Literal["file", "tree"]) -> None:
         tree = kind == "tree"
-        self._run(
-            (
-                *self._config.rsync_command,
-                "-a",
-                "-e",
-                shlex.join(self._config.ssh_command),
-                "--",
-                self._remote(remote, trailing_slash=tree),
-                f"{local}/" if tree else str(local),
-            ),
+        self._rsync(
+            ["-a"],
+            self._remote(remote, trailing_slash=tree),
+            f"{local}/" if tree else str(local),
             operation="get",
+        )
+
+    def _rsync(self, options: list[str], source: str, target: str, *, operation: str) -> None:
+        self._run(
+            (*self._rsync_command, *options, *self._remote_shell, "--", source, target),
+            operation=operation,
         )
 
     def _remote(self, path: PurePosixPath, *, trailing_slash: bool = False) -> str:
         suffix = "/" if trailing_slash else ""
-        return f"{self._config.host}:{path.as_posix()}{suffix}"
+        return f"{self._destination}{path.as_posix()}{suffix}"
+
+
+class _SshTransport(_RsyncTransport):
+    def __init__(
+        self,
+        config: SlurmSshTransport,
+        *,
+        process: SlurmProcess,
+        timeout: float,
+    ) -> None:
+        super().__init__(
+            config.rsync_command,
+            remote_shell=("-e", shlex.join(config.ssh_command)),
+            destination=f"{config.host}:",
+            process=process,
+            timeout=timeout,
+        )
+        self._config = config
+
+    def exec(self, command: str) -> _TransportResponse:
+        result = self._run(
+            (*self._config.ssh_command, "--", self._config.host, command),
+            operation="exec",
+        )
+        return _TransportResponse(stdout=result.stdout, stderr=result.stderr)
+
+
+class _LocalTransport(_RsyncTransport):
+    def __init__(
+        self,
+        config: SlurmLocalTransport,
+        *,
+        process: SlurmProcess,
+        timeout: float,
+    ) -> None:
+        super().__init__(
+            config.rsync_command,
+            remote_shell=(),
+            destination="",
+            process=process,
+            timeout=timeout,
+        )
+        self._config = config
+
+    def exec(self, command: str) -> _TransportResponse:
+        result = self._run((*self._config.shell_command, command), operation="exec")
+        return _TransportResponse(stdout=result.stdout, stderr=result.stderr)
 
 
 class _ConnectorTransport(_ProcessTransport):
@@ -1528,18 +1559,14 @@ class _ConnectorTransport(_ProcessTransport):
 
 
 def _make_transport(config: SlurmConfig, *, process: SlurmProcess) -> _Transport:
-    transport = config.transport
-    if isinstance(transport, SlurmSshTransport):
-        return _SshTransport(
-            transport,
-            process=process,
-            timeout=config.transport_timeout_seconds,
-        )
-    return _ConnectorTransport(
-        transport,
-        process=process,
-        timeout=config.transport_timeout_seconds,
-    )
+    timeout = config.transport_timeout_seconds
+    match config.transport:
+        case SlurmSshTransport():
+            return _SshTransport(config.transport, process=process, timeout=timeout)
+        case SlurmLocalTransport():
+            return _LocalTransport(config.transport, process=process, timeout=timeout)
+        case SlurmConnectorTransport():
+            return _ConnectorTransport(config.transport, process=process, timeout=timeout)
 
 
 def _run_process(
