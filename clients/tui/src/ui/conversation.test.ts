@@ -783,6 +783,24 @@ describe('transcript run ids take the card label color, source tags recede (#647
   });
 });
 
+describe('a truncated event entry', () => {
+  it('draws an explicit notice after the retained payload', async () => {
+    const {testRenderer} = await renderEntries([
+      {
+        id: 'cut',
+        kind: 'status',
+        label: 'implementer',
+        content: 'retained prefix',
+        truncated: true,
+      },
+    ]);
+
+    const frame = testRenderer.captureCharFrame();
+    expect(frame).toContain('retained prefix');
+    expect(frame).toContain("Event payload truncated at the server's size bound.");
+  });
+});
+
 describe('a gate command entry', () => {
   // Shape of clients/tui/dev/fixtures/bad-cpp-round1.jsonl:388, already split
   // by core-state's `splitFrameworkValidationCommand` into prose plus

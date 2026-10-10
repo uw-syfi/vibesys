@@ -16,6 +16,15 @@ Pydantic models in `src/server/api/protocol.py`, generated into
 `clients/backend-client/src/generated/`. A transport relays whole protocol messages opaquely. If the
 payload schema changes (for example a version bump), this layer does not.
 
+One payload invariant is relevant to framing: a recorded `RunEvent` is bounded by
+`src/server/events.py:MAX_SERIALIZED_RUN_EVENT_BYTES` before it reaches either transport.
+`src/server/events.py:EventStore.append`
+keeps an ordinary event byte-for-byte unchanged. If an event is larger, it retains prefixes of its
+variable-size payload values on Unicode code-point and collection-entry boundaries and carries
+`truncated: true`; web and TUI clients render that marker. The durable log holds the bounded event,
+so live delivery and every later replay observe the same fact. The WebSocket batch chunker still
+handles only whole events and has no payload-specific branch.
+
 It also does not specify how the WebSocket gateway serves the browser bundle over plain HTTP. The
 response headers, the Content-Security-Policy, and the token-free `/assets/*` route are gateway
 serving decisions with no counterpart on the Unix transport, so they are owned by

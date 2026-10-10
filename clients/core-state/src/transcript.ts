@@ -50,12 +50,25 @@ export interface TranscriptEntry {
   readonly toolCallId?: string;
   readonly toolArguments?: ReadonlyProjection<Record<string, unknown>>;
   readonly toolResult?: TypedToolResult;
+  /** The server cut this event's payload at its recorded-size bound. */
+  readonly truncated?: true;
 }
 
 export function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
   const fields = transcriptFields(event);
   const dataEntry = eventDataToTranscriptEntry(event, fields);
-  return dataEntry === undefined ? eventTypeToTranscriptEntry(event, fields) : dataEntry;
+  const entry = dataEntry === undefined ? eventTypeToTranscriptEntry(event, fields) : dataEntry;
+  if (event.truncated !== true) return entry;
+  if (entry !== null) return {...entry, truncated: true};
+  return {
+    id: fields.id,
+    kind: 'diagnostic',
+    content: event.text ?? '',
+    label: labelFor(event, event.type),
+    ...fields.agentFields,
+    ...fields.roundFields,
+    truncated: true,
+  };
 }
 
 interface TranscriptFields {
@@ -564,7 +577,11 @@ export function foldTranscriptEntry(
       incoming.kind === 'analysis' ||
       incoming.kind === 'diagnostic')
   ) {
-    entries[entries.length - 1] = {...last, content: last.content + glue(last, incoming)};
+    entries[entries.length - 1] = {
+      ...last,
+      content: last.content + glue(last, incoming),
+      ...(incoming.truncated === true ? {truncated: true as const} : {}),
+    };
     return;
   }
   entries.push(incoming);
@@ -767,6 +784,7 @@ function mergeToolResult(call: TranscriptEntry, result: TranscriptEntry): Transc
       content: result.toolResult.content,
       toolResult: result.toolResult,
       ...(result.tone === undefined ? {} : {tone: result.tone}),
+      ...(result.truncated === true ? {truncated: true as const} : {}),
     };
   }
   const separator = call.content.endsWith('\n') || result.content.startsWith('\n') ? '' : '\n';
@@ -775,5 +793,6 @@ function mergeToolResult(call: TranscriptEntry, result: TranscriptEntry): Transc
     content: call.content + separator + result.content,
     toolResponse: (call.toolResponse ?? '') + (call.toolResponse ? separator : '') + result.content,
     ...(result.tone === undefined ? {} : {tone: result.tone}),
+    ...(result.truncated === true ? {truncated: true as const} : {}),
   };
 }

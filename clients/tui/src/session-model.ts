@@ -393,6 +393,8 @@ export interface ConversationEntry {
   toolCallId?: string;
   toolArguments?: Record<string, unknown>;
   toolResult?: TranscriptEntry['toolResult'];
+  /** The server cut this event's payload at its recorded-size bound. */
+  truncated?: true;
 }
 
 export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): SessionState {

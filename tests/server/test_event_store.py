@@ -11,9 +11,19 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from server.events import EventStore, EventType, RunEvent, ToolCallData, make_event
+from server.events import (
+    MAX_SERIALIZED_RUN_EVENT_BYTES,
+    EventStore,
+    EventType,
+    OutputData,
+    RunEvent,
+    ToolCallData,
+    make_event,
+)
 from vs_sim.api.testing import wait_until_started_sync
 
 if TYPE_CHECKING:
@@ -35,6 +45,17 @@ def _persisted_event(sequence: int, text: str = "") -> RunEvent:
         timestamp=datetime.now(UTC),
         type=EventType.OUTPUT,
         text=text,
+    )
+
+
+def _recordable_output_event(content: str) -> RunEvent:
+    """An event already stamped exactly as this test's store will stamp it."""
+    return RunEvent(
+        sequence=1,
+        run_id="run",
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        type=EventType.OUTPUT,
+        data=OutputData(stream="stdout", content=content),
     )
 
 
@@ -61,6 +82,95 @@ class TestEventStore:
         assert appended.sequence == 3
         assert appended.run_id == "active-run"
         assert [event.sequence for event in store.read(after_sequence=1)] == [2, 3]
+
+    @settings(max_examples=12, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @given(
+        delta=st.integers(min_value=-2048, max_value=2048),
+        unit=st.sampled_from(("x", "é", "🧪")),
+    )
+    def test_append_bounds_serialized_events_without_touching_ordinary_bytes(
+        self, tmp_path: Path, delta: int, unit: str
+    ) -> None:
+        """Every UTF-8 payload fits; every already-fitting payload stays exact."""
+        target = MAX_SERIALIZED_RUN_EVENT_BYTES + delta
+        empty = _recordable_output_event("")
+        overhead = len(empty.model_dump_json().encode())
+        repeats, remainder = divmod(target - overhead, len(unit.encode()))
+        produced = _recordable_output_event(unit * repeats + "x" * remainder)
+        produced_json = produced.model_dump_json()
+        assert len(produced_json.encode()) == target
+        path = tmp_path / f"event-{len(tuple(tmp_path.iterdir()))}.jsonl"
+
+        recorded = EventStore(path, run_id="run").append(produced)
+
+        assert len(recorded.model_dump_json().encode()) <= MAX_SERIALIZED_RUN_EVENT_BYTES
+        if target <= MAX_SERIALIZED_RUN_EVENT_BYTES:
+            assert recorded.model_dump_json() == produced_json
+            assert recorded is not produced
+            assert recorded.truncated is False
+        else:
+            assert recorded.truncated is True
+            assert isinstance(recorded.data, OutputData)
+            assert isinstance(produced.data, OutputData)
+            assert produced.data.content.startswith(recorded.data.content)
+        assert RunEvent.model_validate_json(path.read_bytes()) == recorded
+
+    @pytest.mark.parametrize("collection_kind", ["list", "dict"])
+    def test_append_cuts_structured_payloads_on_collection_entry_boundaries(
+        self, tmp_path: Path, collection_kind: str
+    ) -> None:
+        """Nested lists and mappings retain whole prefixes around the byte bound."""
+
+        def items(count: int) -> list[str] | dict[str, str]:
+            if collection_kind == "list":
+                return ["x" * 128] * count
+            return {f"entry-{index:05d}": "x" * 112 for index in range(count)}
+
+        def structured_event(count: int) -> RunEvent:
+            return RunEvent(
+                sequence=1,
+                run_id="run",
+                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                type=EventType.TOOL_CALL,
+                data=ToolCallData(tool="structured", args={"items": items(count)}),
+            )
+
+        low = 0
+        high = 10_000
+        while low < high:
+            middle = (low + high) // 2
+            if (
+                len(structured_event(middle).model_dump_json().encode())
+                <= MAX_SERIALIZED_RUN_EVENT_BYTES
+            ):
+                low = middle + 1
+            else:
+                high = middle
+        first_over_bound = low
+        below = structured_event(first_over_bound - 1)
+        above = structured_event(first_over_bound)
+        assert len(below.model_dump_json().encode()) <= MAX_SERIALIZED_RUN_EVENT_BYTES
+        assert len(above.model_dump_json().encode()) > MAX_SERIALIZED_RUN_EVENT_BYTES
+
+        recorded_below = EventStore(
+            tmp_path / f"structured-{collection_kind}-below.jsonl", run_id="run"
+        ).append(below)
+        recorded_above = EventStore(
+            tmp_path / f"structured-{collection_kind}-above.jsonl", run_id="run"
+        ).append(above)
+
+        assert recorded_below.model_dump_json() == below.model_dump_json()
+        assert recorded_above.truncated is True
+        assert len(recorded_above.model_dump_json().encode()) <= MAX_SERIALIZED_RUN_EVENT_BYTES
+        assert isinstance(recorded_above.data, ToolCallData)
+        retained = recorded_above.data.args["items"]
+        original = items(first_over_bound)
+        if isinstance(retained, list) and isinstance(original, list):
+            assert retained == original[: len(retained)]
+        else:
+            assert isinstance(retained, dict)
+            assert isinstance(original, dict)
+            assert list(retained.items()) == list(original.items())[: len(retained)]
 
     def test_legacy_out_of_order_sequences_get_stable_monotonic_cursors(
         self, tmp_path: Path

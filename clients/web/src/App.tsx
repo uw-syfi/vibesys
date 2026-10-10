@@ -147,7 +147,14 @@ export function App({
             {state.transcript.slice(-8).map(entry => (
               <li key={entry.id}>
                 <span className="marker" />
-                {entry.content}
+                <span className="transcript-entry">
+                  <span>{entry.content}</span>
+                  {entry.truncated === true && (
+                    <span className="event-truncated">
+                      Event payload truncated at the server's size bound.
+                    </span>
+                  )}
+                </span>
               </li>
             ))}
           </ol>
