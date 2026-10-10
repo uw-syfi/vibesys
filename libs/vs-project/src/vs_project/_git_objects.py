@@ -191,10 +191,6 @@ class ObjectStore:
         """The files of the commit with this id, which must exist (``KeyError`` otherwise)."""
         return self._trees[self._commits[identifier].tree]
 
-    def has_object(self, identifier: str) -> bool:
-        """Whether any object with this full id exists."""
-        return identifier in self._commits or identifier in self._blobs or identifier in self._trees
-
     def commits_named(self, prefix: str) -> list[str]:
         """Every commit id that starts with the abbreviation ``prefix`` (empty if malformed)."""
         if _OBJECT_PREFIX.match(prefix) is None:

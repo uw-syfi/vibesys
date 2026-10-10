@@ -202,30 +202,6 @@ def test_namespace_snapshot_read_failure_is_reported(
         namespace.snapshot()
 
 
-def test_local_namespace_has_no_worktree_equivalent(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    namespace = store.state.local_namespace(run.run_id, "agent")
-
-    with pytest.raises(ProjectStateError, match="has no worktree equivalent"):
-        namespace.equivalent_external_file(tmp_path, "active.json")
-
-
-def test_equivalent_external_file_requires_a_directory_root(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    namespace = store.state.portable_namespace(run.run_id, "agent")
-    not_a_directory = tmp_path / "file.txt"
-    not_a_directory.write_text("x", encoding="utf-8")
-
-    with pytest.raises(ProjectStateError, match="Project root is not a directory"):
-        namespace.equivalent_external_file(not_a_directory, "state.json")
-
-    assert namespace.equivalent_external_file(tmp_path, "state.json") == (
-        tmp_path / ".vibesys/state/runs" / run.run_id / "agent/state.json"
-    )
-
-
 def test_external_directory_rejects_a_file_at_the_directory(tmp_path: Path) -> None:
     store = _store(tmp_path)
     run = _run(store)

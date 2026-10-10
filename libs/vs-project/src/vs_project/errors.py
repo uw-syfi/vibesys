@@ -178,11 +178,6 @@ class ProjectStateError(ProjectError):
         return cls("Machine-local VibeSys state is not agent-visible")
 
     @classmethod
-    def local_state_has_no_worktree_equivalent(cls) -> Self:
-        """Describe a worktree lookup for machine-local state."""
-        return cls("Machine-local VibeSys state has no worktree equivalent")
-
-    @classmethod
     def snapshot_from_deletion_transition(cls) -> Self:
         """Describe an attempt to snapshot a deletion transition."""
         return cls("Cannot create a state snapshot from a deletion transition")

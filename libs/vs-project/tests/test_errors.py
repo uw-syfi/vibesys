@@ -103,11 +103,6 @@ _CASES: list[tuple[str, tuple[object, ...], str]] = [
         "Machine-local VibeSys state is not agent-visible",
     ),
     (
-        "local_state_has_no_worktree_equivalent",
-        (),
-        "Machine-local VibeSys state has no worktree equivalent",
-    ),
-    (
         "snapshot_from_deletion_transition",
         (),
         "Cannot create a state snapshot from a deletion transition",

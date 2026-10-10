@@ -494,7 +494,7 @@ def test_candidate_worktree_is_local_and_retained_by_durable_ref(tmp_path: Path)
     _git(worktree, "commit", "-q", "-m", "candidate")
     candidate_sha = _git(worktree, "rev-parse", "HEAD")
 
-    ref = tracker.retain_worktree(worktree, "candidate-1")
+    ref = tracker.retain_candidate("candidate-1", candidate_sha)
     tracker.remove_worktree(worktree)
     _git(tmp_path, "reflog", "expire", "--expire=now", "--all")
     _git(tmp_path, "gc", "--prune=now")

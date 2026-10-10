@@ -41,7 +41,6 @@ def test_profiler_definitions_derive_uniform_packaging_names() -> None:
     assert frozenset(PROFILER_DEFINITIONS) == ACTIVE_PROFILER_KINDS
     for kind, definition in PROFILER_DEFINITIONS.items():
         assert definition.support_name == f"{kind.value}_profiler"
-        assert definition.server_path == f"{kind.value}_profiler/server.py"
         assert definition.prompt_template == f"profilers/{kind.value}.j2"
         assert definition.mcp_name == f"vibesys-{kind.value.replace('_', '-')}-profiler"
 
@@ -52,7 +51,6 @@ def test_profiler_definition_needs_no_path_or_dispatch_declaration() -> None:
         domains=frozenset({DomainName.GENERIC}),
     )
 
-    assert definition.server_path == "nsys_profiler/server.py"
     assert definition.prompt_template == "profilers/nsys.j2"
 
 

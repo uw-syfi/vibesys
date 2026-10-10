@@ -6,7 +6,6 @@ from pathlib import Path
 from vs_sandbox.api import ComputeBackend
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-SKILLS_DIR = ".agents/skills/"
 
 
 class DomainName(StrEnum):

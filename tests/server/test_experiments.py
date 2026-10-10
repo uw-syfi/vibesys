@@ -38,7 +38,6 @@ from vibesys.api.hypothesis import (
 from vibesys.api.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.readmodel import (
-    project_committed_run_view,
     project_run_view,
 )
 from vibesys.hypothesis.state import (
@@ -132,6 +131,17 @@ class _HypothesisFields(TypedDict, total=False):
     strategy: HypothesisStrategy
     strategy_reason: str | None
     last_experiment_revision: int
+
+
+def _committed_view(state: HypothesisState, *, run_id: str, loop: str) -> RunView:
+    """Project a just-committed state into the active run view."""
+    return project_run_view(
+        state,
+        run_id=run_id,
+        status=RunStatus.ACTIVE,
+        experiment_revision=state.experiment_revision,
+        loop=loop,
+    )
 
 
 def _round(number: int, **overrides: Unpack[_RoundFields]) -> RoundRecord:
@@ -705,7 +715,7 @@ def test_service_projects_committed_live_state_without_reloading_history(
     changed.hypotheses[1].plan.task = "project this row only"
     store.save(SingleState(search=changed))
     parts.publish_committed_view(
-        project_committed_run_view(changed, run_id=run_id, loop="single-agent"),
+        _committed_view(changed, run_id=run_id, loop="single-agent"),
         changed_keys=("H-02",),
     )
     parts.journal.record(
@@ -773,7 +783,7 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
         changed.hypotheses[0].plan.task = "new committed contents"
         store.save(SingleState(search=changed))
         parts.publish_committed_view(
-            project_committed_run_view(changed, run_id=run_id, loop="single-agent"),
+            _committed_view(changed, run_id=run_id, loop="single-agent"),
             changed_keys=("H-01",),
         )
         parts.journal.record(
@@ -845,9 +855,7 @@ def test_committed_state_is_projected_synchronously_before_later_mutation(tmp_pa
     )
     state = HypothesisState(hypotheses=[_hypothesis("H-01", 1)])
 
-    parts.publish_committed_view(
-        project_committed_run_view(state, run_id=run_id, loop="single-agent")
-    )
+    parts.publish_committed_view(_committed_view(state, run_id=run_id, loop="single-agent"))
     state.hypotheses[0].plan.task = "uncommitted mutation"
     response = parts.api.execute(ExperimentQuery())
 
