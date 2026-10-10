@@ -8,9 +8,14 @@ or reconcile stable request identities before replay.
 """
 
 from enum import StrEnum
-from typing import Annotated, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vs_project.project import Project
 
 
 class _Value(BaseModel):
@@ -179,3 +184,7 @@ class StateStore(Protocol):
         Time before the last successful mutation cannot authorize dispatch.
         """
         ...
+
+
+type StateStoreFactory = Callable[[Project, str], StateStore]
+"""Opens the ``StateStore`` of one run of a project; a Project's default is the local one."""

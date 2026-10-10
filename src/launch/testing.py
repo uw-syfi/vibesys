@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from vibesys.api import OrchestrationRegistry, RunRequest, RunSession
     from vibesys.api.contracts import EventSink
     from vs_agent.api import AgentClientProtocol, AgentEventSink, AgentSpec
-    from vs_project.api import GitRepositoryFactory
+    from vs_project.api import GitRepositoryFactory, StateStoreFactory
     from vs_runtime.api.infrastructure import StopTimer
     from vs_sandbox.api import ComputeBackendImpl
     from vs_slurm.api import SlurmProcess
@@ -37,6 +37,7 @@ def create_session(  # noqa: PLR0913
     stop_timer: StopTimer = asyncio.sleep,
     git_repository: GitRepositoryFactory | None = None,
     slurm_process: SlurmProcess | None = None,
+    state_stores: StateStoreFactory | None = None,
 ) -> RunSession:
     """Execute real built-in wiring with caller-owned Fake implementations."""
     return _create_session(
@@ -49,6 +50,7 @@ def create_session(  # noqa: PLR0913
             stop_timer,
             git_repository=git_repository,
             slurm_process=slurm_process,
+            state_stores=state_stores,
         ),
     )
 

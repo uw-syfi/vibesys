@@ -110,7 +110,12 @@ def test_a_hypothesis_is_adopted_and_the_next_one_builds_on_it(tmp_path: Path) -
         .judge("H3", PASS)
     )
 
-    run = run_request(loop_input.request(max_rounds=3), agents, slurm_process=loop_input.connector)
+    run = run_request(
+        loop_input.request(max_rounds=3),
+        agents,
+        slurm_process=loop_input.connector,
+        state_stores=loop_input.state_stores,
+    )
 
     assert run.error is None
     assert (run.succeeded, run.status) == (True, RunStatus.COMPLETED)
@@ -179,7 +184,10 @@ def test_every_kind_of_planner_mistake_is_corrected_in_one_run(tmp_path: Path) -
     )
 
     run = run_request(
-        loop_input.request(max_in_flight=2), agents, slurm_process=loop_input.connector
+        loop_input.request(max_in_flight=2),
+        agents,
+        slurm_process=loop_input.connector,
+        state_stores=loop_input.state_stores,
     )
 
     assert run.error is None
@@ -234,6 +242,7 @@ def test_implementer_and_judge_faults_in_parallel_workstreams_leave_the_others_u
         loop_input.request(max_in_flight=3, max_retries_per_round=3),
         agents,
         slurm_process=loop_input.connector,
+        state_stores=loop_input.state_stores,
     )
 
     assert run.error is None
@@ -283,7 +292,12 @@ def test_a_planner_turn_killed_by_any_cli_failure_ends_the_run_without_a_stall(
     loop_input = LoopInput.create(tmp_path)
     agents = ScriptedAgents().plan(*failures)
 
-    run = run_request(loop_input.request(), agents, slurm_process=loop_input.connector)
+    run = run_request(
+        loop_input.request(),
+        agents,
+        slurm_process=loop_input.connector,
+        state_stores=loop_input.state_stores,
+    )
 
     assert not isinstance(run.error, RunStalledError), run.error
     assert run.succeeded is not True
@@ -299,7 +313,12 @@ def test_a_planner_that_fails_its_schema_after_correction_ends_the_run(tmp_path:
     loop_input = LoopInput.create(tmp_path)
     agents = ScriptedAgents().plan(*[AgentOutputSchemaError(_SCHEMA_ERRORS)] * 8)
 
-    run = run_request(loop_input.request(), agents, slurm_process=loop_input.connector)
+    run = run_request(
+        loop_input.request(),
+        agents,
+        slurm_process=loop_input.connector,
+        state_stores=loop_input.state_stores,
+    )
 
     assert run.succeeded is not True
     assert agents.unscripted == []
@@ -357,6 +376,7 @@ def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
         loop_input.request(max_rounds=2, max_in_flight=2),
         agents,
         slurm_process=loop_input.connector,
+        state_stores=loop_input.state_stores,
     )
 
     assert agents.unscripted == []
@@ -438,7 +458,12 @@ def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
             .judge(identifier, PASS)
         )
 
-        run = run_request(loop_input.request(), agents, slurm_process=loop_input.connector)
+        run = run_request(
+            loop_input.request(),
+            agents,
+            slurm_process=loop_input.connector,
+            state_stores=loop_input.state_stores,
+        )
 
         assert run.error is None
         assert run.succeeded is True
@@ -451,7 +476,7 @@ def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
 def test_a_lease_that_cannot_be_released_does_not_replace_the_runs_own_error(
     tmp_path: Path,
 ) -> None:
-    loop_input = LoopInput.create(tmp_path)
+    loop_input = LoopInput.create(tmp_path, on_disk_state=True)
     clock = simulated_clock()
     run_ids: list[str] = []
 
@@ -471,6 +496,7 @@ def test_a_lease_that_cannot_be_released_does_not_replace_the_runs_own_error(
         clock=clock,
         on_handle=lambda handle: run_ids.append(handle.run_id),
         slurm_process=loop_input.connector,
+        state_stores=loop_input.state_stores,
     )
 
     # The release in the run's ``finally`` fails to read the lease document; the run's

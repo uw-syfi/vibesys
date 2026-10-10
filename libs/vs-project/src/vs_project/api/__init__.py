@@ -79,7 +79,7 @@ from vs_project._state_io import (
     decode_state_document,
 )
 from vs_project._state_models import FakeStateModels, validate_state_namespace
-from vs_project._state_store import FakeStateStore, LocalStateStore
+from vs_project._state_store import FakeStateStore, FakeStateStores, LocalStateStore
 from vs_project.api.git_repository import (
     COMMIT_IDENTITY_EMAIL,
     COMMIT_IDENTITY_NAME,
@@ -106,6 +106,7 @@ from vs_project.api.state_store import (
     ObservationFault,
     QuarantinedEnvelope,
     StateStore,
+    StateStoreFactory,
     StateStoreWriteError,
     StoredEnvelope,
     StoreFence,
@@ -140,6 +141,7 @@ __all__ = [
     "ConflictReason",
     "FakeStateModels",
     "FakeStateStore",
+    "FakeStateStores",
     "FrameworkSnapshotStatus",
     "GitBackend",
     "GitBackendError",
@@ -192,6 +194,7 @@ __all__ = [
     "StateSlot",
     "StateSnapshot",
     "StateStore",
+    "StateStoreFactory",
     "StateStoreWriteError",
     "StateTransition",
     "StoreFence",

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
         AgentSessionKey,
     )
     from vs_mcp.api import ToolServerDescriptor
-    from vs_project.api import GitRepositoryFactory
+    from vs_project.api import GitRepositoryFactory, StateStoreFactory
     from vs_runtime.api import AgentToolBindingContext
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment, StopTimer
@@ -76,6 +76,8 @@ class SessionImplementations:
     """Builds the run's ``GitRepository`` implementations; ``None`` runs the Git CLI."""
     slurm_process: SlurmProcess | None = None
     """Replaces the Slurm transport's process boundary; ``None`` runs the configured programs."""
+    state_stores: StateStoreFactory | None = None
+    """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
 
 
 __all__ = ["SessionAgents", "SessionImplementations"]

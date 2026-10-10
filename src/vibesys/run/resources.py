@@ -454,6 +454,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     log_emit=run_log_emitter(integration.agent_events),
                     on_log_ready=integration.attach,
                     git_repository=integration.git_repository,
+                    state_stores=integration.state_stores,
                 ),
                 buffered_logs=buffered_logs,
                 resolve_resume=resolve_recorded_run,

@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from vibesys.api.contracts import EventSink
     from vibesys.api.wiring import SessionAgents
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSessionKey
-    from vs_project.api import GitRepositoryFactory, Project
+    from vs_project.api import GitRepositoryFactory, Project, StateStoreFactory
     from vs_runtime.api.infrastructure import RunState, StopTimer
     from vs_sandbox.api import ComputeBackendImpl
     from vs_slurm.api import SlurmProcess
@@ -64,6 +64,8 @@ class LaunchSettings:
     """Builds the run's ``GitRepository`` implementations; ``None`` runs the Git CLI."""
     slurm_process: SlurmProcess | None = None
     """Replaces the Slurm transport's process boundary; ``None`` runs the configured programs."""
+    state_stores: StateStoreFactory | None = None
+    """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
 
 
 def create_session(
@@ -110,6 +112,7 @@ def create_session(
             agent_tool_bindings=AGENT_TOOL_BINDINGS,
             git_repository=selected.git_repository,
             slurm_process=selected.slurm_process,
+            state_stores=selected.state_stores,
             agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),
         ),
     )

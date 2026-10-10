@@ -108,6 +108,26 @@ class FakeStateStore(StoreOperations):
         self._contents = document.model_dump_json().encode()
 
 
+class FakeStateStores:
+    """A ``StateStoreFactory`` of memory stores that outlive any one run host.
+
+    One store per (project root, run id) is kept for the Fake's lifetime, so a
+    run opened again for the same run id reads exactly the records and lease the
+    earlier host committed, as a restart over the shared filesystem does. A test
+    that wants a crash keeps this object and starts the next host with it.
+    """
+
+    def __init__(self) -> None:
+        """Start with no run stores."""
+        self._stores: dict[tuple[Path, str], FakeStateStore] = {}
+        self._lock = RLock()
+
+    def __call__(self, project: Project, run_id: str) -> FakeStateStore:
+        """Return the run's store, creating an empty one on first use."""
+        with self._lock:
+            return self._stores.setdefault((project.root, run_id), FakeStateStore())
+
+
 class LocalStateStore(StoreOperations):
     """Shared-filesystem store with flock and fsync/rename atomic publication.
 
