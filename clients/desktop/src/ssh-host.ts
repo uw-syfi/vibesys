@@ -147,7 +147,7 @@ function hex(word: string): string {
  * a datum with a newline or NUL: no command line this app runs needs one, and `sh` cannot carry it
  * through a command substitution intact.
  */
-export function remoteCommand(script: string, role: string, args: readonly string[]): string {
+function remoteCommand(script: string, role: string, args: readonly string[]): string {
   for (const arg of args) {
     if (/[\n\r\0]/.test(arg)) {
       throw new HostError('failed', `an argument contains a line break: ${JSON.stringify(arg)}`);
@@ -155,13 +155,6 @@ export function remoteCommand(script: string, role: string, args: readonly strin
   }
   return ['sh', '-c', `'${script}'`, role, ...args.map(hex)].join(' ');
 }
-
-/** The fixed scripts, exported for the test that checks every login shell passes them through. */
-export const REMOTE_SCRIPTS = {
-  'vibesys-probe': PROBE_SCRIPT,
-  'vibesys-run': RUN_SCRIPT,
-  'vibesys-bridge': BRIDGE_SCRIPT,
-} as const;
 
 interface Resolved {
   /** The vibesys command with its first word replaced by the path found. */
