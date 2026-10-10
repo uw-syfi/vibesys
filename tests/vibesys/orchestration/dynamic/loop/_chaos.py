@@ -41,6 +41,7 @@ from vs_faults.api import (
     AgentCrashError,
     AgentFault,
     Boundary,
+    ClusterFault,
     FaultPlan,
     FaultyAgentClient,
     FaultyToolDispatch,
@@ -51,7 +52,7 @@ from vs_faults.api import (
     injected_faults,
     prompt_vocabulary,
 )
-from vs_runtime.api import UnresolvedDispatchError
+from vs_runtime.api import RunCleanupError, UnresolvedDispatchError
 from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
@@ -123,20 +124,26 @@ class Injected:
     """The faults a run actually suffered, which decide the endings it may have."""
 
     agent: frozenset[AgentFault] = frozenset()
+    #: Cluster transport faults the connector wrapper injected. Which Slurm call
+    #: receives one depends on the run's pace, so only the kinds are recorded.
+    cluster: frozenset[ClusterFault] = frozenset()
     #: The user's stop reached the session during the run (not merely scheduled).
     stop_delivered: bool = False
 
 
-#: Each ending a run may have, with the agent faults that can cause it. The map
+#: Each ending a run may have, with the faults that can cause it. The map
 #: is closed: an error type outside it (any other ``RuntimeContractError``
 #: included) is a violation whatever was injected. A transport fault leaves a
 #: turn's fate unknown; an output fault makes a reply wrong, which schema and
-#: planning errors report.
-_EXPLAINED_BY: dict[type[BaseException], frozenset[AgentFault]] = {
+#: planning errors report. A cluster fault can leave a job's cancellation
+#: unknown, so cleanup cannot close the evaluation services and ends the run
+#: with a typed ``RunCleanupError`` (decision D294).
+_EXPLAINED_BY: dict[type[BaseException], frozenset[AgentFault | ClusterFault]] = {
     UnresolvedDispatchError: _TRANSPORT_FAULTS,
     AgentCrashError: frozenset({AgentFault.CRASH}),
     AgentOutputSchemaError: _OUTPUT_FAULTS,
     DynamicPlanningError: _OUTPUT_FAULTS,
+    RunCleanupError: frozenset(ClusterFault),
 }
 
 
@@ -148,7 +155,7 @@ def unexplained_end(error: BaseException | None, injected: Injected) -> str | No
         return None if injected.stop_delivered else "stopped without a delivered stop"
     for error_type, causes in _EXPLAINED_BY.items():
         if isinstance(error, error_type):
-            if injected.agent & causes:
+            if (injected.agent | injected.cluster) & causes:
                 return None
             return f"{error_type.__name__} without a fault that can cause it"
     return "an ending no fault is declared to cause"
@@ -446,6 +453,9 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     run = finished[0]
     suffered = Injected(
         agent=frozenset(item[2] for item in (agents.faulty.injected if agents.faulty else [])),
+        cluster=frozenset(
+            ClusterFault(str(item["fault"])) for item in injected_faults(faults_dir / "cluster")
+        ),
         stop_delivered=agents.stop_delivered,
     )
     if (reason := unexplained_end(run.error, suffered)) is not None:
