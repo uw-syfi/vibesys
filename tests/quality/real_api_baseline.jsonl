@@ -155,7 +155,7 @@
 {"path": "libs/vs-sandbox/tests/test_docker_workspace.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_gate_runners.py", "rule": "process", "count": 3}
 {"path": "libs/vs-sandbox/tests/test_gate_runners.py", "rule": "threading", "count": 3}
-{"path": "libs/vs-sandbox/tests/test_host_command_bridge_e2e.py", "rule": "process", "count": 3}
+{"path": "libs/vs-sandbox/tests/test_host_command_bridge_e2e.py", "rule": "process", "count": 2}
 {"path": "libs/vs-sandbox/tests/test_host_command_bridge_e2e.py", "rule": "subprocess", "count": 3}
 {"path": "libs/vs-sandbox/tests/test_host_command_bridge_e2e.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_landlock_sandbox.py", "rule": "process", "count": 3}
@@ -171,7 +171,7 @@
 {"path": "libs/vs-sandbox/tests/test_slurm_executor.py", "rule": "bare_wait", "count": 3}
 {"path": "libs/vs-sandbox/tests/test_slurm_executor.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_slurm_executor.py", "rule": "threading", "count": 10}
-{"path": "libs/vs-sandbox/tests/test_agent_gpu.py", "rule": "process", "count": 2}
+{"path": "libs/vs-sandbox/tests/test_agent_gpu.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_agent_gpu.py", "rule": "threading", "count": 2}
 {"path": "libs/vs-sandbox/tests/test_slurm_lifecycle.py", "rule": "bare_wait", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_slurm_lifecycle.py", "rule": "threading", "count": 6}

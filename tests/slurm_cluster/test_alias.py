@@ -28,12 +28,16 @@ def test_the_aliass_gates_run_as_jobs_staged_into_its_stage_root(
 ) -> None:
     alias_run.set_mode("accuracy", "pass")
 
-    accuracy = alias_run.gate("accuracy")
-
-    assert accuracy.exit_code == 0, accuracy.output
-    assert "accuracy ok" in accuracy.output
+    for _ in range(2):
+        accuracy = alias_run.gate("accuracy")
+        assert accuracy.exit_code == 0, accuracy.output
+        assert "accuracy ok" in accuracy.output
     stage = slurm_cluster.root / "alias-home" / ".cache" / "vibesys" / "slurm-gpu-stage"
-    assert any((stage / "slurm-gpu").iterdir())
+    # Runs sharing the root stage into separate invocation directories.
+    invocations = [
+        path for path in (stage / "slurm-gpu").iterdir() if (path / "workspace").is_dir()
+    ]
+    assert len(invocations) >= 2
     assert slurm_cluster.queue() == []
 
 
