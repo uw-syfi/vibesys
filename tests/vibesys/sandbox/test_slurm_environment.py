@@ -282,7 +282,7 @@ def test_the_environment_notes_name_the_gate_client_and_exactly_the_planned_gate
 
 
 def _run_tokens(backend: DaemonBackend) -> list[str]:
-    return next(call for call in backend.engine.calls if call[1] == "run")
+    return list(next(call for call in backend.engine.calls if call[1] == "run"))
 
 
 @pytest.mark.parametrize("name", _ENVIRONMENTS)

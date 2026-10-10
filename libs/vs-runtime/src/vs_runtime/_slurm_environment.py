@@ -79,6 +79,15 @@ def _slurm_service_command(policy: SlurmExecutionPolicy) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True, slots=True)
+class _OperatorSettings:
+    """What the operator's file says: the cluster, the VibeSys policy, the agent GPU limits."""
+
+    config: SlurmConfig
+    policy: SlurmExecutionPolicy
+    agent_gpu: AgentGpuConfig | None
+
+
+@dataclass(frozen=True, slots=True)
 class _ClusterPlans:
     """The evaluation and capture plans the run wrote, and the paths they name."""
 
@@ -198,19 +207,16 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                     else AgentGpuFacts(agent_gpu.max_gpus, agent_gpu.max_time_minutes)
                 ),
             ),
-            partial(self._open, request, config, policy, agent_gpu),
+            partial(self._open, request, _OperatorSettings(config, policy, agent_gpu)),
         )
 
-    def _open(  # lint-waiver: LW-610011 [PLR0913]; the prepared plan binds the run's request and its three loaded operator facts once, before the presentation arrives.
-        # > A parameter object would only restate these arguments at the single
-        # > call site in prepare.
+    def _open(
         self,
         request: RunEnvironmentRequest,
-        config: SlurmConfig,
-        policy: SlurmExecutionPolicy,
-        agent_gpu: AgentGpuConfig | None,
+        operator: _OperatorSettings,
         presentation: RunEnvironmentPresentation,
     ) -> RunEnvironmentSession:
+        config, policy, agent_gpu = operator.config, operator.policy, operator.agent_gpu
         # Without the agent's own GPU commands, profiling is a remote capture
         # the cluster runs; with them, the agent profiles through its commands.
         remote_profiling = agent_gpu is None

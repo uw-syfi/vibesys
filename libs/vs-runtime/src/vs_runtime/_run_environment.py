@@ -481,12 +481,38 @@ class _PreparedRunEnvironment:
 class RunEnvironment(Protocol):
     """Environment policy for run execution and candidate evaluation."""
 
-    isolated: bool
-    materialize_local_model_weights: bool
-    default_profiler_id: str
-    supported_profiler_ids: frozenset[str] | None
-    backend_image: str | None
-    requires_local_profiler_preflight: bool
+    # Read-only members: an environment may fix them or derive them from its
+    # operator configuration.
+
+    @property
+    def isolated(self) -> bool:
+        """Whether candidates run in isolated worktrees of their own."""
+        ...
+
+    @property
+    def materialize_local_model_weights(self) -> bool:
+        """Whether external model-weight symlinks are copied into the workspace."""
+        ...
+
+    @property
+    def default_profiler_id(self) -> str:
+        """The profiler a run uses when none is requested."""
+        ...
+
+    @property
+    def supported_profiler_ids(self) -> frozenset[str] | None:
+        """The profilers a run may select, or ``None`` when any is allowed."""
+        ...
+
+    @property
+    def backend_image(self) -> str | None:
+        """The image the environment pins for the compute backend, if any."""
+        ...
+
+    @property
+    def requires_local_profiler_preflight(self) -> bool:
+        """Whether the profiler's tool must exist on this host."""
+        ...
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve environment facts without starting owned resources."""
