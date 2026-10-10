@@ -4,9 +4,9 @@
  * `LocalHost` builds them, and answered from the world's scripts; sockets are a `FakeNetwork`.
  */
 import {PassThrough} from 'node:stream';
-import type {CommandResult, ServerScript} from '../fake-host.js';
-import {FakeNetwork} from '../fake-network.js';
 import type {LocalSystem, ProcessLike} from '../local-host.js';
+import type {CommandResult, ServerScript} from './fake-host.js';
+import {FakeNetwork} from './fake-network.js';
 
 export interface FakeLocalScripts {
   server: (args: readonly string[]) => ServerScript;

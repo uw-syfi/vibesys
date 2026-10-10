@@ -1,6 +1,6 @@
-import type {CommandResult, ServerScript} from './fake-host.js';
-import {FakeHost} from './fake-host.js';
 import {LocalHost} from './local-host.js';
+import type {CommandResult, ServerScript} from './testing/fake-host.js';
+import {FakeHost} from './testing/fake-host.js';
 import {fakeLocalSystem} from './testing/fake-local-system.js';
 import {describeHostContract, type HostWorld} from './testing/host-contract.js';
 

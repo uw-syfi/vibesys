@@ -7,7 +7,7 @@
  * order, ending one side ends the other's readable side, and destroying one side ends the other.
  */
 import {Duplex} from 'node:stream';
-import {HostError} from './host.js';
+import {HostError} from '../host.js';
 
 /** A server's per-connection behavior: it receives the server end of each new connection. */
 export type ConnectionHandler = (connection: Duplex) => void;

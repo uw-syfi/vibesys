@@ -7,8 +7,8 @@
  * `failed`, and nothing works after `close()`.
  */
 import type {Duplex} from 'node:stream';
+import {type Endpoint, type Host, HostError, type ServerExit, type ServerHandle} from '../host.js';
 import {type ConnectionHandler, FakeNetwork} from './fake-network.js';
-import {type Endpoint, type Host, HostError, type ServerExit, type ServerHandle} from './host.js';
 
 /** What a scripted command prints and how it exits. */
 export interface CommandResult {

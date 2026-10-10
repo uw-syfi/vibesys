@@ -1,9 +1,9 @@
 import {describe, expect, test} from 'bun:test';
 import type {MainToPage} from './bridge-protocol.js';
-import {FakeHost} from './fake-host.js';
-import type {ConnectionHandler} from './fake-network.js';
 import {HostError} from './host.js';
 import {type RelayPort, relay} from './relay.js';
+import {FakeHost} from './testing/fake-host.js';
+import type {ConnectionHandler} from './testing/fake-network.js';
 
 /** The page end of a connection, as the main process sees it through a message port. */
 class FakePort implements RelayPort {

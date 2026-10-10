@@ -5,8 +5,8 @@
  */
 import {describe, expect, test} from 'bun:test';
 import type {Duplex} from 'node:stream';
-import type {CommandResult, ServerScript} from '../fake-host.js';
 import {type Host, HostError, type HostErrorKind} from '../host.js';
+import type {CommandResult, ServerScript} from './fake-host.js';
 
 export interface HostWorld {
   readonly host: Host;
