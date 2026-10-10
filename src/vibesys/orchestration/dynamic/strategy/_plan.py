@@ -42,11 +42,18 @@ class PlanViolation(Value):
         return f"{self.path}: {self.detail}"
 
 
+_RETIREMENTS: dict[str, Literal[HypothesisStrategy.PARKED, HypothesisStrategy.ABANDONED]] = {
+    "parked": HypothesisStrategy.PARKED,
+    "abandoned": HypothesisStrategy.ABANDONED,
+}
+"""The planner's wording of a retirement, as the strategy value the record stores."""
+
+
 class PlanUpdate(Value):
     """A validated park or abandon decision for a finished hypothesis."""
 
     hypothesis_id: str
-    disposition: Literal["parked", "abandoned"]
+    disposition: Literal[HypothesisStrategy.PARKED, HypothesisStrategy.ABANDONED]
     reason: str
     reason_kind: str
 
@@ -252,7 +259,7 @@ def _updates(
             kept.append(
                 PlanUpdate(
                     hypothesis_id=update.hypothesis_id,
-                    disposition=update.disposition,
+                    disposition=_RETIREMENTS[update.disposition],
                     reason=update.reason,
                     reason_kind=update.reason_kind.value,
                 )
