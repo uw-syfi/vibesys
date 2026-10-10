@@ -87,6 +87,7 @@ def run_shell(
     limits: Limits | None = None,
     live: bool = True,
     max_concurrent: int = 1,
+    deadline_at: float | None = None,
     **overrides: object,
 ) -> Run:
     """Run a fresh strategy to the end of its run on the production shell.
@@ -101,6 +102,7 @@ def run_shell(
         limits=limits or LIMITS,
         envelope_type=RunEnvelope[DynamicStrategyState],
         requirements=requirements_for(settings),
+        **({} if deadline_at is None else {"deadline_at": deadline_at}),
     )
     finished = drive_shell(
         DynamicStrategy(config=settings),

@@ -71,6 +71,12 @@ ISSUED = tuple(
     )
 )
 WORKSTREAMS = 2
+# A run that is stuck idles until its deadline, one durable commit per clock tick, so the
+# deadline sets the cost of such a case. The slowest run that does end (a measurement
+# submission answered Unknown every time) ends 12,601 s in; a run known to stay open is cut
+# short much earlier, since only the fact that it does not end is asserted.
+DEADLINE = 15_000.0
+OPEN_DEADLINE = 1_000.0
 
 
 class Reply(StrEnum):
@@ -115,8 +121,9 @@ def test_every_registered_kind_is_classified() -> None:
 
 
 def _run(kind: str, how: Reply | None, cap: int) -> Faulted:
+    deadline = OPEN_DEADLINE if (kind, how) in KNOWN_OPEN else DEADLINE
     script = Faulted(kind, how) if how is not None else Faulted("", Reply.SILENT)
-    run_shell(script, max_concurrent=cap, max_in_flight=WORKSTREAMS)
+    run_shell(script, max_concurrent=cap, max_in_flight=WORKSTREAMS, deadline_at=deadline)
     return script
 
 
