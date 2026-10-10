@@ -16,7 +16,7 @@ from hypothesis import strategies as st
 
 from entrypoints.instances import main as instances_main
 from entrypoints.instances import run
-from entrypoints.launcher import _headless_requested
+from entrypoints.launcher import _headless_requested, source_checkout_root
 from entrypoints.server import (
     _DetachedGatewayEffects,
     _headless_argv,
@@ -41,7 +41,6 @@ from server.instances import (
     StopOutcome,
     driving,
     instance_root,
-    running_checkout,
 )
 from vibesys.orchestration.dynamic import DynamicOptions
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
@@ -418,7 +417,8 @@ def test_a_detached_server_advertises_each_milestone_and_unregisters_on_exit(
         os.getpid(),
     )
     assert starting.socket_path == str(socket_path)
-    assert starting.vibesys_root == running_checkout()
+    checkout = source_checkout_root()
+    assert starting.vibesys_root == (None if checkout is None else str(checkout))
     assert serving is not None
     assert serving.status is InstanceStatus.SERVING
     assert ready is not None

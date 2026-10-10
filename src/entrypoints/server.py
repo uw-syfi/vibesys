@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, Protocol, TypeVar
 
 from entrypoints import cli
+from entrypoints.launcher import source_checkout_root
 from entrypoints.web_assets import WebAssetBundle
 from launch import default_runs
 from server.instances import (
@@ -33,7 +34,6 @@ from server.instances import (
     instance_run_directory,
     instance_socket_path,
     new_instance_id,
-    running_checkout,
 )
 from server.runtime import (
     WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
@@ -919,6 +919,12 @@ class _RegistryPublisher:
         self._hold.publish(self._record)
 
 
+def _running_checkout() -> str | None:
+    """The VibeSys source checkout this server runs from, for its registry record."""
+    root = source_checkout_root()
+    return None if root is None else str(root)
+
+
 def _register_detached_instance(
     arguments: list[str], control_socket: Path, scope: ExitStack
 ) -> _RegistryPublisher:
@@ -944,7 +950,7 @@ def _register_detached_instance(
             started_at=SystemClock().now(),
             hostname=hostname,
             vibesys_version=version,
-            vibesys_root=running_checkout(),
+            vibesys_root=_running_checkout(),
         ),
     )
 

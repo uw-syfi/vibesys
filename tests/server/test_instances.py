@@ -33,13 +33,11 @@ from server.instances import (
     StopOutcome,
     StopRoute,
     Verdict,
-    checkout_root,
     instance_root,
     instance_socket_path,
     judge,
     new_instance_id,
     parse_instance_id,
-    running_checkout,
 )
 from server.transport.discovery import LockState
 from server.transport.unix_jsonl import MAX_SOCKET_PATH_BYTES
@@ -530,49 +528,6 @@ def test_socket_paths_fit_the_unix_limit_with_room_to_spare() -> None:
     assert len(str(instance_socket_path(root, new_instance_id())).encode()) <= (
         MAX_SOCKET_PATH_BYTES - 40
     )
-
-
-def _checkout(root: Path, manifest: str | None) -> Path:
-    """A ``src/server/instances.py`` module under ``root`` with ``manifest`` as its pyproject."""
-    module = root / "src" / "server" / "instances.py"
-    module.parent.mkdir(parents=True)
-    module.write_text("", encoding="utf-8")
-    if manifest is not None:
-        (root / "pyproject.toml").write_text(manifest, encoding="utf-8")
-    return module
-
-
-def test_checkout_root_is_the_directory_whose_pyproject_declares_vibesys(tmp_path: Path) -> None:
-    module = _checkout(tmp_path, '[project]\nname = "vibesys"\n')
-
-    assert checkout_root(module) == tmp_path.resolve()
-
-
-@pytest.mark.parametrize(
-    "manifest",
-    [
-        None,
-        '[project]\nname = "other"\n',
-        "[tool.uv]\npackage = true\n",
-        "project = 3\n",
-        "[project\n",
-    ],
-    ids=["no-pyproject", "other-project", "no-project-table", "project-not-a-table", "malformed"],
-)
-def test_checkout_root_is_none_without_a_vibesys_pyproject(
-    tmp_path: Path, manifest: str | None
-) -> None:
-    assert checkout_root(_checkout(tmp_path, manifest)) is None
-
-
-def test_checkout_root_is_none_for_a_module_too_close_to_the_filesystem_root() -> None:
-    assert checkout_root(Path("/instances.py")) is None
-
-
-def test_running_checkout_is_this_source_tree() -> None:
-    repository = Path(__file__).resolve().parents[2]
-
-    assert running_checkout() == str(repository)
 
 
 def test_record_without_vibesys_root_still_parses_as_version_1() -> None:
