@@ -322,13 +322,18 @@ class SshAccess implements HostAccess {
     const kind: HostErrorKind | null =
       code === null ? 'link' : BRIDGE_EXITS.has(code) ? (BRIDGE_EXITS.get(code) ?? null) : 'failed';
     if (kind === null) return null;
+    const report = bridgeReport(stderr);
     if (kind === 'unreachable') {
-      return new HostError('unreachable', `nothing is listening at ${socketPath}`);
+      return new HostError(
+        'unreachable',
+        `nothing is listening at ${socketPath}${report === null ? '' : ` (${report})`}`,
+      );
     }
-    if (kind === 'link') return this.#linkError(stderr);
+    if (kind === 'link' && (code === null || code === SSH_FAILED)) return this.#linkError(stderr);
     return new HostError(
       kind,
-      `the bridge to ${socketPath} on ${this.#options.alias} ended with ${code}: ${lastLine(stderr)}`,
+      `the bridge to ${socketPath} on ${this.#options.alias} ended: ` +
+        (report ?? `status ${code}: ${lastLine(stderr)}`),
     );
   }
 }
@@ -346,6 +351,26 @@ function derivePython(vibesys: string, rest: string, shebang: string): string | 
   }
   const interpreter = shebang.trim();
   return interpreter === '' ? null : interpreter;
+}
+
+/**
+ * The stdio bridge's report, `outcome: detail`, from the one JSON line it writes to standard error
+ * on a nonzero exit (`{"outcome", "exit_status", "detail"}`); null when there is none.
+ */
+function bridgeReport(stderr: string): string | null {
+  for (const line of stderr.split('\n').reverse()) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line) as unknown;
+    } catch {
+      continue;
+    }
+    if (typeof parsed !== 'object' || parsed === null) continue;
+    const {outcome, detail} = parsed as {outcome?: unknown; detail?: unknown};
+    if (typeof outcome !== 'string') continue;
+    return typeof detail === 'string' && detail !== '' ? `${outcome}: ${detail}` : outcome;
+  }
+  return null;
 }
 
 function lastLine(text: string): string {

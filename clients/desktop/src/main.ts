@@ -362,8 +362,8 @@ class DesktopApp {
         return;
       }
       port.start();
-      const report = (end: StreamEnd): void =>
-        binding.supervisor.dispatch({type: 'stream-ended', end});
+      const report = (end: StreamEnd, detail: string): void =>
+        binding.supervisor.dispatch({type: 'stream-ended', end, detail});
       void relay(relayPort(port), observedDial(binding.run, report));
     });
     // A machine that slept has dead connections nobody has noticed yet: check every link now.

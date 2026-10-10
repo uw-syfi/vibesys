@@ -89,6 +89,7 @@ function streamEndOf(error: unknown): StreamEnd {
     case 'unreachable':
       return 'run-gone';
     case 'auth':
+      return 'auth';
     case 'failed':
     case 'malformed':
       return 'failed';
@@ -97,20 +98,22 @@ function streamEndOf(error: unknown): StreamEnd {
   }
 }
 
-/** `run`'s dial, reporting every failed dial and abnormal stream end to `report`. */
+/** `run`'s dial, reporting every failed dial and abnormal stream end, with its message. */
 export function observedDial(
   run: AttachedRun,
-  report: (end: StreamEnd) => void,
+  report: (end: StreamEnd, detail: string) => void,
 ): () => Promise<Duplex> {
+  const observe = (error: unknown): void =>
+    report(streamEndOf(error), error instanceof Error ? error.message : String(error));
   return async () => {
     let stream: Duplex;
     try {
       stream = await run.host.dial(run.endpoint);
     } catch (error) {
-      report(streamEndOf(error));
+      observe(error);
       throw error;
     }
-    stream.once('error', error => report(streamEndOf(error)));
+    stream.once('error', observe);
     return stream;
   };
 }

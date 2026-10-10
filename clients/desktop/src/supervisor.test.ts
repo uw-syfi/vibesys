@@ -21,6 +21,7 @@ import {FakeVibesysNode} from './testing/fake-vibesys-node.js';
 const CONFIG: SupervisorConfig = {
   delaysMs: [500, 1_000, 2_000, 4_000, 8_000],
   checkTimeoutMs: 45_000,
+  stableAfterMs: 30_000,
 };
 const SPENT = CONFIG.delaysMs.reduce((sum, delay) => sum + delay, 0);
 
@@ -67,7 +68,7 @@ async function connected(answer: (interactive: boolean) => CheckOutcome | 'hang'
 describe('ConnectionSupervisor scenarios', () => {
   test('a drop mid-stream restores the link, then wakes the page once', async () => {
     const world = await connected(() => OK);
-    world.supervisor.dispatch({type: 'stream-ended', end: 'link'});
+    world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'link'});
     await settle();
     expect(world.supervisor.status.kind).toBe('connected');
     expect(world.wakes()).toBe(1);
@@ -80,7 +81,7 @@ describe('ConnectionSupervisor scenarios', () => {
       calls += 1;
       return calls === 1 ? 'hang' : OK;
     });
-    world.supervisor.dispatch({type: 'stream-ended', end: 'link'});
+    world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'link'});
     await settle();
     expect(world.supervisor.status.kind).toBe('reconnecting');
     world.clock.advance(CONFIG.checkTimeoutMs);
@@ -99,7 +100,7 @@ describe('ConnectionSupervisor scenarios', () => {
         calls += 1;
         return calls <= refusals ? LINK : OK;
       });
-      world.supervisor.dispatch({type: 'stream-ended', end: 'link'});
+      world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'link'});
       for (const delay of CONFIG.delaysMs.slice(0, refusals)) {
         await settle();
         expect(world.supervisor.status.kind).toBe('reconnecting');
@@ -118,7 +119,7 @@ describe('ConnectionSupervisor scenarios', () => {
   test('a link that stays down goes offline instead of retrying forever, until the network changes', async () => {
     let up = false;
     const world = await connected(() => (up ? OK : LINK));
-    world.supervisor.dispatch({type: 'stream-ended', end: 'link'});
+    world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'link'});
     await settle();
     for (let index = 0; index < 20; index += 1) {
       world.clock.advance(SPENT);
@@ -136,7 +137,7 @@ describe('ConnectionSupervisor scenarios', () => {
   test('waking from sleep checks at once instead of waiting out the backoff', async () => {
     let up = false;
     const world = await connected(() => (up ? OK : LINK));
-    world.supervisor.dispatch({type: 'stream-ended', end: 'link'});
+    world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'link'});
     await settle();
     world.clock.advance(CONFIG.delaysMs[0] ?? 0);
     await settle();
@@ -155,12 +156,12 @@ describe('ConnectionSupervisor scenarios', () => {
     const world = await connected(interactive =>
       interactive && password ? OK : {ok: false, cause: 'auth', detail: 'Permission denied'},
     );
-    world.supervisor.dispatch({type: 'stream-ended', end: 'link'});
+    world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'link'});
     await settle();
     expect(world.supervisor.status.kind).toBe('auth-needed');
     world.clock.advance(10 * SPENT);
     world.supervisor.dispatch({type: 'resumed'});
-    world.supervisor.dispatch({type: 'stream-ended', end: 'link'});
+    world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'link'});
     await settle();
     expect(world.checks).toEqual([true, false]);
     password = true;
@@ -172,11 +173,11 @@ describe('ConnectionSupervisor scenarios', () => {
 
   test('a run that is gone ends the attachment with no retry', async () => {
     const world = await connected(() => ({ok: false, cause: 'run-gone', detail: 'gone'}));
-    world.supervisor.dispatch({type: 'stream-ended', end: 'run-gone'});
+    world.supervisor.dispatch({type: 'stream-ended', end: 'run-gone', detail: 'run-gone'});
     await settle();
     expect(world.supervisor.status.kind).toBe('run-ended');
     for (let index = 0; index < 5; index += 1) {
-      world.supervisor.dispatch({type: 'stream-ended', end: 'run-gone'});
+      world.supervisor.dispatch({type: 'stream-ended', end: 'run-gone', detail: 'run-gone'});
       world.supervisor.dispatch({type: 'network-changed'});
       world.clock.advance(SPENT);
       await settle();
@@ -193,6 +194,84 @@ describe('ConnectionSupervisor scenarios', () => {
     world.clock.advance(SPENT);
     await settle();
     expect(world.checks.length).toBe(1);
+  });
+});
+
+describe('ConnectionSupervisor when checks pass but dials fail', () => {
+  /** A connected supervisor whose page redials (and fails) every time it is woken. */
+  async function redialing(dialFails: () => boolean) {
+    const world = await connected(() => OK);
+    let woken = world.wakes();
+    const pump = async (): Promise<void> => {
+      for (let index = 0; index < 100; index += 1) {
+        await settle();
+        if (world.wakes() === woken) return;
+        woken = world.wakes();
+        if (dialFails()) {
+          world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'server_stalled'});
+        }
+      }
+    };
+    return {...world, pump};
+  }
+
+  test('every dial failing while the registry check passes is a bounded loop that ends offline', async () => {
+    const world = await redialing(() => true);
+    world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'server_stalled'});
+    for (let index = 0; index < 20; index += 1) {
+      await world.pump();
+      world.clock.advance(SPENT);
+    }
+    await world.pump();
+    expect(world.supervisor.status).toEqual({kind: 'offline', detail: 'server_stalled'});
+    // The first check, then at most the schedule's worth of recoveries.
+    expect(world.checks.length).toBeLessThanOrEqual(1 + CONFIG.delaysMs.length + 1);
+    expect(world.clock.pending).toBe(0);
+  });
+
+  test('a recovery that holds for the stable period starts the backoff over', async () => {
+    let fail = true;
+    const world = await redialing(() => fail);
+    world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'x'});
+    await world.pump();
+    fail = false;
+    world.clock.advance(SPENT);
+    await world.pump();
+    expect(world.supervisor.status.kind).toBe('connected');
+    world.clock.advance(CONFIG.stableAfterMs);
+    await settle();
+    const before = world.checks.length;
+    world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'x'});
+    await settle();
+    // Checked at once, with no delay: the earlier failures no longer count.
+    expect(world.checks.length).toBe(before + 1);
+    expect(world.supervisor.status.kind).toBe('connected');
+  });
+
+  test('a bridge that cannot run stops with its report instead of checking and redialing', async () => {
+    const world = await connected(() => OK);
+    const detail = 'connect_denied: connecting to /run/vs.sock: Permission denied';
+    world.supervisor.dispatch({type: 'stream-ended', end: 'failed', detail});
+    await settle();
+    expect(world.supervisor.status).toEqual({kind: 'failed', detail});
+    world.supervisor.dispatch({type: 'stream-ended', end: 'link', detail: 'x'});
+    world.supervisor.dispatch({type: 'network-changed'});
+    world.clock.advance(SPENT);
+    await settle();
+    expect(world.checks).toEqual([true]);
+    expect(world.wakes()).toBe(0);
+    expect(world.clock.pending).toBe(0);
+  });
+
+  test('a dial the host refuses asks for sign-in', async () => {
+    const world = await connected(() => OK);
+    world.supervisor.dispatch({type: 'stream-ended', end: 'auth', detail: 'Permission denied'});
+    await settle();
+    expect(world.supervisor.status).toEqual({kind: 'auth-needed', detail: 'Permission denied'});
+    world.supervisor.dispatch({type: 'user-retry'});
+    await settle();
+    expect(world.supervisor.status.kind).toBe('connected');
+    expect(world.wakes()).toBe(1);
   });
 });
 
@@ -215,7 +294,11 @@ describe('supervisor core properties', () => {
   ): SupervisorEvent {
     const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
     const choices: SupervisorEvent[] = [
-      {type: 'stream-ended', end: pick(['normal', 'link', 'run-gone', 'failed'] as const)},
+      {
+        type: 'stream-ended',
+        end: pick(['normal', 'link', 'link', 'run-gone', 'auth', 'failed'] as const),
+        detail: 'stream',
+      },
       {type: 'resumed'},
       {type: 'network-changed'},
     ];
@@ -246,12 +329,25 @@ describe('supervisor core properties', () => {
     if (state.timer !== null) expect(timers.has(state.timer)).toBe(true);
   }
 
+  /**
+   * What buys a fresh retry budget: the world changing or the user asking. A stream ending is not
+   * one: a check can succeed while every dial fails, so redials must spend the same budget.
+   */
   const TRIGGERS: ReadonlySet<SupervisorEvent['type']> = new Set([
     'resumed',
     'network-changed',
     'user-retry',
-    'stream-ended',
   ]);
+
+  /** A recovered connection that outlasted `stableAfterMs` also starts the budget over. */
+  function lasted(before: SupervisorState, event: SupervisorEvent): boolean {
+    return (
+      event.type === 'timer-fired' &&
+      event.timer === before.timer &&
+      before.status.kind === 'connected' &&
+      before.check === null
+    );
+  }
 
   /** Apply one step's requests to the live timers; return how many checks it started. */
   function observe(
@@ -284,7 +380,7 @@ describe('supervisor core properties', () => {
     for (let index = 0; index < 300; index += 1) {
       const event = nextEvent(random, state, timers);
       const next = step(state, event, CONFIG);
-      if (TRIGGERS.has(event.type)) checksSinceTrigger = 0;
+      if (TRIGGERS.has(event.type) || lasted(state, event)) checksSinceTrigger = 0;
       checksSinceTrigger += observe(next.requests, state, event, timers);
       // Never a retry storm: one trigger buys at most the finite schedule plus its first try.
       expect(checksSinceTrigger).toBeLessThanOrEqual(CONFIG.delaysMs.length + 1);
@@ -378,7 +474,9 @@ describe('supervisor over an SSH host', () => {
     await settle();
     expect(supervisor.status.kind).toBe('connected');
 
-    const dial = observedDial(run, end => supervisor.dispatch({type: 'stream-ended', end}));
+    const dial = observedDial(run, (end, detail) =>
+      supervisor.dispatch({type: 'stream-ended', end, detail}),
+    );
     const stream = await dial();
     stream.resume();
     const closed = new Promise(resolve => stream.once('close', resolve));
@@ -393,6 +491,8 @@ describe('supervisor over an SSH host', () => {
     live = false;
     node.stopAll();
     await dial().catch(() => {});
+    // The stream just recovered, so this check waits its turn in the backoff.
+    clock.advance(SPENT);
     await checked.at(-1);
     await settle();
     expect(supervisor.status.kind).toBe('run-ended');

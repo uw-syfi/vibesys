@@ -28,8 +28,11 @@ export type CheckFailure =
   /** Something retrying cannot fix (a missing vibesys command, a malformed listing). */
   | 'failed';
 
-/** How a stream (or a dial) to the run ended, as the relay observed it. */
-export type StreamEnd = 'normal' | 'link' | 'run-gone' | 'failed';
+/**
+ * How a stream (or a dial) to the run ended, as the relay observed it. `auth` and `failed` are
+ * final: retrying a dial the host refused or that cannot run only repeats the refusal.
+ */
+export type StreamEnd = 'normal' | 'link' | 'run-gone' | 'auth' | 'failed';
 
 /** What the window shows about its connection. */
 export type ConnectionStatus =
@@ -45,11 +48,15 @@ export type ConnectionStatus =
 
 export interface SupervisorState {
   readonly status: ConnectionStatus;
-  /** Position in the backoff schedule for the next link failure. */
+  /**
+   * Position in the backoff schedule for the next link failure. A recovery a stream triggered keeps
+   * its place (a check can succeed while every dial fails), until a stream stays up for
+   * `stableAfterMs`; only that, a wake, a network change, or the user's retry starts over.
+   */
   readonly attempt: number;
   /** The check whose outcome the core is waiting for, or null. */
   readonly check: number | null;
-  /** The pending retry or check-deadline timer, or null. */
+  /** The pending retry, check-deadline, or (while connected) stability timer, or null. */
   readonly timer: number | null;
   /** The next id for a check or timer; ids are never reused. */
   readonly nextId: number;
@@ -64,7 +71,7 @@ export type SupervisorEvent =
       readonly cause: CheckFailure;
       readonly detail: string;
     }
-  | {readonly type: 'stream-ended'; readonly end: StreamEnd}
+  | {readonly type: 'stream-ended'; readonly end: StreamEnd; readonly detail: string}
   | {readonly type: 'timer-fired'; readonly timer: number}
   /** The machine woke from sleep (`powerMonitor` resume). */
   | {readonly type: 'resumed'}
@@ -86,11 +93,14 @@ export interface SupervisorConfig {
   readonly delaysMs: readonly number[];
   /** How long one check may take before it counts as a link failure. */
   readonly checkTimeoutMs: number;
+  /** How long a recovered connection must last before the backoff starts over. */
+  readonly stableAfterMs: number;
 }
 
 const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
   delaysMs: DEFAULT_RECONNECT_DELAYS_MS,
   checkTimeoutMs: 45_000,
+  stableAfterMs: 30_000,
 };
 
 export const INITIAL_STATE: SupervisorState = {
@@ -126,18 +136,21 @@ export function step(
       return state.check === null && state.status.kind === 'connecting'
         ? startCheck({...state, attempt: 0}, true, config, [])
         : {state, requests: []};
-    case 'user-retry':
+    case 'user-retry': {
       if (state.check !== null) return {state, requests: []};
-      return startCheck({...state, attempt: 0, status: {kind: 'connecting'}}, true, config, []);
+      // A retry is a recovery: on success the page, which may have given up, is woken.
+      const status = {kind: 'reconnecting', attempt: 1} as const;
+      return startCheck({...state, attempt: 0, status}, true, config, [{type: 'show', status}]);
+    }
     case 'resumed':
     case 'network-changed':
       return wake(state, config);
     case 'stream-ended':
-      return streamEnded(state, event.end, config);
+      return streamEnded(state, event, config);
     case 'timer-fired':
       return timerFired(state, event.timer, config);
     case 'check-succeeded':
-      return checkSucceeded(state, event.check);
+      return checkSucceeded(state, event.check, config);
     case 'check-failed':
       return checkFailed(state, event, config);
   }
@@ -168,18 +181,46 @@ function wake(state: SupervisorState, config: SupervisorConfig): Step {
   return startCheck({...state, attempt: 0}, false, config, []);
 }
 
-function streamEnded(state: SupervisorState, end: StreamEnd, config: SupervisorConfig): Step {
-  // A normal end is the page's to handle; a failure needs a check only if nobody is on it yet.
-  if (end === 'normal' || state.status.kind !== 'connected' || state.check !== null) {
-    return {state, requests: []};
+function streamEnded(
+  state: SupervisorState,
+  event: Extract<SupervisorEvent, {type: 'stream-ended'}>,
+  config: SupervisorConfig,
+): Step {
+  if (event.end === 'normal' || isTerminal(state.status)) return {state, requests: []};
+  const requests: SupervisorRequest[] =
+    state.timer === null ? [] : [{type: 'cancel', timer: state.timer}];
+  if (event.end === 'auth' || event.end === 'failed') {
+    // The host refused the dial or the bridge cannot run: stop, and say why, instead of checking
+    // a registry that would say all is well and redialing into the same refusal.
+    const status: ConnectionStatus =
+      event.end === 'auth'
+        ? {kind: 'auth-needed', detail: event.detail}
+        : {kind: 'failed', detail: event.detail};
+    return {
+      state: {...state, status, check: null, timer: null},
+      requests: [...requests, {type: 'show', status}],
+    };
   }
-  const reconnecting = {...state, status: {kind: 'reconnecting', attempt: 1} as const};
-  return startCheck(reconnecting, false, config, [{type: 'show', status: reconnecting.status}]);
+  // A link failure needs a check only if nobody is on it yet.
+  if (state.status.kind !== 'connected' || state.check !== null) return {state, requests: []};
+  const cleared = {...state, timer: null};
+  if (state.attempt > 0) {
+    // The last recovery did not hold: back off before the next one.
+    const next = linkFailure(cleared, event.detail, config);
+    return {state: next.state, requests: [...requests, ...next.requests]};
+  }
+  const reconnecting = {...cleared, status: {kind: 'reconnecting', attempt: 1} as const};
+  return startCheck(reconnecting, false, config, [
+    ...requests,
+    {type: 'show', status: reconnecting.status},
+  ]);
 }
 
 function timerFired(state: SupervisorState, timer: number, config: SupervisorConfig): Step {
   if (timer !== state.timer) return {state, requests: []};
   const cleared = {...state, timer: null};
+  // A recovered connection lasted: the next drop starts the backoff over.
+  if (state.status.kind === 'connected') return {state: {...cleared, attempt: 0}, requests: []};
   if (state.check !== null) {
     // The check outlived its deadline: whatever it reports later is ignored.
     return linkFailure({...cleared, check: null}, 'the host did not answer in time', config);
@@ -187,15 +228,23 @@ function timerFired(state: SupervisorState, timer: number, config: SupervisorCon
   return startCheck(cleared, false, config, []);
 }
 
-function checkSucceeded(state: SupervisorState, check: number): Step {
+function checkSucceeded(state: SupervisorState, check: number, config: SupervisorConfig): Step {
   if (check !== state.check) return {state, requests: []};
   const recovered = state.status.kind !== 'connecting';
   const status: ConnectionStatus = {kind: 'connected'};
   const requests: SupervisorRequest[] = [];
   if (state.timer !== null) requests.push({type: 'cancel', timer: state.timer});
   requests.push({type: 'show', status});
-  if (recovered) requests.push({type: 'wake-page'});
-  return {state: {...state, status, attempt: 0, check: null, timer: null}, requests};
+  const settled = {...state, status, check: null, timer: null};
+  if (!recovered) return {state: {...settled, attempt: 0}, requests};
+  // The check proves the host and the registry, not that a dial works: keep this recovery's place
+  // in the backoff until a stream outlasts `stableAfterMs`.
+  const timer = state.nextId;
+  requests.push({type: 'wake-page'}, {type: 'schedule', timer, delayMs: config.stableAfterMs});
+  return {
+    state: {...settled, attempt: Math.max(state.attempt, 1), timer, nextId: state.nextId + 1},
+    requests,
+  };
 }
 
 function checkFailed(

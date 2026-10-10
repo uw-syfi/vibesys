@@ -32,6 +32,12 @@ export class FakeSsh implements SshRunner {
   acceptsCredentials = true;
   /** Whether `vibesys` is installed where the probe finds it. */
   installed = true;
+  /** When set, every bridge exits at once with this outcome, as `stdio_bridge` reports it. */
+  bridgeRefusal: {
+    readonly status: number;
+    readonly outcome: string;
+    readonly detail: string;
+  } | null = null;
   readonly calls: FakeSshCall[] = [];
   /** How many times a master connection could have prompted the user. */
   prompts = 0;
@@ -139,6 +145,15 @@ export class FakeSsh implements SshRunner {
   #bridge([python, socketPath]: readonly string[]): SpawnedProcess {
     this.ran.push(python ?? '');
     const path = socketPath ?? '';
+    const refusal = this.bridgeRefusal;
+    if (refusal !== null) {
+      const {status, outcome, detail} = refusal;
+      return finishedProcess(
+        status,
+        '',
+        `${JSON.stringify({outcome, exit_status: status, detail})}\n`,
+      );
+    }
     if (!this.#node.network.isListening(path)) {
       return finishedProcess(
         4,

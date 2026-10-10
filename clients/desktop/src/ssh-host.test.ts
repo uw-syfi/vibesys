@@ -128,6 +128,28 @@ describe('SshHost', () => {
     await host.close();
   });
 
+  test("a bridge that ends abnormally is reported with the bridge's own outcome and detail", async () => {
+    const {ssh, host} = world();
+    const server = await host.startServer([]);
+    const cases = [
+      {status: 5, outcome: 'connect_denied', detail: 'Permission denied', kind: 'failed'},
+      {status: 6, outcome: 'connect_failed', detail: 'timed out', kind: 'link'},
+      {status: 9, outcome: 'server_failed', detail: 'reset', kind: 'link'},
+      {status: 4, outcome: 'run_gone', detail: 'no socket', kind: 'unreachable'},
+    ] as const;
+    for (const {kind, ...refusal} of cases) {
+      ssh.bridgeRefusal = refusal;
+      try {
+        await host.dial(server.endpoint);
+        throw new Error('expected a failure');
+      } catch (error) {
+        expect((error as HostError).kind).toBe(kind);
+        expect((error as Error).message).toContain(`${refusal.outcome}: ${refusal.detail}`);
+      }
+    }
+    await host.close();
+  });
+
   test('a missing vibesys command names every place tried', async () => {
     const {ssh, host} = world();
     ssh.installed = false;
