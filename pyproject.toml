@@ -105,7 +105,7 @@ testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/te
 # remain queued behind fast tests. CI explicitly selects loadgroup to keep
 # shared native-build fixtures on one worker.
 addopts = "-ra -p no:tach --import-mode=importlib --dist load --maxschedchunk=1 --cov --cov-report=term-missing -m 'not slow'"
-pythonpath = [".", "packaging"]
+pythonpath = [".", "packaging", "libs/vs-sim/pytest_plugin"]
 # A test still running after this many seconds dumps every thread's stack to
 # stderr (xdist workers inherit the controller's stderr, so it reaches the CI
 # log). It never kills or fails the test, so it is a diagnostic and not a
@@ -224,7 +224,7 @@ baseline = "tests/quality/isolation_baseline.jsonl"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
+src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
 # resources/skills/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
@@ -361,6 +361,7 @@ root = [
     "libs/vs-mcp/src",
     "libs/vs-faults/src",
     "libs/vs-sim/src",
+    "libs/vs-sim/pytest_plugin",
     "sdk/vs-bench/src",
 ]
 
@@ -401,6 +402,7 @@ include = [
     "libs/vs-faults/src",
     "libs/vs-faults/tests",
     "libs/vs-sim/src",
+    "libs/vs-sim/pytest_plugin",
     "libs/vs-sim/tests",
     "sdk/vs-bench/src",
     "sdk/vs-bench/tests",

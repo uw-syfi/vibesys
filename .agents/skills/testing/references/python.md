@@ -46,6 +46,32 @@ For a differential test, use a Hypothesis `RuleBasedStateMachine`.
   derandomized `ci` profile too.
 - Build strategies from the public Pydantic models and enums.
 
+## Deterministic simulation (`vs-sim`)
+
+`libs/vs-sim` owns time, scheduling, seeds, signals, child processes and
+blocking calls (`vs_sim.api` for the interfaces product code takes,
+`vs_sim.api.testing` for the simulator, Fakes, waits and contract suites). Its
+pytest plugin (`libs/vs-sim/pytest_plugin`, registered by the root
+`conftest.py`) makes the simulator the default:
+
+- An `async def` test outside `tests/e2e`, `tests/slurm_cluster` and
+  `tests/minimal_container` that has no `pytest.mark.asyncio` runs on a virtual
+  clock: sleeping costs no wall time, and a test that waits on nothing raises
+  `VirtualDeadlockError` at once. A test marked `asyncio` stays on
+  pytest-asyncio; do not combine the marker with the `sim` fixture. Async
+  fixtures are not supported on the virtual loop.
+- The `sim` fixture gives `sim.clock`, `sim.seed`, `sim.random(label)`,
+  `sim.gate()`, `sim.run(coro)` (for sync tests), `sim.run_in_child(fn)` and
+  `sim.world(name)` (domain fakes registered in a conftest with
+  `vs_sim.api.testing.WORLDS`).
+- Use `Gate`/`arrival`, `wait_for_state` with `Changes`, and the `*_or_fail`
+  waits instead of polling or bare waits; run anything that changes signals,
+  environment, working directory or timers in `run_in_child`.
+- A failing sim test prints its seed; `--sim-seed=N` replays it exactly.
+  `--sim-determinism-check` runs each sim test twice with one seed and fails if
+  the event traces (clock advances, task steps, input from outside the
+  simulation) differ.
+
 ## Golden fixtures
 
 Prompt snapshots live under `tests/vibesys/loops/*/fixtures/prompt_snapshots`.

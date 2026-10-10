@@ -20,3 +20,12 @@ Nothing here reads a wall clock to decide a test outcome. The virtual clock jump
 only when every task waits, and refuses to idle (`VirtualDeadlockError`) instead of
 hanging. Product code reaches time, threads, signals and processes only through the
 interfaces, so a test can run it on the simulator.
+
+## The pytest plugin
+
+`pytest_plugin/vs_sim_pytest.py` (outside `src`, because it imports pytest) is loaded by
+the repository's root `conftest.py`. It runs unmarked async tests on the virtual clock,
+provides the `sim` fixture (`vs_sim.api.testing.Sim`), prints the seed of a failing sim
+test (`--sim-seed=N` replays it) and, with `--sim-determinism-check`, runs each sim test
+twice and compares their event traces. Domain fakes register with
+`vs_sim.api.testing.WORLDS` and are built per test by `sim.world(name)`.

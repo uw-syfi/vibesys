@@ -29,7 +29,14 @@ def test_duration_order_respects_the_distribution_mode(
     distribution, workers, first = case
     repository = Path(__file__).parents[2]
     monkeypatch.setenv(
-        "PYTHONPATH", os.pathsep.join((str(repository), os.environ.get("PYTHONPATH", "")))
+        "PYTHONPATH",
+        os.pathsep.join(
+            (
+                str(repository),
+                str(repository / "libs" / "vs-sim" / "pytest_plugin"),
+                os.environ.get("PYTHONPATH", ""),
+            )
+        ),
     )
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     monkeypatch.delenv("VIBESYS_TEST_SHARD", raising=False)
@@ -83,7 +90,14 @@ def test_collection_workers_and_children_have_private_state(
     for variable in ("CARGO_HOME", "RUSTUP_HOME", "GOCACHE", "GOMODCACHE"):
         monkeypatch.setenv(variable, str(shared / variable))
     monkeypatch.setenv(
-        "PYTHONPATH", os.pathsep.join((str(repository), os.environ.get("PYTHONPATH", "")))
+        "PYTHONPATH",
+        os.pathsep.join(
+            (
+                str(repository),
+                str(repository / "libs" / "vs-sim" / "pytest_plugin"),
+                os.environ.get("PYTHONPATH", ""),
+            )
+        ),
     )
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     # The nested suite checks both workers even when its parent is a CI shard.

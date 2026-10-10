@@ -309,7 +309,14 @@ def test_a_shard_that_owns_no_test_under_the_given_path_passes(
 ) -> None:
     repository = Path(__file__).parents[2]
     monkeypatch.setenv(
-        "PYTHONPATH", os.pathsep.join((str(repository), os.environ.get("PYTHONPATH", "")))
+        "PYTHONPATH",
+        os.pathsep.join(
+            (
+                str(repository),
+                str(repository / "libs" / "vs-sim" / "pytest_plugin"),
+                os.environ.get("PYTHONPATH", ""),
+            )
+        ),
     )
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     pytester.makeconftest((repository / "conftest.py").read_text(encoding="utf-8"))

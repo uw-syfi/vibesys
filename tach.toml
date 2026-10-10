@@ -662,7 +662,7 @@ depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.processes", "vs_sim.ran
 [[modules]]
 path = "vs_sim.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.child", "vs_sim.contracts", "vs_sim.crash", "vs_sim.fakes", "vs_sim.gate", "vs_sim.manual", "vs_sim.seeds", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
+depends_on = ["vs_sim.child", "vs_sim.contracts", "vs_sim.crash", "vs_sim.fakes", "vs_sim.gate", "vs_sim.manual", "vs_sim.seeds", "vs_sim.sim", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
 
 [[modules]]
 path = "vs_sim.blocking"
@@ -723,6 +723,11 @@ depends_on = []
 path = "vs_sim.seeds"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_sim.randomness"]
+
+[[modules]]
+path = "vs_sim.sim"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.child", "vs_sim.gate", "vs_sim.randomness", "vs_sim.trace", "vs_sim.virtual"]
 
 [[modules]]
 path = "vs_sim.states"
