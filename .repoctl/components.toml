@@ -182,7 +182,7 @@ to = "native:examples/data-structures/repositories/queue-rs"
 id = "repo_policy"
 # Policy inputs affect every CI selection.
 roots = ["support/repoctl", ".repoctl"]
-files = [".github/workflows/test.yml", "tests/repoctl/cases.toml"]
+files = [".github/workflows/test.yml", ".github/actions/setup-tui/action.yml", "tests/repoctl/cases.toml"]
 select_all_jobs = true
 select_all_collections = true
 
