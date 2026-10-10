@@ -34,22 +34,32 @@ import os
 import re
 import shutil
 import signal
-import subprocess
 import sys
 import threading
-import time
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from vibesys.api import boot_trace
-from vs_sim.api import InheritedStdioLauncher, LoopSignalSource
+from vs_sim.api import (
+    InheritedStdioLauncher,
+    LoopSignalSource,
+    MonotonicClock,
+    ProcessSpec,
+    SubprocessLauncher,
+)
 
 if TYPE_CHECKING:
-    from vs_sim.api import ForegroundChild, ForegroundLauncher, SignalSource
+    from vs_sim.api import (
+        Clock,
+        ForegroundChild,
+        ForegroundLauncher,
+        ProcessLauncher,
+        SignalSource,
+    )
 
 _MIN_NODE_MAJOR = 20
 
@@ -92,6 +102,50 @@ _REBUILD_WATCH_DIRS: tuple[str, ...] = (
     "clients/core-state/src",
     "clients/tui/src",
 )
+
+
+@dataclass(frozen=True)
+class LauncherHost:
+    """What the launcher runs on: how it starts processes, the terminal child, and time.
+
+    The defaults are the real operating system; a test passes Fakes.
+    """
+
+    processes: ProcessLauncher = field(default_factory=SubprocessLauncher)
+    """Starts the probes and builds whose output the launcher reads."""
+    children: ForegroundLauncher = field(default_factory=InheritedStdioLauncher)
+    """Starts the engine or TUI that shares this terminal."""
+    clock: Clock = field(default_factory=MonotonicClock)
+    """Times the dependency install and the TUI rebuild for the messages."""
+    signals: SignalSource | None = None
+    """Where this process's signals arrive; ``None`` is the process's own, on the main thread."""
+
+
+@dataclass(frozen=True)
+class _Captured:
+    """The status and decoded output of a finished probe or build step."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def _run_captured(host: LauncherHost, argv: list[str], cwd: Path | None = None) -> _Captured:
+    """Run *argv* to completion and return its status and output.
+
+    Raises ``OSError`` when the program cannot be started.
+    """
+
+    async def run() -> _Captured:
+        process = await host.processes.start(ProcessSpec(tuple(argv), cwd=cwd))
+        outcome = await process.wait()
+        return _Captured(
+            outcome.returncode,
+            outcome.stdout.decode(errors="replace"),
+            outcome.stderr.decode(errors="replace"),
+        )
+
+    return asyncio.run(run())
 
 
 @dataclass(frozen=True)
@@ -138,7 +192,7 @@ def _headless_requested(args: list[str]) -> bool:
     return not (sys.stdin.isatty() and sys.stdout.isatty())
 
 
-def _run_headless(args: list[str]) -> int:
+def _run_headless(args: list[str], host: LauncherHost) -> int:
     module = (
         "entrypoints.web"
         if args and args[0] == "web"
@@ -152,7 +206,9 @@ def _run_headless(args: list[str]) -> int:
         command_args = args
     else:
         command_args = _without_option(args, "--theme")
-    return call_child([sys.executable, "-m", module, *command_args])
+    return call_child(
+        [sys.executable, "-m", module, *command_args], children=host.children, signals=host.signals
+    )
 
 
 # Signals a supervisor or a closed terminal sends to this process alone; the
@@ -253,7 +309,7 @@ def _bundled_runtime_missing_message() -> str:
     )
 
 
-def _run_bundled_tui(bundle: BundledTui, args: list[str]) -> int:
+def _run_bundled_tui(bundle: BundledTui, args: list[str], host: LauncherHost) -> int:
     if not bundle.runtime.is_file() or not os.access(bundle.runtime, os.X_OK):
         sys.stderr.write(_bundled_runtime_missing_message() + "\n")
         return 1
@@ -271,7 +327,12 @@ def _run_bundled_tui(bundle: BundledTui, args: list[str]) -> int:
         # reach clients/tui/src/boot-trace.ts unchanged.
         **boot_trace.child_env(),
     }
-    return call_child([str(bundle.runtime), str(bundle.launcher), *args], env=env)
+    return call_child(
+        [str(bundle.runtime), str(bundle.launcher), *args],
+        env=env,
+        children=host.children,
+        signals=host.signals,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -320,12 +381,12 @@ def _node_executable() -> Path | None:
     return Path(found) if found is not None else None
 
 
-def _node_major(node: Path) -> int | None:
+def _node_major(node: Path, host: LauncherHost) -> int | None:
     try:
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010228 [S603]; execute the resolved Node binary with only its version probe argument.
-            [str(node), "--version"], capture_output=True, text=True, check=True
-        )
-    except (OSError, subprocess.CalledProcessError):
+        result = _run_captured(host, [str(node), "--version"])
+    except OSError:
+        return None
+    if result.returncode != 0:
         return None
     match = re.match(r"v(\d+)", result.stdout.strip())
     return int(match.group(1)) if match else None
@@ -405,36 +466,28 @@ def _write_install_stamp(root: Path) -> None:
     stamp.touch()
 
 
-def _run_pnpm_install(pnpm: list[str], root: Path) -> bool:
+def _run_pnpm_install(pnpm: list[str], root: Path, host: LauncherHost) -> bool:
     sys.stderr.write("vibesys: installing JS dependencies (pnpm install --frozen-lockfile)...\n")
-    started = time.monotonic()
-    result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010229 [S603]; pnpm install uses the resolved package manager and fixed workspace setup arguments.
-        [*pnpm, "install", "--frozen-lockfile"],
-        cwd=str(root / _WORKSPACE_REL),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    started = host.clock.now()
+    result = _run_captured(host, [*pnpm, "install", "--frozen-lockfile"], root / _WORKSPACE_REL)
     if result.returncode != 0:
         sys.stderr.write("vibesys: failed to install JS dependencies:\n")
         sys.stderr.write(result.stdout)
         sys.stderr.write(result.stderr)
         return False
     _write_install_stamp(root)
-    elapsed = time.monotonic() - started
+    elapsed = host.clock.now() - started
     sys.stderr.write(f"vibesys: dependencies installed ({elapsed:.1f}s)\n")
     return True
 
 
-def _run_codegen_and_build(pnpm: list[str], root: Path) -> bool:
+def _run_codegen_and_build(pnpm: list[str], root: Path, host: LauncherHost) -> bool:
     steps = (
         [*pnpm, "--dir", "backend-client", "generate:protocol"],
         [*pnpm, "build:clients"],
     )
     for command in steps:
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010230 [S603]; build steps are framework-constructed argv executed without a shell.
-            command, cwd=str(root / _WORKSPACE_REL), capture_output=True, text=True, check=False
-        )
+        result = _run_captured(host, command, root / _WORKSPACE_REL)
         if result.returncode != 0:
             sys.stderr.write("vibesys: failed to build the interactive client:\n")
             sys.stderr.write(result.stdout)
@@ -443,7 +496,7 @@ def _run_codegen_and_build(pnpm: list[str], root: Path) -> bool:
     return True
 
 
-def _ensure_source_tui_built(root: Path) -> bool:
+def _ensure_source_tui_built(root: Path, host: LauncherHost) -> bool:
     pnpm = _pnpm_argv()
     if pnpm is None:
         sys.stderr.write(
@@ -452,19 +505,19 @@ def _ensure_source_tui_built(root: Path) -> bool:
         )
         return False
 
-    if _needs_install(root) and not _run_pnpm_install(pnpm, root):
+    if _needs_install(root) and not _run_pnpm_install(pnpm, root, host):
         return False
-    if _run_codegen_and_build(pnpm, root):
+    if _run_codegen_and_build(pnpm, root, host):
         return True
 
     # The build failed even though the install-skip heuristic considered
     # dependencies fresh (e.g. a partially removed node_modules). Fall back to
     # a full install and retry once before giving up.
     sys.stderr.write("vibesys: build failed; retrying after a full dependency install...\n")
-    return _run_pnpm_install(pnpm, root) and _run_codegen_and_build(pnpm, root)
+    return _run_pnpm_install(pnpm, root, host) and _run_codegen_and_build(pnpm, root, host)
 
 
-def _run_source_tui(root: Path, args: list[str]) -> int:
+def _run_source_tui(root: Path, args: list[str], host: LauncherHost) -> int:
     bun = _bun_executable()
     if bun is None:
         sys.stderr.write(
@@ -473,7 +526,7 @@ def _run_source_tui(root: Path, args: list[str]) -> int:
         )
         return 1
     node = _node_executable()
-    if node is None or (_node_major(node) or 0) < _MIN_NODE_MAJOR:
+    if node is None or (_node_major(node, host) or 0) < _MIN_NODE_MAJOR:
         sys.stderr.write(
             f"vibesys: Node.js {_MIN_NODE_MAJOR}+ is required for the interactive client, "
             "or run headless with --headless.\n"
@@ -484,10 +537,10 @@ def _run_source_tui(root: Path, args: list[str]) -> int:
         sys.stderr.write(
             f"vibesys: TUI bundle is stale (changed: {reason}); rebuilding (~30-60s)...\n"
         )
-        started = time.monotonic()
-        if not _ensure_source_tui_built(root):
+        started = host.clock.now()
+        if not _ensure_source_tui_built(root, host):
             return 1
-        elapsed = time.monotonic() - started
+        elapsed = host.clock.now() - started
         sys.stderr.write(f"vibesys: TUI bundle rebuilt ({elapsed:.1f}s)\n")
 
     launcher = root / "clients" / "tui" / "dist" / "launcher.js"
@@ -500,11 +553,14 @@ def _run_source_tui(root: Path, args: list[str]) -> int:
         # Launch anchor and stderr-trace request; see _run_bundled_tui.
         **boot_trace.child_env(),
     }
-    return call_child([str(node), str(launcher), *args], env=env)
+    return call_child(
+        [str(node), str(launcher), *args], env=env, children=host.children, signals=host.signals
+    )
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Entry point for the ``vibesys`` console script."""
+def main(argv: list[str] | None = None, host: LauncherHost | None = None) -> int:
+    """Entry point for the ``vibesys`` console script; *host* is the real system by default."""
+    host = LauncherHost() if host is None else host
     # Anchored before any doctor check, staleness check, or rebuild, so the
     # frontend's boot trace reports wall time since the user actually ran the
     # command, including a source-checkout rebuild.
@@ -512,22 +568,22 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
     if _headless_requested(args):
-        return _run_headless(args)
+        return _run_headless(args, host)
 
     bundle = bundled_tui()
     if bundle is not None:
-        return _run_bundled_tui(bundle, args)
+        return _run_bundled_tui(bundle, args, host)
 
     root = source_checkout_root()
     if root is not None:
-        return _run_source_tui(root, args)
+        return _run_source_tui(root, args, host)
 
     sys.stderr.write(
         "vibesys: interactive TUI is not bundled and no source checkout was found; "
         "running headless. Install a supported platform wheel to get the TUI, or "
         "pass --headless to silence this notice.\n"
     )
-    return _run_headless(args)
+    return _run_headless(args, host)
 
 
 if __name__ == "__main__":  # pragma: no cover

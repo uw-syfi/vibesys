@@ -215,9 +215,7 @@
 {"path": "src/entrypoints/cli/remote.py", "rule": "subprocess", "count": 2}
 {"path": "src/entrypoints/launcher.py", "rule": "process", "count": 3}
 {"path": "src/entrypoints/launcher.py", "rule": "signal", "count": 6}
-{"path": "src/entrypoints/launcher.py", "rule": "subprocess", "count": 4}
 {"path": "src/entrypoints/launcher.py", "rule": "threading", "count": 2}
-{"path": "src/entrypoints/launcher.py", "rule": "time", "count": 4}
 {"path": "src/entrypoints/run.py", "rule": "signal", "count": 10}
 {"path": "src/entrypoints/run.py", "rule": "threading", "count": 2}
 {"path": "src/entrypoints/server.py", "rule": "process", "count": 2}
