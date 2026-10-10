@@ -89,6 +89,7 @@ def test_a_stop_during_the_input_measurement_cancels_its_job_and_starts_no_plann
         agents,
         on_handle=handles,
         stop_timer=timer,
+        slurm_process=loop_input.connector,
     )
 
     assert run.error is None, run.error
@@ -130,6 +131,7 @@ def test_a_stop_during_a_candidate_evaluation_cancels_its_job_and_starts_no_new_
         agents,
         on_handle=handles,
         stop_timer=timer,
+        slurm_process=loop_input.connector,
     )
 
     assert run.error is None, run.error
@@ -176,6 +178,7 @@ def test_a_stop_mid_turn_ends_at_the_grace_bound_and_starts_no_evaluation(tmp_pa
         agents,
         on_handle=handles,
         stop_timer=timer,
+        slurm_process=loop_input.connector,
     )
 
     assert run.error is None, run.error
@@ -219,6 +222,7 @@ def test_a_turn_that_ends_after_a_stop_starts_no_planner_turn_or_evaluation(
         agents,
         on_handle=handles,
         stop_timer=FakeStopTimer(),
+        slurm_process=loop_input.connector,
     )
 
     assert run.error is None, run.error

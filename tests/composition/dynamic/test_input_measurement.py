@@ -70,7 +70,7 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
         .implement("H1", edit_to(2, "H1"))
         .judge("H1", PASS)
     )
-    crashed = run_request(request, first, clock=clock)
+    crashed = run_request(request, first, clock=clock, slurm_process=loop_input.connector)
     assert isinstance(crashed.error, HostCrashedError)
     assert loop_input.sbatch_count() == _input_jobs() + _candidate_jobs(1)
     started_from: list[int] = []
@@ -87,7 +87,12 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
         .judge("H2", PASS)
     )
 
-    resumed = run_request(resume_request(request, crashed.run_id), second, clock=clock)
+    resumed = run_request(
+        resume_request(request, crashed.run_id),
+        second,
+        clock=clock,
+        slurm_process=loop_input.connector,
+    )
 
     resumed.raise_error()
     assert resumed.error is None
@@ -145,7 +150,7 @@ def test_transient_input_failure_is_retried_within_its_bound(tmp_path: Path, fai
     counter = _interrupt_input_evaluator(loop_input, tmp_path, failures)
     agents = _script(ScriptedAgents(), 0, 1)
 
-    run = run_request(loop_input.request(max_rounds=1), agents)
+    run = run_request(loop_input.request(max_rounds=1), agents, slurm_process=loop_input.connector)
 
     assert run.error is None
     assert run.succeeded is True

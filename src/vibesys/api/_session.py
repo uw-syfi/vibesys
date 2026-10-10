@@ -162,7 +162,9 @@ class _LocalRunSession:
             backend=request.agent_backend,
             provider=request.cli_provider,
         )
-        self._integration = LocalRunIntegration(implementations.git_repository)
+        self._integration = LocalRunIntegration(
+            implementations.git_repository, implementations.slurm_process
+        )
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
         self._committed_view_listener: Callable[[RunView, tuple[str, ...] | None], None] | None = (

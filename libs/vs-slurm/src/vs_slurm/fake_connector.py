@@ -585,11 +585,15 @@ class FakeConnector:
         output = ""
         if "-n" in tokens and tokens[0] == "squeue":
             name = tokens[tokens.index("-n") + 1]
+            if name not in self._jobs:
+                return None
             job = None if name in self._forgotten_names else self._jobs.get(name)
             if job is not None and job.active:
                 output = f"{job.job_id}\n"
         elif "--name" in tokens:
             name = tokens[tokens.index("--name") + 1]
+            if name not in self._jobs:
+                return None
             job = None if name in self._forgotten_names else self._jobs.get(name)
             output = f"{job.job_id}\n" if job is not None else ""
         else:

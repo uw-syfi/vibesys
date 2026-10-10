@@ -421,7 +421,7 @@ class _ProductHostFactory:
                 resources.facts,
                 resources.environment_resources.view,
             ),
-            executor=self._semantic_executor(resources, workspaces, namespace),
+            executor=self._semantic_executor(self.integration, resources, workspaces, namespace),
             events=self._evaluation_lifecycle_event,
             plan=resources.evaluation_plan,
             queue_allowance_seconds=self.request.config.evaluation.queue_allowance_seconds,
@@ -574,7 +574,7 @@ class _ProductHostFactory:
             project.state, AgentSessionKey.for_member("core", "run")
         )
         namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
-        executor = self._semantic_executor(resources, workspaces, namespace)
+        executor = self._semantic_executor(self.integration, resources, workspaces, namespace)
         configuration = partial(self._agent_configuration, resources)
         return build_core_services(
             policy,
@@ -646,6 +646,7 @@ class _ProductHostFactory:
 
     @staticmethod
     def _semantic_executor(
+        integration: LocalRunIntegration,
         resources: _PreparedRun,
         workspaces: Workspaces,
         namespace: StateNamespace,
@@ -666,6 +667,7 @@ class _ProductHostFactory:
             workspaces,
             namespace,
             namespace.external_directory() / "slurm-provider-handles",
+            process=integration.slurm_process,
         )
 
     def _evaluation_lifecycle_event(self, event: EvaluationLifecycleEvent) -> None:
