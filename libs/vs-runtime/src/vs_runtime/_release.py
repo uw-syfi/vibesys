@@ -28,7 +28,7 @@ async def _finish(task: asyncio.Future[None]) -> _Outcome:
             await asyncio.shield(task)
         except asyncio.CancelledError:
             cancelled = True
-        except BaseException:  # noqa: BLE001  # lint-waiver: LW-948030 [BLE001]; the finished task's outcome is read below, and the remaining releases must still run.
+        except BaseException:  # noqa: BLE001  # lint-waiver: LW-948430 [BLE001]; the finished task's outcome is read below, and the remaining releases must still run.
             break
     if task.cancelled():
         return _Outcome(cancelled=True)

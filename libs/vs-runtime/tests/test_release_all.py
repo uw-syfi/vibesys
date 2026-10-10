@@ -63,7 +63,7 @@ async def _run(steps: list[_Step]) -> tuple[BaseException | None, list[int]]:
                 [_release(step, task, finished, index) for index, step in enumerate(steps)],
                 failure="cleanup failed",
             )
-        except BaseException as error:  # lint-waiver: LW-948031 [BLE001]; the test records the outcome whatever its type, cancellation included.
+        except BaseException as error:
             outcomes.append(error)
             raise
         outcomes.append(None)

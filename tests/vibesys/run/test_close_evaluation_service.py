@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 class _Resource:
     """A run resource whose close can be cancelled by the second interrupt."""
 
-    def __init__(self, name: str, closed: list[str], *, interrupt: Callable[[], None]) -> None:
+    def __init__(self, name: str, closed: list[str], *, interrupt: Callable[[], object]) -> None:
         self._name = name
         self._closed = closed
         self._interrupt = interrupt
@@ -66,7 +66,7 @@ def test_a_cancellation_during_any_close_step_ends_cancelled_after_every_step(
             factory = _factory(resources["backend"], resources["provision"], resources["services"])
             try:
                 await factory.close_evaluation_service()
-            except BaseException as error:  # lint-waiver: LW-948032 [BLE001]; the test records the outcome whatever its type, cancellation included.
+            except BaseException as error:
                 outcomes.append(error)
                 raise
             outcomes.append(None)
