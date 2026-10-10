@@ -91,6 +91,7 @@ class FakeComputeBackend:
         del log_dir, log
         self.image = image or DEFAULT_FAKE_IMAGE
         self.sandboxes: dict[str, FakeCommandRunner] = {}
+        self._kind_sandboxes: dict[SandboxKind, FakeCommandRunner] = {}
         self.creations: list[FakeRunnerCreation] = []
 
     def script_sandbox(
@@ -101,6 +102,14 @@ class FakeComputeBackend:
     ) -> None:
         """Use *sandbox* for the exact kind/workspace construction key."""
         self.sandboxes[f"{kind.value}:{host_workspace}"] = sandbox
+
+    def script_sandbox_for_kind(self, kind: SandboxKind, sandbox: FakeCommandRunner) -> None:
+        """Use *sandbox* for every *kind* workspace without an exact scripted key.
+
+        A gate may run in a throwaway candidate whose path is only known once
+        the run opens it, so a test cannot script that exact key ahead of time.
+        """
+        self._kind_sandboxes[kind] = sandbox
 
     def make_sandbox(  # noqa: PLR0913  # LW-040001 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         self,
@@ -142,7 +151,7 @@ class FakeComputeBackend:
             )
         )
         key = f"{kind.value}:{host_workspace}"
-        sandbox = self.sandboxes.get(key)
+        sandbox = self.sandboxes.get(key) or self._kind_sandboxes.get(kind)
         if sandbox is None:
             # A container sandbox has a lifecycle; a host one has nothing to start.
             sandbox = FakeLifecycleRunner() if kind is SandboxKind.DOCKER else FakeCommandRunner()

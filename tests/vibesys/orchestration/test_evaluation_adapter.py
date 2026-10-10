@@ -425,6 +425,29 @@ def test_adapter_pairs_foreign_receipt_exception_with_terminal_gate(tmp_path: Pa
         integration.close()
 
 
+def test_a_docker_gate_runs_in_a_throwaway_candidate_not_the_live_root(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    integration = LocalRunIntegration()
+    backend = FakeComputeBackend()
+
+    async def exercise() -> bool:
+        async with open_product_run_host(
+            _request(project_root),
+            integration,
+            plugin=_PLUGIN,
+            backend_factory=lambda *_args, **_kwargs: backend,
+        ) as ctx:
+            seen = {c.host_workspace for c in backend.creations}
+            await ctx.evaluation.accuracy(ctx.workspaces.root)
+            return {c.host_workspace for c in backend.creations} > seen
+
+    try:
+        assert asyncio.run(exercise())
+    finally:
+        integration.close()
+
+
 @pytest.mark.parametrize("gate", [GateKind.ACCURACY, GateKind.BENCHMARK])
 def test_gate_starts_before_execution_and_finishes_on_cancellation(
     tmp_path: Path,
@@ -435,7 +458,8 @@ def test_gate_starts_before_execution_and_finishes_on_cancellation(
     integration = LocalRunIntegration()
     sandbox = _BlockingEvaluationSandbox()
     backend = FakeComputeBackend()
-    backend.script_sandbox(SandboxKind.DOCKER, str(project_root), sandbox)
+    # Docker gates run in a throwaway candidate, so hold every Docker workspace.
+    backend.script_sandbox_for_kind(SandboxKind.DOCKER, sandbox)
 
     async def exercise() -> None:
         async with open_product_run_host(
