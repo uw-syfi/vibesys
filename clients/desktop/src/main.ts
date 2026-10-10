@@ -52,6 +52,7 @@ import {type LaunchPlan, parseLaunch} from './launch-args.js';
 import {isAllowedRequest, isAppUrl, type LaunchTarget, originOf} from './launch-url.js';
 import {PICKER_CHANNELS, type PickerResult} from './picker-protocol.js';
 import {type RelayPort, relay} from './relay.js';
+import {shellWords} from './shell-words.js';
 import {
   type ConnectionStatus,
   ConnectionSupervisor,
@@ -334,8 +335,17 @@ class DesktopApp {
 
   /** Start a detached run on `id` in `project` and attach to it. */
   async startRun(id: HostId, project: string, args: readonly string[]): Promise<void> {
+    await this.#launch(id, project, ['--project', project, ...args]);
+  }
+
+  /** Resume stopped run `run` (the latest when empty) of `project` on `id`, detached, and attach. */
+  async resumeRun(id: HostId, project: string, run: string): Promise<void> {
+    await this.#launch(id, project, ['--resume', ...(run === '' ? [] : [run])]);
+  }
+
+  async #launch(id: HostId, project: string, args: readonly string[]): Promise<void> {
     const host = await this.#pool.host(id);
-    const server = await host.startServer(['--project', project, ...args], {cwd: project});
+    const server = await host.startServer(args, {cwd: project});
     if (server.record.kind === 'incompatible') {
       const hostName = id.kind === 'local' ? 'This Mac' : id.alias;
       throw new Error(
@@ -347,8 +357,11 @@ class DesktopApp {
         }),
       );
     }
+    const instance = server.record.instance.id;
     log(
-      `started run ${server.record.instance.id}; stop it with: vibesys instances stop ${server.record.instance.id}`,
+      server.alreadyLive
+        ? `the run is already live as ${instance}; attaching to it`
+        : `started run ${instance}; stop it with: vibesys instances stop ${instance}`,
     );
     await this.openRun(id, server.endpoint.socketPath, server.record.instance.id);
   }
@@ -398,16 +411,22 @@ class DesktopApp {
       return null;
     });
     handle(PICKER_CHANNELS.start, async (key, project, args) => {
-      if (typeof project !== 'string' || project.trim() === '')
-        throw new Error('name a project path');
-      const words = typeof args === 'string' ? args.split(/\s+/).filter(word => word !== '') : [];
-      await this.startRun(await this.#host(key), project.trim(), words);
+      const words = typeof args === 'string' ? shellWords(args) : [];
+      await this.startRun(await this.#host(key), projectPath(project), words);
       return null;
     });
-    handle(PICKER_CHANNELS.saveSettings, async (key, command) => {
+    handle(PICKER_CHANNELS.resume, async (key, project, run) => {
+      const runId = typeof run === 'string' ? run.trim() : '';
+      if (!/^[A-Za-z0-9._-]*$/.test(runId) || runId.startsWith('-')) {
+        throw new Error('a run id is letters, digits, ".", "_", and "-", not starting with "-"');
+      }
+      await this.resumeRun(await this.#host(key), projectPath(project), runId);
+      return null;
+    });
+    handle(PICKER_CHANNELS.saveSettings, async (key, command, python) => {
       const id = await this.#host(key);
       if (id.kind !== 'ssh') throw new Error('this machine has no vibesys command setting');
-      await this.#pool.saveCommand(id.alias, command);
+      await this.#pool.saveCommands(id.alias, command, python);
       return null;
     });
   }
@@ -432,6 +451,15 @@ class DesktopApp {
     };
     realTimers(poll, NETWORK_POLL_MS);
   }
+}
+
+/** A project path from the picker: non-empty, one line, and never read as an option. */
+function projectPath(project: unknown): string {
+  const path = typeof project === 'string' ? project.trim() : '';
+  if (path === '') throw new Error('name a project path');
+  if (path.startsWith('-')) throw new Error('a project path cannot start with "-"');
+  if (/[\n\r\0]/.test(path)) throw new Error('a project path is one line');
+  return path;
 }
 
 function failure(error: unknown): PickerResult<never> {

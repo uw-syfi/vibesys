@@ -16,6 +16,7 @@ const CHANNELS: Channels = {
   signIn: 'vibesys:picker:sign-in',
   attach: 'vibesys:picker:attach',
   start: 'vibesys:picker:start',
+  resume: 'vibesys:picker:resume',
   saveSettings: 'vibesys:picker:save-settings',
 };
 
@@ -30,6 +31,8 @@ electron.contextBridge.exposeInMainWorld('vibesysPicker', {
   attach: (host: HostKey, instance: string) => call<null>(CHANNELS.attach, host, instance),
   start: (host: HostKey, project: string, args: string) =>
     call<null>(CHANNELS.start, host, project, args),
-  saveSettings: (host: HostKey, vibesysCommand: string) =>
-    call<null>(CHANNELS.saveSettings, host, vibesysCommand),
+  resume: (host: HostKey, project: string, run: string) =>
+    call<null>(CHANNELS.resume, host, project, run),
+  saveSettings: (host: HostKey, vibesysCommand: string, pythonCommand: string) =>
+    call<null>(CHANNELS.saveSettings, host, vibesysCommand, pythonCommand),
 });

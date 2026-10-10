@@ -11,6 +11,7 @@ import {
   EMPTY_SETTINGS,
   type HostId,
   parseSettings,
+  SettingsError,
   type SettingsFile,
   settingsFor,
   sshConfigHosts,
@@ -56,11 +57,12 @@ export class HostPool {
       await readFile(this.#options.sshConfigPath, 'utf8').catch(() => ''),
     );
     return [
-      {key: LOCAL_KEY, label: 'This Mac', vibesysCommand: null},
+      {key: LOCAL_KEY, label: 'This Mac', vibesysCommand: null, pythonCommand: null},
       ...aliases.map(alias => ({
         key: hostKey({kind: 'ssh', alias}),
         label: alias,
         vibesysCommand: settingsFor(settings, alias).vibesysCommand,
+        pythonCommand: settingsFor(settings, alias).pythonCommand ?? '',
       })),
     ];
   }
@@ -134,14 +136,21 @@ export class HostPool {
   }
 
   /**
-   * Save `alias`'s vibesys command. The next use of the host runs the new command; windows already
-   * attached keep their host (and its streams) until the app quits.
+   * Save `alias`'s vibesys command and Python command (empty: derive it). The next use of the host
+   * runs the new commands; windows already attached keep their host (and its streams) until the app
+   * quits.
    */
-  async saveCommand(alias: string, command: unknown): Promise<void> {
+  async saveCommands(alias: string, command: unknown, python: unknown): Promise<void> {
     const vibesysCommand = validCommand(command, `the vibesys command for ${alias}`);
+    if (python !== undefined && typeof python !== 'string') {
+      throw new SettingsError(`the Python command for ${alias} must be a string`);
+    }
+    const settings =
+      python === undefined || python.trim() === ''
+        ? {vibesysCommand}
+        : {vibesysCommand, pythonCommand: validCommand(python, `the Python command for ${alias}`)};
     const current = await this.#settings();
-    const previous = settingsFor(current, alias);
-    const next = withHostSettings(current, alias, {...previous, vibesysCommand});
+    const next = withHostSettings(current, alias, settings);
     await writeFile(this.#options.settingsPath, `${JSON.stringify(next, null, 2)}\n`, {
       mode: 0o600,
     });

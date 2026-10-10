@@ -1,6 +1,6 @@
 /**
  * The host and run picker page: pick a host (this Mac or an `~/.ssh/config` alias), see its live
- * detached runs, attach to one, or start a new one. Plain DOM; every action is a request to the
+ * detached runs, attach to one, start a new one, or resume a stopped one. Plain DOM; every action is a request to the
  * main process through the picker preload (`vibesysPicker`), which owns hosts and connections.
  */
 import type {HostKey, PickerHost, PickerResult, PickerRun} from './picker-protocol.js';
@@ -11,7 +11,12 @@ interface PickerBridge {
   signIn(host: HostKey): Promise<PickerResult<null>>;
   attach(host: HostKey, instance: string): Promise<PickerResult<null>>;
   start(host: HostKey, project: string, args: string): Promise<PickerResult<null>>;
-  saveSettings(host: HostKey, vibesysCommand: string): Promise<PickerResult<null>>;
+  resume(host: HostKey, project: string, run: string): Promise<PickerResult<null>>;
+  saveSettings(
+    host: HostKey,
+    vibesysCommand: string,
+    pythonCommand: string,
+  ): Promise<PickerResult<null>>;
 }
 
 declare global {
@@ -135,14 +140,25 @@ function startForm(host: PickerHost): HTMLElement {
   project.placeholder = host.vibesysCommand === null ? '/path/to/project' : '~/path/to/project';
   project.required = true;
   const args = element('input');
-  args.placeholder = 'run arguments (optional)';
+  args.placeholder = 'run arguments, quoted like a shell (optional)';
   const submit = element('button', 'Start run');
-  form.append(element('h3', 'Start a detached run'), project, args, submit);
+  const run = element('input');
+  run.placeholder = 'stopped run id (empty: the latest)';
+  const resume = element('button', 'Resume run');
+  resume.type = 'button';
+  form.append(element('h3', 'Start or resume a detached run'), project, args, submit, run, resume);
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (picker === undefined) return;
     say(`Starting a run on ${host.label}…`);
     const result = await picker.start(host.key, project.value, args.value);
+    say(result.ok ? '' : result.error, result.ok ? 'info' : 'error');
+    if (result.ok) await selectHost(host);
+  });
+  resume.addEventListener('click', async () => {
+    if (picker === undefined || !project.reportValidity()) return;
+    say(`Resuming ${run.value.trim() || 'the latest run'} on ${host.label}…`);
+    const result = await picker.resume(host.key, project.value, run.value);
     say(result.ok ? '' : result.error, result.ok ? 'info' : 'error');
     if (result.ok) await selectHost(host);
   });
@@ -156,12 +172,18 @@ function settingsForm(host: PickerHost): HTMLElement {
   input.value = host.vibesysCommand ?? '';
   input.spellcheck = false;
   label.append(input);
+  const pythonLabel = element('label', 'Python command');
+  const python = element('input');
+  python.value = host.pythonCommand ?? '';
+  python.placeholder = 'derived from the vibesys command';
+  python.spellcheck = false;
+  pythonLabel.append(python);
   const save = element('button', 'Save');
-  form.append(label, save);
+  form.append(label, pythonLabel, save);
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (picker === undefined) return;
-    const result = await picker.saveSettings(host.key, input.value);
+    const result = await picker.saveSettings(host.key, input.value, python.value);
     if (!result.ok) return say(result.error, 'error');
     await loadHosts(host.key);
   });

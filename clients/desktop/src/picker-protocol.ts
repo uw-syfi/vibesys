@@ -13,6 +13,7 @@ export const PICKER_CHANNELS = {
   signIn: 'vibesys:picker:sign-in',
   attach: 'vibesys:picker:attach',
   start: 'vibesys:picker:start',
+  resume: 'vibesys:picker:resume',
   saveSettings: 'vibesys:picker:save-settings',
 } as const;
 
@@ -24,6 +25,8 @@ export interface PickerHost {
   readonly label: string;
   /** The host's vibesys command, editable for SSH hosts; null for this machine. */
   readonly vibesysCommand: string | null;
+  /** The host's Python command setting; empty when derived from the vibesys command. */
+  readonly pythonCommand: string | null;
 }
 
 export interface PickerRun {

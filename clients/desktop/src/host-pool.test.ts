@@ -27,9 +27,9 @@ describe('HostPool', () => {
       JSON.stringify({version: 1, hosts: {cluster: {vibesysCommand: 'uv run vibesys'}}}),
     );
     expect(await hosts.offered()).toEqual([
-      {key: 'local', label: 'This Mac', vibesysCommand: null},
-      {key: 'ssh:gpu-box', label: 'gpu-box', vibesysCommand: 'vibesys'},
-      {key: 'ssh:cluster', label: 'cluster', vibesysCommand: 'uv run vibesys'},
+      {key: 'local', label: 'This Mac', vibesysCommand: null, pythonCommand: null},
+      {key: 'ssh:gpu-box', label: 'gpu-box', vibesysCommand: 'vibesys', pythonCommand: ''},
+      {key: 'ssh:cluster', label: 'cluster', vibesysCommand: 'uv run vibesys', pythonCommand: ''},
     ]);
   });
 
@@ -42,11 +42,23 @@ describe('HostPool', () => {
     }
   });
 
-  test('a saved command is validated, persisted, and offered next time', async () => {
+  test('saved commands are validated, persisted, and offered next time', async () => {
     const {hosts} = pool('Host gpu-box\n', null);
-    await expect(hosts.saveCommand('gpu-box', 'x\ny')).rejects.toThrow('must be one line');
-    await hosts.saveCommand('gpu-box', ' uv  run --project ~/v vibesys ');
-    expect((await hosts.offered())[1]?.vibesysCommand).toBe('uv run --project ~/v vibesys');
+    await expect(hosts.saveCommands('gpu-box', 'x\ny', '')).rejects.toThrow('must be one line');
+    await expect(hosts.saveCommands('gpu-box', 'vibesys', '-c x')).rejects.toThrow(
+      'must start with a command',
+    );
+    await hosts.saveCommands(
+      'gpu-box',
+      ' uv  run --project ~/v vibesys ',
+      ' /srv/venv/bin/python ',
+    );
+    expect((await hosts.offered())[1]).toMatchObject({
+      vibesysCommand: 'uv run --project ~/v vibesys',
+      pythonCommand: '/srv/venv/bin/python',
+    });
+    await hosts.saveCommands('gpu-box', 'vibesys', '  ');
+    expect((await hosts.offered())[1]?.pythonCommand).toBe('');
   });
 
   test('an invalid settings file is reported and ignored, not fatal', async () => {
