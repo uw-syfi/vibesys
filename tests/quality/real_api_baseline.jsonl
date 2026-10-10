@@ -398,8 +398,6 @@
 {"path": "tests/vibesys/backends/test_gpu_monitor.py", "rule": "time", "count": 11}
 {"path": "tests/vibesys/loops/test_capture_runtime.py", "rule": "process", "count": 10}
 {"path": "tests/vibesys/loops/test_capture_runtime.py", "rule": "subprocess", "count": 3}
-{"path": "tests/vibesys/loops/test_capture_runtime.py", "rule": "threading", "count": 5}
-{"path": "tests/vibesys/loops/test_capture_runtime.py", "rule": "time", "count": 12}
 {"path": "tests/vibesys/loops/test_profile_requirements.py", "rule": "process", "count": 2}
 {"path": "tests/vibesys/loops/test_profiler_mcp.py", "rule": "process", "count": 2}
 {"path": "tests/vibesys/loops/test_profiler_mcp.py", "rule": "socket_io", "count": 1}
