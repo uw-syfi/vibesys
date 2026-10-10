@@ -184,6 +184,47 @@ What it does not cover: the ROCprof profiler transport, real GPU devices and
 drivers, cgroup-based resource enforcement, multi-node jobs, and Landlock
 confinement (the compute node uses bubblewrap).
 
+### Minimal-container tier
+
+`./scripts/run_minimal_container_tests.sh` starts every process that runs in the
+agent's editor container, in a real container, on a host without GPUs. For each of
+the CPU, CUDA and ROCm default base images (the ones named by the backends in
+`libs/vs-sandbox/src/vs_sandbox/*_backend.py`) it opens the editor through
+`open_run_environment`, so `docker build` of the real agent layer, the mounts, the
+environment and the uid remap are all production's. The CUDA and ROCm images are
+built and started without an accelerator; nothing runs on a GPU. No LLM is involved.
+In each container it checks that:
+
+- `claude --version` runs and `codex app-server` answers the `initialize` handshake;
+- the evaluation tool server (both the core-run and the per-role descriptor) answers
+  MCP `initialize` and lists its tools, started from the descriptor the run builds;
+- the profiler MCP server of the base's default profiler answers `initialize` and
+  lists its tools;
+- `vibesys-gate` and `vibesys-gpu` run a gate and a command through a real host
+  broker (its `srun` is a local program);
+- the `agent` user has a group of its own name and the host's uid and gid.
+
+A fourth, small stand-in base (`ubuntu:24.04`, which owns uid 1000 as `ubuntu`) runs
+only the last check, so a host that cannot pull the large images still covers it.
+
+The tier is marked `minimal_container` and skipped unless `VIBESYS_MINIMAL_CONTAINER=1`
+and Docker are available. It is not in PR CI. The script sets the variable, removes
+the containers it started on exit (their run id starts with `minimal-container-`), and
+passes extra arguments to pytest. Set `VIBESYS_MINIMAL_CONTAINER_BASES` (for example
+`cpu,rocm`) to run some bases, and `VIBESYS_MINIMAL_CONTAINER_DIR` to a directory on a
+local filesystem when `/tmp` is a network mount. A base image is pulled only when the
+local store lacks it and is never removed: the CUDA and ROCm images are tens of
+gigabytes each. With the images cached, one base takes about 15 seconds after its
+agent layer is built, which takes minutes on the first run.
+
+A test that fails for a known bug is marked `expect_failure_for(...)` with the
+issue that tracks it. It is a strict expected failure, so fixing the bug fails the
+tier until the marker is removed. Run with `--runxfail` to see the failures.
+
+What it does not cover: GPU devices and drivers, profiler captures (only the server
+starts), the accelerator-attached editor of the plain Docker environment on a GPU
+host, and the SkyPilot and Modal editors.
+
 The TypeScript client has its own workflow; see
 [`clients/tui/README.md`](https://github.com/uw-syfi/vibesys/blob/main/clients/tui/README.md). The short version is:
 
