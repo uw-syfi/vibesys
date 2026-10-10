@@ -900,6 +900,18 @@ def test_a_web_launch_reports_the_launcher_flag_it_rejects(
     ) in capsys.readouterr().err
 
 
+def test_a_missing_control_socket_precedes_stray_web_flag_validation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--web-port", "99999"])
+
+    assert exit_info.value.code == 2
+    assert (
+        capsys.readouterr().err == "vibesys: --control-socket is required by the frontend server\n"
+    )
+
+
 @given(flag=text(alphabet=ascii_lowercase, min_size=1, max_size=8).map("--zz{}".format))
 def test_every_run_argument_diagnostic_renders_its_message_and_its_usage(flag: str) -> None:
     """Any argv the run parser rejects reports the message and the usage.
