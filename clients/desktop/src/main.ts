@@ -300,7 +300,10 @@ class DesktopApp {
       },
     });
     this.#runs.set(contentsId, {run, supervisor});
-    window.on('closed', () => this.#runs.delete(contentsId));
+    window.on('closed', () => {
+      this.#runs.delete(contentsId);
+      supervisor.dispose();
+    });
     window.setTitle(`VibeSys · ${hostName} · connecting`);
     supervisor.dispatch({type: 'start'});
   }

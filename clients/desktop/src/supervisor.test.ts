@@ -197,6 +197,39 @@ describe('ConnectionSupervisor scenarios', () => {
   });
 });
 
+describe('ConnectionSupervisor disposal', () => {
+  test('a disposed supervisor cancels its timers and ignores a check that answers late', async () => {
+    let answer: (outcome: CheckOutcome) => void = () => {};
+    const clock = new FakeClock();
+    const shown: ConnectionStatus['kind'][] = [];
+    let wakes = 0;
+    const supervisor = new ConnectionSupervisor({
+      check: () =>
+        new Promise(resolve => {
+          answer = resolve;
+        }),
+      scheduleTimeout: clock.scheduleTimeout,
+      wakePage: () => {
+        wakes += 1;
+      },
+      show: status => shown.push(status.kind),
+      config: CONFIG,
+    });
+    supervisor.dispatch({type: 'start'});
+    expect(clock.pending).toBe(1);
+    supervisor.dispose();
+    expect(clock.pending).toBe(0);
+    answer(OK);
+    await settle();
+    supervisor.dispatch({type: 'network-changed'});
+    supervisor.dispatch({type: 'user-retry'});
+    await settle();
+    expect(shown).toEqual([]);
+    expect(wakes).toBe(0);
+    expect(clock.pending).toBe(0);
+  });
+});
+
 describe('ConnectionSupervisor when checks pass but dials fail', () => {
   /** A connected supervisor whose page redials (and fails) every time it is woken. */
   async function redialing(dialFails: () => boolean) {

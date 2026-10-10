@@ -310,6 +310,7 @@ export class ConnectionSupervisor {
   readonly #config: SupervisorConfig;
   readonly #timers = new Map<number, () => void>();
   #state: SupervisorState = INITIAL_STATE;
+  #disposed = false;
 
   constructor(options: SupervisorShellOptions) {
     this.#options = options;
@@ -321,9 +322,17 @@ export class ConnectionSupervisor {
   }
 
   dispatch(event: SupervisorEvent): void {
+    if (this.#disposed) return;
     const {state, requests} = step(this.#state, event, this.#config);
     this.#state = state;
     for (const request of requests) this.#run(request);
+  }
+
+  /** Stop for good (its window closed): cancel every timer and ignore every later event. */
+  dispose(): void {
+    this.#disposed = true;
+    for (const cancel of this.#timers.values()) cancel();
+    this.#timers.clear();
   }
 
   #run(request: SupervisorRequest): void {
