@@ -140,7 +140,7 @@ id = "agent_image"
 class = "manual"
 job = "agent_image"
 roots = ["libs/vs-agent/src/vs_agent/images", "libs/vs-sandbox"]
-files = ["libs/vs-agent/src/vs_agent/images.py", "libs/vs-agent/src/vs_agent/provider_policy.py"]
+files = ["libs/vs-agent/src/vs_agent/images.py", "libs/vs-agent/src/vs_agent/provider_policy.py", "scripts/ci_docker_data_root.sh"]
 
 [[components]]
 id = "microservice_evaluator"
