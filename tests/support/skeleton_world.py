@@ -17,7 +17,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
-from tests.support.fake_run_clock import FakeRunClock
+from tests.support.host_clock import clock_from
 from tests.support.runtime_evaluation import ScenarioCluster
 from tests.support.session_world import (
     FakeSessionResolver,
@@ -90,6 +90,7 @@ if TYPE_CHECKING:
     from vs_project.api import StateNamespace, StateStore
     from vs_runtime.api.core import AccessGuardedWorkspace, CommitObserver, TurnYields
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
+    from vs_sim.api import Clock, SleepingClock
 
 LEASE = 100.0
 
@@ -105,7 +106,7 @@ class TimedPolls:
     """
 
     inner: PollingEvaluationExecutor
-    clock: FakeRunClock
+    clock: Clock
     runtime: float
     polls: list[str]
     during_submit: Callable[[], Awaitable[None]] | None = None
@@ -160,7 +161,7 @@ class World:
     agents: SessionHost
     strategy: SkeletonStrategy = field(default_factory=SkeletonStrategy)
     operations: OperationCatalog = field(default_factory=empty_catalog)
-    timed: tuple[FakeRunClock, float] | None = None
+    timed: tuple[Clock, float] | None = None
     polls: list[str] = field(default_factory=list)
     during_submit: Callable[[], Awaitable[None]] | None = None
     limits: Limits = field(default_factory=Limits)
@@ -291,7 +292,7 @@ class StalledError(AssertionError):
 
 
 async def drive(
-    process: Process, *, start: float, clock: FakeRunClock | None = None
+    process: Process, *, start: float, clock: SleepingClock | None = None
 ) -> ExecutorRefusal | None:
     """Run the production loop to a terminal run, on a fake clock that starts at ``start``.
 
@@ -299,7 +300,7 @@ async def drive(
     surfaces as ``StalledError``; a request cycle that never goes idle fails the
     loop's dispatch cap.
     """
-    host = CoreRunHost(process.shell, process.delivery, clock or FakeRunClock(start))
+    host = CoreRunHost(process.shell, process.delivery, clock or clock_from(start))
     config = RunLoopConfig(
         host_id="skeleton",
         lease_duration=LEASE,
@@ -439,7 +440,7 @@ def open_skeleton_world(  # noqa: PLR0913  # lint-waiver: LW-731842 [PLR0913]; e
     tmp_path: Path,
     strategy: SkeletonStrategy | None = None,
     cluster: ScenarioCluster | None = None,
-    timed: tuple[FakeRunClock, float] | None = None,
+    timed: tuple[Clock, float] | None = None,
     agents: Callable[[Path], SessionHost] | None = None,
     git: GitKind = GitKind.FAKE,
 ) -> Iterator[World]:

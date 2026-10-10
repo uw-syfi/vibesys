@@ -27,6 +27,7 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING
 
+import hypothesis
 import pytest
 from _pytest.runner import runtestprotocol
 
@@ -43,9 +44,10 @@ from vs_sim.api.testing import (  # noqa: E402  # LW-163810 [E402]; the assert-r
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Coroutine, Generator
 
 SIM_ATTRIBUTE = "_vs_sim"
+_ORIGINAL_INNER = "_vs_sim_inner_test"
 DEFAULT_REAL_TIERS = ["tests/e2e", "tests/slurm_cluster", "tests/minimal_container"]
 _TRACES = pytest.StashKey[list[EventTrace]]()
 
@@ -97,9 +99,18 @@ def _in_real_tier(item: pytest.Item) -> bool:
     return any(relative == tier or relative.startswith(f"{tier}/") for tier in tiers)
 
 
+def _hypothesis_inner(item: pytest.Item) -> Callable[..., Coroutine[object, object, object]] | None:
+    """The coroutine function under a ``@given`` wrapper, or ``None`` for any other test."""
+    handle = getattr(getattr(item, "obj", None), "hypothesis", None)
+    if handle is None:
+        return None
+    inner = getattr(handle, _ORIGINAL_INNER, handle.inner_test)
+    return inner if inspect.iscoroutinefunction(inner) else None
+
+
 def _is_async(item: pytest.Item) -> bool:
     function = getattr(item, "obj", None)
-    return inspect.iscoroutinefunction(function)
+    return inspect.iscoroutinefunction(function) or _hypothesis_inner(item) is not None
 
 
 def _is_sim_test(item: pytest.Item) -> bool:
@@ -151,12 +162,36 @@ def sim(request: pytest.FixtureRequest) -> Sim:
     return _sim_for(request.node)
 
 
+def _seed_hypothesis(item: pytest.Function, sim_for_test: Sim) -> None:
+    """Draw a ``@given`` test's examples from the sim seed, so two runs see the same examples."""
+    function = item.obj
+    if getattr(function, "hypothesis", None) is None:
+        return
+    if getattr(function, "_hypothesis_internal_use_seed", None) is not None:
+        return  # the test pins its own seed
+    hypothesis.seed(sim_for_test.seed)(function)
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> object | None:
     """Run an async sim test on the virtual loop."""
-    if not (_is_sim_test(pyfuncitem) and _is_async(pyfuncitem)):
+    if not _is_sim_test(pyfuncitem):
         return None
     sim_for_test = _sim_for(pyfuncitem)
+    _seed_hypothesis(pyfuncitem, sim_for_test)
+    if not _is_async(pyfuncitem):
+        return None
+    inner = _hypothesis_inner(pyfuncitem)
+    if inner is not None:
+        # Hypothesis calls its inner test once per example; each call is a virtual run.
+        handle = pyfuncitem.obj.hypothesis
+
+        def run_example(*args: object, **kwargs: object) -> None:
+            run_virtual(sim_for_test.clock, inner(*args, **kwargs), trace=sim_for_test.trace)
+
+        setattr(handle, _ORIGINAL_INNER, inner)
+        handle.inner_test = run_example
+        return None
     parameters = inspect.signature(pyfuncitem.obj).parameters
     arguments = {name: pyfuncitem.funcargs[name] for name in parameters}
     run_virtual(sim_for_test.clock, pyfuncitem.obj(**arguments), trace=sim_for_test.trace)

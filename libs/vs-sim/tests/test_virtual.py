@@ -14,6 +14,7 @@ from vs_sim.api.testing import (
     VirtualClock,
     VirtualDeadlockError,
     VirtualTimeLimitError,
+    current_virtual_clock,
     run_virtual,
     wait_or_fail,
 )
@@ -239,3 +240,20 @@ def test_traces_of_different_length_differ() -> None:
     long.step("a")
     assert short.first_difference(long) is not None
     assert long.first_difference(long) is None
+
+
+def test_the_running_virtual_loop_knows_its_clock() -> None:
+    clock = VirtualClock()
+
+    async def main() -> VirtualClock:
+        return current_virtual_clock()
+
+    assert run_virtual(clock, main()) is clock
+
+
+def test_a_real_loop_has_no_virtual_clock() -> None:
+    async def main() -> None:
+        current_virtual_clock()
+
+    with pytest.raises(RuntimeError, match="not running on a virtual loop"):
+        asyncio.run(main())

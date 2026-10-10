@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from tests.support.docker_environment import host_container_backend
-from tests.support.fake_run_clock import FakeRunClock
+from tests.support.host_clock import CrashableClock
 from tests.support.liveness import Budget, End, Journal, assert_live
 from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.slurm_environment import with_fake_image_build
@@ -59,6 +59,7 @@ from vs_core.api import RunEnvelope
 from vs_project.api import Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_runtime.api.testing import FakeStopTimer
+from vs_sim.api.testing import run_virtual
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
@@ -500,7 +501,7 @@ class LoopRun:
     result: RunResult | None
     error: BaseException | None
     events: list[CoreEvent]
-    clock: FakeRunClock | None
+    clock: CrashableClock | None
 
     @property
     def succeeded(self) -> bool | None:
@@ -536,7 +537,7 @@ def run_request(  # noqa: PLR0913
     on_handle: Callable[[RunHandle], None] | None = None,
     stop_timer: StopTimer | None = None,
     client_factory: Callable[..., AgentClientProtocol] | None = None,
-    clock: FakeRunClock | None = None,
+    clock: CrashableClock | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
 ) -> LoopRun:
     """Execute a built request through the production host composition.
@@ -583,7 +584,7 @@ def run_request(  # noqa: PLR0913
         await asyncio.gather(collector, return_exceptions=True)
         return LoopRun(result.run_id, result, None, events, clock)
 
-    finished = asyncio.run(run())
+    finished = asyncio.run(run()) if clock is None else run_virtual(clock, run())
     if finished.error is None:
         _assert_invariants(request, finished)
     return finished
@@ -629,9 +630,9 @@ def load_envelope(root: Path, run_id: str) -> dict[str, Any] | None:
     return envelope
 
 
-def simulated_clock() -> FakeRunClock:
+def simulated_clock() -> CrashableClock:
     """A run clock for a crash and its resume: waits advance it without waiting."""
-    return FakeRunClock(settle_background=False)
+    return CrashableClock()
 
 
 def resume_request(request: RunRequest, run_id: str) -> RunRequest:

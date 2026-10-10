@@ -11,12 +11,10 @@ lifecycle fact: a missing or wrong observation shows up as core rejecting it.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from pydantic import ValidationError
-from tests.support.fake_run_clock import FakeRunClock
 from tests.support.liveness import Journal
 
 from vs_core.api import (
@@ -62,6 +60,7 @@ from vs_runtime.api.core import (
     start_core,
 )
 from vs_runtime.api.testing import FakePublicationDelivery
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -415,7 +414,7 @@ def drive_shell[S: StrategyState](
     )
     if isinstance(script, Admitting):
         script.admit = lambda event, now_at: shell.admit(event, now_at=now_at)
-    clock = FakeRunClock(1.0)
+    clock = VirtualClock(1.0)
     host = CoreRunHost(shell, FakePublicationDelivery(store), clock)
     config = RunLoopConfig(
         host_id="scenario",
@@ -426,7 +425,7 @@ def drive_shell[S: StrategyState](
     start_core(host, config)
     halted = None
     try:
-        asyncio.run(drive_core(host, config))
+        run_virtual(clock, drive_core(host, config))
     except (DispatchCapExceededError, RunStalledError) as error:
         # These are the loop's backstops. Return the run so the liveness check names the
         # invariant it broke and the requests that led there.

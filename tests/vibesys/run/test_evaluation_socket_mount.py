@@ -8,14 +8,12 @@ the daemon records each container's bind mounts.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import tempfile
 from pathlib import Path
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.fake_run_clock import FakeRunClock
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import _plugin, _request, _write_project
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
@@ -28,6 +26,7 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDockerBuildRunner
 from vs_runtime.api.core import RunTiming
 from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 
 def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]:
@@ -54,6 +53,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
         }
     )
     integration = LocalRunIntegration()
+    clock = VirtualClock(at=0.0)
 
     def reaches(run_id: str) -> list[bool]:
         socket = evaluation_socket_path(project_root, run_id)
@@ -71,7 +71,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             integration,
             plugin=_plugin(templates),
             options=EmptyOptions(),
-            timing=RunTiming(FakeRunClock(), 60.0),
+            timing=RunTiming(clock, 60.0),
             agent_client_factory=lambda **_: FakeAgentClient(
                 capabilities=AgentCapabilities(provider_session_resume=True)
             ),
@@ -84,7 +84,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             return reaches(run_id)
 
     try:
-        return asyncio.run(exercise())
+        return run_virtual(clock, exercise())
     finally:
         integration.close()
 

@@ -64,6 +64,25 @@ def test_async_tests_run_on_the_virtual_loop_without_waiting(suite: pytest.Pytes
     suite.runpytest_subprocess().assert_outcomes(passed=3)
 
 
+def test_hypothesis_examples_of_an_async_test_each_run_virtually(suite: pytest.Pytester) -> None:
+    suite.makepyfile(
+        """
+        from hypothesis import given, settings, strategies as st
+        from vs_sim.api.testing import current_virtual_clock
+
+        @settings(max_examples=5, deadline=None)
+        @given(st.floats(min_value=1, max_value=10**6))
+        async def test_sleeps_of_any_length(seconds):
+            clock = current_virtual_clock()
+            before = clock.now()
+            await clock.sleep(seconds)
+            assert clock.now() - before == __import__("pytest").approx(seconds)
+        """
+    )
+    suite.runpytest_subprocess().assert_outcomes(passed=1)
+    suite.runpytest_subprocess("--sim-determinism-check").assert_outcomes(passed=1)
+
+
 def test_a_test_that_waits_on_nothing_fails_at_once(suite: pytest.Pytester) -> None:
     suite.makepyfile(
         """

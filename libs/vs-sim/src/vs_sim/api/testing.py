@@ -34,6 +34,7 @@ from vs_sim.virtual import (
     VirtualClock,
     VirtualDeadlockError,
     VirtualTimeLimitError,
+    current_virtual_clock,
     run_virtual,
 )
 from vs_sim.waits import (
@@ -83,6 +84,7 @@ __all__ = [
     "accept_or_fail",
     "after_crash",
     "arrival",
+    "current_virtual_clock",
     "evenly_spaced",
     "first_of_each_kind",
     "get_or_fail",

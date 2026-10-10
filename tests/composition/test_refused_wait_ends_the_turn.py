@@ -10,7 +10,6 @@ job the run does not own, which core refuses when it commits the suspension.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -22,7 +21,7 @@ from tests.support.concurrent_turns_strategy import (
     ConcurrentTurnsState,
     ConcurrentTurnsStrategy,
 )
-from tests.support.fake_run_clock import FakeRunClock
+from tests.support.host_clock import clock_from
 from tests.support.skeleton_world import LEASE, drive
 
 from vs_core.api import (
@@ -35,6 +34,7 @@ from vs_core.api import (
     ResourceId,
     RunStatus,
 )
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -88,7 +88,7 @@ async def play(tmp_path: Path, job: str) -> ConcurrentTurnsState:
         tmp_path, ConcurrentTurnsStrategy(wave=()), limits, agent, yields_over=refused
     ) as played:
         process = played.world.runtime()
-        clock = FakeRunClock(0.0)
+        clock = clock_from(0.0)
         process.shell.start("skeleton", now_at=0.0, lease_duration=LEASE)
         played.bridge.attach(process.shell, clock)
         await played.bridge.serve()
@@ -111,7 +111,7 @@ def test_a_wait_core_refuses_at_commit_ends_the_turn_and_the_strategy_is_told(
     """The run ends terminally; the turn's result is ordinary and marked as a refused wait."""
     root = tmp_path / uuid.uuid4().hex[:6]
     root.mkdir()
-    seen = asyncio.run(play(root, job))
+    seen = run_virtual(VirtualClock(), play(root, job))
     assert seen.results == (FIRST,)
     assert seen.failed == ()
     assert seen.suspended == ()

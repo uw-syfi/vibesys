@@ -98,7 +98,6 @@ async def _run(tmp_path: Path, provider: str, plan: FaultPlan | None) -> StreamH
         return opened[0]
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("provider", PROVIDERS)
 async def test_the_skeleton_run_adopts_through_a_stream_transport(
     tmp_path: Path, provider: str
@@ -117,7 +116,6 @@ async def test_the_skeleton_run_adopts_through_a_stream_transport(
     assert len(opened[0].peers.prompts()) >= 1
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("provider", PROVIDERS)
 @pytest.mark.parametrize("fault", list(ProcessFault))
 async def test_a_fault_in_the_implementer_turn_ends_the_run_typed_without_a_replay(

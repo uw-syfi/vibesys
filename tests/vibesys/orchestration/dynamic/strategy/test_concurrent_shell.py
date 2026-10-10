@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.fake_run_clock import FakeRunClock
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
@@ -64,8 +63,6 @@ from vs_core.api import (
 from vs_core.testing.drive import Harness, Running, Succeeded, new_run
 from vs_project.api import FakeStateStore
 from vs_runtime.api.core import (
-    HEARTBEAT_TASK,
-    WAIT_TASK,
     CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
@@ -80,6 +77,7 @@ from vs_runtime.api.core import (
     start_core,
 )
 from vs_runtime.api.testing import FakePublicationDelivery
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -94,24 +92,6 @@ if TYPE_CHECKING:
 CAPS = (1, 2, 3)
 WAITING_KIND = "waiting_for_evaluation"
 IMPLEMENTERS = 2
-
-
-class _YieldingClock(FakeRunClock):
-    """Logical time that passes without waiting for other tasks, so turns can overlap."""
-
-    async def sleep(self, seconds: float) -> None:
-        task = asyncio.current_task()
-        if task is not None and task.get_name() == HEARTBEAT_TASK:
-            # Logical time is moved by the turns and the loop, never by the heartbeat.
-            await asyncio.sleep(0)
-            return
-        if task is not None and task.get_name() == WAIT_TASK:
-            # The loop waiting beside running turns: their delays are loop yields, so no
-            # time passes until a turn finishes (the loop cancels this sleep then).
-            await asyncio.get_running_loop().create_future()
-        await asyncio.sleep(0)
-        self.sleeps.append(seconds)
-        self.at += seconds
 
 
 @dataclass
@@ -289,6 +269,7 @@ class _Built:
     ledger: _Ledger
     start: CoreState
     store: FakeStateStore
+    clock: VirtualClock
 
 
 @dataclass(frozen=True)
@@ -299,7 +280,6 @@ class _Process:
     ledger: _Ledger | None = None
     commits: CommitObserver | None = None
     clock_at: float = 1.0
-    plain_clock: bool = False
     delivery: Callable[[FakeStateStore], FakePublicationDelivery] = FakePublicationDelivery
 
 
@@ -360,20 +340,18 @@ def _build(
             ),
         ),
     )
-    clock = (
-        FakeRunClock(process.clock_at) if process.plain_clock else _YieldingClock(process.clock_at)
-    )
+    clock = VirtualClock(process.clock_at)
     host = CoreRunHost(shell, process.delivery(store), clock)
     loop_config = RunLoopConfig(
         host_id="concurrent", lease_duration=LEASE, max_dispatches=400, max_concurrent=cap
     )
     start_core(host, loop_config)
-    return _Built(shell, host, loop_config, ledger, shell.record.envelope.core, store)
+    return _Built(shell, host, loop_config, ledger, shell.record.envelope.core, store, clock)
 
 
 def _run(cap: int | None, delays: list[int]) -> _Finished:
     built = _build(cap, delays)
-    outcome = asyncio.run(drive_core(built.host, built.config))
+    outcome = run_virtual(built.clock, drive_core(built.host, built.config))
     assert outcome.status == RunStatus.TERMINAL
     return _Finished(core=built.shell.record.envelope.core, ledger=built.ledger, start=built.start)
 
@@ -471,7 +449,7 @@ def test_a_failing_turn_keeps_what_the_turns_that_finished_with_it_returned(
     """
     built = _build(2, delays, failing=frozenset({failing}))
     with pytest.raises(_TurnFailedError):
-        asyncio.run(drive_core(built.host, built.config))
+        run_virtual(built.clock, drive_core(built.host, built.config))
     intents = {i.request_id.root: i for i in built.shell.record.envelope.core.intents.intents}
     for request_id in built.ledger.returned:
         assert intents[request_id].phase == IntentPhase.COMPLETED, request_id
@@ -513,7 +491,7 @@ def test_a_tool_call_admitted_during_a_publish_commits_and_never_halts(*, fails:
     built = _build(2, [1, 1], process=_Process(delivery=make))
     deliveries[0].shell = built.shell
     try:
-        outcome = asyncio.run(drive_core(built.host, built.config))
+        outcome = run_virtual(built.clock, drive_core(built.host, built.config))
     except OSError:
         assert fails, "only a failing delivery may end the run"
     else:
@@ -542,7 +520,7 @@ def test_a_wait_refused_at_commit_ends_its_turn_and_the_run_goes_on(
     agent's reply, which still says "waiting") and carry on, and the peer's result stays.
     """
     built = _build(2, delays, waiting=frozenset(waiting))
-    outcome = asyncio.run(drive_core(built.host, built.config))
+    outcome = run_virtual(built.clock, drive_core(built.host, built.config))
     core = built.shell.record.envelope.core
     assert outcome.status == RunStatus.TERMINAL
     assert core.evaluation.continuations == ()
@@ -615,7 +593,7 @@ def test_a_crash_with_two_turns_in_flight_at_the_cap_resumes_with_one_effect_per
 
     first = _build(2, delays, process=_Process(commits=_DiesWhen(dies), delivery=outside_world))
     with pytest.raises(_Crash):
-        asyncio.run(drive_core(first.host, first.config))
+        run_virtual(first.clock, drive_core(first.host, first.config))
     assert first.shell.record.envelope.core.run.status != RunStatus.TERMINAL
     assert dies(_implementer_turns(first.shell.record)), "the process died at the named point"
     second = _build(
@@ -625,11 +603,10 @@ def test_a_crash_with_two_turns_in_flight_at_the_cap_resumes_with_one_effect_per
             store=first.store,
             ledger=first.ledger,
             clock_at=1.0 + 4 * LEASE,
-            plain_clock=True,
             delivery=outside_world,
         ),
     )
-    outcome = asyncio.run(drive_core(second.host, second.config))
+    outcome = run_virtual(second.clock, drive_core(second.host, second.config))
     assert outcome.status == RunStatus.TERMINAL
     effects = first.ledger.effects
     assert len(effects) == len(set(effects)), "a request's effect happened twice"
