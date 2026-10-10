@@ -2,10 +2,15 @@
 
 Status: draft for discussion, with one real backend fix shipped as proof of
 concept (see "Backend PoC"). Owner: web + orchestration. Companion to the
-campaign dashboard in PR #1304 (`feat/web-trajectory-replay-fixtures`): that
-PR is an unmerged, localhost-only demo of one finished run, used here only as
-a visual reference for what a campaign dashboard should show, not as code
-this PR builds on. Citations below were rechecked against a fresh
+campaign dashboard in PR #1304 (`feat/web-trajectory-replay-fixtures`): this
+branch forks directly from #1304's own tip (`git merge-base` against it is
+exactly #1304's tip commit), so `CampaignDashboard.tsx`, `replay-scenario.ts`,
+and the rest of that UI shell are inherited verbatim, not reimplemented from
+its shape. What #1304 itself does not provide is any connection to a real
+run: it replays one curated fixture of an already-finished run, entirely
+offline, unmerged, localhost-only. Everything below is about feeding that
+same dashboard from a live backend instead of a fixture; #1304's own code is
+not otherwise touched. Citations below were rechecked against a fresh
 `upstream/main` pass (commit `5ff739abc`, 2026-10-10); "Telemetry inventory,"
 "The gap," and "Backend path" carry what that pass corrected or sharpened,
 including two places the first draft cited a legacy, dead orchestration
@@ -15,12 +20,14 @@ engine instead of the live one (flagged inline).
 
 A VibeSys serving-system campaign is a long run: a portfolio of concurrent
 workstreams, each a hypothesis with its own implement/review/profile/evaluate
-lifecycle, producing hundreds of measurements over days. PR #1304 is a
-hand-built, localhost-only demo of one finished run, used here purely as a
-visual reference for what a campaign dashboard should show: one performance
-graph with a running-best line, a draggable timer bar, a workstream timeline,
-and a Kanban/table drill-down. It is not integrated into VibeSys, and this PR
-does not build on its code, only on the shape of what it displays.
+lifecycle, producing hundreds of measurements over days. PR #1304 built one
+performance graph with a running-best line, a draggable timer bar, a
+workstream timeline, and a Kanban/table drill-down, all driven by one
+hand-curated fixture of an already-finished run, replayed entirely offline.
+This branch forks from, and inherits, that dashboard's code directly; what it
+does not inherit is any connection to VibeSys itself; #1304 is unmerged,
+localhost-only, and reads nothing from a real run. Closing that gap, live
+telemetry in place of the fixture, is this doc's subject.
 
 Today nothing gets that much telemetry from the backend to a browser while a
 run is still going. This doc breaks that into four sub-problems:
