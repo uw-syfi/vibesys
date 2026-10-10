@@ -362,6 +362,41 @@ jobs:
       - name: Validate microservice workloads
         run: ./support/repoctl/repoctl run-checks --group microservice_workload_checks
 
+  # The example evaluators' build-and-run tests: each compiles an example's native
+  # code (cargo, make, go) and runs the real Go evaluator on it, ~5 worker-minutes in
+  # all. They carry the `native_build` marker, which the Python shards deselect, so
+  # the always-on shards no longer pay for them; they run here whenever an example,
+  # the evaluator SDK or the queue evaluator changes (the `examples` filter). The
+  # runner's own Go, Rust and C++ toolchains are what the shards used.
+  native-evaluator-examples:
+    needs: changes
+    if: needs.changes.outputs.examples == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
+          cache-dependency-path: support/repoctl/go.sum
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Build and run the example evaluators
+        run: ./support/repoctl/repoctl run-checks --group examples_native_evaluator_tests
+
   # The qwen3.5-9b-mi210 tiny-model CPU check starts a candidate server per
   # test (~250 s serially, issue #1675), so it is split by test across the
   # runners in `matrix.shard` (`CPU_CHECK_SHARD`, see
@@ -921,6 +956,7 @@ jobs:
       - impact-tool
       - validate-examples
       - validate-examples-cpu-check
+      - native-evaluator-examples
       - agent-image
       - real-tiers-slurm
       - real-tiers-minimal-container
@@ -976,6 +1012,7 @@ jobs:
       - impact-tool
       - validate-examples
       - validate-examples-cpu-check
+      - native-evaluator-examples
       - agent-image
       - real-tiers-slurm
       - real-tiers-minimal-container

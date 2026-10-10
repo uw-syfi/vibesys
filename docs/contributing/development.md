@@ -116,6 +116,12 @@ checkout):
 uv run python scripts/example_repositories.py
 ```
 
+The example evaluators' build-and-run tests (they compile an example's native code and
+run the real Go evaluator on it) carry the `native_build` marker and are deselected by
+default. CI's `native-evaluator-examples` job runs them when an example or the evaluator
+SDK changes; run them yourself with `uv run pytest -m native_build tests/architecture
+tests/examples`.
+
 Run the Python checks from the repository root:
 
 ```bash
