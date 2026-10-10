@@ -39,12 +39,6 @@ class RetentionRefusal(StrEnum):
     REVISION_UNKNOWN = "revision_unknown"
 
 
-class InterpretRequest(Protocol):
-    """The request shape this owner serves, declared by the strategy that issues it."""
-
-    evidence: tuple[EvidenceRef, ...]
-
-
 class RetainRequest(Protocol):
     """The request shape this owner serves, declared by the strategy that issues it."""
 

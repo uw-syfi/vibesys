@@ -430,9 +430,8 @@ class TestPrefixFormat:
 class TestUpdateUsagePublicHook:
     """Tests for the CLI-backend ``update_usage`` hook.
 
-    ``AgentLogger.on_usage`` routes a driver's per-turn usage dict into this
-    method so the agent prefix stays in sync with the underlying CLI tool's
-    token counts.
+    ``AgentLogger.update_usage`` takes a driver's per-turn usage dict so
+    the agent prefix stays in sync with the underlying CLI tool's token counts.
     """
 
     def test_update_usage_sets_input_tokens(self, capsys: pytest.CaptureFixture[str]) -> None:

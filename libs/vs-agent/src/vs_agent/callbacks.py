@@ -123,10 +123,6 @@ class AgentLogger:
             context_window=self._context_window,
         )
 
-    def _format_prefix(self) -> str:
-        """Render the status snapshot as the plain-text log prefix."""
-        return format_status_prefix(self._status())
-
     # --- Event emission + log formatting ---
 
     # Tool names whose args contain code content that is already tracked in
@@ -184,12 +180,6 @@ class AgentLogger:
                 s = json.dumps(v) if not isinstance(v, str) else v
                 full_parts.append(f'{k}="{s}"' if isinstance(v, str) else f"{k}={s}")
             self._log_line(f"\n→ {name}({', '.join(full_parts)})")
-
-    def _emit_thinking(self, text: str) -> None:
-        self._publish(text, "analysis")
-        self._log_line("\n[thinking]")
-        for line in text.split("\n"):
-            self._log_line(line)
 
     # Maximum chars to write per tool result in the log file.  Keeps logs
     # readable while still capturing enough output for debugging.
@@ -322,10 +312,6 @@ class AgentLogger:
         is_error = bool(stderr) or (exit_code not in (None, 0))
         content = stdout or stderr
         self.log_tool_result(tool, content, is_error=is_error, payload=payload)
-
-    def on_usage(self, usage: dict[str, Any]) -> None:
-        """Update token usage from the provider's current turn."""
-        self.update_usage(usage)
 
     def update_usage(self, usage: dict[str, Any] | None) -> None:
         """Refresh token tracking from a CLI provider's per-turn usage dict.
