@@ -19,6 +19,8 @@ import pytest
 from vs_sim.api.testing import HANG_GUARD_S
 from vs_slurm.fake_connector import JOB_ID, POLLED_FILE, SUBMITTED_FILE, recorded_commands
 
+pytestmark = pytest.mark.usefixtures("isolated_github_auth")
+
 _REPOSITORY = Path(__file__).resolve().parents[2]
 
 
@@ -99,7 +101,7 @@ def test_a_signal_that_ends_the_run_cancels_its_slurm_job(
     # lint-waiver: LW-731104 [S603]; the run must be its own process to be signalled.
     # > Signalling an in-process run would signal pytest; the argv is fixed.
     run = subprocess.Popen(  # noqa: S603
-        [sys.executable, "-m", "tests.headless._signalled_run", str(project), str(config)],
+        [sys.executable, "-m", "tests.e2e._signalled_run", str(project), str(config)],
         cwd=_REPOSITORY,
         stdout=writer,
         stderr=subprocess.DEVNULL,

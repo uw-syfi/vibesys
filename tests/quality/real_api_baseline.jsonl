@@ -322,11 +322,7 @@
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "process", "count": 1}
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "socket_io", "count": 1}
 {"path": "tests/examples/test_verus_queue_task.py", "rule": "process", "count": 4}
-{"path": "tests/headless/test_interrupt.py", "rule": "self_signal", "count": 1}
-{"path": "tests/headless/test_interrupt.py", "rule": "signal", "count": 8}
-{"path": "tests/headless/test_signals_cancel_slurm_jobs.py", "rule": "process", "count": 4}
-{"path": "tests/headless/test_signals_cancel_slurm_jobs.py", "rule": "signal", "count": 9}
-{"path": "tests/headless/test_signals_cancel_slurm_jobs.py", "rule": "subprocess", "count": 2}
+{"path": "tests/headless/test_interrupt.py", "rule": "signal", "count": 2}
 {"path": "tests/packaging/test_fetch_bun.py", "rule": "socket_io", "count": 1}
 {"path": "tests/packaging/test_fetch_bun.py", "rule": "threading", "count": 1}
 {"path": "tests/packaging/test_installed_release_verifier.py", "rule": "process", "count": 4}
