@@ -219,16 +219,7 @@ async function showHost(key: HostKey): Promise<void> {
     const error = element('p', result.error, 'error');
     hostPanel.replaceChildren(element('h2', label), error);
     if (result.authNeeded) {
-      hostPanel.append(
-        button(
-          `Sign in to ${label}`,
-          async () => {
-            const signedIn = await bridge.signIn(key);
-            if (!failed(signedIn, error)) await showHost(key);
-          },
-          'primary',
-        ),
-      );
+      hostPanel.append(signInButton(key, label, error));
     } else {
       hostPanel.append(button('Try again', () => void showHost(key)));
     }
@@ -267,6 +258,19 @@ function renderHost(host: WelcomeHost): void {
   hostPanel.append(actions);
 }
 
+/** Sign in to `key` (the host may prompt), then show its panel again; errors go to `where`. */
+function signInButton(key: HostKey, label: string, where: HTMLElement): HTMLButtonElement {
+  return button(
+    `Sign in to ${label}`,
+    async () => {
+      if (bridge === undefined) return;
+      const signedIn = await bridge.signIn(key);
+      if (!failed(signedIn, where)) await showHost(key);
+    },
+    'primary',
+  );
+}
+
 /** "Where is your VibeSys checkout on HOST?", checked by the host before it is saved. */
 function checkoutForm(host: WelcomeHost, value: string): HTMLElement {
   const form = element('form');
@@ -298,7 +302,10 @@ function checkoutForm(host: WelcomeHost, value: string): HTMLElement {
     save.disabled = true;
     const result = await bridge.setCheckout(host.key, input.value);
     save.disabled = false;
-    if (failed(result, status)) return;
+    if (failed(result, status)) {
+      if (result.authNeeded) form.append(signInButton(host.key, host.label, status));
+      return;
+    }
     await showHost(host.key);
   });
   setTimeout(() => input.focus(), 0);
