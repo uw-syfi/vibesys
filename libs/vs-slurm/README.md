@@ -91,6 +91,15 @@ kind = "local"
 compute nodes. A wrapper may precede the shell in `shell_command`, for example
 one that runs the shell on a login node the host reaches without SSH.
 
+Every program the local transport starts (`shell_command` and `rsync_command`)
+runs in a login-like environment, not this process's: only `HOME`, `USER`,
+`LOGNAME`, `SHELL`, `PATH`, `LANG`, `LC_*`, `TZ` and `TMPDIR`, when set, and
+nothing else. This is what the SSH transport gets from sshd. A host process can
+hold credentials, and one that runs inside an allocation or batch job holds
+`SLURM_*` variables that would point the gate's own `sbatch` at the wrong job;
+none of it reaches the programs. `sbatch` itself is submitted exactly as over
+SSH, so a job gets the environment Slurm's defaults give it.
+
 The local transport runs whatever `shell_command` names with the host's
 privileges, so it is for the host's own trusted code only. VibeSys therefore
 does not offer it to the sandboxed agent: the host-side transport broker that
