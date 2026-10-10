@@ -206,20 +206,27 @@ def advance(state: RelayState, event: RelayEvent, limits: BridgeLimits) -> Relay
             return _with_pending(state, peer, None)
         case Ended():
             outcome = ending(event)
-            return state if outcome is None else replace(state, outcome=outcome)
+            if outcome is not None:
+                return replace(state, outcome=outcome)
+            # The failed write is over, not stalled: only the end of the server's
+            # stream (or another deadline) decides from here.
+            return _with_pending(state, event.peer, None)
         case Tick(at=at):
-            # Compare against the same sum ``next_deadline`` returns: ``at - since`` can
-            # round below the deadline at the instant the supervisor wakes for it, and
-            # the supervisor would then spin on a zero wait without ever deciding.
-            overdue = [
-                peer
-                for peer, since in _pending(state).items()
-                if at >= since + limits.write_deadline_seconds
-            ]
-            if not overdue:
-                return state
-            first = min(overdue, key=lambda peer: _pending(state)[peer])
-            return replace(state, outcome=_STALLED[first])
+            return _tick(state, at, limits)
+
+
+def _tick(state: RelayState, at: float, limits: BridgeLimits) -> RelayState:
+    """Decide a stall when the oldest overdue write has run out of time."""
+    # Compare against the same sum ``next_deadline`` returns: ``at - since`` can round
+    # below the deadline at the instant the supervisor wakes for it, and the supervisor
+    # would then spin on a zero wait without ever deciding.
+    pending = _pending(state)
+    overdue = [
+        peer for peer, since in pending.items() if at >= since + limits.write_deadline_seconds
+    ]
+    if not overdue:
+        return state
+    return replace(state, outcome=_STALLED[min(overdue, key=pending.__getitem__)])
 
 
 def next_deadline(state: RelayState, limits: BridgeLimits) -> float | None:

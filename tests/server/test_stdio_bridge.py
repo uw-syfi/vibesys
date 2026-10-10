@@ -115,6 +115,15 @@ def test_every_end_has_one_classification(peer: Peer, flow: Flow, reason: EndRea
         )
 
 
+def test_a_write_that_finds_the_server_closed_is_not_left_to_stall() -> None:
+    state = _fold(
+        [WriteStarted(Peer.SERVER, 0.0), Ended(Peer.SERVER, Flow.TO_PEER, EndReason.CLOSED)]
+    )[-1]
+    assert state.outcome is None
+    assert next_deadline(state, _LIMITS) is None
+    assert advance(state, Tick(_DEADLINE * 10), _LIMITS).outcome is None
+
+
 def test_every_outcome_has_its_own_exit_status_and_only_a_client_close_is_zero() -> None:
     assert set(EXIT_STATUS) == set(BridgeOutcome)
     assert len(set(EXIT_STATUS.values())) == len(BridgeOutcome)
