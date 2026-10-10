@@ -12,6 +12,7 @@ from tempfile import TemporaryDirectory
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from scripts.ast_identity import node_identity
 from scripts.check_contract_sot import main, measure, ratchet
 
 from vs_project.api import run_git
@@ -22,7 +23,7 @@ OWNER = "legacy.types"
 def fixture_members(source: str) -> list[str]:
     definition = ast.parse(source).body[0]
     assert isinstance(definition, ast.ClassDef)
-    return sorted(ast.dump(node, include_attributes=False) for node in definition.body)
+    return sorted(node_identity(node) for node in definition.body)
 
 
 def repository(root: Path, consumer: str) -> None:
