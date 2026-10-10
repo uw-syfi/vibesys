@@ -34,7 +34,7 @@ class BlockedRuntime:
 
     def drive(self, _request: object) -> None:
         async def serve_forever() -> None:
-            print("driving", flush=True)  # noqa: T201  # lint-waiver: LW-155501 [T201]; the parent test reads the child's observations from stdout
+            print("driving", flush=True)  # noqa: T201  # lint-waiver: LW-155506 [T201]; the parent test reads the child's observations from stdout
             await asyncio.sleep(0)
             await asyncio.Event().wait()
 
@@ -47,7 +47,7 @@ class BlockedRuntime:
 if __name__ == "__main__":
     # test-isolation: the child swaps the runtime and request parsing for a blocked fake
     BlockedRuntime.transports = int(sys.argv[1])
-    runtime_module.ServerRuntime = BlockedRuntime  # ty: ignore[invalid-assignment]  # LW-155503; the child swaps the dynamically imported runtime class for its fake
-    cli.parse_cli_invocation = lambda _argv: object()  # ty: ignore[invalid-assignment]  # LW-155504; the child replaces CLI parsing with a fixed fake
-    cli.build_run_request = lambda _invocation: object()  # ty: ignore[invalid-assignment]  # LW-155505; the child replaces request building with a fixed fake
+    runtime_module.ServerRuntime = BlockedRuntime  # ty: ignore[invalid-assignment]  # LW-155503 [invalid-assignment]; the child swaps the dynamically imported runtime class for its fake
+    cli.parse_cli_invocation = lambda _argv: object()  # ty: ignore[invalid-assignment]  # LW-155504 [invalid-assignment]; the child replaces CLI parsing with a fixed fake
+    cli.build_run_request = lambda _invocation: object()  # ty: ignore[invalid-assignment]  # LW-155505 [invalid-assignment]; the child replaces request building with a fixed fake
     main(["--control-socket", "/unused/control.sock", "--local"])
