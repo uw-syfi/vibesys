@@ -132,3 +132,40 @@ def test_docker_probe_enforces_the_shared_resource_contract(tmp_path: Path) -> N
         assert fields["PATH"] == sandbox.env["PATH"]
     finally:
         sandbox.stop()
+
+
+@pytest.mark.skipif(
+    not _enabled() or shutil.which("docker") is None,
+    reason=f"set {_ENABLE_ENV}=1 with docker on PATH to build and run the agent image",
+)
+def test_a_sandbox_container_exits_on_sigterm_so_stop_needs_no_sigkill(tmp_path: Path) -> None:
+    """PID 1 of a sandbox container handles SIGTERM, so ``docker stop`` never escalates.
+
+    An init-less ``sleep infinity`` ignores SIGTERM, so the engine waits out its
+    grace period and SIGKILLs it (exit 137, ten seconds per close). The contract
+    is pinned by the exit status, not by a stopwatch: a SIGTERM exit is 143, and
+    the grace period is generous so a loaded host cannot turn it into a SIGKILL.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    image = agent_image(_DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S)
+    sandbox = DockerSandbox(host_workspace=str(workspace), image=image, auto_remove=False)
+    sandbox.start()
+    try:
+        container = sandbox.container_id
+        run_test_command(
+            ["docker", "stop", "--time", "120", container],
+            check=True,
+            capture_output=True,
+            timeout=150,
+        )
+        inspected = run_test_command(
+            ["docker", "inspect", "--format", "{{.State.ExitCode}}", container],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert inspected.stdout.strip() == "143"
+    finally:
+        sandbox.stop()
