@@ -77,7 +77,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vs_sim.api", "vs_project", "vs_github", "vs_issue_tracker", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.issue_queue", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "headless", "launch", "vs_mcp"]
+depends_on = ["vs_sim.api", "vs_project", "vs_github", "vs_issue_tracker", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.issue_queue", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "headless", "launch", "vs_mcp", "server.stdio_bridge", "server.stdio_bridge_report"]
 
 [[modules]]
 path = "headless"
@@ -142,6 +142,16 @@ depends_on = ["server.read_model", "server.settings", "server.chat", "server.eve
 [[modules]]
 path = "server.settings"
 depends_on = ["vibesys.api"]
+
+[[modules]]
+# The per-connection stdio relay to a run's control socket. Kept to the standard
+# library and vs_sim so it starts fast; it does not import the server runtime.
+path = "server.stdio_bridge"
+depends_on = ["vs_sim.api"]
+
+[[modules]]
+path = "server.stdio_bridge_report"
+depends_on = ["server.stdio_bridge"]
 
 [[modules]]
 path = "server.tool_payloads"
