@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>VibeSys</title>
+    <style>
+      :root { color-scheme: dark; font: 14px/1.4 -apple-system, system-ui, sans-serif; }
+      body { margin: 0; display: grid; grid-template-columns: 220px 1fr; height: 100vh; background: #15171c; color: #e6e6e6; }
+      nav { padding: 40px 12px 12px; background: #1d2027; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; -webkit-app-region: drag; }
+      #hosts { display: flex; flex-direction: column; gap: 2px; }
+      nav h1 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #9aa0aa; margin: 0 4px 8px; }
+      main { padding: 40px 24px 24px; overflow-y: auto; }
+      button { font: inherit; color: inherit; background: #2b2f38; border: 1px solid #3a3f4b; border-radius: 6px; padding: 4px 10px; cursor: pointer; -webkit-app-region: no-drag; }
+      button:hover { background: #343945; }
+      button.host { text-align: left; background: transparent; border-color: transparent; }
+      button.host.selected { background: #2f3644; border-color: #46506a; }
+      input { font: inherit; color: inherit; background: #101216; border: 1px solid #3a3f4b; border-radius: 6px; padding: 4px 8px; min-width: 260px; }
+      table { border-collapse: collapse; margin: 12px 0 24px; width: 100%; }
+      th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #2a2e37; }
+      th { color: #9aa0aa; font-weight: 500; }
+      form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+      form h3 { width: 100%; margin: 8px 0 0; font-size: 14px; }
+      label { display: flex; gap: 8px; align-items: center; color: #9aa0aa; }
+      .status { min-height: 1.4em; color: #9aa0aa; }
+      .status.error { color: #ff8a80; white-space: pre-wrap; }
+      .blocked { color: #ffcc80; }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <h1>Hosts</h1>
+      <div id="hosts"></div>
+    </nav>
+    <main>
+      <p id="status" class="status" role="status"></p>
+      <div id="runs"><p>Pick a host to see its VibeSys runs.</p></div>
+    </main>
+    <script type="module" src="./picker-page.js"></script>
+  </body>
+</html>

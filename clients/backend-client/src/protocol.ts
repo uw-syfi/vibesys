@@ -1,5 +1,11 @@
 import type {ProtocolDocument} from './generated/protocol.generated.js';
 
+/**
+ * The wire protocol version this client speaks. Source: `PROTOCOL_VERSION` in
+ * `src/server/api/protocol.py`; a server that reports another one cannot be read by this client.
+ */
+export const PROTOCOL_VERSION = 1;
+
 export type ProtocolRequest = ProtocolDocument['request'];
 export type ProtocolResponse = ProtocolDocument['response'];
 export type RunEvent = ProtocolDocument['event'];

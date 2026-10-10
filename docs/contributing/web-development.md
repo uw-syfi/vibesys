@@ -344,10 +344,19 @@ library decodes the target with `ascii`/`surrogateescape`, so a raw byte above
 ## Desktop app
 
 The desktop app (`clients/desktop`) ships its own copy of the web UI and
-reaches the server through its main process, without the web gateway:
+reaches servers through its main process, without the web gateway. A server is
+a detached run (`vibesys --detach`, see `tui-architecture.md`) on this machine
+or on an SSH host; local and remote share every layer above the `Host`
+interface, and the page cannot tell them apart.
 
 ```bash
-# Start a local server for a project and open the window on it
+# The host and run picker: This Mac plus the Host entries of ~/.ssh/config
+pnpm --dir clients --filter @vibesys/desktop start
+
+# The picker on one SSH host, or straight into one of its detached runs
+pnpm --dir clients --filter @vibesys/desktop start -- --host HOST [--instance ID]
+
+# Start a detached run for a local project and open the window on it
 pnpm --dir clients --filter @vibesys/desktop start -- --project ~/proj [-- RUN_ARGS...]
 
 # Open the window on a server that is already listening on a control socket,
@@ -361,22 +370,78 @@ the `app://vibesys` origin. The page has no network access: the main process
 cancels every http(s) and ws(s) request and the page's Content Security Policy
 forbids connections. Its only way to the server is the preload bridge,
 `window.vibesysDesktop.connect()`, which takes no host or path: the main process
-binds each window to one server. Each connection is a MessagePort that the main
-process relays to a new Unix-socket stream (`clients/desktop/src/relay.ts`),
-reframing one port message as one newline-delimited line in each direction
-(see `wire-protocol.md`). The page drives those connections with the browser's
-own `WebSocketTransport` and `WebSession`, so redial, resume, and
-reconciliation behave as in the browser; the shell's wake-from-sleep report
-reaches the session as an `online` event.
+binds each window to one run. Each connection is a MessagePort that the main
+process relays to a new byte stream from the window's host
+(`clients/desktop/src/relay.ts`), reframing one port message as one
+newline-delimited line in each direction (see `wire-protocol.md`). The page
+drives those connections with the browser's own `WebSocketTransport` and
+`WebSession`, so redial, resume, and reconciliation behave as in the browser.
 
 The main process reaches servers only through the `Host` interface
-(`clients/desktop/src/host.ts`): `startServer(args)`, `dial(endpoint)`,
-`invoke(argv)`, and `close()`. `LocalHost` starts
-`python -m entrypoints.server ARGS --control-socket <dir>/control.sock` as the
-TUI launcher does, using `VIBESYS_PYTHON` when set and otherwise `uv run` in
-the repository the app was built from. Every implementation, including the
-in-memory `FakeHost`, passes the contract suite in
-`clients/desktop/src/testing/host-contract.ts`.
+(`clients/desktop/src/host.ts`): `ensureLink()`, `startServer(args)`,
+`dial(endpoint)`, `invoke(argv)`, and `close()`. Both implementations are a
+`DetachedHost` over a `HostAccess` (how `vibesys` runs and how a Unix socket is
+reached on that machine):
+
+- `LocalHost` runs `python -m entrypoints.launcher ARGV` (`VIBESYS_PYTHON` when
+  set, otherwise `uv run` in the repository the app was built from) and dials
+  sockets directly.
+- `SshHost` uses the system `ssh`, so `~/.ssh/config`, ProxyJump, agents, and
+  certificates work unchanged. The app owns one master connection per host
+  (`ControlMaster`, `ControlPath=/tmp/vsd-<uid>/%C`, `ControlPersist=30m`,
+  `ServerAliveInterval`). Only the master authenticates, through an askpass
+  helper that shows ssh's prompt (password, 2FA, an untrusted host key's
+  yes/no) in a native dialog, and only when the user asks (the picker's
+  sign-in, a Retry); a host key is never accepted silently. Every other ssh
+  run is a `BatchMode` channel over the master: `invoke` runs the host's vibesys
+  command, `startServer` runs it with `--detach` and reads the record, and each
+  `dial` runs the stdio bridge (`<python> -m entrypoints.stdio_bridge --socket
+  PATH`, see `wire-protocol.md`) on its own channel. The bridge's exit status
+  names how a stream ended: 4 means the run is gone, 255 and the stall and
+  transport statuses mean the link broke, 5 is a permission failure; its
+  one-line JSON report on stderr becomes the message.
+- Remote commands work under any login shell (sh, bash, zsh, tcsh, csh, fish):
+  each is `sh -c '<one-line script>' ROLE xHEX...`, a fixed script with no
+  quote, `!`, or line break, and every datum hex-encoded for `sh` to decode.
+  `clients/desktop/src/ssh-host.shells.test.ts` runs the exact strings under
+  every installed shell.
+
+Each SSH host has a "vibesys command" (default `vibesys`; for example
+`uv run --project ~/src/vibesys vibesys` for a checkout), set in the picker and
+stored in the app's user data (`hosts.json`), never in the repository. A
+non-interactive ssh session often lacks `~/.local/bin` on PATH, so the
+command's first word is also probed in a few common directories, and a miss
+names every place tried. The bridge runs on the Python of that command
+(`uv run ... python`, or the `#!` interpreter of an installed script when that
+is a Python). Any other launcher (a `#!/bin/sh` script) needs the host's
+"Python command", also set in the picker.
+
+The picker starts a run with `vibesys --detach --project PATH ARGS` (the
+arguments are split like a shell's words) and resumes a stopped one with
+`vibesys --detach --resume [RUN]` in the project directory. A launch that
+starts nothing prints a `DetachedLaunchFailure`, shown with its code, message,
+and log path; `run_already_live` attaches to the server already driving the
+run.
+
+Each run window has a connection supervisor (`clients/desktop/src/supervisor.ts`,
+a pure `step` core and a thin shell). When a stream reports a broken link, the
+machine wakes, or the network comes back, it restores the host link and
+confirms the run is still in the host's registry and speaks this client's
+protocol version, retrying a broken link with a finite backoff, then wakes the
+page so its own session resumes. A check can pass while every dial fails (a
+wedged server), so a recovery keeps its place in the backoff until a stream
+stays up for 30 seconds, and a dial the bridge refuses outright
+(`connect_denied`) stops at once with the bridge's report. There is one retry loop per layer: the page
+never restores links, and the supervisor never redials streams. It stops, with
+the status in the window title and a dialog offering Retry, on what retrying
+cannot fix: credentials the user must give, a run that ended, a protocol
+version mismatch (the message names both versions and the host's vibesys
+command), or a missing command. Runs are detached: closing the app ends its
+streams and SSH masters, never a run (`vibesys instances stop ID` does).
+
+Every implementation, including the in-memory `FakeHost`, passes the contract
+suite in `clients/desktop/src/testing/host-contract.ts`; `SshHost` runs it over
+`FakeSsh`, an in-memory ssh client and machine.
 
 ### Gateway window
 

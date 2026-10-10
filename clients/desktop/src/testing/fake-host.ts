@@ -8,7 +8,9 @@
  */
 import type {Duplex} from 'node:stream';
 import {type Endpoint, type Host, HostError, type ServerExit, type ServerHandle} from '../host.js';
+import {parseInstanceRecord} from '../instances.js';
 import {type ConnectionHandler, FakeNetwork} from './fake-network.js';
+import {fakeRecord} from './fake-record.js';
 
 /** What a scripted command prints and how it exits. */
 export interface CommandResult {
@@ -33,7 +35,6 @@ export class FakeHost implements Host {
   readonly #server: (args: readonly string[]) => ServerScript;
   readonly #command: (argv: readonly string[]) => CommandResult;
   readonly #streams = new Set<Duplex>();
-  readonly #servers = new Set<ServerHandle>();
   #nextServer = 0;
   #closed = false;
 
@@ -42,6 +43,10 @@ export class FakeHost implements Host {
     this.#server = options.server ?? (() => () => {});
     this.#command =
       options.command ?? (argv => ({code: 127, stdout: '', stderr: `${argv[0]}: not found`}));
+  }
+
+  async ensureLink(): Promise<void> {
+    this.#assertOpen();
   }
 
   async startServer(args: readonly string[]): Promise<ServerHandle> {
@@ -58,17 +63,18 @@ export class FakeHost implements Host {
     const exited = new Promise<ServerExit>(resolve => {
       resolveExit = resolve;
     });
+    const id = this.#nextServer.toString(16).padStart(12, '0');
     const handle: ServerHandle = {
       endpoint: {socketPath},
+      record: parseInstanceRecord(fakeRecord(id, socketPath)),
+      alreadyLive: false,
       exited,
       stop: async () => {
         this.network.unlisten(socketPath);
-        this.#servers.delete(handle);
-        resolveExit({code: null, logTail: ''});
+        resolveExit({code: null, logTail: '', stopOutcome: 'stopped'});
         await exited;
       },
     };
-    this.#servers.add(handle);
     return handle;
   }
 
@@ -103,7 +109,6 @@ export class FakeHost implements Host {
     this.#closed = true;
     for (const stream of this.#streams) stream.destroy();
     this.#streams.clear();
-    await Promise.all([...this.#servers].map(server => server.stop()));
   }
 
   #assertOpen(): void {

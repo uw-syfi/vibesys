@@ -1,5 +1,5 @@
 /**
- * The `Host` contract suite. Every implementation (FakeHost, LocalHost, and later SshHost) runs
+ * The `Host` contract suite. Every implementation (FakeHost, LocalHost, SshHost) runs
  * every case here through a `HostWorld`: the host under test plus the scripts that decide what its
  * servers and commands do, wired through whatever seam that implementation exposes.
  */
@@ -14,6 +14,8 @@ export interface HostWorld {
   scriptServer(script: (args: readonly string[]) => ServerScript): void;
   /** Decide what each later `invoke(argv)` prints. */
   scriptCommand(command: (argv: readonly string[]) => CommandResult): void;
+  /** Whether a server listens at `path` on the host's machine, seen from outside the host. */
+  isListening(path: string): boolean;
 }
 
 /** A server that writes back every byte it reads. */
@@ -113,48 +115,72 @@ export function describeHostContract(name: string, makeWorld: () => HostWorld): 
       await world.host.close();
     });
 
-    test('invoke parses the command output as JSON', async () => {
-      const world = makeWorld();
-      const seen: (readonly string[])[] = [];
-      world.scriptCommand(argv => {
-        seen.push(argv);
-        return {code: 0, stdout: '{"instances": [{"id": "r1"}]}\n', stderr: ''};
-      });
-      expect(await world.host.invoke(['instances', 'list', '--json'])).toEqual({
-        instances: [{id: 'r1'}],
-      });
-      expect(seen).toEqual([['instances', 'list', '--json']]);
-      await world.host.close();
-    });
+    describeCommandContract(makeWorld);
+    describeLifecycleContract(makeWorld);
+  });
+}
 
-    test('invoke reports a failed command with its standard error', async () => {
-      const world = makeWorld();
-      world.scriptCommand(() => ({code: 2, stdout: '', stderr: 'unknown command\n'}));
-      const error = await expectKind(world.host.invoke(['nope']), 'failed');
-      expect(error.message).toContain('unknown command');
-      await world.host.close();
+/** The `invoke` cases. */
+function describeCommandContract(makeWorld: () => HostWorld): void {
+  test('invoke parses the command output as JSON', async () => {
+    const world = makeWorld();
+    const seen: (readonly string[])[] = [];
+    world.scriptCommand(argv => {
+      seen.push(argv);
+      return {code: 0, stdout: '{"instances": [{"id": "r1"}]}\n', stderr: ''};
     });
+    expect(await world.host.invoke(['instances', 'list', '--json'])).toEqual({
+      instances: [{id: 'r1'}],
+    });
+    expect(seen).toEqual([['instances', 'list', '--json']]);
+    await world.host.close();
+  });
 
-    test('invoke reports output that is not JSON as malformed', async () => {
-      const world = makeWorld();
-      world.scriptCommand(() => ({code: 0, stdout: 'hello', stderr: ''}));
-      await expectKind(world.host.invoke(['x']), 'malformed');
-      await world.host.close();
-    });
+  test('invoke reports a failed command with its standard error', async () => {
+    const world = makeWorld();
+    world.scriptCommand(() => ({code: 2, stdout: '', stderr: 'unknown command\n'}));
+    const error = await expectKind(world.host.invoke(['nope']), 'failed');
+    expect(error.message).toContain('unknown command');
+    await world.host.close();
+  });
 
-    test('close ends open streams, stops started servers, and refuses later work', async () => {
-      const world = makeWorld();
-      world.scriptServer(() => echo);
-      const server = await world.host.startServer([]);
-      const stream = await world.host.dial(server.endpoint);
-      stream.resume();
-      await world.host.close();
-      await closed(stream);
-      await server.exited;
-      await expectKind(world.host.dial(server.endpoint), 'closed');
-      await expectKind(world.host.startServer([]), 'closed');
-      await expectKind(world.host.invoke(['x']), 'closed');
-      await world.host.close();
-    });
+  test('invoke reports output that is not JSON as malformed', async () => {
+    const world = makeWorld();
+    world.scriptCommand(() => ({code: 0, stdout: 'hello', stderr: ''}));
+    await expectKind(world.host.invoke(['x']), 'malformed');
+    await world.host.close();
+  });
+}
+
+/** The cases about what outlives a host and what a start publishes. */
+function describeLifecycleContract(makeWorld: () => HostWorld): void {
+  test('close ends open streams, leaves detached servers running, and refuses later work', async () => {
+    const world = makeWorld();
+    world.scriptServer(() => echo);
+    const server = await world.host.startServer([]);
+    const stream = await world.host.dial(server.endpoint);
+    stream.resume();
+    await world.host.close();
+    await closed(stream);
+    expect(world.isListening(server.endpoint.socketPath)).toBe(true);
+    await expectKind(world.host.dial(server.endpoint), 'closed');
+    await expectKind(world.host.startServer([]), 'closed');
+    await expectKind(world.host.invoke(['x']), 'closed');
+    await expectKind(world.host.ensureLink(), 'closed');
+    await world.host.close();
+  });
+
+  test('a started server publishes its registry record with the endpoint it listens on', async () => {
+    const world = makeWorld();
+    world.scriptServer(() => echo);
+    const server = await world.host.startServer([]);
+    expect(server.record.kind).toBe('compatible');
+    if (server.record.kind === 'compatible') {
+      expect(server.record.instance.socketPath).toBe(server.endpoint.socketPath);
+    }
+    expect(world.isListening(server.endpoint.socketPath)).toBe(true);
+    await server.stop();
+    expect(world.isListening(server.endpoint.socketPath)).toBe(false);
+    await world.host.close();
   });
 }
