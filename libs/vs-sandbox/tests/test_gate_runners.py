@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -28,7 +29,6 @@ from vs_sandbox.api.slurm import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 _WAIT_FOR_SIGTERM = """\
 import io, os, signal, sys
@@ -180,6 +180,40 @@ class TestSrunGateRunner:
         assert command.argv == (*planned[gate], *arguments)
         assert command.cwd == tmp_path
         assert dict(command.env) == {"A": "1"}
+
+    @settings(max_examples=40, deadline=None)
+    @given(
+        env=st.dictionaries(
+            st.one_of(
+                st.text(alphabet="ABCXYZ_", min_size=1, max_size=8),
+                st.builds("SLURM_{}".format, st.text(alphabet="ABCXYZ_", max_size=8)),
+            ),
+            st.text(alphabet="abc", max_size=4),
+            max_size=8,
+        )
+    )
+    def test_a_gate_never_inherits_the_hosts_own_slurm_allocation(
+        self, env: dict[str, str]
+    ) -> None:
+        """Whatever the host environment holds, ``SLURM_*`` never reaches a gate's ``srun``."""
+        launcher = _RecordingLauncher()
+        runner = SrunGateRunner(
+            launcher,
+            GpuJobRequest(gpus=1, time_minutes=1),
+            {GateKind.ACCURACY: ("true",)},
+            env=env,
+        )
+
+        runner.run(
+            GateKind.ACCURACY,
+            (),
+            cwd=Path.cwd(),
+            write=bytearray().extend,
+            cancel=threading.Event(),
+        )
+
+        (_, command) = launcher.calls[-1]
+        assert dict(command.env) == {k: v for k, v in env.items() if not k.startswith("SLURM_")}
 
     def test_a_gate_the_run_did_not_plan_exits_with_a_usage_status(self, tmp_path: Path) -> None:
         launcher = _RecordingLauncher()

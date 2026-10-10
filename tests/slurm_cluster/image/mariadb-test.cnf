@@ -1,0 +1,5 @@
+# The accounting database is disposable: trade durability for start-up and commit speed.
+[mysqld]
+innodb_flush_log_at_trx_commit=0
+innodb_buffer_pool_size=64M
+skip-name-resolve

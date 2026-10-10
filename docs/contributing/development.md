@@ -153,6 +153,37 @@ of both scenarios takes about 5 minutes and about $0.60 of Haiku tokens. It is
 opt-in (`VIBESYS_E2E_AGENTS=1`) and not in PR CI, because real agents are
 nondeterministic.
 
+### Real-cluster tier
+
+`./scripts/run_slurm_cluster_tests.sh` runs the `slurm` and `slurm-gpu` run
+environments against a real Slurm cluster started in Docker: munge, slurmctld,
+slurmdbd (so `sacct` works), sshd and a login node in a `head` container, and one
+slurmd with four fake GPUs (GRES backed by character devices, no real hardware)
+in a `node` container. No LLM agents run. The agent is a real Docker container
+that VibeSys creates exactly as in production, and the tests drive it with
+scripted commands (`vibesys-gpu`, `vibesys-gate`) through the session's sandbox.
+
+The test's run directory is mounted into both cluster containers at the same
+absolute path and stands in for the shared filesystem. `slurm` reaches the head
+over SSH with a per-session key and `ssh_command` options, so nothing in
+`~/.ssh` is read or changed. `slurm-gpu` needs a Slurm client on the host; the
+tier points its existing `srun_command` and `scancel_command` at a small shim
+that runs them in the head container (the login node) with the caller's working
+directory and exactly the caller's environment, so the host installs nothing.
+
+The tier is marked `slurm_cluster` and skipped unless `VIBESYS_SLURM_CLUSTER=1`
+and Docker are available. It is not in PR CI. The script sets the variable,
+removes everything it created on exit, and passes extra arguments to pytest.
+The shared directory must be on a local filesystem: set
+`VIBESYS_SLURM_CLUSTER_DIR` when `/tmp` is a network mount. The first run builds
+two small images (Ubuntu with `slurm-wlm`, about a minute); later runs reuse
+Docker's cache. Tests wait on Slurm's own state (a job running, the queue
+empty) with a hang guard, never on a fixed delay.
+
+What it does not cover: the ROCprof profiler transport, real GPU devices and
+drivers, cgroup-based resource enforcement, multi-node jobs, and Landlock
+confinement (the compute node uses bubblewrap).
+
 The TypeScript client has its own workflow; see
 [`clients/tui/README.md`](https://github.com/uw-syfi/vibesys/blob/main/clients/tui/README.md). The short version is:
 
