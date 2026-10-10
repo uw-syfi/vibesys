@@ -54,6 +54,10 @@ importers:
         version: 5.9.3
 
   desktop:
+    dependencies:
+      '@vibesys/backend-client':
+        specifier: workspace:*
+        version: link:../backend-client
     devDependencies:
       '@types/bun':
         specifier: 1.4.2

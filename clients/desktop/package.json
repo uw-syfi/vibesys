@@ -8,10 +8,16 @@
   "main": "dist/main.js",
   "exports": {},
   "scripts": {
+    "prebuild": "pnpm --filter @vibesys/desktop^... build",
     "build": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\" && tsc -p tsconfig.json",
+    "precheck": "pnpm --filter @vibesys/desktop^... build",
     "check": "tsc -p tsconfig.check.json",
+    "pretest": "pnpm --filter @vibesys/desktop^... build",
     "test": "node ../scripts/run_bun_tests.mjs ./src",
     "start": "pnpm build && electron ."
+  },
+  "dependencies": {
+    "@vibesys/backend-client": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
