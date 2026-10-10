@@ -28,7 +28,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeModelVolumeProvisioner
 from vs_sandbox.api import CommandResult, LocalShellRunner
 from vs_sandbox.api.testing import FakeCommandRunner
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api.testing import wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -505,7 +505,7 @@ class _BlockingSandbox:
         del timeout
         self.calls.append(command)
         self.started.set()
-        self.release.wait()
+        wait_or_fail(self.release, "the held execution release")
         self.completed.set()
         return CommandResult(output="", exit_code=0)
 

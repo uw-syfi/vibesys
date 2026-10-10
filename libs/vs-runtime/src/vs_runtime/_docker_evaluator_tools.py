@@ -5,7 +5,7 @@ from __future__ import annotations
 import shlex
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 from vs_runtime._trusted_evaluation_preparation import (
     SANDBOX_EVALUATOR_TOOLS_ROOT,
@@ -29,7 +29,6 @@ from vs_sandbox.api.evaluator_tools import (
 )
 
 if TYPE_CHECKING:
-    import subprocess
     from collections.abc import Sequence
 
 
@@ -39,7 +38,7 @@ class _EvaluatorToolBuildRequiredError(RuntimeError):
 
 def _require_builder(
     _arguments: Sequence[str],
-) -> subprocess.CompletedProcess[str]:
+) -> NoReturn:
     raise _EvaluatorToolBuildRequiredError
 
 

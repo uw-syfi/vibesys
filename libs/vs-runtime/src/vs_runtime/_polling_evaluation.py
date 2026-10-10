@@ -9,7 +9,6 @@ process and reports state through ``inspect``/``wait_for_change``.
 from __future__ import annotations
 
 import asyncio
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -40,9 +39,11 @@ from vs_evaluation.api import (
 )
 from vs_runtime._evaluation_failure_text import render_evaluation_failure, render_stage_failure
 from vs_runtime._failure_classification import is_unsettled
+from vs_sim.api import MonotonicClock
 
 if TYPE_CHECKING:
     from vs_runtime.contracts import CandidateWorkspace, Evaluation, Workspace, Workspaces
+    from vs_sim.api import Clock
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,8 +60,14 @@ class PollingEvaluationExecutor:
     Observations are process-local: nothing survives a restart.
     """
 
-    def __init__(self, evaluation: Evaluation, workspaces: Workspaces) -> None:
-        """Evaluate through ``evaluation`` in candidate workspaces from ``workspaces``."""
+    def __init__(
+        self, evaluation: Evaluation, workspaces: Workspaces, *, clock: Clock | None = None
+    ) -> None:
+        """Evaluate through ``evaluation`` in candidate workspaces from ``workspaces``.
+
+        ``clock`` stamps availability observations; the default is the monotonic clock.
+        """
+        self._clock = clock or MonotonicClock()
         self._evaluation = evaluation
         self._workspaces = workspaces
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -76,7 +83,7 @@ class PollingEvaluationExecutor:
             queue_depth=max(0, active - 1),
             reuse_status=ReuseStatus.UNKNOWN,
             cost_class=CostClass.UNKNOWN,
-            observed_at=time.monotonic(),
+            observed_at=self._clock.now(),
             fresh_for_s=1.0,
             supported_evidence_kinds=(EvidenceKind.ACCURACY.value, EvidenceKind.BENCHMARK.value),
         )

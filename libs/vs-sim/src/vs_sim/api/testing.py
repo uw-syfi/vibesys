@@ -21,7 +21,13 @@ from vs_sim.crash import (
     first_of_each_kind,
     restart_until_done,
 )
-from vs_sim.fakes import FakeProcessLauncher, FakeSignalSource, InlineBlockingRunner, ProcessScript
+from vs_sim.fakes import (
+    FakeProcessLauncher,
+    FakeSignalSource,
+    GatedBlockingRunner,
+    InlineBlockingRunner,
+    ProcessScript,
+)
 from vs_sim.gate import Gate, arrival, start_thread, wait_until_started, wait_until_started_sync
 from vs_sim.manual import ManualClock
 from vs_sim.seeds import (
@@ -69,6 +75,7 @@ __all__ = [
     "FakeProcessLauncher",
     "FakeSignalSource",
     "Gate",
+    "GatedBlockingRunner",
     "InlineBlockingRunner",
     "ManualClock",
     "ProcessLauncherContract",

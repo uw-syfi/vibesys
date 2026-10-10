@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, suppress
@@ -48,6 +47,7 @@ from vs_runtime._capacity_gate import (
     PolicyCapacityGate,
 )
 from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
+from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -425,7 +425,7 @@ class RuntimeAgentExecution:
                 raise AgentSpawnError(configuration.spec.provider, str(error)) from error
             resources.callback(client.close)
             if isinstance(client, CapacityGated):
-                timer = capacity.timer or ControlCapacityTimer(control, time.time)
+                timer = capacity.timer or ControlCapacityTimer(control, SystemClock().now)
                 client.set_capacity_gate(PolicyCapacityGate(control, agent_events, capacity, timer))
             return cls(
                 configuration,

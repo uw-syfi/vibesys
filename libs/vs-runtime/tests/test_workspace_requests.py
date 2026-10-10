@@ -91,7 +91,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink, FakeRunControlEventSink
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api.testing import wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
@@ -1419,7 +1419,7 @@ class _FaultyResource:
             raise OSError(message)
         if self._owner.release_close is not None:
             self._owner.close_entered.set()
-            self._owner.release_close.wait()
+            wait_or_fail(self._owner.release_close, "the held close release")
         self._resource.close()
 
 

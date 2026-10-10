@@ -22,7 +22,7 @@ from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, Fake
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import AgentCapability, AgentRole
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaceAgentSessions
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api.testing import wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -53,7 +53,7 @@ class _JournalSaveGate(FakeAgentInvocationStore):
             and isinstance(record.outcome, Unknown)
         ):
             self.saving_unknown.set()
-            self.release.wait()
+            wait_or_fail(self.release, "the journal save release")
         super().save(model)
 
 

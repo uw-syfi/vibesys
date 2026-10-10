@@ -90,7 +90,7 @@ from vs_runtime.api.testing import (
     FakeWorkspaces,
 )
 from vs_sandbox.api import ProjectPathPolicy
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api.testing import wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
     from vs_agent.api import AgentClientProtocol, AgentSessions, SessionStore
@@ -985,7 +985,7 @@ def test_cancelled_session_close_does_not_cancel_owned_cleanup() -> None:
     class _BlockingEnvironment(FakeAgentExecutionEnvironment):
         def close(self) -> None:
             close_started.set()
-            release_close.wait()
+            wait_or_fail(release_close, "the held close release")
             super().close()
 
     environment = _BlockingEnvironment(project_path_policy=ProjectPathPolicy())
@@ -1021,7 +1021,7 @@ def test_cancelled_turn_drains_worker_before_workspace_enforcement() -> None:
 
     def block_turn(_call: object) -> None:
         turn_started.set()
-        release_turn.wait()
+        wait_or_fail(release_turn, "the held turn release")
 
     client = _client(responses=("done",)).on_invoke(block_turn)
 
@@ -1394,7 +1394,7 @@ def test_cancelled_resume_retains_workspace_until_external_turn_settles(
     def hold(request: AgentTurnRequest) -> None:
         if request.invocation_id is not None:
             resume_loops[0].call_soon_threadsafe(entered.set)
-            release.wait()
+            wait_or_fail(release, "the held resume release")
 
     transport, client = _resume_transport(tmp_path, hold)
     role = AgentRole(id="worker", system_prompt="Work carefully.")
@@ -1474,7 +1474,7 @@ def test_cancelled_resume_drains_workspace_access_enforcement(
             preserve_memory: bool = True,
         ) -> bool:
             resume_loops[0].call_soon_threadsafe(entered.set)
-            release.wait()
+            wait_or_fail(release, "the held resume release")
             return not restore_failure and super().restore(
                 revision,
                 clean=clean,

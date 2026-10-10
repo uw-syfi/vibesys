@@ -16,6 +16,7 @@ from vs_runtime.contracts import (
     Workspaces,
     member_workspace_id,
 )
+from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
     from vs_runtime.contracts import CandidateWorkspace, Workspace
     from vs_sandbox.api import CommandRunner
+    from vs_sim.api import BlockingRunner
 
 
 class WorkspaceResource(Protocol):
@@ -135,12 +137,13 @@ async def _drain(task: asyncio.Task[object]) -> None:
 
 
 async def run_sync[**P, Result](
+    runner: BlockingRunner,
     operation: Callable[P, Result],
     /,
     *args: P.args,
     **kwargs: P.kwargs,
 ) -> Result:
-    task = asyncio.create_task(asyncio.to_thread(operation, *args, **kwargs))
+    task = asyncio.create_task(runner.run(operation, *args, **kwargs))
     try:
         return await asyncio.shield(task)
     except asyncio.CancelledError as cancelled:
@@ -194,7 +197,7 @@ class RuntimeWorkspace:
     async def snapshot(self, label: str) -> str:
         await self.access_recovery.reconcile(self)
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-228402 [SLF001]; a workspace handle delegates synchronization to its owning collection.
-            return await run_sync(self._resource.snapshot, label)
+            return await run_sync(self._owner.runner, self._resource.snapshot, label)
 
     async def restore(self, revision: str, *, clean: bool = True) -> None:
         await self._restore(revision, clean=clean)
@@ -209,6 +212,7 @@ class RuntimeWorkspace:
     ) -> None:
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-228403 [SLF001]; a workspace handle delegates synchronization to its owning collection.
             restored = await run_sync(
+                self._owner.runner,
                 self._resource.restore,
                 revision,
                 clean=clean,
@@ -220,7 +224,9 @@ class RuntimeWorkspace:
 
     async def try_restore(self, revision: str, *, clean: bool = True) -> bool:
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-228411 [SLF001]; a workspace handle delegates synchronization to its owning collection.
-            return await run_sync(self._resource.try_restore, revision, clean=clean)
+            return await run_sync(
+                self._owner.runner, self._resource.try_restore, revision, clean=clean
+            )
 
     async def retain(self, revision: str, *, label: str) -> None:
         if not label:
@@ -229,7 +235,9 @@ class RuntimeWorkspace:
         digest = hashlib.sha256(f"{label}\0{revision}".encode()).hexdigest()
         async with self._owner._root_lock:  # noqa: SLF001  # lint-waiver: LW-228404 [SLF001]; retention mutates the collection's shared root Git metadata.
             self._ensure_open()
-            await run_sync(self._resource.retain, revision, f"retained-{digest}")
+            await run_sync(
+                self._owner.runner, self._resource.retain, revision, f"retained-{digest}"
+            )
 
     async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
         revision = await self.snapshot(label)
@@ -238,21 +246,21 @@ class RuntimeWorkspace:
 
     async def has_revision(self, revision: str) -> bool:
         self._ensure_open()
-        return await run_sync(self._resource.has_revision, revision)
+        return await run_sync(self._owner.runner, self._resource.has_revision, revision)
 
     async def matches_revision(self, revision: str) -> bool:
         self._ensure_open()
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402310 [SLF001]; a workspace handle delegates synchronization to its owning collection.
-            return await run_sync(self._resource.matches_revision, revision)
+            return await run_sync(self._owner.runner, self._resource.matches_revision, revision)
 
     async def find_snapshot(self, label: str) -> str | None:
         self._ensure_open()
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402311 [SLF001]; a workspace handle delegates synchronization to its owning collection.
-            return await run_sync(self._resource.find_snapshot, label)
+            return await run_sync(self._owner.runner, self._resource.find_snapshot, label)
 
     async def pending_changes(self) -> list[str]:
         self._ensure_open()
-        return await run_sync(self._resource.pending_changes)
+        return await run_sync(self._owner.runner, self._resource.pending_changes)
 
     async def restore_for_agent(
         self,
@@ -271,10 +279,10 @@ class RuntimeWorkspace:
         return self._resource.is_directory(path)
 
     async def candidate_patch(self, revision: str) -> str:
-        return await run_sync(self._resource.candidate_patch, revision)
+        return await run_sync(self._owner.runner, self._resource.candidate_patch, revision)
 
     async def trusted_input_changes(self) -> list[str]:
-        return await run_sync(self._resource.trusted_input_changes)
+        return await run_sync(self._owner.runner, self._resource.trusted_input_changes)
 
 
 class RuntimeCandidateWorkspace(RuntimeWorkspace):
@@ -296,8 +304,12 @@ class RuntimeWorkspaces:
     def __init__(
         self,
         resources: WorkspaceResourceProvider,
+        *,
+        runner: BlockingRunner | None = None,
     ) -> None:
+        """Own ``resources``; their synchronous effects run on ``runner`` (a worker thread by default)."""
         self._resources = resources
+        self._runner = runner or ThreadBlockingRunner()
         self._root_lock = asyncio.Lock()
         self._lifecycle_lock = asyncio.Lock()
         self._candidate_locks: dict[str, asyncio.Lock] = {}
@@ -308,6 +320,11 @@ class RuntimeWorkspaces:
         self._evaluations: set[asyncio.Task[object]] = set()
         self.access_fence: Callable[[Path], tuple[str, ...]] | None = None
         self.root = RuntimeWorkspace(self, resources.root)
+
+    @property
+    def runner(self) -> BlockingRunner:
+        """Where this collection's synchronous workspace effects execute."""
+        return self._runner
 
     def guard_access(self, fenced_by: Callable[[Path], tuple[str, ...]]) -> None:
         """Refuse snapshots of any workspace of this collection while *fenced_by* names a fence.
@@ -361,7 +378,7 @@ class RuntimeWorkspaces:
                     message = f"member {member_id!r} already has a live candidate workspace"
                     raise RuntimeContractError(message)
                 task = asyncio.create_task(
-                    asyncio.to_thread(self._resources.create_candidate, workspace_id, revision)
+                    self._runner.run(self._resources.create_candidate, workspace_id, revision)
                 )
                 try:
                     resource = await asyncio.shield(task)
@@ -370,7 +387,7 @@ class RuntimeWorkspaces:
                     if error := task.exception():
                         cancelled.add_note(f"candidate construction also failed: {error}")
                     else:
-                        await run_sync(task.result().close)
+                        await run_sync(self._runner, task.result().close)
                     raise
                 return self._register(workspace_id, resource)
 
@@ -402,7 +419,7 @@ class RuntimeWorkspaces:
                 if revision is None:
                     return None
                 resource = await run_sync(
-                    self._resources.reattach_candidate, workspace_id, revision
+                    self._runner, self._resources.reattach_candidate, workspace_id, revision
                 )
                 if resource is None:
                     return None
@@ -419,7 +436,7 @@ class RuntimeWorkspaces:
         return await self.root.candidate_patch(revision)
 
     async def retains(self, revision: str) -> bool:
-        return await run_sync(self.resource_for(self.root).is_retained, revision)
+        return await run_sync(self._runner, self.resource_for(self.root).is_retained, revision)
 
     def resource_for(self, workspace: Workspace) -> WorkspaceResource:
         if isinstance(workspace, RuntimeWorkspace):
@@ -512,7 +529,7 @@ class RuntimeWorkspaces:
             lock = self._candidate_locks[resource.id or ""]
             async with lock, self._root_lock:
                 try:
-                    await run_sync(resource.close)
+                    await run_sync(self._runner, resource.close)
                 except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228409 [BLE001]; all candidate bookkeeping must close even when one resource close fails.
                     errors.append(error)
                 finally:
@@ -554,7 +571,7 @@ class RuntimeWorkspaces:
             errors.append(error)
         async with self._root_lock:
             try:
-                await run_sync(self.root._resource.close)  # noqa: SLF001  # lint-waiver: LW-228420 [SLF001]; collection close releases the root resource after all candidates.
+                await run_sync(self._runner, self.root._resource.close)  # noqa: SLF001  # lint-waiver: LW-228420 [SLF001]; collection close releases the root resource after all candidates.
             except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228421 [BLE001]; root cleanup joins candidate cleanup failures.
                 errors.append(error)
         self.root._closed = True  # noqa: SLF001  # lint-waiver: LW-228418 [SLF001]; collection close terminates its root handle with the run.

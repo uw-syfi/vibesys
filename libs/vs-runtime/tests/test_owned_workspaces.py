@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 from collections import deque
 from typing import TYPE_CHECKING
 
@@ -29,7 +28,7 @@ from vs_runtime.api.testing import (
     FakeWorkspace,
 )
 from vs_sandbox.api import CommandResult
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api.testing import GatedBlockingRunner, arrival
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -224,7 +223,7 @@ class _ContentProvider(_Provider):
         return resource
 
 
-def _runtime(provider: _Provider) -> WorkspaceRuntime:
+def _runtime(provider: _Provider, runner: GatedBlockingRunner | None = None) -> WorkspaceRuntime:
     def unexpected_execution(_role: AgentRole) -> AgentExecutionConfiguration:
         pytest.fail("workspace-only test opened an agent execution")
 
@@ -240,35 +239,31 @@ def _runtime(provider: _Provider) -> WorkspaceRuntime:
         lifecycle_events=FakeAgentExecutionLifecycleSink(),
         agent_events=NULL_AGENT_EVENT_SINK,
         route_message=lambda message, _steering: message,
-        blocking=BlockingOperations(),
+        blocking=BlockingOperations(runner),
         client_factory=unexpected_client,
     )
 
 
-def test_collection_owns_candidate_cleanup_in_reverse_order(tmp_path: Path) -> None:
+async def test_collection_owns_candidate_cleanup_in_reverse_order(tmp_path: Path) -> None:
     provider = _Provider(tmp_path)
-
-    async def exercise() -> None:
-        runtime = _runtime(provider)
-        workspaces = runtime.workspaces
-        first = await workspaces.create_candidate()
-        second = await workspaces.create_candidate()
-        first_id = first.id
-        second_id = second.id
-        await workspaces.close()
-        assert second_id is not None
-        assert first_id is not None
-        assert all(resource.closed for resource in provider.created)
-        assert provider.root.closed
-        with pytest.raises(ValueError, match="closed"):
-            _ = first.path
-        with pytest.raises(ValueError, match="closed"):
-            _ = workspaces.root.path
-
-    asyncio.run(exercise())
+    runtime = _runtime(provider)
+    workspaces = runtime.workspaces
+    first = await workspaces.create_candidate()
+    second = await workspaces.create_candidate()
+    first_id = first.id
+    second_id = second.id
+    await workspaces.close()
+    assert second_id is not None
+    assert first_id is not None
+    assert all(resource.closed for resource in provider.created)
+    assert provider.root.closed
+    with pytest.raises(ValueError, match="closed"):
+        _ = first.path
+    with pytest.raises(ValueError, match="closed"):
+        _ = workspaces.root.path
 
 
-def test_close_attempts_every_candidate_and_aggregates_failures(tmp_path: Path) -> None:
+async def test_close_attempts_every_candidate_and_aggregates_failures(tmp_path: Path) -> None:
     class _FailingResource(_Resource):
         def close(self) -> None:
             self.closed = True
@@ -281,91 +276,55 @@ def test_close_attempts_every_candidate_and_aggregates_failures(tmp_path: Path) 
             return resource
 
     provider = _FailingProvider(tmp_path)
-
-    async def exercise() -> None:
-        runtime = _runtime(provider)
-        workspaces = runtime.workspaces
-        await workspaces.create_candidate()
-        await workspaces.create_candidate()
-        with pytest.raises(BaseExceptionGroup) as captured:
-            await workspaces.close()
-        assert len(captured.value.exceptions) == 2
-        assert all(resource.closed for resource in provider.created)
-
-    asyncio.run(exercise())
-
-
-def test_workspace_mutations_are_serialized(tmp_path: Path) -> None:
-    entered = threading.Event()
-    release = threading.Event()
-
-    class _BlockingResource(_Resource):
-        def __init__(self, identifier: str | None, path: Path) -> None:
-            super().__init__(identifier, path)
-            self.calls = 0
-            self.active = 0
-            self.maximum_active = 0
-
-        def snapshot(self, label: str) -> str:
-            self.calls += 1
-            self.active += 1
-            self.maximum_active = max(self.maximum_active, self.active)
-            if self.calls == 1:
-                entered.set()
-                release.wait()
-            try:
-                return super().snapshot(label)
-            finally:
-                self.active -= 1
-
-    provider = _Provider(tmp_path)
-    root = _BlockingResource(None, tmp_path)
-    provider.root = root
-
-    async def exercise() -> None:
-        workspaces = _runtime(provider).workspaces
-        first = asyncio.create_task(workspaces.root.snapshot("first"))
-        await wait_until_started(entered, first)
-        second_scheduled = asyncio.Event()
-
-        async def second_snapshot() -> str:
-            second_scheduled.set()
-            return await workspaces.root.snapshot("second")
-
-        second = asyncio.create_task(second_snapshot())
-        await second_scheduled.wait()
-        assert root.calls == 1
-        release.set()
-        await asyncio.gather(first, second)
-        assert root.maximum_active == 1
+    runtime = _runtime(provider)
+    workspaces = runtime.workspaces
+    await workspaces.create_candidate()
+    await workspaces.create_candidate()
+    with pytest.raises(BaseExceptionGroup) as captured:
         await workspaces.close()
+    assert len(captured.value.exceptions) == 2
+    assert all(resource.closed for resource in provider.created)
 
-    asyncio.run(exercise())
+
+async def test_workspace_mutations_are_serialized(tmp_path: Path) -> None:
+    provider = _Provider(tmp_path)
+    runner = GatedBlockingRunner(held=True)
+    workspaces = _runtime(provider, runner).workspaces
+    first = asyncio.create_task(workspaces.root.snapshot("first"))
+    await runner.wait_in_flight(1, first)
+    second_scheduled = asyncio.Event()
+
+    async def second_snapshot() -> str:
+        second_scheduled.set()
+        return await workspaces.root.snapshot("second")
+
+    second = asyncio.create_task(second_snapshot())
+    await arrival(second_scheduled.wait(), second)
+    runner.release()
+    await asyncio.gather(first, second)
+    assert runner.max_in_flight == 1
+    await workspaces.close()
 
 
-def test_collection_rejects_foreign_handles_and_early_discard_is_idempotent(
+async def test_collection_rejects_foreign_handles_and_early_discard_is_idempotent(
     tmp_path: Path,
 ) -> None:
     provider = _Provider(tmp_path)
-
-    async def exercise() -> None:
-        runtime = _runtime(provider)
-        workspaces = runtime.workspaces
-        candidate = await workspaces.create_candidate()
-        candidate_id = candidate.id
-        with pytest.raises(TypeError, match="live handle"):
-            await runtime.commands.run(("true",), workspace=FakeWorkspace(path=tmp_path))
-        await candidate.discard()
-        await candidate.discard()
-        assert candidate_id is not None
-        with pytest.raises(ValueError, match="closed"):
-            await runtime.commands.run(("true",), workspace=candidate)
-        await workspaces.close()
-
-    asyncio.run(exercise())
+    runtime = _runtime(provider)
+    workspaces = runtime.workspaces
+    candidate = await workspaces.create_candidate()
+    candidate_id = candidate.id
+    with pytest.raises(TypeError, match="live handle"):
+        await runtime.commands.run(("true",), workspace=FakeWorkspace(path=tmp_path))
+    await candidate.discard()
+    await candidate.discard()
+    assert candidate_id is not None
+    with pytest.raises(ValueError, match="closed"):
+        await runtime.commands.run(("true",), workspace=candidate)
+    await workspaces.close()
 
 
-def test_runtime_commands_capture_and_remove_managed_output(tmp_path: Path) -> None:
+async def test_runtime_commands_capture_and_remove_managed_output(tmp_path: Path) -> None:
     provider = _Provider(tmp_path)
     provider.root.scripted.extend(
         (
@@ -375,54 +334,46 @@ def test_runtime_commands_capture_and_remove_managed_output(tmp_path: Path) -> N
             CommandResult("", 0),
         )
     )
-
-    async def exercise() -> None:
-        runtime = _runtime(provider)
-        result = await runtime.commands.capture_output(
-            ("profiler",),
-            workspace=runtime.workspaces.root,
-            output_argument="--output",
-            timeout_seconds=17,
-        )
-        assert result.output == "captured"
-        assert provider.root.executions == [
-            ("mktemp", None),
-            ("profiler --output runtime-result", 17),
-            ("cat runtime-result", None),
-            ("rm -f runtime-result", None),
-        ]
-        await runtime.workspaces.close()
-
-    asyncio.run(exercise())
+    runtime = _runtime(provider)
+    result = await runtime.commands.capture_output(
+        ("profiler",),
+        workspace=runtime.workspaces.root,
+        output_argument="--output",
+        timeout_seconds=17,
+    )
+    assert result.output == "captured"
+    assert provider.root.executions == [
+        ("mktemp", None),
+        ("profiler --output runtime-result", 17),
+        ("cat runtime-result", None),
+        ("rm -f runtime-result", None),
+    ]
+    await runtime.workspaces.close()
 
 
-def test_runtime_evaluation_validates_and_normalizes_unavailable_revisions(
+async def test_runtime_evaluation_validates_and_normalizes_unavailable_revisions(
     tmp_path: Path,
 ) -> None:
     provider = _Provider(tmp_path)
     provider.root.unavailable_revisions.add("missing")
-
-    async def exercise() -> None:
-        runtime = _runtime(provider)
-        assert await runtime.evaluation.revisions_equivalent(
+    runtime = _runtime(provider)
+    assert await runtime.evaluation.revisions_equivalent(
+        runtime.workspaces.root,
+        "same",
+        "same",
+    )
+    with pytest.raises(RuntimeContractError, match="revision is unavailable"):
+        await runtime.evaluation.revisions_equivalent(
             runtime.workspaces.root,
-            "same",
+            "missing",
             "same",
         )
-        with pytest.raises(RuntimeContractError, match="revision is unavailable"):
-            await runtime.evaluation.revisions_equivalent(
-                runtime.workspaces.root,
-                "missing",
-                "same",
-            )
-        with pytest.raises(TypeError, match="live handle"):
-            runtime.evaluation.spec(FakeWorkspace(path=tmp_path))
-        await runtime.workspaces.close()
-
-    asyncio.run(exercise())
+    with pytest.raises(TypeError, match="live handle"):
+        runtime.evaluation.spec(FakeWorkspace(path=tmp_path))
+    await runtime.workspaces.close()
 
 
-def test_gate_stages_the_submitted_revision_while_the_live_workspace_changes(
+async def test_gate_stages_the_submitted_revision_while_the_live_workspace_changes(
     tmp_path: Path,
 ) -> None:
     provider = _ContentProvider(tmp_path)
@@ -431,143 +382,113 @@ def test_gate_stages_the_submitted_revision_while_the_live_workspace_changes(
         provider.content_root.files["engine.py"] = "v2 (edited while the gate ran)"
 
     provider.content_root.edit_while_staging = implementer_edits
+    runtime = _runtime(provider)
+    accuracy = await runtime.evaluation.accuracy("run-a", runtime.workspaces.root)
 
-    async def exercise() -> None:
-        runtime = _runtime(provider)
-        accuracy = await runtime.evaluation.accuracy("run-a", runtime.workspaces.root)
-
-        assert accuracy.result is not None
-        assert accuracy.result.passed
-        (candidate,) = provider.candidates
-        assert candidate.staged == [{"engine.py": "v1"}]
-        assert provider.history[accuracy.receipt.revision] == {"engine.py": "v1"}
-        assert candidate.accuracy_calls
-        assert accuracy.receipt.revision in (candidate.accuracy_calls[0] or "")
-        assert provider.root.accuracy_calls == []
-        assert candidate.closed
-        await runtime.workspaces.close()
-
-    asyncio.run(exercise())
+    assert accuracy.result is not None
+    assert accuracy.result.passed
+    (candidate,) = provider.candidates
+    assert candidate.staged == [{"engine.py": "v1"}]
+    assert provider.history[accuracy.receipt.revision] == {"engine.py": "v1"}
+    assert candidate.accuracy_calls
+    assert accuracy.receipt.revision in (candidate.accuracy_calls[0] or "")
+    assert provider.root.accuracy_calls == []
+    assert candidate.closed
+    await runtime.workspaces.close()
 
 
-def test_runtime_evaluation_owns_snapshots_receipts_and_command_binding(tmp_path: Path) -> None:
-    provider = _LiveOnlyProvider(tmp_path)
-
-    async def exercise() -> None:
-        runtime = _runtime(provider)
-        workspace = runtime.workspaces.root
-        accuracy = await runtime.evaluation.accuracy(
-            "run-a",
-            workspace,
-            release=True,
-        )
-        benchmark = await runtime.evaluation.benchmark(
-            workspace,
-            required_metrics=frozenset({"throughput"}),
-        )
-
-        assert accuracy.result is not None
-        assert accuracy.result.passed
-        assert accuracy.receipt.run_id == "run-a"
-        assert accuracy.receipt.workspace_id is None
-        accuracy_command = provider.root.accuracy_calls[0]
-        assert accuracy_command is not None
-        assert accuracy.receipt.revision in accuracy_command
-        assert "python accuracy.py" in accuracy_command
-        assert benchmark.result.passed
-        assert provider.root.benchmark_calls[0][1] == frozenset({"throughput"})
-        benchmark_command = provider.root.benchmark_calls[0][0]
-        assert benchmark_command is not None
-        assert "python benchmark.py" in benchmark_command
-
-        with pytest.raises(RuntimeContractError, match="another run"):
-            await runtime.evaluation.accuracy(
-                "run-b",
-                workspace,
-                reuse=accuracy.receipt,
-            )
-        # An agent-reported artifact path that is not a workspace file is
-        # repairable feedback, including recipe JSON inlined in its place.
-        for artifact in (
-            "../recipes.json",
-            "Accuracy checker: expects cached_tokens > 0 on a repeated prompt",
-            "validation/recipes.txt",
-            '{"version":1,"recipes":[{"name":"a","command":"python3 -c \\"import re\\nok=True\\""}]}',
-        ):
-            with pytest.raises(
-                LocalValidationRecipeError, match="canonical workspace-relative path"
-            ) as raised:
-                await runtime.evaluation.validate_local(
-                    workspace,
-                    recipe_artifact=artifact,
-                    report_location="validation/report.json",
-                )
-            assert raised.value.kind is LocalValidationRecipeErrorKind.INVALID_ARTIFACT
-        # The report location is framework-owned, so an invalid one stays a contract error.
-        with pytest.raises(ValueError, match="writable path") as raised_report:
-            await runtime.evaluation.validate_local(
-                workspace,
-                recipe_artifact="validation/recipes.json",
-                report_location="../report.json",
-            )
-        assert not isinstance(raised_report.value, LocalValidationRecipeError)
-        await runtime.workspaces.close()
-
-    asyncio.run(exercise())
-
-
-def test_cancelled_candidate_construction_drains_and_closes_partial_resource(
+async def test_runtime_evaluation_owns_snapshots_receipts_and_command_binding(
     tmp_path: Path,
 ) -> None:
-    started = threading.Event()
-    release = threading.Event()
+    provider = _LiveOnlyProvider(tmp_path)
+    runtime = _runtime(provider)
+    workspace = runtime.workspaces.root
+    accuracy = await runtime.evaluation.accuracy(
+        "run-a",
+        workspace,
+        release=True,
+    )
+    benchmark = await runtime.evaluation.benchmark(
+        workspace,
+        required_metrics=frozenset({"throughput"}),
+    )
 
-    class _BlockingProvider(_Provider):
-        def create_candidate(self, workspace_id: str, revision: str) -> _Resource:
-            started.set()
-            release.wait()
-            return super().create_candidate(workspace_id, revision)
+    assert accuracy.result is not None
+    assert accuracy.result.passed
+    assert accuracy.receipt.run_id == "run-a"
+    assert accuracy.receipt.workspace_id is None
+    accuracy_command = provider.root.accuracy_calls[0]
+    assert accuracy_command is not None
+    assert accuracy.receipt.revision in accuracy_command
+    assert "python accuracy.py" in accuracy_command
+    assert benchmark.result.passed
+    assert provider.root.benchmark_calls[0][1] == frozenset({"throughput"})
+    benchmark_command = provider.root.benchmark_calls[0][0]
+    assert benchmark_command is not None
+    assert "python benchmark.py" in benchmark_command
 
-    provider = _BlockingProvider(tmp_path)
+    with pytest.raises(RuntimeContractError, match="another run"):
+        await runtime.evaluation.accuracy(
+            "run-b",
+            workspace,
+            reuse=accuracy.receipt,
+        )
+    # An agent-reported artifact path that is not a workspace file is
+    # repairable feedback, including recipe JSON inlined in its place.
+    for artifact in (
+        "../recipes.json",
+        "Accuracy checker: expects cached_tokens > 0 on a repeated prompt",
+        "validation/recipes.txt",
+        '{"version":1,"recipes":[{"name":"a","command":"python3 -c \\"import re\\nok=True\\""}]}',
+    ):
+        with pytest.raises(
+            LocalValidationRecipeError, match="canonical workspace-relative path"
+        ) as raised:
+            await runtime.evaluation.validate_local(
+                workspace,
+                recipe_artifact=artifact,
+                report_location="validation/report.json",
+            )
+        assert raised.value.kind is LocalValidationRecipeErrorKind.INVALID_ARTIFACT
+    # The report location is framework-owned, so an invalid one stays a contract error.
+    with pytest.raises(ValueError, match="writable path") as raised_report:
+        await runtime.evaluation.validate_local(
+            workspace,
+            recipe_artifact="validation/recipes.json",
+            report_location="../report.json",
+        )
+    assert not isinstance(raised_report.value, LocalValidationRecipeError)
+    await runtime.workspaces.close()
 
-    async def exercise() -> None:
-        workspaces = _runtime(provider).workspaces
-        construction = asyncio.create_task(workspaces.create_candidate())
-        await wait_until_started(started, construction)
-        construction.cancel()
-        release.set()
-        with pytest.raises(asyncio.CancelledError):
-            await construction
-        assert len(provider.created) == 1
-        assert provider.created[0].closed
-        await workspaces.close()
 
-    asyncio.run(exercise())
-
-
-def test_cancelled_close_keeps_owned_root_cleanup_alive(tmp_path: Path) -> None:
-    close_started = threading.Event()
-    close_release = threading.Event()
-
-    class _BlockingRoot(_Resource):
-        def close(self) -> None:
-            close_started.set()
-            close_release.wait()
-            super().close()
-
+async def test_cancelled_candidate_construction_drains_and_closes_partial_resource(
+    tmp_path: Path,
+) -> None:
     provider = _Provider(tmp_path)
-    root = _BlockingRoot(None, tmp_path)
+    runner = GatedBlockingRunner(held=True)
+    workspaces = _runtime(provider, runner).workspaces
+    construction = asyncio.create_task(workspaces.create_candidate())
+    await runner.wait_in_flight(1, construction)
+    construction.cancel()
+    runner.release()
+    with pytest.raises(asyncio.CancelledError):
+        await construction
+    assert len(provider.created) == 1
+    assert provider.created[0].closed
+    await workspaces.close()
+
+
+async def test_cancelled_close_keeps_owned_root_cleanup_alive(tmp_path: Path) -> None:
+    provider = _Provider(tmp_path)
+    root = _Resource(None, tmp_path)
     provider.root = root
-
-    async def exercise() -> None:
-        workspaces = _runtime(provider).workspaces
-        waiter = asyncio.create_task(workspaces.close())
-        await wait_until_started(close_started, waiter)
-        waiter.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await waiter
-        close_release.set()
-        await workspaces.close()
-        assert root.closed
-
-    asyncio.run(exercise())
+    runner = GatedBlockingRunner(held=True)
+    workspaces = _runtime(provider, runner).workspaces
+    waiter = asyncio.create_task(workspaces.close())
+    await runner.wait_in_flight(1, waiter)
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    runner.release()
+    await workspaces.close()
+    assert root.closed

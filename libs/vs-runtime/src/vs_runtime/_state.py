@@ -51,7 +51,9 @@ class RuntimeState:
     async def load[StateT: BaseModel](self, model: type[StateT]) -> StateT | None:
         self._require_model(model)
         coordinator = self._require_coordinator()
-        return await run_sync(coordinator.namespace.slot("state.json", model).load_optional)
+        return await run_sync(
+            self._workspaces.runner, coordinator.namespace.slot("state.json", model).load_optional
+        )
 
     async def commit(
         self,
@@ -74,7 +76,10 @@ class RuntimeState:
                 raise RuntimeContractError(message)
         snapshot = model.model_validate_json(value.model_dump_json(round_trip=True))
         async with self._workspaces._mutation(self._workspaces.root):  # noqa: SLF001  # lint-waiver: LW-228419 [SLF001]; state and root Git mutations share the runtime workspace owner's serialization.
-            previous = await run_sync(coordinator.namespace.slot("state.json", model).load_optional)
+            previous = await run_sync(
+                self._workspaces.runner,
+                coordinator.namespace.slot("state.json", model).load_optional,
+            )
             sequence = self._next_sequence
             self._next_sequence += 1
             transaction = coordinator.begin(
@@ -83,7 +88,7 @@ class RuntimeState:
                 candidate=workspace is not None,
                 label=label,
             )
-            await run_sync(transaction.complete)
+            await run_sync(self._workspaces.runner, transaction.complete)
         if self._observer is not None:
             self._observer.committed(previous, snapshot)
 

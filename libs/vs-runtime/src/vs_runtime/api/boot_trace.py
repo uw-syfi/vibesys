@@ -3,6 +3,7 @@
 from vs_runtime._boot_trace import (
     BOOT_TRACE_ENV,
     LAUNCH_START_ENV,
+    BootTrace,
     child_env,
     drain_log_lines,
     mark_launch,
@@ -14,6 +15,7 @@ from vs_runtime._boot_trace import (
 __all__ = [
     "BOOT_TRACE_ENV",
     "LAUNCH_START_ENV",
+    "BootTrace",
     "child_env",
     "drain_log_lines",
     "mark_launch",

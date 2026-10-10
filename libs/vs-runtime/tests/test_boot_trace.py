@@ -8,8 +8,11 @@ through a real ``open_run_resources`` call.
 """
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vs_runtime.api import boot_trace
+from vs_sim.api.testing import ManualClock
 
 
 @pytest.fixture(autouse=True)
@@ -152,3 +155,24 @@ def test_child_env_propagates_the_trace_request(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv(boot_trace.BOOT_TRACE_ENV, "1")
 
     assert boot_trace.child_env()[boot_trace.BOOT_TRACE_ENV] == "1"
+
+
+@given(elapsed_ms=st.integers(min_value=0, max_value=100_000))
+def test_a_span_reports_the_time_its_clock_advanced(elapsed_ms: int) -> None:
+    clock = ManualClock()
+    trace = boot_trace.BootTrace(wall=ManualClock(), elapsed=clock)
+
+    with trace.span("stage"):
+        clock.advance(elapsed_ms / 1000)
+
+    assert trace.drain() == [f"boot span stage: {elapsed_ms}ms"]
+
+
+@given(epoch_s=st.integers(min_value=1, max_value=4_000_000_000))
+def test_the_launch_anchor_is_the_wall_clock_in_milliseconds(epoch_s: int) -> None:
+    wall = ManualClock(epoch_s)
+    trace = boot_trace.BootTrace(wall=wall, elapsed=ManualClock())
+
+    assert trace.mark_launch() == epoch_s * 1000
+    wall.advance(60)
+    assert trace.launched_at_ms() == epoch_s * 1000

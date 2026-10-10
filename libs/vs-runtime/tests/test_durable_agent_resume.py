@@ -79,7 +79,7 @@ from vs_sandbox.api import (
     HostResourceAccess,
     ProjectPathPolicy,
 )
-from vs_sim.api.testing import arrival, wait_until_started
+from vs_sim.api.testing import arrival, wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
     from vs_agent.api import AgentInvocationStore
@@ -410,7 +410,7 @@ def test_in_flight_resume_is_inspectable_without_waiting_for_the_agent(tmp_path:
     def hold(request: AgentTurnRequest) -> None:
         if request.label == "evaluation-resume":
             entered.set()
-            released.wait()
+            wait_or_fail(released, "the held operation release")
 
     message = TemplateRenderer(tmp_path).render_string("trusted result")
 
@@ -467,7 +467,7 @@ def test_key_ownership_is_held_until_pending_close_acknowledges(
 
     def hold(_request: AgentTurnRequest) -> None:
         worker_entered.set()
-        worker_released.wait()
+        wait_or_fail(worker_released, "the held worker release")
 
     async def respond(
         _role: AgentRole,

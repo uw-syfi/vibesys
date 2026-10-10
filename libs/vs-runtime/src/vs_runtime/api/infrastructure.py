@@ -324,7 +324,7 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
     capacity: CapacityHandling = PAUSE_ONLY,
 ) -> WorkspaceRuntime:
     """Create one owner for workspace handles and their bound agent sessions."""
-    workspaces = RuntimeWorkspaces(workspace_resources)
+    workspaces = RuntimeWorkspaces(workspace_resources, runner=blocking.runner)
     agents = RuntimeWorkspaceAgentSessions(
         roles,
         workspaces=workspaces,
