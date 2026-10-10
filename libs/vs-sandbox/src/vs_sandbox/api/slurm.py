@@ -56,8 +56,10 @@ from vs_sandbox.slurm_gpu import (
 )
 from vs_sandbox.slurm_policy import (
     SlurmExecutionPolicy,
+    SlurmOperatorSettings,
     SlurmPolicyError,
     agent_gpu_capability,
+    load_slurm_operator_settings,
     load_slurm_policy,
 )
 from vs_sandbox.slurm_profile import (
@@ -68,6 +70,7 @@ from vs_sandbox.slurm_profile import (
     require_profile_fields,
     trusted_profile_command,
 )
+from vs_sandbox.slurm_settings_toml import render_slurm_operator_toml
 
 #: The single-file, standard-library-only client an agent's container runs.
 HOST_COMMAND_CLIENT = Path(host_command_client.__file__).resolve()
@@ -106,6 +109,7 @@ __all__ = [
     "SlurmGpuConfigError",
     "SlurmGpuLauncher",
     "SlurmGpuRequestError",
+    "SlurmOperatorSettings",
     "SlurmOutcomeUnknownError",
     "SlurmPolicyError",
     "SlurmProcessBroker",
@@ -118,10 +122,12 @@ __all__ = [
     "classify_benchmark_output",
     "configured_capture_lifecycle",
     "load_slurm_gpu_config",
+    "load_slurm_operator_settings",
     "load_slurm_policy",
     "profile_capture_descriptor",
     "read_slurm_capture_plan",
     "read_slurm_evaluation_plan",
+    "render_slurm_operator_toml",
     "require_profile_fields",
     "run_brokered_process",
     "trusted_profile_command",

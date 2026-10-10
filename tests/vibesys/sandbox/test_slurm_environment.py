@@ -25,7 +25,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api import DockerSandbox, SandboxKind
-from vs_sandbox.api.slurm import SlurmPolicyError
+from vs_sandbox.api.slurm import SlurmPolicyError, load_slurm_operator_settings
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -105,7 +105,9 @@ def _environment(tmp_path: Path, name: str, backend: DaemonBackend) -> RunEnviro
         gate = tmp_path / "fake_gate.py"
         gate.write_text(_FAKE_GATE, encoding="utf-8")
         return SlurmEnvironment(
-            _write_agent_gpu_slurm_config(tmp_path, tmp_path / "srun.log"),
+            load_slurm_operator_settings(
+                _write_agent_gpu_slurm_config(tmp_path, tmp_path / "srun.log")
+            ),
             docker=docker,
             gate_wrapper=(_PYTHON, str(gate)),
             job_confinement=_PassThroughConfinement(),
@@ -115,7 +117,11 @@ def _environment(tmp_path: Path, name: str, backend: DaemonBackend) -> RunEnviro
         config.write_text(_SLURM_CONFIG, encoding="utf-8")
         gate = tmp_path / "fake_gate.py"
         gate.write_text(_FAKE_GATE, encoding="utf-8")
-        return SlurmEnvironment(config, docker=docker, gate_wrapper=(_PYTHON, str(gate)))
+        return SlurmEnvironment(
+            load_slurm_operator_settings(config),
+            docker=docker,
+            gate_wrapper=(_PYTHON, str(gate)),
+        )
     config = tmp_path / "slurm-gpu.toml"
     config.write_text(_SLURM_GPU_CONFIG, encoding="utf-8")
     return SlurmGpuEnvironment(
@@ -388,7 +394,7 @@ def test_agent_gpu_commands_are_rejected_without_the_local_transport(
     }[transport]
     text = config.read_text(encoding="utf-8").replace('kind = "local"', replacement)
     config.write_text(text, encoding="utf-8")
-    environment = SlurmEnvironment(config, docker=daemon_docker_config(backend.engine))
+    del backend
 
     with pytest.raises(SlurmPolicyError, match=rf"vibesys\.agent_gpu.*{transport}"):
-        open_run_environment(environment, _request(tmp_path, backend))
+        load_slurm_operator_settings(config)

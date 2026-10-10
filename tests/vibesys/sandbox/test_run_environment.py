@@ -65,6 +65,7 @@ from vs_sandbox.api.evaluator_tools import (
     tool_spec_digest,
 )
 from vs_sandbox.api.slurm import (
+    load_slurm_operator_settings,
     read_slurm_capture_plan,
     read_slurm_evaluation_plan,
     run_brokered_process,
@@ -463,7 +464,10 @@ remote_python = "/remote/venv/bin/python"
     assert (session.view.paths.benchmark_command or "").endswith("vibesys-gate --gate benchmark")
     assert "vs_sandbox" not in (session.view.paths.accuracy_command or "")
     profiler_env = dict(session.view.profiler_mcp_env)
-    assert profiler_env["VIBESYS_SLURM_CONFIG"] == str(config_path)
+    # The profiler reads the run's own rendering of the settings it validated.
+    assert load_slurm_operator_settings(
+        Path(profiler_env["VIBESYS_SLURM_CONFIG"])
+    ) == load_slurm_operator_settings(config_path)
     assert profiler_env["VIBESYS_SLURM_EVALUATOR_PLAN"] == str(
         tmp_path / "logs/slurm-capture-plan.json"
     )

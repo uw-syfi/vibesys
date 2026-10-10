@@ -24,6 +24,7 @@ from vs_runtime._host_command_bridge import (
 )
 from vs_runtime._run_environment import (
     AgentGpuFacts,
+    ClusterEvaluationFacts,
     DockerEnvironment,
     DockerEnvironmentConfig,
     RunEnvironmentPresentation,
@@ -53,15 +54,16 @@ from vs_sandbox.api.slurm import (
     SlurmCommandGateRunner,
     SlurmEvaluationPlan,
     SlurmExecutionPolicy,
+    SlurmOperatorSettings,
     SlurmProcessBroker,
-    agent_gpu_capability,
     configured_capture_lifecycle,
-    load_slurm_policy,
+    load_slurm_operator_settings,
+    render_slurm_operator_toml,
     trusted_profile_command,
     write_slurm_capture_plan,
     write_slurm_evaluation_plan,
 )
-from vs_slurm.api import SlurmConfig, SlurmSshTransport, load_slurm_config
+from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -79,21 +81,16 @@ def _slurm_service_command(policy: SlurmExecutionPolicy) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True, slots=True)
-class _OperatorSettings:
-    """What the operator's file says: the cluster, the VibeSys policy, the agent GPU limits."""
-
-    config: SlurmConfig
-    policy: SlurmExecutionPolicy
-    agent_gpu: AgentGpuConfig | None
-
-
-@dataclass(frozen=True, slots=True)
 class _ClusterPlans:
     """The evaluation and capture plans the run wrote, and the paths they name."""
 
     evaluator: Path
     #: ``None`` when profiling is the agent's own GPU command, not a remote capture.
     capture: Path | None
+    #: The evaluation plan as written, for consumers of the environment's facts.
+    plan: SlurmEvaluationPlan
+    #: The operator settings file the plans name: the run's own rendering of its settings.
+    config_path: Path
     state_root: Path
     support_paths: Mapping[str, Path]
     has_accuracy: bool
@@ -119,28 +116,29 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
 
     def __init__(
         self,
-        config_path: Path,
+        settings: SlurmOperatorSettings,
         docker: DockerEnvironmentConfig | None = None,
         gate_wrapper: Sequence[str] = DEFAULT_WRAPPER,
         job_confinement: JobConfinement | None = None,
     ) -> None:
-        """Bind the operator configuration and the injection seams.
+        """Bind the operator settings, parsed once, and the injection seams.
 
+        *settings* is the operator file as ``load_slurm_operator_settings`` read
+        it (or the translation of the deprecated ``slurm-gpu`` file). Every
+        later read in the run uses it, so the facts cannot change mid-run.
         *docker* configures the editor container. *gate_wrapper* is the program
         that runs one trusted gate against the cluster; tests substitute a fake
         that stands in for it. *job_confinement* is how an agent GPU job is
         confined; the default is the host sandbox.
         """
-        self.config_path = config_path.expanduser()
+        self._settings = settings
         self._docker = DockerEnvironment(docker or DockerEnvironmentConfig())
         self._gate_wrapper = tuple(gate_wrapper)
         self._job_confinement = job_confinement
 
     def _agent_gpu(self) -> AgentGpuConfig | None:
         """Return the operator's agent GPU limits, or ``None`` when the capability is off."""
-        return agent_gpu_capability(
-            load_slurm_config(self.config_path), load_slurm_policy(self.config_path)
-        )
+        return self._settings.agent_gpu
 
     # What the run consults before it prepares the environment. The profiler
     # follows the capability: the agent's own GPU commands run where the agent's
@@ -170,21 +168,19 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         """Validate the remote capture's workload; the agent's own profiling has none."""
         if self._agent_gpu() is None:
             configured_capture_lifecycle(
-                load_slurm_config(self.config_path),
-                load_slurm_policy(self.config_path),
-                profile_command,
+                self._settings.config, self._settings.policy, profile_command
             )
 
     @classmethod
     def from_options(cls, options: Mapping[str, object]) -> SlurmEnvironment:
-        """Resolve the operator configuration path.
+        """Parse the operator file named by the options, once.
 
         ``build_runner`` is the unrecorded injection seam for the agent image build.
         """
         value = options.get("config_path", "~/.config/vibesys/slurm.toml")
         build_runner = options.get("build_runner")
         return cls(
-            Path(str(value)),
+            load_slurm_operator_settings(Path(str(value))),
             docker=DockerEnvironmentConfig(
                 build_runner=cast("DockerBuildRunner | None", build_runner)
             ),
@@ -193,9 +189,8 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Validate external policy before opening the editor container."""
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="slurm")
-        config = load_slurm_config(self.config_path)
-        policy = load_slurm_policy(self.config_path)
-        agent_gpu = agent_gpu_capability(config, policy)
+        policy = self._settings.policy
+        agent_gpu = self._settings.agent_gpu
         return _PreparedRunEnvironment(
             SlurmEnvironmentFacts(
                 service_command=_slurm_service_command(policy),
@@ -207,16 +202,19 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                     else AgentGpuFacts(agent_gpu.max_gpus, agent_gpu.max_time_minutes)
                 ),
             ),
-            partial(self._open, request, _OperatorSettings(config, policy, agent_gpu)),
+            partial(self._open, request),
         )
 
     def _open(
         self,
         request: RunEnvironmentRequest,
-        operator: _OperatorSettings,
         presentation: RunEnvironmentPresentation,
     ) -> RunEnvironmentSession:
-        config, policy, agent_gpu = operator.config, operator.policy, operator.agent_gpu
+        config, policy, agent_gpu = (
+            self._settings.config,
+            self._settings.policy,
+            self._settings.agent_gpu,
+        )
         # Without the agent's own GPU commands, profiling is a remote capture
         # the cluster runs; with them, the agent profiles through its commands.
         remote_profiling = agent_gpu is None
@@ -263,9 +261,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                     gates, launcher, env=None if gpu is None else agent_gpu_env(launcher)
                 ),
             )
-            profiler_mcp = _remote_profiler_mcp(
-                self.config_path, plans, transport_env, transport_resources
-            )
+            profiler_mcp = _remote_profiler_mcp(plans, transport_env, transport_resources)
             session = SandboxSession.start(
                 sandbox,
                 RunEnvironmentView(
@@ -291,6 +287,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                     framework_setup_timeout_seconds=config.job_timeout_seconds,
                     profiler_mcp_env=profiler_mcp[0],
                     profiler_mcp_resources=profiler_mcp[1],
+                    cluster_evaluation=ClusterEvaluationFacts(self._settings, plans.plan),
                 ),
             )
         except BaseException:
@@ -340,6 +337,8 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         }
         state_root = request.log_dir / "slurm-cluster"
         state_root.mkdir(parents=True, exist_ok=True)
+        config_path = request.log_dir / "slurm-operator.toml"
+        config_path.write_text(render_slurm_operator_toml(self._settings), encoding="utf-8")
         evaluator_plan_path = request.log_dir / "slurm-evaluation-plan.json"
         capture_plan_path = (
             request.log_dir / "slurm-capture-plan.json" if remote_profiling else None
@@ -350,28 +349,26 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         profile = policy.remote_argv(raw_profile) if raw_profile is not None else None
         accuracy = policy.remote_argv(raw_accuracy) if raw_accuracy is not None else None
         benchmark = policy.remote_argv(raw_benchmark) if raw_benchmark is not None else None
-        write_slurm_evaluation_plan(
-            evaluator_plan_path,
-            SlurmEvaluationPlan(
-                config_path=self.config_path,
-                cluster_state_root=state_root,
-                accuracy_command=accuracy,
-                benchmark_command=benchmark,
-                benchmark_output_argument=request.benchmark_output_argument,
-                support_paths=support_paths,
-                profile_command=(
-                    trusted_profile_command(
-                        config,
-                        policy,
-                        profile,
-                        profiler_tree=profiler_tree,
-                        workload_timeout_seconds=request.profile_timeout_seconds,
-                    )
-                    if profiler_tree is not None and profiler_tree in support_paths
-                    else None
-                ),
+        evaluation_plan = SlurmEvaluationPlan(
+            config_path=config_path,
+            cluster_state_root=state_root,
+            accuracy_command=accuracy,
+            benchmark_command=benchmark,
+            benchmark_output_argument=request.benchmark_output_argument,
+            support_paths=support_paths,
+            profile_command=(
+                trusted_profile_command(
+                    config,
+                    policy,
+                    profile,
+                    profiler_tree=profiler_tree,
+                    workload_timeout_seconds=request.profile_timeout_seconds,
+                )
+                if profiler_tree is not None and profiler_tree in support_paths
+                else None
             ),
         )
+        write_slurm_evaluation_plan(evaluator_plan_path, evaluation_plan)
         if capture_plan_path is not None:
             write_slurm_capture_plan(
                 capture_plan_path,
@@ -385,6 +382,8 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         return _ClusterPlans(
             evaluator=evaluator_plan_path,
             capture=capture_plan_path,
+            plan=evaluation_plan,
+            config_path=config_path,
             state_root=state_root,
             support_paths=support_paths,
             has_accuracy=accuracy is not None,
@@ -446,7 +445,6 @@ def _start_transport_broker(
 
 
 def _remote_profiler_mcp(
-    config_path: Path,
     plans: _ClusterPlans,
     transport_env: tuple[tuple[str, str], ...],
     transport_resources: tuple[HostResource, ...],
@@ -456,7 +454,7 @@ def _remote_profiler_mcp(
         return (), ()
     return (
         (
-            ("VIBESYS_SLURM_CONFIG", str(config_path)),
+            ("VIBESYS_SLURM_CONFIG", str(plans.config_path)),
             ("VIBESYS_SLURM_EVALUATOR_PLAN", str(plans.capture)),
             *transport_env,
         ),
@@ -466,7 +464,9 @@ def _remote_profiler_mcp(
                 HostResourceAccess.READ_WRITE,
                 "Slurm cluster operation state and transfers",
             ),
-            HostResource(config_path, HostResourceAccess.READ_ONLY, "Slurm profiler configuration"),
+            HostResource(
+                plans.config_path, HostResourceAccess.READ_ONLY, "Slurm profiler configuration"
+            ),
             HostResource(plans.capture, HostResourceAccess.READ_ONLY, "Slurm profiler plan"),
             *(
                 HostResource(path, HostResourceAccess.READ_ONLY, f"Slurm support tree {name}")
