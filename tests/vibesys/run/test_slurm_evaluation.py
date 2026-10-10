@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
-from tests.support.started_operation import wait_until_executor_started
+from tests.support.started_operation import arrival, wait_until_executor_started
 from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.orchestration.dynamic.agents import PROFILER
@@ -1005,7 +1005,7 @@ async def test_close_retains_execution_until_cleanup_settles(tmp_path: Path) -> 
     assert (await _terminal(executor, "retained-during-close")).state is EvaluationState.SUCCEEDED
 
     closing = asyncio.create_task(executor.close())
-    await workspaces.candidates[0].discard_started.wait()
+    await arrival(workspaces.candidates[0].discard_started.wait(), closing)
     inspecting = asyncio.create_task(executor.inspect("retained-during-close"))
     await asyncio.sleep(0)
 

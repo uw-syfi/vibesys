@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.started_operation import arrival
 
 from vs_evaluation.api import (
     AvailabilityState,
@@ -238,7 +239,7 @@ async def test_await_wakes_on_completion_without_wall_clock_wait() -> None:
     handle = await coordinator(executor, InMemoryEvaluationStore()).submit(request())
 
     waiting = asyncio.create_task(handle.await_result(5))
-    await executor.wait_started.wait()
+    await arrival(executor.wait_started.wait(), waiting)
     executor.set_state(
         handle.id,
         EvaluationState.SUCCEEDED,
@@ -481,7 +482,7 @@ async def test_await_deadline_interrupts_blocked_inspection_and_keeps_durable_st
     executor.block = True
 
     waiting = asyncio.create_task(handle.await_result(5))
-    await executor.started.wait()
+    await arrival(executor.started.wait(), waiting)
     deadlines.scopes[0].expire()
     result = await waiting
 
@@ -512,7 +513,7 @@ async def test_await_deadline_before_first_store_read_has_no_status() -> None:
     store.block = True
 
     waiting = asyncio.create_task(handle.await_result(5))
-    await store.started.wait()
+    await arrival(store.started.wait(), waiting)
     deadlines.scopes[0].expire()
     result = await waiting
 

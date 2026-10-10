@@ -8,6 +8,7 @@ import math
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.started_operation import arrival
 
 from vs_runtime.api import CandidateProfileStatus, Evaluation
 from vs_runtime.api.infrastructure import (
@@ -242,7 +243,7 @@ async def test_gated_evaluation_cancels_a_running_evaluation_at_the_stop() -> No
     workspace = FakeWorkspace(workspace_id="candidate")
 
     running = asyncio.create_task(evaluation.benchmark(workspace))
-    await gate.entered.wait()
+    await arrival(gate.entered.wait(), running)
     channel.request_stop()
 
     with pytest.raises(RunStopped):

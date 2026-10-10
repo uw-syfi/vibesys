@@ -6,6 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from tests.support.started_operation import arrival
 
 from vibesys.run.host import close_evaluation_services
 from vs_evaluation.api import (
@@ -138,7 +139,7 @@ async def test_profiler_settlement_precedes_evaluation_close(
         await provision.wait_started(dispatched.operation_id)
 
     closing = asyncio.create_task(close_evaluation_services(evaluation, profilers))
-    await provision.cancel_entered.wait()
+    await arrival(provision.cancel_entered.wait(), closing)
     assert evaluation.socket_path.exists()
     assert not closing.done()
     if cancel_shutdown:

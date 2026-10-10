@@ -6,6 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from tests.support.started_operation import arrival
 
 from vs_async_ops.api import (
     OperationCancellationTimeoutError,
@@ -167,7 +168,7 @@ async def test_running_transition_does_not_finish_a_bounded_await() -> None:
     )
     await coordinator.submit(_request("one"))
     pending = asyncio.create_task(coordinator.await_result("one", 10))
-    await waiter.entered.wait()
+    await arrival(waiter.entered.wait(), pending)
     await runner.wait_started("one")
     assert not pending.done()
 
@@ -420,7 +421,7 @@ async def test_deadline_covers_store_observation_without_unbounded_fallback() ->
     store.block_get = True
 
     waiting = asyncio.create_task(coordinator.await_result("slow-read", 5))
-    await store.entered.wait()
+    await arrival(store.entered.wait(), waiting)
     deadlines.scopes[-1].expire()
     observed = await waiting
 
@@ -437,7 +438,7 @@ async def test_deadline_reports_when_no_record_was_observed() -> None:
     coordinator = OperationCoordinator(FakeOperationRunner(), store, deadline_factory=deadlines)
 
     waiting = asyncio.create_task(coordinator.await_result("unknown", 5))
-    await store.entered.wait()
+    await arrival(store.entered.wait(), waiting)
     deadlines.scopes[-1].expire()
 
     with pytest.raises(OperationObservationTimeoutError):
@@ -458,7 +459,7 @@ async def test_cancellation_deadline_records_terminal_state() -> None:
     await runner.started.wait()
 
     canceling = asyncio.create_task(coordinator.cancel("stuck-cancel"))
-    await runner.cancel_entered.wait()
+    await arrival(runner.cancel_entered.wait(), canceling)
     deadlines.scopes[-1].expire()
 
     with pytest.raises(OperationCancellationTimeoutError):
@@ -480,7 +481,7 @@ async def test_close_deadline_interrupts_when_runner_cancel_is_stuck() -> None:
     await runner.started.wait()
 
     closing = asyncio.create_task(coordinator.close())
-    await runner.cancel_entered.wait()
+    await arrival(runner.cancel_entered.wait(), closing)
     deadlines.scopes[-1].expire()
 
     with pytest.raises(OperationCancellationTimeoutError):
@@ -493,7 +494,7 @@ async def test_close_submit_race_finishes_accepted_work_and_closes_admission() -
     store = _BlockingStore(block_create=True)
     coordinator = OperationCoordinator(FakeOperationRunner(), store)
     submitting = asyncio.create_task(coordinator.submit(_request("submit-race")))
-    await store.entered.wait()
+    await arrival(store.entered.wait(), submitting)
     closing = asyncio.create_task(coordinator.close())
     store.release.set()
 

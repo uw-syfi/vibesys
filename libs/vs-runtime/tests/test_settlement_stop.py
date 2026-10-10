@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from tests.support.started_operation import arrival
 
 from vs_evaluation.api import (
     ContentDigest,
@@ -53,7 +54,7 @@ async def test_stop_cancels_only_the_host_observer(operation: str) -> None:
         entered = fake.executor.wait_started
         call = evaluation.settlements().wait_any(dependencies)
     task = asyncio.create_task(call)
-    await entered.wait()
+    await arrival(entered.wait(), task)
     channel.request_stop()
     with pytest.raises(RunStopped):
         await task
