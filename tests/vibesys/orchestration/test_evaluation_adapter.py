@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import threading
 from typing import TYPE_CHECKING
 
 import pytest
@@ -43,17 +42,22 @@ from vs_runtime.api import (
 from vs_runtime.api.testing import FakeWorkspace
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
     from typing import TypeVar
 
+    from vs_sim.api import Event
+
     _Result = TypeVar("_Result")
 
 
 _PLUGIN = capability_plugin("evaluation")
+# The held command blocks a worker thread of the sandbox runner, so its latches are the OS's.
+_THREADS = OsThreads()
 
 
 class _BlockingEvaluationSandbox(FakeLifecycleRunner):
@@ -61,20 +65,20 @@ class _BlockingEvaluationSandbox(FakeLifecycleRunner):
 
     def __init__(self) -> None:
         super().__init__()
-        self.started = threading.Event()
-        self.release = threading.Event()
+        self.started = _THREADS.event()
+        self.release = _THREADS.event()
 
     def execute(
         self,
         command: str,
         *,
         timeout: int | None = None,
-        cancel: threading.Event | None = None,
+        cancel: Event | None = None,
     ) -> CommandResult:
         del cancel  # the test releases the held command itself
         if not self.started.is_set():
             self.started.set()
-            self.release.wait()
+            wait_or_fail(self.release, "the held trusted command to be released")
         return super().execute(command, timeout=timeout)
 
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import json
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
@@ -43,7 +42,8 @@ from vs_agent.contracts import (
     MCPServerSpec,
 )
 from vs_mcp.api import StdioServerDescriptor
-from vs_sim.api.testing import wait_until_started_sync
+from vs_sim.api import Event, OsThreads
+from vs_sim.api.testing import wait_or_fail, wait_until_started_sync
 
 
 class _Response(BaseModel):
@@ -61,8 +61,8 @@ class _FakeSession(HandSession):
     resumed: list[str] = field(default_factory=list)
     lifecycle_calls: list[str] = field(default_factory=list)
     cancel_error: BaseException | None = None
-    started: threading.Event | None = None
-    release: threading.Event | None = None
+    started: Event | None = None
+    release: Event | None = None
 
     def __post_init__(self) -> None:
         HandSession.__init__(self)
@@ -77,7 +77,7 @@ class _FakeSession(HandSession):
         if self.started is not None:
             self.started.set()
         if self.release is not None:
-            self.release.wait()
+            wait_or_fail(self.release, "the held turn to be released")
         if observer is not None:
             for event in self.emitted:
                 observer.on_event(event)
@@ -637,8 +637,8 @@ def test_evicting_a_session_cancels_its_turn_before_closing_it() -> None:
 
 
 def test_cancel_stops_an_active_session_without_closing_it() -> None:
-    started = threading.Event()
-    release = threading.Event()
+    started = OsThreads().event()
+    release = OsThreads().event()
     session = _FakeSession(results=[AgentTurnResult("ok")], started=started, release=release)
     client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
     with ThreadPoolExecutor(max_workers=1) as pool:

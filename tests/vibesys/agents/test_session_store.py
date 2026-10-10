@@ -42,6 +42,7 @@ from vs_project.api import (
     Project,
     RunEnvironmentRecord,
 )
+from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from vs_agent.shim_turns import LaunchedSession
@@ -192,7 +193,7 @@ def test_one_store_preserves_checkpoints_from_concurrent_clients(tmp_path: Path)
     ready = Barrier(clients)
 
     def checkpoint(client: int) -> None:
-        ready.wait()
+        ready.wait(HANG_GUARD_S)
         _checkpoint(
             store,
             f"thread-{client}",

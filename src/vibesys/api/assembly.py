@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment, StopTimer
     from vs_sandbox.api import ComputeBackendImpl, HostResource
+    from vs_sim.api import Threads
     from vs_slurm.api import SlurmProcess
 
 
@@ -74,6 +75,8 @@ class SessionImplementations:
     ) = None
     git_repository: GitRepositoryFactory | None = None
     """Builds the run's ``GitRepository`` implementations; ``None`` runs the Git CLI."""
+    threads: Threads | None = None
+    """Locks for the session's shared state; ``None`` uses the operating system's."""
     slurm_process: SlurmProcess | None = None
     """Replaces the Slurm transport's process boundary; ``None`` runs the configured programs."""
     state_stores: StateStoreFactory | None = None

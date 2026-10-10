@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
@@ -95,7 +94,7 @@ from vs_runtime.api import (
     render_rejected_evidence,
 )
 from vs_runtime.api.infrastructure import RunStopped, TrustedEvaluationPlan
-from vs_sim.api import MonotonicClock
+from vs_sim.api import MonotonicClock, SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -104,6 +103,7 @@ if TYPE_CHECKING:
     from vs_runtime.api import RunFacts
     from vs_runtime.api.infrastructure import AgentToolBindingContext, RunEnvironmentView
 
+_SYSTEM_CLOCK = SystemClock()
 _STATE_DIRECTORY = "semantic-evaluations"
 _RETRYABLE_STATES = frozenset(
     {EvaluationState.FAILED, EvaluationState.CANCELED, EvaluationState.SUPERSEDED}
@@ -263,7 +263,7 @@ class SemanticEvaluationBackend:
         events: Callable[[EvaluationLifecycleEvent], None] | None = None,
         plan: TrustedEvaluationPlan | None = None,
         queue_allowance_seconds: int | None = None,
-        submitted_time: Callable[[], float] = time.time,
+        submitted_time: Callable[[], float] = _SYSTEM_CLOCK.now,
     ) -> None:
         """Bind official evaluation, isolated workspaces, and durable state."""
         if plan is not None and queue_allowance_seconds is None:

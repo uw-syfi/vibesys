@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from itertools import count
 from typing import TYPE_CHECKING
 
@@ -51,6 +50,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     ValidationRecipe,
 )
+from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -65,6 +65,8 @@ if TYPE_CHECKING:
     )
 
 
+# The UTC timeline persisted deadlines are read against; the sleeps run on the event loop.
+_CLOCK = SystemClock()
 GATE_LOG_TAIL_CHARS = 1000
 GATE_FEEDBACK_TAIL_CHARS = 4000
 
@@ -363,11 +365,11 @@ class _EvaluationAdapter:
 
     def current_time(self) -> float:
         """Use UTC time so persisted deadlines survive process restarts."""
-        return time.time()
+        return _CLOCK.now()
 
     async def wait_until(self, deadline_at_s: float) -> None:
         """Wait without agent calls, with cancellation releasing the timer."""
-        await asyncio.sleep(max(0.0, deadline_at_s - self.current_time()))
+        await _CLOCK.sleep(max(0.0, deadline_at_s - self.current_time()))
 
     async def validate_wait(
         self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str

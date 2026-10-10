@@ -72,7 +72,6 @@ from vs_sandbox.api import CommandResult, CommandRunner, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 
 if TYPE_CHECKING:
-    import threading
     from pathlib import Path
     from typing import TextIO
 
@@ -80,6 +79,7 @@ if TYPE_CHECKING:
     from vs_project.api import OrchestrationRunManifest
     from vs_runtime.api import AgentRole, OrchestrationResumeDecision
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration
+    from vs_sim.api import Event
 
 _RUN_ID = "lost-stage"
 _HANDLE = "handle-1"
@@ -110,7 +110,7 @@ class _LosesStageCommands(FakeCommandRunner):
         command: str,
         *,
         timeout: int | None = None,
-        cancel: threading.Event | None = None,
+        cancel: Event | None = None,
     ) -> CommandResult:
         result = super().execute(command, timeout=timeout, cancel=cancel)
         if _ACCURACY in command or _BENCHMARK in command:

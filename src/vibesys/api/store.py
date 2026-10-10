@@ -18,11 +18,14 @@ from vibesys.api._store import (
 if TYPE_CHECKING:
     from vibesys.plugin_catalog import OrchestrationRegistry
     from vs_project.api import Project
+    from vs_sim.api import Threads
 
 
-def open_run_store(project: Project, *, registry: OrchestrationRegistry) -> RunStore:
-    """Open a read-only run history store for *project*."""
-    return _open_run_store(project, registry=registry)
+def open_run_store(
+    project: Project, *, registry: OrchestrationRegistry, threads: Threads | None = None
+) -> RunStore:
+    """Open a read-only run history store for *project*; *threads* defaults to the OS's."""
+    return _open_run_store(project, registry=registry, threads=threads)
 
 
 __all__ = [

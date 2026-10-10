@@ -3,7 +3,6 @@
 import shlex
 import shutil
 import sys
-import time
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -112,6 +111,7 @@ from vs_sandbox.api import (
     HostResource,
     create_compute_backend,
 )
+from vs_sim.api import MonotonicClock
 
 _StateBinding = ProjectStateDeclaration
 
@@ -213,7 +213,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     backend = request.backend
     remote_repo = request.remote_repo
     repo_visibility = request.repo_visibility
-    context_start = time.perf_counter()
+    boot_clock = MonotonicClock()
+    context_start = boot_clock.now()
     # Boot spans recorded before this function ran (the dispatch preamble)
     # come first, so the run log reads in the order the work happened once
     # the buffer below flushes into ``RunLogger``. Assembly's own spans stay
@@ -488,7 +489,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 data=ExperimentsChangedData(reason="project_attached"),
             )
             logger.lprint(
-                f"experiments gate open after {(time.perf_counter() - context_start) * 1000:.0f}ms"
+                f"experiments gate open after {(boot_clock.now() - context_start) * 1000:.0f}ms"
             )
 
             project_ref_dir = (

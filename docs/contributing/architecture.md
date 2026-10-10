@@ -113,6 +113,7 @@ graph TD
     entrypoints --> vs_mcp
     entrypoints --> vs_project
     entrypoints --> vs_sandbox
+    entrypoints --> vs_sim
     headless --> vibesys
     launch --> vibesys
     launch --> vs_agent

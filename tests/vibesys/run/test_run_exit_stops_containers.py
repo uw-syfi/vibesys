@@ -8,7 +8,6 @@ daemon, so the assertion is on the daemon's own container list.
 from __future__ import annotations
 
 import asyncio
-import os
 import signal
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -33,6 +32,7 @@ from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import OrchestrationPlugin, RunStatus
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeContainer, FakeDockerEngine, HostExecutedContainerBackend
+from vs_sim.api.testing import FakeSignalSource
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -105,7 +105,12 @@ _MAX_CHECKPOINTS = 100_000
 
 
 async def _run_until_exit(
-    run: Run, engine: FakeDockerEngine, observed: _Observed, *, exit_path: str
+    run: Run,
+    engine: FakeDockerEngine,
+    observed: _Observed,
+    signals: FakeSignalSource,
+    *,
+    exit_path: str,
 ) -> RunStatus:
     """Fail, or raise the signals of *exit_path* and then wait to be unwound."""
     observed.run_id = run.run_id
@@ -113,7 +118,7 @@ async def _run_until_exit(
     if exit_path == "failure":
         raise _OrchestrationFailedError
     for name in exit_path.split("+"):
-        os.kill(os.getpid(), getattr(signal, name))
+        assert signals.deliver(signal.Signals[name]), f"the run installed no {name} handler"
     for _ in range(_MAX_CHECKPOINTS):
         await run.control.checkpoint()
         await asyncio.sleep(0)
@@ -143,10 +148,11 @@ def _execute(
         engine.runs_lost_after_creating([False])
 
     observed = _Observed()
+    signals = FakeSignalSource()
     ending_context = nullcontext() if ends_with is None else pytest.raises(ends_with)
 
     async def orchestrate(run: Run, _options: object) -> RunStatus:
-        return await _run_until_exit(run, engine, observed, exit_path=exit_path)
+        return await _run_until_exit(run, engine, observed, signals, exit_path=exit_path)
 
     plugin = OrchestrationPlugin(
         id=_PLUGIN_ID, agents=(), options=EmptyOptions, orchestrate=orchestrate
@@ -195,7 +201,7 @@ def _execute(
 
     async def execute() -> None:
         handle = runs.start(request) if resume is None else runs.resume(request)
-        await supervise(handle, render_run(handle))
+        await supervise(handle, render_run(handle), signals=signals)
 
     with ending_context:
         asyncio.run(execute())
