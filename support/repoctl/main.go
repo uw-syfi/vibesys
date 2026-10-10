@@ -192,7 +192,7 @@ func cli(args []string) error {
 	if err != nil {
 		return err
 	}
-	g, err := readPolicy(root, configPath)
+	g, err := readCurrentPolicy(root, configPath)
 	if err != nil {
 		return err
 	}

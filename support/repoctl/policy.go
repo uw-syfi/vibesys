@@ -55,9 +55,6 @@ func readPolicy(root, configPath string) (graph, error) {
 		if err := g.add(c); err != nil {
 			return g, err
 		}
-		if err := requireExisting(root, g.Components[c.ID]); err != nil {
-			return g, err
-		}
 	}
 	for _, spec := range p.Discoveries {
 		adapter, ok := discoveryAdapters[spec.Adapter]
@@ -215,21 +212,30 @@ func (g *graph) add(c component) error {
 	return nil
 }
 
-// requireExisting rejects a declared component root or file that is absent from
-// the repository. A path that no longer exists never matches a changed file, so
-// a stale entry silently stops the component from selecting its jobs.
-func requireExisting(repoRoot string, c component) error {
-	for _, entry := range []struct {
-		key   string
-		paths []string
-	}{{"roots", c.Roots}, {"files", c.Files}} {
-		for _, rel := range entry.paths {
-			if _, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(rel))); err != nil {
-				return fmt.Errorf("component %q %s: path %q does not exist in the repository", c.ID, entry.key, rel)
+// readCurrentPolicy reads the policy of the checked-out tree and additionally
+// rejects any declared component root or file that is absent from it. A path
+// that does not exist never matches a changed file, so a stale entry silently
+// stops its component from selecting jobs. Historical snapshots (the base of a
+// comparison) go through readPolicy alone: they were valid when written.
+func readCurrentPolicy(root, configPath string) (graph, error) {
+	g, err := readPolicy(root, configPath)
+	if err != nil {
+		return g, err
+	}
+	for _, id := range g.Order {
+		c := g.Components[id]
+		for _, entry := range []struct {
+			key   string
+			paths []string
+		}{{"roots", c.Roots}, {"files", c.Files}} {
+			for _, rel := range entry.paths {
+				if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
+					return g, fmt.Errorf("component %q %s: path %q does not exist in the repository", id, entry.key, rel)
+				}
 			}
 		}
 	}
-	return nil
+	return g, nil
 }
 
 func (g graph) validate() error {

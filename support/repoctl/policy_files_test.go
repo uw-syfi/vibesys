@@ -125,13 +125,31 @@ func TestPolicyRejectsMissingComponentPaths(t *testing.T) {
 					if err := os.WriteFile(path, append(data, component...), 0600); err != nil {
 						t.Fatal(err)
 					}
-					_, err = readPolicy(root, "repoctl.toml")
+					_, err = readCurrentPolicy(root, "repoctl.toml")
 					want := `component "stale" ` + key + `: path "gone/path" does not exist`
 					if err == nil || !strings.Contains(err.Error(), want) {
-						t.Fatalf("readPolicy() error = %v; want %q", err, want)
+						t.Fatalf("readCurrentPolicy() error = %v; want %q", err, want)
 					}
 				})
 			}
 		}
+	}
+}
+
+// The base of a comparison is a historical snapshot: it may still declare paths
+// that were later removed, and must stay loadable so the change can be planned.
+func TestPolicySnapshotAllowsMissingComponentPaths(t *testing.T) {
+	root := fixtureRepo(t)
+	path := filepath.Join(root, "repoctl.toml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := append(data, "\n[[components]]\nid = \"stale\"\nfiles = [\"gone/path\"]\n"...)
+	if err := os.WriteFile(path, stale, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readPolicy(root, "repoctl.toml"); err != nil {
+		t.Fatalf("readPolicy() = %v; want a historical snapshot to load", err)
 	}
 }
