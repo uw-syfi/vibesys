@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_project.api import StateNamespace
+from vs_project.api.testing import scratch_state_directory
 from vs_sandbox.api.skypilot import (
     AckRequest,
     ClusterInfo,
@@ -112,8 +113,7 @@ class _Setup:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         (workspace / "candidate.py").write_text("candidate")
-        state = tmp_path / ".vibesys" / "state" / "skypilot"
-        state.mkdir(parents=True)
+        state = scratch_state_directory(tmp_path, "skypilot")
         self.network = network
         self.runner = _Runner()
         self.bridge = SkyPilotBridge(
