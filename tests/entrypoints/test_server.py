@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
+import threading
 from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
@@ -14,7 +16,7 @@ from string import ascii_lowercase
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis.strategies import integers, one_of, text
 from tests.entrypoints.support import (
     BUDGET_POLLS,
@@ -25,6 +27,7 @@ from tests.entrypoints.support import (
     FakeDetachedGateway,
     gateway_record,
 )
+from tests.support.thread_signals import non_main_thread_ids, requires_tgkill, send_to_thread
 
 import entrypoints.server as server_entrypoint
 import server.runtime as runtime_module
@@ -886,3 +889,72 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     assert options["web_assets"] == tmp_path.resolve()
     assert callable(options["tui_defaults"])
     assert observed["request"] is request
+
+
+@requires_tgkill
+@example(transports=1, target=1)
+@settings(max_examples=8, deadline=None)
+@given(transports=integers(min_value=1, max_value=3), target=integers(min_value=0, max_value=3))
+def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
+    transports: int, target: int
+) -> None:
+    # The kernel may hand a process SIGTERM to any thread while CPython runs
+    # handlers on the main thread, which is blocked driving the run. Aim it at
+    # the main thread or at any transport thread to force each interleaving.
+    child = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-155502 [S603]; the test runs its own fixed child module.
+        # > A real signal needs a real child process.
+        [sys.executable, "-m", "tests.entrypoints.foreground_run_child", str(transports)],
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline().strip() == "driving"
+        threads = [child.pid, *non_main_thread_ids(child.pid)]
+        send_to_thread(child.pid, threads[target % len(threads)], signal.SIGTERM)
+        # test-isolation: the deadline only guards a hang; a delivered stop returns at once
+        output, _ = child.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.communicate()
+        pytest.fail("SIGTERM did not interrupt the foreground run")
+    finally:
+        child.kill()
+    assert "cleanup shutdown=True" in output
+    assert child.returncode != 0
+
+
+def test_a_sigterm_during_the_foreground_run_shuts_the_runtime_down_and_interrupts_the_caller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stopping = threading.Event()
+    before = signal.getsignal(signal.SIGTERM)
+
+    class SignalledRuntime:
+        def __init__(self, **_options: object) -> None:
+            pass
+
+        def run(self, callback: Callable[[], object]) -> object:
+            return callback()
+
+        def drive(self, _request: object) -> None:
+            os.kill(os.getpid(), signal.SIGTERM)
+            # Blocks until the relay wakes this thread with the interrupt.
+            threading.Event().wait()
+
+        def shutdown(self) -> None:
+            stopping.set()
+
+    # test-isolation: replace the dynamic runtime import with a local fake to test signal wiring
+    monkeypatch.setattr(runtime_module, "ServerRuntime", SignalledRuntime)
+    # test-isolation: replace CLI parsing with a deterministic return-value fake
+    monkeypatch.setattr(server_entrypoint.cli, "parse_cli_invocation", lambda _argv: object())
+    # test-isolation: replace request construction with a deterministic return-value fake
+    monkeypatch.setattr(server_entrypoint.cli, "build_run_request", lambda _invocation: object())
+
+    with pytest.raises(KeyboardInterrupt):
+        main(["--control-socket", "/unused/control.sock", "--local"])
+
+    assert stopping.is_set()
+    assert signal.getsignal(signal.SIGTERM) is before

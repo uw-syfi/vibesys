@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import webbrowser
 from contextlib import contextmanager
@@ -30,6 +31,7 @@ from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
 from vs_github.api import GitHubCLI, GitHubCLIError
 from vs_project.api import Project
+from vs_sandbox.api import relay_signals
 
 _WEB_PORT_MAX = 65_535
 _DETACHED_START_TIMEOUT_SECONDS = 10.0
@@ -39,6 +41,8 @@ GATEWAY_STOP_TIMEOUT_SECONDS = WEBSOCKET_CLOSE_TIMEOUT_SECONDS + _GATEWAY_STOP_G
 """Transport close bound plus grace to observe the released instance files."""
 _DETACHED_POLL_SECONDS = 0.05
 _DETACHED_LOG_TAIL_BYTES = 4_096
+_INTERRUPT_SIGNAL = signal.SIGUSR1
+"""Private signal that wakes the main thread; only the relay sends it."""
 
 if TYPE_CHECKING:
     import argparse
@@ -51,19 +55,31 @@ if TYPE_CHECKING:
 
 @contextmanager
 def _termination_signal(runtime: ServerRuntime) -> Iterator[None]:
-    """Forward launcher termination into the server's cleanup boundary."""
-    previous = signal.getsignal(signal.SIGTERM)
+    """Forward launcher termination into the server's cleanup boundary.
 
-    def terminate(signum: int, frame: object) -> None:
+    The kernel may hand a process-directed SIGTERM to a transport thread, while
+    CPython runs Python handlers on the main thread only, so a handler installed
+    for SIGTERM is not run while the main thread is blocked in the run. The
+    relay observes SIGTERM on whichever thread took it, then interrupts the main
+    thread with a private wake signal that is always delivered to it.
+    """
+    main_thread = threading.get_ident()
+
+    def interrupt(signum: int, frame: object) -> None:
         del signum, frame
-        runtime.shutdown()
         raise KeyboardInterrupt
 
-    signal.signal(signal.SIGTERM, terminate)
+    def terminate(signum: int) -> None:
+        del signum
+        runtime.shutdown()
+        signal.pthread_kill(main_thread, _INTERRUPT_SIGNAL)
+
+    previous = signal.signal(_INTERRUPT_SIGNAL, interrupt)
     try:
-        yield
+        with relay_signals([signal.SIGTERM], terminate):
+            yield
     finally:
-        signal.signal(signal.SIGTERM, previous)
+        signal.signal(_INTERRUPT_SIGNAL, previous)
 
 
 def _control_socket_from_argv(argv: list[str]) -> Path | None:

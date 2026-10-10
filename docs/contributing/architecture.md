@@ -112,6 +112,7 @@ graph TD
     entrypoints --> vs_issue_tracker
     entrypoints --> vs_mcp
     entrypoints --> vs_project
+    entrypoints --> vs_sandbox
     headless --> vibesys
     launch --> vibesys
     launch --> vs_agent
