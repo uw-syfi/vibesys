@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import ValidationError
+from tests.support.started_operation import wait_until_started
 
 from vs_project.api import Project
 from vs_runtime.api import BenchmarkFailureKind
@@ -518,7 +519,7 @@ def test_cancellation_drains_owned_accuracy_execution(tmp_path: Path) -> None:
             sandbox,
         )
         operation = asyncio.create_task(executor.accuracy())
-        await asyncio.to_thread(sandbox.started.wait)
+        await wait_until_started(sandbox.started, operation)
         operation.cancel()
         sandbox.release.set()
         with pytest.raises(asyncio.CancelledError):
