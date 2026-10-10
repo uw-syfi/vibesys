@@ -7,7 +7,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from http import HTTPStatus
 from http.client import HTTPConnection
 from pathlib import Path
@@ -32,11 +31,13 @@ from server.runtime import (
     WebPortState,
 )
 from vs_project.api import Project
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from entrypoints.server import WebGatewayPortEffects, WebGatewayStopEffects
+    from vs_sim.api import Threads
 
 _LIVE_PORT = 8765
 _DEV_PORT = 5173
@@ -184,13 +185,15 @@ def _live_command(  # noqa: PLR0913  # lint-waiver: LW-101077 [PLR0913]; keep in
     return command
 
 
-def _wait_for_record(path: Path) -> WebInstanceRecord:
-    deadline = time.monotonic() + _RECORD_WAIT_SECONDS
-    while time.monotonic() < deadline:
+def _wait_for_record(path: Path, threads: Threads | None = None) -> WebInstanceRecord:
+    """Poll for the gateway's record on *threads*' clock (the real one by default)."""
+    clock = OsThreads() if threads is None else threads
+    deadline = clock.now() + _RECORD_WAIT_SECONDS
+    while clock.now() < deadline:
         record = WebInstanceRecord.discover(path, cleanup_stale=False)
         if record is not None:
             return record
-        time.sleep(0.05)
+        clock.sleep(0.05)
     raise SystemExit(f"vibesys web: gateway did not publish {path}")  # noqa: TRY003  # lint-waiver: LW-101078 [TRY003]; report the bounded detached-startup timeout
 
 

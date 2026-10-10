@@ -224,11 +224,9 @@
 {"path": "src/entrypoints/server.py", "rule": "signal", "count": 6}
 {"path": "src/entrypoints/server.py", "rule": "subprocess", "count": 5}
 {"path": "src/entrypoints/server.py", "rule": "threading", "count": 1}
-{"path": "src/entrypoints/server.py", "rule": "time", "count": 5}
 {"path": "src/entrypoints/web.py", "rule": "process", "count": 1}
 {"path": "src/entrypoints/web.py", "rule": "socket_io", "count": 1}
 {"path": "src/entrypoints/web.py", "rule": "subprocess", "count": 4}
-{"path": "src/entrypoints/web.py", "rule": "time", "count": 3}
 {"path": "src/server/api/protocol.py", "rule": "wall_clock", "count": 2}
 {"path": "src/server/chat/manager.py", "rule": "threading", "count": 1}
 {"path": "src/server/event_index.py", "rule": "fs_sync", "count": 2}
@@ -259,13 +257,11 @@
 {"path": "tests/conformance/test_server_transports.py", "rule": "socket", "count": 3}
 {"path": "tests/conformance/test_server_transports.py", "rule": "socket_io", "count": 1}
 {"path": "tests/conformance/test_server_transports.py", "rule": "threading", "count": 4}
-{"path": "tests/entrypoints/foreground_run_child.py", "rule": "threading", "count": 3}
 {"path": "tests/entrypoints/test_launcher.py", "rule": "process", "count": 7}
 {"path": "tests/entrypoints/test_launcher.py", "rule": "time", "count": 2}
 {"path": "tests/entrypoints/test_launcher_signals.py", "rule": "signal", "count": 11}
-{"path": "tests/entrypoints/test_server.py", "rule": "process", "count": 3}
-{"path": "tests/entrypoints/test_server.py", "rule": "signal", "count": 1}
-{"path": "tests/entrypoints/test_server.py", "rule": "subprocess", "count": 7}
+{"path": "tests/entrypoints/test_server.py", "rule": "process", "count": 2}
+{"path": "tests/entrypoints/test_server.py", "rule": "subprocess", "count": 4}
 {"path": "tests/entrypoints/test_web.py", "rule": "fs_sync", "count": 2}
 {"path": "tests/entrypoints/test_web.py", "rule": "process", "count": 1}
 {"path": "tests/entrypoints/test_web.py", "rule": "subprocess", "count": 11}

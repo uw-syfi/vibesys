@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from hypothesis import given
+from hypothesis.strategies import integers
 from tests.entrypoints.support import (
     IDLE_DIRECTORY,
     INSTANCE_PATH,
@@ -43,7 +45,7 @@ from entrypoints.web import (
     _wait_for_record,
 )
 from server.runtime import WebInstanceHold, WebPortObservation, WebPortState
-from vs_sim.api.testing import HANG_GUARD_S
+from vs_sim.api.testing import HANG_GUARD_S, SimThreads
 
 
 def _record() -> web.WebInstanceRecord:
@@ -182,36 +184,43 @@ def test_run_dev_invokes_vite_with_the_requested_address(
     assert calls[0][0][0] == ["pnpm", "dev", "--host", "127.0.0.1", "--port", "5173"]
 
 
-def test_wait_for_record_returns_a_published_record(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@given(polls_before_publication=integers(min_value=0, max_value=100))
+def test_wait_for_record_returns_a_published_record(polls_before_publication: int) -> None:
     record = _record()
+    polls = 0
 
-    def discover(path: Path, *, cleanup_stale: bool) -> web.WebInstanceRecord:
-        assert path == tmp_path / "record.json"
+    def discover(path: Path, *, cleanup_stale: bool) -> web.WebInstanceRecord | None:
+        nonlocal polls
+        assert path == Path("record.json")
         assert not cleanup_stale
-        return record
+        polls += 1
+        return record if polls > polls_before_publication else None
 
-    # test-isolation: discovery is replaced to isolate the polling helper.
-    monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
+    threads = SimThreads()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        # test-isolation: discovery is replaced to isolate the polling helper.
+        monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
 
-    assert _wait_for_record(tmp_path / "record.json") == record
+        found = threads.run(lambda: _wait_for_record(Path("record.json"), threads))
+
+    assert found == record
+    assert polls == polls_before_publication + 1
 
 
-def test_wait_for_record_reports_a_startup_timeout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_wait_for_record_reports_a_startup_timeout() -> None:
     def discover(path: Path, *, cleanup_stale: bool) -> None:
         assert path
         assert not cleanup_stale
 
-    # test-isolation: discovery is replaced to exercise the timeout branch.
-    monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
-    # test-isolation: shorten the bounded wait for a deterministic timeout test.
-    monkeypatch.setattr(web, "_RECORD_WAIT_SECONDS", 0.0)
+    threads = SimThreads()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        # test-isolation: discovery is replaced to exercise the timeout branch.
+        monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
 
-    with pytest.raises(SystemExit, match="did not publish"):
-        _wait_for_record(tmp_path / "record.json")
+        with pytest.raises(SystemExit, match="did not publish"):
+            threads.run(lambda: _wait_for_record(Path("record.json"), threads))
+
+    assert threads.now() >= web._RECORD_WAIT_SECONDS  # noqa: SLF001  # lint-waiver: LW-101699 [SLF001]; the bound is the behavior under test
 
 
 def test_run_live_launches_gateway_and_prints_browser_links(
