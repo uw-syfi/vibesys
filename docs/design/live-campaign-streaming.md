@@ -130,16 +130,18 @@ constants in `tests/vibesys/orchestration/dynamic/loop/_harness.py`, not a
 `DynamicStrategyState` holding `attempts: tuple[AttemptRecord, ...]`, not
 `workstreams: tuple[DynamicWorkstream, ...]`.
 
-**"Telemetry inventory," "The gap," and "Scalable packaging design" below
-describe the `upstream/main` engine (`DynamicStrategyState`/`AttemptRecord`),
-not the one this branch's own `orchestration/dynamic/` currently runs.**
-That is a deliberate choice, not an oversight: `strategy/_state.py` is what
-future telemetry work will actually extend, and describing a pre-migration
-engine as the design target would go stale the moment this branch rebases.
-The cost is that those sections' file:line citations do not resolve inside
-this branch's own checked-out tree today; re-verify them against current
-`upstream/main` before relying on them, or after this branch syncs past
-`712586df6`. "Backend PoC" is the one exception: it touches only
+**Everywhere below that cites `DynamicStrategyState`/`AttemptRecord`/
+`strategy/_state.py`/`core_policy` (the viewpoint taxonomy's
+workstream-specific row and "Backend path" included, not only "Telemetry
+inventory"/"The gap"/"Scalable packaging design") describes the
+`upstream/main` engine, not the one this branch's own `orchestration/dynamic/`
+currently runs.** That is a deliberate choice, not an oversight:
+`strategy/_state.py` is what future telemetry work will actually extend, and
+describing a pre-migration engine as the design target would go stale the
+moment this branch rebases. The cost is that those citations do not resolve
+inside this branch's own checked-out tree today; re-verify them against
+current `upstream/main` before relying on them, or after this branch syncs
+past `712586df6`. "Backend PoC" is the one exception: it touches only
 `src/server/`, is verified directly against this branch's own working tree
 (see its own commit citations), and does not depend on either engine.
 
@@ -252,11 +254,12 @@ persisted but not streamed, and not computed anywhere.
   down to "most recent one."
 - **The richest per-workstream detail, in live state, lost at settlement.**
   `AttemptRecord` (`strategy/_state.py`) carries `blockers` (the ordered
-  history of failed/rejected turns), `turns_spent`, `judge_invocation`,
-  `review_evidence`, and the current `turn`, and none of it is pruned while
-  the run is live. `on_settled()`'s `_round()` (`strategy/_attempt_events.py`)
-  collapses this ~29-field record to the 13-field `RoundRecord` (`sequence`,
-  `outcome`, `summary`, `metrics`, ...), dropping every field above; no "how
+  history of turns with a `BlockerKind` of `failed`, `rejected`, or
+  `no_reply`), `turns_spent`, `judge_invocation`, `review_evidence`, and the
+  current `turn`, and none of it is pruned while the run is live.
+  `on_settled()`'s `_round()` (`strategy/_attempt_events.py`) collapses this
+  30-field record to the 15-field `RoundRecord` (`sequence`, `outcome`,
+  `summary`, `metrics`, ...), dropping every field above; no "how
   many tries did this take" counter survives settlement anywhere. A
   telemetry tap sourced from `RoundRecord` or the read model inherits this
   loss; one sourced from live `AttemptRecord` at its `DONE` transition would
@@ -346,16 +349,18 @@ backend and a live `CampaignRecord`:
 1. **Workstream state is computed, then collapsed, not "never projected."**
    The live engine already computes true portfolio concurrency:
    `active()`/`capacity()` (`strategy/_context.py`) and
-   `project_strategy_state()` (`core_policy/_projection.py`) both derive an
-   `in_flight` tuple of every non-DONE attempt from
-   `DynamicStrategyState.attempts` on every call. `project_strategy_state()`
-   then collapses it to one id, `active = in_flight[-1] if in_flight else
-   None`, because `AgentRunProjection` was designed for one hypothesis at a
-   time and has not been redesigned for the portfolio engine. Settlement
-   compounds this: `on_settled()`'s `_round()` (`strategy/_attempt_events.py`)
-   flattens a live, ~29-field `AttemptRecord` (blockers, turns_spent,
-   judge_invocation, review_evidence, the current turn) to a 13-field
-   `RoundRecord`, and `DynamicStrategyState.attempts` itself is never pruned
+   `project_strategy_state()` (`core_policy/_projection.py`) both derive a
+   similar `in_flight` tuple of non-DONE attempts from
+   `DynamicStrategyState.attempts` on every call (not byte-identical:
+   `project_strategy_state()`'s also excludes withdrawn attempts).
+   `project_strategy_state()` then collapses it to one id, `active =
+   in_flight[-1] if in_flight else None`, because `AgentRunProjection` was
+   designed for one hypothesis at a time and has not been redesigned for the
+   portfolio engine. Settlement compounds this: `on_settled()`'s `_round()`
+   (`strategy/_attempt_events.py`) flattens a live, 30-field `AttemptRecord`
+   (blockers, turns_spent, judge_invocation, review_evidence, the current
+   turn) to a 15-field `RoundRecord`, and `DynamicStrategyState.attempts`
+   itself is never pruned
    of DONE records, so the detail exists in durable live state for the run's
    whole lifetime; it is only the derived read model that is thin.
    **Correction from the first draft:** this gap was previously described in
