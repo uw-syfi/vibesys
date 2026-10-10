@@ -93,8 +93,16 @@ event sequences, with no clocks at all.
 3. Remove the source with an injected interface, a Fake, or a synchronization
    point. Do not mask it with a sleep or retry.
 4. Prove it: the repeated and parallel runs from the previous section pass,
-   and a test that would have caught the flaky behavior now fails
-   deterministically when the bug is reintroduced.
+   and the failure reproduces deterministically on the old code (a pinned
+   seed or ordering, or the bad condition forced through the test's seams)
+   and does not on the new code.
+5. Decide where the root cause lives. If the flake exposed a product defect
+   (a race, a missed drain, a lost update), add a regression test of that
+   product behavior, as for any bug fix. If the defect is in the test itself
+   (it read the wrong stream, polled a clock it then advanced, shared state
+   with a neighbor, depended on what the runner has installed), fix the test
+   and stop: do not add a test that tests the test. Put the deterministic
+   reproduction from step 4 in the PR description instead.
 
 A sleep that is the actual subject of an opt-in real-contract test needs a
 `test-isolation: <reason>` comment. Where a language has a test-isolation
