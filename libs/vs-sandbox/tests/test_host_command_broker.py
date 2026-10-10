@@ -12,6 +12,7 @@ import base64
 import json
 import posixpath
 import socket
+import tempfile
 import threading
 import uuid
 from contextlib import contextmanager
@@ -522,6 +523,29 @@ class TestRoots:
         assert launcher.commands == []
 
 
+def _status_when_the_broker_drops(*, argument_bytes: int) -> int:
+    """Run the client against a broker that accepts a connection and closes it unread."""
+    with tempfile.TemporaryDirectory() as directory, pytest.MonkeyPatch.context() as env:
+        path = Path(directory) / "dead.sock"
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(path))
+        server.listen(1)
+
+        def accept_and_drop() -> None:
+            connection, _ = server.accept()
+            connection.close()
+
+        thread = threading.Thread(target=accept_and_drop)
+        thread.start()
+        env.setenv(COMMAND_BROKER_SOCKET_ENV, str(path))
+        env.setenv(COMMAND_BROKER_TOKEN_ENV, "t")
+        try:
+            return client_main(["--", "x" * argument_bytes])
+        finally:
+            thread.join()
+            server.close()
+
+
 class TestClient:
     def test_without_a_broker_it_refuses(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -540,32 +564,25 @@ class TestClient:
         assert "--gate takes one of" in capsys.readouterr().err
 
     def test_a_dropped_connection_is_a_failure_not_a_success(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
+        self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        path = tmp_path / "dead.sock"
-        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        server.bind(str(path))
-        server.listen(1)
-
-        def accept_and_drop() -> None:
-            connection, _ = server.accept()
-            connection.close()
-
-        thread = threading.Thread(target=accept_and_drop)
-        thread.start()
-        monkeypatch.setenv(COMMAND_BROKER_SOCKET_ENV, str(path))
-        monkeypatch.setenv(COMMAND_BROKER_TOKEN_ENV, "t")
-        try:
-            status = client_main(["--", "true"])
-        finally:
-            thread.join()
-            server.close()
-
-        assert status == 1
+        assert _status_when_the_broker_drops(argument_bytes=1) == 1
         assert "closed the connection" in capsys.readouterr().err
+
+    def test_a_broker_that_drops_before_reading_a_large_request_is_a_dropped_connection(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The request outgrows the socket buffer, so the send blocks until the
+        # broker closes and then fails with a broken pipe or reset, every time.
+        assert _status_when_the_broker_drops(argument_bytes=4 * 1024 * 1024) == 1
+        assert "closed the connection" in capsys.readouterr().err
+
+    @settings(max_examples=25, deadline=None)
+    @given(argument_bytes=st.integers(min_value=0, max_value=2 * 1024 * 1024))
+    def test_a_dropped_connection_never_depends_on_how_much_was_sent(
+        self, argument_bytes: int
+    ) -> None:
+        assert _status_when_the_broker_drops(argument_bytes=argument_bytes) == 1
 
     def test_the_client_imports_only_the_standard_library(self) -> None:
         """It runs as one file under the agent image's python3, with no VibeSys packages."""
