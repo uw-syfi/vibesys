@@ -594,6 +594,9 @@ class TestLandlockEntryPoint:
     def test_restricts_then_execs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         applied: list[landlock.LandlockPolicy] = []
         execs: list[tuple[str, list[str]]] = []
+        # `main` changes this process's directory; registering the current one
+        # first makes monkeypatch restore it when the test ends.
+        monkeypatch.chdir(Path.cwd())
         monkeypatch.setattr(landlock, "restrict", lambda policy: applied.append(policy) or 1)
         monkeypatch.setattr(landlock.os, "execvp", lambda file, args: execs.append((file, args)))
         policy = landlock.policy_for(read_paths=(), write_paths=(tmp_path,), chdir=tmp_path)

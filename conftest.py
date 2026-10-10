@@ -20,6 +20,7 @@ from tests.support.scratch_tree import remove_scratch_tree
 pytest_plugins = [
     "vs_sim_pytest",
     "tests.support.isolated_environment",
+    "tests.support.cwd_hygiene",
     "tests.support.path_hygiene",
     "tests.support.sharding",
 ]
