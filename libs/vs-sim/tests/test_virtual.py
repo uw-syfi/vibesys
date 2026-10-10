@@ -6,7 +6,7 @@ import asyncio
 import threading
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_sim.api.testing import (
@@ -175,6 +175,7 @@ def test_a_failure_in_main_propagates_and_leaves_no_loop_behind() -> None:
         asyncio.get_running_loop()
 
 
+@example(durations=[0.5, 0.5 + 2.0**-52, 0.5])
 @given(DURATIONS)
 def test_the_same_run_leaves_the_same_trace(durations: list[float]) -> None:
     def trace_of_one_run() -> EventTrace:
@@ -193,7 +194,9 @@ def test_the_same_run_leaves_the_same_trace(durations: list[float]) -> None:
     first, second = trace_of_one_run(), trace_of_one_run()
     assert first.first_difference(second) is None
     advances = [event for event in first.events if event[0] == "advance"]
-    assert len(advances) == len({1.0 + seconds for seconds in durations})
+    # The loop treats due times closer than its clock resolution as one instant, so adjacent
+    # floats may share a jump; it never jumps more often than there are distinct due times.
+    assert 1 <= len(advances) <= len({1.0 + seconds for seconds in durations})
 
 
 def test_the_trace_records_task_order_and_clock_jumps() -> None:
@@ -307,6 +310,10 @@ def test_different_schedule_seeds_reach_different_orders() -> None:
     assert _wake_order(6, 1.0, None) == list(range(6))
 
 
+# Seed 358 with four callbacks once left one of them unrun (#1674). The `ci` Hypothesis profile
+# is derandomized with few examples, so a rare failing pair stays hidden: pin it, and search deeper.
+@example(seed=358, count=4)
+@settings(max_examples=300)
 @given(st.integers(0, 2**32), st.integers(1, 12))
 def test_ready_callbacks_run_in_a_seeded_order_and_all_run(seed: int, count: int) -> None:
     def order(schedule_seed: int | None) -> list[int]:
@@ -326,3 +333,91 @@ def test_ready_callbacks_run_in_a_seeded_order_and_all_run(seed: int, count: int
     seeded = order(seed)
     assert seeded == order(seed)
     assert sorted(seeded) == list(range(count))
+
+
+_PLANS = st.lists(
+    st.tuples(
+        st.sampled_from(["soon", "nested", "cancelled", "timer", "threadsafe"]),
+        st.floats(min_value=0.0, max_value=3.0),
+    ),
+    min_size=1,
+    max_size=12,
+)
+
+
+def _run_plan(plan: list[tuple[str, float]], schedule_seed: int | None) -> list[int]:
+    """Run one callback per plan entry by its kind; return the ids that ran, in order."""
+    clock = VirtualClock()
+    ran: list[int] = []
+
+    async def main() -> None:
+        loop = asyncio.get_running_loop()
+        for i, (kind, delay) in enumerate(plan):
+            if kind == "soon":
+                loop.call_soon(ran.append, i)
+            elif kind == "nested":
+                loop.call_soon(lambda i=i: loop.call_soon(ran.append, i))
+            elif kind == "cancelled":
+                loop.call_soon(ran.append, -1 - i).cancel()
+                loop.call_soon(ran.append, i)
+            elif kind == "timer":
+                loop.call_later(delay, ran.append, i)
+            else:
+                await asyncio.to_thread(loop.call_soon_threadsafe, ran.append, i)
+        await clock.sleep(10.0)
+
+    run_virtual(clock, main(), schedule_seed=schedule_seed)
+    return ran
+
+
+@settings(max_examples=200)
+@given(st.integers(0, 2**32), _PLANS)
+def test_every_callback_runs_exactly_once_under_every_schedule(
+    seed: int, plan: list[tuple[str, float]]
+) -> None:
+    """Callbacks scheduled from callbacks, threads, timers and cancelled handles are never lost."""
+    expected = list(range(len(plan)))
+    assert sorted(_run_plan(plan, None)) == expected
+    seeded = _run_plan(plan, seed)
+    assert sorted(seeded) == expected
+
+
+@settings(max_examples=200)
+@given(st.integers(0, 2**32), _PLANS)
+def test_a_schedule_seed_replays_callbacks_scheduled_on_the_loop(
+    seed: int, plan: list[tuple[str, float]]
+) -> None:
+    """Order is a function of the seed for work scheduled on the loop (a thread's hand-off is real time)."""
+    on_loop = [(kind, delay) for kind, delay in plan if kind != "threadsafe"]
+    if not on_loop:
+        return
+    assert _run_plan(on_loop, seed) == _run_plan(on_loop, seed)
+
+
+_ADJACENT = st.lists(st.integers(0, 3).map(lambda k: 0.5 + k * 2.0**-52), min_size=1, max_size=8)
+
+
+@example(durations=[0.5, 0.5 + 2.0**-52, 0.5], seed=None)
+@settings(max_examples=300)
+@given(_ADJACENT, st.none() | st.integers(0, 2**32))
+def test_sleeps_wake_by_due_time_even_when_due_times_are_one_float_step_apart(
+    durations: list[float], seed: int | None
+) -> None:
+    """Without a seed, a tie never lets a timer overtake one that is really due earlier; with one, none is lost."""
+    clock = VirtualClock(1.0)
+    woke: list[int] = []
+
+    async def sleeper(index: int, seconds: float) -> None:
+        await clock.sleep(seconds)
+        woke.append(index)
+
+    async def main() -> None:
+        await asyncio.gather(*(sleeper(i, d) for i, d in enumerate(durations)))
+
+    run_virtual(clock, main(), schedule_seed=seed)
+    due = [1.0 + d for d in durations]
+    assert sorted(woke) == list(range(len(durations)))
+    if seed is None:
+        assert woke == sorted(range(len(durations)), key=lambda i: (due[i], i))
+    # Under a seed, due times closer than the loop's clock resolution are one instant, and
+    # the callbacks that instant makes ready run in a seeded order, so only the set is fixed.
