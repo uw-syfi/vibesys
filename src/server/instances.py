@@ -150,6 +150,41 @@ class InstanceStopResult(BaseModel):
     """How the server was reached; ``None`` when nothing was sent."""
 
 
+class DetachedLaunchErrorCode(StrEnum):
+    """Failure codes ``vibesys --detach`` owns; configuration codes pass through as is."""
+
+    REGISTRY_UNAVAILABLE = "registry_unavailable"
+    """The per-user runtime root is missing, foreign, or open to other users."""
+    RUN_ALREADY_LIVE = "run_already_live"
+    """``--resume`` named a run a live detached server on this node is driving."""
+    SERVER_START_FAILED = "server_start_failed"
+    """The detached server exited, or did not serve, before it was ready."""
+
+
+class DetachedLaunchFailure(BaseModel):
+    """What ``vibesys --detach`` prints on stdout, as one line, when it starts nothing.
+
+    On success the line is a ``LiveInstanceRecord`` instead; a reader tells them
+    apart by ``outcome``, which a record never has. ``code`` is a
+    ``DetachedLaunchErrorCode`` or the code of the run's configuration
+    diagnostic (``invalid_arguments``, ``resume_not_found``, ...), and
+    ``exit_code`` is the process's exit status.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: Literal[1] = 1
+    outcome: Literal["failed"] = "failed"
+    code: str
+    stage: str
+    message: str
+    exit_code: PositiveInt
+    log_path: str | None = None
+    """The detached server's log, when one was started."""
+    live_instance: LiveInstanceRecord | None = None
+    """The server already driving the run, for ``run_already_live``: attach to it."""
+
+
 # --- pure core -------------------------------------------------------------
 
 
@@ -213,6 +248,16 @@ def survey(observations: Iterable[InstanceObservation]) -> Survey:
         unverified=tuple(sorted(unverified)),
         dead=tuple(sorted(dead)),
     )
+
+
+def driving(listing: InstanceList, run_id: str) -> LiveInstanceRecord | None:
+    """Return the live server already driving ``run_id``, if any.
+
+    Run ids are generated per experiment, so a match on this node is the same
+    run. A server still starting has not published its run id; the run's own
+    write lease is what refuses a second writer in that window.
+    """
+    return next((record for record in listing.instances if record.run_id == run_id), None)
 
 
 # --- interface and implementations -----------------------------------------

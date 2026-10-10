@@ -20,11 +20,14 @@ from entrypoints import cli
 from entrypoints.web_assets import WebAssetBundle
 from launch import default_runs
 from server.instances import (
+    DetachedLaunchErrorCode,
+    DetachedLaunchFailure,
     FileInstanceStore,
     InstanceHold,
     InstanceStatus,
     LiveInstanceRecord,
     LiveRegistry,
+    driving,
     host_facts,
     instance_root,
     instance_run_directory,
@@ -455,18 +458,28 @@ def _start_detached_child(  # noqa: PLR0913  # lint-waiver: LW-178204 [PLR0913];
             return value
         status = process.poll()
         if status is not None:
-            raise RuntimeError(
-                _detached_failure(f"{name} exited with status {status}", log_path, output)
+            raise _DetachedStartError(
+                _detached_failure(f"{name} exited with status {status}", log_path, output),
+                log_path,
             )
         effects.sleep(_DETACHED_POLL_SECONDS)
     _stop_detached(process)
-    raise RuntimeError(
+    raise _DetachedStartError(
         _detached_failure(
             f"{name} did not become ready within {_DETACHED_START_TIMEOUT_SECONDS:g} seconds",
             log_path,
             output,
-        )
+        ),
+        log_path,
     )
+
+
+class _DetachedStartError(RuntimeError):
+    """A detached server that exited or never became ready; names its log."""
+
+    def __init__(self, message: str, log_path: Path) -> None:
+        super().__init__(message)
+        self.log_path = log_path
 
 
 def _spawn_detached_instance(
@@ -799,8 +812,74 @@ def _discover_web_instance(path: Path, threads: Threads | None = None) -> WebIns
         clock.sleep(0.05)
 
 
-def _launch_detached_instance(arguments: list[str]) -> None:
-    """Validate, spawn a headless detached server, and print its record as JSON."""
+def _launch_detached_instance(
+    arguments: list[str], effects: _DetachedGatewayEffects = _DETACHED_EFFECTS
+) -> None:
+    """Validate, spawn a headless detached server, and print one JSON line.
+
+    The line is the server's ``LiveInstanceRecord`` on success (exit 0), else
+    a ``DetachedLaunchFailure`` (exit nonzero, its ``exit_code``) with the same
+    message, for a person, on stderr. ``--resume`` starts the stopped or
+    crashed run under this process's interpreter, so a detached resume runs
+    whatever code the invoked ``vibesys`` command points at.
+    """
+    try:
+        record = _start_detached_instance(arguments, effects)
+    except ConfigurationError as exc:
+        diagnostic = exc.diagnostic
+        failure = DetachedLaunchFailure(
+            code=diagnostic.code,
+            stage=diagnostic.stage,
+            message=diagnostic.message,
+            exit_code=diagnostic.exit_code,
+        )
+    except _DetachedLiveRunError as exc:
+        failure = DetachedLaunchFailure(
+            code=DetachedLaunchErrorCode.RUN_ALREADY_LIVE,
+            stage="resume_resolution",
+            message=str(exc),
+            exit_code=1,
+            live_instance=exc.record,
+        )
+    except PermissionError as exc:
+        failure = DetachedLaunchFailure(
+            code=DetachedLaunchErrorCode.REGISTRY_UNAVAILABLE,
+            stage="registry",
+            message=str(exc),
+            exit_code=1,
+        )
+    except _DetachedStartError as exc:
+        failure = DetachedLaunchFailure(
+            code=DetachedLaunchErrorCode.SERVER_START_FAILED,
+            stage="server_start",
+            message=str(exc),
+            exit_code=1,
+            log_path=str(exc.log_path),
+        )
+    else:
+        sys.stdout.write(record.model_dump_json() + "\n")
+        return
+    sys.stdout.write(failure.model_dump_json() + "\n")
+    sys.stderr.write(f"vibesys: {failure.message}\n")
+    raise SystemExit(failure.exit_code)
+
+
+class _DetachedLiveRunError(RuntimeError):
+    """``--resume`` named a run another live detached server is driving."""
+
+    def __init__(self, record: LiveInstanceRecord) -> None:
+        super().__init__(
+            f"run {record.run_id!r} is already live in detached server {record.id}; "
+            "attach to it, or stop it first with `vibesys instances stop "
+            f"{record.id}`"
+        )
+        self.record = record
+
+
+def _start_detached_instance(
+    arguments: list[str], effects: _DetachedGatewayEffects
+) -> LiveInstanceRecord:
+    """Reject a malformed or already-live run, then spawn it; raise on any failure."""
     if _control_socket_from_argv(arguments) is not None:
         cli.configuration_error(
             "--detach without --web chooses its own control socket; drop --control-socket",
@@ -808,14 +887,16 @@ def _launch_detached_instance(arguments: list[str]) -> None:
             stage="argument_parsing",
         )
     # Reject a malformed run before anything is spawned, so the operator sees
-    # the diagnostic here rather than in a detached server's log.
-    cli.parse_cli_invocation(_headless_argv(arguments))
-    try:
-        record = _spawn_detached_instance(arguments, instance_root(os.environ, os.getuid()))
-    except (RuntimeError, PermissionError) as exc:
-        sys.stderr.write(f"{exc}\n")
-        raise SystemExit(1) from None
-    sys.stdout.write(record.model_dump_json() + "\n")
+    # the diagnostic here rather than in a detached server's log. Resume
+    # resolution happens here too, so ``resume`` is the run id it chose.
+    invocation = cli.parse_cli_invocation(_headless_argv(arguments))
+    root = instance_root(os.environ, os.getuid())
+    resume = invocation.args.resume
+    if isinstance(resume, str):
+        live = driving(LiveRegistry(FileInstanceStore(root)).list(), resume)
+        if live is not None:
+            raise _DetachedLiveRunError(live)
+    return _spawn_detached_instance(arguments, root, effects)
 
 
 class _RegistryPublisher:
