@@ -55,7 +55,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_core.api import RunEnvelope
-from vs_project.api import Project, StoredEnvelope
+from vs_project.api import FakeStateStores, Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sim.api.testing import run_virtual
@@ -69,6 +69,7 @@ if TYPE_CHECKING:
     from vibesys.api import CoreEvent, RunHandle
     from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
+    from vs_project.api import StateStoreFactory
     from vs_runtime.api.infrastructure import StopTimer
     from vs_sandbox.api import ComputeBackendImpl
     from vs_slurm.api import SlurmProcess
@@ -410,10 +411,22 @@ class LoopInput:
     agent_config: Path
     connector: FakeConnector
     """The in-process Fake cluster; pass it to :func:`run_request` as ``slurm_process``."""
+    state_stores: FakeStateStores | None
+    """The run's durable records, kept across a simulated crash; ``None`` is the real ``.vibesys``.
+
+    Pass it to :func:`run_request` as ``state_stores``. The Fake commits and fences exactly as
+    the local store does (both pass ``test_state_store_contract``), without an fsync per read.
+    """
 
     @classmethod
-    def create(cls, base: Path, *, poll_interval_s: float = 1.0) -> LoopInput:
-        """Write the input project, the executing cluster, and its Slurm config."""
+    def create(
+        cls, base: Path, *, poll_interval_s: float = 1.0, on_disk_state: bool = False
+    ) -> LoopInput:
+        """Write the input project, the executing cluster, and its Slurm config.
+
+        The run's durable records live in memory unless ``on_disk_state``, which keeps
+        the product's fsynced ``.vibesys`` store for the scenarios that prove it.
+        """
         root = base / "project"
         root.mkdir(parents=True)
         (root / "OBJECTIVE.md").write_text("Raise queue throughput.\n", encoding="utf-8")
@@ -444,7 +457,18 @@ class LoopInput:
         )
         agent_config = base / "agent.toml"
         agent_config.write_text(_AGENT_CONFIG, encoding="utf-8")
-        return cls(root, cluster, config, agent_config, connector)
+        return cls(
+            root,
+            cluster,
+            config,
+            agent_config,
+            connector,
+            None if on_disk_state else FakeStateStores(),
+        )
+
+    def project(self) -> Project:
+        """Open the input project over the run's state stores."""
+        return Project.open(self.root, state_stores=self.state_stores)
 
     def hold_jobs(self) -> None:
         """Leave every job submitted from now on pending until it is cancelled."""
@@ -544,6 +568,7 @@ def run_request(  # noqa: PLR0913
     clock: CrashableClock | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     slurm_process: SlurmProcess | None = None,
+    state_stores: StateStoreFactory | None = None,
 ) -> LoopRun:
     """Execute a built request through the production host composition.
 
@@ -566,6 +591,7 @@ def run_request(  # noqa: PLR0913
             # repository must exist on disk: these runs use the product's real Git.
             git_repository=None,
             slurm_process=slurm_process,
+            state_stores=state_stores,
         )
     )
     events: list[CoreEvent] = []
@@ -592,11 +618,13 @@ def run_request(  # noqa: PLR0913
 
     finished = asyncio.run(run()) if clock is None else run_virtual(clock, run())
     if finished.error is None:
-        _assert_invariants(request, finished)
+        _assert_invariants(request, finished, state_stores)
     return finished
 
 
-def _assert_invariants(request: RunRequest, run: LoopRun) -> None:
+def _assert_invariants(
+    request: RunRequest, run: LoopRun, state_stores: StateStoreFactory | None
+) -> None:
     """Fail the scenario when the run's own records violate a loop invariant.
 
     A run that raised (a crash or stall) has no terminal event by design, so only runs
@@ -605,7 +633,7 @@ def _assert_invariants(request: RunRequest, run: LoopRun) -> None:
     root = request.project_root
     records = RunRecords.from_core(
         [event.model_dump(mode="json") for event in run.events],
-        load_envelope(root, run.run_id),
+        load_envelope(Project.open(root, state_stores=state_stores), run.run_id),
         root.parent / "cluster",
         Project.log_directory_for(root, run.run_id),
     )
@@ -627,9 +655,9 @@ def assert_run_live(envelope: Mapping[str, Any] | None, end: End = End.TERMINAL)
     assert_live(Journal.from_ledger(core), core, Budget(retries=core.run.limits.max_retries), end)
 
 
-def load_envelope(root: Path, run_id: str) -> dict[str, Any] | None:
+def load_envelope(project: Project, run_id: str) -> dict[str, Any] | None:
     """Return the run's committed envelope, or None when none was committed."""
-    stored = Project.open(root).state_store(run_id).load()
+    stored = project.stored_record(run_id)
     if not isinstance(stored, StoredEnvelope):
         return None
     envelope: dict[str, Any] = json.loads(stored.payload)["envelope"]
@@ -653,8 +681,8 @@ class CoreRecords:
         """Load the run's committed envelope; fail when none was committed."""
         self.loop_input = loop_input
         self.run_id = run_id
-        self.project = Project.open(loop_input.root)
-        envelope = load_envelope(loop_input.root, run_id)
+        self.project = loop_input.project()
+        envelope = load_envelope(self.project, run_id)
         assert envelope is not None, f"no committed record for {run_id}"
         self.envelope: dict[str, Any] = envelope
 

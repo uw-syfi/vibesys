@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from vibesys.config import Config
     from vibesys.constants import ComputeBackend
     from vs_agent.api import AgentEventSink
-    from vs_project.api import GitRepositoryFactory, Project
+    from vs_project.api import GitRepositoryFactory, Project, StateStoreFactory
     from vs_runtime.api.infrastructure import (
         ProjectRunResources,
         RunEnvironmentResources,
@@ -295,15 +295,19 @@ class LocalRunIntegration:
         self,
         git_repository: GitRepositoryFactory | None = None,
         slurm_process: SlurmProcess | None = None,
+        state_stores: StateStoreFactory | None = None,
     ) -> None:
         """Compose a durable journal with direct invocation control.
 
         ``git_repository`` builds the run's ``GitRepository`` implementations; ``None``
         runs the Git CLI. ``slurm_process`` replaces the Slurm transport's process
         boundary for the run's evaluations; ``None`` runs the configured programs.
+        ``state_stores`` opens each run's ``StateStore``; ``None`` is the local
+        crash-atomic one.
         """
         self.git_repository = git_repository
         self.slurm_process = slurm_process
+        self.state_stores = state_stores
         self.events = EventJournal()
         self.agent_events = CoreAgentEventSink(self.events.record)
         self.control = create_run_control_channel(_CoreRunControlEvents(self.events))

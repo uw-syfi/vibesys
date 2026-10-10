@@ -46,7 +46,12 @@ def test_no_better_candidate_keeps_a_trusted_input_and_still_succeeds(tmp_path: 
     loop_input = LoopInput.create(tmp_path)
     agents = _one_candidate(_FAILS_ACCURACY)
 
-    run = run_request(loop_input.request(), agents, slurm_process=loop_input.connector)
+    run = run_request(
+        loop_input.request(),
+        agents,
+        slurm_process=loop_input.connector,
+        state_stores=loop_input.state_stores,
+    )
 
     assert run.error is None
     assert (run.succeeded, run.status) == (True, RunStatus.COMPLETED)

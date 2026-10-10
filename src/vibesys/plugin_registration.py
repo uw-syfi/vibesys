@@ -116,10 +116,9 @@ class RuntimeRecordProjector[S: StrategyState]:
 
     def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
         """Project the last committed record, or identity and status when none exists."""
-        # Probe absence first: opening the store would create it for a run that has none.
-        if project.state.state_store_namespace(run_id).read_bytes("store.json") is None:
+        stored = project.stored_record(run_id)
+        if stored is None:
             return RunView(run_id=run_id, loop=loop, status=status)
-        stored = project.state_store(run_id).load()
         if not isinstance(stored, StoredEnvelope):
             raise ContractError(("runtime",), "a run without a readable record has no projection")
         record = self.record_type.decode(stored, self.operations)

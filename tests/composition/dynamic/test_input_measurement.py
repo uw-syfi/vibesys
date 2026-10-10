@@ -53,8 +53,12 @@ def _candidate_jobs(rounds: int) -> int:
     return rounds
 
 
-def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> None:
-    loop_input = LoopInput.create(tmp_path)
+@pytest.mark.parametrize("on_disk_state", [False, True], ids=["memory-store", "fsynced-store"])
+def test_permanent_input_failure_survives_a_crash_and_resume(
+    tmp_path: Path, *, on_disk_state: bool
+) -> None:
+    # The fsynced store is the product's: one crash and resume proves it end to end.
+    loop_input = LoopInput.create(tmp_path, on_disk_state=on_disk_state)
     _failing_input(loop_input)
     request = loop_input.request(max_rounds=2)
     clock = simulated_clock()
@@ -70,7 +74,13 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
         .implement("H1", edit_to(2, "H1"))
         .judge("H1", PASS)
     )
-    crashed = run_request(request, first, clock=clock, slurm_process=loop_input.connector)
+    crashed = run_request(
+        request,
+        first,
+        clock=clock,
+        slurm_process=loop_input.connector,
+        state_stores=loop_input.state_stores,
+    )
     assert isinstance(crashed.error, HostCrashedError)
     assert loop_input.sbatch_count() == _input_jobs() + _candidate_jobs(1)
     started_from: list[int] = []
@@ -92,6 +102,7 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
         second,
         clock=clock,
         slurm_process=loop_input.connector,
+        state_stores=loop_input.state_stores,
     )
 
     resumed.raise_error()
@@ -150,7 +161,12 @@ def test_transient_input_failure_is_retried_within_its_bound(tmp_path: Path, fai
     counter = _interrupt_input_evaluator(loop_input, tmp_path, failures)
     agents = _script(ScriptedAgents(), 0, 1)
 
-    run = run_request(loop_input.request(max_rounds=1), agents, slurm_process=loop_input.connector)
+    run = run_request(
+        loop_input.request(max_rounds=1),
+        agents,
+        slurm_process=loop_input.connector,
+        state_stores=loop_input.state_stores,
+    )
 
     assert run.error is None
     assert run.succeeded is True

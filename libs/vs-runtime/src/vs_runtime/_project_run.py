@@ -33,7 +33,7 @@ from vs_runtime.contracts import OrchestrationResumeDecision
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vs_project.api import GitRepository, GitRepositoryFactory
+    from vs_project.api import GitRepository, GitRepositoryFactory, StateStoreFactory
     from vs_runtime._project_materialization import ProjectMaterializer
 
 type LogEmitter = Callable[[str, TextIO], None]
@@ -144,6 +144,8 @@ class ProjectRunEffects:
 
     ``None`` runs the Git CLI; tests pass a Fake so a run needs no Git process.
     """
+    state_stores: StateStoreFactory | None = None
+    """Opens each run's ``StateStore``; ``None`` uses the project's crash-atomic local one."""
 
 
 def _repository(effects: ProjectRunEffects, root: Path) -> GitRepository | None:
@@ -337,7 +339,7 @@ def _assemble_project_run_resources(
         provisional_ownership.callback(request.provisional_project.discard_project)
 
     with boot_trace.span("project_open"):
-        project = Project.open(request.project_root)
+        project = Project.open(request.project_root, state_stores=effects.state_stores)
         project_state = project.state
         teardown_stack.enter_context(project_state.exclusive_run_host(request.run_id))
         log_dir = project_state.log_directory(request.run_id)

@@ -163,7 +163,9 @@ class _LocalRunSession:
             provider=request.cli_provider,
         )
         self._integration = LocalRunIntegration(
-            implementations.git_repository, implementations.slurm_process
+            implementations.git_repository,
+            implementations.slurm_process,
+            implementations.state_stores,
         )
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -368,7 +370,7 @@ class _LocalRunSession:
         """
         return project_run(
             self._registration,
-            Project.open(self._request.project_root),
+            Project.open(self._request.project_root, state_stores=self._integration.state_stores),
             run_id=self._run_id(),
             status=self._status,
             loop=self._request.orchestration.id,
