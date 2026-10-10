@@ -31,5 +31,5 @@
       "@vibesys/core-state": ["../core-state/src/index.ts"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "vite.browser.config.ts", "playwright.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "vite.browser.config.ts", "vite.desktop.config.ts", "playwright.config.ts"]
 }

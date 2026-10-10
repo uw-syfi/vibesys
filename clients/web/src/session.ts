@@ -376,7 +376,8 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-const browserLifecycle: BrowserLifecycle = {
+/** The page's own visibility and network reachability. */
+export const browserLifecycle: BrowserLifecycle = {
   get visibilityState() {
     return document.visibilityState;
   },
