@@ -14,20 +14,14 @@ from typing import TYPE_CHECKING, cast
 from agentshim.testing import (
     ClaudePeerTurn,
     ClaudeStreamPeers,
-    FakeClock,
     FakeExecutor,
-    SequentialIds,
 )
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
-from vs_agent.contracts import (
-    AgentExecutionPolicy,
-    AgentSessionSpec,
-    AgentTurnRequest,
-)
-from vs_agent.session_launch import ConfinedSessionLauncher
+from vs_agent.api import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
+from vs_agent.api.testing import fake_stream_launcher
 
 if TYPE_CHECKING:
     from vs_sandbox.api import DockerSandbox
@@ -58,15 +52,11 @@ def test_each_turn_execs_in_the_container_of_its_workspace(candidates: int) -> N
         [],
         peers=ClaudeStreamPeers([ClaudePeerTurn(text="ok") for _ in range(candidates + 1)]).build,
     )
-    launcher = ConfinedSessionLauncher(
+    launcher = fake_stream_launcher(
         provider="claude",
-        docker_sandboxes={"implementer": cast("DockerSandbox", root)},
+        executor=executor,
+        sandboxes={"implementer": cast("DockerSandbox", root)},
         workspace_sandboxes=lambda path: cast("DockerSandbox | None", owned.get(path)),
-        executor_factory=lambda: executor,
-        launcher_env=dict,
-        transient_retry_delays=(),
-        clock=FakeClock(),
-        ids=SequentialIds(),
     )
 
     expected = [root.container_id, *(sandbox.container_id for sandbox in owned.values())]

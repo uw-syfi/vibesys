@@ -51,7 +51,8 @@ from vs_agent.sessions import AgentInvocationState, ClientAgentSessions
 from vs_agent.stream_peers import StreamPeers, answering_with, stream_peers
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
+    from pathlib import Path
 
     from vs_agent.contracts import AgentSessionSpec
     from vs_agent.session_launch import SessionLauncher
@@ -130,6 +131,7 @@ def fake_stream_launcher(
     provider: str,
     executor: CommandExecutor,
     sandboxes: Mapping[str, DockerSandbox],
+    workspace_sandboxes: Callable[[Path], DockerSandbox | None] | None = None,
 ) -> SessionLauncher:
     """Launch container sessions over a stream transport whose process is ``executor``.
 
@@ -141,6 +143,7 @@ def fake_stream_launcher(
     return ConfinedSessionLauncher(
         provider=provider,
         docker_sandboxes=dict(sandboxes),
+        workspace_sandboxes=workspace_sandboxes,
         executor_factory=lambda: executor,
         launcher_env=dict,
         transient_retry_delays=(),
