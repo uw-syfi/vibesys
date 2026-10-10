@@ -55,6 +55,7 @@ from vs_core.api import (
 )
 from vs_evaluation.api import SocketFailure, SocketSuccess, SubmitCall, WaitCall
 from vs_evaluation.api.tools import (
+    CORE_MCP_PACKAGES,
     SUBMIT_TOOL,
     VALIDATE_WAIT_TOOL,
     EvaluationServiceClientError,
@@ -285,6 +286,23 @@ async def test_an_agent_submits_through_the_tool_and_is_resumed_once(tmp_path: P
         assert played.writer.turns == 2
         assert strategy.suspensions == 1
         assert strategy.resumes == 1
+
+
+@pytest.mark.asyncio
+async def test_the_tool_server_is_offered_the_packages_it_imports_in_the_container(
+    tmp_path: Path,
+) -> None:
+    async with scenario(tmp_path) as played:
+        process = played.world.runtime()
+        (bridge,) = played.bridge
+        process.shell.start("skeleton", now_at=0.0, lease_duration=LEASE)
+        scope = Scope(owner=process.shell.record.envelope.core.run.run_id, generation=0)
+
+        (descriptor,) = bridge.servers(ROLE, scope)
+
+    assert dict(descriptor.env)["PYTHONPATH"].split(":") == [
+        f"/opt/vibesys/libs/{name}/src" for name in CORE_MCP_PACKAGES
+    ]
 
 
 SOCKET_REPLY = TypeAdapter(SocketSuccess | SocketFailure)

@@ -12,11 +12,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vs_evaluation.agent_models import EvidenceKindsArgs, SubmitCall, WaitArgs, WaitCall
 from vs_evaluation.agent_wire import Offer, SocketClient
 from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, serve_stdio
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 SERVER_NAME = "vs-evaluation"
 SUBMIT_TOOL = "submit_evaluation"
@@ -24,12 +27,26 @@ VALIDATE_WAIT_TOOL = "validate_evaluation_wait"
 CORE_EVALUATION_TOOLS = (SUBMIT_TOOL, VALIDATE_WAIT_TOOL)
 
 
-def core_evaluation_mcp_descriptor(token: str, socket_path: str) -> ToolServerDescriptor:
-    """Describe the thin MCP process for one core scope's host-issued token."""
+CORE_MCP_PACKAGES = ("vs-evaluation", "vs-evaluator-protocol", "vs-mcp")
+"""The framework packages the MCP process imports, by source directory name under ``libs``."""
+
+
+def core_evaluation_mcp_descriptor(
+    token: str, socket_path: str, *, import_roots: Sequence[str] = ()
+) -> ToolServerDescriptor:
+    """Describe the thin MCP process for one core scope's host-issued token.
+
+    *import_roots* are the directories, as the process sees them, that hold
+    :data:`CORE_MCP_PACKAGES`. A process that does not already import the
+    framework (an agent container) needs them on its ``PYTHONPATH``, and a
+    provider may start it with a scrubbed environment, so they travel on the
+    server itself.
+    """
     return StdioServerDescriptor(
         name=SERVER_NAME,
         command="python",
         args=("-m", "vs_evaluation.agent_core_mcp"),
+        env=(("PYTHONPATH", os.pathsep.join(import_roots)),) if import_roots else (),
         runtime_env=(("VS_EVALUATION_SOCKET", socket_path), ("VS_EVALUATION_TOKEN", token)),
     )
 
@@ -75,6 +92,7 @@ if __name__ == "__main__":
 
 __all__ = [
     "CORE_EVALUATION_TOOLS",
+    "CORE_MCP_PACKAGES",
     "SUBMIT_TOOL",
     "VALIDATE_WAIT_TOOL",
     "build_core_evaluation_tools",

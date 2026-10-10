@@ -51,6 +51,7 @@ from vs_agent.api import (
 from vs_project.api import RunResourceRequest  # noqa: TC001
 from vs_runtime import _boot_trace as boot_trace
 from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_and_auth_files
+from vs_runtime._container_paths import CONTAINER_FRAMEWORK_ROOT
 from vs_runtime._container_runtime_policy import (
     DOCKER_IN_DOCKER_NOTICE,
     attaches_accelerator,
@@ -1593,7 +1594,9 @@ def _container_mount_plan(
             for host, container, read_only in auth_bind_mounts(request.cli_provider)
         )
         resources.append(
-            host_resource_for_mount(str(request.framework_root), "/opt/vibesys", read_only=True)
+            host_resource_for_mount(
+                str(request.framework_root), CONTAINER_FRAMEWORK_ROOT, read_only=True
+            )
         )
 
     return resources, symlinks
