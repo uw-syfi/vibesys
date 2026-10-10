@@ -601,9 +601,13 @@ class SlurmEvaluationExecutor:
         for task in leftover:
             task.cancel()
         await asyncio.gather(*leftover, return_exceptions=True)
-        # A cluster call whose caller was cancelled still runs in its thread.
-        while self._calls:
-            await asyncio.gather(*tuple(self._calls), return_exceptions=True)
+        # A cluster call whose caller was cancelled still runs in its thread. Wait
+        # only for calls still running: a call that has ended stays in ``_calls``
+        # until its done callback runs on a later loop turn, and gathering it
+        # returns without yielding (Python 3.14), so waiting on it would spin the
+        # loop and starve that very callback.
+        while pending := tuple(call for call in self._calls if not call.done()):
+            await asyncio.gather(*pending, return_exceptions=True)
         for result in results:
             if isinstance(result, BaseException):
                 raise result
