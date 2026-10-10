@@ -22,7 +22,17 @@ from vs_sim.api.testing import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vs_sim.api import Connection
+
 _REAL_TICK_S = 0.001
+
+
+def _read_outcome(connection: Connection) -> bytes | type[OSError]:
+    """What one ``recv`` on *connection* ends with: its bytes, or ``OSError`` if closed."""
+    try:
+        return connection.recv(1)
+    except OSError:
+        return OSError
 
 
 class TestOsThreads(ThreadsContract):
@@ -63,18 +73,32 @@ class TestUnixNetwork(NetworkContract):
         return NetworkUnderTest(UnixNetwork(), threads, address)
 
     def test_closing_a_connection_ends_a_read_blocked_in_another_thread(self) -> None:
+        # The reader may reach recv before or after close; nothing here can observe
+        # which. Either way the read must end: with end of stream if it was blocked,
+        # or with the contract's OSError if this end was already closed.
         network = UnixNetwork()
         address = _unix_paths()("blocked")
         listener = network.listen(address)
         client = network.connect(address, HANG_GUARD_S)
         server = listener.accept(HANG_GUARD_S)
-        reads: list[bytes] = []
-        reader = threading.Thread(target=lambda: reads.append(server.recv(1)))
+        outcomes: list[bytes | type[OSError]] = []
+        reader = threading.Thread(target=lambda: outcomes.append(_read_outcome(server)))
         reader.start()
         server.close()
         join_or_fail(reader)
-        assert reads == [b""]
+        assert outcomes in ([b""], [OSError])
         assert client.recv(1, HANG_GUARD_S) == b""
+        client.close()
+        listener.close()
+
+    def test_a_read_after_close_raises_instead_of_hanging(self) -> None:
+        network = UnixNetwork()
+        address = _unix_paths()("closed-first")
+        listener = network.listen(address)
+        client = network.connect(address, HANG_GUARD_S)
+        server = listener.accept(HANG_GUARD_S)
+        server.close()
+        assert _read_outcome(server) is OSError
         client.close()
         listener.close()
 
