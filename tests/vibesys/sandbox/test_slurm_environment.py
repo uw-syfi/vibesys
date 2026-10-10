@@ -79,6 +79,8 @@ sys.exit(7 if "benchmark" in sys.argv else 0)
 """
 
 
+# The interpreter that runs the fake programs standing in for the cluster.
+_PYTHON = sys.executable
 _ENVIRONMENTS = ["slurm", "slurm-gpu", "slurm+gpu"]
 
 
@@ -92,7 +94,7 @@ def _write_agent_gpu_slurm_config(tmp_path: Path, srun_log: Path) -> Path:
     fake = tmp_path / "fake_srun.py"
     fake.write_text(_FAKE_SRUN.format(log=str(srun_log)), encoding="utf-8")
     config = tmp_path / "slurm-agent-gpu.toml"
-    program = f'"{sys.executable}", "{fake}"'
+    program = f'"{_PYTHON}", "{fake}"'
     config.write_text(_SLURM_AGENT_GPU_CONFIG.format(srun=program), encoding="utf-8")
     return config
 
@@ -105,7 +107,7 @@ def _environment(tmp_path: Path, name: str, backend: DaemonBackend) -> RunEnviro
         return SlurmEnvironment(
             _write_agent_gpu_slurm_config(tmp_path, tmp_path / "srun.log"),
             docker=docker,
-            gate_wrapper=(sys.executable, str(gate)),
+            gate_wrapper=(_PYTHON, str(gate)),
             job_confinement=_PassThroughConfinement(),
         )
     if name == "slurm":
@@ -113,7 +115,7 @@ def _environment(tmp_path: Path, name: str, backend: DaemonBackend) -> RunEnviro
         config.write_text(_SLURM_CONFIG, encoding="utf-8")
         gate = tmp_path / "fake_gate.py"
         gate.write_text(_FAKE_GATE, encoding="utf-8")
-        return SlurmEnvironment(config, docker=docker, gate_wrapper=(sys.executable, str(gate)))
+        return SlurmEnvironment(config, docker=docker, gate_wrapper=(_PYTHON, str(gate)))
     config = tmp_path / "slurm-gpu.toml"
     config.write_text(_SLURM_GPU_CONFIG, encoding="utf-8")
     return SlurmGpuEnvironment(
