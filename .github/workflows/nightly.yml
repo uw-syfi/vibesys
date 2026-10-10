@@ -96,6 +96,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The host-side job confinement the tier exercises needs bubblewrap; see
+      # the sandbox-linux job for why the AppArmor userns restriction is lifted.
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -118,5 +126,5 @@ jobs:
         env:
           VIBESYS_SLURM_CLUSTER_DIR: ${{ runner.temp }}/slurm-cluster
           VIBESYS_MINIMAL_CONTAINER_DIR: ${{ runner.temp }}/minimal-container
-          VIBESYS_MINIMAL_CONTAINER_BASES: cpu
+          VIBESYS_MINIMAL_CONTAINER_BASES: cpu,ubuntu-uid-1000
         run: ./support/repoctl/repoctl run-checks --group ${{ matrix.group }}
