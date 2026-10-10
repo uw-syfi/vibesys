@@ -208,9 +208,11 @@ The host bridge performs these operations for each evaluation:
 
 ## Candidate staging
 
-The first version supports one active remote evaluation per campaign and sets
-`supports_parallel_candidate_evaluation` to false. This avoids concurrent
-updates to SkyPilot's shared work directory.
+The first version supports one active remote evaluation per campaign: the
+environment shares one agent session across the run, so its run-environment
+view reports no parallel candidate evaluation (it follows from
+`share_agent_session`). This avoids concurrent updates to SkyPilot's shared
+work directory.
 
 Before each evaluation, stage the candidate visible to the agent, including
 uncommitted changes. Exclusions must derive from the existing project path

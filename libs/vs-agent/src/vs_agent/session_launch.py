@@ -338,7 +338,9 @@ class ConfinedSessionLauncher:
         :mod:`vs_agent.session_environment`).
 
         ``workspace_sandboxes`` answers, for a session's workspace, the sandbox
-        that mounts it, or ``None`` when the role's sandbox serves it. A client
+        that mounts it, or ``None`` when the role's sandbox serves it (the root
+        workspace). It raises for a workspace it does not know; this launcher
+        never turns that into the role's sandbox. A client
         shared by turns in several workspaces needs it: each workspace has its
         own container, and ``docker exec`` into another one cannot reach the
         workspace's directory.

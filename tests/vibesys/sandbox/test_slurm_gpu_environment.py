@@ -126,6 +126,7 @@ def test_the_agent_runs_in_a_gpuless_same_path_container_with_the_broker_mounted
         assert "CUDA_VISIBLE_DEVICES=" in run
         assert any(token.startswith("VIBESYS_COMMAND_BROKER_SOCKET=") for token in run)
         assert session.view.env_kind == "slurm-gpu"
+        assert session.view.parallel_candidate_obstacle is not None
     finally:
         session.close()
 

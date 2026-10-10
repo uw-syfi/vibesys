@@ -27,7 +27,9 @@ _environments = st.builds(
     RunEnvironmentView,
     paths=st.just(AgentPaths()),
     prompt_notes=st.text(max_size=16),
-    supports_parallel_candidate_evaluation=st.booleans(),
+    cli_sandboxed=st.booleans(),
+    share_agent_session=st.booleans(),
+    parallel_candidate_blocker=st.none() | st.text(max_size=8),
 )
 
 

@@ -131,6 +131,11 @@ class SlurmGpuEnvironment(_NoopWorkspaceRecovery):
                     cli_sandboxed=True,
                     host_device_reselect=False,
                     env_kind="slurm-gpu",
+                    # Never exercised with one gate broker per candidate. Removed
+                    # with the slurm and slurm-gpu unification (D260).
+                    parallel_candidate_blocker=(
+                        "it has not been verified to run one gate broker per candidate"
+                    ),
                 ),
             )
         except BaseException:

@@ -90,8 +90,14 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     timeout = spec.cli_timeout
     diagnostic_log = AgentDiagnosticLog(run_log_file)
 
+    if workspace_sandboxes is not None and not use_docker:
+        message = "workspace_sandboxes routes container turns, but this client does not use Docker"
+        raise ValueError(message)
     docker_sandboxes = None
     if use_docker:
+        if backends is None:
+            message = "a Docker agent client needs the run's sandboxes (backends), got none"
+            raise ValueError(message)
         from vs_agent.cli_docker import (  # noqa: PLC0415  # lint-waiver: LW-010175 [PLC0415]; Keep DOCKER_PROVIDER_ENV lazy in build_agent_client so unused providers and import cycles stay unloaded.
             DOCKER_PROVIDER_ENV,
         )
@@ -111,7 +117,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
         provider=provider,
         timeout=timeout,
         docker_sandboxes=docker_sandboxes,
-        workspace_sandboxes=workspace_sandboxes if use_docker else None,
+        workspace_sandboxes=workspace_sandboxes,
         executor_factory=executor_factory,
         log=diagnostic_log,
         agent_homes=agent_homes_dir,

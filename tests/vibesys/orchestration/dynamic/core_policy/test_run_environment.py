@@ -50,25 +50,40 @@ def _plan(root: Path, environment: RunEnvironmentView) -> None:
     )
 
 
-@given(kind=st.sampled_from(["skypilot", "metal", "custom-env"]))
-def test_an_environment_without_candidate_sandboxes_is_refused_naming_it(kind: str) -> None:
+@given(
+    kind=st.sampled_from(["skypilot", "metal", "custom-env"]),
+    cli_sandboxed=st.booleans(),
+    share_agent_session=st.booleans(),
+)
+def test_an_environment_without_candidate_sandboxes_is_refused_naming_it_and_why(
+    kind: str, *, cli_sandboxed: bool, share_agent_session: bool
+) -> None:
     with tempfile.TemporaryDirectory() as directory:
+        base = resolved(Path(directory)).environment
         environment = replace(
-            resolved(Path(directory)).environment,
+            base,
             env_kind=kind,
-            supports_parallel_candidate_evaluation=False,
+            cli_sandboxed=cli_sandboxed,
+            share_agent_session=share_agent_session,
+            parallel_candidate_blocker=None if cli_sandboxed and not share_agent_session else "x",
         )
+        if environment.supports_parallel_candidate_evaluation:
+            _plan(Path(directory), environment)
+            return
         with pytest.raises(ConfigurationError, match="isolated candidate sandboxes") as raised:
             _plan(Path(directory), environment)
 
     assert f"'{kind}' run environment" in str(raised.value)
+    assert str(environment.parallel_candidate_obstacle) in str(raised.value)
 
 
 def test_an_environment_with_candidate_sandboxes_is_planned(tmp_path: Path) -> None:
     environment = replace(
         resolved(tmp_path).environment,
         env_kind="docker",
-        supports_parallel_candidate_evaluation=True,
+        cli_sandboxed=True,
+        share_agent_session=False,
+        parallel_candidate_blocker=None,
     )
 
     _plan(tmp_path, environment)

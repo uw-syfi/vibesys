@@ -112,9 +112,7 @@ if TYPE_CHECKING:
 class _Session:
     sandbox: CommandRunner = field(default_factory=FakeCommandRunner)
     view: RunEnvironmentView = field(
-        default_factory=lambda: RunEnvironmentView(
-            paths=AgentPaths(), supports_parallel_candidate_evaluation=True
-        )
+        default_factory=lambda: RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True)
     )
 
     def __enter__(self) -> _Session:

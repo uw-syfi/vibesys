@@ -282,7 +282,9 @@ class DockerSandbox(WorkspaceSandbox):
                 (emits ``--group-add``).  Required by accelerators whose
                 device nodes are group-owned rather than world-accessible —
                 AMD ROCm needs ``video`` and ``render`` to open ``/dev/kfd``
-                and ``/dev/dri/*``.
+                and ``/dev/dri/*``. Requires *devices*: without a forwarded
+                device node there is nothing for the groups to own, and an
+                image without them would fail to start.
             entrypoint: Override the image ``ENTRYPOINT`` (emits
                 ``--entrypoint``).  Pass ``""`` to *clear* a baked-in
                 entrypoint so the container runs ``sleep infinity`` directly
@@ -351,6 +353,13 @@ class DockerSandbox(WorkspaceSandbox):
             message = (
                 "the Sysbox container runtime cannot forward accelerators; "
                 "drop gpus/devices for a docker_in_docker task"
+            )
+            raise ValueError(message)
+        if group_add and not devices:
+            message = (
+                f"group_add {list(group_add)!r} names the groups that own forwarded device "
+                "nodes, but no devices are forwarded; the image may not have those groups "
+                "(#1587), so pass devices or drop group_add"
             )
             raise ValueError(message)
         self._host_workspace = host_workspace

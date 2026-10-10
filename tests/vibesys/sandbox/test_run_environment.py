@@ -452,6 +452,7 @@ remote_python = "/remote/venv/bin/python"
     )
 
     assert session.view.env_kind == "slurm"
+    assert session.view.supports_parallel_candidate_evaluation is True
     assert session.view.profile_execution == "remote"
     # The agent runs in a GPU-less Docker container with the workspace at its host path.
     (kind, options), *_ = backend.calls
@@ -749,6 +750,8 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(
     assert backend.calls[0][0] is SandboxKind.DOCKER
     assert session.view.isolated is True
     assert session.view.cli_sandboxed is True
+    # Regression for #1549: each candidate gets its own container.
+    assert session.view.supports_parallel_candidate_evaluation is True
     assert session.view.profile_execution == "local"
     assert session.view.paths.accuracy_command == "uv run python accuracy_checker/checker.py"
     assert session.view.paths.benchmark_command == "uv run python benchmark/benchmark.py"

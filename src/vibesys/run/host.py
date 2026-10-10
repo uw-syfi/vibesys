@@ -555,7 +555,9 @@ class _ProductHostFactory:
             run_log_file=scope.current_log_file(),
             # A turn runs in the container that mounts its workspace, so a
             # candidate's turn is not sent to the root container.
-            workspace_sandboxes=partial(_candidate_agent_sandbox, agent_runtime),
+            workspace_sandboxes=(
+                partial(_candidate_agent_sandbox, agent_runtime) if environment.use_docker else None
+            ),
             use_docker=environment.use_docker,
             log_dir=scope.log_directory,
             agent_homes_dir=scope.agent_homes_directory,
@@ -921,7 +923,11 @@ __all__ = [
 
 
 def _candidate_agent_sandbox(runtime: WorkspaceRuntime, path: Path) -> DockerSandbox | None:
-    """The container that mounts the candidate checked out at ``path``, if one is live."""
+    """The container that mounts the candidate checked out at ``path``.
+
+    ``None`` is the root workspace, which the role's own container serves; a
+    path no live candidate owns raises ``AgentWorkspaceRouteError``.
+    """
     return cast("DockerSandbox | None", runtime.workspaces.agent_sandbox_at(path))
 
 

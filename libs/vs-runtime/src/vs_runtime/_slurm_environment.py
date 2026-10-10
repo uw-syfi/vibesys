@@ -221,7 +221,6 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                     host_device_reselect=False,
                     env_kind="slurm",
                     profile_execution="remote",
-                    supports_parallel_candidate_evaluation=True,
                     framework_setup_timeout_seconds=config.job_timeout_seconds,
                     profiler_mcp_env=(
                         ("VIBESYS_SLURM_CONFIG", str(self.config_path)),

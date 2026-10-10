@@ -187,3 +187,31 @@ def test_a_container_client_accepts_a_workspace_sandbox_lookup() -> None:
     )
 
     assert isinstance(client, AgentClient)
+
+
+def test_a_lookup_without_docker_is_refused_not_dropped() -> None:
+    """A routing lookup the client would silently ignore is a configuration error (#1613)."""
+    spec = agent_spec_from_config(_config(backend="cli", cli_provider="claude"), model="m")
+
+    with pytest.raises(ValueError, match="does not use Docker"):
+        build_agent_client(
+            spec=spec,
+            backends=None,
+            workspace_sandboxes=lambda _path: None,
+            skill_source_dirs=[],
+            run_log_file=None,
+            use_docker=False,
+        )
+
+
+def test_a_docker_client_without_sandboxes_is_refused_at_build() -> None:
+    spec = agent_spec_from_config(_config(backend="cli", cli_provider="claude"), model="m")
+
+    with pytest.raises(ValueError, match="needs the run's sandboxes"):
+        build_agent_client(
+            spec=spec,
+            backends=None,
+            skill_source_dirs=[],
+            run_log_file=None,
+            use_docker=True,
+        )

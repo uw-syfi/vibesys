@@ -87,6 +87,19 @@ class AgentTurnTimeoutError(RuntimeContractError):
         super().__init__(f"agent turn timed out after {timeout_seconds:g} seconds")
 
 
+class AgentWorkspaceRouteError(RuntimeContractError):
+    """No sandbox serves the workspace an agent turn asked for.
+
+    A turn sent to another workspace's container runs in a directory that is
+    not there (exit 127, #1552), so a path that is neither the root nor a live
+    candidate with a sandbox is refused rather than routed to a default.
+    """
+
+    def __init__(self, path: object, reason: str) -> None:
+        """Name the workspace path and why no sandbox serves it."""
+        super().__init__(f"no agent sandbox serves workspace {str(path)!r}: {reason}")
+
+
 class WorkspaceRestoreError(RuntimeContractError):
     """A workspace could not materialize a requested retained revision."""
 

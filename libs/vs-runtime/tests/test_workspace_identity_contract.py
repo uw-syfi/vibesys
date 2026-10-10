@@ -137,9 +137,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                 ),
                 lambda _request: _EnvironmentSession(
                     FakeCommandRunner(),
-                    RunEnvironmentView(
-                        paths=AgentPaths(), supports_parallel_candidate_evaluation=True
-                    ),
+                    RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True),
                 ),
             )
             ownership.callback(environment.close)
