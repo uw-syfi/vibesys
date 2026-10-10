@@ -1,4 +1,4 @@
-:root { color: #e9edf5; background: #0c1018; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-synthesis: none; }
+:root { --page-background: #0c1018; --desktop-titlebar-height: 40px; color: #e9edf5; background: var(--page-background); font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
 .shell { width: min(1120px, calc(100% - 48px)); margin: 0 auto; padding: 52px 0 72px; }
@@ -32,3 +32,8 @@ h2 { font-size: 16px; margin: 0; }
 .gateway-connect button { background: #79a8ff; border: 0; border-radius: 7px; color: #07101f; cursor: pointer; font: inherit; font-weight: 700; padding: 11px 16px; }
 .gateway-connect-error { color: #ff9c9c; margin: 0; }
 @media (max-width: 640px) { .shell { width: min(100% - 28px, 1120px); padding-top: 28px; } .summary { grid-template-columns: 1fr; } }
+/* Inside the Electron shell the native title bar is hidden: reserve a drag strip in the page's own background for the window controls. Nothing interactive lives in it. */
+html[data-shell="desktop"] body { padding-top: var(--desktop-titlebar-height); }
+html[data-shell="desktop"] body::before { content: ""; position: fixed; inset: 0 0 auto 0; height: var(--desktop-titlebar-height); background: var(--page-background); -webkit-app-region: drag; z-index: 10; }
+html[data-shell="desktop"] .shell { padding-top: 12px; }
+html[data-shell="desktop"] button, html[data-shell="desktop"] input, html[data-shell="desktop"] a, html[data-shell="desktop"] select, html[data-shell="desktop"] textarea { -webkit-app-region: no-drag; }

@@ -21,9 +21,10 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     project: ['src/**/*.ts', 'bench/**/*.ts'],
   },
   desktop: {
-    // The Electron main process is the package `main` (an entry by default).
-    entry: ['src/**/*.test.ts'],
-    project: ['src/**/*.ts'],
+    // The Electron main process is the package `main` (an entry by default); the sandboxed
+    // preload is loaded by path from `main.ts`, so knip cannot see it as an import.
+    entry: ['src/**/*.test.ts', 'src/preload.cts'],
+    project: ['src/**/*.ts', 'src/**/*.cts'],
   },
   tui: {
     entry: [

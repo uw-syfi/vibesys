@@ -5,6 +5,7 @@
  * passes the capability URL in `VIBESYS_DESKTOP_URL`. The shell only displays it: the window is
  * sandboxed and confined to the gateway origin, and the token never reaches a log line.
  */
+import {fileURLToPath} from 'node:url';
 import {app, BrowserWindow, Menu, nativeTheme, session, type WebContents} from 'electron';
 import {
   isAllowedRequest,
@@ -13,6 +14,7 @@ import {
   originOf,
   parseLaunchUrl,
 } from './launch-url.js';
+import {windowChrome} from './window-chrome.js';
 
 /** The one browser permission the web UI uses (copying run IDs). */
 const ALLOWED_PERMISSIONS: ReadonlySet<string> = new Set(['clipboard-sanitized-write']);
@@ -52,6 +54,8 @@ function secureSession(target: LaunchTarget): void {
 }
 
 function openWindow(target: LaunchTarget): void {
+  // The web UI has one dark theme; make native menus and controls follow it.
+  nativeTheme.themeSource = 'dark';
   const window = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -59,8 +63,9 @@ function openWindow(target: LaunchTarget): void {
     minHeight: 600,
     show: false,
     title: 'VibeSys',
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#111113' : '#fcfcfd',
+    ...windowChrome(process.platform),
     webPreferences: {
+      preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)),
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
