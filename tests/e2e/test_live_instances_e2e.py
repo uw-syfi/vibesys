@@ -12,12 +12,15 @@ import pytest
 
 from entrypoints.server import _DetachedGatewayEffects
 from server.instances import (
+    ControlSocketStopRequester,
     FileInstanceStore,
     LiveRegistry,
+    StopEffects,
     StopOutcome,
+    StopRoute,
     instance_root,
 )
-from vs_sim.api import OsThreads, PidfdProcessSignaller
+from vs_sim.api import OsThreads, PidfdProcessSignaller, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S, stop_process
 
 if TYPE_CHECKING:
@@ -83,11 +86,18 @@ def test_stop_terminates_a_live_server_and_removes_its_record(
 ) -> None:
     threads = OsThreads()
 
+    # The child binds no control socket, so the stop falls back to the signal.
     result = registry.stop(
-        INSTANCE, signaller=PidfdProcessSignaller(), clock=threads, pause=threads.sleep
+        INSTANCE,
+        StopEffects(
+            ControlSocketStopRequester(UnixNetwork()),
+            PidfdProcessSignaller(),
+            threads,
+            threads.sleep,
+        ),
     )
 
-    assert result.outcome is StopOutcome.STOPPED
+    assert (result.outcome, result.route) == (StopOutcome.STOPPED, StopRoute.SIGNAL)
     assert holder.wait(timeout=HANG_GUARD_S) == -signal.SIGTERM
     assert registry.list().instances == ()
 

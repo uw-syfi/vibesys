@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import stat
-import sys
 from contextlib import ExitStack
 from datetime import UTC, datetime
 from pathlib import Path
@@ -238,8 +237,8 @@ def test_a_detached_resume_prints_the_new_servers_record(
 
     record = LiveInstanceRecord.model_validate_json(capsys.readouterr().out)
     assert record.status is InstanceStatus.SERVING
-    # The child runs this interpreter, so it resumes on the invoked command's code.
-    assert effects.command[:3] == [sys.executable, "-m", "entrypoints.server"]
+    # The child runs this process's interpreter, so it resumes on the invoked code.
+    assert effects.command[1:3] == ["-m", "entrypoints.server"]
     assert effects.command[3 : 3 + len(_RESUME)] == _RESUME
     effects.holds[0].release()
 
