@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vs_runtime.contracts import Run, RunCleanupError
+from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
         State,
         WorkspaceAgentSessions,
     )
+    from vs_sim.api import BlockingRunner
 
 
 def _runtime_closed_error() -> RuntimeError:
@@ -38,9 +40,16 @@ def _cleanup_failure(errors: list[BaseException]) -> RunCleanupError:
 class BlockingOperations:
     """Run synchronous effects without racing run teardown."""
 
-    def __init__(self) -> None:
+    def __init__(self, runner: BlockingRunner | None = None) -> None:
+        """Run operations on ``runner``; the default is a worker thread each."""
+        self._runner = runner or ThreadBlockingRunner()
         self._tasks: set[asyncio.Task] = set()
         self._closed = False
+
+    @property
+    def runner(self) -> BlockingRunner:
+        """Where this run's synchronous effects execute."""
+        return self._runner
 
     async def run[**P, Result](
         self,
@@ -52,7 +61,7 @@ class BlockingOperations:
         """Run one synchronous operation and preserve cancellation semantics."""
         if self._closed:
             raise _runtime_closed_error()
-        task = asyncio.create_task(asyncio.to_thread(operation, *args, **kwargs))
+        task = asyncio.create_task(self._runner.run(operation, *args, **kwargs))
         self._tasks.add(task)
         try:
             return await asyncio.shield(task)
@@ -153,7 +162,7 @@ class RuntimeRunHost:
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948002 [BLE001]; cleanup must continue through independently owned resources.
             errors.append(error)
         try:
-            await asyncio.to_thread(self._ownership.close)
+            await self._blocking.runner.run(self._ownership.close)
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948003 [BLE001]; all cleanup outcomes are reported together after every owner runs.
             errors.append(error)
         if errors:
@@ -200,10 +209,11 @@ async def _close_runtime(host: RuntimeRunHost, error: BaseException | None) -> N
 async def _close_preparation_resources(
     ownership: ExitStack,
     error: BaseException | None,
+    runner: BlockingRunner,
 ) -> None:
     """Close partially prepared resources without replacing the root failure."""
     cancelled = False
-    cleanup = asyncio.create_task(asyncio.to_thread(ownership.close))
+    cleanup = asyncio.create_task(runner.run(ownership.close))
     while not cleanup.done():
         try:
             await asyncio.shield(cleanup)
@@ -229,12 +239,18 @@ async def _close_preparation_resources(
 @asynccontextmanager
 async def open_run_host(
     prepare: Callable[[ExitStack], RunHostComponents],
+    *,
+    runner: BlockingRunner | None = None,
 ) -> AsyncIterator[RuntimeRunHost]:
-    """Prepare and close one host, including on cancellation or setup failure."""
+    """Prepare and close one host, including on cancellation or setup failure.
+
+    Preparation and failed-preparation cleanup run on ``runner`` (a worker thread by default).
+    """
+    runner = runner or ThreadBlockingRunner()
     ownership = ExitStack()
     host: RuntimeRunHost | None = None
     try:
-        preparation = asyncio.create_task(asyncio.to_thread(prepare, ownership))
+        preparation = asyncio.create_task(runner.run(prepare, ownership))
         try:
             components = await asyncio.shield(preparation)
         except asyncio.CancelledError as cancellation:
@@ -255,7 +271,7 @@ async def open_run_host(
         if host is not None:
             await _close_runtime(host, sys.exception())
         else:
-            await _close_preparation_resources(ownership, sys.exception())
+            await _close_preparation_resources(ownership, sys.exception(), runner)
 
 
 __all__ = [

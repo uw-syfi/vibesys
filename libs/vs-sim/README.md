@@ -12,7 +12,8 @@ timing: the clock, sleeping, seeds, signals, child processes and blocking calls.
   (`VirtualClock`, `run_virtual`), `ManualClock`, an event trace for comparing two
   runs, `Gate` and `arrival` (waits tied to the lifetime of what they wait on),
   hang-guarded joins, waits, gets and accepts, `wait_for_state`, `run_in_child`,
-  crash and restart building blocks, Fakes of each interface, and a contract suite
+  crash and restart building blocks, Fakes of each interface (including
+  `GatedBlockingRunner`, which keeps a blocking call in flight until released), and a contract suite
   every implementation of `Clock`, `BlockingRunner`, `SignalSource` and
   `ProcessLauncher` passes.
 

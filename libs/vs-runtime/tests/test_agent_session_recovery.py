@@ -161,14 +161,14 @@ class _RestoreGate:
         self.calls = 0
         self.loop: asyncio.AbstractEventLoop | None = None
 
-    async def wait(self) -> None:
+    async def park(self) -> None:
         self.calls += 1
         self.entered.set()
         await self.release.wait()
 
     def wait_sync(self) -> None:
         assert self.loop is not None
-        asyncio.run_coroutine_threadsafe(self.wait(), self.loop).result()
+        asyncio.run_coroutine_threadsafe(self.park(), self.loop).result()
 
 
 class _BlockedRecoveryFakeWorkspace(_FaultedFakeWorkspace):
@@ -178,7 +178,7 @@ class _BlockedRecoveryFakeWorkspace(_FaultedFakeWorkspace):
 
     async def restore_for_agent(self, revision: str, *, preserve_paths: tuple[str, ...]) -> None:
         if self.fault.recovery_allowed:
-            await self.gate.wait()
+            await self.gate.park()
         await super().restore_for_agent(revision, preserve_paths=preserve_paths)
 
 

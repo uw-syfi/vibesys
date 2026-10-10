@@ -356,9 +356,8 @@ class RuntimeWorkspaceEvaluation:
             message = "accuracy receipt does not match the current candidate revision"
             raise RuntimeContractError(message)
 
-    @staticmethod
-    async def _blocking_patch(resource: WorkspaceResource, revision: str) -> str:
-        return await run_sync(resource.candidate_patch, revision)
+    async def _blocking_patch(self, resource: WorkspaceResource, revision: str) -> str:
+        return await run_sync(self._workspaces.runner, resource.candidate_patch, revision)
 
 
 def _evaluation_command(

@@ -20,6 +20,7 @@ from vs_sim.api.testing import (
     ClockUnderTest,
     FakeProcessLauncher,
     FakeSignalSource,
+    GatedBlockingRunner,
     InlineBlockingRunner,
     ManualClock,
     ProcessLauncherContract,
@@ -104,6 +105,11 @@ class TestThreadBlockingRunner(BlockingRunnerContract):
 class TestInlineBlockingRunner(BlockingRunnerContract):
     def runner_under_test(self) -> RunnerUnderTest:
         return RunnerUnderTest(InlineBlockingRunner(), asyncio.run)
+
+
+class TestGatedBlockingRunner(BlockingRunnerContract):
+    def runner_under_test(self) -> RunnerUnderTest:
+        return RunnerUnderTest(GatedBlockingRunner(), asyncio.run)
 
 
 class TestInlineBlockingRunnerOnTheVirtualLoop(BlockingRunnerContract):

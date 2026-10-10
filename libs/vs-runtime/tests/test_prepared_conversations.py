@@ -49,6 +49,7 @@ from vs_runtime.api.testing import (
     FakeWorkspace,
     FakeWorkspaceAgentSessions,
 )
+from vs_sim.api.testing import wait_or_fail
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -191,7 +192,7 @@ class _OpeningGate:
 
     def wait_sync(self) -> None:
         self.loop.call_soon_threadsafe(self.entered.set)
-        self.release.wait()
+        wait_or_fail(self.release, "the held opening release")
 
     async def wait(self) -> None:
         self.entered.set()
