@@ -25,6 +25,7 @@ from vs_sim.fakes import FakeProcessLauncher, FakeSignalSource, InlineBlockingRu
 from vs_sim.gate import Gate, arrival, start_thread, wait_until_started, wait_until_started_sync
 from vs_sim.manual import ManualClock
 from vs_sim.seeds import SEED_OPTION, random_for, replay_hint, seed_for_test
+from vs_sim.sim import WORLDS, Sim, UnknownWorldError, WorldFactory, WorldRegistry
 from vs_sim.states import Changes, wait_for_async_state, wait_for_state
 from vs_sim.threads import TGKILL_SUPPORTED, non_main_thread_ids, send_to_thread
 from vs_sim.trace import EventTrace, TraceEvent
@@ -49,6 +50,7 @@ __all__ = [
     "SEED_OPTION",
     "TGKILL_SUPPORTED",
     "WORKER_GUARD_S",
+    "WORLDS",
     "BlockingRunnerContract",
     "Changes",
     "ChildDiedError",
@@ -68,12 +70,16 @@ __all__ = [
     "RunnerUnderTest",
     "SignalSourceContract",
     "SignalSourceUnderTest",
+    "Sim",
     "SleeperContract",
     "SleeperUnderTest",
     "TraceEvent",
+    "UnknownWorldError",
     "VirtualClock",
     "VirtualDeadlockError",
     "VirtualTimeLimitError",
+    "WorldFactory",
+    "WorldRegistry",
     "accept_or_fail",
     "after_crash",
     "arrival",
