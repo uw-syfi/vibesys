@@ -375,6 +375,8 @@ class Run:
     """What one whole run did: the decisions proposed and the final core state."""
 
     core: CoreState
+    # The strategy state as the shell last persisted it.
+    state: StrategyState
     decisions: list[Decision] = field(default_factory=list)
     journal: Journal = field(default_factory=Journal)
     # The loop gave up on the run: its dispatch cap was hit (it never went idle) or it
@@ -430,7 +432,13 @@ def drive_shell[S: StrategyState](
         # These are the loop's backstops. Return the run so the liveness check names the
         # invariant it broke and the requests that led there.
         halted = error
-    return Run(core=shell.record.envelope.core, decisions=decisions, journal=journal, halted=halted)
+    return Run(
+        core=shell.record.envelope.core,
+        state=shell.record.envelope.strategy,
+        decisions=decisions,
+        journal=journal,
+        halted=halted,
+    )
 
 
 def _executors(executor: ScriptedExecutors) -> RequestExecutors:

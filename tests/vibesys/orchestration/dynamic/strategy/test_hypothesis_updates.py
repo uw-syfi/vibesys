@@ -10,7 +10,10 @@ import json
 from collections import deque
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
+from tests.vibesys.orchestration.dynamic.strategy._harness import envelope, round_trip
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
     implemented,
@@ -19,10 +22,13 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
 )
 from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
 
+from vibesys.hypothesis import HypothesisStrategy
+from vibesys.orchestration.dynamic.models import StrategyReason
+from vibesys.orchestration.dynamic.strategy.api import DynamicStrategyState
 from vs_core.api import Stop
 
 
-def _second_plan(disposition: str) -> str:
+def _second_plan(disposition: str, reason_kind: str = "blocked") -> str:
     return json.dumps(
         {
             "reasoning": "retire h1, try h2",
@@ -31,7 +37,7 @@ def _second_plan(disposition: str) -> str:
                 {
                     "hypothesis_id": "h1",
                     "disposition": disposition,
-                    "reason_kind": "blocked",
+                    "reason_kind": reason_kind,
                     "reason": "no further progress",
                 }
             ],
@@ -57,3 +63,28 @@ def test_a_run_survives_the_planner_retiring_a_finished_hypothesis(disposition: 
     final = trace.decisions[-1]
     assert isinstance(final, Stop)
     assert final.result.outcome == "success"
+
+
+@settings(max_examples=20, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    disposition=st.sampled_from(["parked", "abandoned"]),
+    reason_kind=st.sampled_from([item.value for item in StrategyReason]),
+)
+def test_every_retirement_the_planner_schema_allows_leaves_a_persistable_state(
+    disposition: str, reason_kind: str
+) -> None:
+    executors = Executors(
+        planner=deque([plan_reply(implement("h1")), _second_plan(disposition, reason_kind)]),
+        implementer=deque([_blocked(), _blocked(), implemented()]),
+        judge=deque([reviewed()]),
+    )
+
+    state = run_shell(executors, max_rounds=2, max_retries_per_round=5).state
+    assert isinstance(state, DynamicStrategyState)
+
+    retired = next(item for item in state.hypotheses if item.hypothesis_id == "h1")
+    assert retired.strategy is HypothesisStrategy(disposition)
+    assert retired.reason_kind == reason_kind
+    assert DynamicStrategyState.model_validate(state.model_dump(mode="python")) == state
+    codec, saved = envelope(state)
+    assert round_trip(codec, saved).strategy == state
