@@ -41,6 +41,7 @@ from server.instances import (
     StopOutcome,
     driving,
     instance_root,
+    running_checkout,
 )
 from vibesys.orchestration.dynamic import DynamicOptions
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
@@ -417,6 +418,7 @@ def test_a_detached_server_advertises_each_milestone_and_unregisters_on_exit(
         os.getpid(),
     )
     assert starting.socket_path == str(socket_path)
+    assert starting.vibesys_root == running_checkout()
     assert serving is not None
     assert serving.status is InstanceStatus.SERVING
     assert ready is not None

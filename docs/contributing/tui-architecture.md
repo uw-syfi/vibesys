@@ -177,6 +177,11 @@ $XDG_RUNTIME_DIR/vibesys/            (else /tmp/vibesys-<uid>/), mode 0700
   runs/<id>/server.log               the server's stdout and stderr
 ```
 
+A record's `vibesys_root` is the absolute path of the VibeSys source checkout the server runs from
+(the directory whose `pyproject.toml` declares the `vibesys` project), or `null` for a server run
+from an installed distribution and for records written before the field existed. The desktop app
+uses it to suggest the checkout to run `vibesys` from on that host.
+
 The root is never under `$HOME`, which may be on NFS. Liveness is proven, not read from the record:
 the server holds an exclusive `flock` on its lock file for its lifetime, and the kernel releases it
 on any exit, `kill -9` included. `vibesys instances list [--json]` reports a record only while its

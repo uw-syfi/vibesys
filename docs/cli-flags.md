@@ -368,6 +368,22 @@ future runs. Resumed repositories with an `origin` are synchronized again after
 the run. `--repo` only creates a repository for a fresh experiment and cannot be
 combined with `--resume`.
 
+## Listing Tasks
+
+Run `vibesys tasks [PROJECT] [--json]` to list the tasks a project defines under
+`.vibesys/tasks/`, one name per line, ordered by name. The project defaults to
+the current directory. Each task is validated the way a run selects it, so a
+task directory missing its `OBJECTIVE.md` or `vibesys.input.toml` fails the
+listing. `--json` prints one `TaskList` document (defined in
+`src/entrypoints/tasks.py`):
+
+```json
+{"version": 1, "project_root": "/home/me/src/queue-rs", "tasks": [{"name": "mpmc"}, {"name": "spsc"}]}
+```
+
+A missing project, a project without `.vibesys/tasks/`, or an invalid task exits
+with status 1, prints the reason on stderr, and prints nothing on stdout.
+
 ## Repository Validation
 
 Run `vibesys validate [PROJECT] --task NAME` to check a task's static harness

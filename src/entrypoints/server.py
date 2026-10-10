@@ -33,6 +33,7 @@ from server.instances import (
     instance_run_directory,
     instance_socket_path,
     new_instance_id,
+    running_checkout,
 )
 from server.runtime import (
     WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
@@ -943,6 +944,7 @@ def _register_detached_instance(
             started_at=SystemClock().now(),
             hostname=hostname,
             vibesys_version=version,
+            vibesys_root=running_checkout(),
         ),
     )
 

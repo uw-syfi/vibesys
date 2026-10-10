@@ -267,6 +267,7 @@ maintained by people.
 - Non-interactive execution runs headless automatically.
 - `vibesys validate [PROJECT] --task NAME` checks the static task contract
   without starting an agent or executing the checker and benchmark.
+- `vibesys tasks [PROJECT] [--json]` lists the tasks a project defines.
 
 Legacy root input bundles remain valid positional arguments without `--task`.
 

@@ -19,6 +19,7 @@ Layout under ``instance_root``::
     runs/<id>/control.sock, runs/<id>/server.log
 
 Public surface: the record and CLI result models, ``instance_root``,
+``checkout_root`` and ``running_checkout`` (the record's ``vibesys_root``),
 ``InstanceStore`` with its ``FileInstanceStore`` and ``FakeInstanceStore``
 implementations, ``StopRequester`` with ``ControlSocketStopRequester`` and
 the ``StopEffects`` a stop uses, the
@@ -33,6 +34,7 @@ import platform
 import re
 import secrets
 import stat
+import tomllib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -68,6 +70,8 @@ STOP_TIMEOUT_SECONDS = 10.0
 CONTROL_REPLY_TIMEOUT_SECONDS = 5.0
 """How long a stop request waits to connect and for the server's acknowledgment."""
 _MAX_REPLY_BYTES = 1 << 20
+_CHECKOUT_DEPTH = 2
+"""``src/<package>/<module>.py``: the checkout is this many parents above the module."""
 
 
 class InstanceStatus(StrEnum):
@@ -95,6 +99,14 @@ class LiveInstanceRecord(BaseModel):
     hostname: str
     protocol_version: Literal[1] = PROTOCOL_VERSION
     vibesys_version: str
+    vibesys_root: str | None = None
+    """Absolute path of the VibeSys source checkout this server runs from.
+
+    ``None`` when the server runs from an installed distribution rather than a
+    checkout, and in records written before the field existed (the field is
+    additive, so the record stays version 1). A client uses it to suggest the
+    checkout it should run ``vibesys`` from on this host.
+    """
 
 
 class InstanceList(BaseModel):
@@ -666,6 +678,34 @@ def host_facts() -> tuple[str, str]:
     except PackageNotFoundError:
         version = "0+unknown"
     return platform.node(), version
+
+
+def checkout_root(module_file: Path) -> Path | None:
+    """Return the VibeSys source checkout that holds ``module_file``, if any.
+
+    ``module_file`` is a module of the ``src/<package>/`` layout; its checkout
+    is two directories above the package, and counts only when that
+    directory's ``pyproject.toml`` declares the ``vibesys`` project. An
+    installed distribution has no such file, so it yields ``None``.
+    """
+    resolved = module_file.resolve()
+    if len(resolved.parents) < _CHECKOUT_DEPTH + 1:
+        return None
+    candidate = resolved.parents[_CHECKOUT_DEPTH]
+    try:
+        manifest = tomllib.loads((candidate / "pyproject.toml").read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return None
+    project = manifest.get("project")
+    if isinstance(project, dict) and project.get("name") == "vibesys":
+        return candidate
+    return None
+
+
+def running_checkout() -> str | None:
+    """Return the checkout this process runs VibeSys from, as a string, or ``None``."""
+    root = checkout_root(Path(__file__))
+    return None if root is None else str(root)
 
 
 def parse_instance_id(value: str) -> str:
