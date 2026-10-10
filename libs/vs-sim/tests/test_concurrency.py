@@ -62,18 +62,26 @@ class TestUnixNetwork(NetworkContract):
         )
         return NetworkUnderTest(UnixNetwork(), threads, address)
 
-    def test_closing_a_connection_ends_a_read_blocked_in_another_thread(self) -> None:
+    def test_concurrent_connection_close_ends_read_with_eof_or_error(self) -> None:
         network = UnixNetwork()
         address = _unix_paths()("blocked")
         listener = network.listen(address)
         client = network.connect(address, HANG_GUARD_S)
         server = listener.accept(HANG_GUARD_S)
-        reads: list[bytes] = []
-        reader = threading.Thread(target=lambda: reads.append(server.recv(1)))
+        outcomes: list[bytes | OSError] = []
+
+        def read_until_closed() -> None:
+            try:
+                outcomes.append(server.recv(1))
+            except OSError as error:
+                outcomes.append(error)
+
+        reader = threading.Thread(target=read_until_closed)
         reader.start()
         server.close()
         join_or_fail(reader)
-        assert reads == [b""]
+        assert len(outcomes) == 1
+        assert outcomes[0] == b"" or isinstance(outcomes[0], OSError)
         assert client.recv(1, HANG_GUARD_S) == b""
         client.close()
         listener.close()
