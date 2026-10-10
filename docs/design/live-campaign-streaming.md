@@ -1,26 +1,54 @@
 # Live campaign telemetry: streaming a long run into the web UI
 
-Status: draft for discussion. Owner: web + orchestration. Companion to the
-campaign dashboard in PR #1304 (`feat/web-trajectory-replay-fixtures`), which
-this builds on. Citations below were rechecked against a fresh
-`upstream/main` pass (commit `cbca56e46`, 2026-10-10); "The gap" and "Backend
-path" carry what that pass corrected or sharpened from the first draft.
+Status: draft for discussion, with one real backend fix shipped as proof of
+concept (see "Backend PoC"). Owner: web + orchestration. Companion to the
+campaign dashboard in PR #1304 (`feat/web-trajectory-replay-fixtures`): that
+PR is an unmerged, localhost-only demo of one finished run, used here only as
+a visual reference for what a campaign dashboard should show, not as code
+this PR builds on. Citations below were rechecked against a fresh
+`upstream/main` pass (commit `5ff739abc`, 2026-10-10); "Telemetry inventory,"
+"The gap," and "Backend path" carry what that pass corrected or sharpened,
+including two places the first draft cited a legacy, dead orchestration
+engine instead of the live one (flagged inline).
 
 ## Problem
 
 A VibeSys serving-system campaign is a long run: a portfolio of concurrent
 workstreams, each a hypothesis with its own implement/review/profile/evaluate
-lifecycle, producing hundreds of measurements over days. PR #1304 shows what we
-want to see while that runs: one performance graph of every measurement with a
-running-best line, a draggable timer bar to view the run as of any moment, a
-workstream timeline, and a Kanban/table drill-down. Today that dashboard is
-driven by a hand-curated fixture, not live data.
+lifecycle, producing hundreds of measurements over days. PR #1304 is a
+hand-built, localhost-only demo of one finished run, used here purely as a
+visual reference for what a campaign dashboard should show: one performance
+graph with a running-best line, a draggable timer bar, a workstream timeline,
+and a Kanban/table drill-down. It is not integrated into VibeSys, and this PR
+does not build on its code, only on the shape of what it displays.
 
-The question this doc answers is narrow and load-bearing: **how do we get that
-much telemetry from the backend to the browser, live, accurately, and
-efficiently, without any delay, and without scattering print statements through
-the orchestration code.** The fixture's own footer states exactly which parts
-are real versus reconstructed; closing that gap is the work.
+Today nothing gets that much telemetry from the backend to a browser while a
+run is still going. This doc breaks that into four sub-problems:
+
+1. **Inventory.** What telemetry does the backend already compute or emit,
+   what of that already reaches the websocket, and what does not exist as
+   measured data anywhere yet? Without this, any design is guessing.
+2. **Packaging.** However this data gets to the browser, it cannot be one
+   stream per metric. A run with a portfolio of workstreams, each polling
+   tools, tokens, and profilers, produces telemetry at a rate and shape that
+   do not fit "add a print statement, pipe it to the UI": that approach does
+   not type-check, does not replay, does not survive a reconnect, and turns
+   into an unmaintainable pile of ad hoc channels the moment a second kind of
+   telemetry is added. The design needs one packaging answer that scales to
+   telemetry not yet invented.
+3. **Classification.** The dashboard, and future ones, need data at
+   different altitudes: global run health, one workstream's progress, one
+   checkpoint's result, one agent's activity. The design needs to say which
+   altitude each kind of telemetry belongs to and why, so a new kind has an
+   obvious home.
+4. **Durability.** A campaign can run for a month or more. The design needs
+   to say what happens to an hour-one browser tab still open at hour-700, and
+   what happens to the on-disk history by then, rather than assuming a run
+   this long away as out of scope.
+
+This doc answers all four, with a proof-of-concept backend fix, not just a
+proposal, wired into the same chokepoints the system already uses for every
+other event it streams today.
 
 ## Goals and non-goals
 
@@ -35,12 +63,20 @@ Goals:
 - A runnable local prototype that streams the existing campaign over this
   contract so collaborators can see and critique the live behavior, the way
   #1304 let people see the layout.
+- A complete account of what telemetry exists today, what already reaches the
+  websocket, what does not, a packaging design that scales to telemetry not
+  yet invented, and a resilience plan for runs lasting a month or more.
+- One real backend change that proves the packaging design's extensibility
+  claim against a genuine bug, not only on paper.
 
-Non-goals (named here, deferred to the backend path in the last section):
+Non-goals (named here, deferred to "Backend path"):
 
-- Emitting these events from the real orchestrator. That needs a projection of
-  `DynamicState.workstreams` and new wire-protocol event types; it is sketched
-  but not built here.
+- Emitting the *campaign-dashboard-specific* events (workstream lifecycle,
+  token spend) from the real orchestrator. That still needs the projection
+  work in "Backend path"; it is sketched, not built, here. The one event this
+  PR does wire for real (async-operation lifecycle, see "Backend PoC") is
+  general-purpose plumbing the campaign projection will also depend on, not
+  the campaign projection itself.
 - Running a real `dynamic` campaign locally. `dynamic` orchestration raises
   at startup unless the run environment supports parallel candidate
   workspaces (`_require_candidate_sandboxes`, `dynamic_core.py:143-162`,
@@ -68,6 +104,23 @@ class. None of this changes the design below (frames key off
 `workstream_id`/`phase`, not off which outer-loop strategy produced them),
 but it is worth knowing before reading backend code that still says "outer
 loop."
+
+**A second terminology note, more consequential: two "workstream" engines
+exist in `orchestration/dynamic/`, and only one is live.**
+`DynamicState`/`DynamicWorkstream`/`AgentLoopState`/`PortfolioView`
+(`models.py`, `rounds.py`, `workstream.py`, `agent_loop.py`) are a legacy
+in-process engine. Since `712586df6` ("run `--outer-loop dynamic` on the core
+path"), that engine is registered only under `legacy_plugin.py` and reachable
+only from tests (`tests/vibesys/orchestration/dynamic/*`,
+`tests/e2e/test_dynamic_loop_smoke_e2e.py`); nothing under `src/` wires it
+into a real run. The live engine, wired by `dynamic/plugin.py`
+(`dynamic_core_registration()`), is `vibesys.orchestration.dynamic.strategy`
+plus `core_policy` (glue to `vs_core`/`vs_runtime`): `DynamicStrategyState`
+holds `attempts: tuple[AttemptRecord, ...]`, not `workstreams: tuple[
+DynamicWorkstream, ...]`. The first draft of this doc cited the legacy types
+in "The gap" below; this pass corrects every citation to the live ones, and
+flags each correction inline. Anyone extending this design later should grep
+`strategy/_state.py`, not `models.py`.
 
 **Telemetry already flows through named chokepoints, not prints.** There are
 two, one per layer, not a single one. Core-side, every producer emits
@@ -120,69 +173,378 @@ each metric's unit, direction, and whether it is required, then one `result`
 any value arrives. The telemetry contract below carries the same information in
 its first frame, so a live chart can label its axes from the start.
 
+## Telemetry inventory
+
+Grounded in a direct, file-by-file pass over `upstream/main` (`5ff739abc`),
+not assumption. Three buckets: already streamed to the browser, computed or
+persisted but not streamed, and not computed anywhere.
+
+### Already streamed (reaches the websocket today)
+
+- **Tool calls, with real per-call duration.** `ToolCallData`/`ToolResultData`
+  (`vibesys/events.py`), mirrored in `server/events.py`. agentshim times
+  every tool-use block uniformly, native and MCP tools alike
+  (`CommandResultPayload.duration`); this is comprehensive, not limited to
+  shell-style tools.
+- **Agent status snapshots**: elapsed seconds, in-flight input tokens,
+  context-window usage (`AgentStatusData`), and current-context token/model
+  readings (`UsageUpdateData`) — both point-in-time, not cumulative.
+- **Rate limits and quota lifecycle**: `RateLimitUpdateData`,
+  `QuotaPausedData`/`QuotaResumedData`/`QuotaAbandonedData`,
+  `ProviderSwitchedData`.
+- **Gate lifecycle**: `GateStartedData`/`GateFinishedData` (gate, recipe,
+  reused, metric, value, unit, output tail) — no duration field.
+- **Round outcomes**: `RoundFinishedData` (attempts, judge verdict,
+  `perf_metric`/`perf_unit`, whether profiling was skipped) — this is also
+  where a profiler's headline metric surfaces; see the profiler bullet
+  below.
+- **Judge and benchmark results**: `JudgeResultData`, `BenchmarkResultData`.
+- **Run failure, in aggregate**: `RunFailure` (kind, reason,
+  `workstreams_started`, `workstream_budget`, `candidates_kept`) — a real
+  cross-workstream count, but terminal-only, built once when a run fails.
+- **Envelope metadata on every event**: `sequence`, `timestamp`, `run_id`,
+  `execution_id`, `round_label`, `agent_kind`.
+
+### Exists, computed or persisted, not streamed
+
+- **Per-turn usage, with cost and real per-agent-kind attribution.**
+  `usage.jsonl` / `AgentUsage` (`vs_agent/contracts.py`): input/output/cache
+  tokens, `total_cost_usd`, `duration_ms`, and a `kind` field distinguishing
+  "dynamic-implementer" from "dynamic-judge" and so on. This is the richest
+  disconnected source in the repo. It is write-only today: nothing reads it
+  back into an event.
+- **Portfolio concurrency.** `active()`/`capacity()` (`strategy/_context.py`)
+  compute true N-way in-flight/queued counts every tick, from live
+  `DynamicStrategyState.attempts`, and discard the result immediately. One
+  level up, `project_strategy_state()` (`core_policy/_projection.py`)
+  computes the same `in_flight` tuple and collapses it to a single `active =
+  in_flight[-1]` (`AgentRunProjection.active_hypothesis_id`) before it
+  reaches any read model: real concurrency is computed, then thrown away
+  down to "most recent one."
+- **The richest per-workstream detail, in live state, lost at settlement.**
+  `AttemptRecord` (`strategy/_state.py`) carries `blockers` (the ordered
+  history of failed/rejected turns), `turns_spent`, `judge_invocation`,
+  `review_evidence`, and the current `turn`, and none of it is pruned while
+  the run is live. `on_settled()`'s `_round()` (`strategy/_attempt_events.py`)
+  collapses this ~29-field record to the 13-field `RoundRecord` (`sequence`,
+  `outcome`, `summary`, `metrics`, ...), dropping every field above; no "how
+  many tries did this take" counter survives settlement anywhere. A
+  telemetry tap sourced from `RoundRecord` or the read model inherits this
+  loss; one sourced from live `AttemptRecord` at its `DONE` transition would
+  not.
+- **The run's stated objective.** `RunFacts.objective`, frozen at run start
+  (`vs_core` kernel `RunView.facts`). Exists today; nothing emits it as an
+  event. This is the direct answer to showing the run's objective in the UI.
+- **GPU telemetry and contention.** `NvidiaSmiTelemetry`,
+  `GpuContentionMonitor` (`vs_sandbox/gpu_monitor.py`), a daemon thread
+  polling every 30s. `FrameworkSource.GPU` is declared in `vibesys.events`
+  and never constructed anywhere in production.
+- **Executor/evaluation capacity.** `AvailabilitySnapshot`
+  (`vs_evaluation/models.py`: state, capacity, in_flight, queue_depth,
+  estimated start/runtime, cost class) is real and detailed, consumed only
+  internally for scheduling, never emitted.
+- **Profiler narrative and attribution.** `ProfilerAgentResult` (narrative,
+  evidence ids, named cost/share attribution) and `ProfilerSummary`
+  (analysis, bottlenecks, a `metrics` dict) are rich structured outputs of a
+  profiler turn. Only lifecycle *state* reaches an event
+  (`AsyncOperationLifecycleData`: submitted/queued/running/succeeded/failed);
+  the narrative, attribution, and metrics dict stay inside the turn's return
+  value. One exception: `perf_metric`/`perf_unit` do reach `RoundFinishedData`
+  once a round concludes.
+- **Checkpoint history below the attempt.** `AttemptCheckpoint`
+  (`vs_core/types/attempts.py`: invocation, revision, `wip`/`candidate`
+  retention) is an append-only history of every retained snapshot within one
+  attempt. `AttemptRecord` keeps only the latest (`candidate: RevisionRef |
+  None`); the retained history never surfaces above the kernel.
+- **Boot-phase span timing.** `BootTrace` (`vs_runtime/_boot_trace.py`) is a
+  deliberate, OpenTelemetry-shaped span/trace mechanism, used extensively
+  during environment setup. By design it writes only to the plain-text run
+  log, since it runs before any event sink exists.
+- **Per-evaluation-stage duration.** `EvaluationStepResult.duration_s`
+  (`vs_evaluation/models.py`) is real and computed, but does not reach
+  `GateFinishedData`, which has no duration field at all.
+
+### Does not exist anywhere
+
+- **VibeSys's own throughput.** No tokens-per-second or any rate computation
+  for VibeSys's own agent activity exists anywhere, confirmed against
+  production code and against this PR's own prototype fold
+  (`campaign-fold.ts` tracks a cumulative `tokenSpend`, never a rate).
+  `ProfilerSummary.metrics`' example key `'median_tok_per_sec'` is a
+  different thing: it describes the *candidate system being optimized*, not
+  VibeSys's own loop, and should not be confused with it.
+- **Run wall-clock duration as a stored fact.** No run start time is stored
+  anywhere; a run's elapsed time is derivable only as "now minus the first
+  event's timestamp."
+- **Gate duration.** Zero clock calls anywhere in gate execution.
+- **CPU/memory of agent sandboxes.** No `psutil`, `pynvml`, or cgroup-usage
+  polling exists anywhere in `vs_sandbox`/`vs_agent`/`src/vibesys`.
+- **Retry/backoff as an event: a dead sink, not a missing feature.** A real
+  retry policy exists (`TRANSIENT_RETRY_DELAYS_S`,
+  `vs_agent/session_launch.py`) and the wait loop runs inside agentshim, but
+  its log callback, `AgentDiagnosticLog`, is constructed with no event sink
+  (`factory.py:91`, defaults to `NULL_AGENT_EVENT_SINK`). The retry notice
+  reaches the plain-text run log only. One line of wiring would fix this; it
+  is listed under "Backend path" rather than fixed in this PR, to keep the
+  proof of concept to one change.
+- **Typed workstream/attempt correlation.** `round_label`/`agent_kind` on the
+  event envelope are free text, not references; which workstream an
+  agent-local event belongs to is not a parseable field anywhere today.
+- **Tool output size, and real tool-call identity.** `ToolResultData` has no
+  byte-size field; `call_id` is a synthetic UUID, paired to its call by a
+  per-tool-name FIFO queue, not the provider's real id.
+
+**Naive alternative, ruled out explicitly: print statements.** Routing any of
+the above to the UI by adding print statements, or ad hoc log lines parsed
+back out, does not type-check at the boundary, does not replay on reconnect,
+does not survive a process restart, and does not compose: each new kind of
+telemetry becomes its own bespoke parsing problem on both ends. Every kind
+above instead becomes a typed payload inside the one pipeline the system
+already uses for everything in "already streamed"; see "Scalable packaging
+design" for why that pipeline, not a new one, is the right place to add the
+rest.
+
 ## The gap
 
 PR #1304's fixture footer names it precisely: the measurement points and their
 values are recovered from a real campaign, but "workstream windows, role
 assignments, and turn text are curated reconstructions from available evidence,
 not backend events." Four concrete things are missing between the current
-backend and a live `CampaignRecord` (the first three were in the first draft;
-the fourth surfaced on recheck):
+backend and a live `CampaignRecord`:
 
-1. **Workstream state is never projected.** `dynamic` holds the full lifecycle
-   in `DynamicState.workstreams` (phase, attempts, candidate, review,
-   evaluation), but the read-model projection, `project_strategy_state()` in
-   `orchestration/dynamic/core_policy/_projection.py` (wired in through
-   `dynamic_core.py`'s `dynamic_projector()`; `dynamic/plugin.py` itself is
-   just a thin re-export of `dynamic_core_registration()` today), builds its
-   `AgentRunProjection` from `state.hypotheses`/`state.attempts` only and
-   never reads `workstreams`. Settlement makes this worse, not just absent:
-   once a workstream finishes, `Rounds.record()`
-   (`orchestration/dynamic/rounds.py:78,384,494`) flattens it into a
-   `RoundRecord` on the shared `HypothesisState`, the same aggregate `single`
-   and `multi` write to directly. `DynamicWorkstream` itself never crosses
-   `vibesys.api`; the in-flight phase detail only exists while the run is
-   live. No external consumer can see "N workstreams in flight, in these
-   phases" today.
+1. **Workstream state is computed, then collapsed, not "never projected."**
+   The live engine already computes true portfolio concurrency:
+   `active()`/`capacity()` (`strategy/_context.py`) and
+   `project_strategy_state()` (`core_policy/_projection.py`) both derive an
+   `in_flight` tuple of every non-DONE attempt from
+   `DynamicStrategyState.attempts` on every call. `project_strategy_state()`
+   then collapses it to one id, `active = in_flight[-1] if in_flight else
+   None`, because `AgentRunProjection` was designed for one hypothesis at a
+   time and has not been redesigned for the portfolio engine. Settlement
+   compounds this: `on_settled()`'s `_round()` (`strategy/_attempt_events.py`)
+   flattens a live, ~29-field `AttemptRecord` (blockers, turns_spent,
+   judge_invocation, review_evidence, the current turn) to a 13-field
+   `RoundRecord`, and `DynamicStrategyState.attempts` itself is never pruned
+   of DONE records, so the detail exists in durable live state for the run's
+   whole lifetime; it is only the derived read model that is thin.
+   **Correction from the first draft:** this gap was previously described in
+   terms of the legacy, dead `DynamicState.workstreams`/`DynamicWorkstream`;
+   those types are reachable only from tests. This is the corrected,
+   live-engine version of the same gap.
 2. **The event envelope has almost no workstream identity.** There is
-   `round_label` and `execution_id`, but no `workstream_id` and no
-   per-workstream phase/status event, so even the events that do flow cannot
-   be grouped into workstream lanes. One existing event comes close:
+   `round_label` and `execution_id`, but no `workstream_id`/`attempt_id` and
+   no per-workstream phase/status event, so even the events that do flow
+   cannot be grouped into workstream lanes. One existing event comes close:
    `AsyncOperationLifecycleData.scope_id` is already populated with the
-   `hypothesis_id` (`run/host.py:676-694`), but
-   `CoreEventType.ASYNC_OPERATION_LIFECYCLE` has no case in the server's
-   `EventType`/`EventData` union or in `project_event()`'s control-event
-   special cases, so `project_event()`'s `EventType(event.type.value)`
-   (`server/integration.py:365`) would raise on it, uncaught. That is a real
-   gap independent of this design: the closest thing to a workstream id
-   already emitted core-side cannot reach the server today. It is also a
-   cheaper place to start than inventing a field from nothing.
-3. **There is no token-spend field, and the placeholder that exists is
-   unwired.** Token usage is tracked per invocation (`usage.jsonl`) but
-   never reaches this schema. There is also a schema-level seed,
+   `hypothesis_id` (`run/host.py`), but until this PR,
+   `CoreEventType.ASYNC_OPERATION_LIFECYCLE` had no case in the server's
+   `EventType`/`EventData` union or in `project_event()`, so
+   `project_event()`'s `EventType(event.type.value)` would raise on it,
+   uncaught, killing the run. **This PR fixes that; see "Backend PoC."**
+   Promoting `scope_id` into a documented, first-class
+   `workstream_id`/`attempt_id` envelope concern for every event, not just
+   this one, is still future work, scoped out of this PR; see "Backend
+   path."
+3. **There is no token-spend field on the live engine, and no unwired
+   placeholder worth wiring either.** The first draft of this doc pointed at
    `AgentLoopState.input_tokens`/`output_tokens`
-   (`orchestration/dynamic/models.py:887-888`), but it is run-level only
-   (not per-workstream), has zero reads or writes anywhere else in
-   `src/vibesys`, and is not re-exported through `vibesys.api`. It arrived
-   with the same migration (`DynamicState` schema v7, PR #1239,
-   "orchestrator agent step 1") that this gap's eventual fix should probably
-   extend, rather than inventing a parallel counter next to it.
-4. **No wall-clock timestamp survives in the core model.** `Hypothesis`,
-   `RoundRecord`, and `DynamicWorkstream` order entirely by `round_number` /
-   `sequence`; none stores a `started_at`/`finished_at`. The dashboard needs
-   real ISO timestamps (to drive "active iff cursor time is before
-   finishedAt" and the timer bar's axis), so a live projection has to derive
-   them from the event envelope's own `timestamp` field (the first and last
-   event touching a given workstream), not from any backend-stored start or
-   end field. Worth settling now so step 1 below does not have to
-   rediscover it.
+   (`orchestration/dynamic/models.py`) as an unwired seed to extend.
+   **Correction from the first draft:** that field is legacy, dead code:
+   always zero, never assigned in production, not part of any event, and not
+   reachable from the live engine at all. The live
+   `DynamicStrategyState`/`AttemptRecord` carry no token or cost field, a
+   regression relative to the legacy engine, not a redesign in progress. The
+   real, richest source is `usage.jsonl`/`AgentUsage` (per-turn tokens, cache
+   tokens, cost, duration, real per-agent-kind attribution), covered in
+   "Telemetry inventory" above: it is write-only today, and wiring it, not
+   `AgentLoopState`, is the right next step.
+4. **No wall-clock timestamp survives in the core model.** Neither the
+   legacy nor the live attempt/workstream type stores a
+   `started_at`/`finished_at`, and the generic kernel `RunView.now_at` is a
+   run-clock float for deadlines, not a timestamp. The dashboard needs real
+   ISO timestamps (to drive "active iff cursor time is before finishedAt"
+   and the timer bar's axis), so a live projection has to derive them from
+   the event envelope's own `timestamp` field (the first and last event
+   touching a given workstream), not from any backend-stored start or end
+   field.
 
 Everything else the dashboard needs (measurements with values and gates,
 objective and metric catalog, benchmark-version boundary) already exists as
 data; it is the workstream layer, its timing, and token spend that are
 unprojected.
 
-## Design
+## Scalable packaging design
+
+The question "how do we package and transport all of this so it scales to
+telemetry we have not invented yet, without a new architecture every time"
+has one answer: **do not build anything new.** VibeSys already has the
+pattern this needs, twice.
+
+### The pattern that already exists
+
+Core side: a closed `CoreEventType` enum, a discriminated-union `CoreEventData`
+payload keyed by `kind`, a flat `CoreEvent` envelope, and one emission
+chokepoint, `EventJournal.emit()`, writing one append-only JSONL file. Wire
+side: the same shape, `EventType`/`EventData`/`RunEvent`, written by
+`WireJournal`/`EventStore` to `run-events.jsonl`, chunked (1 MiB frame cap)
+over one reconnecting websocket. One bridge function, `project_event()`, is
+the single place a core event becomes a wire event. This PR's own prototype
+(`CampaignFrame`, a six-kind discriminated union with a strict parser) is a
+smaller instance of exactly this same pattern, one layer up, on the browser
+side.
+
+### Why extend this instead of inventing a struct, library, or second transport
+
+- **It is already proven additive.** `#697` added five `EventType` members
+  and a field as a pure-additive, no-protocol-version-bump change. Adding a
+  telemetry kind is already a small, type-checker-enforced, one-PR change,
+  not a migration. `#1749`'s `STEER_DELIVERED` addition (landed on
+  `upstream/main` after this PR forked) is a second, independent instance of
+  the same pattern: one core enum member, one wire enum member, one
+  `project_event()` case.
+- **It already avoids "a thousand streams."** One multiplexed, sequenced,
+  size-capped, chunked channel discriminated by `kind`, not a connection per
+  metric. This is the direct answer to the failure mode a print-statement or
+  per-metric-stream approach hits at portfolio scale.
+- **It is forward-compatible by construction.** The wire-side parsers
+  already tolerate an unknown enum variant (the documented "unknown-enum
+  policy" in `protocol-parse.ts`), so an old client does not break the
+  moment a new telemetry kind ships from a newer server.
+- **The one real gap is coverage, not design.** Nothing today guarantees
+  every `CoreEventType` has a wire mapping, exactly what let
+  `ASYNC_OPERATION_LIFECYCLE` crash a run uncaught. The fix for that class of
+  gap is a test, not a new mechanism; this PR adds one (see "Backend PoC")
+  that fails on any future core event added without its wire counterpart,
+  not just on this one instance.
+- **Correlation should be promoted, not reinvented.** The ad hoc `scope_id`
+  pattern, already on `AsyncOperationLifecycleData`, is the right shape for
+  "which workstream does this event belong to"; it should become a
+  documented, first-class `workstream_id`/`attempt_id` envelope field every
+  new telemetry kind fills in, rather than each payload inventing its own
+  correlation field. Scoped to "Backend path": changing the shared envelope
+  is bigger than one PR should do alongside everything else here.
+- **High-frequency data gets sampled, not streamed per tick.** Some
+  telemetry (portfolio concurrency, queue depth) is naturally computed on
+  every orchestrator tick. Emitting an event per tick does not scale over a
+  month-long run; emitting a periodic snapshot (every N seconds, or on state
+  transition, not every tick) does, and is an emission-policy choice per
+  telemetry kind, not a transport change. See "Long-run resilience."
+
+### What this means concretely for a new kind of telemetry
+
+Adding any item from "doesn't exist anywhere" above, once it is measured,
+costs: one `CoreEventType` member and payload class (or a field on an
+existing payload, when it is naturally part of an existing event's moment);
+one `project_event()` case, now covered by a standing test, so a forgotten
+case fails CI instead of a run in production; one mirrored `EventType`
+member and payload; one regenerated TypeScript type; one conformance
+fixture. Nothing about the journal, the websocket, the chunking, or the
+frontend fold changes. That is the scalability property this section set
+out to justify.
+
+```mermaid
+flowchart LR
+    Orch[Orchestration code] --> Emit["Emit chokepoint<br/>+ new core kind here"]
+    Emit --> CoreJournal[(Core event journal)]
+    CoreJournal --> Bridge["Bridge chokepoint<br/>+ new wire kind here"]
+    Bridge --> WireEvent[Wire event]
+    WireEvent --> WireJournal[(Wire journal)]
+    WireJournal --> WS[Websocket]
+    WS --> Dashboard[Browser dashboard]
+```
+
+Two chokepoints, annotated above, are the only two places a new telemetry
+kind gets added. Everything else in the pipeline, the journals, the
+websocket, the chunking, is unchanged by that addition.
+
+## Long-run resilience
+
+A campaign can run for a month or more. Three problems, each with an answer
+that reuses something the system already has rather than inventing new
+infrastructure:
+
+1. **Every page load replays the entire run, unbounded.** The web client
+   never sets the already-built `tail` bootstrap option
+   (`clients/web/src/main.tsx`), so opening the dashboard on day 30 replays
+   30 days of events from the start. The TUI client already solved this:
+   `tail=1000` plus a periodically-recomputed "spine" summary of everything
+   before that window (`BOOTSTRAP_TAIL`, `session-controller.ts`;
+   server-side `WireJournal._bootstrap_spine_locked`, `server/journal.py`).
+   The fix for the web client is pointing it at the same mechanism, not
+   building a second one.
+2. **The on-disk journal has no rotation, compaction, or retention.**
+   `run-events.jsonl`/`core-events.jsonl` grow without bound, and
+   `EventStore` reads the entire file into memory at construction. This is a
+   real, currently open gap; out of scope to fully close in this PR. The
+   natural extension point is the spine concept from problem 1: a spine that
+   already bounds *replay* could be extended to also bound *storage*
+   (periodic compaction keeping a spine plus a bounded tail window on disk,
+   not just in the bootstrap response), rather than a new storage mechanism.
+3. **Sustained high-frequency emission over weeks adds up, even if no single
+   event is huge.** `upstream/main` (`#1735`, landed after this PR forked)
+   already caps and truncates any one oversized event
+   (`MAX_SERIALIZED_RUN_EVENT_BYTES`, with a `RunEvent.truncated` marker).
+   That bounds one event, not a sustained rate. The answer is the
+   per-telemetry-kind sampling/coalescing policy from "Scalable packaging
+   design": a portfolio-concurrency snapshot every N seconds or on state
+   change, not one event per orchestrator tick, keeps total volume bounded
+   by run *events*, not run *duration*.
+
+None of these three are solved by a bigger buffer or a longer timeout; each
+is solved by using a bound the system already enforces somewhere (replay
+window, per-event size) or by choosing what to sample instead of streaming
+everything that is computed.
+
+```mermaid
+flowchart LR
+    FullJournal[(Full journal)] --> Replay["Unbounded replay<br/>(today)"]
+    Replay --> Dashboard[Web dashboard]
+    Spine[Spine + tail window] --> Bootstrap["Bounded bootstrap<br/>(proposed)"]
+    Bootstrap --> Dashboard
+    TUI[TUI client] -. already uses .-> Bootstrap
+```
+
+The TUI client already takes the bounded path. Problem 1 above is wiring the
+web client to that same mechanism, not building a second one.
+
+## Telemetry viewpoint taxonomy
+
+Every kind of telemetry in this system belongs to one of five altitudes.
+Naming them gives a new kind of telemetry an obvious home instead of an
+argument.
+
+| Viewpoint | Scope | Examples (today) | Examples (future) |
+| --- | --- | --- | --- |
+| Global / cross-run | Whole portfolio, this run | `RunFailure` aggregate counts (terminal only); best-result-so-far (`Winner`, computed once at search end) | live N-way concurrency snapshot (`active()`/`capacity()`, sampled, not per-tick); baseline state (`BaselineState`, already the one clean run-wide fact) |
+| Run-specific | One run, no workstream breakdown | `RunStatus`/`RunPhase`; global round counter (`RoundSummary.number`, not per-hypothesis) | the run's objective (`RunFacts.objective`, exists, unwired); run elapsed time (derived from the first event's timestamp, since no start-time field exists) |
+| Workstream-specific | One hypothesis/attempt | phase/step transitions, once gap 2 is closed generally | `AttemptRecord` detail while still live: `blockers`, `turns_spent`, `judge_invocation`, `review_evidence`, candidate revision |
+| Checkpoint-specific | One retained snapshot within an attempt | none today | kernel-level `AttemptCheckpoint` (`wip` vs. `candidate` retention), if historical, not just latest, checkpoints are ever needed on the dashboard |
+| Agent / local-specific | One tool call or turn | tool calls + duration, `AgentStatusData`, `UsageUpdateData`, provider/model switches, rate limits | per-turn cost and cache tokens with real per-agent-kind attribution, once `usage.jsonl`/`AgentUsage` is wired |
+
+Every tier fits the same envelope from "Scalable packaging design": scoped by
+`run_id` always, and by `workstream_id`/`attempt_id` where the tier is
+narrower than the whole run. Checkpoint-specific is listed because the data
+already exists one layer down in the kernel (`AttemptCheckpoint`), not
+because anything needs it today; it is the natural next tier the same
+pattern grows into, not a reason to add a new pattern now.
+
+```mermaid
+flowchart LR
+    Global[Global] --> Stream["Event stream<br/>scoped by run / workstream id"]
+    Run[Run] --> Stream
+    Workstream[Workstream] --> Stream
+    Checkpoint[Checkpoint] --> Stream
+    AgentLocal[Agent-local] --> Stream
+    Stream --> Perf[Performance graph]
+    Stream --> Timeline[Workstream timeline]
+    Stream --> Kanban[Kanban / table]
+```
+
+All five viewpoints share the one pipeline from "Scalable packaging design."
+The dashboard's three live views all read from that same stream, not three
+separate feeds.
+
+## Prototype design
 
 ### One contract: an append-only stream of typed campaign frames
 
@@ -324,51 +686,148 @@ the frames come from the curated record, not a live orchestrator; token values
 are the record's reconstructed spend; `dynamic`'s real concurrency is not
 exercised (it cannot be, locally).
 
+## Backend PoC: closing the `ASYNC_OPERATION_LIFECYCLE` gap
+
+"The gap" item 2 above is a real, production-reachable crash, not a
+hypothetical: `run/host.py`'s `_evaluation_lifecycle_event` and
+`_profiler_lifecycle_event` (lines 673, 687) are live callbacks, not
+test-only, and every call emits `CoreEventType.ASYNC_OPERATION_LIFECYCLE`.
+Until this PR, `project_event()`'s unconditional `EventType(event.type.value)`
+(`server/integration.py:365`) raised `ValueError` on it, and
+`server/runtime.py`'s `drive()` only catches `asyncio.CancelledError` around
+the event loop (line 176), so the error propagated uncaught: any run that
+dispatched a profiler or submitted evaluation evidence crashed its own event
+loop the next time one of those operations changed state.
+
+What changed, entirely within `src/server/`, mirroring `AsyncOperationLifecycleData`'s
+seven fields (`operation_kind`, `operation_id`, `state`, `revision`, `scope_id`,
+`current_stage`, `source`), not a trimmed subset:
+
+- `server/events.py`: added `EventType.ASYNC_OPERATION_LIFECYCLE`, the mirrored
+  `AsyncOperationKind`/`AsyncOperationState` enums, and a wire-side
+  `AsyncOperationLifecycleData` payload, added to the `EventData` discriminated
+  union.
+- `server/integration.py`: **no change.** Once the `EventType` member exists,
+  `project_event()`'s existing generic fallthrough, the same path
+  `GATE_STARTED`/`RUN_CONFIGURED`/`FRAMEWORK_WARNING` already use, appends the
+  event to the wire journal correctly, `scope_id` included. The bug was a
+  missing enum member, not missing bridge logic.
+- `tests/server/test_integration.py`: two new tests. One constructs a real
+  `AsyncOperationLifecycleData`/`CoreEvent`, runs it through `project_event()`,
+  and asserts `scope_id="hypothesis-7"` survives onto the wire event. The
+  other sweeps every `CoreEventType` not in `_CONTROL_EVENT_TYPES` and asserts
+  `EventType(core_type.value)` does not raise, closing the asymmetry
+  generally rather than just for this one kind, per this repo's "a bug fix
+  needs a regression test" rule. Both fail at the merge base (reverted via a
+  saved patch file, not `git stash`, since a worktree's `refs/stash` is
+  shared) with the predicted `ValueError: 'async_operation_lifecycle' is not
+  a valid EventType`, and pass after the fix; `uv run pytest
+  tests/server/test_integration.py` is 13 passed, `uv run pytest
+  tests/server/` is 483 passed, `./scripts/check_format.sh` and
+  `./scripts/check_lint.sh` are clean.
+- `clients/backend-client/src/generated/protocol.schema.json` and
+  `protocol.generated.ts`: regenerated via `pnpm generate:protocol`, and
+  `tests/conformance/events/async_operation_lifecycle.json`: one new fixture,
+  following the `rate_limit_update.json`/`provider_switched.json` pattern.
+  `node clients/scripts/check_conformance_corpus.mjs` confirms the corpus is
+  complete.
+- `clients/core-state/src/core-state.ts`: **no change.** This package's fold
+  (`applyRunFacts`) dispatches with a plain `if (data?.kind === ...)` chain,
+  not an exhaustive table, so an unhandled kind is already a correct no-op by
+  construction; `pnpm --filter @vibesys/core-state check` and `pnpm --dir
+  backend-client check` are both clean with zero client-side changes. This is
+  a second, independent instance of "Scalable packaging design"'s
+  forward-compatibility claim: a kind the client does not project is not a
+  kind the client fails to compile on.
+
+An unplanned fix surfaced along the way: the wire schema generator
+(`server/api/schema.py`) only allows a fixed JSON-schema keyword whitelist,
+and rejected `operation_id`'s `Field(min_length=1)` the first time
+`generate:protocol` ran. No existing wire payload uses `min_length`; the wire
+side keeps `operation_id: str` unconstrained while the core payload keeps the
+stricter `Field(min_length=1)`, since core and wire are allowed to diverge in
+strictness (core validates what orchestration code must guarantee; wire
+validates what the schema generator supports today).
+
+One more fact this PoC confirms, relevant to "Scalable packaging design"'s
+correlation bullet: async-operation-lifecycle events carry no
+`agent_kind`/`round_label`/`execution_id` at all (`run/host.py` emits them
+with none), and no `status` on the envelope either, since lifecycle state
+lives inside the payload's own `state` field. `scope_id` is genuinely their
+only correlation handle on the wire today, which is exactly why promoting it
+to a first-class, documented envelope concern (rather than a payload-specific
+convention only this event happens to follow) is named as the next step in
+"Backend path," not an optional polish.
+
+Commit: `ac119aa13` (plus a one-line formatting fixup, `5aee31bb3`) on
+`feat/web-live-campaign-streaming`.
+
 ## Backend path (future, not in this PR)
 
-The prototype's frame schema is the proposed contract. Making it real is
-four changes, in expand-migrate-contract order, each behind the existing
-emission chokepoints (core `EventJournal`, bridged by `project_event()` into
-the server `WireJournal`) so no print statements are added:
+The prototype's frame schema is the proposed contract for the
+campaign-dashboard-specific data. Making it real is four changes, in
+expand-migrate-contract order, each behind the existing emission chokepoints
+(core `EventJournal`, bridged by `project_event()` into the server
+`WireJournal`) so no print statements are added:
 
 1. **Project workstream state, including its timing.** Extend
-   `project_strategy_state()` in
-   `orchestration/dynamic/core_policy/_projection.py` (called from
-   `dynamic_core.py`) to emit a typed workstream-lifecycle event whenever a
-   `DynamicWorkstream` changes phase, sourced from
-   `DynamicState.workstreams`, which this layer already has access to.
-   Populate `startedAt`/`finishedAt` from the emitting event's own
-   `timestamp` (first and last event per workstream), since no core type
-   stores wall-clock time (gap 4): derive it
-   at the projection boundary, the same way the live fold in this prototype
-   already does, rather than adding a parallel field to `DynamicWorkstream`.
-2. **Add workstream identity to the envelope.** The cheapest start is making
-   `project_event()` carry `AsyncOperationLifecycleData.scope_id` through (it
-   is already `hypothesis_id`, gap 2) instead of inventing a new field
-   first, then extending the same id to the rest of the per-turn events so
-   they group into lanes. One source of truth for the id, generated into the
-   client protocol types via `pnpm generate:protocol`, with the conformance
-   corpus extended rather than per-client snapshots.
-3. **Surface token spend.** `AgentLoopState.input_tokens`/`output_tokens`
-   (gap 3) is the natural seed, but it is run-level and unwired today;
-   making it per-workstream is part of the same "orchestrator agent"
-   migration (`DynamicState` v7 to v9, PR #1239) already in flight, not a
-   new counter built beside it. Coordinate with that work rather than
-   duplicate it.
+   `project_strategy_state()` (`orchestration/dynamic/core_policy/_projection.py`)
+   to emit a typed workstream-lifecycle event on every `AttemptRecord` phase
+   transition, sourced from live `DynamicStrategyState.attempts` (this layer
+   already reads it; see "The gap" item 1). Populate `startedAt`/`finishedAt`
+   from the emitting event's own `timestamp` (first and last event per
+   attempt), since no core type stores wall-clock time (gap 4): derive it at
+   the projection boundary, the same way the live fold in this prototype
+   already does, rather than adding a parallel field to `AttemptRecord`. Tap
+   the attempt at its `DONE` transition specifically, before `on_settled()`'s
+   `_round()` collapses `blockers`/`turns_spent`/`judge_invocation` away (see
+   "Telemetry inventory"), not after.
+2. **Add workstream identity to the envelope.** Done in this PR for one
+   event: `project_event()` now carries `AsyncOperationLifecycleData.scope_id`
+   through instead of crashing on it (see "Backend PoC"). What remains:
+   extending the same id to the rest of the per-turn events so they group
+   into lanes, and promoting it from a payload-specific field to a
+   documented, first-class `workstream_id`/`attempt_id` envelope concern
+   (see "Scalable packaging design"). One source of truth for the id,
+   generated into the client protocol types via `pnpm generate:protocol`,
+   with the conformance corpus extended rather than per-client snapshots.
+3. **Surface token spend.** The first draft of this doc pointed at
+   `AgentLoopState.input_tokens`/`output_tokens` as the seed to extend; that
+   field is legacy, dead code reachable only from tests (see "The gap" item
+   3). The real seed is `usage.jsonl`/`AgentUsage` (`vs_agent/contracts.py`):
+   write a `CoreEventType` and payload mirroring its fields (input/output/
+   cache tokens, `total_cost_usd`, `duration_ms`, `kind`), emit it from
+   wherever `vs_agent` already writes `usage.jsonl`, and bridge it like any
+   other event. This is the single highest-value next wiring target this
+   inventory found.
 4. **Derive the agent roster's `workstreamIds`; do not store it.** Roles are
    a run-level set (`orchestrator`/`implementer`/`judge`/`profiler`); no
    backend aggregate maps an agent to the workstreams it touched. Build
    `agent-upsert`'s `workstreamIds` by aggregating (role, workstream_id)
    pairs observed in the event stream itself, once step 2 makes that id
-   available.
+   available everywhere, not just on async-operation events.
+
+Also surfaced by this inventory, not yet scheduled against the four steps
+above:
+
+- **Show the run's objective and similar run-level facts in the UI.**
+  `RunFacts.objective` already exists, frozen at run start; wiring it is a
+  `campaign-init`-shaped addition, not a new mechanism (see "Telemetry
+  inventory").
+- **Fix the retry/backoff dead sink.** `AgentDiagnosticLog` is built with no
+  event sink, so retry-wait notices never leave the plain-text log (see
+  "Telemetry inventory"). A one-line wiring fix once someone decides what
+  event kind should carry it.
+- **Journal compaction for month-long runs**, extending the existing spine
+  concept to bound on-disk size, not just replay (see "Long-run
+  resilience").
 
 Explicitly out of scope for this path, named so it is not foreclosed by
 accident: the implementer's `dispatch_profiler` and evaluation/evidence tool
 calls (PR #1024, #1291) are real signal a later pass could turn into their
-own frame kinds. RFC #937's proposal for agents to dynamically form
-subteams is design-stage only and would change the "one agent, one role,
-many workstreams" shape assumed above if it ships. Neither blocks the four
-steps here.
+own frame kinds. RFC #937's proposal for agents to dynamically form subteams
+is design-stage only and would change the "one agent, one role, many
+workstreams" shape assumed above if it ships. Neither blocks the steps here.
 
 The server-side campaign projection then replaces `framesFromRecord`: the
 same frames, sourced from live state instead of a finished record, consumed
@@ -378,8 +837,10 @@ the client does not need to change when the source does.
 ## Design checkpoint
 
 - **Owner.** The web client owns the live fold and view model; the frame
-  contract is co-owned with orchestration (it is the projection boundary). No
-  backend module changes in this PR.
+  contract is co-owned with orchestration (it is the projection boundary).
+  This PR also makes one small, real change in `src/server/` (see "Backend
+  PoC"): a bug fix proving the extensibility pattern end to end, not a step
+  toward the campaign-specific projection above.
 - **Interface.** One new published interface, `CampaignStream`, plus a second
   implementation of the existing `CampaignViewModel`. `CampaignDashboard`'s
   surface is unchanged. The frame union and `parseCampaignFrame` are the typed
@@ -388,7 +849,9 @@ the client does not need to change when the source does.
   model -> view. No view code imports the stream or the fixture. No upward
   import.
 - **Coupling.** The view couples only to `CampaignRecord` + `CampaignViewModel`,
-  as it already did. The live path adds no coupling to the view.
+  as it already did. The live path adds no coupling to the view. The backend
+  fix touches only `src/server/`; it adds no new dependency and no new
+  `tach.toml` edge.
 - **Twice.** The rejected alternative was per-widget live queries (each panel
   subscribes to its own feed). It couples every widget to the transport, has no
   single ordering, and cannot answer "state as of cursor T" coherently. The
@@ -417,6 +880,14 @@ the client does not need to change when the source does.
   pauses follow without rewriting the already-completed status. This is the one
   place the React + transport wiring is exercised, matching the repo's
   unit-core / e2e-integration split.
+- `tests/server/test_integration.py`'s two new tests (see "Backend PoC")
+  cover the real bridge fix: `scope_id` survives `project_event()` intact for
+  an `ASYNC_OPERATION_LIFECYCLE` event, and every `CoreEventType` outside
+  `_CONTROL_EVENT_TYPES` has a working `EventType` counterpart, checked
+  exhaustively rather than one kind at a time. Reverting `server/events.py`
+  to its pre-fix state (via a saved patch, not `git stash`) reproduces the
+  exact `ValueError` the production crash hit; restoring the fix turns both
+  green.
 - Known gaps, named rather than silently dropped: `FakeCampaignStream` and the
   `useLiveCampaign` hook it exists to test (tail-follow, scrubbing while still
   active, and the `streamError` surface) have no automated test yet. This
