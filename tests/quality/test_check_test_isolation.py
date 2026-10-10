@@ -384,6 +384,70 @@ def test_timeout_verdict_rule_counts_an_expiry_consumed_as_a_value() -> None:
     assert counts_for(source) == {"timeout_verdict": 8}
 
 
+def test_timeout_verdict_rule_follows_one_hop_locals_into_conditions() -> None:
+    source = """
+        import threading
+        import time
+
+        def test_a(start):
+            expired = threading.Event().wait(timeout=0.05)
+            assert not expired
+
+            if_expired = threading.Event().wait(timeout=0.05)
+            if not if_expired:
+                pass
+
+            while_expired = threading.Event().wait(timeout=0.05)
+            while while_expired is False:
+                break
+
+            elapsed = time.monotonic() - start
+            assert elapsed < 1
+
+            observed = time.monotonic()
+            if observed > start:
+                pass
+
+            deadline = time.monotonic() + 1
+            while deadline > start:
+                break
+    """
+    assert counts_for(source) == {"timeout_verdict": 6}
+
+
+def test_timeout_verdict_rule_ignores_one_hop_locals_used_only_as_inputs() -> None:
+    source = """
+        import threading
+        import time
+
+        def test_a(start, system_under_test):
+            elapsed = time.monotonic() - start
+            system_under_test(elapsed)
+
+            completed = threading.Event().wait(timeout=0.05)
+            system_under_test(completed)
+            assert completed, "the fake never signalled"
+    """
+    assert counts_for(source) == {}
+
+
+def test_timeout_verdict_rule_invalidates_a_one_hop_local_on_reassignment() -> None:
+    source = """
+        import threading
+        import time
+
+        def test_a(start, system_under_test):
+            elapsed = time.monotonic() - start
+            elapsed = system_under_test()
+            assert elapsed < 1
+
+            expired = threading.Event().wait(timeout=0.05)
+            expired = system_under_test()
+            assert not expired
+    """
+    assert counts_for(source) == {}
+
+
 def test_timeout_verdict_rule_allows_a_deadlock_guard() -> None:
     source = """
         import asyncio

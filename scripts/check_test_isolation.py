@@ -118,13 +118,17 @@ Deliberately not counted, so that the gate stays worth reading:
       whose expiry nobody catches: expiry fails the test with an error instead
       of producing a verdict. `return proc.communicate(timeout=T)` is the same
       case, since `communicate` raises rather than returning the expiry.
-    - A production timeout passed into the system under test, or a timeout
-      constant asserted on. Those are inputs, not synchronization.
+    - A production timeout or clock-derived local passed into the system under
+      test, or a timeout constant asserted on. Those are inputs, not
+      synchronization.
     - `timeout=None`, which arms no deadline.
-    - Dataflow through a local: `ok = ev.wait(timeout=T)` then `assert not ok`,
-      and `elapsed = time.monotonic() - start` then `assert elapsed < T`. The
-      rule reads one expression at a time and does no dataflow analysis, so it
-      errs toward catching too little.
+    - Dataflow beyond one local assignment. The rule follows a timed wait
+      assigned directly to a local when its false result drives a later
+      condition, and follows a clock-derived local into a later comparison in
+      an `assert`, `if`, or `while`. Reassignment invalidates that origin, and
+      the rule does not propagate origins through another local or merge
+      ambiguous control-flow paths, so it still errs toward catching too
+      little.
     - `datetime.now()` and other non-`time` clocks.
 
 Configuration lives in `pyproject.toml` under `[tool.vibesys.test_isolation]`:
@@ -1236,6 +1240,109 @@ class _Sites:
                     self._expected_expiries(node.body)
             elif isinstance(node, ast.Try | ast.TryStar) and _catches_expiry(node):
                 self._expected_expiries(node.body)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                self._one_hop_timeout_verdicts(node.body)
+
+    def _one_hop_timeout_verdicts(
+        self,
+        statements: Sequence[ast.stmt],
+        inherited: dict[str, ast.expr] | None = None,
+    ) -> None:
+        """Follow direct timeout origins to later conditions in one scope.
+
+        A binding anywhere inside a compound statement makes its value after
+        that statement ambiguous. Dropping it before scanning nested blocks is
+        intentionally conservative: the gate may miss a path, but it will not
+        report a stale origin after reassignment.
+        """
+        sources = dict(inherited or {})
+        for statement in statements:
+            self._one_hop_condition(statement, sources)
+            rebound = _stored_local_names(statement)
+            nested_sources = {name: value for name, value in sources.items() if name not in rebound}
+            for block in _nested_statement_blocks(statement):
+                self._one_hop_timeout_verdicts(block, nested_sources)
+            for name in rebound:
+                sources.pop(name, None)
+            sources.update(self._timeout_source_assignments(statement))
+
+    def _one_hop_condition(self, statement: ast.stmt, sources: dict[str, ast.expr]) -> None:
+        """Record tracked locals when a condition consumes their timeout value."""
+        if not isinstance(statement, ast.Assert | ast.If | ast.While):
+            return
+        self._clock_local_comparisons(statement.test, sources)
+        self._negated_wait_locals(statement.test, sources, line=statement.lineno, negated=False)
+
+    def _timeout_source_assignments(self, statement: ast.stmt) -> dict[str, ast.expr]:
+        """Return simple local assignments whose value has a timeout origin."""
+        value: ast.expr | None = None
+        targets: Sequence[ast.expr] = ()
+        if isinstance(statement, ast.Assign):
+            value = statement.value
+            targets = statement.targets
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            value = statement.value
+            targets = (statement.target,)
+        if value is None or not (
+            self._expression_has_clock(value) or self._expression_has_reporting_wait(value)
+        ):
+            return {}
+        return {target.id: value for target in targets if isinstance(target, ast.Name)}
+
+    def _clock_local_comparisons(self, node: ast.expr, sources: dict[str, ast.expr]) -> None:
+        """Record comparisons that consume a local derived from a clock."""
+        for inner in ast.walk(node):
+            if not isinstance(inner, ast.Compare):
+                continue
+            if any(
+                isinstance(candidate, ast.Name)
+                and isinstance(candidate.ctx, ast.Load)
+                and candidate.id in sources
+                and self._expression_has_clock(sources[candidate.id])
+                for candidate in ast.walk(inner)
+            ):
+                self.timeout_lines.add(inner.lineno)
+
+    def _negated_wait_locals(
+        self,
+        node: ast.expr,
+        sources: dict[str, ast.expr],
+        *,
+        line: int,
+        negated: bool,
+    ) -> None:
+        """Record tracked wait results whose false value drives a condition."""
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            self._negated_wait_locals(node.operand, sources, line=line, negated=not negated)
+            return
+        if isinstance(node, ast.Compare) and _has_false_operand(node):
+            for operand in (node.left, *node.comparators):
+                self._negated_wait_locals(operand, sources, line=line, negated=not negated)
+            return
+        if (
+            negated
+            and isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Load)
+            and node.id in sources
+            and self._expression_has_reporting_wait(sources[node.id])
+        ):
+            self.timeout_lines.add(line)
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.expr):
+                self._negated_wait_locals(child, sources, line=line, negated=negated)
+
+    def _expression_has_reporting_wait(self, node: ast.expr) -> bool:
+        return any(
+            isinstance(inner, ast.Call) and self._is_reporting_wait(inner)
+            for inner in _eager_expression_nodes(node)
+        )
+
+    def _expression_has_clock(self, node: ast.expr) -> bool:
+        return any(
+            isinstance(inner, ast.Call) and self._is_clock_reading(inner)
+            for inner in _eager_expression_nodes(node)
+        )
 
     def _returned_waits(self, node: ast.expr) -> None:
         """Record waits whose expiry leaves the function as its value."""
@@ -1328,6 +1435,60 @@ class _Sites:
                 ):
                     return True
         return node.attr in {"object", "dict"} and self._is_mock_symbol(node.value)
+
+
+def _eager_expression_nodes(node: ast.AST) -> Iterable[ast.AST]:
+    """Yield nodes evaluated with ``node``, excluding deferred expression bodies."""
+    yield node
+    if isinstance(node, ast.Lambda | ast.GeneratorExp):
+        return
+    for child in ast.iter_child_nodes(node):
+        yield from _eager_expression_nodes(child)
+
+
+def _stored_local_names(node: ast.AST) -> set[str]:
+    """Return local names rebound while evaluating ``node`` or its blocks."""
+    names: set[str] = set()
+
+    def collect(inner: ast.AST) -> None:
+        if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Store | ast.Del):
+            names.add(inner.id)
+            return
+        if isinstance(inner, ast.Import | ast.ImportFrom):
+            names.update(alias.asname or alias.name.split(".")[0] for alias in inner.names)
+            return
+        if isinstance(inner, ast.ExceptHandler) and inner.name is not None:
+            names.add(inner.name)
+        if isinstance(inner, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            names.add(inner.name)
+            return
+        if isinstance(inner, ast.Lambda | ast.GeneratorExp):
+            return
+        for child in ast.iter_child_nodes(inner):
+            collect(child)
+
+    collect(node)
+    return names
+
+
+def _nested_statement_blocks(node: ast.stmt) -> tuple[Sequence[ast.stmt], ...]:
+    """Return direct execution blocks without crossing a nested scope."""
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        return ()
+    if isinstance(node, ast.If | ast.For | ast.AsyncFor | ast.While):
+        return node.body, node.orelse
+    if isinstance(node, ast.With | ast.AsyncWith):
+        return (node.body,)
+    if isinstance(node, ast.Try | ast.TryStar):
+        return (
+            node.body,
+            *(handler.body for handler in node.handlers),
+            node.orelse,
+            node.finalbody,
+        )
+    if isinstance(node, ast.Match):
+        return tuple(case.body for case in node.cases)
+    return ()
 
 
 def _is_zero_argument(call: ast.Call) -> bool:

@@ -38,6 +38,7 @@
 {"path": "sdk/vs-bench/tests/test_runner.py", "rule": "private_import", "count": 2}
 {"path": "sdk/vs-bench/tests/test_runner.py", "rule": "sleep", "count": 4}
 {"path": "sdk/vs-bench/tests/test_schedule.py", "rule": "private_import", "count": 1}
+{"path": "sdk/vs-bench/tests/test_schedule.py", "rule": "timeout_verdict", "count": 5}
 {"path": "sdk/vs-bench/tests/test_stats.py", "rule": "private_import", "count": 1}
 {"path": "sdk/vs-bench/tests/test_transport.py", "rule": "private_import", "count": 1}
 {"path": "tests/architecture/test_delegated_merge.py", "rule": "patch", "count": 12}
@@ -67,6 +68,7 @@
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "mock", "count": 6}
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "patch", "count": 5}
 {"path": "tests/vibesys/inputs/test_synthesis.py", "rule": "patch", "count": 1}
+{"path": "tests/vibesys/loops/test_rocprof_compute.py", "rule": "timeout_verdict", "count": 1}
 {"path": "tests/vibesys/loops/test_torch_inject.py", "rule": "timeout_verdict", "count": 2}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "mock", "count": 55}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "patch", "count": 83}
