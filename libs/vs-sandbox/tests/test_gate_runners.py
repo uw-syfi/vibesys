@@ -30,6 +30,8 @@ from vs_sandbox.api.slurm import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vs_sim.api import Event
+
 _WAIT_FOR_SIGTERM = """\
 import io, os, signal, sys
 
@@ -78,7 +80,7 @@ class _RecordingLauncher:
         command: GpuCommand,
         *,
         write: Callable[[bytes], None],
-        cancel: threading.Event,
+        cancel: Event,
     ) -> int:
         del cancel
         self.calls.append((request, command))

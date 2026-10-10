@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vs_sim.api import OsThreads, UnixNetwork
 from vs_sim.api.testing import (
+    HANG_GUARD_S,
     NetworkContract,
     NetworkUnderTest,
     SimNetwork,
     SimThreads,
     ThreadsContract,
     ThreadsUnderTest,
+    join_or_fail,
 )
 
 if TYPE_CHECKING:
@@ -58,6 +61,32 @@ class TestUnixNetwork(NetworkContract):
             OsThreads(), lambda program: program(), tick=_REAL_TICK_S, exact=False
         )
         return NetworkUnderTest(UnixNetwork(), threads, address)
+
+    def test_closing_a_connection_ends_a_read_blocked_in_another_thread(self) -> None:
+        network = UnixNetwork()
+        address = _unix_paths()("blocked")
+        listener = network.listen(address)
+        client = network.connect(address, HANG_GUARD_S)
+        server = listener.accept(HANG_GUARD_S)
+        reads: list[bytes] = []
+        reader = threading.Thread(target=lambda: reads.append(server.recv(1)))
+        reader.start()
+        server.close()
+        join_or_fail(reader)
+        assert reads == [b""]
+        assert client.recv(1, HANG_GUARD_S) == b""
+        client.close()
+        listener.close()
+
+    def test_closing_a_listener_leaves_a_socket_file_a_later_listener_replaced(self) -> None:
+        path = _unix_paths()("replaced")
+        first = UnixNetwork().listen(path)
+        Path(path).unlink()
+        second = UnixNetwork().listen(path)
+        first.close()
+        assert Path(path).exists()
+        second.close()
+        assert not Path(path).exists()
 
 
 class TestSimNetworkFifo(NetworkContract):

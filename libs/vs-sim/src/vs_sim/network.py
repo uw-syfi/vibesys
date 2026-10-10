@@ -92,6 +92,10 @@ class _UnixConnection:
             return True
 
     def close(self) -> None:
+        with contextlib.suppress(OSError):
+            # Sends the peer its EOF and wakes a thread blocked in recv, even though the
+            # descriptor stays open until that thread returns.
+            self._sock.shutdown(socket.SHUT_RDWR)
         self._sock.close()
 
 
@@ -99,6 +103,8 @@ class _UnixListener:
     def __init__(self, sock: socket.socket, path: Path) -> None:
         self._sock = sock
         self._path = path
+        info = path.stat()
+        self._identity = (info.st_dev, info.st_ino)
 
     def accept(self, timeout: float | None = None) -> Connection:
         self._sock.settimeout(timeout)
@@ -111,7 +117,16 @@ class _UnixListener:
             # Wakes a thread blocked in accept on Linux before the descriptor goes away.
             self._sock.shutdown(socket.SHUT_RDWR)
         self._sock.close()
-        self._path.unlink(missing_ok=True)
+        self._unlink_if_ours()
+
+    def _unlink_if_ours(self) -> None:
+        # A later listener may have replaced the file at this path; only remove the one we bound.
+        try:
+            info = self._path.stat()
+        except FileNotFoundError:
+            return
+        if (info.st_dev, info.st_ino) == self._identity:
+            self._path.unlink(missing_ok=True)
 
 
 class UnixNetwork:

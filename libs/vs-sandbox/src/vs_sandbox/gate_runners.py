@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.host_command_broker import GateKind
+    from vs_sim.api import Event
 
 #: The program that runs one planned gate against a Slurm cluster.
 DEFAULT_WRAPPER = (sys.executable, "-m", "vs_sandbox.slurm_command")
@@ -65,7 +66,7 @@ class SlurmCommandGateRunner:
         *,
         cwd: Path,
         write: Callable[[bytes], None],
-        cancel: threading.Event,
+        cancel: Event,
     ) -> int:
         """Run the gate from *cwd*; setting *cancel* sends the wrapper ``SIGTERM``."""
         argv = (*self._wrapper, "--plan", str(self._plan_path), kind.value, *arguments)
@@ -102,7 +103,7 @@ class SlurmCommandGateRunner:
 
 
 def _stop_when_asked(
-    process: subprocess.Popen[bytes], cancel: threading.Event, finished: threading.Event
+    process: subprocess.Popen[bytes], cancel: Event, finished: threading.Event
 ) -> None:
     while not finished.is_set():
         if cancel.wait(0.2):
@@ -150,7 +151,7 @@ class SrunGateRunner:
         *,
         cwd: Path,
         write: Callable[[bytes], None],
-        cancel: threading.Event,
+        cancel: Event,
     ) -> int:
         """Run the planned *kind* gate from *cwd*; a gate the run did not plan exits 2."""
         planned = self._planned.get(kind)

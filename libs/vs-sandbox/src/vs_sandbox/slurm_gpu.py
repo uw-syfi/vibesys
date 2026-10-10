@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
+    from vs_sim.api import Event
+
 _UNLIMITED = "unlimited"
 _WINDOWS_TIMEOUT_SECONDS = 30
 _CANCEL_GRACE_SECONDS = 30
@@ -290,7 +292,7 @@ class GpuLauncher(Protocol):
         command: GpuCommand,
         *,
         write: Callable[[bytes], None],
-        cancel: threading.Event,
+        cancel: Event,
     ) -> int:
         """Run *command*, stream its output to *write*, and stop when *cancel* is set."""
         ...
@@ -321,7 +323,7 @@ class SlurmGpuLauncher:
         command: GpuCommand,
         *,
         write: Callable[[bytes], None],
-        cancel: threading.Event,
+        cancel: Event,
     ) -> int:
         """Run *command* in a new allocation, streaming merged output to *write*.
 
@@ -371,7 +373,7 @@ class SlurmGpuLauncher:
         self,
         process: subprocess.Popen[bytes],
         job_name: str,
-        cancel: threading.Event,
+        cancel: Event,
         finished: threading.Event,
     ) -> None:
         while not finished.is_set():
