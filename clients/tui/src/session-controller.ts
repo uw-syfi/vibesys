@@ -12,7 +12,12 @@ import {
   type StreamConnectionState,
   StreamReconciler,
 } from '@vibesys/backend-client';
-import {DEFAULT_CHAT_THREAD_ID, hasRunEnded, recordsBenchmark} from '@vibesys/core-state';
+import {
+  DEFAULT_CHAT_THREAD_ID,
+  hasRunEnded,
+  projectPerformance,
+  recordsBenchmark,
+} from '@vibesys/core-state';
 import type {StartupTrace} from './boot-trace.js';
 import {
   chatMenuCustomModel,
@@ -32,7 +37,6 @@ import {
   type ParsedCommand,
   parseCommand,
 } from './commands.js';
-import {renderDesignSummary} from './design-log.js';
 import {
   applyDiffPatch,
   closeDiffViewer,
@@ -48,7 +52,6 @@ import {
   openDiffViewer,
 } from './diff-viewer.js';
 import {
-  designRoundViews,
   enterExperimentDrilldown,
   enterExperimentRound,
   enterUnownedExperimentRound,
@@ -121,10 +124,9 @@ import {
   selectNextTodo,
   setChatDockFits,
   setChatThreadPending,
-  setChatWidthOverride,
-  setGraphWidthOverride,
+  setDesignPane,
   setNotepadText,
-  setPaneContent,
+  setPerformancePane,
   showDetail,
   showLive,
   switchChatThread,
@@ -175,10 +177,6 @@ export interface SessionController {
   focusRound(focus: RoundFocus): void;
   selectNextTodo(delta: number): void;
   toggleTodos(): void;
-  /** `<`/`>`: the Agents pane's explicit column width, already clamped; `=`: null. */
-  setGraphWidthOverride(width: number | null): void;
-  /** `<`/`>`: the docked chat pane's explicit column width, already clamped; `=`: null. */
-  setChatWidthOverride(width: number | null): void;
   /** Expands the latest prompt in view; the view owns what "latest" means. */
   togglePrompt(): void;
   onTogglePrompt(handler: () => void): void;
@@ -502,14 +500,6 @@ export class SocketSessionController implements SessionController {
 
   toggleTodos(): void {
     this.#setState(toggleTodos(this.#state));
-  }
-
-  setGraphWidthOverride(width: number | null): void {
-    this.#setState(setGraphWidthOverride(this.#state, width));
-  }
-
-  setChatWidthOverride(width: number | null): void {
-    this.#setState(setChatWidthOverride(this.#state, width));
   }
 
   setTheme(themeName: ThemeName): void {
@@ -842,71 +832,44 @@ export class SocketSessionController implements SessionController {
 
   async #requestPane(view: PaneView): Promise<void> {
     try {
-      const content = await this.#renderPane(view);
-      this.#setState(setPaneContent(this.#state, view, content));
+      switch (view) {
+        case 'perf': {
+          const response = await this.client.request({type: 'query.performance'});
+          this.#setState(
+            setPerformancePane(
+              this.#state,
+              {performance: response.performance, events: response.events ?? []},
+              response.performance_context ?? null,
+            ),
+          );
+          return;
+        }
+        case 'design': {
+          const response = await this.client.request({type: 'query.design'});
+          this.#setState(
+            setDesignPane(this.#state, response.design ?? [], response.design_ready !== false),
+          );
+          return;
+        }
+        default: {
+          const unreachable: never = view;
+          throw new Error(`Unknown pane view: ${String(unreachable)}`);
+        }
+      }
     } catch (error) {
       const message = errorMessage(error);
       this.#setState(reportCaughtError(failPane(this.#state, view, message), error, 'request'));
     }
   }
 
-  /** Exhaustive over PaneView, so a new visualization is a compile error. */
-  #renderPane(view: PaneView): Promise<string> {
-    switch (view) {
-      case 'perf':
-        return this.#renderPerfPane();
-      case 'design':
-        return this.#renderDesignPane();
-      default: {
-        const unreachable: never = view;
-        throw new Error(`Unknown pane view: ${String(unreachable)}`);
-      }
-    }
-  }
-
-  async #renderPerfPane(): Promise<string> {
-    const response = await this.client.request({type: 'query.performance'});
-    return renderPerformanceCurve(
-      response.performance ?? [],
-      response.events ?? [],
-      response.performance_context,
-    );
-  }
-
   /**
-   * The design query carries only each round's file list. Every stage fact on
-   * the same row comes from the experiment log already in state, joined by
-   * round, so the pane and the drill-down cannot disagree about a round.
-   */
-  async #renderDesignPane(): Promise<string> {
-    const response = await this.client.request({type: 'query.design'});
-    if (response.design_ready === false) {
-      return 'The design log is not available until a run is attached.';
-    }
-    const rounds = response.design ?? [];
-    this.#setState(setDesignLog(this.#state, rounds));
-    return renderDesignSummary(designRoundViews(rounds, this.#state.experimentLog?.entries ?? []));
-  }
-
-  /**
-   * Both visualizations are functions of completed rounds and recorded
-   * metrics, so a round boundary and a recorded measurement bound every change
-   * either can show. Which events carry a measurement is core-state's fact,
-   * not this controller's: post-#692 journals report one as a completed
-   * benchmark `gate_finished` rather than a `benchmark_result`. The bare
-   * `benchmark_result` type stays as its own clause, since the trigger is
-   * allowed to be broader than the fold and a legacy event carrying no typed
-   * data still means the backend's performance log moved.
+   * Both visualizations refresh only when core-state says an event records a
+   * benchmark. The controller does not carry a second list of event spellings.
    */
   #refreshPaneFor(events: readonly RunEvent[]): void {
     const right = this.#state.layout.right;
     if (right === null) return;
-    const relevant = events.some(
-      event =>
-        event.type === 'round_finished' ||
-        event.type === 'benchmark_result' ||
-        recordsBenchmark(event),
-    );
+    const relevant = events.some(recordsBenchmark);
     if (relevant) void this.#loadPane(right.view);
   }
 
@@ -1170,7 +1133,7 @@ export class SocketSessionController implements SessionController {
         {
           id: `chat-help-${++this.#chatMessageId}`,
           kind: 'status',
-          label: 'Chat commands',
+          labelKind: 'chat_commands',
           content: chatHelpText(),
         },
       ]),
@@ -1197,7 +1160,7 @@ export class SocketSessionController implements SessionController {
         threadId,
         entries => [
           ...entries,
-          {id, kind: 'user', label: queued ? 'You · queued' : 'You', content: text},
+          {id, kind: 'user', labelKind: queued ? 'user_queued' : 'user', content: text},
         ],
       ),
     );
@@ -1228,7 +1191,9 @@ export class SocketSessionController implements SessionController {
             setChatThreadPending(this.#state, threadId, true),
             threadId,
             entries =>
-              entries.map(entry => (messageIds.has(entry.id) ? {...entry, label: 'You'} : entry)),
+              entries.map(entry =>
+                messageIds.has(entry.id) ? {...entry, labelKind: 'user'} : entry,
+              ),
           ),
         );
         await this.#requestChat(messages.map(message => message.text).join('\n\n'), threadId);
@@ -1259,7 +1224,7 @@ export class SocketSessionController implements SessionController {
           {
             id: `chat-answer-${++this.#chatMessageId}`,
             kind: 'assistant',
-            label: 'Answer',
+            labelKind: 'answer',
             content: answer,
           },
         ]);
@@ -1276,7 +1241,7 @@ export class SocketSessionController implements SessionController {
             {
               id: `chat-error-${++this.#chatMessageId}`,
               kind: 'result',
-              label: 'Chat failed',
+              labelKind: 'chat_failed',
               tone: 'failure',
               content: message,
             },
@@ -1502,8 +1467,11 @@ function renderResponse(
   if (response.ack) return `${response.ack.action}: ${response.ack.status}`;
   if (request.type === 'query.performance' || responseView === 'perf') {
     return renderPerformanceCurve(
-      response.performance ?? [],
-      response.events ?? [],
+      projectPerformance({
+        performance: response.performance,
+        events: response.events,
+        objectiveDirection: response.performance_context?.objective_direction,
+      }),
       response.performance_context,
     );
   }

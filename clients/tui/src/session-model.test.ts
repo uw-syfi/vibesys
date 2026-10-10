@@ -46,10 +46,9 @@ import {
   openNotepad,
   openPane,
   reportError,
-  runStatusLabel,
   setChatDockFits,
   setNotepadText,
-  setPaneContent,
+  setPerformancePane,
   showDetail,
   stripRounds,
   togglePaneZoom,
@@ -127,7 +126,7 @@ describe('error report normalization', () => {
     });
 
     expect(state.errorBanner).toEqual({
-      title: 'Invocation failed',
+      titleKind: 'invocation',
       message: 'The worker failed.',
       detail: 'Exit code: 2',
       hint: 'Inspect the worker log.',
@@ -148,7 +147,7 @@ describe('error report normalization', () => {
     });
 
     expect(state.errorBanner).toEqual({
-      title: 'Connection lost',
+      titleKind: 'transport',
       message: 'An unknown error occurred.',
       detail: null,
       hint: null,
@@ -176,7 +175,7 @@ describe('error report normalization', () => {
     });
 
     expect(merged.errorBanner).toMatchObject({
-      title: 'Run failed',
+      titleKind: 'run',
       message: 'The worker failed.\nExit code: 2',
       detail: 'Exit code: 2',
       diagnosticId: 'diagnostic-1',
@@ -963,7 +962,7 @@ describe('quota pause banner', () => {
   it('names the provider, the diagnostic and the choices, with fallback only when configured', () => {
     const withFallback = applyEvent(initialSessionState(), paused(true));
     expect(withFallback.errorBanner).toMatchObject({
-      title: 'Paused on provider quota',
+      titleKind: 'quota_pause',
       severity: 'recoverable',
       message: 'claude is out of quota. The run is paused until you decide.',
     });
@@ -1271,7 +1270,7 @@ describe('session event model', () => {
     expect(hasRunEnded(state.core)).toBe(true);
     expect(state.overlay).toBeNull();
     expect(state.errorBanner).toMatchObject({
-      title: 'Configuration failed',
+      titleKind: 'configuration',
       severity: 'fatal',
     });
     expect(state.errorBanner?.message).toContain('This run has completed 30 rounds.');
@@ -1291,7 +1290,7 @@ describe('session event model', () => {
     });
 
     expect(state.errorBanner).toMatchObject({
-      title: 'Invocation failed',
+      titleKind: 'invocation',
       severity: 'recoverable',
       invocationId: 'invocation-1',
     });
@@ -1301,7 +1300,7 @@ describe('session event model', () => {
     });
 
     expect(state.errorBanner).toMatchObject({
-      title: 'Run failed',
+      titleKind: 'run',
       severity: 'fatal',
       count: 2,
     });
@@ -1391,7 +1390,7 @@ describe('session event model', () => {
     });
 
     expect(state.errorBanner).toMatchObject({
-      title: 'Invocation failed',
+      titleKind: 'invocation',
       message: 'The worker could not start.',
       detail: 'PermissionError: sandbox rejected the worker.\nExit code: 1',
       hint: 'Check the sandbox permissions.',
@@ -1426,7 +1425,7 @@ describe('session event model', () => {
     });
 
     expect(state.errorBanner).toMatchObject({
-      title: 'Invocation failed',
+      titleKind: 'invocation',
       message: 'The agent process could not start.',
     });
   });
@@ -1462,7 +1461,7 @@ describe('session event model', () => {
     });
 
     expect(state.errorBanner).toMatchObject({
-      title: 'Run interrupted',
+      titleKind: 'run_interruption',
       message: 'Run interrupted',
       detail: 'RuntimeError: launcher_terminated (SIGTERM)',
       severity: 'fatal',
@@ -1908,22 +1907,6 @@ describe('session event model', () => {
     expect(toggleTodos(toggleTodos(state)).todosExpanded).toBe(false);
   });
 
-  // The header carries exactly one status token, read from backend-owned core
-  // state. `/pause` is visible as `pausing…` until the backend says the pause
-  // landed, and the run's ended status replaces it rather than joining it.
-  // `interrupted` is the one client-derived exception: the backend signals it
-  // through the separate `run_interrupted` event rather than as a `RunStatus`.
-  it('renders one header status token per backend run status', () => {
-    expect(runStatusLabel('running')).toBe('running');
-    expect(runStatusLabel('pausing')).toBe('pausing…');
-    expect(runStatusLabel('paused')).toBe('paused');
-    expect(runStatusLabel('stopping')).toBe('stopping…');
-    expect(runStatusLabel('stopped')).toBe('stopped');
-    expect(runStatusLabel('completed')).toBe('completed');
-    expect(runStatusLabel('failed')).toBe('failed');
-    expect(runStatusLabel('interrupted')).toBe('interrupted');
-  });
-
   it('reads a pause from the backend and drops it when the run ends', () => {
     const statusChange = (sequence: number, status: RunStatus, previous: RunStatus) =>
       event(sequence, 'run_status_changed', {
@@ -2200,23 +2183,24 @@ describe('right pane layout', () => {
     expect(state.layout.focus).toBe('left');
   });
 
-  it('opens a pane pending, titled, and focused', () => {
+  it('opens a semantic pane pending and focused', () => {
     const state = openPane(initialSessionState(), 'perf');
 
-    expect(state.layout.right).toMatchObject({view: 'perf', title: 'Performance', pending: true});
+    expect(state.layout.right).toMatchObject({view: 'perf', data: null, pending: true});
     expect(state.layout.focus).toBe('right');
   });
 
   it('keeps the old chart on screen while the same view refreshes', () => {
-    const perf = setPaneContent(openPane(initialSessionState(), 'perf'), 'perf', 'chart');
+    const data = {performance: [], events: []};
+    const perf = setPerformancePane(openPane(initialSessionState(), 'perf'), data, null);
 
-    expect(openPane(perf, 'perf').layout.right?.content).toBe('chart');
+    expect(openPane(perf, 'perf').layout.right).toMatchObject({data});
   });
 
   it('ignores a response for a pane the operator has since closed', () => {
     const closed = closePane(openPane(initialSessionState(), 'perf'));
 
-    const stale = setPaneContent(closed, 'perf', 'late chart');
+    const stale = setPerformancePane(closed, {performance: [], events: []}, null);
 
     expect(stale).toBe(closed);
     expect(failPane(closed, 'perf', 'late failure')).toBe(closed);
@@ -2287,7 +2271,11 @@ describe('right pane layout', () => {
   });
 
   it('zooms the semantic focused pane and restores the unchanged split state', () => {
-    const split = setPaneContent(openPane(initialSessionState(), 'perf'), 'perf', 'chart');
+    const split = setPerformancePane(
+      openPane(initialSessionState(), 'perf'),
+      {performance: [], events: []},
+      null,
+    );
     const chat = focusPane(split, 'chat');
     const zoomed = togglePaneZoom(chat);
 
@@ -2542,7 +2530,6 @@ describe('notepad', () => {
         selectedAgentKind: 'judge',
         selectedEntryId: 'entry-7',
         selectedTodoIndex: 2,
-        graphWidthOverride: 48,
       }),
       'old-run note',
       't0',
@@ -2570,7 +2557,8 @@ describe('notepad', () => {
     expect(changed.selectedEntryId).toBeNull();
     expect(changed.selectedTodoIndex).toBeNull();
     expect(changed.themeName).toBe('light');
-    expect(changed.graphWidthOverride).toBe(48);
+    expect('graphWidthOverride' in changed).toBe(false);
+    expect('chatWidthOverride' in changed).toBe(false);
   });
 
   it('preserves a note when rebootstrap replays the same run', () => {

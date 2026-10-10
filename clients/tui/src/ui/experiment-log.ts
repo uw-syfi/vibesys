@@ -73,7 +73,6 @@ export {
   formatRounds,
   headerRow,
   hypothesisMetadata,
-  measuredDirection,
   outcomeColor,
   outcomeLabel,
   resolveColumns,

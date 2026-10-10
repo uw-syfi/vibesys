@@ -347,8 +347,8 @@ describe('agentsPaneVisible', () => {
         ...state.layout,
         right: {
           view: 'perf' as const,
-          title: 'Performance',
-          content: '',
+          data: null,
+          context: null,
           pending: false,
           error: null,
         },
@@ -522,13 +522,12 @@ describe('truncation under an explicit override', () => {
     for (const destroy of cleanup.splice(0).reverse()) destroy();
   });
 
-  function roundState(graphWidthOverride: number | null): SessionState {
+  function roundState(): SessionState {
     const base = initialSessionState();
     return {
       ...base,
       experimentLog: null,
       selectedRound: 1,
-      graphWidthOverride,
       core: {
         ...base.core,
         rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
@@ -553,7 +552,7 @@ describe('truncation under an explicit override', () => {
       view.output.destroyRecursively();
       testRenderer.renderer.destroy();
     });
-    view.render(roundState(graphWidthOverride), undefined, 0, 20);
+    view.render(roundState(), undefined, 0, 20, graphWidthOverride);
     await testRenderer.renderOnce();
     return {frame: testRenderer.captureCharFrame(), paneWidth: view.output.width as number};
   }
@@ -639,10 +638,6 @@ describe('fan-in at a narrowed, overridden width', () => {
       ...base,
       experimentLog: null,
       selectedRound: 1,
-      // The narrowest a graph can draw at all: stacking a second agent inside
-      // the implementer column changes its height, not its width, so this is
-      // the same 56 columns as the three-stage chain above.
-      graphWidthOverride: agentGraphMinWidth(phases),
       core: {
         ...base.core,
         rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
@@ -662,7 +657,7 @@ describe('fan-in at a narrowed, overridden width', () => {
       view.output.destroyRecursively();
       testRenderer.renderer.destroy();
     });
-    view.render(state, undefined, 0, 20);
+    view.render(state, undefined, 0, 20, agentGraphMinWidth(phases));
     await testRenderer.renderOnce();
     const frame = testRenderer.captureCharFrame();
 

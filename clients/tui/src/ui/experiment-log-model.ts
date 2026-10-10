@@ -1,3 +1,4 @@
+import {formatPerformanceDelta, projectPerformance} from '@vibesys/core-state';
 import {
   detailedHypothesis,
   experimentIndexItems,
@@ -304,34 +305,13 @@ export function formatRounds(entry: ExperimentEntry): string {
  */
 export function formatMeasured(entry: ExperimentEntry): string {
   const delta = entry.perf_delta_pct;
-  if (typeof delta === 'number') return formatDelta(delta);
+  if (typeof delta === 'number') return formatPerformanceDelta(delta);
   if (entry.perf_delta_reason === 'not_framework_measured') return 'self-reported';
   if (typeof entry.perf_metric === 'number') {
     const marker = entry.perf_delta_reason === 'baseline_unresolved' ? '? ' : '';
     return `${marker}${trimNumber(entry.perf_metric)}${entry.perf_unit ? ` ${entry.perf_unit}` : ''}`;
   }
   return PLACEHOLDER;
-}
-
-function formatDelta(delta: number): string {
-  const sign = delta > 0 ? '+' : '';
-  return `${sign}${delta.toFixed(delta >= 10 || delta <= -10 ? 0 : 1)}%`;
-}
-
-/**
- * The one improvement direction the header can honestly carry. Null when no
- * entry recorded a direction, or when entries disagree, where a single glyph
- * would mislabel some rows.
- */
-export function measuredDirection(entries: readonly ExperimentEntry[]): 'max' | 'min' | null {
-  let direction: 'max' | 'min' | null = null;
-  for (const entry of entries) {
-    const candidate = entry.perf_direction ?? null;
-    if (candidate === null) continue;
-    if (direction === null) direction = candidate;
-    else if (direction !== candidate) return null;
-  }
-  return direction;
 }
 
 export function hypothesisMetadata(entry: ExperimentEntry): string {
@@ -374,7 +354,7 @@ function measurementMetadata(entry: ExperimentEntry): string[] {
     parts.push(`Baseline commit ${entry.perf_baseline_commit.slice(0, 7)}`);
   }
   if (typeof entry.perf_delta_pct === 'number') {
-    parts.push(`Delta ${formatDelta(entry.perf_delta_pct)}`);
+    parts.push(`Delta ${formatPerformanceDelta(entry.perf_delta_pct)}`);
   }
   const reason = deltaReasonLabel(entry.perf_delta_reason);
   if (reason !== null) parts.push(reason);
@@ -410,7 +390,7 @@ export function planTable(state: SessionState, bodyWidth: number): TablePlan | n
       : '↑↓ · Enter';
   return {
     columns,
-    header: headerRow(columns, measuredDirection(log.entries)),
+    header: headerRow(columns, projectPerformance({experiments: log.entries}).direction),
     rows: rowPlan.rows,
     selectedRenderIndex: rowPlan.selectedRenderIndex,
     renderedRows: rowPlan.renderedRows,

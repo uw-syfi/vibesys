@@ -36,6 +36,11 @@ import {
   renderHeader,
 } from './header.js';
 import {bindKeybindings} from './keybindings.js';
+import {
+  initialTuiLayoutState,
+  withChatWidthOverride,
+  withGraphWidthOverride,
+} from './layout-state.js';
 import {NotepadView} from './notepad.js';
 import {OverlayView} from './overlay.js';
 import {PaletteView} from './palette.js';
@@ -104,6 +109,7 @@ export function createOpenTuiApp(
 ): OpenTuiApp {
   let themeName: ThemeName = controller.state.themeName;
   let theme = resolveTheme(themeName);
+  let tuiLayout = initialTuiLayoutState();
   const root = new BoxRenderable(renderer, {
     id: 'app',
     width: '100%',
@@ -431,7 +437,7 @@ export function createOpenTuiApp(
     const chatWidth = showChatPane
       ? zoomedPane === 'chat'
         ? renderer.terminalWidth
-        : chatPaneWidthWithOverride(renderer.terminalWidth, rightWidth, state.chatWidthOverride)
+        : chatPaneWidthWithOverride(renderer.terminalWidth, rightWidth, tuiLayout.chatWidthOverride)
       : 0;
     const showExperimentLog = showLog && (zoomedPane === null || zoomedPane === 'experiments');
     paintHeader(renderHeader(state, showLog, renderer.terminalWidth - HEADER_CHROME));
@@ -490,6 +496,7 @@ export function createOpenTuiApp(
         zoomedPane === 'agents' ? renderer.terminalWidth : undefined,
         railWidth,
         mainRows,
+        tuiLayout.graphWidthOverride,
       );
       // The todo box sits under the agent pane and stops where it stops: the
       // todos belong to an agent, so running them under the transcript would
@@ -642,8 +649,16 @@ export function createOpenTuiApp(
     selectNextRound: () => controller.selectNextRound(),
     selectPreviousRound: () => controller.selectPreviousRound(),
     toggleTodos: () => controller.toggleTodos(),
-    setGraphWidthOverride: width => controller.setGraphWidthOverride(width),
-    setChatWidthOverride: width => controller.setChatWidthOverride(width),
+    setGraphWidthOverride: width => {
+      tuiLayout = withGraphWidthOverride(tuiLayout, width);
+      render(lastState);
+    },
+    setChatWidthOverride: width => {
+      tuiLayout = withChatWidthOverride(tuiLayout, width);
+      render(lastState);
+    },
+    graphWidthOverride: () => tuiLayout.graphWidthOverride,
+    chatWidthOverride: () => tuiLayout.chatWidthOverride,
     scrollRightPane: delta => rightPane.scrollBy(delta),
     scrollChatPane: delta => chatPane.scrollBy(delta),
     scrollExperimentDetail: delta => experimentLog.scrollBy(delta),

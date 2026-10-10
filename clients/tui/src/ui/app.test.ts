@@ -11,7 +11,12 @@ import {
   TextRenderable,
 } from '@opentui/core';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
-import type {ChatOptions, HypothesisEntry} from '@vibesys/backend-client';
+import type {
+  ChatOptions,
+  DesignRound,
+  HypothesisEntry,
+  ProtocolResponse,
+} from '@vibesys/backend-client';
 import {type CoreRunStatus, DEFAULT_CHAT_THREAD_ID} from '@vibesys/core-state';
 import {
   chatMenuCustomModel,
@@ -30,7 +35,6 @@ import {
   fuzzyMatchCommands,
   parseCommand,
 } from '../commands.js';
-import {renderDesignSummary} from '../design-log.js';
 import {
   closeDiffViewer,
   diffRoundRange,
@@ -49,6 +53,7 @@ import {
   openExperimentLog,
   openHypothesisDetail,
   selectExperimentActivity,
+  setDesignLog,
   setExperiments,
 } from '../experiments.js';
 import {
@@ -92,8 +97,9 @@ import {
   selectNextEntry,
   selectNextTodo,
   setChatDockFits,
+  setDesignPane,
   setNotepadText,
-  setPaneContent,
+  setPerformancePane,
   switchChatThread,
   togglePaneZoom,
 } from '../session-model.js';
@@ -123,6 +129,20 @@ const cleanup: Array<() => void> = [];
 /** Required numeric round identity for hand-built public core-state fixtures. */
 function roundKey(number: number) {
   return {kind: 'number' as const, number};
+}
+
+function performanceData(
+  round: number,
+  value: number,
+  unit = 'tok_s',
+): {
+  performance: NonNullable<ProtocolResponse['performance']>;
+  events: [];
+} {
+  return {
+    performance: [{round, perf_metric: value, perf_unit: unit, passed: true}],
+    events: [],
+  };
 }
 
 afterEach(() => {
@@ -205,7 +225,7 @@ describe('OpenTUI presentation', () => {
     registerCleanup(testRenderer.renderer, app);
     await controller.openPane('perf');
     const fatalBanner: NonNullable<SessionState['errorBanner']> = {
-      title: 'Run failed',
+      titleKind: 'run',
       message: 'RuntimeError: app-server initialization was denied\nOperation not permitted',
       detail: 'The run server exited before accepting a client.',
       hint: 'Check the startup log and retry.',
@@ -245,7 +265,7 @@ describe('OpenTUI presentation', () => {
 
     controller.publish({
       ...controller.state,
-      errorBanner: {...fatalBanner, title: 'Request failed', message: 'A later failure.'},
+      errorBanner: {...fatalBanner, titleKind: 'request', message: 'A later failure.'},
     });
     frame = await testRenderer.waitForFrame(value => value.includes('A later failure.'));
     expect(frame).toContain('Esc: dismiss');
@@ -1068,7 +1088,6 @@ describe('OpenTUI presentation', () => {
     await testRenderer.waitForFrame(value => value.includes('live output'));
     const agentsBox = () => testRenderer.renderer.root.findDescendantById('agent-map');
 
-    expect(controller.state.graphWidthOverride).toBeNull();
     expect(agentsBox()?.width).toBe(68);
 
     testRenderer.mockInput.pressKey('<');
@@ -1172,7 +1191,6 @@ describe('OpenTUI presentation', () => {
     await frameAfter(testRenderer);
 
     expect(agentsBox()?.width).toBe(30);
-    expect(controller.state.graphWidthOverride).toBeNull();
   });
 
   it('stores nothing on a terminal too narrow to draw any graph, so a later widening is still automatic', async () => {
@@ -1200,7 +1218,6 @@ describe('OpenTUI presentation', () => {
     // never hands such a width back for this terminal; this pins that no key
     // press stores one anyway.
     expect(agentsBox()?.width).toBe(30);
-    expect(controller.state.graphWidthOverride).toBeNull();
   });
 
   it('stores nothing on a round whose clamp band is one width wide, leaving later rounds automatic', async () => {
@@ -1225,7 +1242,6 @@ describe('OpenTUI presentation', () => {
     await frameAfter(testRenderer);
 
     expect(agentsBox()?.width).toBe(30);
-    expect(controller.state.graphWidthOverride).toBeNull();
 
     // The round that does have stages is still sized automatically, rather
     // than pinned to the 56-column narrowest graph with its names cut.
@@ -1252,7 +1268,6 @@ describe('OpenTUI presentation', () => {
     await frameAfter(testRenderer);
 
     expect(agentsBox()?.width).toBe(68);
-    expect(controller.state.graphWidthOverride).toBeNull();
   });
 
   it('no-ops the resize keys while a visualization split holds the row beside the transcript', async () => {
@@ -1280,7 +1295,6 @@ describe('OpenTUI presentation', () => {
     testRenderer.mockInput.pressKey('>');
     testRenderer.mockInput.pressKey('<');
     await frameAfter(testRenderer);
-    expect(controller.state.graphWidthOverride).toBeNull();
 
     testRenderer.mockInput.pressKey('ESCAPE');
     await frameAfterEscape(testRenderer);
@@ -1303,12 +1317,10 @@ describe('OpenTUI presentation', () => {
     for (let step = 0; step < 15; step += 1) testRenderer.mockInput.pressKey('<');
     await frameAfter(testRenderer);
     expect(agentsBox()?.width).toBe(56);
-    expect(controller.state.graphWidthOverride).toBe(56);
 
     testRenderer.mockInput.pressKey('=');
     const reset = await frameAfter(testRenderer);
 
-    expect(controller.state.graphWidthOverride).toBeNull();
     expect(agentsBox()?.width).toBe(68); // automatic sizing at 160, as before any press.
     // And with it the no-truncation guarantee: 56 cut `orchestrator` short.
     expect(reset).toContain('orchestrator');
@@ -1339,7 +1351,6 @@ describe('OpenTUI presentation', () => {
 
     testRenderer.mockInput.pressKey('=');
     await frameAfter(testRenderer);
-    expect(controller.state.graphWidthOverride).toBeNull();
     expect(agentsBox()?.width).toBe(68);
     expect(rail()?.width).toBe(28);
   });
@@ -1355,7 +1366,6 @@ describe('OpenTUI presentation', () => {
     await testRenderer.mockInput.typeText('/steer a < b > c');
     const typed = await frameAfter(testRenderer);
     expect(typed).toContain('a < b > c');
-    expect(controller.state.graphWidthOverride).toBeNull();
 
     testRenderer.mockInput.pressEnter();
     await testRenderer.waitForFrame(() => controller.submissions.length === 1);
@@ -1363,10 +1373,10 @@ describe('OpenTUI presentation', () => {
     // With the input empty again, the same key resizes.
     testRenderer.mockInput.pressKey('>');
     await frameAfter(testRenderer);
-    expect(controller.state.graphWidthOverride).toBe(65); // seeded from the automatic 63.
+    expect(testRenderer.renderer.root.findDescendantById('agent-map')?.width).toBe(65);
   });
 
-  it('leaves graphWidthOverride untouched while the agents pane is zoomed', async () => {
+  it('leaves the local graph width automatic while the agents pane is zoomed', async () => {
     const testRenderer = await createTestRenderer({width: 160, height: 30});
     const controller = new FakeController(threeStageRound());
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -1379,9 +1389,9 @@ describe('OpenTUI presentation', () => {
     expect(controller.state.layout.zoomedPane).toBe('agents');
 
     // Before the zoom guard, these keys still seeded and mutated
-    // `graphWidthOverride` here with no visible effect, since the zoomed pane
-    // ignores it for its own full-width rule; the state itself has to stay
-    // put, not just the frame.
+    // the local width here with no visible effect, since the zoomed pane
+    // ignores it for its own full-width rule. Closing zoom must still restore
+    // the automatically sized graph.
     // `=` first, so the `<`/`>` presses are the ones the assertion rests on:
     // `=` writes null onto null, which an unguarded run would not distinguish.
     testRenderer.mockInput.pressKey('=');
@@ -1390,7 +1400,9 @@ describe('OpenTUI presentation', () => {
     testRenderer.mockInput.pressKey('>');
     await frameAfter(testRenderer);
 
-    expect(controller.state.graphWidthOverride).toBeNull();
+    testRenderer.mockInput.pressKey('F4');
+    await frameAfter(testRenderer);
+    expect(testRenderer.renderer.root.findDescendantById('agent-map')?.width).toBe(68);
   });
 
   it('no-ops the resize keys while the experiment log holds the row instead of the agents pane', async () => {
@@ -1405,7 +1417,6 @@ describe('OpenTUI presentation', () => {
     testRenderer.mockInput.pressKey('>');
     testRenderer.mockInput.pressKey('<');
     await frameAfter(testRenderer);
-    expect(controller.state.graphWidthOverride).toBeNull();
   });
 
   /**
@@ -1424,13 +1435,11 @@ describe('OpenTUI presentation', () => {
 
     const before = await frameAfter(testRenderer);
     expect(before).toContain('Experiment chat');
-    expect(controller.state.chatWidthOverride).toBeNull();
     expect(chatPane()?.width).toBe(45);
 
     testRenderer.mockInput.pressKey('<');
     await frameAfter(testRenderer);
     expect(chatPane()?.width).toBe(43); // seeded from 45, one step down.
-    expect(controller.state.chatWidthOverride).toBe(43);
 
     testRenderer.mockInput.pressKey('<');
     await frameAfter(testRenderer);
@@ -1455,12 +1464,10 @@ describe('OpenTUI presentation', () => {
     for (let step = 0; step < 10; step += 1) testRenderer.mockInput.pressKey('<');
     await frameAfter(testRenderer);
     expect(chatPane()?.width).toBe(25);
-    expect(controller.state.chatWidthOverride).toBe(25);
 
     testRenderer.mockInput.pressKey('=');
     await frameAfter(testRenderer);
 
-    expect(controller.state.chatWidthOverride).toBeNull();
     expect(chatPane()?.width).toBe(45); // automatic sizing at 140, as before any press.
   });
 
@@ -1476,14 +1483,12 @@ describe('OpenTUI presentation', () => {
     for (let step = 0; step < 15; step += 1) testRenderer.mockInput.pressKey('<');
     await frameAfter(testRenderer);
     expect(chatPane()?.width).toBe(25);
-    expect(controller.state.chatWidthOverride).toBe(25);
 
     // Five presses past the floor changed nothing further: the override
     // itself stayed 25 rather than drifting under CHAT_PANE_MIN.
     testRenderer.mockInput.pressKey('<');
     await frameAfter(testRenderer);
     expect(chatPane()?.width).toBe(25);
-    expect(controller.state.chatWidthOverride).toBe(25);
   });
 
   it('the override may exceed CHAT_PANE_MAX, but keeps the log at LOG_COMPACT_PANEL_WIDTH, and a further > stores nothing', async () => {
@@ -1507,13 +1512,11 @@ describe('OpenTUI presentation', () => {
     expect(chatPane()?.width).toBe(233);
     expect(chatPane()?.width as number).toBeGreaterThan(52);
     expect(table()?.width).toBe(width - 233); // 67, LOG_COMPACT_PANEL_WIDTH.
-    expect(controller.state.chatWidthOverride).toBe(233);
 
     // One more press past the ceiling stores nothing further.
     testRenderer.mockInput.pressKey('>');
     await frameAfter(testRenderer);
     expect(chatPane()?.width).toBe(233);
-    expect(controller.state.chatWidthOverride).toBe(233);
   });
 
   it('no-ops the chat resize keys on the round view, where experimentLogVisible is false', async () => {
@@ -1527,7 +1530,6 @@ describe('OpenTUI presentation', () => {
     testRenderer.mockInput.pressKey('>');
     testRenderer.mockInput.pressKey('<');
     await frameAfter(testRenderer);
-    expect(controller.state.chatWidthOverride).toBeNull();
   });
 
   it("no-ops the Agents pane's resize keys on the home page, where agentsPaneVisible is false", async () => {
@@ -1544,7 +1546,6 @@ describe('OpenTUI presentation', () => {
     testRenderer.mockInput.pressKey('>');
     testRenderer.mockInput.pressKey('<');
     await frameAfter(testRenderer);
-    expect(controller.state.graphWidthOverride).toBeNull();
   });
 
   it('stores nothing on a terminal too narrow for the chat to dock at all', async () => {
@@ -1562,7 +1563,6 @@ describe('OpenTUI presentation', () => {
     testRenderer.mockInput.pressKey('<');
     testRenderer.mockInput.pressKey('=');
     await frameAfter(testRenderer);
-    expect(controller.state.chatWidthOverride).toBeNull();
   });
 
   it('never advertises the resize keys on LOG_KEY_HELP, where chatPaneVisible is false', async () => {
@@ -2070,7 +2070,7 @@ describe('OpenTUI presentation', () => {
     await controller.openPane('perf');
     controller.publish({...controller.state, chatOpen: true});
     let frame = await frameAfter(testRenderer);
-    expect(frame).toContain('1200');
+    expect(frame).toContain('1.2k');
 
     // The modal chat is the innermost layer: the first Escape closes only it,
     // and the visualization behind it stays exactly where it was.
@@ -2080,7 +2080,7 @@ describe('OpenTUI presentation', () => {
     expect(controller.state.layout.right).not.toBeNull();
     expect(controller.state.layout.focus).toBe('right');
     expect(controller.state.hypothesisScope).not.toBeNull();
-    expect(frame).toContain('1200');
+    expect(frame).toContain('1.2k');
 
     // The second Escape is the pane's own: it closes now, leaving the round
     // trajectory that was always behind both of them.
@@ -2089,7 +2089,7 @@ describe('OpenTUI presentation', () => {
     expect(controller.state.layout.right).toBeNull();
     expect(controller.state.layout.focus).toBe('left');
     expect(controller.state.hypothesisScope).not.toBeNull();
-    expect(frame).not.toContain('1200');
+    expect(frame).not.toContain('1.2k');
   });
 
   it('closes the chat alone on Escape when no pane is behind it', async () => {
@@ -4628,7 +4628,7 @@ describe('theming', () => {
     await controller.openPane('perf');
     testRenderer.renderer.resize(MIN_SPLIT_WIDTH - 1, 20);
     const narrow = await frameAfter(testRenderer);
-    expect(narrow).toContain('best r7 1135 tok_s');
+    expect(narrow).toContain('Performance · tok_s');
     expectCommandInside('viewport');
     const floating = testRenderer.renderer.root.findDescendantById('overlay');
     const narrowCommand = testRenderer.renderer.root.findDescendantById('command-input-box');
@@ -5416,7 +5416,7 @@ describe('theming', () => {
   it('keeps the chat, the table, and the visualization on screen together', async () => {
     const testRenderer = await createTestRenderer({width: 200, height: 20});
     const controller = logController();
-    controller.paneContent = 'Performance · tok_s\n    1135 ┤   ●\nbest r7 1135 tok_s';
+    controller.performanceData = performanceData(7, 1135);
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
     await controller.openExperimentLog();
@@ -5431,7 +5431,7 @@ describe('theming', () => {
     // Three columns: chat, table, visualization. None replaced another.
     expect(frame).toContain('Experiment chat');
     expect(frame).toContain('H-07');
-    expect(frame).toContain('best r7 1135 tok_s');
+    expect(frame).toContain('best r7 1.14k tok_s');
     expect(frame).toContain('Ctrl+W: switch pane');
   });
 
@@ -5516,7 +5516,7 @@ describe('theming', () => {
 
     // Both live at once; neither obscures the other.
     expect(frame).toContain('batched the prefill step');
-    expect(frame).toContain('best r7 1135 tok_s');
+    expect(frame).toContain('best r7 1.14k tok_s');
     expect(frame).toContain('Performance');
     expect(frame).toContain('Ctrl+W: switch pane');
   });
@@ -5543,7 +5543,7 @@ describe('theming', () => {
   it('marks exactly one focused pane across the hypothesis layout', async () => {
     const testRenderer = await createTestRenderer({width: 200, height: 20});
     const controller = logController();
-    controller.paneContent = 'Performance · tok_s\nbest r7 1135 tok_s';
+    controller.performanceData = performanceData(7, 1135);
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
     await controller.openExperimentLog();
@@ -5760,7 +5760,7 @@ describe('theming', () => {
     const frame = await frameAfter(testRenderer);
 
     expect(controller.state.layout.focus).toBe('right');
-    expect(frame).toContain('best r7 1135 tok_s');
+    expect(frame).toContain('best r7 1.14k tok_s');
     const theme = resolveTheme('dark');
     const borders = paneBorders(testRenderer);
     expect(markedPanes(borders)).toEqual(['▸ Performance']);
@@ -5821,15 +5821,10 @@ describe('theming', () => {
   it('keeps the newest design round reachable in the pane at 100x30', async () => {
     const testRenderer = await createTestRenderer({width: 100, height: 30});
     const controller = logController();
-    controller.paneContent = renderDesignSummary(
-      Array.from({length: 10}, (_, index) => ({
-        round: index + 1,
-        files: [{path: `src/round-${index + 1}.rs`, change: 'modified' as const}],
-        hypothesisId: 'H-07',
-        title: 'Batch the prefill step',
-        record: null,
-      })),
-    );
+    controller.designRounds = Array.from({length: 10}, (_, index) => ({
+      round: index + 1,
+      files: [{path: `src/round-${index + 1}.rs`, change: 'modified' as const}],
+    }));
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
 
@@ -5846,12 +5841,34 @@ describe('theming', () => {
     const frame = await testRenderer.waitForFrame(value =>
       value.includes('Design changes by round'),
     );
-    expect(frame).toContain('Round 1 · H-07');
+    expect(frame).toContain('Round 1');
 
     for (let index = 0; index < 3; index += 1) testRenderer.mockInput.pressKey('\x1B[6~');
     const scrolled = await frameAfter(testRenderer);
-    expect(scrolled).toContain('Round 10 · H-07');
+    expect(scrolled).toContain('Round 10');
     expect(scrolled).toContain('src/round-10.rs');
+  });
+
+  it('repaints split and overlay design views when the shared design log refreshes', async () => {
+    for (const width of [MIN_SPLIT_WIDTH, MIN_SPLIT_WIDTH - 1]) {
+      const testRenderer = await createTestRenderer({width, height: 30});
+      const controller = logController();
+      controller.designRounds = [{round: 1, files: [{path: 'src/old.rs', change: 'modified'}]}];
+      const app = createOpenTuiApp(testRenderer.renderer, controller);
+      registerCleanup(testRenderer.renderer, app);
+      await controller.openPane('design');
+      expect(await testRenderer.waitForFrame(value => value.includes('src/old.rs'))).toContain(
+        'src/old.rs',
+      );
+
+      controller.publish(
+        setDesignLog(controller.state, [
+          {round: 2, files: [{path: 'src/new.rs', change: 'added'}]},
+        ]),
+      );
+      const refreshed = await testRenderer.waitForFrame(value => value.includes('src/new.rs'));
+      expect(refreshed).not.toContain('src/old.rs');
+    }
   });
 
   it('annotates the selected round with its design changes once the log loads', async () => {
@@ -5940,17 +5957,14 @@ describe('theming', () => {
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
     await controller.openExperimentLog();
-    controller.publish({
-      ...controller.state,
-      designLog: [
-        {
-          round: 41,
-          base: 'aaa1111',
-          commit: 'bbb2222',
-          files: [{path: 'src/ring.rs', change: 'added'}],
-        },
-      ],
-    });
+    controller.designRounds = [
+      {
+        round: 41,
+        base: 'aaa1111',
+        commit: 'bbb2222',
+        files: [{path: 'src/ring.rs', change: 'added'}],
+      },
+    ];
     await controller.openPane('design');
     await frameAfter(testRenderer);
     expect(controller.state.layout.focus).toBe('right');
@@ -5998,7 +6012,7 @@ describe('theming', () => {
         ],
       }),
     ];
-    controller.paneContent = 'Performance · tok_s\nbest r7 1135 tok_s';
+    controller.performanceData = performanceData(7, 1135);
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
     await controller.openExperimentLog();
@@ -6042,8 +6056,8 @@ describe('theming', () => {
     // performance pane, so Escape is routed there and closes it.
     frame = testRenderer.captureCharFrame();
     lines = frame.split('\n');
-    row = lines.findIndex(line => line.includes('best r7 1135 tok_s'));
-    column = (lines[row]?.indexOf('best r7 1135 tok_s') ?? 0) + 2;
+    row = lines.findIndex(line => line.includes('best r7 1.14k tok_s'));
+    column = (lines[row]?.indexOf('best r7 1.14k tok_s') ?? 0) + 2;
     await testRenderer.mockMouse.click(column, row);
     await frameAfter(testRenderer);
     expect(controller.state.layout.focus).toBe('right');
@@ -6055,7 +6069,7 @@ describe('theming', () => {
   it('zooms and restores every pane without replacing its model state', async () => {
     const testRenderer = await createTestRenderer({width: 200, height: 20});
     const controller = logController();
-    controller.paneContent = 'Performance · tok_s\nbest r7 1135 tok_s';
+    controller.performanceData = performanceData(7, 1135);
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
     await controller.openExperimentLog();
@@ -6064,7 +6078,7 @@ describe('theming', () => {
 
     testRenderer.mockInput.pressKey('F4');
     const performance = await frameAfter(testRenderer);
-    expect(performance).toContain('best r7 1135 tok_s');
+    expect(performance).toContain('Performance · tok_s');
     expect(performance).not.toContain('H-07');
     expect(performance).not.toContain('Experiment chat');
 
@@ -6086,7 +6100,7 @@ describe('theming', () => {
     const experiments = await frameAfter(testRenderer);
     expect(experiments).toContain('H-07');
     expect(experiments).not.toContain('Experiment chat');
-    expect(experiments).not.toContain('best r7 1135 tok_s');
+    expect(experiments).not.toContain('Performance · tok_s');
   });
 
   it('zooms the selected agents or transcript pane in a round', async () => {
@@ -6121,7 +6135,7 @@ describe('theming', () => {
     const frame = await frameAfterEscape(testRenderer);
 
     expect(controller.state.layout.right).toBeNull();
-    expect(frame).not.toContain('best r7 1135 tok_s');
+    expect(frame).not.toContain('best r7 1.14k tok_s');
     expect(frame).toContain('batched the prefill step');
     expect(frame).toContain('Agents');
   });
@@ -6139,7 +6153,7 @@ describe('theming', () => {
     const narrow = await frameAfter(testRenderer);
 
     // Single view, chart in the modal it used before the split existed.
-    expect(narrow).toContain('best r7 1135 tok_s');
+    expect(narrow).toContain('Performance · tok_s');
     expect(narrow).toContain('Command');
     expect(narrow).not.toContain('Ctrl+W: switch pane');
 
@@ -6157,7 +6171,7 @@ describe('theming', () => {
     controller.experiments = [
       logEntry('H-07', 41, 41, {claim: 'batch the prefill step', resolved_outcome: 'proven'}),
     ];
-    controller.paneContent = 'Performance · tok_s\nbest r41 1135 tok_s';
+    controller.performanceData = performanceData(41, 1135);
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
     await controller.openExperimentLog();
@@ -6166,7 +6180,7 @@ describe('theming', () => {
     const frame = await frameAfter(testRenderer);
 
     expect(frame).toContain('H-07');
-    expect(frame).toContain('best r41 1135 tok_s');
+    expect(frame).toContain('best r41 1.14k tok_s');
     // The table gives up its widest column to make room, rather than vanishing.
     expect(frame).toContain('Hypothesis');
   });
@@ -6182,7 +6196,7 @@ describe('theming', () => {
     await frameAfter(testRenderer);
 
     expect(spanColors(testRenderer, '▸ Performance')?.fg).toBe(theme.borderFocus);
-    expect(spanColors(testRenderer, 'best r7 1135 tok_s')?.fg).toBe(theme.textPrimary);
+    expect(spanColors(testRenderer, 'best r7 1.14k tok_s')?.fg).toBe(theme.textPrimary);
 
     controller.cyclePaneFocus();
     await frameAfter(testRenderer);
@@ -6232,16 +6246,16 @@ describe('theming', () => {
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
     await controller.openPane('perf');
-    expect(await frameAfter(testRenderer)).toContain('best r7 1135 tok_s');
+    expect(await frameAfter(testRenderer)).toContain('best r7 1.14k tok_s');
 
     // A later round lands and the controller refetches; the pane redraws in
     // place rather than needing to be reopened.
-    controller.paneContent = 'Performance · tok_s\n    1180 ┤    ●\nbest r8 1180 tok_s';
+    controller.performanceData = performanceData(8, 1180);
     await controller.openPane('perf');
     const updated = await frameAfter(testRenderer);
 
-    expect(updated).toContain('best r8 1180 tok_s');
-    expect(updated).not.toContain('best r7 1135 tok_s');
+    expect(updated).toContain('best r8 1.18k tok_s');
+    expect(updated).not.toContain('best r7 1.14k tok_s');
   });
 
   it('shows an explicit placeholder for records with no hypothesis id', async () => {
@@ -6805,12 +6819,12 @@ describe('box fills', () => {
     // only exists after a frame.
     const testRenderer = await createTestRenderer({width: 60, height: 30});
     const controller = shapeController();
-    controller.paneContent = 'Performance · tok_s\nbest r1 1135 tok_s';
+    controller.performanceData = performanceData(1, 1135);
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
     await testRenderer.waitForFrame(value => value.includes('implementer'));
     await controller.openPane('perf');
-    await testRenderer.waitForFrame(value => value.includes('1135 tok_s'));
+    await testRenderer.waitForFrame(value => value.includes('Performance · tok_s'));
     const root = testRenderer.renderer.root;
 
     expect(boxIds(root)).toContain('agent-implementer');
@@ -7013,7 +7027,7 @@ function splitController(): FakeController {
       ],
     },
   });
-  controller.paneContent = 'Performance · tok_s\n    1135 ┤   ●\nbest r7 1135 tok_s';
+  controller.performanceData = performanceData(7, 1135);
   return controller;
 }
 
@@ -7050,7 +7064,7 @@ function todoController(): FakeController {
       ],
     },
   });
-  controller.paneContent = 'Performance · tok_s\nbest r7 1135 tok_s';
+  controller.performanceData = performanceData(7, 1135);
   return controller;
 }
 
@@ -7864,7 +7878,7 @@ describe('command palette', () => {
     const testRenderer = await createTestRenderer({width: 140, height: 40});
     const controller = new FakeController(initialSessionState());
     const banner: NonNullable<SessionState['errorBanner']> = {
-      title: 'Run failed',
+      titleKind: 'run',
       message: 'CliExitError: codex exited with code 1',
       detail: null,
       hint: null,
@@ -7903,17 +7917,14 @@ describe('command palette', () => {
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
     await controller.openExperimentLog();
-    controller.publish({
-      ...controller.state,
-      designLog: [
-        {
-          round: 41,
-          base: 'aaa1111',
-          commit: 'bbb2222',
-          files: [{path: 'src/ring.rs', change: 'added'}],
-        },
-      ],
-    });
+    controller.designRounds = [
+      {
+        round: 41,
+        base: 'aaa1111',
+        commit: 'bbb2222',
+        files: [{path: 'src/ring.rs', change: 'added'}],
+      },
+    ];
     await controller.openPane('design');
     await frameAfter(testRenderer);
 
@@ -8612,22 +8623,6 @@ class FakeController implements SessionController {
   toggleTodos(): void {
     this.publish({...this.state, todosExpanded: !this.state.todosExpanded});
   }
-  setGraphWidthOverride(width: number | null): void {
-    // The same dedup the real reducer does
-    // (`session-model.ts#setGraphWidthOverride`): an unchanged width keeps the
-    // same state object, so a lost dedup is visible here rather than papered
-    // over by a double that always publishes.
-    if (this.state.graphWidthOverride === width) return;
-    this.publish({...this.state, graphWidthOverride: width});
-  }
-
-  setChatWidthOverride(width: number | null): void {
-    // The same dedup the real reducer does
-    // (`session-model.ts#setChatWidthOverride`).
-    if (this.state.chatWidthOverride === width) return;
-    this.publish({...this.state, chatWidthOverride: width});
-  }
-
   /** Records written through the fake `setNoteText`, indexed by run id. */
   readonly notesWritten: Record<string, string> = {};
 
@@ -8679,7 +8674,12 @@ class FakeController implements SessionController {
     this.publish(enterExperimentDrilldown(this.state));
   }
   openPane(view: PaneView): Promise<void> {
-    this.publish(setPaneContent(openPane(this.state, view), view, this.paneContent));
+    const opened = openPane(this.state, view);
+    this.publish(
+      view === 'perf'
+        ? setPerformancePane(opened, this.performanceData, null)
+        : setDesignPane(opened, this.designRounds, true),
+    );
     return Promise.resolve();
   }
   closePane(): void {
@@ -8707,8 +8707,9 @@ class FakeController implements SessionController {
     this.publish(setChatDockFits(this.state, fits));
   }
 
-  /** Content the fake server returns for whichever visualization is opened. */
-  paneContent = 'Performance · median_tok_per_sec\n  1200 ┤●';
+  /** Structured projections the fake server returns for each visualization. */
+  performanceData = performanceData(1, 1200, 'median_tok_per_sec');
+  designRounds: DesignRound[] = [];
 
   openRound(roundNumber?: number): void {
     if (roundNumber === undefined) {

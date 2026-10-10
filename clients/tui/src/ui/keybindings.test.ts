@@ -84,6 +84,8 @@ function stubActions(): KeybindingActions {
     toggleTodos: () => {},
     setGraphWidthOverride: () => {},
     setChatWidthOverride: () => {},
+    graphWidthOverride: () => null,
+    chatWidthOverride: () => null,
     scrollRightPane: () => {},
     scrollChatPane: () => {},
     scrollExperimentDetail: () => {},

@@ -733,7 +733,28 @@ export function styleTranscriptText(
 function speaker(entry: ConversationEntry): {role: string; runId: string | null} {
   return entry.agentKind !== undefined && entry.roundLabel !== undefined
     ? {role: entry.agentKind, runId: entry.roundLabel}
-    : {role: entry.label ?? entry.kind, runId: null};
+    : {role: entry.label ?? conversationLabel(entry.labelKind) ?? entry.kind, runId: null};
+}
+
+function conversationLabel(kind: ConversationEntry['labelKind']): string | null {
+  switch (kind) {
+    case 'chat_commands':
+      return 'Chat commands';
+    case 'user':
+      return 'You';
+    case 'user_queued':
+      return 'You · queued';
+    case 'answer':
+      return 'Answer';
+    case 'chat_failed':
+      return 'Chat failed';
+    case undefined:
+      return null;
+    default: {
+      const unhandled: never = kind;
+      return unhandled;
+    }
+  }
 }
 
 function sameSpeaker(left: ConversationEntry, right: ConversationEntry): boolean {

@@ -1,5 +1,6 @@
 import {BoxRenderable, type CliRenderer, TextRenderable} from '@opentui/core';
 import {
+  formatPerformanceDelta,
   hasActiveAgentTiming,
   type RoundKey,
   type RoundOutcome,
@@ -416,7 +417,7 @@ function roundMetric(round: RoundState, state: SessionState, now: Date): string 
   if (round.status === 'active') return elapsedLabel(roundAgentElapsedMs(round, now));
   const delta = hypothesisRoundFor(state, round.number)?.perf_delta_pct;
   if (typeof delta === 'number') {
-    return `${delta > 0 ? '+' : ''}${delta.toFixed(Math.abs(delta) >= 10 ? 0 : 1)}%`;
+    return formatPerformanceDelta(delta);
   }
   const end = round.finishedAt ? new Date(round.finishedAt) : now;
   return elapsedLabel(roundAgentElapsedMs(round, end));

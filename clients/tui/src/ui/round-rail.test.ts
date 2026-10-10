@@ -219,7 +219,13 @@ describe('roundRailVisible', () => {
       ...state,
       layout: {
         ...state.layout,
-        right: {view: 'perf' as const, title: 'Perf', content: '', pending: false, error: null},
+        right: {
+          view: 'perf' as const,
+          data: null,
+          context: null,
+          pending: false,
+          error: null,
+        },
       },
     };
     // Wide enough for the split to open, so the rail yields the row to it.

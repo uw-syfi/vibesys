@@ -3,7 +3,6 @@ export {
   type ActiveAgentExecution,
   type ActiveExecutionCheckpoint,
   type AgentExecutionMode,
-  type BenchmarkRecord,
   type ChatThread,
   type CoreDiagnostic,
   type CoreRunStatus,
@@ -18,7 +17,6 @@ export {
   type QuotaState,
   type RunLifetimeBoundary,
   reconcileActiveExecutions,
-  recordsBenchmark,
   reduceEvent,
   reduceEventBatch,
   reduceEventPrefix,
@@ -32,6 +30,16 @@ export {
   type UsageMeter,
 } from './core-state.js';
 export {type ExecutionStatus, executionStatusFor} from './execution-status.js';
+export {
+  type BenchmarkRecord,
+  formatPerformanceDelta,
+  type PerformanceDirection,
+  type PerformancePoint,
+  type PerformanceProjection,
+  type PerformanceProjectionInput,
+  projectPerformance,
+  recordsBenchmark,
+} from './performance-projection.js';
 export {
   activeRunFocus,
   agentKindText,
