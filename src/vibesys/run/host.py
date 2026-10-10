@@ -29,7 +29,6 @@ from vibesys.run.core_services import (
     CoreServices,
     agent_session_spec,
     build_core_services,
-    evaluation_socket_path,
 )
 from vibesys.run.evaluation import create_evaluation
 from vibesys.run.evaluation_backend import (
@@ -313,21 +312,22 @@ class _ProductHostFactory:
 
         return open_environment
 
-    def _evaluation_socket(self, resources: _PreparedRun) -> Path | None:
-        """The socket of the run's evaluation tool service, legacy or core, once composed."""
+    def _evaluation_socket(self) -> Path | None:
+        """The legacy evaluation service's socket, once composed.
+
+        A core run's socket is not mounted per role: its directory is mounted into every
+        agent container when the run environment opens (``evaluation_socket_mount``).
+        """
         if self.evaluation_service is not None:
             return self.evaluation_service.socket_path
-        if self.plugin.core is None:
-            return None
-        project = resources.project_resources
-        return evaluation_socket_path(project.project.root, project.state.run_id)
+        return None
 
     def _agent_configuration(
         self, resources: _PreparedRun, role: AgentRole
     ) -> AgentExecutionConfiguration:
         """The session-fixed agent inputs of one role: its spec and the resources it mounts."""
         spec = resources.agent_specs[role.id]
-        socket = self._evaluation_socket(resources)
+        socket = self._evaluation_socket()
         return AgentExecutionConfiguration(
             agent_id=role.id,
             spec=spec,

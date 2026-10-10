@@ -10,14 +10,12 @@ cannot serve, fails at composition with the name of what is missing, never mid-r
 
 from __future__ import annotations
 
-import hashlib
-import tempfile
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel
 
+from vibesys.run.evaluation_socket import evaluation_socket_path
 from vs_agent.api import (
     AgentExecutionPolicy,
     AgentSessionSpec,
@@ -54,6 +52,7 @@ from vs_runtime.api.core import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
+    from pathlib import Path
 
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
     from vs_core.api import CoreState, LifecycleCapability, Strategy
@@ -322,12 +321,6 @@ def _refuse_unbridged_tools(roles: Iterable[AgentRole], *, bridged: bool) -> Non
             raise CoreCompositionError(resource, detail)
 
 
-def evaluation_socket_path(project_root: Path, run_id: str) -> Path:
-    """The unix socket of one run's in-turn evaluation tool; the host also mounts it for agents."""
-    suffix = hashlib.sha256(f"{project_root}:{run_id}".encode()).hexdigest()
-    return Path(tempfile.gettempdir()) / f"vse-{suffix[:16]}.sock"
-
-
 def _agent_bridge(
     plan: CorePlan, resources: CoreResources, receipts: ReceiptStore
 ) -> AgentEvaluationBridge | None:
@@ -417,5 +410,4 @@ __all__ = [
     "CoreServices",
     "agent_session_spec",
     "build_core_services",
-    "evaluation_socket_path",
 ]

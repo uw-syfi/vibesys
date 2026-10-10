@@ -354,9 +354,14 @@ layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp"]
 
 [[modules]]
+path = "vibesys.run.evaluation_socket"
+layer = "orchestration_host"
+depends_on = ["vs_sandbox"]
+
+[[modules]]
 path = "vibesys.run.core_services"
 layer = "orchestration_host"
-depends_on = ["vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime"]
+depends_on = ["vibesys.run.evaluation_socket", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.measurement_events"
@@ -376,7 +381,7 @@ depends_on = ["vibesys.prompts", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.resources"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.errors", "vibesys.run.evaluation", "vibesys.run.profilers", "vibesys.orchestration.profilers", "vibesys.orchestration.skill_selection", "vibesys.run", "vibesys.run.contracts", "vibesys.run.environment", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
+depends_on = ["vibesys", "vibesys.errors", "vibesys.run.evaluation", "vibesys.run.evaluation_socket", "vibesys.run.profilers", "vibesys.orchestration.profilers", "vibesys.orchestration.skill_selection", "vibesys.run", "vibesys.run.contracts", "vibesys.run.environment", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.run.evaluation"
