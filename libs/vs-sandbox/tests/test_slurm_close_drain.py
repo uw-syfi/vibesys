@@ -14,7 +14,6 @@ sweeps the turns so the window is crossed whatever the interleaving.
 from __future__ import annotations
 
 import asyncio
-import threading
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,6 +25,7 @@ from vs_sandbox.api.slurm import (
     SlurmEvaluationExecutor,
     SlurmStagePayload,
 )
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import wait_until_started
 from vs_slurm.api import (
     ClusterInspectOutcome,
@@ -46,6 +46,9 @@ pytestmark = pytest.mark.asyncio
 
 _HANDLE = "evaluation-under-test"
 _TURNS = range(8)
+# Only guards a hang: the thread being waited on is already past its last step.
+_BOUND_S = 60.0
+_threads = OsThreads()
 
 
 class _GatedCluster(FakeCluster):
@@ -54,10 +57,10 @@ class _GatedCluster(FakeCluster):
     def __init__(self) -> None:
         super().__init__()
         self.armed = False
-        self.entered = threading.Event()
-        self.release = threading.Event()
-        self.returned = threading.Event()
-        self.accepted = threading.Event()
+        self.entered = _threads.event()
+        self.release = _threads.event()
+        self.returned = _threads.event()
+        self.accepted = _threads.event()
 
     def submit(
         self, request: SlurmBatchRequest | SlurmJobRequest, *, operation_id: str
@@ -71,7 +74,7 @@ class _GatedCluster(FakeCluster):
     def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
         if self.armed:
             self.entered.set()
-            self.release.wait()
+            self.release.wait(timeout=_BOUND_S)
         outcome = super().inspect(target, by_job_id=by_job_id)
         if self.armed:
             self.returned.set()
@@ -136,7 +139,7 @@ async def test_close_returns_when_an_abandoned_cluster_call_ends_as_it_begins(
         cluster.release.set()
     # Hold the loop until the worker thread has returned, so its completion is
     # already queued when the loop next runs; then land close on the chosen turn.
-    cluster.returned.wait()
+    cluster.returned.wait(timeout=_BOUND_S)
     for _ in range(turns):
         await asyncio.sleep(0)
 
