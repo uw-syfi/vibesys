@@ -88,7 +88,6 @@ from vs_evaluation.api import (
     TrustedEvidence,
 )
 from vs_evaluation.api.testing import (
-    FakeClock,
     FakeEvaluationBackend,
     FakeEvaluationExecutor,
     FakeProfilerTurnProvision,
@@ -103,6 +102,7 @@ from vs_project.api import (
     StateNamespace,
 )
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -292,7 +292,7 @@ def _namespace(tmp_path: Path) -> StateNamespace:
 def _service(
     tmp_path: Path,
 ) -> tuple[EvaluationAgentService, FakeEvaluationExecutor]:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(
         clock,
         supported_evidence_kinds=("accuracy", "benchmark", "profile"),
@@ -414,7 +414,7 @@ async def test_judge_can_observe_same_scope_status_without_wait_or_mutation(
 async def test_kind_the_executor_cannot_produce_is_rejected_without_a_handle(
     tmp_path: Path,
 ) -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock, supported_evidence_kinds=("accuracy", "benchmark"))
     store = InMemoryEvaluationStore()
     service = EvaluationAgentService(
@@ -905,7 +905,7 @@ async def test_availability_tool_round_trips_strict_enums_over_socket(tmp_path: 
 async def test_await_tool_states_its_cap_and_waits_the_cap_for_longer_requests(
     tmp_path: Path, requested_s: float
 ) -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock, supported_evidence_kinds=("accuracy", "benchmark"))
     service = EvaluationAgentService(
         _SemanticBackend(
@@ -928,7 +928,7 @@ async def test_await_tool_states_its_cap_and_waits_the_cap_for_longer_requests(
         SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
     )
     assert isinstance(submitted, SubmittedReply)
-    started = clock.monotonic()
+    started = clock.now()
     await service.start()
     try:
         tool = next(
@@ -951,7 +951,7 @@ async def test_await_tool_states_its_cap_and_waits_the_cap_for_longer_requests(
     reply = AwaitReply.model_validate_json(raw)
     assert isinstance(reply.result, EvaluationStillRunning)
     assert executor.wait_calls[0][1] == MAX_AGENT_AWAIT_S
-    assert clock.monotonic() - started == MAX_AGENT_AWAIT_S
+    assert clock.now() - started == MAX_AGENT_AWAIT_S
 
 
 # The smallest MCP tool-call timeout a supported agent CLI is known to apply
@@ -984,7 +984,7 @@ async def _await_through_tool(
 
 
 def _bounded_service(tmp_path: Path) -> tuple[EvaluationAgentService, FakeEvaluationExecutor]:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock, supported_evidence_kinds=("accuracy", "benchmark"))
     service = EvaluationAgentService(
         _SemanticBackend(
@@ -1041,11 +1041,11 @@ async def test_await_returns_recorded_progress_at_the_bound_before_any_client_ti
         current_stage="benchmark",
         stage_results=(accuracy,),
     )
-    started = executor.clock.monotonic()
+    started = executor.clock.now()
 
     reply = await _await_through_tool(service, grant.token, submitted.handle_id, 1800.0)
 
-    waited = executor.clock.monotonic() - started
+    waited = executor.clock.now() - started
     assert waited == MAX_AGENT_AWAIT_S
     assert waited + _SOCKET_SLACK_S < _SMALLEST_CLIENT_TOOL_TIMEOUT_S
     assert reply.result == EvaluationStillRunning(
@@ -1073,17 +1073,17 @@ async def test_await_returns_the_result_when_the_evaluation_finishes_within_the_
         ExecutorObservation(state=EvaluationState.SUCCEEDED, stage_results=(accuracy,)),
         elapsed_s=MAX_AGENT_AWAIT_S - 1,
     )
-    started = executor.clock.monotonic()
+    started = executor.clock.now()
 
     reply = await _await_through_tool(service, grant.token, submitted.handle_id, 1800.0)
 
-    assert executor.clock.monotonic() - started == MAX_AGENT_AWAIT_S - 1
+    assert executor.clock.now() - started == MAX_AGENT_AWAIT_S - 1
     assert reply.result == EvaluationCompleted(handle_id=submitted.handle_id, stages=(accuracy,))
 
 
 @pytest.mark.asyncio
 async def test_service_close_cancels_remembered_execution(tmp_path: Path) -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock, supported_evidence_kinds=("accuracy", "benchmark"))
     backend = _BlockingSemanticBackend(
         EvaluationCoordinator(
@@ -1130,7 +1130,7 @@ async def test_service_close_cancels_remembered_execution(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_abrupt_client_disconnect_is_normal_socket_teardown(tmp_path: Path) -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     backend = _BlockingAvailabilityBackend(
         EvaluationCoordinator(
             FakeEvaluationExecutor(clock),
@@ -1175,7 +1175,7 @@ async def test_a_stopping_run_refuses_new_submissions_and_profiles_with_a_typed_
     tmp_path: Path,
 ) -> None:
     stopping = [False]
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock, supported_evidence_kinds=("accuracy", "benchmark"))
     coordinator = EvaluationCoordinator(executor, InMemoryEvaluationStore(), clock)
     namespace = _namespace(tmp_path)
@@ -1317,7 +1317,7 @@ def _restart_host(
     credentials: list[str],
 ) -> tuple[EvaluationAgentService, FakeEvaluationExecutor, AgentClient]:
     namespace = _namespace(workspace)
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(
         clock,
         backend=remote,

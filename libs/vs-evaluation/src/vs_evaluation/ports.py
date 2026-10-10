@@ -67,14 +67,6 @@ class ExecutorRejectedError(ValueError):
     """
 
 
-class Clock(Protocol):
-    """Monotonic time source used for bounded waits and observations."""
-
-    def monotonic(self) -> float:
-        """Return monotonic seconds."""
-        ...
-
-
 class EvaluationEventSink(Protocol):
     """Receive lifecycle facts after their authoritative store write."""
 

@@ -38,12 +38,12 @@ from vs_evaluation.api import (
     TrustedEvidence,
 )
 from vs_evaluation.api.testing import (
-    FakeClock,
     FakeEvaluationExecutor,
     FakeProfilerTurnProvision,
     InMemoryEvaluationNamespace,
 )
 from vs_runtime.api import AgentToolBindingContext, Run
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -178,7 +178,7 @@ def profile_release_effects(
     if fault is not None:
         namespace = FaultNamespace(namespace, fault)
     executor = OwnedEvaluationExecutor(
-        clock=FakeClock(),
+        clock=ManualClock(),
         supported_evidence_kinds=tuple(kind.value for kind in EvidenceKind),
         advance_clock_on_timeout=False,
     )
@@ -192,7 +192,7 @@ def profile_release_effects(
         executor=executor,
         plan=plan,
         queue_allowance_seconds=900,
-        submitted_time=executor.clock.monotonic,
+        submitted_time=executor.clock.now,
     )
     profiler = ProfilerAgentService(
         FakeProfilerTurnProvision(),

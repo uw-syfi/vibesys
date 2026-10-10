@@ -13,6 +13,7 @@ dependencies = [
     "vs-evaluator-protocol",
     "vs-mcp",
     "vs-project",
+    "vs-sim",
 ]
 
 [tool.setuptools.packages.find]
@@ -26,3 +27,4 @@ vs-async-ops = { workspace = true }
 vs-evaluator-protocol = { workspace = true }
 vs-mcp = { workspace = true }
 vs-project = { workspace = true }
+vs-sim = { workspace = true }

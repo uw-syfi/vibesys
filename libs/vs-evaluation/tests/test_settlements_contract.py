@@ -190,7 +190,7 @@ async def test_host_waits_renew_past_agent_and_coordinator_bounds(
         OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
     )
     assert isinstance(result[0].result, EvaluationCanceled)
-    assert fake.executor.clock.monotonic() == 360.0
+    assert fake.executor.clock.now() == 360.0
     assert all(timeout == 45.0 for _, timeout in fake.executor.wait_calls)
     assert fake.executor.cancellations == []
 

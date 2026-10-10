@@ -33,8 +33,8 @@ from vs_evaluation.api import (
     EvaluationStep,
     PollPhase,
 )
-from vs_evaluation.api.testing import FakeClock
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
+from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     CANCEL_REACTIONS,
     LIFETIMES,
@@ -45,7 +45,6 @@ from vs_slurm.api import (
     ClusterSubmitOutcome,
     ClusterTarget,
     FakeCluster,
-    ManualClock,
     SchedulerTrace,
     SlurmBatchRequest,
     SlurmBatchResult,
@@ -305,7 +304,7 @@ def _stack(
 ) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator]:
     executor = _executor(world, pause)
     store = evaluation_testing.InMemoryEvaluationStore()
-    return executor, EvaluationCoordinator(executor, store, FakeClock())
+    return executor, EvaluationCoordinator(executor, store, ManualClock())
 
 
 _OPS = st.lists(st.sampled_from(("snapshot", "inspect_only", "poll", "wait")), max_size=30)

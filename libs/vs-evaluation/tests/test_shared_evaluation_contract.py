@@ -41,7 +41,6 @@ from vs_evaluation.api import (
     SubmittedReply,
 )
 from vs_evaluation.api.testing import (
-    FakeClock,
     FakeEvaluationExecutor,
     FakeEvaluationSettlements,
     InMemoryEvaluationNamespace,
@@ -61,7 +60,7 @@ from vs_runtime.api.testing import (
     FakeWorkspace,
     FakeWorkspaces,
 )
-from vs_sim.api.testing import arrival
+from vs_sim.api.testing import ManualClock, arrival
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -125,7 +124,7 @@ async def _harness(
         fingerprints = produced.submission.fingerprints
     namespace = InMemoryEvaluationNamespace() if namespace is None else namespace
     executor = (
-        FakeEvaluationExecutor(FakeClock(), supported_evidence_kinds=(kind.value,))
+        FakeEvaluationExecutor(ManualClock(), supported_evidence_kinds=(kind.value,))
         if executor is None
         else executor
     )
@@ -236,7 +235,7 @@ async def test_join_reselects_when_canonical_cancellation_wins_admission(
     tmp_path: Path, implementation: str, requester: str
 ) -> None:
     namespace = _CancellationIntentNamespace()
-    executor = _InspectionGateExecutor(FakeClock(), supported_evidence_kinds=("accuracy",))
+    executor = _InspectionGateExecutor(ManualClock(), supported_evidence_kinds=("accuracy",))
     async with _harness(
         tmp_path, implementation, namespace=namespace, executor=executor
     ) as harness:

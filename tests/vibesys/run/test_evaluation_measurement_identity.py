@@ -38,7 +38,6 @@ from vs_evaluation.api import (
     SubmittedSemanticEvaluation,
 )
 from vs_evaluation.api.testing import (
-    FakeClock,
     FakeEvaluationExecutor,
     FakeProfilerTurnProvision,
     InMemoryEvaluationNamespace,
@@ -56,7 +55,7 @@ from vs_runtime.api import (
 )
 from vs_runtime.api.infrastructure import TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeEvaluation, FakeRun
-from vs_sim.api.testing import arrival
+from vs_sim.api.testing import ManualClock, arrival
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -108,7 +107,7 @@ async def test_agent_workspace_submission_joins_same_measurement_across_scopes(
         assert agent.id is not None
         namespace = InMemoryEvaluationNamespace()
         executor = FakeEvaluationExecutor(
-            clock=FakeClock(), supported_evidence_kinds=tuple(item.value for item in EvidenceKind)
+            clock=ManualClock(), supported_evidence_kinds=tuple(item.value for item in EvidenceKind)
         )
         backend = SemanticEvaluationBackend(
             run.evaluation,
@@ -153,7 +152,7 @@ async def test_releasing_foreign_scope_preserves_canonical_capture_until_its_own
             assert canonical_scope is not None
         namespace = InMemoryEvaluationNamespace()
         executor = FakeEvaluationExecutor(
-            clock=FakeClock(), supported_evidence_kinds=(EvidenceKind.PROFILE.value,)
+            clock=ManualClock(), supported_evidence_kinds=(EvidenceKind.PROFILE.value,)
         )
         backend = SemanticEvaluationBackend(
             run.evaluation, run.workspaces, namespace, _identity(), executor=executor
@@ -215,7 +214,7 @@ async def test_profile_measurement_identity_fences_revision_plan_and_fingerprint
         run.workspaces.set_patch(second_revision, "second candidate")
         namespace = InMemoryEvaluationNamespace()
         executor = FakeEvaluationExecutor(
-            clock=FakeClock(), supported_evidence_kinds=(EvidenceKind.PROFILE.value,)
+            clock=ManualClock(), supported_evidence_kinds=(EvidenceKind.PROFILE.value,)
         )
         plan = TrustedEvaluationPlan(profile_command="capture-a", profile_timeout_seconds=60)
 
@@ -283,7 +282,7 @@ async def test_unobserved_executor_failure_gets_a_fresh_shared_attempt(
         assert owner.revision is not None
         assert requester.revision is not None
         executor = FakeEvaluationExecutor(
-            clock=FakeClock(), supported_evidence_kinds=(EvidenceKind.BENCHMARK.value,)
+            clock=ManualClock(), supported_evidence_kinds=(EvidenceKind.BENCHMARK.value,)
         )
         backend = SemanticEvaluationBackend(
             run.evaluation,
@@ -720,7 +719,7 @@ async def test_capture_registry_read_never_dispatches_or_polls_a_provisional_cap
         revision = await run.workspaces.root.snapshot("prepared immutable candidate")
         namespace = InMemoryEvaluationNamespace()
         executor = FakeEvaluationExecutor(
-            clock=FakeClock(), supported_evidence_kinds=(EvidenceKind.BENCHMARK.value,)
+            clock=ManualClock(), supported_evidence_kinds=(EvidenceKind.BENCHMARK.value,)
         )
         backend = SemanticEvaluationBackend(
             run.evaluation, run.workspaces, namespace, _identity(), executor=executor

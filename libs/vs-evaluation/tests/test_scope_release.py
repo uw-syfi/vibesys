@@ -44,7 +44,6 @@ from vs_evaluation.api import (
     TrustedEvidence,
 )
 from vs_evaluation.api.testing import (
-    FakeClock,
     FakeEvaluationExecutor,
     FakeProfilerTurnProvision,
     InMemoryEvaluationStore,
@@ -56,6 +55,7 @@ from vs_project.api import (
     RunExecutionRecord,
     StateNamespace,
 )
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -256,7 +256,7 @@ class _Harness:
 
 
 def _harness(root: Path) -> _Harness:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock, supported_evidence_kinds=("accuracy",))
     coordinator = EvaluationCoordinator(executor, InMemoryEvaluationStore(), clock)
     backend = _ContentBackend(coordinator)

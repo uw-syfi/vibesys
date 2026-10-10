@@ -20,6 +20,7 @@ dependencies = [
     "vs-project",
     "vs-prompts",
     "vs-sandbox",
+    "vs-sim",
     "vs-slurm",
 ]
 
@@ -39,4 +40,5 @@ vs-mcp = { workspace = true }
 vs-project = { workspace = true }
 vs-prompts = { workspace = true }
 vs-sandbox = { workspace = true }
+vs-sim = { workspace = true }
 vs-slurm = { workspace = true }

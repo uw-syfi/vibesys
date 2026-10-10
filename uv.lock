@@ -3056,6 +3056,7 @@ dependencies = [
     { name = "vs-evaluator-protocol" },
     { name = "vs-mcp" },
     { name = "vs-project" },
+    { name = "vs-sim" },
 ]
 
 [package.metadata]
@@ -3065,6 +3066,7 @@ requires-dist = [
     { name = "vs-evaluator-protocol", editable = "libs/vs-evaluator-protocol" },
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 
 [[package]]
@@ -3173,6 +3175,7 @@ dependencies = [
     { name = "vs-project" },
     { name = "vs-prompts" },
     { name = "vs-sandbox" },
+    { name = "vs-sim" },
     { name = "vs-slurm" },
 ]
 
@@ -3190,6 +3193,7 @@ requires-dist = [
     { name = "vs-project", editable = "libs/vs-project" },
     { name = "vs-prompts", editable = "libs/vs-prompts" },
     { name = "vs-sandbox", editable = "libs/vs-sandbox" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
     { name = "vs-slurm", editable = "libs/vs-slurm" },
 ]
 
@@ -3229,10 +3233,14 @@ version = "0.1.0"
 source = { editable = "libs/vs-slurm" }
 dependencies = [
     { name = "pydantic" },
+    { name = "vs-sim" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
+]
 
 [[package]]
 name = "watchfiles"

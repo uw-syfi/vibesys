@@ -24,12 +24,11 @@ from vs_evaluation.api import (
     SubmitCall,
 )
 from vs_evaluation.api.testing import (
-    FakeClock,
     FakeEvaluationExecutor,
     FakeProfilerTurnProvision,
     InMemoryEvaluationNamespace,
 )
-from vs_sim.api.testing import arrival
+from vs_sim.api.testing import ManualClock, arrival
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,7 +40,7 @@ class EmptyEvaluationBackend:
     """An evaluation namespace containing no submitted jobs or trusted results."""
 
     def __init__(self) -> None:
-        self.executor = FakeEvaluationExecutor(FakeClock())
+        self.executor = FakeEvaluationExecutor(ManualClock())
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         return await self.executor.availability(requirements)

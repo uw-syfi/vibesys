@@ -29,14 +29,13 @@ from vs_evaluation.api import (
     EvaluationStep,
     PollPhase,
 )
-from vs_evaluation.api.testing import FakeClock
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
+from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     ClusterCancelOutcome,
     ClusterSubmitOutcome,
     ClusterTarget,
     FakeCluster,
-    ManualClock,
     SlurmBatchRequest,
     SlurmBatchResult,
     SlurmConfig,
@@ -171,7 +170,7 @@ def _stack(
         cancel_confirmation_seconds=_CONFIRMATION_S,
     )
     store = evaluation_testing.InMemoryEvaluationStore()
-    return executor, EvaluationCoordinator(executor, store, FakeClock())
+    return executor, EvaluationCoordinator(executor, store, ManualClock())
 
 
 _OPS = st.lists(st.sampled_from(("snapshot", "inspect_only", "poll", "wait")), max_size=40)
@@ -274,7 +273,7 @@ def _parked_submitter(
         cancel_confirmation_seconds=_CONFIRMATION_S,
     )
     store = evaluation_testing.InMemoryEvaluationStore()
-    return executor, EvaluationCoordinator(executor, store, FakeClock()), idle, release
+    return executor, EvaluationCoordinator(executor, store, ManualClock()), idle, release
 
 
 async def _stopped_while_active(schedule: _Schedule) -> None:

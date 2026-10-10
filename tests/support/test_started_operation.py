@@ -12,8 +12,14 @@ from hypothesis import strategies as st
 from tests.support.started_operation import wait_until_executor_started
 
 from vs_evaluation.api import EvaluationState
-from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor
-from vs_sim.api.testing import arrival, start_thread, wait_until_started, wait_until_started_sync
+from vs_evaluation.api.testing import FakeEvaluationExecutor
+from vs_sim.api.testing import (
+    ManualClock,
+    arrival,
+    start_thread,
+    wait_until_started,
+    wait_until_started_sync,
+)
 
 
 class _Ending(StrEnum):
@@ -99,7 +105,7 @@ _LIVE = (
 
 def _executor_run(state: EvaluationState, *, yields: int, starts: bool) -> None:
     async def scenario() -> None:
-        executor = FakeEvaluationExecutor(FakeClock(), advance_clock_on_timeout=False)
+        executor = FakeEvaluationExecutor(ManualClock(), advance_clock_on_timeout=False)
         started = threading.Event()
         if starts:
             started.set()

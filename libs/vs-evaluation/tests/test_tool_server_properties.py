@@ -75,7 +75,6 @@ from vs_evaluation.api import (
     TrustedEvidence,
 )
 from vs_evaluation.api.testing import (
-    FakeClock,
     FakeEvaluationExecutor,
     FakeProfilerTurnProvision,
     InMemoryEvaluationStore,
@@ -92,6 +91,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
     RunExecutionRecord,
 )
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Iterator
@@ -325,7 +325,7 @@ class _World:
             orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
         )
         project.state.create_run(manifest)
-        clock = FakeClock()
+        clock = ManualClock()
         self.executor = FakeEvaluationExecutor(
             clock, supported_evidence_kinds=tuple(kind.value for kind in EvidenceKind)
         )

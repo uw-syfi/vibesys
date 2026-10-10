@@ -32,12 +32,11 @@ from vs_evaluation.api import (
     StoredEvaluation,
 )
 from vs_evaluation.api.testing import (
-    FakeClock,
     FakeDeadlineFactory,
     FakeEvaluationExecutor,
     InMemoryEvaluationStore,
 )
-from vs_sim.api.testing import arrival
+from vs_sim.api.testing import ManualClock, arrival
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -92,7 +91,7 @@ def test_legacy_failed_stage_records_retain_execution_stop_semantics() -> None:
 async def test_execution_stop_gate_does_not_discard_postexecution_collection_evidence(
     failure_kind: StageFailureKind | None, later_state: StageState
 ) -> None:
-    executor = FakeEvaluationExecutor(FakeClock())
+    executor = FakeEvaluationExecutor(ManualClock())
     service = coordinator(executor, InMemoryEvaluationStore())
     handle = await service.submit(request())
     later_failed = later_state is StageState.FAILED
@@ -127,7 +126,7 @@ async def test_execution_stop_gate_does_not_discard_postexecution_collection_evi
 
 @pytest.mark.asyncio
 async def test_lifecycle_events_publish_revisioned_durable_changes_and_wait_timeout() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     observed: list[EvaluationLifecycleEvent] = []
     service = coordinator(executor, InMemoryEvaluationStore(), events=observed)
@@ -163,7 +162,7 @@ async def test_lifecycle_events_publish_revisioned_durable_changes_and_wait_time
 
 @pytest.mark.asyncio
 async def test_submit_deduplicates_by_stable_key_and_reuses_terminal_result() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     store = InMemoryEvaluationStore()
     service = coordinator(executor, store)
@@ -197,7 +196,7 @@ async def test_submit_deduplicates_by_stable_key_and_reuses_terminal_result() ->
 
 @pytest.mark.asyncio
 async def test_history_is_read_only_and_includes_zero_or_all_durable_submissions() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     service = coordinator(executor, InMemoryEvaluationStore())
 
@@ -216,7 +215,7 @@ async def test_history_is_read_only_and_includes_zero_or_all_durable_submissions
 
 @pytest.mark.asyncio
 async def test_bounded_await_returns_timed_out_and_enforces_maximum() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     handle = await coordinator(executor, InMemoryEvaluationStore()).submit(request())
 
@@ -225,7 +224,7 @@ async def test_bounded_await_returns_timed_out_and_enforces_maximum() -> None:
     assert isinstance(result, EvaluationTimedOut)
     assert result.status is not None
     assert result.status.value == "queued"
-    assert clock.monotonic() == 3.5
+    assert clock.now() == 3.5
     with pytest.raises(ValueError, match="maximum"):
         await handle.await_result(20.1)
     with pytest.raises(ValueError, match="positive"):
@@ -234,7 +233,7 @@ async def test_bounded_await_returns_timed_out_and_enforces_maximum() -> None:
 
 @pytest.mark.asyncio
 async def test_await_wakes_on_completion_without_wall_clock_wait() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock, advance_clock_on_timeout=False)
     handle = await coordinator(executor, InMemoryEvaluationStore()).submit(request())
 
@@ -251,12 +250,12 @@ async def test_await_wakes_on_completion_without_wall_clock_wait() -> None:
     result = await waiting
 
     assert isinstance(result, EvaluationCompleted)
-    assert clock.monotonic() == 0
+    assert clock.now() == 0
 
 
 @pytest.mark.asyncio
 async def test_cancel_and_failure_have_explicit_await_outcomes() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     service = coordinator(executor, InMemoryEvaluationStore())
     canceled = await service.submit(request("cancel-key"))
@@ -287,7 +286,7 @@ async def test_cancel_and_failure_have_explicit_await_outcomes() -> None:
 
 @pytest.mark.asyncio
 async def test_availability_is_typed_and_freshness_uses_injected_clock() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(
         clock,
         availability_state=AvailabilityState.DELAYED,
@@ -309,12 +308,12 @@ async def test_availability_is_typed_and_freshness_uses_injected_clock() -> None
     assert snapshot.state is AvailabilityState.DELAYED
     assert snapshot.in_flight == 7
     assert snapshot.queue_depth == 4
-    assert not snapshot.is_fresh(clock.monotonic())
+    assert not snapshot.is_fresh(clock.now())
 
 
 @pytest.mark.asyncio
 async def test_reconcile_reuses_durable_handle_after_store_reopen(tmp_path: Path) -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     first_executor = FakeEvaluationExecutor(clock)
     first_store = FilesystemEvaluationStore(tmp_path)
     first_service = coordinator(first_executor, first_store)
@@ -335,7 +334,7 @@ async def test_reconcile_reuses_durable_handle_after_store_reopen(tmp_path: Path
 
 @pytest.mark.asyncio
 async def test_filesystem_store_claim_is_atomic_across_store_instances(tmp_path: Path) -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     stores = [FilesystemEvaluationStore(tmp_path), FilesystemEvaluationStore(tmp_path)]
     services = [coordinator(executor, store) for store in stores]
@@ -348,7 +347,7 @@ async def test_filesystem_store_claim_is_atomic_across_store_instances(tmp_path:
 
 @pytest.mark.asyncio
 async def test_ambiguous_submit_error_is_reconciled_without_duplicate_execution() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock, fail_after_accept_once=True)
     service = coordinator(executor, InMemoryEvaluationStore())
 
@@ -361,7 +360,7 @@ async def test_ambiguous_submit_error_is_reconciled_without_duplicate_execution(
 
 @pytest.mark.asyncio
 async def test_rejected_submit_fails_the_handle_with_the_reason() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock, rejection="profile evidence is unsupported")
     store = InMemoryEvaluationStore()
     events: list[EvaluationLifecycleEvent] = []
@@ -381,7 +380,7 @@ async def test_rejected_submit_fails_the_handle_with_the_reason() -> None:
 
 @pytest.mark.asyncio
 async def test_key_reuse_with_different_request_is_rejected() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     service = coordinator(FakeEvaluationExecutor(clock), InMemoryEvaluationStore())
     await service.submit(request())
     changed = EvaluationRequest(
@@ -395,7 +394,7 @@ async def test_key_reuse_with_different_request_is_rejected() -> None:
 
 @pytest.mark.asyncio
 async def test_status_rejects_executor_state_regression() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     handle = await coordinator(executor, InMemoryEvaluationStore()).submit(request())
     executor.set_state(handle.id, EvaluationState.RUNNING, current_stage="correctness")
@@ -413,7 +412,7 @@ async def test_status_rejects_executor_state_regression() -> None:
 class BlockingInspection(FakeEvaluationExecutor):
     """Hold an executor inspection at a deterministic synchronization point."""
 
-    def __init__(self, clock: FakeClock) -> None:
+    def __init__(self, clock: ManualClock) -> None:
         super().__init__(clock)
         self.block = False
         self.started = asyncio.Event()
@@ -447,7 +446,7 @@ class BlockingStore(InMemoryEvaluationStore):
 class TransitionAfterInspection(FakeEvaluationExecutor):
     """Publish completion after returning an older inspected state."""
 
-    def __init__(self, clock: FakeClock) -> None:
+    def __init__(self, clock: ManualClock) -> None:
         super().__init__(clock)
         self.complete_after_inspect = False
 
@@ -469,7 +468,7 @@ class TransitionAfterInspection(FakeEvaluationExecutor):
 
 @pytest.mark.asyncio
 async def test_await_deadline_interrupts_blocked_inspection_and_keeps_durable_status() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = BlockingInspection(clock)
     deadlines = FakeDeadlineFactory()
     service = EvaluationCoordinator(
@@ -503,7 +502,7 @@ async def test_await_deadline_interrupts_blocked_inspection_and_keeps_durable_st
 
 @pytest.mark.asyncio
 async def test_await_deadline_before_first_store_read_has_no_status() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     store = BlockingStore()
     deadlines = FakeDeadlineFactory()
     service = EvaluationCoordinator(
@@ -525,7 +524,7 @@ async def test_await_deadline_before_first_store_read_has_no_status() -> None:
 
 @pytest.mark.asyncio
 async def test_await_observes_change_published_between_inspect_and_wait() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = TransitionAfterInspection(clock)
     handle = await coordinator(executor, InMemoryEvaluationStore()).submit(request())
     executor.complete_after_inspect = True
@@ -539,7 +538,7 @@ async def test_await_observes_change_published_between_inspect_and_wait() -> Non
 @pytest.mark.asyncio
 async def test_provider_timeout_error_is_not_reported_as_await_deadline() -> None:
     class ProviderTimeout(FakeEvaluationExecutor):
-        def __init__(self, clock: FakeClock) -> None:
+        def __init__(self, clock: ManualClock) -> None:
             super().__init__(clock)
             self.fail_inspection = False
 
@@ -548,7 +547,7 @@ async def test_provider_timeout_error_is_not_reported_as_await_deadline() -> Non
                 raise TimeoutError
             return await super().inspect(handle_id)
 
-    clock = FakeClock()
+    clock = ManualClock()
     executor = ProviderTimeout(clock)
     deadlines = FakeDeadlineFactory()
     service = EvaluationCoordinator(
@@ -567,7 +566,7 @@ async def test_provider_timeout_error_is_not_reported_as_await_deadline() -> Non
 class SlowInspection(FakeEvaluationExecutor):
     """An executor whose every inspection takes ``latency_s`` on the injected clock."""
 
-    def __init__(self, clock: FakeClock) -> None:
+    def __init__(self, clock: ManualClock) -> None:
         super().__init__(clock)
         self.latency_s = 0.0
 
@@ -609,7 +608,7 @@ def test_await_on_a_finished_evaluation_returns_its_result_whatever_the_deadline
     """A finished evaluation is the answer, even when reading it used up the caller's wait."""
 
     async def scenario() -> None:
-        clock = FakeClock()
+        clock = ManualClock()
         executor = SlowInspection(clock)
         handle = await coordinator(executor, InMemoryEvaluationStore()).submit(request())
         failure, stages = _FINISHED[state]
@@ -627,7 +626,7 @@ def test_await_on_a_finished_evaluation_returns_its_result_whatever_the_deadline
 @pytest.mark.asyncio
 async def test_cancel_known_undispatched_claim_has_no_executor_effects() -> None:
     """Intent-only prepared resources can settle without inventing an external operation."""
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     store = InMemoryEvaluationStore()
     service = EvaluationCoordinator(executor, store, clock)
@@ -661,7 +660,7 @@ class _DispatchGuardExecutor(FakeEvaluationExecutor):
 @pytest.mark.asyncio
 async def test_external_submit_observes_durable_dispatch_authorization() -> None:
     """No handler effect begins before its dispatch authorization commits."""
-    clock = FakeClock()
+    clock = ManualClock()
     store = InMemoryEvaluationStore()
     executor = _DispatchGuardExecutor(clock, store=store)
     service = EvaluationCoordinator(executor, store, clock)

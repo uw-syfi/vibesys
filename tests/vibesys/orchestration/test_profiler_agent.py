@@ -31,7 +31,7 @@ from vs_evaluation.api import (
     SubmitCall,
     SubmittedReply,
 )
-from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor, InMemoryEvaluationNamespace
+from vs_evaluation.api.testing import FakeEvaluationExecutor, InMemoryEvaluationNamespace
 from vs_runtime.api import AgentCapability, AgentRole, AgentToolBindingContext, CandidateWorkspace
 from vs_runtime.api.testing import (
     FakeEvaluation,
@@ -40,7 +40,7 @@ from vs_runtime.api.testing import (
     FakeWorkspaces,
     TurnResponder,
 )
-from vs_sim.api.testing import arrival
+from vs_sim.api.testing import ManualClock, arrival
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -191,7 +191,7 @@ async def test_profiler_yields_pending_evaluation_and_resumes_once(
     agents, workspaces = _runtime(role, responder=respond)
     namespace = InMemoryEvaluationNamespace()
     executor = _OwnedFakeExecutor(
-        clock=FakeClock(),
+        clock=ManualClock(),
         supported_evidence_kinds=(EvidenceKind.PROFILE.value,),
         advance_clock_on_timeout=False,
     )
@@ -300,7 +300,7 @@ async def test_profiler_exit_withdraws_only_its_requester_association(
     agents, workspaces = _runtime(role, responder=respond)
     namespace = InMemoryEvaluationNamespace()
     executor = _OwnedFakeExecutor(
-        clock=FakeClock(), supported_evidence_kinds=(EvidenceKind.PROFILE.value,)
+        clock=ManualClock(), supported_evidence_kinds=(EvidenceKind.PROFILE.value,)
     )
     digest = ContentDigest.sha256(b"profile identity")
     backend = SemanticEvaluationBackend(
@@ -486,7 +486,7 @@ async def test_profiler_invalid_wait_continues_conversation(
     agents, workspaces = _runtime(role, responder=respond)
     namespace = InMemoryEvaluationNamespace()
     executor = _OwnedFakeExecutor(
-        clock=FakeClock(),
+        clock=ManualClock(),
         supported_evidence_kinds=(EvidenceKind.PROFILE.value,),
         advance_clock_on_timeout=False,
     )

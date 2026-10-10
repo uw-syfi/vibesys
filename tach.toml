@@ -337,7 +337,7 @@ depends_on = ["vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.in
 [[modules]]
 path = "vibesys.run.evaluation_backend"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime"]
+depends_on = ["vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.run.slurm_evaluation"
@@ -362,7 +362,7 @@ depends_on = ["vs_sandbox"]
 [[modules]]
 path = "vibesys.run.core_services"
 layer = "orchestration_host"
-depends_on = ["vibesys.run.evaluation_socket", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime"]
+depends_on = ["vibesys.run.evaluation_socket", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.run.measurement_events"
@@ -429,7 +429,7 @@ depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "v
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_async_ops.api", "vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations", "vs_mcp"]
+depends_on = ["vs_async_ops.api", "vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations", "vs_mcp", "vs_sim.api"]
 
 [[modules]]
 path = "vs_runtime._fake_agent_invocations"
@@ -556,7 +556,7 @@ depends_on = ["vs_evaluation.agent_evidence", "vs_evaluator_protocol"]
 [[modules]]
 path = "vs_evaluation.coordinator"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.ports"]
+depends_on = ["vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.ports", "vs_sim.api"]
 
 [[modules]]
 # The one rule for how a published evaluation lifecycle may change.
@@ -607,7 +607,7 @@ depends_on = ["vs_evaluation.profiler_models"]
 [[modules]]
 path = "vs_evaluation.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.coordinator", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.scope_state", "vs_evaluation.settlements", "vs_evaluation.state_namespace", "vs_project"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.coordinator", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.scope_state", "vs_evaluation.settlements", "vs_evaluation.state_namespace", "vs_project", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_prompts"
@@ -627,7 +627,7 @@ depends_on = []
 [[modules]]
 path = "vs_slurm"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_slurm.wiring"

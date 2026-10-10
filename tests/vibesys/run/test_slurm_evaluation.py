@@ -41,7 +41,7 @@ from vs_evaluation.api import (
     StageState,
     TrustedEvidence,
 )
-from vs_evaluation.api.testing import FakeClock, FakeProfilerTurnProvision, InMemoryEvaluationStore
+from vs_evaluation.api.testing import FakeProfilerTurnProvision, InMemoryEvaluationStore
 from vs_evaluation.api.tools import build_evaluation_tools
 from vs_project.api import StateNamespace
 from vs_runtime.api import (
@@ -54,7 +54,7 @@ from vs_runtime.api import (
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeRun, FakeWorkspace
 from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_sim.api.testing import arrival
+from vs_sim.api.testing import ManualClock, arrival
 from vs_slurm.api import (
     FakeCluster,
     FakeConnector,
@@ -496,7 +496,7 @@ async def test_coordinator_retains_completed_stages_after_late_infrastructure_fa
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     coordinator = EvaluationCoordinator(
-        executor, InMemoryEvaluationStore(), FakeClock(), max_await_timeout_s=5
+        executor, InMemoryEvaluationStore(), ManualClock(), max_await_timeout_s=5
     )
     handle = await coordinator.submit(_request(snapshot))
     assert isinstance(await handle.await_result(5), EvaluationFailed)
@@ -591,7 +591,7 @@ async def test_unsupported_profile_evaluation_fails_instead_of_staying_queued(
         tmp_path / "handles",
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
-    clock = FakeClock()
+    clock = ManualClock()
     coordinator = EvaluationCoordinator(
         executor, InMemoryEvaluationStore(), clock, max_await_timeout_s=5
     )
@@ -627,7 +627,7 @@ async def test_a_kind_without_a_command_is_rejected_not_passed(
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     coordinator = EvaluationCoordinator(
-        executor, InMemoryEvaluationStore(), FakeClock(), max_await_timeout_s=5
+        executor, InMemoryEvaluationStore(), ManualClock(), max_await_timeout_s=5
     )
 
     availability = await executor.availability(ResourceRequirements())

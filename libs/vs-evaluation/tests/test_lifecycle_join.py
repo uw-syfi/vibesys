@@ -14,7 +14,8 @@ from vs_evaluation.api import (
     join_observation,
     state_rank,
 )
-from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor
+from vs_evaluation.api.testing import FakeEvaluationExecutor
+from vs_sim.api.testing import ManualClock
 
 _ORDER = [
     EvaluationState.QUEUED,
@@ -84,7 +85,7 @@ def test_a_publisher_never_moves_a_handle_backwards_or_out_of_a_finished_state(
 
 @pytest.mark.asyncio
 async def test_a_fake_executor_cancel_keeps_the_result_of_a_finished_evaluation() -> None:
-    executor = FakeEvaluationExecutor(clock=FakeClock())
+    executor = FakeEvaluationExecutor(clock=ManualClock())
     executor.backend.publish(_HANDLE, ExecutorObservation(state=EvaluationState.SUCCEEDED))
 
     await executor.cancel(_HANDLE)

@@ -71,7 +71,6 @@ from vs_evaluation.api import (
     TrustedEvidence,
 )
 from vs_evaluation.api.testing import (
-    FakeClock,
     FakeEvaluationExecutor,
     FakeProfilerTurnProvision,
     InMemoryEvaluationNamespace,
@@ -92,7 +91,7 @@ from vs_runtime.api import (
 )
 from vs_runtime.api.infrastructure import TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeRun
-from vs_sim.api.testing import arrival
+from vs_sim.api.testing import ManualClock, arrival
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -639,7 +638,7 @@ class _OwnedFakeExecutor(FakeEvaluationExecutor):
 async def test_submission_deadline_is_immutable_through_join_and_restart() -> None:
     run = FakeRun(PLUGIN, project_root=Path("/memory/deadline"))
     namespace = InMemoryEvaluationNamespace()
-    clock = FakeClock()
+    clock = ManualClock()
     clock.advance(100)
     executor = _OwnedFakeExecutor(clock=clock)
     plan = TrustedEvaluationPlan(
@@ -655,7 +654,7 @@ async def test_submission_deadline_is_immutable_through_join_and_restart() -> No
         executor=executor,
         plan=plan,
         queue_allowance_seconds=900,
-        submitted_time=clock.monotonic,
+        submitted_time=clock.now,
     )
     service = EvaluationAgentService(backend, namespace, Path("/memory/deadline.sock"))
     evaluation = EvidenceReusingEvaluation(
@@ -680,7 +679,7 @@ async def test_submission_deadline_is_immutable_through_join_and_restart() -> No
         executor=executor,
         plan=TrustedEvaluationPlan(accuracy_timeout_seconds=1, benchmark_timeout_seconds=2),
         queue_allowance_seconds=1,
-        submitted_time=clock.monotonic,
+        submitted_time=clock.now,
     )
     recovered = EvidenceReusingEvaluation(
         run.evaluation, reopened, run_id=run.run_id, scopes=service
@@ -699,7 +698,7 @@ async def test_legacy_submission_has_no_guessed_deadline() -> None:
         run.workspaces,
         namespace,
         _identity(),
-        executor=_OwnedFakeExecutor(clock=FakeClock()),
+        executor=_OwnedFakeExecutor(clock=ManualClock()),
     )
     service = EvaluationAgentService(backend, namespace, Path("/memory/deadline.sock"))
     evaluation = EvidenceReusingEvaluation(
@@ -715,7 +714,7 @@ async def test_legacy_submission_has_no_guessed_deadline() -> None:
 async def test_unbounded_ordinary_submission_records_deadline_unavailability() -> None:
     run = FakeRun(PLUGIN, project_root=Path("/memory/unbounded-deadline"))
     namespace = InMemoryEvaluationNamespace()
-    clock = FakeClock(value=100.0)
+    clock = ManualClock(start=100.0)
     executor = _OwnedFakeExecutor(clock=clock)
     backend = SemanticEvaluationBackend(
         run.evaluation,
@@ -725,7 +724,7 @@ async def test_unbounded_ordinary_submission_records_deadline_unavailability() -
         executor=executor,
         plan=TrustedEvaluationPlan(),
         queue_allowance_seconds=900,
-        submitted_time=clock.monotonic,
+        submitted_time=clock.now,
     )
     service = EvaluationAgentService(backend, namespace, Path("/memory/deadline.sock"))
     revision = await run.workspaces.root.snapshot("submitted")
@@ -740,7 +739,7 @@ async def test_unbounded_ordinary_submission_records_deadline_unavailability() -
         executor=executor,
         plan=TrustedEvaluationPlan(accuracy_timeout_seconds=60),
         queue_allowance_seconds=1,
-        submitted_time=clock.monotonic,
+        submitted_time=clock.now,
     )
     for owner in (backend, reopened):
         evaluation = EvidenceReusingEvaluation(
@@ -764,7 +763,7 @@ async def test_missing_budget_does_not_hide_invalid_deadline_configuration(
         run.workspaces,
         InMemoryEvaluationNamespace(),
         _identity(),
-        executor=_OwnedFakeExecutor(clock=FakeClock()),
+        executor=_OwnedFakeExecutor(clock=ManualClock()),
         plan=TrustedEvaluationPlan(),
         queue_allowance_seconds=queue_allowance_seconds,
         submitted_time=lambda: submitted_at_s,
@@ -782,7 +781,7 @@ async def test_recorded_snapshot_preserves_submission_identity_without_refresh()
     candidate = await run.workspaces.create_candidate(member_id="record")
     assert candidate.id is not None
     namespace = InMemoryEvaluationNamespace()
-    executor = _OwnedFakeExecutor(clock=FakeClock())
+    executor = _OwnedFakeExecutor(clock=ManualClock())
     backend = SemanticEvaluationBackend(
         run.evaluation, run.workspaces, namespace, _identity(), executor=executor
     )
@@ -827,7 +826,7 @@ async def test_service_settlements_keep_real_submission_identity_after_live_revi
     assert candidate.id != "logical-hypothesis"
     namespace = InMemoryEvaluationNamespace()
     executor = _OwnedFakeExecutor(
-        clock=FakeClock(), supported_evidence_kinds=(EvidenceKind.ACCURACY.value,)
+        clock=ManualClock(), supported_evidence_kinds=(EvidenceKind.ACCURACY.value,)
     )
     backend = SemanticEvaluationBackend(
         run.evaluation, run.workspaces, namespace, _identity(), executor=executor
@@ -943,7 +942,7 @@ async def test_unchanged_content_is_measured_again_after_an_attempt_without_a_re
     candidate = await run.workspaces.create_candidate()
     run.workspaces.set_default_patch("diff --git a/engine.py b/engine.py")
     executor = _OwnedFakeExecutor(
-        clock=FakeClock(),
+        clock=ManualClock(),
         supported_evidence_kinds=(EvidenceKind.ACCURACY.value, EvidenceKind.BENCHMARK.value),
     )
     namespace = _namespace(tmp_path)
@@ -983,7 +982,7 @@ async def test_concurrent_submissions_of_unchanged_content_share_one_evaluation(
     candidate = await run.workspaces.create_candidate()
     run.workspaces.set_default_patch("diff --git a/engine.py b/engine.py")
     executor = _OwnedFakeExecutor(
-        clock=FakeClock(),
+        clock=ManualClock(),
         supported_evidence_kinds=(EvidenceKind.ACCURACY.value, EvidenceKind.BENCHMARK.value),
     )
     namespace = _namespace(tmp_path)
@@ -1031,7 +1030,7 @@ async def test_slow_submission_does_not_delay_a_submission_of_different_content(
     run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
     candidate = await run.workspaces.create_candidate()
     executor = _BlockingSubmitExecutor(
-        clock=FakeClock(),
+        clock=ManualClock(),
         supported_evidence_kinds=(EvidenceKind.ACCURACY.value, EvidenceKind.BENCHMARK.value),
     )
     namespace = _namespace(tmp_path)
@@ -1085,7 +1084,7 @@ def _release_harness(
     plan: TrustedEvaluationPlan | None = None,
 ) -> _ReleaseHarness:
     executor = executor or _OwnedFakeExecutor(
-        clock=FakeClock(),
+        clock=ManualClock(),
         supported_evidence_kinds=tuple(kind.value for kind in EvidenceKind),
         advance_clock_on_timeout=False,
     )
@@ -1509,7 +1508,7 @@ async def test_release_owns_submission_cancelled_after_remote_acceptance(tmp_pat
     candidate = await run.workspaces.create_candidate(member_id="accepted")
     assert candidate.id is not None
     executor = _AcceptedSubmitBarrierExecutor(
-        clock=FakeClock(), supported_evidence_kinds=tuple(kind.value for kind in EvidenceKind)
+        clock=ManualClock(), supported_evidence_kinds=tuple(kind.value for kind in EvidenceKind)
     )
     harness = _release_harness(tmp_path, run, executor=executor)
     harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "accepted", str))
@@ -1876,7 +1875,7 @@ async def _additional_profile_trace(field: ProfileField, *, supported: bool) -> 
     run.workspaces.set_default_patch("profile reason candidate")
     candidate = await run.workspaces.create_candidate(member_id="reason")
     executor = _OwnedFakeExecutor(
-        clock=FakeClock(),
+        clock=ManualClock(),
         supported_evidence_kinds=(EvidenceKind.PROFILE.value,),
         supported_profile_fields=(field,) if supported else (),
         advance_clock_on_timeout=False,
