@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from vs_project.api import GitRepositoryFactory
     from vs_runtime.api.infrastructure import StopTimer
     from vs_sandbox.api import ComputeBackendImpl
+    from vs_slurm.api import SlurmProcess
 
 
 # lint-waiver: LW-125701 [PLR0913]; a settings bundle would hide the individual
@@ -35,6 +36,7 @@ def create_session(  # noqa: PLR0913
     backend_factory: Callable[..., ComputeBackendImpl],
     stop_timer: StopTimer = asyncio.sleep,
     git_repository: GitRepositoryFactory | None = None,
+    slurm_process: SlurmProcess | None = None,
 ) -> RunSession:
     """Execute real built-in wiring with caller-owned Fake implementations."""
     return _create_session(
@@ -46,6 +48,7 @@ def create_session(  # noqa: PLR0913
             backend_factory,
             stop_timer,
             git_repository=git_repository,
+            slurm_process=slurm_process,
         ),
     )
 

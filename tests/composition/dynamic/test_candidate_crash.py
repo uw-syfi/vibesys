@@ -100,7 +100,7 @@ def test_a_crashing_candidate_is_measured_by_its_class_and_the_planner_reads_the
         .implement("C", implemented("C", outcome="blocked"))
     )
 
-    run = run_request(loop_input.request(max_rounds=3), agents)
+    run = run_request(loop_input.request(max_rounds=3), agents, slurm_process=loop_input.connector)
 
     assert run.error is None
     assert agents.unscripted == []

@@ -70,6 +70,7 @@ if TYPE_CHECKING:
         ClusterCollectOutcome,
         ClusterInspectOutcome,
         SlurmConfig,
+        SlurmProcess,
         SlurmService,
     )
 
@@ -302,6 +303,7 @@ class SlurmEvaluationExecutor:
         supported_evidence_kinds: tuple[str, ...] = ("accuracy", "benchmark"),
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
+        process: SlurmProcess | None = None,
         pause: Callable[[float], None] | None = None,
         deadline_clock: Callable[[], float] = time.time,
         cancel_confirmation_seconds: float = _DEFAULT_CANCEL_CONFIRMATION_SECONDS,
@@ -310,7 +312,7 @@ class SlurmEvaluationExecutor:
         self._cluster = (
             cluster
             if cluster is not None
-            else make_cluster(config, state_root=handle_root / "cluster")
+            else make_cluster(config, state_root=handle_root / "cluster", process=process)
         )
         self._pause = pause
         self._poll_interval = config.poll_interval_seconds

@@ -49,6 +49,7 @@ if TYPE_CHECKING:
         RunEnvironmentResources,
     )
     from vs_sandbox.api import HostResource
+    from vs_slurm.api import SlurmProcess
 
 
 def run_log_emitter(events: AgentEventSink) -> Callable[[str, TextIO], None]:
@@ -290,13 +291,19 @@ class LocalRunIntegration:
     `RunSession`.
     """
 
-    def __init__(self, git_repository: GitRepositoryFactory | None = None) -> None:
+    def __init__(
+        self,
+        git_repository: GitRepositoryFactory | None = None,
+        slurm_process: SlurmProcess | None = None,
+    ) -> None:
         """Compose a durable journal with direct invocation control.
 
         ``git_repository`` builds the run's ``GitRepository`` implementations; ``None``
-        runs the Git CLI.
+        runs the Git CLI. ``slurm_process`` replaces the Slurm transport's process
+        boundary for the run's evaluations; ``None`` runs the configured programs.
         """
         self.git_repository = git_repository
+        self.slurm_process = slurm_process
         self.events = EventJournal()
         self.agent_events = CoreAgentEventSink(self.events.record)
         self.control = create_run_control_channel(_CoreRunControlEvents(self.events))

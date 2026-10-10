@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment, StopTimer
     from vs_sandbox.api import ComputeBackendImpl, HostResource
+    from vs_slurm.api import SlurmProcess
 
 
 class SessionAgents(Protocol):
@@ -73,6 +74,8 @@ class SessionImplementations:
     ) = None
     git_repository: GitRepositoryFactory | None = None
     """Builds the run's ``GitRepository`` implementations; ``None`` runs the Git CLI."""
+    slurm_process: SlurmProcess | None = None
+    """Replaces the Slurm transport's process boundary; ``None`` runs the configured programs."""
 
 
 __all__ = ["SessionAgents", "SessionImplementations"]

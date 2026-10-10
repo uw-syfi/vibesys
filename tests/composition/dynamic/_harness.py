@@ -24,7 +24,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import sys
 import threading
 from collections import defaultdict, deque
 from collections.abc import Mapping
@@ -60,7 +59,7 @@ from vs_project.api import Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sim.api.testing import run_virtual
-from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
+from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, FakeConnector, recorded_commands
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -72,6 +71,7 @@ if TYPE_CHECKING:
     from vs_agent.api.testing import FakeInvocation
     from vs_runtime.api.infrastructure import StopTimer
     from vs_sandbox.api import ComputeBackendImpl
+    from vs_slurm.api import SlurmProcess
 
 # Simulated seconds one run may wait; a healthy scenario needs a small fraction of it.
 SIMULATED_BUDGET_S = 120.0
@@ -408,6 +408,8 @@ class LoopInput:
     cluster: Path
     slurm_config: Path
     agent_config: Path
+    connector: FakeConnector
+    """The in-process Fake cluster; pass it to :func:`run_request` as ``slurm_process``."""
 
     @classmethod
     def create(cls, base: Path, *, poll_interval_s: float = 1.0) -> LoopInput:
@@ -425,22 +427,24 @@ class LoopInput:
             "timeout_seconds = 30\nresult_protocol = 2\n",
             encoding="utf-8",
         )
-        cluster = executing_cluster(base / "cluster")
+        connector = FakeConnector(base / "cluster")
+        cluster = connector.state
         remote = base / "remote"
         remote.mkdir()
-        connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(cluster)])
+        # The command is never run: the run's evaluations call ``connector`` in process.
+        command = json.dumps(["fake-connector"])
         config = base / "slurm.toml"
         config.write_text(
             "[slurm]\n"
             'name = "fake"\n'
             f'remote_workspace_root = "{remote}"\n'
             f"poll_interval_seconds = {poll_interval_s}\n"
-            f'transport = {{ kind = "connector", command = {connector} }}\n',
+            f'transport = {{ kind = "connector", command = {command} }}\n',
             encoding="utf-8",
         )
         agent_config = base / "agent.toml"
         agent_config.write_text(_AGENT_CONFIG, encoding="utf-8")
-        return cls(root, cluster, config, agent_config)
+        return cls(root, cluster, config, agent_config, connector)
 
     def hold_jobs(self) -> None:
         """Leave every job submitted from now on pending until it is cancelled."""
@@ -539,6 +543,7 @@ def run_request(  # noqa: PLR0913
     client_factory: Callable[..., AgentClientProtocol] | None = None,
     clock: CrashableClock | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    slurm_process: SlurmProcess | None = None,
 ) -> LoopRun:
     """Execute a built request through the production host composition.
 
@@ -560,6 +565,7 @@ def run_request(  # noqa: PLR0913
             # The agent's container mounts the repository's `.git` read-only, so the
             # repository must exist on disk: these runs use the product's real Git.
             git_repository=None,
+            slurm_process=slurm_process,
         )
     )
     events: list[CoreEvent] = []
