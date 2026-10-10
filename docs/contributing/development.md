@@ -172,7 +172,7 @@ that runs them in the head container (the login node) with the caller's working
 directory and exactly the caller's environment, so the host installs nothing.
 
 The tier is marked `slurm_cluster` and skipped unless `VIBESYS_SLURM_CLUSTER=1`
-and Docker are available. It is not in PR CI. The script sets the variable,
+and Docker are available. CI runs it as the `real-tiers-slurm` job when the `real_tiers` change filter selects it, on every merge-queue entry, and nightly. The script sets the variable,
 removes everything it created on exit, and passes extra arguments to pytest.
 The shared directory must be on a local filesystem: set
 `VIBESYS_SLURM_CLUSTER_DIR` when `/tmp` is a network mount. The first run builds
@@ -213,7 +213,7 @@ Python at a fixed path, and the agent launcher starts every Python server on it 
 the framework's source roots on `PYTHONPATH` (`vs_agent.containerize_server`).
 
 The tier is marked `minimal_container` and skipped unless `VIBESYS_MINIMAL_CONTAINER=1`
-and Docker are available. It is not in PR CI. The script sets the variable, removes
+and Docker are available. CI runs the CPU base as the `real-tiers-minimal-container` job when the `real_tiers` change filter selects it, on every merge-queue entry, and nightly. The script sets the variable, removes
 the containers it started on exit (their run id starts with `minimal-container-`), and
 passes extra arguments to pytest. Set `VIBESYS_MINIMAL_CONTAINER_BASES` (for example
 `cpu,rocm`) to run some bases, and `VIBESYS_MINIMAL_CONTAINER_DIR` to a directory on a
