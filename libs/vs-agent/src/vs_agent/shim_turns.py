@@ -142,7 +142,6 @@ class LaunchedSession:
         agent_path: Callable[[str], str],
         timeout: int | None,
         log: Callable[[str], None],
-        mcp_servers: tuple[agentshim.StdioMcpServer, ...] = (),
     ) -> None:
         """Bind a library session to the launch facts its turns need."""
         self.session = session
@@ -153,7 +152,6 @@ class LaunchedSession:
         self.agent_path = agent_path
         self.timeout = timeout
         self.log = log
-        self.mcp_servers = mcp_servers
         self.closed = False
 
     def close(self) -> None:
@@ -340,7 +338,6 @@ def _turn_request(live: LaunchedSession, request: AgentTurnRequest) -> agentshim
         reasoning_effort=(
             live.spec.reasoning_effort if live.profile.supports_reasoning_effort else None
         ),
-        mcp_servers=live.mcp_servers,
     )
 
 
