@@ -211,7 +211,7 @@ async def _terminal(executor: PollingEvaluationExecutor) -> ExecutorObservation:
         observed = await executor.inspect(_HANDLE)
         if observed is not None and observed.state in _ENDED:
             return observed
-        await asyncio.sleep(0)
+        await executor.wait_for_change(_HANDLE, timeout_s=float("inf"))
 
 
 def _measure_with_lost_command(

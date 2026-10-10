@@ -364,7 +364,7 @@ async def _terminal(
             EvaluationState.FAILED,
         }:
             return observed
-        await asyncio.sleep(0)
+        await executor.wait_for_change(handle_id, timeout_s=float("inf"))
 
 
 @pytest.mark.asyncio

@@ -100,6 +100,10 @@ class _Observed:
     containers: tuple[FakeContainer, ...] = ()
 
 
+# A count of checkpoints, not time: far above what an unwind needs.
+_MAX_CHECKPOINTS = 100_000
+
+
 async def _run_until_exit(
     run: Run, engine: FakeDockerEngine, observed: _Observed, *, exit_path: str
 ) -> RunStatus:
@@ -110,9 +114,11 @@ async def _run_until_exit(
         raise _OrchestrationFailedError
     for name in exit_path.split("+"):
         os.kill(os.getpid(), getattr(signal, name))
-    while True:
+    for _ in range(_MAX_CHECKPOINTS):
         await run.control.checkpoint()
         await asyncio.sleep(0)
+    message = f"the run was not unwound by {exit_path} within {_MAX_CHECKPOINTS} checkpoints"
+    raise AssertionError(message)
 
 
 def _execute(
