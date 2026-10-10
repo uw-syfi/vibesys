@@ -497,11 +497,17 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
+      # 3.14 for the test shards only: coverage's cheaper `sysmon` core (set
+      # below) measures branches only on Python 3.14+, and on 3.12 it falls
+      # back to the slower tracer with a warning. Measured on the same tests, it
+      # cuts the coverage-run time by about a fifth and reports the same
+      # coverage to within a few lines. The type check and every other job stay
+      # on 3.12, the version the product supports at its floor.
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install 3.14
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --python 3.14
 
       - name: Set up Go for repoctl
         uses: actions/setup-go@v5
@@ -523,6 +529,7 @@ jobs:
         env:
           VIBESYS_TEST_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           COVERAGE_FILE: .coverage.shard-${{ matrix.shard }}
+          COVERAGE_CORE: sysmon
           VIBESYS_RECORD_SHARD_DURATIONS: shard-durations-${{ matrix.shard }}.json
         run: ./support/repoctl/repoctl run-checks --group python_ci_tests_shard
 
