@@ -32,7 +32,6 @@ from tests.entrypoints.support import (
     FakePortGateway,
     gateway_record,
 )
-from tests.support.thread_signals import non_main_thread_ids, requires_tgkill, send_to_thread
 
 import entrypoints.server as server_entrypoint
 import server.runtime as runtime_module
@@ -60,11 +59,21 @@ from entrypoints.server import (
 from server.runtime import WebPortObservation, WebPortState
 from server.transport.discovery import WebInstanceClaim, WebInstanceHold, WebInstanceRecord
 from server.transport.websocket import WebSocketLimits
-from vs_sim.api.testing import HANG_GUARD_S, stop_process
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    TGKILL_SUPPORTED,
+    non_main_thread_ids,
+    send_to_thread,
+    stop_process,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import BinaryIO
+
+requires_tgkill = pytest.mark.skipif(
+    not TGKILL_SUPPORTED, reason="tgkill syscall number is unknown"
+)
 
 
 class RecordingDetachedProcess:

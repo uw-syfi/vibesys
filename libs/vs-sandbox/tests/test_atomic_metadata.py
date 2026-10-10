@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from tests.support.file_effects import file_size_limit
 
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.slurm import (
@@ -18,6 +17,7 @@ from vs_sandbox.api.slurm import (
     write_slurm_capture_plan,
     write_slurm_evaluation_plan,
 )
+from vs_sim.api.testing import file_size_limit
 
 
 def test_capture_plan_interrupted_at_every_byte_remains_readable(tmp_path: Path) -> None:

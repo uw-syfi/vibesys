@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from tests.support.executor_context import context_for
-from tests.support.pairwise import pairwise_rows
 from tests.support.session_lifecycle_world import (
     cancel_request,
     close_request,
@@ -38,6 +37,7 @@ from vs_runtime.api.core import (
     ReceiptStore,
     ReleasedRunInvocations,
 )
+from vs_sim.api.testing import pairwise_rows
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

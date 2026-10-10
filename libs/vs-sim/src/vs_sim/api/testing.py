@@ -37,8 +37,11 @@ from vs_sim.fakes import (
     InlineBlockingRunner,
     ProcessScript,
 )
+from vs_sim.file_effects import file_size_limit
 from vs_sim.gate import Gate, arrival, start_thread, wait_until_started, wait_until_started_sync
+from vs_sim.host_clock import CrashableClock, HostCrashedError, ProbedClock, clock_from
 from vs_sim.manual import ManualClock
+from vs_sim.pairwise import pairwise_rows
 from vs_sim.seeds import (
     SCHEDULE_SEED_OPTION,
     SEED_OPTION,
@@ -83,17 +86,20 @@ __all__ = [
     "ChildDiedError",
     "ClockContract",
     "ClockUnderTest",
+    "CrashableClock",
     "EventTrace",
     "FakeProcessLauncher",
     "FakeProcessSignaller",
     "FakeSignalSource",
     "Gate",
     "GatedBlockingRunner",
+    "HostCrashedError",
     "IdleDriver",
     "InlineBlockingRunner",
     "ManualClock",
     "NetworkContract",
     "NetworkUnderTest",
+    "ProbedClock",
     "ProcessLauncherContract",
     "ProcessScript",
     "ProcessSignallerContract",
@@ -123,13 +129,16 @@ __all__ = [
     "accept_or_fail",
     "after_crash",
     "arrival",
+    "clock_from",
     "current_virtual_clock",
     "evenly_spaced",
     "explore_seed",
+    "file_size_limit",
     "first_of_each_kind",
     "get_or_fail",
     "join_or_fail",
     "non_main_thread_ids",
+    "pairwise_rows",
     "random_for",
     "replay_hint",
     "restart_until_done",

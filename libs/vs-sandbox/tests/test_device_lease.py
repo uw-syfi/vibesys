@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.file_effects import file_size_limit
 
 from vs_sandbox.api import ComputeBackend, DeviceLease
+from vs_sim.api.testing import file_size_limit
 
 if TYPE_CHECKING:
     from pathlib import Path

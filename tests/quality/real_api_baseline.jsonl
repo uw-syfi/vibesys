@@ -345,7 +345,6 @@
 {"path": "tests/support/__init__.py", "rule": "subprocess", "count": 7}
 {"path": "tests/support/docker_daemon.py", "rule": "subprocess", "count": 2}
 {"path": "tests/support/evaluation_scenarios.py", "rule": "process", "count": 5}
-{"path": "tests/support/file_effects.py", "rule": "signal", "count": 5}
 {"path": "tests/support/runtime_agent_sessions.py", "rule": "bare_wait", "count": 1}
 {"path": "tests/support/runtime_agent_sessions.py", "rule": "threading", "count": 2}
 {"path": "tests/support/runtime_evaluation.py", "rule": "threading", "count": 1}

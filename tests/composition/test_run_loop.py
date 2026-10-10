@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.support.host_clock import ProbedClock, clock_from
 from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
 from tests.support.skeleton_world import (
     LEASE,
@@ -41,6 +40,8 @@ from vs_runtime.api.core import (
     start_core_awaiting_lease,
 )
 from vs_runtime.api.infrastructure import RunStopped, RuntimeRunControlChannel
+from vs_runtime.api.testing import ProbedRunClock
+from vs_sim.api.testing import clock_from
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -63,7 +64,7 @@ class BaselineOnly(SkeletonStrategy):
         return state.model_copy(update={"phase": "cancel"}) if state.phase == "start" else state
 
 
-class ScriptedClock(ProbedClock):
+class ScriptedClock(ProbedRunClock):
     """A fake clock that runs an action when the loop makes its n-th sleep."""
 
     def __init__(self, inner: VirtualClock) -> None:
@@ -115,7 +116,7 @@ def _config(
 
 
 def _host(
-    world: World, clock: ProbedClock, channel: RuntimeRunControlChannel | None = None
+    world: World, clock: ProbedRunClock, channel: RuntimeRunControlChannel | None = None
 ) -> tuple[Process, CoreRunHost]:
     process = world.runtime()
     controls = None
@@ -143,7 +144,7 @@ async def test_a_stop_control_ends_the_run_with_the_proposed_result(tmp_path: Pa
 
 async def test_the_deadline_ends_an_otherwise_idle_paused_run(tmp_path: Path) -> None:
     channel = _channel()
-    clock = ProbedClock(clock_from(1.0))
+    clock = ProbedRunClock(clock_from(1.0))
     with open_skeleton_world(tmp_path, INERT) as world:
         process, host = _host(world, clock, channel)
         channel.request_pause()
@@ -180,7 +181,7 @@ async def test_an_idle_run_is_woken_a_bounded_number_of_times(
         open_skeleton_world(Path(directory), INERT) as world,
     ):
         channel = _channel()
-        clock = ProbedClock(clock_from(1.0))
+        clock = ProbedRunClock(clock_from(1.0))
         process, host = _host(world, clock, channel)
         channel.request_pause()
         config = _config(control_poll_interval=poll, min_sleep=min_sleep)
@@ -205,7 +206,7 @@ async def _measure_a_job_running(tmp_path: Path, runtime: float) -> tuple[World,
 
     Returns the world, the process and whether the run reached its terminal status.
     """
-    clock = ProbedClock(clock_from(1.0))
+    clock = ProbedRunClock(clock_from(1.0))
     with open_skeleton_world(tmp_path, BaselineOnly(), timed=(clock, runtime)) as world:
         process = world.runtime()
         process.shell.start("host-a", now_at=1.0, lease_duration=LEASE)
@@ -245,7 +246,7 @@ async def test_a_dispatch_longer_than_the_lease_does_not_lose_the_lease(
     the loop body does not run. Without renewal the next commit is stamped after the lease
     expired and the run dies with a fence conflict.
     """
-    clock = ProbedClock(clock_from(1.0))
+    clock = ProbedRunClock(clock_from(1.0))
 
     async def lease_durations_pass() -> None:
         for _ in range(leases * 4):
@@ -273,7 +274,7 @@ async def test_a_stop_during_a_turn_that_never_ends_cancels_it_once_without_wait
     host's grace bound cancelled it. Now the loop cancels the dispatch once and ends the
     run as stopped, with no run-clock time spent waiting for a bound.
     """
-    clock = ProbedClock(clock_from(1.0))
+    clock = ProbedRunClock(clock_from(1.0))
     channel = _channel()
     cancellations: list[str] = []
 
@@ -311,7 +312,7 @@ async def test_a_run_with_a_long_measurement_closes_after_the_job_ends(tmp_path:
 
 async def test_a_run_nothing_can_wake_is_reported_stalled(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path, INERT) as world:
-        _, host = _host(world, ProbedClock(clock_from(1.0)))
+        _, host = _host(world, ProbedRunClock(clock_from(1.0)))
         start_core(host, _config())
         with pytest.raises(RunStalledError, match="stalled"):
             await drive_core(host, _config())
@@ -337,7 +338,7 @@ async def test_a_strategy_that_waits_for_a_time_is_woken_then_and_not_reported_s
     until: float,
 ) -> None:
     waiting = WaitsUntil(state=SkeletonState(schema_version=1, phase="done"), until=until)
-    clock = ProbedClock(clock_from(1.0))
+    clock = ProbedRunClock(clock_from(1.0))
     with (
         tempfile.TemporaryDirectory() as directory,
         open_skeleton_world(Path(directory), waiting) as world,
@@ -356,7 +357,7 @@ async def test_restart_mid_run_resumes_from_durable_state(tmp_path: Path) -> Non
     process over the same disk, which finishes the run.
     """
     with open_skeleton_world(tmp_path, SkeletonStrategy.cancelled()) as world:
-        clock = ProbedClock(clock_from(1.0))
+        clock = ProbedRunClock(clock_from(1.0))
         first, host = _host(world, clock)
         start_core(host, _config(max_dispatches=1))
         with pytest.raises(DispatchCapExceededError) as capped:
@@ -378,7 +379,7 @@ async def test_a_restart_waits_in_clock_time_for_a_dead_hosts_lease(
     tmp_path: Path, elapsed: float
 ) -> None:
     with open_skeleton_world(tmp_path, INERT) as world:
-        clock = ProbedClock(clock_from(1.0))
+        clock = ProbedRunClock(clock_from(1.0))
         first, crashed = _host(world, clock)
         start_core(crashed, _config())
         del first  # the process dies holding its lease, which it never releases
@@ -397,11 +398,11 @@ async def test_a_restart_gives_up_after_one_lease_while_another_host_renews_it(
     tmp_path: Path,
 ) -> None:
     with open_skeleton_world(tmp_path, INERT) as world:
-        clock = ProbedClock(clock_from(1.0))
+        clock = ProbedRunClock(clock_from(1.0))
         holder, live = _host(world, clock)
         start_core(live, _config())
 
-        class RenewingClock(ProbedClock):
+        class RenewingClock(ProbedRunClock):
             async def sleep(self, seconds: float) -> None:
                 await super().sleep(seconds)
                 holder.shell.renew(now_at=self.at, lease_duration=LEASE)
@@ -416,7 +417,7 @@ async def test_a_restart_gives_up_after_one_lease_while_another_host_renews_it(
 
 async def test_a_released_lease_is_free_at_once(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path, INERT) as world:
-        clock = ProbedClock(clock_from(1.0))
+        clock = ProbedRunClock(clock_from(1.0))
         first, host = _host(world, clock)
         start_core(host, _config())
 

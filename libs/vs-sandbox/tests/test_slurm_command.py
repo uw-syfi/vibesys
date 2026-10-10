@@ -11,13 +11,18 @@ import threading
 from typing import TYPE_CHECKING, TypedDict
 
 import pytest
-from tests.support.thread_signals import non_main_thread_ids, requires_tgkill, send_to_thread
 
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, write_slurm_evaluation_plan
 
 # test-isolation: main is the CLI entry point and is intentionally absent from the library API.
 from vs_sandbox.slurm_command import main
-from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    TGKILL_SUPPORTED,
+    join_or_fail,
+    non_main_thread_ids,
+    send_to_thread,
+)
 from vs_slurm.api import (
     ClusterObservation,
     ClusterSubmitted,
@@ -34,6 +39,10 @@ from vs_slurm.wiring import SlurmCluster
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+requires_tgkill = pytest.mark.skipif(
+    not TGKILL_SUPPORTED, reason="tgkill syscall number is unknown"
+)
 
 
 class _PlanOptions(TypedDict, total=False):

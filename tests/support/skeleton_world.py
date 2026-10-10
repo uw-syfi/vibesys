@@ -17,7 +17,6 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
-from tests.support.host_clock import clock_from
 from tests.support.runtime_evaluation import ScenarioCluster
 from tests.support.session_world import (
     FakeSessionResolver,
@@ -68,6 +67,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
 )
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
+from vs_sim.api.testing import clock_from
 from vs_slurm.api import (
     SlurmConfig,
     SlurmSshTransport,

@@ -19,10 +19,10 @@ from tests.composition.dynamic._harness import (
     simulated_clock,
     workstream,
 )
-from tests.support.host_clock import HostCrashedError
 
 from vibesys.api import RunStatus
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
+from vs_sim.api.testing import HostCrashedError
 
 if TYPE_CHECKING:
     from pathlib import Path
