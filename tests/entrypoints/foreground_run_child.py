@@ -47,7 +47,7 @@ class BlockedRuntime:
 if __name__ == "__main__":
     # test-isolation: the child swaps the runtime and request parsing for a blocked fake
     BlockedRuntime.transports = int(sys.argv[1])
-    runtime_module.ServerRuntime = BlockedRuntime  # type: ignore[misc]
-    cli.parse_cli_invocation = lambda _argv: object()  # type: ignore[assignment]
-    cli.build_run_request = lambda _invocation: object()  # type: ignore[assignment]
+    runtime_module.ServerRuntime = BlockedRuntime  # ty: ignore[invalid-assignment]  # LW-155503; the child swaps the dynamically imported runtime class for its fake
+    cli.parse_cli_invocation = lambda _argv: object()  # ty: ignore[invalid-assignment]  # LW-155504; the child replaces CLI parsing with a fixed fake
+    cli.build_run_request = lambda _invocation: object()  # ty: ignore[invalid-assignment]  # LW-155505; the child replaces request building with a fixed fake
     main(["--control-socket", "/unused/control.sock", "--local"])

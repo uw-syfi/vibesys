@@ -8,6 +8,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
@@ -912,7 +913,7 @@ def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
         assert child.stdout.readline().strip() == "driving"
         threads = [child.pid, *non_main_thread_ids(child.pid)]
         send_to_thread(child.pid, threads[target % len(threads)], signal.SIGTERM)
-        # The deadline only guards a hang; a stop that is delivered returns at once.
+        # test-isolation: the deadline only guards a hang; a delivered stop returns at once
         output, _ = child.communicate(timeout=20)
     except subprocess.TimeoutExpired:
         child.kill()
@@ -922,3 +923,38 @@ def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
         child.kill()
     assert "cleanup shutdown=True" in output
     assert child.returncode != 0
+
+
+def test_a_sigterm_during_the_foreground_run_shuts_the_runtime_down_and_interrupts_the_caller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stopping = threading.Event()
+    before = signal.getsignal(signal.SIGTERM)
+
+    class SignalledRuntime:
+        def __init__(self, **_options: object) -> None:
+            pass
+
+        def run(self, callback: Callable[[], object]) -> object:
+            return callback()
+
+        def drive(self, _request: object) -> None:
+            os.kill(os.getpid(), signal.SIGTERM)
+            # Blocks until the relay wakes this thread with the interrupt.
+            threading.Event().wait()
+
+        def shutdown(self) -> None:
+            stopping.set()
+
+    # test-isolation: replace the dynamic runtime import with a local fake to test signal wiring
+    monkeypatch.setattr(runtime_module, "ServerRuntime", SignalledRuntime)
+    # test-isolation: replace CLI parsing with a deterministic return-value fake
+    monkeypatch.setattr(server_entrypoint.cli, "parse_cli_invocation", lambda _argv: object())
+    # test-isolation: replace request construction with a deterministic return-value fake
+    monkeypatch.setattr(server_entrypoint.cli, "build_run_request", lambda _invocation: object())
+
+    with pytest.raises(KeyboardInterrupt):
+        main(["--control-socket", "/unused/control.sock", "--local"])
+
+    assert stopping.is_set()
+    assert signal.getsignal(signal.SIGTERM) is before
