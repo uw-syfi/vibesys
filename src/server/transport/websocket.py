@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     from websockets.http11 import Response as HttpResponse
 
     from server.api.service import RunApi, SubscriptionBootstrap
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Event
 
 _LOG = logging.getLogger(__name__)
 
@@ -175,7 +175,7 @@ class StartupSynchronization(Protocol):
     def wait_before_serve(self, stop: threading.Event) -> None:
         """Run immediately before the event loop begins serving."""
 
-    def wait_before_listener_start(self, stop: threading.Event, bound_port: int) -> None:
+    def wait_before_listener_start(self, stop: Event, bound_port: int) -> None:
         """Run after bind and before the socket begins listening."""
 
     def wait_before_publication(self, stop: threading.Event, bound_port: int) -> None:
@@ -193,7 +193,7 @@ class _DefaultStartupSynchronization:
         """Begin serving without an additional startup barrier."""
         del stop
 
-    def wait_before_listener_start(self, stop: threading.Event, bound_port: int) -> None:
+    def wait_before_listener_start(self, stop: Event, bound_port: int) -> None:
         """Begin listening immediately after bind."""
         del stop, bound_port
 

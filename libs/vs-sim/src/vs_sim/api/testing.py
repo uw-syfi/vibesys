@@ -12,6 +12,8 @@ from vs_sim.contracts import (
     ClockContract,
     ClockUnderTest,
     ProcessLauncherContract,
+    ProcessSignallerContract,
+    ProcessSignallerUnderTest,
     ProcessUnderTest,
     RunnerUnderTest,
     SignalSourceContract,
@@ -29,6 +31,7 @@ from vs_sim.crash import (
 )
 from vs_sim.fakes import (
     FakeProcessLauncher,
+    FakeProcessSignaller,
     FakeSignalSource,
     GatedBlockingRunner,
     InlineBlockingRunner,
@@ -82,6 +85,7 @@ __all__ = [
     "ClockUnderTest",
     "EventTrace",
     "FakeProcessLauncher",
+    "FakeProcessSignaller",
     "FakeSignalSource",
     "Gate",
     "GatedBlockingRunner",
@@ -92,6 +96,8 @@ __all__ = [
     "NetworkUnderTest",
     "ProcessLauncherContract",
     "ProcessScript",
+    "ProcessSignallerContract",
+    "ProcessSignallerUnderTest",
     "ProcessUnderTest",
     "RestartLimitError",
     "Restarted",

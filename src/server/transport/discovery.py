@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import secrets
-import signal
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -14,8 +13,10 @@ from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from vs_sim.api import PidfdProcessSignaller
+
 if TYPE_CHECKING:
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, ProcessSignaller
 
 try:
     import fcntl
@@ -37,6 +38,7 @@ _IPV4_WILDCARD_HEX = "00000000"
 _IPV6_MAPPED_LOOPBACK_HEX = "0000000000000000FFFF00000100007F"
 _TCP_LISTEN_STATE = "0A"
 _SOCKET_PREFIX = "socket:["
+_PROCESS_SIGNALLER = PidfdProcessSignaller()
 
 
 class WebPortState(StrEnum):
@@ -76,9 +78,15 @@ class WebPortObservation:
 class WebPortInspector:
     """Identify and safely signal a same-user gateway through Linux ``/proc``."""
 
-    def __init__(self, process_table: Path = _PROCESS_TABLE) -> None:
+    def __init__(
+        self,
+        process_table: Path = _PROCESS_TABLE,
+        *,
+        process_signaller: ProcessSignaller = _PROCESS_SIGNALLER,
+    ) -> None:
         """Inspect ``process_table``, injectable for deterministic filesystem tests."""
         self._process_table = process_table
+        self._process_signaller = process_signaller
 
     def inspect(self, port: int) -> WebPortObservation:
         """Classify the loopback listener on ``port`` without changing it."""
@@ -123,18 +131,12 @@ class WebPortInspector:
 
     def terminate(self, listener: WebGatewayListener) -> None:
         """Send SIGTERM only if ``listener`` still has the verified identity."""
-        pidfd_open = getattr(os, "pidfd_open", None)
-        pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
-        if pidfd_open is None or pidfd_send_signal is None:
-            raise NotImplementedError("safe port-keyed stop requires Linux pidfds")
-        descriptor = pidfd_open(listener.pid)
-        try:
-            current = self.inspect(listener.port)
-            if current.gateway != listener:
-                raise ProcessLookupError(listener.pid)
-            pidfd_send_signal(descriptor, signal.SIGTERM)
-        finally:
-            os.close(descriptor)
+        sent = self._process_signaller.terminate_if_current(
+            listener.pid,
+            lambda: self.inspect(listener.port).gateway == listener,
+        )
+        if not sent:
+            raise ProcessLookupError(listener.pid)
 
 
 @dataclass(frozen=True)

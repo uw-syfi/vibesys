@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from vs_sim.blocking import BlockingRunner
     from vs_sim.clock import Clock, Sleeper
     from vs_sim.processes import ProcessLauncher, ProcessOutcome
-    from vs_sim.signals import SignalSource
+    from vs_sim.signals import ProcessSignaller, SignalSource
 
 type Run = Callable[[Coroutine[Any, Any, Any]], Any]
 """Run a coroutine to completion on the loop the implementation under test belongs to."""
@@ -342,6 +342,70 @@ class SignalSourceContract:
 
             subject.run(main())
             assert heard == ["second"]
+
+        self._case(case)
+
+
+@dataclass(frozen=True)
+class ProcessSignallerUnderTest:
+    """A process signaller and observable lifetime for one stable process."""
+
+    signaller: ProcessSignaller
+    pid: int
+    assert_live: Callable[[], None]
+    assert_terminated: Callable[[], None]
+    close: Callable[[], None]
+
+
+class ProcessSignallerContract:
+    """Cases for :class:`~vs_sim.signals.ProcessSignaller`. Implement one factory."""
+
+    def process_signaller_under_test(self) -> ProcessSignallerUnderTest:
+        """Return a fresh signaller and one process identity it can open."""
+        raise NotImplementedError
+
+    def _case(self, case: Callable[[ProcessSignallerUnderTest], None]) -> None:
+        subject = self.process_signaller_under_test()
+        try:
+            case(subject)
+        finally:
+            subject.close()
+
+    def test_a_current_identity_is_terminated(self) -> None:
+        """A true revalidation sends SIGTERM to the stable process."""
+
+        def case(subject: ProcessSignallerUnderTest) -> None:
+            assert subject.signaller.terminate_if_current(subject.pid, lambda: True) is True
+            subject.assert_terminated()
+
+        self._case(case)
+
+    def test_a_changed_identity_is_not_terminated(self) -> None:
+        """A false revalidation leaves the stable process running."""
+
+        def case(subject: ProcessSignallerUnderTest) -> None:
+            assert subject.signaller.terminate_if_current(subject.pid, lambda: False) is False
+            subject.assert_live()
+
+        self._case(case)
+
+    def test_a_revalidation_failure_is_propagated_without_termination(self) -> None:
+        """An identity-check error propagates and leaves the stable process running."""
+
+        class RevalidationError(RuntimeError):
+            pass
+
+        def case(subject: ProcessSignallerUnderTest) -> None:
+            def fail() -> bool:
+                raise RevalidationError
+
+            try:
+                subject.signaller.terminate_if_current(subject.pid, fail)
+            except RevalidationError:
+                pass
+            else:  # pragma: no cover - every implementation must propagate the callback error.
+                raise AssertionError
+            subject.assert_live()
 
         self._case(case)
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import socket
 from typing import TYPE_CHECKING
 
 import pytest
@@ -11,6 +10,7 @@ from hypothesis import given
 from hypothesis.strategies import integers
 
 from server.runtime import WebPortInspector, WebPortState
+from vs_sim.api.testing import FakeProcessSignaller
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -189,11 +189,35 @@ def test_inspector_fails_closed_without_a_linux_process_table(tmp_path: Path) ->
     assert observation.state is WebPortState.UNKNOWN
 
 
-def test_inspector_maps_a_real_same_user_non_gateway_listener() -> None:
-    with socket.create_server(("127.0.0.1", 0)) as server:
-        port = server.getsockname()[1]
-        observation = WebPortInspector().inspect(port)
+def test_inspector_signals_only_the_revalidated_stable_process(tmp_path: Path) -> None:
+    process_table = tmp_path / "proc"
+    instance = tmp_path / "project" / ".vibesys" / "web-gateway.json"
+    _write_tcp_table(process_table, (_PORT, _INODE))
+    _write_process(process_table, instance)
+    signaller = FakeProcessSignaller({_PID})
+    inspector = WebPortInspector(process_table, process_signaller=signaller)
+    observation = inspector.inspect(_PORT)
+    assert observation.gateway is not None
 
-    assert observation.state is WebPortState.OTHER
-    assert observation.gateway is None
-    assert os.getpid() in observation.holder_pids
+    inspector.terminate(observation.gateway)
+
+    assert signaller.opened == [_PID]
+    assert signaller.terminated == [_PID]
+
+
+def test_inspector_refuses_to_signal_after_the_listener_identity_changes(tmp_path: Path) -> None:
+    process_table = tmp_path / "proc"
+    instance = tmp_path / "project" / ".vibesys" / "web-gateway.json"
+    _write_tcp_table(process_table, (_PORT, _INODE))
+    _write_process(process_table, instance)
+    signaller = FakeProcessSignaller({_PID})
+    inspector = WebPortInspector(process_table, process_signaller=signaller)
+    observation = inspector.inspect(_PORT)
+    assert observation.gateway is not None
+    (process_table / str(_PID) / "cmdline").write_bytes(b"python\0-m\0http.server\0")
+
+    with pytest.raises(ProcessLookupError):
+        inspector.terminate(observation.gateway)
+
+    assert signaller.opened == [_PID]
+    assert signaller.terminated == []

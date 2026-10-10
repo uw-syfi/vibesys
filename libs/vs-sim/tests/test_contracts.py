@@ -4,27 +4,36 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
+import subprocess
 import sys
 from typing import TYPE_CHECKING
+
+import pytest
 
 from vs_sim.api import (
     LoopSignalSource,
     MonotonicClock,
+    PidfdProcessSignaller,
     SubprocessLauncher,
     SystemClock,
     ThreadBlockingRunner,
 )
 from vs_sim.api.testing import (
+    HANG_GUARD_S,
     BlockingRunnerContract,
     ClockContract,
     ClockUnderTest,
     FakeProcessLauncher,
+    FakeProcessSignaller,
     FakeSignalSource,
     GatedBlockingRunner,
     InlineBlockingRunner,
     ManualClock,
     ProcessLauncherContract,
     ProcessScript,
+    ProcessSignallerContract,
+    ProcessSignallerUnderTest,
     ProcessUnderTest,
     RunnerUnderTest,
     SignalSourceContract,
@@ -33,6 +42,7 @@ from vs_sim.api.testing import (
     SleeperUnderTest,
     VirtualClock,
     run_virtual,
+    stop_process,
 )
 
 if TYPE_CHECKING:
@@ -131,6 +141,46 @@ class TestLoopSignalSource(SignalSourceContract):
             asyncio.run,
             deliver=lambda number: os.kill(os.getpid(), number),
             isolate=True,
+        )
+
+
+def _assert_running(process: subprocess.Popen[bytes]) -> None:
+    assert process.poll() is None
+
+
+def _assert_terminated(process: subprocess.Popen[bytes]) -> None:
+    assert process.wait(timeout=HANG_GUARD_S) == -signal.SIGTERM
+
+
+class TestPidfdProcessSignaller(ProcessSignallerContract):
+    def process_signaller_under_test(self) -> ProcessSignallerUnderTest:
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import signal; signal.pause()"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return ProcessSignallerUnderTest(
+            PidfdProcessSignaller(),
+            process.pid,
+            lambda: _assert_running(process),
+            lambda: _assert_terminated(process),
+            lambda: stop_process(process),
+        )
+
+
+class TestFakeProcessSignaller(ProcessSignallerContract):
+    def process_signaller_under_test(self) -> ProcessSignallerUnderTest:
+        pid = 1234
+        signaller = FakeProcessSignaller({pid})
+        return ProcessSignallerUnderTest(
+            signaller,
+            pid,
+            lambda: None if pid in signaller.live_pids else pytest.fail("process was terminated"),
+            lambda: (
+                None if pid not in signaller.live_pids else pytest.fail("process is still live")
+            ),
+            lambda: None,
         )
 
 

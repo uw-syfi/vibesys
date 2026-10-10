@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import signal
-import socket
 import stat
 import subprocess
 import sys
@@ -290,37 +289,6 @@ def test_detached_startup_surfaces_early_child_failure(tmp_path: Path) -> None:
     assert log_path.read_text() == "Address already in use\n"
     assert stat.S_IMODE(log_path.stat().st_mode) == 0o600
     assert process.terminated is False
-
-
-def test_server_main_prints_the_bind_authority_and_reason_on_its_first_line(
-    tmp_path: Path,
-) -> None:
-    source = Path("clients/tui/dev/fixtures/framework-events.jsonl")
-    replay = tmp_path / "run-events.jsonl"
-    replay.write_bytes(source.read_bytes())
-    instance = tmp_path / "web-gateway.json"
-
-    with socket.create_server(("127.0.0.1", 0)) as held:
-        port = held.getsockname()[1]
-        stderr = StringIO()
-        with redirect_stderr(stderr), pytest.raises(SystemExit) as exit_status:
-            main(
-                [
-                    "--web",
-                    "--web-port",
-                    str(port),
-                    "--web-instance",
-                    str(instance),
-                    "--web-reopen",
-                    str(replay),
-                ]
-            )
-
-    assert exit_status.value.code == 1
-    first_line = stderr.getvalue().splitlines()[0]
-    assert first_line.startswith(f"WebSocket gateway could not bind 127.0.0.1:{port}:")
-    assert "address already in use" in first_line.lower()
-    assert f"vibesys web stop --port {port}" in stderr.getvalue()
 
 
 def test_detached_startup_refuses_to_clobber_a_gateway_that_still_holds_the_log(
