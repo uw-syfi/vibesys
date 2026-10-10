@@ -8,6 +8,26 @@ Never: add retries or reruns, skip on failure, lengthen a timeout or sleep "to
 make it pass", mark it as an expected failure to hide it, or tolerate it
 "because it usually passes".
 
+A test's result must never depend on timing, and every wait needs a bound that
+only guards against hangs. In the deterministic tiers this is enforced, not
+advised: `tests/quality/test_real_apis_confined.py` fails a test that uses
+`time`, `threading`, `subprocess`, `socket`, `signal`, a nonzero
+`asyncio.sleep`, a bare wait, join or get, or a signal to its own process
+(`vs_sim` interfaces, the virtual loop and Fakes cover each). Rewrite a flagged
+test as follows.
+
+| Flagged use | Rewrite as |
+| --- | --- |
+| `time.sleep`, `asyncio.sleep(n)`, `time.monotonic` | An injected `vs_sim.api.Clock`/`Sleeper`; run on the virtual loop (`sim`, or an unmarked `async def` test) and advance `VirtualClock`. |
+| `threading.Thread`, `Event`, `Lock` | A `Gate`, `start_thread` and `join_or_fail`, or run the code through a Fake `BlockingRunner`. |
+| `subprocess`, `asyncio.create_subprocess_*` | A Fake `ProcessLauncher` or command runner from the owning library. |
+| `socket` | The library's in-memory Fake transport; a real socket is a real-tier test. |
+| `signal.signal`, `os.kill(os.getpid(), ...)` | A Fake `SignalSource`; anything that must change real signal state goes through `run_in_child`. |
+| bare `.wait()`, `.join()`, `.get()` | `wait_or_fail`, `join_or_fail`, `get_or_fail`, `arrival(awaitable, task)` or a `timeout=`. |
+| A test of a real system | Move it to a real tier (`sim_real_tiers`). |
+
+The baseline of existing uses has exact counts and only shrinks.
+
 The suite has a hard per-test bound (`timeout` in `pyproject.toml`, 300 s) so a
 hung test fails alone instead of stalling its shard. It is a backstop, not a
 synchronization tool: a test must pass without ever reaching it.

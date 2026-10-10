@@ -14,7 +14,12 @@ Skills (load them, in every language):
 - Before writing, changing, or reviewing any test, use the `testing` skill
   (`.agents/skills/testing/`). Tests exercise public APIs only, use Fakes
   instead of patching or mocks, favor property-based tests, and are never flaky
-  (no reliance on timeouts, sleeps, or wall-clock time).
+  (a test's result must never depend on timing; every wait needs a bound that
+  only guards against hangs). Deterministic-tier tests and product code use no
+  real time, threads, processes, sockets, or signals outside `vs_sim`
+  (`tests/quality/test_real_apis_confined.py`); only the real tiers
+  (`sim_real_tiers`: `tests/e2e`, `tests/slurm_cluster`,
+  `tests/minimal_container`) drive real systems.
 
 Architecture:
 

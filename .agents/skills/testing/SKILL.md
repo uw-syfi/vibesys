@@ -49,13 +49,27 @@ a per-language reference; read the one for the language you are editing:
    sequences, including crash and replay at every durable intent boundary. Use
    no async, sleeps, or Fakes in core tests. See
    [references/properties-and-goldens.md](references/properties-and-goldens.md).
-5. **No flaky tests.** Never depend on timeouts, sleeps, wall-clock time,
-   scheduling order, or shared state. Inject clocks and simulate timeouts; do
-   not wait for them. Never add retries. Zero tolerance: on seeing any flake,
-   yours or not, root-cause it, redesign the test to remove the source, and
-   leave it better than you found it. Ship the fix as its own PR, then rebase
-   your current PR on top of it. See
+5. **No flaky tests.** A test's result must never depend on timing. Never
+   depend on timeouts, sleeps, wall-clock time, scheduling order, or shared
+   state. Inject clocks and simulate timeouts; do not wait for them. Every wait
+   on something the test does not control needs a bound, and that bound only
+   guards against a hang: a passing run never gets near it, and it is never
+   what the test synchronizes on. Never add retries. Zero tolerance: on seeing
+   any flake, yours or not, root-cause it, redesign the test to remove the
+   source, and leave it better than you found it. Ship the fix as its own PR,
+   then rebase your current PR on top of it. See
    [references/flakiness.md](references/flakiness.md).
+   **Tiers.** Unit and composition tests are the deterministic tiers: they use
+   no `time`, `threading`, `subprocess`, `socket` or `signal`, no nonzero
+   `asyncio.sleep`, no bare `.wait()`/`.join()`/`.get()`/`.communicate()`, and
+   never signal their own process, except through `vs_sim`
+   (`vs_sim.api.testing`: `VirtualClock`, `Gate`, `arrival`, `run_in_child`,
+   Fakes). Only `tests/e2e`, `tests/slurm_cluster` and `tests/minimal_container`
+   (the `sim_real_tiers` ini key) drive real systems. Product code takes the
+   `vs_sim.api` interfaces instead of the real APIs.
+   `tests/quality/test_real_apis_confined.py` enforces both with an exact-count
+   baseline that only shrinks: when you remove a use, lower its count in
+   `tests/quality/real_api_baseline.jsonl`; never raise one.
 6. **Bug fixes.** Add a regression test at the lowest layer that reproduces the
    symptom, through the public API, that fails at the merge base. Then add a
    property test that generalizes the pattern, so the whole class of bug is
