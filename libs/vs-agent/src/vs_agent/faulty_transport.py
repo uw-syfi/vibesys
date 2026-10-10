@@ -10,7 +10,7 @@ what the real transport would and the session above decides what happens.
 The wrapper itself lives in ``vs_agent`` (the only package that imports
 agentshim); this module supplies the plan lookup and the bookkeeping tests
 assert on. A turn runs first and fails afterwards (like
-:class:`~vs_faults.agent.FaultyAgentClient`), so the provider did the work
+:class:`~vs_agent.faulty_agent.FaultyAgentClient`), so the provider did the work
 whose reply the caller loses: that is the case a recovery must not replay
 blindly. An empty plan makes it a pass-through.
 """
@@ -20,16 +20,16 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING, cast
 
-from vs_agent.api.testing import (
+from vs_agent.fault_injection import (
     NOT_A_REPLY,
     TURN_BUDGET_S,
     ConversationFaultKind,
     FaultingTransport,
 )
-from vs_faults.plan import Boundary, ConversationFault, FaultPlan
+from vs_faults.api import Boundary, ConversationFault, FaultPlan
 
 if TYPE_CHECKING:
-    from vs_agent.api.testing import Transport
+    from vs_agent.fault_injection import Transport
 
 __all__ = ["NOT_A_REPLY", "TURN_BUDGET_S", "FaultyTransport"]
 

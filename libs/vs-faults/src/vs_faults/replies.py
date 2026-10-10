@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, TypeVar, cast
 from pydantic import BaseModel, ValidationError
 
 if TYPE_CHECKING:
-    import random
+    from vs_sim.api import SeededRandom
 
 M = TypeVar("M", bound=BaseModel)
 type Json = None | bool | int | float | str | list[Json] | dict[str, Json]
@@ -44,7 +44,7 @@ class ReplyGenerator:
     """
 
     def __init__(
-        self, rng: random.Random, vocabulary: tuple[str, ...] = (), *, bold: bool = False
+        self, rng: SeededRandom, vocabulary: tuple[str, ...] = (), *, bold: bool = False
     ) -> None:
         """Use ``rng`` for every choice and ``vocabulary`` as candidate strings."""
         self._rng = rng

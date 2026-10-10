@@ -439,7 +439,7 @@ depends_on = ["vs_agent", "vs_project"]
 [[modules]]
 path = "vs_agent"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sandbox", "vs_project", "vs_prompts", "vs_mcp", "vs_sim.api"]
+depends_on = ["vs_sandbox", "vs_project", "vs_prompts", "vs_mcp", "vs_faults", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_project"
@@ -651,7 +651,7 @@ visibility = ["vs_sandbox", "vs_runtime"]
 [[modules]]
 path = "vs_faults"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_mcp"]
+depends_on = ["vs_sim.api", "vs_sim.api.testing"]
 
 # Deterministic simulation kit: a standard-library-only leaf with no outgoing VibeSys edges.
 [[modules]]
@@ -667,7 +667,7 @@ depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.n
 [[modules]]
 path = "vs_sim.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.fakes", "vs_sim.file_effects", "vs_sim.gate", "vs_sim.host_clock", "vs_sim.manual", "vs_sim.pairwise", "vs_sim.seeds", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
+depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.fakes", "vs_sim.faults", "vs_sim.file_effects", "vs_sim.gate", "vs_sim.host_clock", "vs_sim.manual", "vs_sim.pairwise", "vs_sim.seeds", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
 
 [[modules]]
 path = "vs_sim.blocking"
@@ -728,6 +728,11 @@ depends_on = []
 path = "vs_sim.fakes"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_sim.clock", "vs_sim.gate", "vs_sim.processes", "vs_sim.states"]
+
+[[modules]]
+path = "vs_sim.faults"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.randomness"]
 
 [[modules]]
 path = "vs_sim.file_effects"

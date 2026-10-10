@@ -20,8 +20,13 @@ from tests.support.session_world import (
 )
 
 from vs_agent.api import AgentClient, AgentExecutionPolicy, AgentSessionSpec
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeExecutor, fake_stream_launcher
-from vs_faults.api import FaultPlan, FaultyExecutor
+from vs_agent.api.testing import (
+    FakeAgentInvocationStore,
+    FakeExecutor,
+    FaultyExecutor,
+    fake_stream_launcher,
+)
+from vs_faults.api import FaultPlan
 from vs_sandbox.api.testing import FakeDockerConfinement
 
 if TYPE_CHECKING:

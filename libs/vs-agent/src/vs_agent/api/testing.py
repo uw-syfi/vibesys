@@ -39,6 +39,14 @@ from vs_agent.fault_injection import (
     ProcessFaultKind,
     Transport,
 )
+from vs_agent.faulty_agent import (
+    AgentCrashError,
+    DurableAgentClient,
+    FaultyAgentClient,
+    generated_replies,
+)
+from vs_agent.faulty_executor import FaultyExecutor
+from vs_agent.faulty_transport import FaultyTransport
 from vs_agent.scripted_provider import (
     FakeProvider,
     FakeProviderError,
@@ -72,10 +80,12 @@ __all__ = [
     "MALFORMED_LINE",
     "NOT_A_REPLY",
     "TURN_BUDGET_S",
+    "AgentCrashError",
     "CommandExecutor",
     "CommandRequest",
     "ConversationFaultKind",
     "DockerResult",
+    "DurableAgentClient",
     "FakeAgentClient",
     "FakeAgentInvocationStore",
     "FakeAgentSessions",
@@ -88,6 +98,9 @@ __all__ = [
     "FakeTurnScript",
     "FaultingExecutor",
     "FaultingTransport",
+    "FaultyAgentClient",
+    "FaultyExecutor",
+    "FaultyTransport",
     "HandSession",
     "ProcessFaultKind",
     "StreamPeers",
@@ -100,6 +113,7 @@ __all__ = [
     "fake_agentshim_launcher",
     "fake_profiles",
     "fake_stream_launcher",
+    "generated_replies",
     "installed_mcp_servers",
     "scripted_turn",
     "stream_peers",

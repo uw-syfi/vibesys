@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "agentshim>=0.15.7,<0.16",
     "pydantic>=2",
+    "vs-faults",
     "vs-mcp",
     "vs-project",
     "vs-prompts",
@@ -24,6 +25,7 @@ where = ["src"]
 vs_agent = ["py.typed", "images/*.Dockerfile"]
 
 [tool.uv.sources]
+vs-faults = { workspace = true }
 vs-mcp = { workspace = true }
 vs-project = { workspace = true }
 vs-prompts = { workspace = true }

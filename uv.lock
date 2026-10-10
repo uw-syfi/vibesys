@@ -2984,6 +2984,7 @@ source = { editable = "libs/vs-agent" }
 dependencies = [
     { name = "agentshim" },
     { name = "pydantic" },
+    { name = "vs-faults" },
     { name = "vs-mcp" },
     { name = "vs-project" },
     { name = "vs-prompts" },
@@ -2995,6 +2996,7 @@ dependencies = [
 requires-dist = [
     { name = "agentshim", specifier = ">=0.15.7,<0.16" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "vs-faults", editable = "libs/vs-faults" },
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },
     { name = "vs-prompts", editable = "libs/vs-prompts" },
@@ -3088,15 +3090,13 @@ version = "0.1.0"
 source = { editable = "libs/vs-faults" }
 dependencies = [
     { name = "pydantic" },
-    { name = "vs-agent" },
-    { name = "vs-mcp" },
+    { name = "vs-sim" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
-    { name = "vs-agent", editable = "libs/vs-agent" },
-    { name = "vs-mcp", editable = "libs/vs-mcp" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 
 [[package]]

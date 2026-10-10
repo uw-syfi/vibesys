@@ -9,8 +9,7 @@ description = "Seeded, declarative fault injection at VibeSys boundary interface
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2",
-    "vs-agent",
-    "vs-mcp",
+    "vs-sim",
 ]
 
 [tool.setuptools.packages.find]
@@ -20,5 +19,4 @@ where = ["src"]
 vs_faults = ["py.typed"]
 
 [tool.uv.sources]
-vs-agent = { workspace = true }
-vs-mcp = { workspace = true }
+vs-sim = { workspace = true }

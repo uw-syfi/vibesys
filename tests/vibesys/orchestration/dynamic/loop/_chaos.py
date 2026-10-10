@@ -34,21 +34,23 @@ from vibesys.api import RunStopped
 from vibesys.orchestration.dynamic import DynamicPlanningError
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, AgentOutputSchemaError
-from vs_agent.api.testing import FakeAgentClient
+from vs_agent.api.testing import (
+    AgentCrashError,
+    FakeAgentClient,
+    FaultyAgentClient,
+    generated_replies,
+)
 from vs_evaluation.api import EvaluationAgentRole
 from vs_evaluation.api.tools import EvaluationServiceClientError, build_evaluation_tools
 from vs_faults.api import (
-    AgentCrashError,
     AgentFault,
     Boundary,
     ClusterFault,
     FaultPlan,
-    FaultyAgentClient,
     FaultyToolDispatch,
     ReplyGenerator,
     ToolCallFailedError,
     connector_command,
-    generated_replies,
     injected_faults,
     prompt_vocabulary,
 )

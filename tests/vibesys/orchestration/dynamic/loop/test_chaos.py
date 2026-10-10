@@ -24,7 +24,8 @@ from tests.vibesys.orchestration.dynamic.loop._chaos import (
 from vibesys.api import RunStatus, RunStopped
 from vibesys.orchestration.dynamic import DynamicPlanningError
 from vs_agent.api import AgentOutputSchemaError
-from vs_faults.api import AgentCrashError, AgentFault, Boundary, ClusterFault
+from vs_agent.api.testing import AgentCrashError
+from vs_faults.api import AgentFault, Boundary, ClusterFault
 from vs_runtime.api import RunCleanupError, RuntimeContractError, UnresolvedDispatchError
 
 if TYPE_CHECKING:

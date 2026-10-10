@@ -22,15 +22,13 @@ from vs_agent.api import (
     SessionScope,
     SteerOutcome,
 )
-from vs_agent.api.testing import FakeAgentClient, FakeAgentSessions
-from vs_faults.api import (
+from vs_agent.api.testing import (
     AgentCrashError,
-    AgentFault,
-    Boundary,
-    FaultPlan,
-    FaultRule,
+    FakeAgentClient,
+    FakeAgentSessions,
     FaultyAgentClient,
 )
+from vs_faults.api import AgentFault, Boundary, FaultPlan, FaultRule
 
 if TYPE_CHECKING:
     from pathlib import Path

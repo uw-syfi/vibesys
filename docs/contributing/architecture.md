@@ -139,6 +139,7 @@ graph TD
     vibesys --> vs_sandbox
     vibesys --> vs_sim
     vibesys --> vs_slurm
+    vs_agent --> vs_faults
     vs_agent --> vs_mcp
     vs_agent --> vs_project
     vs_agent --> vs_prompts
@@ -149,8 +150,7 @@ graph TD
     vs_evaluation --> vs_mcp
     vs_evaluation --> vs_project
     vs_evaluation --> vs_sim
-    vs_faults --> vs_agent
-    vs_faults --> vs_mcp
+    vs_faults --> vs_sim
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
     vs_runtime --> vs_async_ops

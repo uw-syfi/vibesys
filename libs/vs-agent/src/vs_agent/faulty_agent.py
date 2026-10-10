@@ -19,33 +19,32 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
-from vs_agent.api import (
+from vs_agent.contracts import (
     AgentClientProtocol,
     AgentOutputSchemaError,
-    AgentTurnExecutor,
     AgentTurnTimeoutError,
     SteerableAgentClient,
     SteerOutcome,
-    describe_validation_error,
 )
-from vs_faults.plan import AgentFault, Boundary, FaultPlan
-from vs_faults.replies import ReplyGenerator, prompt_vocabulary
+from vs_agent.runner import describe_validation_error
+from vs_agent.sessions import AgentTurnExecutor
+from vs_faults.api import AgentFault, Boundary, FaultPlan, ReplyGenerator, prompt_vocabulary
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
     from typing import TextIO
 
-    from vs_agent.api import (
+    from vs_agent.contracts import (
         AgentCapabilities,
         AgentObserver,
-        AgentProgress,
-        AgentSessionKey,
         AgentSessionSpec,
         AgentTurnRequest,
         AgentTurnResult,
     )
-    from vs_agent.api.testing import FakeInvocation
+    from vs_agent.fake_client import FakeInvocation
+    from vs_agent.progress import AgentProgress
+    from vs_agent.session_key import AgentSessionKey
     from vs_mcp.api import ToolServerDescriptor
 
 T = TypeVar("T", bound=BaseModel)

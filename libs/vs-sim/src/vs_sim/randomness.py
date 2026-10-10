@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from collections.abc import MutableSequence, Sequence
 
 
-def derive_seed(root: int, label: str) -> int:
+def derive_seed(root: int | str, label: str) -> int:
     """A seed for the stream called ``label`` under ``root``; the same pair always gives the same seed."""
     digest = hashlib.sha256(f"{root}:{label}".encode()).digest()
     return int.from_bytes(digest[:8], "big")
@@ -43,8 +43,8 @@ class RandomSource(Protocol):
 class SeededRandom:
     """A reproducible source: the same seed and the same draws give the same values."""
 
-    def __init__(self, seed: int) -> None:
-        """Start the stream at ``seed``."""
+    def __init__(self, seed: int | str) -> None:
+        """Start the stream at ``seed`` (a text seed is hashed by ``random.Random``, reproducibly)."""
         self.seed = seed
         self._random = random.Random(seed)  # noqa: S311  # LW-163801 [S311]; a reproducible simulation stream, not a security value.
 
@@ -59,6 +59,14 @@ class SeededRandom:
     def choice[T](self, items: Sequence[T]) -> T:
         """One of ``items``."""
         return self._random.choice(items)
+
+    def uniform(self, low: float, high: float) -> float:
+        """A float between ``low`` and ``high``."""
+        return self._random.uniform(low, high)
+
+    def getrandbits(self, bits: int) -> int:
+        """An integer of ``bits`` random bits."""
+        return self._random.getrandbits(bits)
 
     def shuffle(self, items: MutableSequence[Any]) -> None:
         """Reorder ``items`` in place."""
