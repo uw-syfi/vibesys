@@ -1,0 +1,65 @@
+name: Set up the TUI workspace
+description: >-
+  Node, pnpm with its store cache, verified Bun, uv with the Python dev
+  environment, the `clients/` workspace install, and Go for repoctl. Every
+  `tui-*` job of test.yml starts from this, so the legs cannot drift apart.
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 24
+
+    - name: Enable pnpm
+      shell: bash
+      run: |
+        corepack enable
+        corepack install --global pnpm@11.11.0
+
+    # Resolved after pnpm exists rather than hardcoded: the store location is
+    # pnpm's to choose, and a wrong path caches an empty directory silently.
+    - name: Locate the pnpm store
+      shell: bash
+      run: echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
+    - name: Cache the pnpm store
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.PNPM_STORE_PATH }}
+        key: pnpm-store-${{ runner.os }}-${{ hashFiles('clients/pnpm-lock.yaml') }}
+        # A lockfile bump usually changes a handful of packages, so an older
+        # store is still worth most of its download cost.
+        restore-keys: pnpm-store-${{ runner.os }}-
+
+    - name: Set up verified Bun 1.4.2 for OpenTUI
+      shell: bash
+      run: |
+        python3 packaging/fetch_bun.py --target linux-x86_64 --output "$RUNNER_TEMP/bun/bin/bun"
+        echo "$RUNNER_TEMP/bun/bin" >> "$GITHUB_PATH"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+
+    - name: Set up Python
+      shell: bash
+      run: uv python install 3.12
+
+    - name: Install Python dependencies
+      shell: bash
+      run: uv sync --dev
+
+    - name: Install TUI dependencies
+      shell: bash
+      working-directory: clients
+      run: pnpm install --frozen-lockfile
+
+    - name: Set up Go for repoctl
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: support/repoctl/go.mod
+        cache-dependency-path: support/repoctl/go.sum

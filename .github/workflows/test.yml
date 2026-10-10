@@ -177,7 +177,12 @@ jobs:
       - name: Check Python types
         run: ./support/repoctl/repoctl run-checks --group python_types
 
-  tui:
+  # The TUI work is four jobs, one per independent check group, so its wall time
+  # is the slowest leg rather than the sum (issue #1678). Each job has its own
+  # checkout, which is what makes that safe: a package's `build` is
+  # `rm -rf dist && tsc`, and two pnpm runs in one checkout race on `dist` (see
+  # `tui_tests` in .repoctl/checks.toml). Required PR CI lists all four.
+  tui-quality:
     needs: changes
     if: needs.changes.outputs.tui == 'true'
     runs-on: ubuntu-latest
@@ -185,64 +190,38 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-
-      - name: Enable pnpm
-        run: |
-          corepack enable
-          corepack install --global pnpm@11.11.0
-
-      # Resolved after pnpm exists rather than hardcoded: the store location is
-      # pnpm's to choose, and a wrong path caches an empty directory silently.
-      - name: Locate the pnpm store
-        run: echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-
-      - name: Cache the pnpm store
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ env.PNPM_STORE_PATH }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('clients/pnpm-lock.yaml') }}
-          # A lockfile bump usually changes a handful of packages, so an older
-          # store is still worth most of its download cost.
-          restore-keys: pnpm-store-${{ runner.os }}-
-
-      - name: Set up verified Bun 1.4.2 for OpenTUI
-        run: |
-          python3 packaging/fetch_bun.py --target linux-x86_64 --output "$RUNNER_TEMP/bun/bin/bun"
-          echo "$RUNNER_TEMP/bun/bin" >> "$GITHUB_PATH"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install Python dependencies
-        run: uv sync --dev
-
-      - name: Install TUI dependencies
-        working-directory: clients
-        run: pnpm install --frozen-lockfile
-
-      - name: Set up Go for repoctl
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: support/repoctl/go.mod
-          cache-dependency-path: support/repoctl/go.sum
+      - name: Set up the TUI workspace
+        uses: ./.github/actions/setup-tui
 
       - name: Check TypeScript packages
         run: ./support/repoctl/repoctl run-checks --group tui_quality
+
+  tui-tests:
+    needs: changes
+    if: needs.changes.outputs.tui == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up the TUI workspace
+        uses: ./.github/actions/setup-tui
 
       - name: Test affected TypeScript packages
         env:
           PNPM_PACKAGES: ${{ needs.changes.outputs.pnpm_packages }}
         run: ./support/repoctl/repoctl run-checks --group tui_tests --collection-json "$PNPM_PACKAGES"
+
+  tui-build:
+    needs: changes
+    if: needs.changes.outputs.tui == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up the TUI workspace
+        uses: ./.github/actions/setup-tui
 
       - name: Build TypeScript packages
         run: ./support/repoctl/repoctl run-checks --group tui_build
@@ -251,15 +230,26 @@ jobs:
         working-directory: clients
         run: pnpm check:web-browser-bundle
 
+      - name: Smoke-test TUI packages
+        run: ./support/repoctl/repoctl run-checks --group tui_package_smoke
+
+  tui-e2e:
+    needs: changes
+    if: needs.changes.outputs.tui == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up the TUI workspace
+        uses: ./.github/actions/setup-tui
+
       - name: Install Chromium for the web smoke test
         working-directory: clients
         run: pnpm --filter @vibesys/web exec playwright install --with-deps chromium
 
       - name: Test the replay-driven web viewer
         run: ./support/repoctl/repoctl run-checks --group tui_e2e
-
-      - name: Smoke-test TUI packages
-        run: ./support/repoctl/repoctl run-checks --group tui_package_smoke
 
   queue-native:
     needs: changes
@@ -775,7 +765,10 @@ jobs:
       - doc-checks
       - python-checks
       - typecheck
-      - tui
+      - tui-quality
+      - tui-tests
+      - tui-build
+      - tui-e2e
       - queue-native
       - impact-tool
       - validate-examples
@@ -825,7 +818,10 @@ jobs:
     needs:
       - changes
       - python-checks
-      - tui
+      - tui-quality
+      - tui-tests
+      - tui-build
+      - tui-e2e
       - queue-native
       - impact-tool
       - validate-examples
