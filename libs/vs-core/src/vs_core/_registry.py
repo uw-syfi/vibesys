@@ -252,14 +252,6 @@ class OperationRegistry:
             payload["target"] = target_payload
         return type(event).model_validate(payload, context={"operation_registry": self})
 
-    def encode_event(self, event: OperationResult) -> str:
-        """Persist an operation callback with its exact registered outcome wire."""
-        return canonical_json(self.validate_event(event))
-
-    def decode_event(self, source: str) -> OperationResult:
-        """Restore callback subtypes before invoking Strategy.on_event."""
-        return OperationResult.model_validate_json(source, context={"operation_registry": self})
-
     def decode_outcome(self, schema: OperationSchemaRef, payload_json: str) -> BaseModel:
         """Give the strategy the owning library's validated outcome value."""
         return self._find(schema).outcome_model.model_validate_json(payload_json)

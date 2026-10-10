@@ -169,14 +169,6 @@ class Trace[S: StrategyState]:
         """The run as the strategy sees it now."""
         return project(self.core)
 
-    def open_requests(self) -> tuple[Request, ...]:
-        """Requests core holds that no executor has completed."""
-        return tuple(
-            intent.request
-            for intent in self.core.intents.intents
-            if intent.phase is not IntentPhase.COMPLETED
-        )
-
 
 class _Driver[S: StrategyState]:
     def __init__(

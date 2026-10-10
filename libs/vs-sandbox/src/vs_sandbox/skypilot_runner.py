@@ -576,12 +576,6 @@ class SkyPilotJobRunner:
             raise SkyPilotOutputError.queue_missing_job_list()
         return records
 
-    def _cancel_or_release(self, cluster_name: str, job_id: int) -> None:
-        try:
-            self.cancel(cluster_name, job_id)
-        except SkyPilotCLIError:
-            self.release(cluster_name)
-
     def _pause(self, deadline: float | None, detail: str) -> None:
         if deadline is not None:
             remaining = deadline - self._threads.now()

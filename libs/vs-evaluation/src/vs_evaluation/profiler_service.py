@@ -31,7 +31,6 @@ from vs_evaluation.profiler_models import (
     ProfilerDispatchedReply,
     ProfilerLifecycleEvent,
     ProfilerOperation,
-    ProfilerOperationLifecycle,
     ProfilerOperationReference,
     ProfilerOperationResult,
     ProfilerOperationsReply,
@@ -564,16 +563,6 @@ class ProfilerAgentService:
             )
         )
 
-    async def project_principal(self, principal_id: str) -> tuple[ProfilerOperationLifecycle, ...]:
-        """Return concise lifecycle facts for framework policy, without report narratives."""
-        await self._ensure_started()
-        owned = tuple(
-            record
-            for record in await self._coordinator.records()
-            if _ProfilerPayload.model_validate(record.request.payload).principal_id == principal_id
-        )
-        return tuple(_operation_lifecycle(record) for record in owned[-8:])
-
     async def project_run(self, *, limit: int | None = 32) -> tuple[ProfilerRunObservation, ...]:
         """Return host-owned profiler facts, bounding only agent-facing history views."""
         await self._ensure_started()
@@ -791,26 +780,6 @@ def _operation_reference(record: OperationHandle) -> ProfilerOperationReference:
         work=payload.work,
         candidate_snapshot_id=payload.candidate_snapshot_id,
         state=_STATE_MAP[record.state],
-    )
-
-
-def _operation_lifecycle(record: OperationHandle) -> ProfilerOperationLifecycle:
-    """Project operation identity and trusted terminal metadata only."""
-    payload = _ProfilerPayload.model_validate(record.request.payload)
-    result = (
-        _RESULT_ADAPTER.validate_python(record.result)
-        if record.state is OperationState.SUCCEEDED
-        else None
-    )
-    return ProfilerOperationLifecycle(
-        operation_id=record.request.operation_id,
-        session_id=record.request.concurrency_key,
-        request=payload.request,
-        work=payload.work,
-        candidate_snapshot_id=payload.candidate_snapshot_id,
-        state=_STATE_MAP[record.state],
-        outcome=result.report.outcome if result is not None else None,
-        trusted_evidence_ids=(result.report.evidence_ids if result is not None else ()),
     )
 
 

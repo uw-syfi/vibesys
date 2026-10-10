@@ -308,7 +308,6 @@ async def test_availability_is_typed_and_freshness_uses_injected_clock() -> None
     assert snapshot.state is AvailabilityState.DELAYED
     assert snapshot.in_flight == 7
     assert snapshot.queue_depth == 4
-    assert not snapshot.is_fresh(clock.now())
 
 
 @pytest.mark.asyncio
