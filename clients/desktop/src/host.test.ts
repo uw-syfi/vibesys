@@ -12,14 +12,21 @@ interface Scripts {
   command: (argv: readonly string[]) => CommandResult;
 }
 
-function scripted(make: (scripts: Scripts) => HostWorld['host']): () => HostWorld {
+interface Made {
+  readonly host: HostWorld['host'];
+  readonly network: {isListening(path: string): boolean};
+}
+
+function scripted(make: (scripts: Scripts) => Made): () => HostWorld {
   return () => {
     const scripts: Scripts = {
       server: () => () => {},
       command: () => ({code: 127, stdout: '', stderr: 'not found'}),
     };
+    const made = make(scripts);
     return {
-      host: make(scripts),
+      host: made.host,
+      isListening: path => made.network.isListening(path),
       scriptServer: script => {
         scripts.server = script;
       },
@@ -39,27 +46,35 @@ function node(scripts: Scripts): FakeVibesysNode {
 
 describeHostContract(
   'FakeHost',
-  scripted(
-    scripts =>
-      new FakeHost({server: args => scripts.server(args), command: argv => scripts.command(argv)}),
-  ),
+  scripted(scripts => {
+    const host = new FakeHost({
+      server: args => scripts.server(args),
+      command: argv => scripts.command(argv),
+    });
+    return {host, network: host.network};
+  }),
 );
 
 describeHostContract(
   'LocalHost',
-  scripted(scripts => new LocalHost({python: ['python3'], system: fakeLocalSystem(node(scripts))})),
+  scripted(scripts => {
+    const machine = node(scripts);
+    const host = new LocalHost({python: ['python3'], system: fakeLocalSystem(machine)});
+    return {host, network: machine.network};
+  }),
 );
 
 describeHostContract(
   'SshHost',
-  scripted(
-    scripts =>
-      new SshHost({
-        alias: 'node-1',
-        vibesysCommand: 'vibesys',
-        controlPath: '/tmp/vsd/%C',
-        askpass: '/app/askpass',
-        runner: new FakeSsh(node(scripts)),
-      }),
-  ),
+  scripted(scripts => {
+    const machine = node(scripts);
+    const host = new SshHost({
+      alias: 'node-1',
+      vibesysCommand: 'vibesys',
+      controlPath: '/tmp/vsd/%C',
+      askpass: '/app/askpass',
+      runner: new FakeSsh(machine),
+    });
+    return {host, network: machine.network};
+  }),
 );

@@ -35,7 +35,6 @@ export class FakeHost implements Host {
   readonly #server: (args: readonly string[]) => ServerScript;
   readonly #command: (argv: readonly string[]) => CommandResult;
   readonly #streams = new Set<Duplex>();
-  readonly #servers = new Set<ServerHandle>();
   #nextServer = 0;
   #closed = false;
 
@@ -71,12 +70,10 @@ export class FakeHost implements Host {
       exited,
       stop: async () => {
         this.network.unlisten(socketPath);
-        this.#servers.delete(handle);
         resolveExit({code: null, logTail: ''});
         await exited;
       },
     };
-    this.#servers.add(handle);
     return handle;
   }
 
@@ -111,7 +108,6 @@ export class FakeHost implements Host {
     this.#closed = true;
     for (const stream of this.#streams) stream.destroy();
     this.#streams.clear();
-    await Promise.all([...this.#servers].map(server => server.stop()));
   }
 
   #assertOpen(): void {

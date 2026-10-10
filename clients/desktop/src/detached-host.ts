@@ -4,7 +4,8 @@
  * What differs between this machine and an SSH host is only how a `vibesys` command runs there and
  * how a Unix socket there is opened: that is the `HostAccess` interface (`LocalHost` and `SshHost`
  * supply one each). Everything else (starting a run with `vibesys --detach`, reading its record,
- * stopping it with `vibesys instances stop`, tracking streams and servers for `close`) is here, once.
+ * stopping it with `vibesys instances stop`, tracking streams for `close`) is here, once. Servers are
+ * detached: closing the host ends its streams and its link, never a run.
  */
 import type {Duplex} from 'node:stream';
 import {
@@ -38,7 +39,6 @@ const LOG_TAIL_LINES = 20;
 export class DetachedHost implements Host {
   readonly #access: HostAccess;
   readonly #streams = new Set<Duplex>();
-  readonly #servers = new Set<ServerHandle>();
   #closed = false;
 
   constructor(access: HostAccess) {
@@ -74,13 +74,11 @@ export class DetachedHost implements Host {
       exited,
       stop: () => {
         stopping ??= this.#stop(id).then(exit => {
-          this.#servers.delete(handle);
           resolveExit(exit);
         });
         return stopping;
       },
     };
-    this.#servers.add(handle);
     return handle;
   }
 
@@ -119,7 +117,6 @@ export class DetachedHost implements Host {
     this.#closed = true;
     for (const stream of this.#streams) stream.destroy();
     this.#streams.clear();
-    await Promise.all([...this.#servers].map(server => server.stop()));
     await this.#access.close();
   }
 

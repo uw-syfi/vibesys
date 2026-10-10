@@ -32,7 +32,7 @@ export interface ServerHandle {
   readonly endpoint: Endpoint;
   /** What the server published about itself in the host's registry. */
   readonly record: InstanceRecord;
-  /** Settles once the server has been stopped through this handle or its host. */
+  /** Settles once the server has been stopped through this handle. */
   readonly exited: Promise<ServerExit>;
   /** Stop the server and wait for it to end. Idempotent. */
   stop(): Promise<void>;
@@ -95,8 +95,9 @@ export interface Host {
    */
   invoke(argv: readonly string[]): Promise<unknown>;
   /**
-   * Destroy every stream this host opened and stop every server it started. Later calls reject
-   * with `closed`. Idempotent.
+   * Destroy every stream this host opened and release its link. Servers it started keep running:
+   * they are detached, and `ServerHandle.stop` is how one ends. Later calls reject with `closed`.
+   * Idempotent.
    */
   close(): Promise<void>;
 }
