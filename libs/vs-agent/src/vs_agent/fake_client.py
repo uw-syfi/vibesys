@@ -6,7 +6,7 @@ streamed output and session-reuse behavior. With no configured structured
 response it raises ``AgentOutputSchemaError``; every call is recorded as a
 :class:`FakeInvocation` for direct assertions.
 
-This module stays schema-agnostic (no ``vibesys`` core imports) and driver-
+This module stays schema-agnostic (no ``vibesys`` core imports) and provider-
 agnostic (no ``agentshim`` imports): callers enqueue already-
 constructed response objects, and this module never runs an external agent.
 """
@@ -293,7 +293,7 @@ class FakeAgentClient:
     def set_steering(self, outcome: SteerOutcome, *, refuses_after_accepting: bool = False) -> Self:
         """Script how :meth:`steer` answers while a turn is in flight.
 
-        The default is ``UNSUPPORTED``, like a driver on a one-shot transport.
+        The default is ``UNSUPPORTED``, like a provider on a one-shot transport.
         With ``refuses_after_accepting`` a ``DELIVERED`` message is handed back
         through its ``on_rejected`` when the turn ends.
         """

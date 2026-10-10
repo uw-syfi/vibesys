@@ -1,4 +1,4 @@
-"""Application composition for agent clients and execution drivers."""
+"""Application composition for agent clients and their session launchers."""
 
 from __future__ import annotations
 
@@ -22,17 +22,17 @@ if TYPE_CHECKING:
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 
-def agent_driver_supports_tool_servers(spec: AgentSpec) -> bool | None:
-    """Return whether the configured agent driver supports agent tool servers.
+def agent_supports_tool_servers(spec: AgentSpec) -> bool | None:
+    """Return whether the configured agent backend supports agent tool servers.
 
     This query has no runtime side effects, so wiring code can reject an
-    incompatible feature before creating a project or driver resources.
-    Non-CLI backends do not use the external-driver contract.
+    incompatible feature before creating a project or launcher resources.
+    Non-CLI backends have no external provider session, so they answer ``None``.
     """
     if spec.backend != AgentBackend.CLI:
         return None
 
-    from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # lint-waiver: LW-010171 [PLC0415]; Keep AGENTSHIM_CAPABILITIES lazy so unused providers and import cycles stay unloaded.
+    from vs_agent.session_launch import (  # noqa: PLC0415  # lint-waiver: LW-010171 [PLC0415]; Keep AGENTSHIM_CAPABILITIES lazy so unused providers and import cycles stay unloaded.
         AGENTSHIM_CAPABILITIES,
     )
 
@@ -84,7 +84,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
 
     provider = spec.provider
     timeout = spec.cli_timeout
-    driver_log = AgentDiagnosticLog(run_log_file)
+    diagnostic_log = AgentDiagnosticLog(run_log_file)
 
     docker_sandboxes = None
     if use_docker:
@@ -99,21 +99,21 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
             )
             raise SystemExit(message)
         docker_sandboxes = backends
-    from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # lint-waiver: LW-010176 [PLC0415]; Keep AgentShimDriver lazy in build_agent_client so unused providers and import cycles stay unloaded.
-        AgentShimDriver,
+    from vs_agent.session_launch import (  # noqa: PLC0415  # lint-waiver: LW-010176 [PLC0415]; Keep ConfinedSessionLauncher lazy in build_agent_client so unused providers and import cycles stay unloaded.
+        ConfinedSessionLauncher,
     )
 
-    driver = AgentShimDriver(
+    launcher = ConfinedSessionLauncher(
         provider=provider,
         timeout=timeout,
         docker_sandboxes=docker_sandboxes,
-        log=driver_log,
+        log=diagnostic_log,
         agent_homes=agent_homes_dir,
         env_passthrough=spec.env_passthrough,
     )
 
     return AgentClient(
-        driver,
+        launcher,
         provider=provider,
         skills=skill_source_dirs,
         skill_selection=skill_selection,
@@ -128,7 +128,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
         host_resources=host_resources,
         require_host_sandbox=require_host_sandbox,
         containerized=use_docker,
-        driver_log=driver_log,
+        diagnostic_log=diagnostic_log,
         session_store=session_store,
         event_sink=events,
         check_readiness=True,

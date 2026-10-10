@@ -2,7 +2,7 @@
 
 Codex's long-lived app-server is scripted with ``agentshim.testing.CodexScript``
 (its real ``turn/steer`` exchange), so the whole path runs: ``AgentClient.steer``
--> ``AgentShimSession.steer`` -> ``agentshim.Session.steer`` -> the server. The
+-> ``LaunchedSession.steer`` -> ``agentshim.Session.steer`` -> the server. The
 default one-shot transport must never be asked.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import io
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
@@ -30,18 +30,18 @@ from vs_agent.api import (
     AgentClient,
     AgentEvent,
     AgentEventKind,
-    NullAgentEventSink,
-    SteerableSession,
-    SteerOutcome,
-)
-from vs_agent.client import AgentDiagnosticLog
-from vs_agent.contracts import (
     AgentExecutionPolicy,
-    AgentSession,
     AgentSessionSpec,
     AgentTurnRequest,
+    NullAgentEventSink,
+    SteerOutcome,
 )
-from vs_agent.drivers.agentshim import AgentShimDriver
+
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
+from vs_agent.client import AgentDiagnosticLog
+
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
+from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
 
 if TYPE_CHECKING:
@@ -54,17 +54,17 @@ PROVIDERS = ("claude", "codex", "gemini", "opencode")
 
 @pytest.fixture(scope="module")
 def home(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A throwaway operator HOME: the driver prepares provider state under it."""
+    """A throwaway operator HOME: the launcher prepares provider state under it."""
     return tmp_path_factory.mktemp("operator-home")
 
 
-def _driver(
+def _launcher(
     provider: str,
     fake: FakeExecutor,
     home: Path,
     transport: agentshim.TransportKind,
-) -> AgentShimDriver:
-    return AgentShimDriver(
+) -> ConfinedSessionLauncher:
+    return ConfinedSessionLauncher(
         provider=provider,
         executor_factory=lambda: fake,
         launcher_env=lambda: {
@@ -74,16 +74,6 @@ def _driver(
         },
         transport=transport,
     )
-
-
-class _SteerableAgentSession(AgentSession, SteerableSession, Protocol):
-    """A session that is also the optional steering capability."""
-
-
-def _steerable(session: AgentSession) -> _SteerableAgentSession:
-    """The AgentShim session as the optional steering capability it provides."""
-    assert isinstance(session, SteerableSession)
-    return cast("_SteerableAgentSession", session)
 
 
 def _diagnostics(events: list[AgentEvent]) -> list[str]:
@@ -140,7 +130,7 @@ def _delivered(outcomes: list[SteerOutcome]) -> bool:
 
 def test_a_steer_reaches_the_running_turn_through_the_client(tmp_path: Path, home: Path) -> None:
     script = CodexScript().turn(RunCommand("sleep 20"), AwaitSteer(then=(Say("STEERED"),)))
-    driver = _driver(
+    launcher = _launcher(
         "codex", FakeExecutor([], peers=script.peer), home, agentshim.TransportKind.STREAM
     )
     rejected: list[str] = []
@@ -158,10 +148,10 @@ def test_a_steer_reaches_the_running_turn_through_the_client(tmp_path: Path, hom
             steerer.on_event(AgentEvent(kind=AgentEventKind.THINKING))
 
     client = AgentClient(
-        driver,
+        launcher,
         provider="codex",
         event_sink=_Sink(),
-        driver_log=AgentDiagnosticLog(io.StringIO()),
+        diagnostic_log=AgentDiagnosticLog(io.StringIO()),
     )
 
     answer = client.invoke_text(
@@ -182,10 +172,10 @@ def test_a_steer_is_delivered_once_and_reported_on_the_diagnostic_channel(
     tmp_path: Path, home: Path
 ) -> None:
     script = CodexScript().turn(RunCommand("sleep 20"), AwaitSteer(then=(Say("STEERED"),)))
-    driver = _driver(
+    launcher = _launcher(
         "codex", FakeExecutor([], peers=script.peer), home, agentshim.TransportKind.STREAM
     )
-    session = _steerable(driver.create_session(_spec(tmp_path)))
+    session = launcher.launch(_spec(tmp_path))
     rejected: list[str] = []
     observer = _SteerWhenRunning(
         lambda: session.steer(TEXT, on_rejected=lambda: rejected.append(TEXT))
@@ -208,10 +198,10 @@ def test_a_refusal_after_acceptance_hands_the_text_back_exactly_once(
     script = CodexScript(steer_refusal="turn cannot be steered").turn(
         Say("a"), AwaitSteer(then=(Say("b"),))
     )
-    driver = _driver(
+    launcher = _launcher(
         "codex", FakeExecutor([], peers=script.peer), home, agentshim.TransportKind.STREAM
     )
-    session = _steerable(driver.create_session(_spec(tmp_path)))
+    session = launcher.launch(_spec(tmp_path))
     rejected: list[str] = []
 
     def steer_then_stop() -> SteerOutcome:
@@ -233,9 +223,9 @@ def test_a_refusal_after_acceptance_hands_the_text_back_exactly_once(
 @given(provider=st.sampled_from(PROVIDERS))
 def test_a_one_shot_provider_is_never_asked_to_steer(provider: str, home: Path) -> None:
     fake = FakeExecutor(scripted_turn(provider, text="done"))
-    driver = _driver(provider, fake, home, agentshim.TransportKind.ONE_SHOT)
+    launcher = _launcher(provider, fake, home, agentshim.TransportKind.ONE_SHOT)
     with TemporaryDirectory() as root:
-        session = _steerable(driver.create_session(_spec(Path(root), provider)))
+        session = launcher.launch(_spec(Path(root), provider))
         rejected: list[str] = []
         observer = _SteerWhenRunning(
             lambda: session.steer(TEXT, on_rejected=lambda: rejected.append(TEXT))
@@ -253,10 +243,10 @@ def test_a_steer_with_no_turn_running_reports_it_before_and_after_a_turn(
     tmp_path: Path, home: Path
 ) -> None:
     script = CodexScript().turn(Say("ok"))
-    driver = _driver(
+    launcher = _launcher(
         "codex", FakeExecutor([], peers=script.peer), home, agentshim.TransportKind.STREAM
     )
-    session = _steerable(driver.create_session(_spec(tmp_path)))
+    session = launcher.launch(_spec(tmp_path))
 
     def offer() -> SteerOutcome:
         return session.steer(TEXT, on_rejected=lambda: None)
@@ -272,7 +262,7 @@ def test_a_steer_with_no_turn_running_reports_it_before_and_after_a_turn(
 def test_a_client_with_no_turn_in_flight_reports_none_running(home: Path) -> None:
     fake = FakeExecutor(scripted_turn("claude"))
     client = AgentClient(
-        _driver("claude", fake, home, agentshim.TransportKind.ONE_SHOT),
+        _launcher("claude", fake, home, agentshim.TransportKind.ONE_SHOT),
         provider="claude",
     )
 

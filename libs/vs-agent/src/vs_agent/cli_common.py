@@ -1,7 +1,7 @@
-"""Prompt and workspace helpers shared by external-agent drivers.
+"""Prompt and workspace helpers shared by agent sessions.
 
 The application client owns skill materialization and response parsing. A
-driver reuses :func:`build_schema_hint` when its provider cannot take the
+session reuses :func:`build_schema_hint` when its provider cannot take the
 response schema natively; ``agentshim`` owns the native-schema dialect checks
 and materialization.
 """

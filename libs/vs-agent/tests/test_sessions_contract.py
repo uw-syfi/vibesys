@@ -9,7 +9,6 @@ from threading import Event
 from typing import TYPE_CHECKING
 
 import pytest
-from agentshim.testing import FakeExecutor, FakeRun, scripted_turn
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
@@ -40,8 +39,11 @@ from vs_agent.api import (
 from vs_agent.api.testing import (
     FakeAgentInvocationStore,
     FakeAgentSessions,
-    FakeDriver,
-    fake_agentshim_driver,
+    FakeExecutor,
+    FakeProvider,
+    FakeRun,
+    fake_agentshim_launcher,
+    scripted_turn,
 )
 from vs_project.api import (
     OrchestrationDescriptor,
@@ -135,7 +137,7 @@ def harness(
     )
     boundary = _Boundary()
     if request.param == "fake":
-        driver = FakeDriver(answer="done", on_turn=lambda _: boundary.accept())
+        launcher = FakeProvider(answer="done", on_turn=lambda _: boundary.accept())
     else:
 
         def execute(_request: object) -> FakeRun:
@@ -144,10 +146,10 @@ def harness(
                 "codex", session_id="thread-1", text="done"
             )
 
-        driver = fake_agentshim_driver(provider="codex", executor=FakeExecutor(execute))
+        launcher = fake_agentshim_launcher(provider="codex", executor=FakeExecutor(execute))
 
     def new_client() -> AgentClient:
-        return AgentClient(driver, provider="codex", session_store=checkpoints)
+        return AgentClient(launcher, provider="codex", session_store=checkpoints)
 
     client = new_client()
     spec = AgentSessionSpec(
@@ -330,14 +332,14 @@ def test_declared_provider_resume_failure_never_falls_back(harness: _Harness) ->
     assert harness.reconstruct().resume(KEY, harness.message, "resume-1") == result
 
 
-class _NoResumeDriver(FakeDriver):
+class _NoResumeProvider(FakeProvider):
     @property
     def capabilities(self) -> AgentCapabilities:
         return replace(super().capabilities, provider_session_resume=False)
 
 
 def test_unsupported_provider_is_typed_preflight_error() -> None:
-    client = AgentClient(_NoResumeDriver(answer="done"))
+    client = AgentClient(_NoResumeProvider(answer="done"))
     try:
         with pytest.raises(SessionConfigurationError, match="provider_session_resume"):
             ClientAgentSessions(client, FakeAgentInvocationStore())
@@ -417,10 +419,10 @@ def test_raw_strict_turn_cannot_start_ephemeral_or_nondurable_session(
 def test_strict_turn_cannot_dispatch_without_adoption(tmp_path: Path, implementation: str) -> None:
     fake_calls: list[AgentTurnRequest] = []
     executor = FakeExecutor(scripted_turn("codex", session_id="new-thread", text="done"))
-    driver = (
-        FakeDriver(answer="done", on_turn=fake_calls.append)
+    launcher = (
+        FakeProvider(answer="done", on_turn=fake_calls.append)
         if implementation == "fake"
-        else fake_agentshim_driver(provider="codex", executor=executor)
+        else fake_agentshim_launcher(provider="codex", executor=executor)
     )
     spec = AgentSessionSpec(
         role="implementer",
@@ -428,7 +430,7 @@ def test_strict_turn_cannot_dispatch_without_adoption(tmp_path: Path, implementa
         workspace=tmp_path,
         policy=AgentExecutionPolicy(require_enforcement=False),
     )
-    session = driver.create_session(spec)
+    session = launcher.launch(spec)
     try:
         with pytest.raises(SessionResumeError, match="adopted"):
             session.run_turn(
@@ -440,7 +442,7 @@ def test_strict_turn_cannot_dispatch_without_adoption(tmp_path: Path, implementa
             assert fake_calls == []
     finally:
         session.close()
-        driver.close()
+        launcher.close()
 
 
 @pytest.mark.parametrize("implementation", ["fake", "agentshim"])
@@ -456,10 +458,10 @@ def test_strict_turn_identity_matches_adoption_and_prior_turn(
             text="done",
         )
     )
-    driver = (
-        FakeDriver(answer="done", on_turn=fake_calls.append)
+    launcher = (
+        FakeProvider(answer="done", on_turn=fake_calls.append)
         if implementation == "fake"
-        else fake_agentshim_driver(provider="codex", executor=executor)
+        else fake_agentshim_launcher(provider="codex", executor=executor)
     )
     spec = AgentSessionSpec(
         role="implementer",
@@ -467,15 +469,15 @@ def test_strict_turn_identity_matches_adoption_and_prior_turn(
         workspace=tmp_path,
         policy=AgentExecutionPolicy(require_enforcement=False),
     )
-    session = driver.create_session(spec)
+    session = launcher.launch(spec)
     try:
         if scenario == "prior-turn":
             initial = session.run_turn(AgentTurnRequest(message="first"))
             expected = initial.provider_session_id
             assert expected is not None
-            assert not session.resume_provider_session("stale-thread")
+            assert not session.adopt("stale-thread")
         else:
-            assert session.resume_provider_session("old-thread")
+            assert session.adopt("old-thread")
             expected = "old-thread"
         if scenario == "adoption-mismatch":
             with pytest.raises(SessionResumeError, match="adopted"):
@@ -497,7 +499,7 @@ def test_strict_turn_identity_matches_adoption_and_prior_turn(
             assert len(executor.requests) == (2 if scenario == "prior-turn" else 1)
     finally:
         session.close()
-        driver.close()
+        launcher.close()
 
 
 @pytest.mark.parametrize("implementation", ["fake", "agentshim"])
@@ -514,10 +516,10 @@ def test_session_cannot_adopt_while_turn_is_in_flight(tmp_path: Path, implementa
         entered.set()
         release.wait()
 
-    driver = (
-        FakeDriver(answer="done", on_turn=block_fake_turn)
+    launcher = (
+        FakeProvider(answer="done", on_turn=block_fake_turn)
         if implementation == "fake"
-        else fake_agentshim_driver(provider="codex", executor=FakeExecutor(block_turn))
+        else fake_agentshim_launcher(provider="codex", executor=FakeExecutor(block_turn))
     )
     spec = AgentSessionSpec(
         role="implementer",
@@ -525,20 +527,20 @@ def test_session_cannot_adopt_while_turn_is_in_flight(tmp_path: Path, implementa
         workspace=tmp_path,
         policy=AgentExecutionPolicy(require_enforcement=False),
     )
-    session = driver.create_session(spec)
+    session = launcher.launch(spec)
     try:
         with ThreadPoolExecutor(max_workers=1) as pool:
             turn = pool.submit(session.run_turn, AgentTurnRequest(message="first"))
             try:
                 entered.wait()
-                assert not session.resume_provider_session("late-thread")
+                assert not session.adopt("late-thread")
             finally:
                 release.set()
             assert turn.result().text == "done"
     finally:
         release.set()
         session.close()
-        driver.close()
+        launcher.close()
 
 
 @pytest.mark.parametrize("kind", [Pending, Unknown])
@@ -626,7 +628,7 @@ def test_initial_reply_replays_after_all_services_reconstructed(
         reopened = _namespace_existing(workspace)
         checkpoints = DurableSessionStore(reopened.slot("sessions.json", AgentSessionState))
         client = AgentClient(
-            FakeDriver(answer="waiting", on_turn=calls.append),
+            FakeProvider(answer="waiting", on_turn=calls.append),
             provider="codex",
             session_store=checkpoints,
         )
@@ -683,7 +685,7 @@ def test_initial_schema_rejection_without_checkpoint_fences_live_and_recovered_c
             detail = "value must be an integer"
             raise AgentOutputSchemaError(detail)
 
-    client = AgentClient(FakeDriver(answer="done", on_turn=execute))
+    client = AgentClient(FakeProvider(answer="done", on_turn=execute))
     ledger = FakeAgentInvocationStore()
     sessions = ClientAgentSessions(client, ledger)
     spec = AgentSessionSpec(

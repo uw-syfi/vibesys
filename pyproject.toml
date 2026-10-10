@@ -257,11 +257,16 @@ convention = "google"
 "langchain_openai".msg = "langchain was removed; do not reintroduce it."
 "langchain_google_vertexai".msg = "langchain was removed; do not reintroduce it."
 "langgraph".msg = "langgraph was removed; do not reintroduce it."
+"agentshim".msg = "Only vs_agent talks to agentshim; use vs_agent.api (or vs_agent.api.testing in tests)."
 
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.OutcomeValue", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
 
 [tool.ruff.lint.per-file-ignores]
+# agentshim is the agent-CLI library; vs_agent is its only importer. The e2e
+# tests drive the real library and CLIs, so they may name it too.
+"libs/vs-agent/**" = ["TID251"]
+"tests/e2e/**" = ["TID251"]
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "libs/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "sdk/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]

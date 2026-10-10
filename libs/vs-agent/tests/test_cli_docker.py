@@ -6,9 +6,10 @@ import agentshim
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support import provider_profiles as fake_profiles
 
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent import cli_docker
+from vs_agent.api.testing import fake_profiles
 
 _SHIPPED = ("claude", "codex", "gemini", "opencode")
 

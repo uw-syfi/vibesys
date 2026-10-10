@@ -42,7 +42,7 @@ from vs_agent.api import (
     SessionResumeError,
     Unknown,
 )
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver, FakeTurnScript
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider, FakeTurnScript
 from vs_mcp.api import StdioServerDescriptor
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_prompts.api import TemplateRenderer
@@ -217,7 +217,7 @@ ROLE = AgentRole(
 def open_runtime(
     project: Project,
     path: Path,
-    driver: FakeDriver,
+    driver: FakeProvider,
     lifecycle: FakeAgentExecutionLifecycleSink | None = None,
     *,
     invocation_store: AgentInvocationStore | None = None,
@@ -304,8 +304,8 @@ def test_initial_turn_and_reconstructed_resume_use_the_same_conversation(tmp_pat
     project = create_project(tmp_path)
     lifecycle = FakeAgentExecutionLifecycleSink()
     turns: list[AgentTurnRequest] = []
-    initial_driver = FakeDriver(answer={"value": 7}, on_turn=turns.append)
-    reconstructed_driver = FakeDriver(answer={"value": 8}, on_turn=turns.append)
+    initial_driver = FakeProvider(answer={"value": 7}, on_turn=turns.append)
+    reconstructed_driver = FakeProvider(answer={"value": 8}, on_turn=turns.append)
     # A local template keeps the continuation at the checked agent-bound sink.
     template = tmp_path / "resume.j2"
     template.write_text("{{ result }}")
@@ -369,7 +369,7 @@ def test_durable_key_has_one_live_owner(implementation: str, tmp_path: Path) -> 
         runtime = None
         if implementation == "runtime":
             runtime = open_runtime(
-                create_project(tmp_path), tmp_path, FakeDriver(answer={"value": 7})
+                create_project(tmp_path), tmp_path, FakeProvider(answer={"value": 7})
             )
             owner = runtime.agents
             workspace = runtime.workspaces.root
@@ -410,7 +410,7 @@ def test_in_flight_resume_is_inspectable_without_waiting_for_the_agent(tmp_path:
     message = TemplateRenderer(tmp_path).render_string("trusted result")
 
     async def scenario() -> None:
-        runtime = open_runtime(project, tmp_path, FakeDriver(answer={"value": 7}, on_turn=hold))
+        runtime = open_runtime(project, tmp_path, FakeProvider(answer={"value": 7}, on_turn=hold))
         session = await runtime.agents.create_session(
             ROLE, workspace=runtime.workspaces.root, member_id="member"
         )
@@ -429,7 +429,7 @@ def test_in_flight_resume_is_inspectable_without_waiting_for_the_agent(tmp_path:
     asyncio.run(scenario())
 
 
-class NonresumableDriver(FakeDriver):
+class NonresumableDriver(FakeProvider):
     @property
     def capabilities(self) -> AgentCapabilities:
         return replace(super().capabilities, provider_session_resume=False)
@@ -478,7 +478,7 @@ def test_key_ownership_is_held_until_pending_close_acknowledges(
         runtime = None
         if implementation == "runtime":
             runtime = open_runtime(
-                create_project(tmp_path), tmp_path, FakeDriver(answer="done", on_turn=hold)
+                create_project(tmp_path), tmp_path, FakeProvider(answer="done", on_turn=hold)
             )
             owner = runtime.agents
             workspace = runtime.workspaces.root
@@ -546,7 +546,7 @@ def test_resume_finishes_lifecycle_when_invocation_commit_fails(
 ) -> None:
     lifecycle = FakeAgentExecutionLifecycleSink()
     turns: list[AgentTurnRequest] = []
-    driver = FakeDriver(answer={"value": 7}, on_turn=turns.append)
+    driver = FakeProvider(answer={"value": 7}, on_turn=turns.append)
     message = TemplateRenderer(tmp_path).render_string("Evaluation settled.")
 
     async def scenario() -> None:
@@ -603,7 +603,7 @@ def test_initial_turn_journal_replays_after_host_reconstruction(
                 runtime = open_runtime(
                     project,
                     tmp_path,
-                    FakeDriver(
+                    FakeProvider(
                         answer={"value": 7}, on_turn=lambda turn: calls.append(turn.message)
                     ),
                 )
@@ -725,7 +725,7 @@ def test_invalid_initial_reply_is_durable_and_allows_explicit_correction(
             runtime = open_runtime(
                 create_project(tmp_path),
                 tmp_path,
-                FakeDriver(
+                FakeProvider(
                     answer={"other": "accepted"},
                     on_turn=lambda turn: calls.append(turn.message),
                 ),
@@ -814,7 +814,7 @@ async def test_fake_first_initial_establishes_checkpoint_but_later_missing_proof
         workspace=tmp_path,
         policy=AgentExecutionPolicy(require_enforcement=False),
     )
-    client = AgentClient(FakeDriver(answer="provider checkpoint established"))
+    client = AgentClient(FakeProvider(answer="provider checkpoint established"))
     ledger = FakeAgentInvocationStore()
     transport = ClientAgentSessions(client, ledger)
     calls: list[str] = []
@@ -986,7 +986,7 @@ def test_initial_and_resume_share_unknown_fences_after_reconstruction(
             for restarted in (False, True):
                 if implementation == "runtime":
                     runtime = open_runtime(
-                        project, tmp_path, FakeDriver(answer="done", on_turn=fail)
+                        project, tmp_path, FakeProvider(answer="done", on_turn=fail)
                     )
                     owner = runtime.agents
                     workspace = runtime.workspaces.root
@@ -1092,7 +1092,7 @@ def test_correction_preserves_checkpoint_when_provider_would_retire_unrestricted
         if provider_rejection
         else {"other": "missing value"}
     )
-    driver = FakeDriver(
+    driver = FakeProvider(
         script=FakeTurnScript((invalid, {"value": 7}), reset_after_turn=2), on_turn=turns.append
     )
     project = create_project(tmp_path)
@@ -1215,7 +1215,7 @@ def test_generated_correction_checkpoint_and_restart_outcomes(
             runtime = open_runtime(
                 project,
                 path,
-                FakeDriver(
+                FakeProvider(
                     script=FakeTurnScript((answers[initial], answers[correction])), on_turn=observe
                 ),
             )
@@ -1242,7 +1242,9 @@ def test_generated_correction_checkpoint_and_restart_outcomes(
                     runtime = open_runtime(
                         project,
                         path,
-                        FakeDriver(script=FakeTurnScript((answers[correction],)), on_turn=observe),
+                        FakeProvider(
+                            script=FakeTurnScript((answers[correction],)), on_turn=observe
+                        ),
                     )
                     session = await runtime.agents.create_session(
                         ROLE, workspace=runtime.workspaces.root, member_id="member"
@@ -1254,7 +1256,7 @@ def test_generated_correction_checkpoint_and_restart_outcomes(
                 if restart == "after":
                     await runtime.workspaces.close()
                     runtime = open_runtime(
-                        project, path, FakeDriver(answer={"value": 99}, on_turn=observe)
+                        project, path, FakeProvider(answer={"value": 99}, on_turn=observe)
                     )
                     session = await runtime.agents.create_session(
                         ROLE, workspace=runtime.workspaces.root, member_id="member"
@@ -1271,7 +1273,7 @@ def test_generated_correction_checkpoint_and_restart_outcomes(
 
 
 def test_journaled_turn_suppresses_discretionary_checkpoint_retirement(tmp_path: Path) -> None:
-    driver = FakeDriver(script=FakeTurnScript(({"value": 7},), reset_after_turn=1))
+    driver = FakeProvider(script=FakeTurnScript(({"value": 7},), reset_after_turn=1))
     message = TemplateRenderer(tmp_path).render_string("Continue with settled evidence.")
 
     async def scenario() -> None:
@@ -1307,7 +1309,7 @@ def test_latest_initial_checkpoint_follows_dispatch_order_not_sorted_identity(
 
     async def scenario() -> None:
         runtime = open_runtime(
-            project, tmp_path, FakeDriver(answer={"value": 1}, on_turn=turns.append)
+            project, tmp_path, FakeProvider(answer={"value": 1}, on_turn=turns.append)
         )
         try:
             session = await runtime.agents.create_session(
@@ -1318,7 +1320,7 @@ def test_latest_initial_checkpoint_follows_dispatch_order_not_sorted_identity(
             )
             await runtime.workspaces.close()
             runtime = open_runtime(
-                project, tmp_path, FakeDriver(answer={"value": 2}, on_turn=turns.append)
+                project, tmp_path, FakeProvider(answer={"value": 2}, on_turn=turns.append)
             )
             session = await runtime.agents.create_session(
                 ROLE, workspace=runtime.workspaces.root, member_id="member"
@@ -1365,7 +1367,7 @@ def test_latest_initial_checkpoint_follows_dispatch_order_not_sorted_identity(
             assert Reply.model_validate_json(corrected.result.text) == Reply(value=2)
             await runtime.workspaces.close()
             runtime = open_runtime(
-                project, tmp_path, FakeDriver(answer={"value": 3}, on_turn=turns.append)
+                project, tmp_path, FakeProvider(answer={"value": 3}, on_turn=turns.append)
             )
             session = await runtime.agents.create_session(
                 ROLE, workspace=runtime.workspaces.root, member_id="member"
@@ -1403,7 +1405,7 @@ def test_legacy_single_checkpoint_allows_correction_without_replaying_initial(
 
     async def scenario() -> None:
         runtime = open_runtime(
-            project, tmp_path, FakeDriver(answer={"other": "invalid"}, on_turn=turns.append)
+            project, tmp_path, FakeProvider(answer={"other": "invalid"}, on_turn=turns.append)
         )
         try:
             session = await runtime.agents.create_session(
@@ -1415,7 +1417,7 @@ def test_legacy_single_checkpoint_allows_correction_without_replaying_initial(
             await runtime.workspaces.close()
             _restore_legacy_invocation_document(project)
             runtime = open_runtime(
-                project, tmp_path, FakeDriver(answer={"value": 7}, on_turn=turns.append)
+                project, tmp_path, FakeProvider(answer={"value": 7}, on_turn=turns.append)
             )
             session = await runtime.agents.create_session(
                 ROLE, workspace=runtime.workspaces.root, member_id="member"
@@ -1446,7 +1448,9 @@ def test_failed_initial_with_prior_checkpoint_preserves_provider_failure(
             raise OSError(detail)
 
     async def scenario() -> None:
-        runtime = open_runtime(project, tmp_path, FakeDriver(answer={"value": 7}, on_turn=observe))
+        runtime = open_runtime(
+            project, tmp_path, FakeProvider(answer={"value": 7}, on_turn=observe)
+        )
         try:
             session = await runtime.agents.create_session(
                 ROLE, workspace=runtime.workspaces.root, member_id="member"
@@ -1459,7 +1463,7 @@ def test_failed_initial_with_prior_checkpoint_preserves_provider_failure(
             if restart:
                 await runtime.workspaces.close()
                 runtime = open_runtime(
-                    project, tmp_path, FakeDriver(answer={"value": 9}, on_turn=observe)
+                    project, tmp_path, FakeProvider(answer={"value": 9}, on_turn=observe)
                 )
                 session = await runtime.agents.create_session(
                     ROLE, workspace=runtime.workspaces.root, member_id="member"
@@ -1505,7 +1509,7 @@ def test_successive_corrections_use_requested_schema_and_replay_after_restart(
     answers = [replies[schemas[0]]]
     for schema in schemas[1:]:
         answers.extend(({}, replies[schema]))
-    driver = FakeDriver(script=FakeTurnScript(tuple(answers)), on_turn=turns.append)
+    driver = FakeProvider(script=FakeTurnScript(tuple(answers)), on_turn=turns.append)
     message = TemplateRenderer(tmp_path).render_string("Please correct the response.")
     corrections: list[Completed] = []
 
@@ -1569,7 +1573,7 @@ def _pending_correction_owner(
     calls: list[str],
 ) -> _OpenedSessionContract:
     if implementation == "runtime":
-        driver = FakeDriver(answer="accepted", on_turn=lambda turn: calls.append(turn.message))
+        driver = FakeProvider(answer="accepted", on_turn=lambda turn: calls.append(turn.message))
         runtime = open_runtime(project, path, driver, invocation_store=ledger)
         return _OpenedSessionContract(runtime.agents, (), runtime)
     owner = FakeWorkspaceAgentSessions(

@@ -5,7 +5,7 @@ Replaces the old file-materialization evidence path
 run's portable state and raw logs into the chat agent's sandbox for `rg`/
 `tail`/`jq`, this subprocess opens the run's own read-model
 (`launch.open_run_store`) and serves it as a handful of read-only MCP
-tools. A chat agent driver launches `python -m entrypoints.chat_tools_server
+tools. A chat agent launches `python -m entrypoints.chat_tools_server
 --run-id <id> --project-root <path>` per `vibesys.api.session
 ._OpenedAgentEnvironment.investigation_tools`; this module rebuilds its own
 tool list from those two primitives as a standalone agent tool server.

@@ -1,4 +1,4 @@
-"""VibeSys agent service shared by all external-agent drivers."""
+"""VibeSys agent service over launched ``agentshim`` sessions."""
 
 from __future__ import annotations
 
@@ -13,14 +13,12 @@ from vs_agent.callbacks import AgentLogger
 from vs_agent.cli_common import agent_label, materialize_skills
 from vs_agent.contracts import (
     AgentCapabilities,
-    AgentDriver,
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
     AgentObserver,
     AgentOutputSchemaError,
     AgentQuotaError,
-    AgentSession,
     AgentSessionSpec,
     AgentSkillUse,
     AgentTurnRequest,
@@ -30,8 +28,6 @@ from vs_agent.contracts import (
     MCPServerSpec,
     ProviderNotReadyError,
     ReadinessProbe,
-    SessionDisposition,
-    SteerableSession,
     SteerOutcome,
     session_spec_fingerprint,
 )
@@ -53,6 +49,8 @@ if TYPE_CHECKING:
     from vs_agent.contracts import CapacityGate
     from vs_agent.events import AgentOutputChannel
     from vs_agent.progress import AgentProgress
+    from vs_agent.session_launch import SessionLauncher
+    from vs_agent.shim_turns import LaunchedSession
     from vs_agent.sink import AgentEventSink
     from vs_agent.skills import SkillSelection
     from vs_mcp.api import ToolServerDescriptor
@@ -64,7 +62,7 @@ T = TypeVar("T", bound=BaseModel)
 @dataclass(slots=True)
 class _CachedSession:
     spec: AgentSessionSpec
-    session: AgentSession
+    session: LaunchedSession
     #: The provider conversation the last completed turn on this session ran
     #: in. Kept beside the live handle so a caller can name the conversation
     #: its next turn continues without a durable store being wired.
@@ -90,7 +88,7 @@ def _emit_and_log(
 
 
 class AgentDiagnosticLog:
-    """Mutable diagnostic destination shared by a client and its driver."""
+    """Mutable diagnostic destination shared by a client and its session launcher."""
 
     def __init__(self, stream: TextIO | None, *, event_sink: AgentEventSink | None = None) -> None:
         """Create a log target backed by ``stream``."""
@@ -98,12 +96,12 @@ class AgentDiagnosticLog:
         self._sink = event_sink if event_sink is not None else NULL_AGENT_EVENT_SINK
 
     def __call__(self, message: str) -> None:
-        """Write one driver diagnostic to the current run log."""
+        """Write one diagnostic to the current run log."""
         _emit_and_log(self._sink, message, self.stream)
 
 
 def _publish_final_text(logger: AgentLogger, text: str) -> None:
-    """Render a turn's answer that no driver stream delivered.
+    """Render a turn's answer that no provider stream delivered.
 
     Routed through the turn's logger rather than printed directly so the
     chunk carries the same ``agent_kind``/``round_label``/``invocation_id``
@@ -115,7 +113,7 @@ def _publish_final_text(logger: AgentLogger, text: str) -> None:
 
 
 class _LoggerObserver:
-    """Translate neutral driver events into VibeSys's application logger."""
+    """Translate neutral provider events into VibeSys's application logger."""
 
     def __init__(
         self,
@@ -129,7 +127,7 @@ class _LoggerObserver:
         self._provider = provider
 
     def on_event(self, event: AgentEvent) -> None:
-        """Render one normalized driver event and preserve the caller observer."""
+        """Render one normalized provider event and preserve the caller observer."""
         if self._observer is not None:
             self._observer.on_event(event)
         if event.kind is AgentEventKind.TEXT:
@@ -177,7 +175,7 @@ class _LoggerObserver:
 def _translate_tool_servers(
     servers: Iterable[ToolServerDescriptor] | None,
 ) -> tuple[MCPServerSpec, ...]:
-    """Translate generic tool declarations into the driver's MCP contract."""
+    """Translate generic tool declarations into the provider-neutral MCP contract."""
     return tuple(
         MCPServerSpec(
             name=item.name,
@@ -202,7 +200,7 @@ class AgentClient:
 
     def __init__(  # noqa: PLR0913  # lint-waiver: LW-010119 [PLR0913]; Preserve AgentClient.__init__'s named-argument contract because callers pass these independent settings directly.
         self,
-        driver: AgentDriver,
+        launcher: SessionLauncher,
         *,
         provider: str | None = None,
         skills: Iterable[Path] = (),
@@ -218,19 +216,19 @@ class AgentClient:
         host_resources: Iterable[HostResource] = (),
         require_host_sandbox: bool = False,
         containerized: bool = False,
-        driver_log: AgentDiagnosticLog | None = None,
+        diagnostic_log: AgentDiagnosticLog | None = None,
         session_store: SessionStore | None = None,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
         check_readiness: bool = False,
     ) -> None:
-        """Create a client that owns ``driver`` and every session it creates.
+        """Create a client that owns ``launcher`` and every session it opens.
 
         ``check_readiness`` makes the first session of each role probe the
         provider CLI first (see :meth:`_require_ready`). Product wiring turns
-        it on; a client built around a scripted driver leaves it off, since a
+        it on; a client built around a scripted provider leaves it off, since a
         probe is a command the script would have to answer.
         """
-        self._driver = driver
+        self._launcher = launcher
         self._sink = event_sink
         self._session_store: SessionStore = session_store or NullSessionStore()
         self._provider = provider
@@ -239,7 +237,7 @@ class AgentClient:
         self._model_name = model_name
         self._timeout = timeout
         self._run_log_file = run_log_file
-        self._driver_log = driver_log
+        self._diagnostic_log = diagnostic_log
         self._log_dir = log_dir
         self._default_reasoning_effort = default_reasoning_effort
         self._role_models = dict(role_models or {})
@@ -260,13 +258,13 @@ class AgentClient:
         self._closed = False
         self._cancelled = False
         self._active_lock = threading.Lock()
-        self._active_sessions: list[AgentSession] = []
+        self._active_sessions: list[LaunchedSession] = []
         self._capacity_gate: CapacityGate | None = None
 
     @property
     def capabilities(self) -> AgentCapabilities:
-        """Return the selected driver's factual capabilities."""
-        return self._driver.capabilities
+        """Return the selected launcher's factual capabilities."""
+        return self._launcher.capabilities
 
     @property
     def provider(self) -> str | None:
@@ -280,8 +278,8 @@ class AgentClient:
     def set_log_file(self, stream: TextIO | None) -> None:
         """Direct subsequent application logs to ``stream``."""
         self._run_log_file = stream
-        if self._driver_log is not None:
-            self._driver_log.stream = stream
+        if self._diagnostic_log is not None:
+            self._diagnostic_log.stream = stream
 
     def invoke(  # noqa: PLR0913  # lint-waiver: LW-010120 [PLR0913]; Preserve AgentClient.invoke's named-argument contract because callers pass these independent settings directly.
         self,
@@ -379,7 +377,7 @@ class AgentClient:
         label = agent_label(kind)
         if result.text:
             _emit_and_log(self._sink, f"\n=== {label} ROUND OUTPUT ===", self._run_log_file)
-            # A driver that streams assistant text has already delivered this
+            # A provider that streams assistant text has already delivered this
             # answer, chunk by chunk and attributed to the turn. Printing it
             # again here would render it twice, the second time unattributed.
             if not logger.streamed_external_text_this_turn():
@@ -415,7 +413,7 @@ class AgentClient:
 
         The logger comes back because it holds the one fact the caller cannot
         derive from the result: whether the answer already reached the
-        assistant channel as the driver streamed it.
+        assistant channel as the provider streamed it.
         """
         model = self._role_models.get(kind, self._model_name)
         reasoning_effort = self._role_reasoning_efforts.get(kind, self._default_reasoning_effort)
@@ -564,7 +562,7 @@ class AgentClient:
     ) -> AgentTurnResult:
         """Run a turn with application events and usage, retaining a keyed session.
 
-        The optional observer receives the same normalized driver events as the
+        The optional observer receives the same normalized provider events as the
         application logger; supplying it does not disable event or usage records.
         """
         result, logger = self._logged_turn(session_spec, turn, session_key, observer=observer)
@@ -610,18 +608,18 @@ class AgentClient:
         try:
             result = self._run_session(cached.session, turn, observer, role=session_spec.role)
         except AgentOutputSchemaError:
-            # The driver kept the conversation that produced the invalid
+            # The session kept the conversation that produced the invalid
             # output, so the session stays live: the caller's correction turn
             # continues it instead of starting over without the work.
             raise
         except BaseException as error:
             # The checkpoint is deliberately kept. A turn can fail for reasons
             # that say nothing about the conversation's validity (a timeout, a
-            # cancelled run), and a driver that finds its conversation
-            # unusable reports RESET_REQUIRED instead of raising.
+            # cancelled run), and a session that finds its conversation
+            # unusable reports ``restarted`` instead of raising.
             try:
                 self._evict(session_key)
-            except Exception as cleanup_error:  # preserve the turn failure  # noqa: BLE001  # lint-waiver: LW-010123 [BLE001]; AgentClient.run must evict a failed provider session while re-raising the driver's original failure.
+            except Exception as cleanup_error:  # preserve the turn failure  # noqa: BLE001  # lint-waiver: LW-010123 [BLE001]; AgentClient.run must evict a failed provider session while re-raising the turn's original failure.
                 error.add_note(f"agent session cleanup also failed: {cleanup_error}")
             raise
 
@@ -632,11 +630,12 @@ class AgentClient:
             require_provider_checkpoint=turn.require_provider_checkpoint,
         )
 
-        # Recorded for both dispositions, and exactly as reported: this is where
-        # the turn ran, which a reset afterwards does not change.
+        # Recorded whether or not the conversation was restarted, and exactly as
+        # reported: this is where the turn ran, which a reset afterwards does not
+        # change.
         self._last_turn_sessions[session_key] = result.provider_session_id
-        if result.disposition is SessionDisposition.RESET_REQUIRED:
-            # The driver restarted or abandoned the conversation this key names,
+        if result.restarted:
+            # The session restarted or abandoned the conversation this key names,
             # so both the live session and the checkpoint describe history that
             # no longer exists.
             self._evict(session_key)
@@ -675,7 +674,7 @@ class AgentClient:
     def last_turn_provider_session_id(self, session_key: AgentSessionKey) -> str | None:
         """Name the provider conversation the last completed turn on the key ran in.
 
-        A driver-reported restart does not clear this, which is what separates
+        A session-reported restart does not clear this, which is what separates
         it from :meth:`provider_session_id`: a conversation retired *after* it
         served a turn still answered that turn, while one replaced *while*
         serving it did not. A caller that shortened a prompt compares this
@@ -700,8 +699,8 @@ class AgentClient:
         key: AgentSessionKey,
         fingerprint: str,
         expected: str | None,
-    ) -> AgentSession:
-        session = self._create_session(spec)
+    ) -> LaunchedSession:
+        session = self._open_session(spec)
         try:
             self._resume_checkpoint(session, key, fingerprint, expected=expected)
         except BaseException:
@@ -722,7 +721,7 @@ class AgentClient:
         if (
             not result.provider_session_id
             or (expected is not None and result.provider_session_id != expected)
-            or result.disposition is SessionDisposition.RESET_REQUIRED
+            or result.restarted
         ):
             self._evict(key)
             self._session_store.clear(key)
@@ -747,7 +746,7 @@ class AgentClient:
 
     def _resume_checkpoint(
         self,
-        session: AgentSession,
+        session: LaunchedSession,
         session_key: AgentSessionKey,
         fingerprint: str,
         *,
@@ -769,10 +768,10 @@ class AgentClient:
             # longer matches; this turn replaces the entry.
             self._session_store.clear(session_key)
             return
-        if not session.resume_provider_session(record.session_id):
+        if not session.adopt(record.session_id):
             if expected is not None:
                 raise SessionResumeError(str(session_key), "provider refused checkpoint adoption")
-            # The driver refused the ID, so nothing will ever resume it: the
+            # The session refused the ID, so nothing will ever resume it: the
             # provider cannot resume at all, or the session already holds a
             # newer conversation. Either way the checkpoint is dead.
             self._session_store.clear(session_key)
@@ -786,7 +785,7 @@ class AgentClient:
     ) -> None:
         """Checkpoint the provider session ID a completed turn reported."""
         if result.provider_session_id is None:
-            # No resumable ID this turn (e.g. a driver without provider session
+            # No resumable ID this turn (e.g. a provider without session
             # support); keep any prior ID rather than clobbering it with None.
             return
         self._session_store.record(
@@ -799,7 +798,7 @@ class AgentClient:
         )
 
     def close(self) -> None:
-        """Close all cached sessions and the driver exactly once."""
+        """Close all cached sessions and the launcher exactly once."""
         if self._closed:
             return
         self._closed = True
@@ -807,12 +806,12 @@ class AgentClient:
         for key in tuple(self._sessions):
             try:
                 self._evict(key)
-            except Exception as error:  # cleanup must continue  # noqa: BLE001  # lint-waiver: LW-010124 [BLE001]; AgentClient.close must evict a failed provider session while re-raising the driver's original failure.
+            except Exception as error:  # cleanup must continue  # noqa: BLE001  # lint-waiver: LW-010124 [BLE001]; AgentClient.close must evict a failed provider session while re-raising the turn's original failure.
                 if first_error is None:
                     first_error = error
         try:
-            self._driver.close()
-        except Exception as error:  # preserve earlier cleanup failures  # noqa: BLE001  # lint-waiver: LW-010125 [BLE001]; AgentClient.close must evict a failed provider session while re-raising the driver's original failure.
+            self._launcher.close()
+        except Exception as error:  # preserve earlier cleanup failures  # noqa: BLE001  # lint-waiver: LW-010125 [BLE001]; AgentClient.close must evict a failed provider session while re-raising the turn's original failure.
             if first_error is None:
                 first_error = error
         if first_error is not None:
@@ -827,11 +826,11 @@ class AgentClient:
             session.cancel()
 
     def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
-        """Offer *text* to the turn running now, on a driver that can take it mid-turn.
+        """Offer *text* to the turn running now, on a provider that can take it mid-turn.
 
         An execution runs one turn at a time, so there is at most one target;
-        with several in flight the newest is offered the message. A driver or
-        provider without mid-turn input reports ``UNSUPPORTED`` and is never
+        with several in flight the newest is offered the message. A provider
+        without mid-turn input reports ``UNSUPPORTED`` and is never
         asked; nothing is queued here, so the caller keeps its own fallback.
         """
         with self._active_lock:
@@ -839,8 +838,6 @@ class AgentClient:
         if not active:
             return SteerOutcome.NO_RUNNING_TURN
         session = active[-1]
-        if not isinstance(session, SteerableSession):
-            return SteerOutcome.UNSUPPORTED
         return session.steer(text, on_rejected=on_rejected)
 
     def cancel_session(self, key: AgentSessionKey) -> None:
@@ -863,7 +860,7 @@ class AgentClient:
         turn: AgentTurnRequest,
         observer: AgentObserver | None,
     ) -> AgentTurnResult:
-        session = self._create_session(session_spec)
+        session = self._open_session(session_spec)
         turn_error: BaseException | None = None
         try:
             return self._run_session(session, turn, observer, role=session_spec.role)
@@ -880,7 +877,7 @@ class AgentClient:
 
     def _run_session(
         self,
-        session: AgentSession,
+        session: LaunchedSession,
         turn: AgentTurnRequest,
         observer: AgentObserver | None,
         *,
@@ -918,15 +915,15 @@ class AgentClient:
             return
         # Stop an in-flight turn before releasing the session's resources:
         # a client closed from another thread (a kill, a context exit) would
-        # otherwise pull the workspace and driver state out from under a turn
+        # otherwise pull the workspace and session state out from under a turn
         # that is still running.
         try:
             cached.session.cancel()
         finally:
             cached.session.close()
 
-    def _create_session(self, spec: AgentSessionSpec) -> AgentSession:
-        """Perform VibeSys-owned setup, then delegate runtime-specific setup."""
+    def _open_session(self, spec: AgentSessionSpec) -> LaunchedSession:
+        """Perform VibeSys-owned setup, then have the launcher open the session."""
         self._require_ready(spec)
         materialize_skills(
             spec.workspace,
@@ -935,38 +932,40 @@ class AgentClient:
             log_file=self._run_log_file,
             event_sink=self._sink,
         )
-        return self._driver.create_session(spec)
+        return self._launcher.launch(spec)
 
     def _require_ready(self, spec: AgentSessionSpec) -> None:
         """Fail before a role's first session if its provider CLI cannot start a turn.
 
-        The driver probes through the route the session itself will use. A
+        The launcher probes through the route the session itself will use. A
         missing binary or a failed login raises :class:`ProviderNotReadyError`;
         an unknown login state (a CLI with no status command) proceeds with a
         log line. Passing is remembered per role, so later sessions pay
         nothing; a failure is not, so a fixed environment is rechecked.
-        Drivers without a probe are skipped.
+        Launchers without a probe are skipped.
         """
-        driver = self._driver
+        launcher = self._launcher
         if (
             not self._check_readiness
             or spec.role in self._ready_roles
-            or not isinstance(driver, ReadinessProbe)
+            or not isinstance(launcher, ReadinessProbe)
         ):
             return
-        readiness = driver.probe_readiness(spec)
+        readiness = launcher.probe_readiness(spec)
         if readiness.problem is not None:
             raise ProviderNotReadyError(readiness)
         self._ready_roles.add(spec.role)
-        if self._driver_log is not None:
+        if self._diagnostic_log is not None:
             version = readiness.version or "unknown version"
             if readiness.auth is AuthStatus.UNKNOWN:
-                self._driver_log(
+                self._diagnostic_log(
                     f"[readiness] {readiness.provider} {version} found; login state unknown "
                     f"({readiness.detail}); proceeding"
                 )
             else:
-                self._driver_log(f"[readiness] {readiness.provider} {version} found and logged in")
+                self._diagnostic_log(
+                    f"[readiness] {readiness.provider} {version} found and logged in"
+                )
 
     def _ensure_open(self) -> None:
         if self._closed or self._cancelled:

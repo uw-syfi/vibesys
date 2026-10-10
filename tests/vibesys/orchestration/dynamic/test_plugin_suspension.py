@@ -33,7 +33,7 @@ from vs_agent.api import (
     SessionScope,
     Unknown,
 )
-from vs_agent.api.testing import FakeAgentSessions, FakeDriver
+from vs_agent.api.testing import FakeAgentSessions, FakeProvider
 from vs_evaluation.api import (
     ArtifactDigest,
     ContentDigest,
@@ -345,7 +345,7 @@ async def _open(
             on_resume(request)
 
     client = AgentClient(
-        FakeDriver(
+        FakeProvider(
             answer=on_resume.answer
             if isinstance(on_resume, ResumeScript)
             else {"unexpected": True}

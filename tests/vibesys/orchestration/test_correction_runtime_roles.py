@@ -49,7 +49,7 @@ from vibesys.orchestration.single import agents as single
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_agent.api import AgentClient, AgentOutputSchemaError, DurableSessionStore
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver, FakeTurnScript
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider, FakeTurnScript
 from vs_evaluation.api import ProfilerAgentResult
 from vs_mcp.api import StdioServerDescriptor
 from vs_runtime.api import (
@@ -229,7 +229,7 @@ def test_valid_correction_preserves_typed_role_reply_without_replay(
 
     async def scenario() -> None:
         for _ in range(2 if durable else 1):
-            driver = FakeDriver(
+            driver = FakeProvider(
                 script=FakeTurnScript(answers=(initial, correction), reset_after_turn=2),
                 on_turn=requests.append,
             )

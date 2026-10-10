@@ -183,7 +183,7 @@ class SessionResolver(Protocol):
         ...
 
     def turn_timeout(self, role: RoleId) -> timedelta | None:
-        """The role's in-turn timeout: one constant per role, None for the driver default.
+        """The role's in-turn timeout: one constant per role, None for the client default.
 
         The executor records it when the session is bound and rejects a turn when the
         resolver later answers differently, because the durable session fences it.

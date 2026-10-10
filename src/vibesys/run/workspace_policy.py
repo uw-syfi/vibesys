@@ -47,7 +47,7 @@ EXCLUDED_WORKSPACE_DIRS: frozenset[str] = frozenset(
 
 _CLI_SKILL_DIRS: tuple[str, ...] = cli_skill_dirs()
 
-# Drivers write each turn's MCP server config, including the role's evaluation
+# The agent client writes each turn's MCP server config, including the role's evaluation
 # capability token, into the workspace. Committing it would leak the token
 # into candidate history and make a mid-turn snapshot differ from the
 # end-of-turn snapshot of the same candidate content.
@@ -55,9 +55,9 @@ AGENT_CONFIG_FILES: frozenset[str] = frozenset(cli_mcp_config_files())
 
 
 def materialized_skill_dirs(skill_sources: Iterable[Path]) -> frozenset[str]:
-    """Return workspace directories that agent drivers refill with skill copies.
+    """Return workspace directories that the agent client refills with skill copies.
 
-    Drivers copy every configured skill into the workspace root (by skill
+    The agent client copies every configured skill into the workspace root (by skill
     name) and into each CLI's skill-discovery directory before a turn. These
     copies are framework inputs, not candidate content, so the run keeps them
     out of Git: otherwise a read-only role's turn reports them as unauthorized

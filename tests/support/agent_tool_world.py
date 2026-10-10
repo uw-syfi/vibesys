@@ -26,7 +26,7 @@ from tests.support.skeleton_world import (
 )
 
 from vs_agent.api import AgentClient
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
 from vs_core.api import ArtifactId, ArtifactRef, Limits, TurnSpec, WorkspaceRef
 from vs_evaluation.api.tools import (
     SUBMIT_TOOL,
@@ -180,7 +180,7 @@ async def scenario(
             writer=agent,
         )
         resolvers.append(resolver)
-        client = AgentClient(FakeDriver(answer=agent.answer, on_turn=agent))
+        client = AgentClient(FakeProvider(answer=agent.answer, on_turn=agent))
         return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
 
     def yields(workspaces: RuntimeWorkspaces, receipts: StateNamespace) -> TurnYields:

@@ -33,7 +33,7 @@ def validate_agent_capabilities(
     member_id: str | None,
     has_bound_tools: bool,
 ) -> None:
-    """Reject role and session requirements that the selected driver cannot meet."""
+    """Reject role and session requirements that the selected agent client cannot meet."""
     required = set(role.required_capabilities)
     if member_id is not None:
         required.add(AgentCapability.PROVIDER_SESSION_RESUME)
@@ -41,7 +41,7 @@ def validate_agent_capabilities(
         required.add(AgentCapability.MCP_SERVERS)
     missing = sorted(capability.value for capability in required - set(supported_capabilities))
     if missing:
-        message = f"agent driver lacks required capabilities: {', '.join(missing)}"
+        message = f"agent client lacks required capabilities: {', '.join(missing)}"
         raise RuntimeContractError(message)
 
 

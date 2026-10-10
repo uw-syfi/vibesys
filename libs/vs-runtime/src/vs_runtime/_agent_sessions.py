@@ -26,7 +26,7 @@ from vs_agent.api import (
     inspect_invocation_journal,
     parse_typed_response,
 )
-from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
+from vs_agent.api import AgentTurnTimeoutError as ClientAgentTurnTimeoutError
 from vs_runtime._agent_declarations import (
     agent_session_key,
     validate_agent_capabilities,
@@ -313,7 +313,7 @@ class RuntimeAgentSession:
                     tool_servers=self._tool_servers or None,
                     invocation_id=invocation_id,
                 )
-            except DriverAgentTurnTimeoutError as error:
+            except ClientAgentTurnTimeoutError as error:
                 raise AgentTurnTimeoutError(error.timeout_seconds) from error
             except (OSError, ImportError) as error:
                 raise AgentSpawnError(

@@ -9,7 +9,7 @@ interface it wraps:
   malformed output, schema-invalid output, extra keys, and schema-valid but
   wrong replies. Replies are generated from the schema each turn declares, so
   the wrapper knows no roles.
-- `FaultyExecutor` wraps an agentshim `Executor` under a long-lived agent
+- `FaultyExecutor` (a plan-driven `vs_agent.api.testing.FaultingExecutor`) wraps an agentshim `Executor` under a long-lived agent
   process: the process dies, hangs, writes a malformed line, or its container
   is replaced (every conversation it held is lost). Faults are scheduled by
   stdout line position (`Boundary.PROCESS_OUTPUT`).

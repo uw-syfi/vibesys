@@ -43,7 +43,7 @@ class AgentTurnTimeoutError(TimeoutError):
     """An agent turn exceeded its configured wall-clock budget."""
 
     def __init__(self, timeout_seconds: float) -> None:
-        """Record the configured budget, independent of driver mechanism."""
+        """Record the configured budget, independent of execution mechanism."""
         self.timeout_seconds = timeout_seconds
         super().__init__(f"agent turn timed out after {timeout_seconds:g} seconds")
 
@@ -246,15 +246,8 @@ class ProviderNotReadyError(RuntimeError):
         )
 
 
-class SessionDisposition(StrEnum):
-    """Whether a session remains safe to use after a turn."""
-
-    REUSABLE = "reusable"
-    RESET_REQUIRED = "reset_required"
-
-
 class AgentEventKind(StrEnum):
-    """Semantic categories streamed by every driver."""
+    """Semantic categories streamed by every provider."""
 
     TEXT = "text"
     THINKING = "thinking"
@@ -299,9 +292,9 @@ class AgentRateLimit:
 
 @dataclass(frozen=True, slots=True)
 class AgentExecutionPolicy:
-    """Existing sandbox semantics that a driver must enforce for a session.
+    """Existing sandbox semantics that a session launcher must enforce.
 
-    Drivers must reject policies they cannot fully enforce. The reusable
+    A launcher must reject policies it cannot fully enforce. The reusable
     ``vs_sandbox`` library remains the authority for project-path and host-
     resource semantics; this value only attaches them to agent setup.
     """
@@ -335,7 +328,7 @@ class MCPServerSpec:
 
 @dataclass(frozen=True, slots=True)
 class AgentCapabilities:
-    """Features a driver can provide without weakening requested semantics."""
+    """Features an agent client can provide without weakening requested semantics."""
 
     tool_servers: bool = False
     nested_read_only_paths: bool = False
@@ -382,10 +375,10 @@ class AgentEvent:
     """One normalized event emitted while an agent turn is running.
 
     A ``THINKING`` event carrying ``payload={"channel": "diagnostic"}`` is
-    driver plumbing (a provider heartbeat, a stderr line, a thread or turn
+    provider plumbing (a provider heartbeat, a stderr line, a thread or turn
     marker), not the agent's reasoning. Consumers route it to the diagnostic
     channel so a transcript never presents plumbing as chain of thought. A
-    driver that has no separate diagnostic stream marks such events itself;
+    provider that has no separate diagnostic stream marks such events itself;
     every other ``THINKING`` event is agent reasoning.
     """
 
@@ -397,10 +390,10 @@ class AgentEvent:
 
 
 class AgentObserver(Protocol):
-    """Consumer of normalized streaming events from an agent driver."""
+    """Consumer of normalized streaming events from an agent provider."""
 
     def on_event(self, event: AgentEvent) -> None:
-        """Observe one event in driver emission order."""
+        """Observe one event in emission order."""
         ...
 
 
@@ -428,7 +421,7 @@ def session_spec_fingerprint(spec: AgentSessionSpec) -> str:
     identity or capability change that would evict a live session also refuses a
     checkpointed provider conversation. MCP launch credentials and endpoints
     are excluded through their explicit ``runtime_env`` field. They are freshly
-    supplied to the driver without entering durable state. The digest is content-derived rather
+    supplied to the launcher without entering durable state. The digest is content-derived rather
     than a Python ``hash``, which is not stable across processes.
     """
     return hashlib.sha256(repr(spec).encode("utf-8")).hexdigest()
@@ -454,7 +447,7 @@ class AgentTurnRequest:
 class AgentSkillUse:
     """Skills a turn was offered and loaded, as the provider reported them.
 
-    ``None`` means the provider cannot say, never zero: a driver without a
+    ``None`` means the provider cannot say, never zero: a provider without a
     skill signal leaves both fields unset. ``invoked`` has one entry per load,
     in order, so its length is the turn's skill-use count.
     """
@@ -470,60 +463,14 @@ class AgentTurnResult:
     text: str
     usage: AgentUsage = field(default_factory=AgentUsage)
     provider_session_id: str | None = None
-    disposition: SessionDisposition = SessionDisposition.REUSABLE
+    restarted: bool = False
+    """The conversation this turn ran in was retired or replaced.
+
+    The session no longer holds the history the turn built on, so a caller that
+    keeps a checkpoint of it must drop the checkpoint. The turn's own answer
+    is still valid.
+    """
     skills: AgentSkillUse = field(default_factory=AgentSkillUse)
-
-
-class AgentSession(Protocol):
-    """A configured agent conversation owned by an :class:`AgentDriver`."""
-
-    def run_turn(
-        self,
-        request: AgentTurnRequest,
-        observer: AgentObserver | None = None,
-    ) -> AgentTurnResult:
-        """Add one turn or raise :class:`AgentTurnTimeoutError` on timeout."""
-        ...
-
-    def resume_provider_session(self, session_id: str) -> bool:
-        """Continue ``session_id`` on this session's next turn.
-
-        Return whether the ID was actually adopted. A driver returns ``False``
-        when its provider cannot resume, or when the session already holds a
-        live conversation whose history is newer than the caller's checkpoint.
-        Callers must not assume adoption: the return value, not the call, is
-        what says the next turn resumes.
-
-        Implementations that report ``False`` must leave the session usable and
-        unchanged. Drivers whose capabilities set ``provider_session_resume``
-        to ``False`` always return ``False``.
-        """
-        ...
-
-    def cancel(self) -> None:
-        """Stop an in-flight turn, if any. Idempotent. Safe to call from another thread."""
-        ...
-
-    def close(self) -> None:
-        """Release session resources. Implementations must be idempotent."""
-        ...
-
-
-class AgentDriver(Protocol):
-    """Adapter that creates configured sessions using one execution system."""
-
-    @property
-    def capabilities(self) -> AgentCapabilities:
-        """Return the features this driver can enforce."""
-        ...
-
-    def create_session(self, spec: AgentSessionSpec) -> AgentSession:
-        """Create a session or reject any unsupported part of ``spec``."""
-        ...
-
-    def close(self) -> None:
-        """Release driver resources. Implementations must be idempotent."""
-        ...
 
 
 class SteerOutcome(StrEnum):
@@ -532,24 +479,9 @@ class SteerOutcome(StrEnum):
     DELIVERED = "delivered"
     """The provider accepted it into the running turn."""
     UNSUPPORTED = "unsupported"
-    """This driver, provider or transport cannot take a message mid-turn."""
+    """This provider or transport cannot take a message mid-turn."""
     NO_RUNNING_TURN = "no_running_turn"
     """No turn could take it right now: none is running, or it is starting or finishing."""
-
-
-@runtime_checkable
-class SteerableSession(Protocol):
-    """An optional session capability: accept a message while a turn runs."""
-
-    def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
-        """Offer *text* to the turn running now. Thread-safe; never queues.
-
-        ``DELIVERED`` means the provider holds the message. If it later
-        refuses it (the turn is unaffected), *on_rejected* is called once, on
-        the thread running the turn, so the caller can deliver the text another
-        way. It is never called for any other outcome.
-        """
-        ...
 
 
 @runtime_checkable
@@ -557,15 +489,15 @@ class SteerableAgentClient(Protocol):
     """An optional client capability: offer a message to the turn running now."""
 
     def steer(self, text: str, *, on_rejected: Callable[[], None]) -> SteerOutcome:
-        """Offer *text* to the in-flight turn; see :meth:`SteerableSession.steer`."""
+        """Offer *text* to the in-flight turn; see :meth:`vs_agent.shim_turns.LaunchedSession.steer`."""
         ...
 
 
 @runtime_checkable
 class ReadinessProbe(Protocol):
-    """An optional driver capability: check the provider CLI before any session exists.
+    """An optional launcher capability: check the provider CLI before any session exists.
 
-    A driver whose provider tooling has no such check does not implement it,
+    A launcher whose provider tooling has no such check does not implement it,
     and callers skip the check rather than guess.
     """
 

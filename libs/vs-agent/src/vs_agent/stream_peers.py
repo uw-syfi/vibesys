@@ -1,4 +1,4 @@
-"""The far end of a provider's long-lived process, for any stream provider.
+"""The far end of a provider's long-lived process, for any stream provider (a test fake).
 
 ``stream_peers`` returns a Claude or Codex fake that answers each turn with the
 next text, plus the means to make it forget what its container held, so a test

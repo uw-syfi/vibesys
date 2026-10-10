@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from tests.support import provider_profiles as fake_profiles
 
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import (
@@ -21,7 +20,7 @@ from vibesys.inputs import (
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.environment import open_run_environment
 from vs_agent.api.images import ImagePushError
-from vs_agent.api.testing import FakeDockerBuildRunner
+from vs_agent.api.testing import FakeDockerBuildRunner, fake_profiles
 from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
 from vs_runtime._run_environment import (
     _cli_container_env,

@@ -1,9 +1,9 @@
 """A durable session world whose provider is a real stream transport in a container.
 
 ``open_stream_host`` builds the pieces :mod:`tests.support.session_world` builds with the
-Fake driver, but the agent is the production ``AgentShimDriver`` over agentshim's stream
+fake provider, but the agent is the production ``ConfinedSessionLauncher`` over agentshim's stream
 transports, in a container session. The process it spawns is the scripted far end of
-:mod:`tests.support.stream_peers`, wrapped by ``FaultyExecutor`` so a fault plan can kill,
+:func:`vs_agent.api.testing.stream_peers`, wrapped by ``FaultyExecutor`` so a fault plan can kill,
 silence or corrupt it, or replace its container. The clock and ids are fakes: a hung
 turn times out on virtual time, never by waiting.
 """
@@ -13,7 +13,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from agentshim.testing import FakeClock, FakeExecutor, SequentialIds
 from tests.support.fake_docker_sandbox import FakeDockerSandbox
 from tests.support.session_world import (
     FakeSessionResolver,
@@ -22,13 +21,11 @@ from tests.support.session_world import (
 )
 
 from vs_agent.api import AgentClient, AgentExecutionPolicy, AgentSessionSpec
-from vs_agent.api.testing import FakeAgentInvocationStore
-from vs_agent.drivers.agentshim import AgentShimDriver
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeExecutor, fake_stream_launcher
 from vs_faults.api import FaultPlan, FaultyExecutor
 
 if TYPE_CHECKING:
-    from tests.support.stream_peers import StreamPeers
-
+    from vs_agent.api.testing import StreamPeers
     from vs_core.api import TurnSpec
     from vs_runtime.api.core import AccessGuardedWorkspace
     from vs_sandbox.api import DockerSandbox
@@ -77,15 +74,11 @@ def open_stream_host(
         on_container_replaced=peers.forget_conversations,
     )
     sandbox = cast("DockerSandbox", FakeDockerSandbox(workspace=resolver.workspace))
-    driver = AgentShimDriver(
+    launcher = fake_stream_launcher(
         provider=provider,
-        docker_sandboxes=dict.fromkeys((role.root for role in resolver.roles), sandbox),
-        executor_factory=lambda: executor,
-        launcher_env=dict,
-        transient_retry_delays=(),
-        clock=FakeClock(),
-        ids=SequentialIds(),
+        executor=executor,
+        sandboxes=dict.fromkeys((role.root for role in resolver.roles), sandbox),
     )
-    client = AgentClient(driver, provider=provider, containerized=True)
+    client = AgentClient(launcher, provider=provider, containerized=True)
     host = SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
     return StreamHost(host, executor, peers)

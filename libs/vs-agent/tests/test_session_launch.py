@@ -1,4 +1,4 @@
-"""Tests for the AgentShim driver against the library's public API.
+"""Tests for the AgentShim launcher against the library's public API.
 
 Every turn is scripted with :func:`agentshim.testing.scripted_turn`, which
 emits the provider's real stream format, so nothing here hand-writes provider
@@ -8,8 +8,8 @@ events the observer saw, how usage maps onto the neutral contract, and when a
 conversation is retired.
 
 Sandbox-facing scenarios run against two ``WorkspaceSandbox`` doubles,
-``_FakeHostSandbox`` and ``FakeDockerSandbox``: the driver has one code path
-for both (:func:`vs_agent.drivers.agentshim.confine_to_sandbox`), so a
+``_FakeHostSandbox`` and ``FakeDockerSandbox``: the launcher has one code path
+for both (:func:`vs_agent.session_launch.confine_to_sandbox`), so a
 test that is really about that path is parametrized over both rather than
 duplicated per mode.
 """
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -44,6 +45,9 @@ from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
 from vibesys.events import CommandResultPayload
 from vibesys.orchestration.multi.contracts import ImplementerResponse, JudgeResponse
+
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
+from vs_agent import session_launch as subject
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
     AgentClient,
@@ -56,20 +60,21 @@ from vs_agent.api import (
     SessionResumeError,
     SessionScope,
 )
+
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentSkillUse,
     AgentTurnRequest,
-    SessionDisposition,
 )
-from vs_agent.drivers import agentshim as subject
 from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from vs_agent.contracts import AgentSession
+    # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
+    from vs_agent.shim_turns import LaunchedSession
 
 SCRIPTED_PROVIDERS = ("claude", "codex", "gemini", "opencode")
 SKILL_LOAD_PROVIDERS = tuple(
@@ -81,9 +86,9 @@ SKILL_LOAD_PROVIDERS = tuple(
 SKILL_BLIND_PROVIDERS = tuple(p for p in SCRIPTED_PROVIDERS if p not in SKILL_LOAD_PROVIDERS)
 """Every provider VibeSys ships, each scripted in its own stream format.
 
-The driver treats them all the same way, so these cases are parametrized
+The launcher treats them all the same way, so these cases are parametrized
 rather than written per provider. Where a provider's declared capabilities
-change what the driver should do, the expectation is read from
+change what the launcher should do, the expectation is read from
 ``agentshim.get_provider(provider).profile`` instead of being branched on the
 provider name.
 """
@@ -97,7 +102,7 @@ two fields distinct regardless; these are the providers that can fill both.
 """
 
 
-class _DriverOptions(TypedDict, total=False):
+class _LauncherOptions(TypedDict, total=False):
     timeout: int | None
     log: Callable[[str], None] | None
     docker_sandboxes: dict[str, Any] | None
@@ -170,21 +175,21 @@ def _spec(tmp_path: Path, **changes: object) -> AgentSessionSpec:
     return AgentSessionSpec(**values)
 
 
-def _driver(
+def _launcher(
     provider: str,
     runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
-    **options: Unpack[_DriverOptions],
-) -> tuple[subject.AgentShimDriver, FakeExecutor]:
-    """Build a driver whose provider process is the scripted fake executor.
+    **options: Unpack[_LauncherOptions],
+) -> tuple[subject.ConfinedSessionLauncher, FakeExecutor]:
+    """Build a launcher whose provider process is the scripted fake executor.
 
-    The same factory backs every mode: the driver applies
+    The same factory backs every mode: the launcher applies
     ``confine_to_sandbox`` itself whenever it has a sandbox, so a test
     controls confinement through what ``build_host_sandbox`` returns (the
     ``sandbox_builds`` fixture below) or through ``docker_sandboxes``, never
     through the executor factory.
     """
     fake = FakeExecutor(runs)
-    driver = subject.AgentShimDriver(
+    launcher = subject.ConfinedSessionLauncher(
         provider=provider,
         timeout=options.get("timeout"),
         log=options.get("log"),
@@ -196,17 +201,17 @@ def _driver(
         # Zero waits keep the retry tests instant; the schedule is the knob.
         transient_retry_delays=options.get("transient_retry_delays", (0.0, 0.0)),
     )
-    return driver, fake
+    return launcher, fake
 
 
 def _session(
     tmp_path: Path,
     provider: str,
     runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
-    **options: Unpack[_DriverOptions],
-) -> tuple[AgentSession, FakeExecutor]:
-    driver, fake = _driver(provider, runs, **options)
-    return driver.create_session(_spec(tmp_path, provider=provider)), fake
+    **options: Unpack[_LauncherOptions],
+) -> tuple[LaunchedSession, FakeExecutor]:
+    launcher, fake = _launcher(provider, runs, **options)
+    return launcher.launch(_spec(tmp_path, provider=provider)), fake
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +245,7 @@ def test_a_turn_reports_its_text_conversation_and_usage(
 
     assert result.text == "done"
     assert result.provider_session_id == "session-1"
-    assert result.disposition is SessionDisposition.REUSABLE
+    assert result.restarted is False
     # Cached tokens are part of the input total on every provider.
     assert result.usage.input_tokens == 1200
     assert result.usage.output_tokens == 30
@@ -392,7 +397,7 @@ def test_every_tool_call_is_forwarded_as_its_own_pair(
     tmp_path: Path,
     provider: str,
 ) -> None:
-    """Two identical calls are two events: the driver never deduplicates."""
+    """Two identical calls are two events: the launcher never deduplicates."""
     del sandbox_builds
     session, _fake = _session(
         tmp_path,
@@ -461,8 +466,8 @@ def test_the_host_sandbox_wraps_the_provider_launch(
     binary = tmp_path / agentshim.get_provider(provider).profile.binary
     binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     binary.chmod(0o755)
-    driver, fake = _driver(provider, scripted_turn(provider, text="ok"))
-    session = driver.create_session(
+    launcher, fake = _launcher(provider, scripted_turn(provider, text="ok"))
+    session = launcher.launch(
         _spec(tmp_path, provider=provider, environment=(("PATH", str(tmp_path)),))
     )
 
@@ -499,9 +504,9 @@ def test_declared_host_resources_reach_the_sandbox(
     """A caller's grant must survive the provider's default declaration."""
     resource = HostResource(tmp_path / "toolchain", purpose="test toolchain")
     policy = ProjectPathPolicy(read_only_paths=("OBJECTIVE.md",))
-    driver, _fake = _driver(provider, scripted_turn(provider, text="ok"))
+    launcher, _fake = _launcher(provider, scripted_turn(provider, text="ok"))
 
-    driver.create_session(
+    launcher.launch(
         _spec(
             tmp_path,
             provider=provider,
@@ -567,7 +572,7 @@ def test_host_binary_lookup_resolves_symlinks_before_sandbox_launch(tmp_path: Pa
     alias.symlink_to(target)
 
     env = {"PATH": str(alias_dir)}
-    # lint-waiver: LW-010420 [SLF001]; exercise the driver-owned lookup used by the sandbox boundary.
+    # lint-waiver: LW-010420 [SLF001]; exercise the launcher-owned lookup used by the sandbox boundary.
     # > Testing only the sandbox transform cannot catch the original mismatch between
     # > the declared executable and the path passed to bubblewrap. A public lookup
     # > API would expose an implementation detail solely for this regression.
@@ -604,8 +609,8 @@ def test_mcp_servers_are_installed_for_the_turn_and_removed_after(tmp_path: Path
         installed.append(installed_mcp_servers("claude", request, tmp_path))
         return scripted_turn("claude", text="ok")
 
-    driver, _fake = _driver("claude", run)
-    session = driver.create_session(
+    launcher, _fake = _launcher("claude", run)
+    session = launcher.launch(
         _spec(
             tmp_path,
             mcp_servers=(MCPServerSpec(name="issues", command="python", args=("-m", "issues")),),
@@ -618,7 +623,7 @@ def test_mcp_servers_are_installed_for_the_turn_and_removed_after(tmp_path: Path
     # A host session pins the interpreter that VibeSys itself is running
     # under: a login shell's bare ``python`` may not have the MCP
     # dependencies.
-    assert entry["command"] == subject.sys.executable
+    assert entry["command"] == sys.executable
     assert entry["args"] == ["-m", "issues"]
     assert _workspace_files(tmp_path) == {}
 
@@ -631,8 +636,8 @@ def test_a_non_python_mcp_command_is_left_alone(tmp_path: Path) -> None:
         installed.append(installed_mcp_servers("claude", request, tmp_path))
         return scripted_turn("claude", text="ok")
 
-    driver, _fake = _driver("claude", run)
-    session = driver.create_session(
+    launcher, _fake = _launcher("claude", run)
+    session = launcher.launch(
         _spec(
             tmp_path,
             mcp_servers=(MCPServerSpec(name="other", command="node", args=("server.js",)),),
@@ -654,8 +659,8 @@ def test_a_container_mcp_command_is_left_for_the_image_to_resolve(tmp_path: Path
         return scripted_turn("claude", text="ok")
 
     sandbox = FakeDockerSandbox(workspace=tmp_path)
-    driver, _fake = _driver("claude", run, docker_sandboxes={"implementer": sandbox})
-    session = driver.create_session(
+    launcher, _fake = _launcher("claude", run, docker_sandboxes={"implementer": sandbox})
+    session = launcher.launch(
         _spec(
             tmp_path,
             provider="claude",
@@ -713,10 +718,10 @@ def test_a_container_turn_carries_the_sandbox_environment_and_workdir(
     library exactly ``sandbox.env``.
     """
     sandbox = FakeDockerSandbox(workspace=tmp_path, extra_env={"VIBESYS_ROUND": "3"})
-    driver, fake = _driver(
+    launcher, fake = _launcher(
         provider, scripted_turn(provider, text="ok"), docker_sandboxes={"implementer": sandbox}
     )
-    session = driver.create_session(_container_spec(tmp_path, provider))
+    session = launcher.launch(_container_spec(tmp_path, provider))
 
     session.run_turn(AgentTurnRequest(message="Do it"))
 
@@ -743,11 +748,11 @@ def test_a_container_binary_check_gets_the_container_budget(
     has to survive a daemon that is busy rather than dead.
     """
     sandbox = FakeDockerSandbox(workspace=tmp_path)
-    driver, fake = _driver(
+    launcher, fake = _launcher(
         provider, scripted_turn(provider, text="ok"), docker_sandboxes={"implementer": sandbox}
     )
 
-    driver.create_session(_container_spec(tmp_path, provider))
+    launcher.launch(_container_spec(tmp_path, provider))
 
     check = fake.requests[0]
     assert "--help" in check.argv
@@ -755,19 +760,19 @@ def test_a_container_binary_check_gets_the_container_budget(
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
-def test_the_binary_check_budget_is_a_driver_option(
+def test_the_binary_check_budget_is_a_launcher_option(
     tmp_path: Path,
     provider: str,
 ) -> None:
     sandbox = FakeDockerSandbox(workspace=tmp_path)
-    driver, fake = _driver(
+    launcher, fake = _launcher(
         provider,
         scripted_turn(provider, text="ok"),
         docker_sandboxes={"implementer": sandbox},
         check_timeout=5,
     )
 
-    driver.create_session(_container_spec(tmp_path, provider))
+    launcher.launch(_container_spec(tmp_path, provider))
 
     assert fake.requests[0].timeout == 5
 
@@ -797,8 +802,8 @@ def test_container_session_mcp_servers_are_installed_on_the_host_workspace(
         return scripted_turn(provider, text="ok")
 
     sandbox = FakeDockerSandbox(workspace=tmp_path)
-    driver, _fake = _driver(provider, run, docker_sandboxes={"implementer": sandbox})
-    session = driver.create_session(_container_spec(tmp_path, provider, mcp_servers=(server,)))
+    launcher, _fake = _launcher(provider, run, docker_sandboxes={"implementer": sandbox})
+    session = launcher.launch(_container_spec(tmp_path, provider, mcp_servers=(server,)))
 
     session.run_turn(AgentTurnRequest(message="review"))
 
@@ -833,8 +838,8 @@ def test_a_container_timeout_reports_no_docker_transport_in_its_message(
         return FakeRun() if "--help" in request.argv else FakeRun(timeout=True)
 
     sandbox = FakeDockerSandbox(workspace=tmp_path, extra_env={"ANTHROPIC_AUTH_TOKEN": "secret"})
-    driver, _fake = _driver(provider, run, docker_sandboxes={"implementer": sandbox})
-    session = driver.create_session(_container_spec(tmp_path, provider))
+    launcher, _fake = _launcher(provider, run, docker_sandboxes={"implementer": sandbox})
+    session = launcher.launch(_container_spec(tmp_path, provider))
 
     with pytest.raises(AgentTurnTimeoutError) as raised:
         session.run_turn(AgentTurnRequest(message="one", timeout=timedelta(seconds=5)))
@@ -898,12 +903,12 @@ def test_a_container_native_schema_directory_is_mapped_through_agent_path(
         pytest.skip(f"{provider} does not reference a schema file path")
     payload = {"analysis": "it improved", "verdict": "accept"}
     sandbox = FakeDockerSandbox(workspace=tmp_path)
-    driver, fake = _driver(
+    launcher, fake = _launcher(
         provider,
         scripted_turn(provider, text="", structured_output=payload),
         docker_sandboxes={"implementer": sandbox},
     )
-    session = driver.create_session(_container_spec(tmp_path, provider))
+    session = launcher.launch(_container_spec(tmp_path, provider))
 
     session.run_turn(
         AgentTurnRequest(message="usr", instructions="sys", output_schema=JudgeResponse)
@@ -1120,10 +1125,10 @@ def test_a_checkpoint_is_adopted_only_while_no_conversation_is_live(
         tmp_path, provider, scripted_turn(provider, text="ok", session_id="session-1")
     )
 
-    assert session.resume_provider_session("checkpoint") is True
+    assert session.adopt("checkpoint") is True
     session.run_turn(AgentTurnRequest(message="one"))
     # The live conversation is newer than any checkpoint the caller holds.
-    assert session.resume_provider_session("older-checkpoint") is False
+    assert session.adopt("older-checkpoint") is False
 
     session.run_turn(AgentTurnRequest(message="two"))
     assert "checkpoint" in fake.requests[0].argv
@@ -1155,7 +1160,7 @@ def test_a_failed_resume_retries_once_from_a_fresh_conversation(
     result = session.run_turn(AgentTurnRequest(message="two"))
 
     assert result.text == "recovered"
-    assert result.disposition is SessionDisposition.RESET_REQUIRED
+    assert result.restarted is True
     assert "session-1" in fake.requests[1].argv
     assert "session-1" not in fake.requests[2].argv
     # The first turn, the resumed attempt, and one retry. Retrying more than
@@ -1268,7 +1273,7 @@ def test_a_transient_provider_error_is_retried(
     result = session.run_turn(AgentTurnRequest(message="one"))
 
     assert result.text == "ok"
-    assert result.disposition is SessionDisposition.REUSABLE
+    assert result.restarted is False
     assert len(fake.requests) == 2
     assert any("retrying the turn in" in line for line in logs)
 
@@ -1385,7 +1390,7 @@ def test_cancel_stops_a_turn_waiting_out_a_transient_error(
 ) -> None:
     """A cancelled turn raises the provider error instead of retrying it."""
     del sandbox_builds
-    sessions: list[AgentSession] = []
+    sessions: list[LaunchedSession] = []
 
     def log(line: str) -> None:
         # Logged just before the wait, so this cancel lands before the backoff;
@@ -1473,7 +1478,7 @@ def test_an_agent_client_keeps_the_conversation_through_a_schema_failure(
     resume from: only the live session holds the conversation.
     """
     del sandbox_builds
-    driver, fake = _driver(
+    launcher, fake = _launcher(
         "claude",
         [
             scripted_failure("claude", _SCHEMA, session_id="s-1"),
@@ -1483,7 +1488,7 @@ def test_an_agent_client_keeps_the_conversation_through_a_schema_failure(
     workspace = tmp_path / "ws"
     workspace.mkdir()
     key = AgentSessionKey(SessionScope.MEMBER, "planner:p")
-    with AgentClient(driver, provider="claude", event_sink=NULL_AGENT_EVENT_SINK) as client:
+    with AgentClient(launcher, provider="claude", event_sink=NULL_AGENT_EVENT_SINK) as client:
 
         def turn(prompt: str) -> str:
             return client.invoke_text(
@@ -1505,12 +1510,12 @@ def test_an_agent_client_keeps_the_conversation_through_a_schema_failure(
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
-def test_a_turn_that_times_out_is_reported_as_a_driver_timeout(
+def test_a_turn_that_times_out_is_reported_as_a_launcher_timeout(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
     provider: str,
 ) -> None:
-    """Every AgentShim provider reports the driver-neutral timeout contract."""
+    """Every AgentShim provider reports the launcher-neutral timeout contract."""
     del sandbox_builds
     session, _fake = _session(tmp_path, provider, FakeRun(timeout=True), timeout=45)
 
@@ -1533,10 +1538,10 @@ def test_the_codex_thread_budget_retires_a_conversation(
     first = session.run_turn(AgentTurnRequest(message="one"))
     second = session.run_turn(AgentTurnRequest(message="two"))
 
-    assert first.disposition is SessionDisposition.REUSABLE
+    assert first.restarted is False
     # The budget is spent, so the thread is retired and the caller is told the
     # conversation this session named no longer exists.
-    assert second.disposition is SessionDisposition.RESET_REQUIRED
+    assert second.restarted is True
     assert second.provider_session_id == "thread-1"
 
 
@@ -1558,7 +1563,7 @@ def test_a_heavy_codex_turn_retires_its_conversation(
 
     result = session.run_turn(AgentTurnRequest(message="one"))
 
-    assert result.disposition is SessionDisposition.RESET_REQUIRED
+    assert result.restarted is True
 
 
 def test_a_reset_conversation_is_not_continued_by_a_strict_turn(
@@ -1572,7 +1577,7 @@ def test_a_reset_conversation_is_not_continued_by_a_strict_turn(
     )
     session.run_turn(AgentTurnRequest(message="one"))
     retired = session.run_turn(AgentTurnRequest(message="two"))
-    assert retired.disposition is SessionDisposition.RESET_REQUIRED
+    assert retired.restarted is True
 
     with pytest.raises(SessionResumeError):
         session.run_turn(AgentTurnRequest(message="three", expected_provider_session_id="thread-1"))
@@ -1594,12 +1599,12 @@ def test_a_replaced_conversation_is_reported_and_not_resumed_again(
             return scripted_resume_failure(provider, session_id="session-1")
         return scripted_turn(provider, text="ok", session_id="session-2")
 
-    driver, fake = _driver(provider, run)
-    session = driver.create_session(_spec(tmp_path, provider=provider))
-    assert session.resume_provider_session("session-1") is True
+    launcher, fake = _launcher(provider, run)
+    session = launcher.launch(_spec(tmp_path, provider=provider))
+    assert session.adopt("session-1") is True
 
     replaced = session.run_turn(AgentTurnRequest(message="one"))
-    assert replaced.disposition is SessionDisposition.RESET_REQUIRED
+    assert replaced.restarted is True
     assert replaced.provider_session_id == "session-2"
 
     # The replacement conversation is the one later turns continue.
@@ -1611,7 +1616,7 @@ def test_a_renewed_codex_thread_is_logged(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
 ) -> None:
-    """The library renews silently, so the driver must tell the operator."""
+    """The library renews silently, so the launcher must tell the operator."""
     del sandbox_builds
     logs: list[str] = []
     session, _fake = _session(
@@ -1642,9 +1647,9 @@ def test_a_replaced_conversation_is_logged(
             return scripted_resume_failure(provider, session_id="session-1")
         return scripted_turn(provider, text="ok", session_id="session-2")
 
-    driver, _fake = _driver(provider, run, log=logs.append)
-    session = driver.create_session(_spec(tmp_path, provider=provider))
-    assert session.resume_provider_session("session-1") is True
+    launcher, _fake = _launcher(provider, run, log=logs.append)
+    session = launcher.launch(_spec(tmp_path, provider=provider))
+    assert session.adopt("session-1") is True
 
     session.run_turn(AgentTurnRequest(message="one"))
 
@@ -1766,9 +1771,9 @@ def test_independent_sessions_run_concurrently(
         assert release_optimizer.wait(timeout=5)
         return scripted_turn(provider, text="optimizer result")
 
-    driver, _fake = _driver(provider, run)
-    optimizer = driver.create_session(_spec(tmp_path, provider=provider, role="implementer"))
-    chat = driver.create_session(
+    launcher, _fake = _launcher(provider, run)
+    optimizer = launcher.launch(_spec(tmp_path, provider=provider, role="implementer"))
+    chat = launcher.launch(
         _spec(
             tmp_path,
             provider=provider,
@@ -1786,36 +1791,36 @@ def test_independent_sessions_run_concurrently(
         release_optimizer.set()
         assert optimizer_turn.result(timeout=10).text == "optimizer result"
 
-    driver.close()
+    launcher.close()
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
-def test_driver_and_session_close_are_idempotent(
+def test_launcher_and_session_close_are_idempotent(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
     provider: str,
 ) -> None:
     del sandbox_builds
-    driver, _fake = _driver(provider, scripted_turn(provider, text="ok"))
-    session = driver.create_session(_spec(tmp_path, provider=provider))
+    launcher, _fake = _launcher(provider, scripted_turn(provider, text="ok"))
+    session = launcher.launch(_spec(tmp_path, provider=provider))
 
     session.close()
     session.close()
-    driver.close()
-    driver.close()
+    launcher.close()
+    launcher.close()
 
     with pytest.raises(RuntimeError, match="closed"):
         session.run_turn(AgentTurnRequest(message="later"))
     with pytest.raises(RuntimeError, match="closed"):
-        driver.create_session(_spec(tmp_path, provider=provider))
+        launcher.launch(_spec(tmp_path, provider=provider))
 
 
 # ---------------------------------------------------------------------------
-# Driver configuration
+# Launcher configuration
 # ---------------------------------------------------------------------------
 
 
-def test_the_shipped_providers_are_the_ones_the_driver_accepts() -> None:
+def test_the_shipped_providers_are_the_ones_the_launcher_accepts() -> None:
     assert subject.supported_providers() == ["claude", "codex", "gemini", "opencode"]
     for provider in SCRIPTED_PROVIDERS:
         assert provider in subject.supported_providers()
@@ -1823,13 +1828,13 @@ def test_the_shipped_providers_are_the_ones_the_driver_accepts() -> None:
 
 def test_an_unknown_provider_is_rejected_by_name() -> None:
     with pytest.raises(ValueError, match="nonesuch"):
-        subject.AgentShimDriver(provider="nonesuch")
+        subject.ConfinedSessionLauncher(provider="nonesuch")
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
 def test_capabilities_report_the_provider_and_execution_mode(provider: str) -> None:
-    driver, _fake = _driver(provider, scripted_turn(provider, text="ok"))
-    capabilities = driver.capabilities
+    launcher, _fake = _launcher(provider, scripted_turn(provider, text="ok"))
+    capabilities = launcher.capabilities
 
     profile = agentshim.get_provider(provider).profile
     assert capabilities.provider_session_resume is profile.supports_resume
@@ -1843,22 +1848,22 @@ def test_a_session_spec_for_another_provider_is_rejected(
     tmp_path: Path,
     provider: str,
 ) -> None:
-    driver, _fake = _driver(provider, scripted_turn(provider, text="ok"))
+    launcher, _fake = _launcher(provider, scripted_turn(provider, text="ok"))
     other = next(name for name in SCRIPTED_PROVIDERS if name != provider)
 
-    with pytest.raises(ValueError, match="cannot create"):
-        driver.create_session(_spec(tmp_path, provider=other))
+    with pytest.raises(ValueError, match="cannot open"):
+        launcher.launch(_spec(tmp_path, provider=other))
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
-def test_a_container_policy_on_a_host_driver_is_rejected(
+def test_a_container_policy_on_a_host_launcher_is_rejected(
     tmp_path: Path,
     provider: str,
 ) -> None:
-    driver, _fake = _driver(provider, scripted_turn(provider, text="ok"))
+    launcher, _fake = _launcher(provider, scripted_turn(provider, text="ok"))
 
     with pytest.raises(ValueError, match="container policy"):
-        driver.create_session(
+        launcher.launch(
             _spec(
                 tmp_path,
                 provider=provider,
@@ -1868,17 +1873,17 @@ def test_a_container_policy_on_a_host_driver_is_rejected(
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
-def test_a_host_policy_on_a_container_driver_is_rejected(
+def test_a_host_policy_on_a_container_launcher_is_rejected(
     tmp_path: Path,
     provider: str,
 ) -> None:
     sandbox = FakeDockerSandbox(workspace=tmp_path)
-    driver, _fake = _driver(
+    launcher, _fake = _launcher(
         provider, scripted_turn(provider, text="ok"), docker_sandboxes={"implementer": sandbox}
     )
 
     with pytest.raises(ValueError, match="container policy"):
-        driver.create_session(_spec(tmp_path, provider=provider))
+        launcher.launch(_spec(tmp_path, provider=provider))
 
 
 # ---------------------------------------------------------------------------
@@ -1894,8 +1899,8 @@ def test_the_launch_drops_the_inherited_pwd(
 ) -> None:
     """A stale ``PWD`` must not reach the CLI: bun-based CLIs trust it over the cwd."""
     del sandbox_builds
-    driver, fake = _driver(provider, scripted_turn(provider, text="ok"))
-    session = driver.create_session(
+    launcher, fake = _launcher(provider, scripted_turn(provider, text="ok"))
+    session = launcher.launch(
         _spec(tmp_path, provider=provider, environment=(("PWD", "/somewhere/stale"), ("GPU", "1")))
     )
 
@@ -2031,9 +2036,9 @@ def test_a_session_finds_the_run_skills_where_its_provider_looks(
         return scripted_turn(provider, text="ok")
 
     logs: list[str] = []
-    driver, _fake = _driver(provider, run, log=logs.append)
+    launcher, _fake = _launcher(provider, run, log=logs.append)
     client = AgentClient(
-        driver, provider=provider, skills=[tmp_path / "skills"], event_sink=NULL_AGENT_EVENT_SINK
+        launcher, provider=provider, skills=[tmp_path / "skills"], event_sink=NULL_AGENT_EVENT_SINK
     )
     with client:
         client.invoke_text(
@@ -2043,7 +2048,7 @@ def test_a_session_finds_the_run_skills_where_its_provider_looks(
     assert skill_dirs
     assert found == [list(skill_dirs)]
     assert scoped == [isolates]
-    assert driver.capabilities.skill_isolation is isolates
+    assert launcher.capabilities.skill_isolation is isolates
     assert any("cannot hide the operator's own skills" in line for line in logs) is not isolates
 
 
@@ -2116,15 +2121,13 @@ def test_a_session_connects_only_to_the_servers_the_run_configured(
         return scripted_turn(provider, text="ok")
 
     logs: list[str] = []
-    driver, _fake = _driver(provider, run, log=logs.append)
-    session = driver.create_session(
-        _spec(tmp_path, provider=provider, role=role, mcp_servers=configured)
-    )
+    launcher, _fake = _launcher(provider, run, log=logs.append)
+    session = launcher.launch(_spec(tmp_path, provider=provider, role=role, mcp_servers=configured))
     session.run_turn(AgentTurnRequest(message="go"))
 
     assert installed == [{server.name for server in configured}]
     assert scoped == [isolates]
-    assert driver.capabilities.mcp_isolation is isolates
+    assert launcher.capabilities.mcp_isolation is isolates
     assert (
         any("cannot hide the operator's own MCP servers" in line for line in logs) is not isolates
     )
@@ -2165,17 +2168,17 @@ def _requests_session_scope(
     return bool(added) and all(arg in request.argv for arg in added)
 
 
-def test_a_container_driver_reports_no_config_isolation_even_with_a_run_home(
+def test_a_container_launcher_reports_no_config_isolation_even_with_a_run_home(
     tmp_path: Path,
 ) -> None:
     sandboxes: dict[str, Any] = {"implementer": FakeDockerSandbox(workspace=tmp_path)}
-    driver = subject.AgentShimDriver(
+    launcher = subject.ConfinedSessionLauncher(
         provider="codex",
         docker_sandboxes=sandboxes,
         agent_homes=tmp_path / "agent-homes",
     )
 
-    assert driver.capabilities.config_isolation is False
+    assert launcher.capabilities.config_isolation is False
 
 
 class _SpawnFailureExecutor(FakeExecutor):
@@ -2219,13 +2222,13 @@ def test_process_spawn_os_errors_are_retryable_typed_faults(
     with TemporaryDirectory() as directory:
         tmp_path = Path(directory)
         executor = _SpawnFailureExecutor(failure, health_check=health_check)
-        driver = subject.AgentShimDriver(
+        launcher = subject.ConfinedSessionLauncher(
             provider="claude",
             docker_sandboxes={"worker": cast("DockerSandbox", FakeDockerSandbox(tmp_path))},
             executor_factory=lambda: executor,
             launcher_env=dict,
         )
-        client = AgentClient(driver, provider="claude", containerized=True)
+        client = AgentClient(launcher, provider="claude", containerized=True)
         try:
             with pytest.raises(RuntimeError, match="could not start") as raised:
                 client.invoke_text(

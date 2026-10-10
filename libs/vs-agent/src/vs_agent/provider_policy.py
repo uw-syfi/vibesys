@@ -8,8 +8,8 @@ provider's container environment needs, which CLI version its container image
 pins, and which VibeSys behaviors are scoped to a single provider.
 
 Before this module existed, several of these decisions were copied by hand
-into the modules that needed them (a shipped-provider tuple in the AgentShim
-driver, a ``--cli-provider`` choices list in the headless entrypoint, a
+into the modules that needed them (a shipped-provider tuple in the session
+launcher, a ``--cli-provider`` choices list in the headless entrypoint, a
 container-env table in ``cli_docker``). Every module that would otherwise
 repeat one of those decisions as a literal imports it from here instead, so a
 new decision (or a change to an existing one) has one place to make it.
@@ -98,7 +98,7 @@ def cli_mcp_config_files() -> tuple[str, ...]:
     """Return every workspace file a shipped provider writes its MCP servers into.
 
     Some CLIs read MCP servers only from a file in the working directory, so
-    the driver writes one there for each turn. It carries per-turn capability
+    the session writes one there for each turn. It carries per-turn capability
     tokens and is never candidate content. Resolved at call time from each
     provider's ``ProviderProfile.mcp_config_file``.
     """

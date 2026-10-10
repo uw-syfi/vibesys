@@ -30,7 +30,7 @@ from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_e
 from tests.support.world_git import CliWorldGit, GitKind, WorldGit, world_git
 
 from vs_agent.api import AgentClient
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
 from vs_core.api import (
     ClockAdvanced,
     Limits,
@@ -423,7 +423,7 @@ class CandidateResolver(FakeSessionResolver):
 
 def _open_agents(root: Path) -> SessionHost:
     writer = CandidateWriter(root)
-    client = AgentClient(FakeDriver(answer=writer.answer, on_turn=writer))
+    client = AgentClient(FakeProvider(answer=writer.answer, on_turn=writer))
     resolver = CandidateResolver(
         root,
         TemplateRenderer(root),

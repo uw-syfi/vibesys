@@ -9,7 +9,7 @@ VIBESYS_E2E_AGENTS=1 uv run pytest tests/e2e/test_operator_isolation_e2e.py -q -
 Each case seeds an operator state root (the provider's relocated state root,
 holding a copy of the real login) with a global instruction naming an operator
 code word and a ``SessionStart`` hook that touches a marker file. The workspace
-holds the project's own instruction with a project code word. The driver runs
+holds the project's own instruction with a project code word. The launcher runs
 one turn through its real host path, bubblewrap included, with a run-owned
 agent-homes directory. The project word must arrive; the operator word and
 the hook must not.
@@ -27,7 +27,7 @@ import pytest
 from tests.support import run_test_command
 
 from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
-from vs_agent.drivers.agentshim import AgentShimDriver
+from vs_agent.session_launch import ConfinedSessionLauncher
 
 ENABLE_ENV = "VIBESYS_E2E_AGENTS"
 OPERATOR_WORD = "OPERATOR-TANGERINE"
@@ -88,7 +88,7 @@ def test_a_confined_session_sees_the_project_and_not_the_operator(
     provider: str, tmp_path: Path
 ) -> None:
     marker = tmp_path / "operator-hook-ran"
-    launcher = {
+    environment = {
         **{k: v for k, v in agentshim.interactive_env().items() if k != "CLAUDECODE"},
         **_seeded_operator_root(provider, tmp_path, marker),
     }
@@ -99,14 +99,14 @@ def test_a_confined_session_sees_the_project_and_not_the_operator(
     (workspace / project_file).write_text(
         f"The project code word is {PROJECT_WORD}. Always mention it in every reply.\n"
     )
-    driver = AgentShimDriver(
+    launcher = ConfinedSessionLauncher(
         provider=provider,
         timeout=300,
         agent_homes=tmp_path / "agent-homes",
-        launcher_env=lambda: launcher,
+        launcher_env=lambda: environment,
     )
     try:
-        session = driver.create_session(
+        session = launcher.launch(
             AgentSessionSpec(
                 role="implementer",
                 provider=provider,
@@ -117,7 +117,7 @@ def test_a_confined_session_sees_the_project_and_not_the_operator(
         )
         result = session.run_turn(AgentTurnRequest(message=PROMPT))
     finally:
-        driver.close()
+        launcher.close()
 
     assert PROJECT_WORD in result.text, result.text
     assert OPERATOR_WORD not in result.text, result.text

@@ -137,7 +137,7 @@ class ManagedAgent(Protocol):
     """One explicitly owned auxiliary agent conversation.
 
     ``turn`` calls serialize.  Every call after the first reuses this object's
-    provider context when the driver can do so.  ``close`` is idempotent.
+    provider context when the provider can do so.  ``close`` is idempotent.
     """
 
     def turn(self, message: str, *, invocation_id: str | None = None) -> str:

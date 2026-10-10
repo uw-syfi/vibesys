@@ -11,7 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_agent.api import AgentClient, AgentQuotaError, AgentTurnRequest, QuotaCondition
-from vs_agent.api.testing import FakeDriver, FakeTurnScript
+from vs_agent.api.testing import FakeProvider, FakeTurnScript
 
 
 def _quota(detail: str = "limit") -> AgentQuotaError:
@@ -45,7 +45,7 @@ def _invoke(client: AgentClient, workspace: Path) -> str:
 
 
 def _client(answers: tuple[AgentQuotaError | str, ...]) -> AgentClient:
-    driver = FakeDriver(script=FakeTurnScript(answers=answers))
+    driver = FakeProvider(script=FakeTurnScript(answers=answers))
     return AgentClient(driver, provider="mock", model_name="m")
 
 

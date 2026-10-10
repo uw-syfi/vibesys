@@ -1,7 +1,7 @@
 """A provider's capacity limit reaches the caller as a typed ``AgentQuotaError``.
 
 Turns are scripted in each provider's real failure format, so the whole path
-runs: agentshim classifies the failure, the driver decides whether it is a
+runs: agentshim classifies the failure, the launcher decides whether it is a
 capacity limit, and the client either hands it to the installed gate or raises.
 """
 
@@ -18,7 +18,9 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_agent.api import AgentClient, AgentQuotaError, QuotaCondition
-from vs_agent.drivers.agentshim import AgentShimDriver
+
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
+from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
 
 PROVIDERS = ("claude", "codex")
@@ -27,14 +29,14 @@ _NOT_QUOTA = (agentshim.FailureKind.AUTH, agentshim.FailureKind.OTHER)
 
 @pytest.fixture(scope="module")
 def home(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A throwaway operator HOME: the driver prepares provider state under it."""
+    """A throwaway operator HOME: the launcher prepares provider state under it."""
     return tmp_path_factory.mktemp("operator-home")
 
 
 def _client(provider: str, runs: list[FakeRun], home: Path) -> AgentClient:
     fake = FakeExecutor(runs)
     return AgentClient(
-        AgentShimDriver(
+        ConfinedSessionLauncher(
             provider=provider,
             executor_factory=lambda: fake,
             launcher_env=lambda: {

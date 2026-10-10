@@ -37,13 +37,13 @@ Two traps:
 | Run environment choice and evaluator dispatch | `vs_runtime` |
 
 agentshim is a transport. VibeSys wraps each provider argv before launch:
-`confine_to_sandbox` in `libs/vs-agent/src/vs_agent/drivers/agentshim.py`
+`confine_to_sandbox` in `libs/vs-agent/src/vs_agent/session_launch.py`
 rewrites every command through the confinement's `wrap`, on the host or in a
 container alike. The provider CLIs run with approvals and their own sandboxes
 off (`--dangerously-bypass-approvals-and-sandbox`,
 `--dangerously-skip-permissions`), so VibeSys confinement is the only boundary.
 Never rely on a provider flag for isolation. See
-[Agent drivers](agent-drivers.md#where-agentshim-lives) for the library split.
+[Agent sessions](agent-drivers.md#where-agentshim-lives) for the library split.
 
 ## Configuration flow per layer
 
@@ -66,10 +66,10 @@ Never rely on a provider flag for isolation. See
    workspace-relative paths. It is validated once, then lowered by each
    confinement backend.
 4. **Agent session.** `AgentExecutionPolicy` carries the policy,
-   `host_resources`, and `require_enforcement` into the driver. Run
+   `host_resources`, and `require_enforcement` into the session launcher. Run
    entrypoints set `require_enforcement = not use_docker`: a host (Metal) run
    must be confined or fail.
-5. **Confinement.** On the host the driver calls `build_host_sandbox` and gets
+5. **Confinement.** On the host the launcher calls `build_host_sandbox` and gets
    `HostSandbox` (Linux, bubblewrap), `LandlockSandbox` (Linux, opt-in), or
    `SeatbeltSandbox` (macOS). In a container it uses the run's started
    `DockerSandbox`. Read-only and hidden paths reach a container through

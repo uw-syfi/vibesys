@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 
 T = TypeVar("T", bound=BaseModel)
 
-#: The turn budget a faulted turn reports exceeding, as the CLI driver does.
+#: The turn budget a faulted turn reports exceeding, as the CLI client does.
 TURN_BUDGET_S = 3600.0
 _NO_JSON = "the reply contained no JSON object"
 

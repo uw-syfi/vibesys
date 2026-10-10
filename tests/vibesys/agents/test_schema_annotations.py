@@ -7,13 +7,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from agentshim.testing import FakeExecutor, scripted_turn
 
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan, PortfolioPlan
 from vibesys.orchestration.multi.contracts import PreRoundDecision
 from vs_agent.api import AgentClient
-from vs_agent.api.testing import fake_agentshim_driver
+from vs_agent.api.testing import FakeExecutor, fake_agentshim_launcher, scripted_turn
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -82,8 +81,8 @@ def test_planner_native_schema_preserves_field_annotations(
 ) -> None:
     payload = response.model_dump(mode="json")
     executor = FakeExecutor(scripted_turn(provider, structured_output=payload))
-    driver = fake_agentshim_driver(provider=provider, executor=executor)
-    with AgentClient(driver, provider=provider) as client:
+    launcher = fake_agentshim_launcher(provider=provider, executor=executor)
+    with AgentClient(launcher, provider=provider) as client:
         result = client.invoke(
             kind="orchestrator",
             workspace=tmp_path,

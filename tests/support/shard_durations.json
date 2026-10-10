@@ -326,7 +326,7 @@
  "tests/conformance/test_frame_matching.py": 0.66,
  "tests/conformance/test_server_transports.py": 1.77,
  "tests/e2e/test_agent_image_e2e.py": 0.0,
- "tests/e2e/test_agentshim_driver_e2e.py": 0.01,
+ "tests/e2e/test_confined_session_e2e.py": 0.01,
  "tests/e2e/test_dynamic_loop_smoke_e2e.py": 18.75,
  "tests/e2e/test_dynamic_objective_document.py": 4.04,
  "tests/e2e/test_operator_isolation_e2e.py": 0.0,

@@ -20,8 +20,8 @@ import pytest
 from agentshim.testing import FakeClock, FakeExecutor, SequentialIds
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.stream_peers import StreamPeers, stream_peers
 
+from vs_agent.api.testing import StreamPeers, stream_peers
 from vs_faults.api import (
     Boundary,
     ConversationFault,

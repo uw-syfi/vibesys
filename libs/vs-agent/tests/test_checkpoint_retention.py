@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from agentshim.testing import FakeExecutor, TokenUsage, scripted_resume_failure, scripted_turn
+from agentshim.testing import scripted_resume_failure
 from hypothesis import example, given
 from hypothesis import strategies as st
 
@@ -20,16 +20,18 @@ from vs_agent.api import (
     ClientAgentSessions,
     Completed,
     InvalidResponse,
-    SessionDisposition,
     SessionResumeError,
     SessionScope,
     Unknown,
 )
 from vs_agent.api.testing import (
     FakeAgentInvocationStore,
-    FakeDriver,
+    FakeExecutor,
+    FakeProvider,
     FakeTurnScript,
-    fake_agentshim_driver,
+    TokenUsage,
+    fake_agentshim_launcher,
+    scripted_turn,
 )
 from vs_prompts.api import TemplateRenderer
 
@@ -68,10 +70,10 @@ def test_journaled_turn_sequence_preserves_resume_proof(
                 usage=TokenUsage(input_tokens=20_000_000 if heavy else 1),
             )
         )
-        driver = fake_agentshim_driver(provider="codex", executor=executor)
+        launcher = fake_agentshim_launcher(provider="codex", executor=executor)
         key = AgentSessionKey(SessionScope.MEMBER, f"{role}:worker")
         ledger = FakeAgentInvocationStore()
-        with AgentClient(driver, provider="codex") as client:
+        with AgentClient(launcher, provider="codex") as client:
             sessions = ClientAgentSessions(client, ledger)
             spec = _spec(workspace, role)
             sessions.bind(key, spec, AgentTurnRequest(message="", label="resume"))
@@ -111,7 +113,7 @@ def test_journaled_later_start_never_replays_after_provider_refuses_resume(
             scripted_turn(provider, text="must not replay", session_id="thread-2"),
         ]
     )
-    driver = fake_agentshim_driver(provider=provider, executor=executor)
+    launcher = fake_agentshim_launcher(provider=provider, executor=executor)
     key = AgentSessionKey(SessionScope.MEMBER, "implementer:worker")
     spec = AgentSessionSpec(
         role="implementer",
@@ -120,7 +122,7 @@ def test_journaled_later_start_never_replays_after_provider_refuses_resume(
         policy=AgentExecutionPolicy(require_enforcement=False),
     )
     ledger = FakeAgentInvocationStore()
-    with AgentClient(driver, provider=provider) as client:
+    with AgentClient(launcher, provider=provider) as client:
         sessions = ClientAgentSessions(client, ledger)
         first = sessions.start(key, spec, AgentTurnRequest(message="work", invocation_id="first"))
         assert isinstance(first, Completed)
@@ -137,12 +139,12 @@ def test_journaled_later_start_never_replays_after_provider_refuses_resume(
 
 def test_journaled_initial_turn_without_provider_identity_stays_unresolved(tmp_path: Path) -> None:
     executor = FakeExecutor(scripted_turn("codex", text="waiting"))
-    driver = fake_agentshim_driver(provider="codex", executor=executor)
+    launcher = fake_agentshim_launcher(provider="codex", executor=executor)
     key = AgentSessionKey(SessionScope.MEMBER, "implementer:worker")
     spec = _spec(tmp_path)
     turn = AgentTurnRequest(message="work", invocation_id="first")
     ledger = FakeAgentInvocationStore()
-    with AgentClient(driver, provider="codex") as client:
+    with AgentClient(launcher, provider="codex") as client:
         sessions = ClientAgentSessions(client, ledger)
         outcome = sessions.start(key, spec, turn)
         assert isinstance(outcome, Unknown)
@@ -157,12 +159,12 @@ def test_journaled_later_start_refuses_replaced_provider_identity(tmp_path: Path
             scripted_turn("codex", text="unexpected replacement", session_id="thread-2"),
         ]
     )
-    driver = fake_agentshim_driver(provider="codex", executor=executor)
+    launcher = fake_agentshim_launcher(provider="codex", executor=executor)
     key = AgentSessionKey(SessionScope.MEMBER, "implementer:worker")
     spec = _spec(tmp_path)
     turn = AgentTurnRequest(message="more", invocation_id="later")
     ledger = FakeAgentInvocationStore()
-    with AgentClient(driver, provider="codex") as client:
+    with AgentClient(launcher, provider="codex") as client:
         sessions = ClientAgentSessions(client, ledger)
         first = sessions.start(key, spec, AgentTurnRequest(message="work", invocation_id="first"))
         assert isinstance(first, Completed)
@@ -178,28 +180,26 @@ def test_journaled_later_start_refuses_replaced_provider_identity(tmp_path: Path
 def test_session_renewal_threshold_survives_a_strict_turn(
     tmp_path: Path, implementation: str, *, required: bool
 ) -> None:
-    driver = (
-        FakeDriver(script=FakeTurnScript(answers=("done",), reset_after_turn=2))
+    launcher = (
+        FakeProvider(script=FakeTurnScript(answers=("done",), reset_after_turn=2))
         if implementation == "fake"
-        else fake_agentshim_driver(
+        else fake_agentshim_launcher(
             provider="codex",
             executor=FakeExecutor(scripted_turn("codex", text="done", session_id="thread-1")),
         )
     )
-    session = driver.create_session(_spec(tmp_path))
+    session = launcher.launch(_spec(tmp_path))
     try:
         first = session.run_turn(AgentTurnRequest("first", require_provider_checkpoint=True))
         strict = session.run_turn(
             AgentTurnRequest("second", expected_provider_session_id=first.provider_session_id)
         )
-        assert strict.disposition is SessionDisposition.REUSABLE
+        assert not strict.restarted
         last = session.run_turn(AgentTurnRequest("third", require_provider_checkpoint=required))
-        assert last.disposition is (
-            SessionDisposition.REUSABLE if required else SessionDisposition.RESET_REQUIRED
-        )
+        assert last.restarted is (not required)
     finally:
         session.close()
-        driver.close()
+        launcher.close()
 
 
 @pytest.mark.parametrize("schema_rejected", [False, True])
@@ -210,11 +210,11 @@ def test_later_start_refuses_lost_checkpoint_after_reconstruction(
     key = AgentSessionKey(SessionScope.MEMBER, "implementer:worker")
     spec = _spec(tmp_path)
     ledger = FakeAgentInvocationStore()
-    first_driver = FakeDriver(
+    first_provider = FakeProvider(
         script=FakeTurnScript(answers=("waiting", AgentOutputSchemaError("invalid reply"))),
         on_turn=calls.append,
     )
-    with AgentClient(first_driver, provider="codex") as client:
+    with AgentClient(first_provider, provider="codex") as client:
         first = ClientAgentSessions(client, ledger).start(
             key, spec, AgentTurnRequest(message="work", invocation_id="first")
         )
@@ -228,7 +228,7 @@ def test_later_start_refuses_lost_checkpoint_after_reconstruction(
     # The inert default checkpoint store deliberately models lost persisted
     # provider state after the journal has acknowledged accepted work.
     with AgentClient(
-        FakeDriver(answer="must not replay", on_turn=calls.append), provider="codex"
+        FakeProvider(answer="must not replay", on_turn=calls.append), provider="codex"
     ) as client:
         recovered = ClientAgentSessions(client, ledger)
         with pytest.raises(SessionResumeError, match="acknowledged provider checkpoint is missing"):
@@ -243,7 +243,7 @@ def test_later_start_refuses_changed_configuration_before_dispatch(tmp_path: Pat
     spec = _spec(tmp_path)
     ledger = FakeAgentInvocationStore()
     with AgentClient(
-        FakeDriver(answer="waiting", on_turn=calls.append), provider="codex"
+        FakeProvider(answer="waiting", on_turn=calls.append), provider="codex"
     ) as client:
         sessions = ClientAgentSessions(client, ledger)
         first = sessions.start(key, spec, AgentTurnRequest(message="work", invocation_id="first"))

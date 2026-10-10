@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 from tests.vibesys.orchestration.dynamic.loop._harness import (
@@ -26,9 +26,9 @@ from vs_agent.api import (
     AgentClient,
     AgentSessionKey,
     AgentSessionSpec,
-    SessionDisposition,
     SessionResumeError,
 )
+from vs_agent.api.testing import HandSession
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -44,23 +44,19 @@ if TYPE_CHECKING:
     from vs_agent.api.testing import FakeAgentClient
 
 
-@dataclass
-class BudgetedSession:
+class BudgetedSession(HandSession):
     """A scripted provider that retires unbound turns at a budget boundary."""
 
-    engine: FakeAgentClient
-    spec: AgentSessionSpec
-    retire_after: int
-    histories: set[str]
-    records: list[tuple[str, AgentTurnRequest, AgentTurnResult]]
-    counts: dict[str, int]
-    adopted: str | None = None
-    closed: bool = False
+    def __init__(self, *, spec: AgentSessionSpec, scenario: BudgetedLauncher) -> None:
+        super().__init__(spec)
+        self.scenario = scenario
+        self.adopted_id: str | None = None
 
     @property
     def key(self) -> AgentSessionKey:
         return AgentSessionKey.for_member(self.spec.role, str(self.spec.workspace))
 
+    @override
     def run_turn(
         self, request: AgentTurnRequest, observer: AgentObserver | None = None
     ) -> AgentTurnResult:
@@ -68,52 +64,52 @@ class BudgetedSession:
             raise SessionResumeError(str(self.key), "provider session is closed")
         if (
             request.expected_provider_session_id is not None
-            and self.adopted != request.expected_provider_session_id
+            and self.adopted_id != request.expected_provider_session_id
         ):
             raise SessionResumeError(str(self.key), "expected provider history was not adopted")
-        result = self.engine.run(
+        result = self.scenario.engine.run(
             session_spec=self.spec, turn=request, session_key=self.key, observer=observer
         )
         assert result.provider_session_id is not None
-        self.histories.add(result.provider_session_id)
-        self.records.append((self.spec.role, request, result))
+        self.scenario.histories.add(result.provider_session_id)
+        self.scenario.records.append((self.spec.role, request, result))
         identity = result.provider_session_id
-        self.adopted = identity
-        self.counts[identity] = self.counts.get(identity, 0) + 1
-        # The compatibility read lets the exact same regression execute on the
-        # pre-fix request contract, which did not express checkpoint retention.
-        checkpoint_required = getattr(request, "require_provider_checkpoint", False)
+        self.adopted_id = identity
+        self.scenario.counts[identity] = self.scenario.counts.get(identity, 0) + 1
         if (
             self.spec.role == IMPLEMENTER.id
-            and self.counts[identity] >= self.retire_after
+            and self.scenario.counts[identity] >= self.scenario.retire_after
             and request.expected_provider_session_id is None
-            and not checkpoint_required
+            and not request.require_provider_checkpoint
         ):
-            self.engine.evict_session(self.key)
-            self.histories.remove(result.provider_session_id)
-            self.adopted = None
-            return replace(result, disposition=SessionDisposition.RESET_REQUIRED)
+            self.scenario.engine.evict_session(self.key)
+            self.scenario.histories.remove(result.provider_session_id)
+            self.adopted_id = None
+            return replace(result, restarted=True)
         return result
 
-    def resume_provider_session(self, session_id: str) -> bool:
+    @override
+    def adopt(self, session_id: str) -> bool:
         if (
-            self.adopted is not None
-            or session_id not in self.histories
-            or self.engine.provider_session_id(self.key) != session_id
+            self.adopted_id is not None
+            or session_id not in self.scenario.histories
+            or self.scenario.engine.provider_session_id(self.key) != session_id
         ):
             return False
-        self.adopted = session_id
+        self.adopted_id = session_id
         return True
 
+    @override
     def cancel(self) -> None:
-        self.engine.cancel()
+        self.scenario.engine.cancel()
 
+    @override
     def close(self) -> None:
         self.closed = True
 
 
 @dataclass
-class BudgetedDriver:
+class BudgetedLauncher:
     """Keep real AgentClient checkpoint behavior above the scripted providers."""
 
     engine: FakeAgentClient
@@ -128,17 +124,15 @@ class BudgetedDriver:
     def capabilities(self) -> AgentCapabilities:
         return self.engine.capabilities
 
-    def create_session(self, spec: AgentSessionSpec) -> BudgetedSession:
+    def launch(self, spec: AgentSessionSpec) -> BudgetedSession:
         if self.closed:
-            raise SessionResumeError(spec.role, "provider driver is closed")
-        session = BudgetedSession(
-            self.engine, spec, self.retire_after, self.histories, self.records, self.counts
-        )
+            raise SessionResumeError(spec.role, "session launcher is closed")
+        session = BudgetedSession(spec=spec, scenario=self)
         self.sessions.append(session)
         return session
 
     def close(self) -> None:
-        # Each scoped AgentClient owns its driver and session views. The
+        # Each scoped AgentClient owns its launcher and session views. The
         # scripted provider's history belongs to the composed scenario and
         # persists after a view closes, as a CLI provider's rollout does.
         self.closed = True
@@ -150,7 +144,7 @@ class BudgetedDriver:
 class BudgetedAgents:
     scripts: ScriptedAgents
     retire_after: int
-    driver: BudgetedDriver | None = None
+    launcher: BudgetedLauncher | None = None
     engine: FakeAgentClient | None = None
     histories: set[str] = field(default_factory=set)
     records: list[tuple[str, AgentTurnRequest, AgentTurnResult]] = field(default_factory=list)
@@ -173,10 +167,10 @@ class BudgetedAgents:
     ) -> AgentClient:
         if self.engine is None:
             self.engine = self.scripts.client(skill_selection=skill_selection)
-        self.driver = BudgetedDriver(
+        self.launcher = BudgetedLauncher(
             self.engine, self.retire_after, self.histories, self.records, self.counts
         )
-        return AgentClient(self.driver, provider="codex", session_store=session_store)
+        return AgentClient(self.launcher, provider="codex", session_store=session_store)
 
 
 def _wait_input(base: Path) -> LoopInput:
@@ -242,7 +236,7 @@ def _run_wait_sequence(base: Path, *, failed_attempts: int, correct_wait: bool) 
     assert run.succeeded is True
     assert scripts.unscripted == []
     assert len(handle) == 1
-    assert agents.driver is not None
+    assert agents.launcher is not None
     records = [
         (request, result) for role, request, result in agents.records if role == IMPLEMENTER.id
     ]
@@ -311,7 +305,7 @@ def test_wait_correction_after_resumed_turn_keeps_checkpoint(tmp_path: Path) -> 
     assert run.succeeded is True
     assert scripts.unscripted == []
     assert len(handles) == 2
-    assert agents.driver is not None
+    assert agents.launcher is not None
     records = [
         (request, result) for role, request, result in agents.records if role == IMPLEMENTER.id
     ]

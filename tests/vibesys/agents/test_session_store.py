@@ -4,7 +4,7 @@ These tests exercise the machine-local session store in isolation and its
 integration with :class:`~vs_agent.client.AgentClient`: a fresh client
 (standing in for a resumed process) must offer a checkpointed provider session
 ID to the very first turn, but only when the spec that produced it still
-matches, and it must forget the ID when a driver reports a restart or refuses
+matches, and it must forget the ID when a session reports a restart or refuses
 to adopt it. A broken store must never cost a completed turn.
 """
 
@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Barrier
+from typing import TYPE_CHECKING, override
 
 import pytest
 from tests.support.run_execution import run_execution_record
@@ -27,14 +28,13 @@ from vs_agent.api import (
     NullSessionStore,
     SessionScope,
 )
+from vs_agent.api.testing import HandSession
 from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentObserver,
-    AgentSession,
     AgentSessionSpec,
     AgentTurnRequest,
     AgentTurnResult,
-    SessionDisposition,
     session_spec_fingerprint,
 )
 from vs_project.api import (
@@ -42,6 +42,9 @@ from vs_project.api import (
     Project,
     RunEnvironmentRecord,
 )
+
+if TYPE_CHECKING:
+    from vs_agent.shim_turns import LaunchedSession
 
 HYPOTHESIS = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
 ROLE = AgentSessionKey(SessionScope.ROLE, "judge")
@@ -293,7 +296,7 @@ def test_a_broken_store_never_discards_a_completed_turn(tmp_path: Path) -> None:
     _slot_path(project).mkdir(parents=True)
     store = DurableSessionStore(slot, log=lambda _message: None)
     session = _FakeSession(results=[AgentTurnResult("done", provider_session_id="thread-1")])
-    client = AgentClient(_FakeDriver([session]), session_store=store)
+    client = AgentClient(_FakeLauncher([session]), session_store=store)
 
     result = client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=HYPOTHESIS)
 
@@ -317,16 +320,24 @@ def test_null_store_persists_nothing_and_always_misses() -> None:
 # --- AgentClient resume ----------------------------------------------------
 
 
-@dataclass
-class _FakeSession:
-    """A fake session that records adoption attempts and queued results."""
+class _FakeSession(HandSession):
+    """A hand-programmed session that records adoption attempts and queued results."""
 
-    results: list[AgentTurnResult]
-    error: Exception | None = None
-    adopts: bool = True
-    offered: list[str] = field(default_factory=list)
-    close_calls: int = 0
+    def __init__(
+        self,
+        results: list[AgentTurnResult],
+        *,
+        error: Exception | None = None,
+        adopts: bool = True,
+    ) -> None:
+        super().__init__()
+        self.results = results
+        self.error = error
+        self.adopts = adopts
+        self.offered: list[str] = []
+        self.close_calls = 0
 
+    @override
     def run_turn(
         self,
         request: AgentTurnRequest,
@@ -337,19 +348,22 @@ class _FakeSession:
             raise self.error
         return self.results.pop(0)
 
-    def resume_provider_session(self, session_id: str) -> bool:
+    @override
+    def adopt(self, session_id: str) -> bool:
         self.offered.append(session_id)
         return self.adopts
 
+    @override
     def cancel(self) -> None:
         """Accept the contract's cancel; the fake has no in-flight turn."""
 
+    @override
     def close(self) -> None:
         self.close_calls += 1
 
 
 @dataclass
-class _FakeDriver:
+class _FakeLauncher:
     queued_sessions: list[_FakeSession]
     specs: list[AgentSessionSpec] = field(default_factory=list)
     close_calls: int = 0
@@ -358,7 +372,7 @@ class _FakeDriver:
     def capabilities(self) -> AgentCapabilities:
         return AgentCapabilities()
 
-    def create_session(self, spec: AgentSessionSpec) -> AgentSession:
+    def launch(self, spec: AgentSessionSpec) -> LaunchedSession:
         self.specs.append(spec)
         return self.queued_sessions.pop(0)
 
@@ -369,7 +383,7 @@ class _FakeDriver:
 def test_completed_turn_checkpoints_its_provider_session_id(tmp_path: Path) -> None:
     store = _store(tmp_path)
     session = _FakeSession(results=[AgentTurnResult("done", provider_session_id="thread-1")])
-    client = AgentClient(_FakeDriver([session]), session_store=store)
+    client = AgentClient(_FakeLauncher([session]), session_store=store)
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=HYPOTHESIS)
 
@@ -382,7 +396,7 @@ def test_completed_turn_checkpoints_its_provider_session_id(tmp_path: Path) -> N
 def test_role_scoped_turn_checkpoints_nothing(tmp_path: Path) -> None:
     store = _store(tmp_path)
     session = _FakeSession(results=[AgentTurnResult("done", provider_session_id="thread-1")])
-    client = AgentClient(_FakeDriver([session]), session_store=store)
+    client = AgentClient(_FakeLauncher([session]), session_store=store)
 
     # No session_key: the client falls back to a role-scoped key.
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"))
@@ -394,7 +408,7 @@ def test_turn_without_a_session_id_keeps_the_prior_checkpoint(tmp_path: Path) ->
     store = _store(tmp_path)
     _checkpoint(store, "thread-old")
     session = _FakeSession(results=[AgentTurnResult("done", provider_session_id=None)])
-    client = AgentClient(_FakeDriver([session]), session_store=store)
+    client = AgentClient(_FakeLauncher([session]), session_store=store)
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=HYPOTHESIS)
 
@@ -408,7 +422,7 @@ def test_fresh_client_offers_the_checkpoint_to_its_first_turn(tmp_path: Path) ->
     _checkpoint(store, "thread-1")
     session = _FakeSession(results=[AgentTurnResult("resumed", provider_session_id="thread-1")])
     # A brand new client with no in-memory session models a resumed process.
-    client = AgentClient(_FakeDriver([session]), session_store=store)
+    client = AgentClient(_FakeLauncher([session]), session_store=store)
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("continue"), session_key=HYPOTHESIS)
 
@@ -423,7 +437,7 @@ def test_a_reused_live_session_is_not_offered_the_checkpoint_again(tmp_path: Pat
             AgentTurnResult("two", provider_session_id="thread-1"),
         ]
     )
-    client = AgentClient(_FakeDriver([session]), session_store=store)
+    client = AgentClient(_FakeLauncher([session]), session_store=store)
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=HYPOTHESIS)
     client.run(session_spec=_spec(), turn=AgentTurnRequest("two"), session_key=HYPOTHESIS)
@@ -447,7 +461,7 @@ def test_checkpoint_from_a_different_spec_is_refused_and_dropped(tmp_path: Path)
     )
     _checkpoint(store, "thread-1", spec=other)
     session = _FakeSession(results=[AgentTurnResult("fresh", provider_session_id="thread-2")])
-    client = AgentClient(_FakeDriver([session]), session_store=store)
+    client = AgentClient(_FakeLauncher([session]), session_store=store)
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("go"), session_key=HYPOTHESIS)
 
@@ -460,9 +474,9 @@ def test_checkpoint_from_a_different_spec_is_refused_and_dropped(tmp_path: Path)
 def test_a_refused_adoption_drops_the_checkpoint(tmp_path: Path) -> None:
     store = _store(tmp_path)
     _checkpoint(store, "thread-1")
-    # A driver whose provider cannot resume reports False.
+    # A session whose provider cannot resume reports False.
     session = _FakeSession(results=[AgentTurnResult("fresh")], adopts=False)
-    client = AgentClient(_FakeDriver([session]), session_store=store)
+    client = AgentClient(_FakeLauncher([session]), session_store=store)
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("go"), session_key=HYPOTHESIS)
 
@@ -470,13 +484,11 @@ def test_a_refused_adoption_drops_the_checkpoint(tmp_path: Path) -> None:
     assert store.get(HYPOTHESIS) is None
 
 
-def test_reset_disposition_evicts_and_clears_the_checkpoint(tmp_path: Path) -> None:
+def test_restarted_turn_evicts_and_clears_the_checkpoint(tmp_path: Path) -> None:
     store = _store(tmp_path)
     _checkpoint(store, "thread-1")
-    session = _FakeSession(
-        results=[AgentTurnResult("reset", disposition=SessionDisposition.RESET_REQUIRED)]
-    )
-    client = AgentClient(_FakeDriver([session]), session_store=store)
+    session = _FakeSession(results=[AgentTurnResult("reset", restarted=True)])
+    client = AgentClient(_FakeLauncher([session]), session_store=store)
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=HYPOTHESIS)
 
@@ -490,7 +502,7 @@ def test_a_failed_turn_keeps_the_checkpoint(tmp_path: Path) -> None:
     # A timeout or a cancelled run says nothing about whether the conversation
     # is still resumable, so the checkpoint outlives it.
     failing = _FakeSession(results=[], error=RuntimeError("transient network error"))
-    client = AgentClient(_FakeDriver([failing]), session_store=store)
+    client = AgentClient(_FakeLauncher([failing]), session_store=store)
 
     with pytest.raises(RuntimeError):
         client.run(session_spec=_spec(), turn=AgentTurnRequest("go"), session_key=HYPOTHESIS)
@@ -504,7 +516,7 @@ def test_in_process_spec_change_replaces_the_checkpoint(tmp_path: Path) -> None:
     store = _store(tmp_path)
     first = _FakeSession(results=[AgentTurnResult("one", provider_session_id="thread-1")])
     second = _FakeSession(results=[AgentTurnResult("two", provider_session_id="thread-2")])
-    client = AgentClient(_FakeDriver([first, second]), session_store=store)
+    client = AgentClient(_FakeLauncher([first, second]), session_store=store)
 
     client.run(
         session_spec=_spec(model="gpt-5.6-sol"),
