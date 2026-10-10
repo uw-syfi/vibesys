@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from server.api.service import RunApi, SubscriptionBootstrap
+    from server.transport.subscriptions import StreamDelivery
     from vs_sim.api import Threads, Worker
 
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
@@ -82,9 +83,9 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                     client_id = raw["client_id"]
                 request = _REQUEST_ADAPTER.validate_python(raw)
                 if isinstance(request, SubscribeRequest):
-                    with self.server.subscriptions.track():
+                    with self.server.subscriptions.track() as delivery:
                         try:
-                            self._stream(request)
+                            self._stream(request, delivery)
                         except (BrokenPipeError, ConnectionResetError):
                             pass
                         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010252 [BLE001]; arbitrary event serialization failures are returned as protocol stream errors.
@@ -100,7 +101,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             self.wfile.write(response.model_dump_json().encode() + b"\n")
             self.wfile.flush()
 
-    def _stream(self, request: SubscribeRequest) -> None:
+    def _stream(self, request: SubscribeRequest, delivery: StreamDelivery) -> None:
         api = self.server.api
         try:
             bootstrap = api.subscription_bootstrap(
@@ -132,6 +133,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             )
         )
         cursor, reported_floor, store_id = self._write_bootstrap(request, bootstrap)
+        delivery.delivered(cursor)
         while True:
             if not api.wait_for_change(cursor, timeout=_DISCONNECT_POLL_SECONDS):
                 if self._client_disconnected():
@@ -143,6 +145,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 # willing to replay. Bootstrap again at a fresh tail rather
                 # than deliver a window the bound was meant to exclude.
                 cursor, reported_floor, store_id = self._rebootstrap(request)
+                delivery.delivered(cursor)
                 continue
             # ``wait_for_change`` only tells us that the stream changed. Take
             # one watermark-consistent snapshot before writing so a resumed
@@ -156,6 +159,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 # the two logs compare in length. Bootstrap against the store
                 # that is live now; the client re-folds from the batch's id.
                 cursor, reported_floor, store_id = self._rebootstrap(request)
+                delivery.delivered(cursor)
                 continue
             self._write_message(
                 EventBatchMessage(
@@ -167,6 +171,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 )
             )
             cursor = checkpoint.through_sequence
+            delivery.delivered(cursor)
 
     def _rebootstrap(self, request: SubscribeRequest) -> tuple[int, int, str]:
         """Restart this subscription's replay against the journal's live state."""
@@ -284,6 +289,10 @@ class UnixJsonlServer:
     def wait_for_subscriber(self, timeout: float) -> bool:
         """Wait until a presentation client has established its event stream."""
         return self._subscriptions.wait_for_subscriber(timeout)
+
+    def wait_until_delivered(self, sequence: int, timeout: float) -> bool:
+        """Wait, bounded, until every open stream wrote through ``sequence``."""
+        return self._subscriptions.wait_until_delivered(sequence, timeout)
 
     def wait_for_subscriber_disconnect(self) -> None:
         """Keep terminal events queryable until the last active subscriber exits."""
