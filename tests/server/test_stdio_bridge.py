@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from server.stdio_bridge import (
@@ -74,6 +74,7 @@ def test_the_first_decided_outcome_is_final(events: list[RelayEvent]) -> None:
 
 
 @given(st.lists(_events, max_size=30), st.floats(1e-3, 100))
+@example(events=[WriteStarted(Peer.CLIENT, 88.40148519386226)], early_by=1.0)
 def test_a_write_in_flight_stalls_exactly_at_its_deadline(
     events: list[RelayEvent], early_by: float
 ) -> None:

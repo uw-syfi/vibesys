@@ -208,10 +208,13 @@ def advance(state: RelayState, event: RelayEvent, limits: BridgeLimits) -> Relay
             outcome = ending(event)
             return state if outcome is None else replace(state, outcome=outcome)
         case Tick(at=at):
+            # Compare against the same sum ``next_deadline`` returns: ``at - since`` can
+            # round below the deadline at the instant the supervisor wakes for it, and
+            # the supervisor would then spin on a zero wait without ever deciding.
             overdue = [
                 peer
                 for peer, since in _pending(state).items()
-                if at - since >= limits.write_deadline_seconds
+                if at >= since + limits.write_deadline_seconds
             ]
             if not overdue:
                 return state
