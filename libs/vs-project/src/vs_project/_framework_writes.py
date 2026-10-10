@@ -51,6 +51,10 @@ class FrameworkWrites:
         # stands for "the file is absent".
         self._files: dict[Path, frozenset[str | None]] = {}
         self._directories: set[Path] = set()
+        # Paths as claimed, so claiming one again costs no ``realpath``. Claims are
+        # idempotent and a directory is only ever claimed after its caller has proven
+        # it is a plain directory below its owning root.
+        self._claimed: set[Path] = set()
 
     @contextmanager
     def publishing(self, path: Path, contents: bytes | None) -> Iterator[None]:
@@ -75,9 +79,13 @@ class FrameworkWrites:
         Files in it that the framework published through ``publishing`` are still compared
         by digest; any other file in it is the library's.
         """
+        with self._lock:
+            if path in self._claimed:
+                return
         resolved = path.resolve()
         with self._lock:
             self._directories.add(resolved)
+            self._claimed.add(path)
 
     def is_framework_state(self, path: Path) -> bool:
         """Return whether *path* is exactly as the framework left it.

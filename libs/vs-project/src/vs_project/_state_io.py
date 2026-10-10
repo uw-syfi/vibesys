@@ -97,6 +97,14 @@ class AtomicWriteEffects(Protocol):
         ...
 
 
+class StoreDurabilityEffects(AtomicWriteEffects, Protocol):
+    """Atomic publication plus synchronizing a file this process did not just write."""
+
+    def sync_existing_file(self, path: Path) -> None:
+        """Persist the current bytes of an already published file."""
+        ...
+
+
 class LocalAtomicWriteEffects:
     """Local filesystem implementation of atomic replacement effects."""
 
@@ -116,6 +124,14 @@ class LocalAtomicWriteEffects:
     def sync_file(self, stream: AtomicWriteStream) -> None:
         """Persist the complete staging file."""
         os.fsync(stream.fileno())
+
+    def sync_existing_file(self, path: Path) -> None:
+        """Persist a published file, refusing to follow a symlink at ``path``."""
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     def replace(self, temporary: Path, destination: Path) -> None:
         """Atomically publish the staging file."""

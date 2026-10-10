@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
     from pathlib import Path
 
-    from vs_project._state_io import AtomicWriteEffects, AtomicWriteStream
+    from vs_project._state_io import AtomicWriteEffects, AtomicWriteStream, StoreDurabilityEffects
     from vs_project.project import Project
 
 
@@ -138,7 +138,7 @@ class LocalStateStore(StoreOperations):
     first-use durability. Ancestors outside the project need only traversal.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-901701 [PLR0913]; every parameter after run_id is keyword-only and independently optional.
         self,
         project: Project,
         run_id: str,
@@ -146,9 +146,19 @@ class LocalStateStore(StoreOperations):
         fault_plan: Iterable[CommitFault] = (),
         lease_fault_plan: Iterable[CommitFault | None] = (),
         observation_fault_plan: Iterable[ObservationFault | None] = (),
+        effects: StoreDurabilityEffects | None = None,
     ) -> None:
         """Bind a validated Project run namespace, without decoding payloads."""
+        # > The three fault plans are the store contract's public injection points and
+        # > ``effects`` is the durability seam; a settings object would change every
+        # > caller of Project.state_store for no added safety.
         super().__init__(fault_plan, lease_fault_plan, observation_fault_plan)
+        self._effects = effects if effects is not None else LocalAtomicWriteEffects()
+        # The document bytes this store knows are durable: the last it published
+        # (every sync succeeded) or the last it reloaded and synchronized. A reload
+        # of exactly these bytes has nothing left to synchronize; any other bytes,
+        # or any publication that did not finish, make the next reload sync again.
+        self._durable_source: bytes | None = None
         self._namespace = project.state.state_store_namespace(run_id)
         self._durable_root = project.root
 
@@ -169,42 +179,36 @@ class LocalStateStore(StoreOperations):
         if fault == ObservationFault.READ:
             message = "state-store observation read failed"
             raise OSError(message)
+        directory = self._namespace.external_directory()
         source = self._namespace.read_bytes("store.json")
         if source is None:
             return StoreDocument()
-        document = _decode_store_document(
-            source, location=str(self._namespace.external_directory() / "store.json")
-        )
+        document = _decode_store_document(source, location=str(directory / "store.json"))
         # Reload resolves a lost durability acknowledgement: synchronize the
-        # whole observed document before any caller can dispatch from it.
-        directory = self._namespace.external_directory()
-        descriptor = os.open(directory / "store.json", os.O_RDONLY | os.O_NOFOLLOW)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        filesystem = (
-            _FaultObservationEffects()
-            if fault == ObservationFault.SYNC
-            else LocalAtomicWriteEffects()
-        )
+        # whole observed document before any caller can dispatch from it. Bytes
+        # this store already made durable need no second synchronization.
+        if fault != ObservationFault.SYNC and source == self._durable_source:
+            return document
+        self._effects.sync_existing_file(directory / "store.json")
+        filesystem = _FaultObservationEffects() if fault == ObservationFault.SYNC else self._effects
         sync_directory_chain(directory, self._durable_root, effects=filesystem)
+        self._durable_source = source
         return document
 
     def _write(self, document: StoreDocument) -> None:
         self._publish_document(document)
 
     def _write_record(self, document: StoreDocument, fault: CommitFault | None) -> None:
-        effects = None if fault is None else _FaultAtomicWriteEffects(fault)
+        effects = self._effects if fault is None else _FaultAtomicWriteEffects(fault)
         self._publish_document(document, effects=effects)
 
     def _publish_document(
         self, document: StoreDocument, *, effects: AtomicWriteEffects | None = None
     ) -> None:
+        contents = document.model_dump_json().encode()
         try:
-            self._namespace.write_bytes(
-                "store.json", document.model_dump_json().encode(), effects=effects
-            )
+            self._namespace.write_bytes("store.json", contents, effects=effects or self._effects)
+            self._durable_source = contents
         except ProjectStateError as exc:
             if isinstance(exc.__cause__, StateStoreWriteError):
                 message = str(exc.__cause__)

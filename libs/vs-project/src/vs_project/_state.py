@@ -26,7 +26,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal, Protocol, Self
+from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, Self
 
 from pydantic import (
     BaseModel,
@@ -1598,25 +1598,38 @@ def _contained_state_dir(parent: Path, namespace: str, *, kind: str) -> Path:
 
 
 def _contained_without_symlinks(parent: Path, child: Path, *, kind: str) -> Path:
-    path = _contained(parent, child)
+    """Return ``child`` once it is proven to lie below ``parent`` through plain directories.
+
+    ``child`` must be ``parent`` plus relative components, none of them ``..``, and no
+    component below ``parent`` may be a symlink. Together these prove containment
+    without resolving the whole path (one ``lstat`` per component instead of a
+    ``realpath`` of both paths on every access): a path of non-symlink components
+    below ``parent`` can only name something below ``parent``, wherever ``parent``
+    itself resolves. Only a rejected path is resolved, to say which rule it broke.
+    """
+    try:
+        components = child.relative_to(parent).parts
+    except ValueError:
+        raise ProjectStateError.path_escapes_root(parent, child) from None
+    if ".." in components:
+        raise ProjectStateError.path_escapes_root(parent, child)
     current = parent
-    for component in child.relative_to(parent).parts:
+    for component in components:
         current /= component
         try:
             if current.is_symlink():
-                raise ProjectStateError.state_path_symlink(kind, current)
+                _raise_symlink_component(parent, child, current, kind=kind)
         except OSError as exc:
             message = f"Could not validate VibeSys {kind} path {current}: {exc}"
             raise ProjectStateError(message) from exc
-    return path
-
-
-def _contained(parent: Path, child: Path) -> Path:
-    parent_resolved = parent.resolve()
-    child_resolved = child.resolve()
-    if not child_resolved.is_relative_to(parent_resolved):
-        raise ProjectStateError.path_escapes_root(parent_resolved, child)
     return child
+
+
+def _raise_symlink_component(parent: Path, child: Path, link: Path, *, kind: str) -> NoReturn:
+    """Report a symlink on the way to ``child``: an escape if it leaves ``parent``."""
+    if not child.resolve().is_relative_to(parent.resolve()):
+        raise ProjectStateError.path_escapes_root(parent.resolve(), child)
+    raise ProjectStateError.state_path_symlink(kind, link)
 
 
 def _validate_storage_root(path: Path, parent: Path, *, name: str) -> None:
