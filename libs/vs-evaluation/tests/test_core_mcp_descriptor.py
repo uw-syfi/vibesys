@@ -25,7 +25,11 @@ def test_the_declared_packages_are_exactly_what_the_server_imports() -> None:
     descriptor = core_evaluation_mcp_descriptor("token", "/run/evaluation.sock")
     module = descriptor.args[descriptor.args.index("-m") + 1]
 
-    imported = subprocess.run(  # noqa: S603  # the interpreter running this test and a fixed program
+    # A fresh interpreter is the only way to see exactly what importing the module pulls in.
+    imported = subprocess.run(  # noqa: S603  # LW-158203; the argv is this interpreter and a fixed program.
+        # > Importing in-process would see this test session's modules, not the server's own
+        # > closure; ModuleFinder also counts type-checking-only imports. A wrapper would only
+        # > hide the single direct call, and shell=True would weaken the argv guarantee.
         [sys.executable, "-c", _PRINT_FRAMEWORK_IMPORTS, module],
         capture_output=True,
         text=True,
