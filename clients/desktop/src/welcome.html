@@ -26,6 +26,8 @@
       html[data-platform="win32"] header, html[data-platform="linux"] header { padding-left: 12px; padding-right: 148px; }
       header .brand { font-weight: 600; color: var(--muted); }
       header .grow { flex: 1; }
+      header > * { flex-shrink: 0; white-space: nowrap; }
+      header #conn, header #strip-stop-state { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       button, input { font: inherit; color: inherit; -webkit-app-region: no-drag; }
       button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
       button:hover { background: var(--hover); }
