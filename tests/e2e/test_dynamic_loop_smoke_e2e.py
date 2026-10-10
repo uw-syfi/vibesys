@@ -127,9 +127,6 @@ _POLL_S = 0.5
 _REMOTE_PYTHON = CAPTURE_RUNTIME_PYTHON.replace("queue_step", "count_primes")
 
 
-pytestmark = pytest.mark.usefixtures("container_cli_credentials")
-
-
 def _provider() -> str:
     return os.environ.get(PROVIDER_ENV, "claude")
 
@@ -396,6 +393,7 @@ def _require_successful_search(envelope: Mapping[str, object]) -> None:
     assert {(adopted, "official", "correctness"), (adopted, "official", "benchmark")} <= held
 
 
+@pytest.mark.usefixtures("container_cli_credentials")
 def test_serving_smoke_fixture_builds_a_profiled_cli_request(tmp_path: Path) -> None:
     """Default CI catches serving capture configuration failures before provider launch."""
     smoke = SmokeRun(tmp_path)
@@ -431,6 +429,7 @@ def test_serving_smoke_fixture_builds_a_profiled_cli_request(tmp_path: Path) -> 
     assert request.backend is ComputeBackend.ROCM
 
 
+@pytest.mark.usefixtures("container_cli_credentials")
 def test_cli_built_dynamic_request_completes_a_trusted_search_without_provider_cli(
     tmp_path: Path,
 ) -> None:
@@ -876,6 +875,7 @@ def _run_headless_recording(
     return asyncio.run(execute())
 
 
+@pytest.mark.usefixtures("container_cli_credentials")
 def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
