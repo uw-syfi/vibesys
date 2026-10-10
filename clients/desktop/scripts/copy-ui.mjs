@@ -17,6 +17,6 @@ if (!existsSync(join(source, 'desktop.html'))) {
 cpSync(source, target, {recursive: true});
 copyFileSync(fileURLToPath(new URL('../src/welcome.html', import.meta.url)), join(target, 'welcome.html'));
 // The welcome page's script and the pure modules it imports.
-for (const file of ['welcome-page.js', 'welcome-model.js', 'host-settings.js']) {
+for (const file of ['welcome-page.js', 'welcome-model.js', 'host-settings.js', 'stop-run.js', 'welcome-banner.js']) {
   copyFileSync(fileURLToPath(new URL(`../dist/${file}`, import.meta.url)), join(target, file));
 }

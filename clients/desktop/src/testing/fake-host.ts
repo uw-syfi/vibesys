@@ -8,7 +8,7 @@
  */
 import type {Duplex} from 'node:stream';
 import {type Endpoint, type Host, HostError, type ServerExit, type ServerHandle} from '../host.js';
-import {parseInstanceRecord} from '../instances.js';
+import {parseInstanceRecord, type StopResult} from '../instances.js';
 import {type ConnectionHandler, FakeNetwork} from './fake-network.js';
 import {fakeRecord} from './fake-record.js';
 
@@ -35,6 +35,8 @@ export class FakeHost implements Host {
   readonly #server: (args: readonly string[]) => ServerScript;
   readonly #command: (argv: readonly string[]) => CommandResult;
   readonly #streams = new Set<Duplex>();
+  /** Live servers by registry id. */
+  readonly #live = new Map<string, string>();
   #nextServer = 0;
   #closed = false;
 
@@ -64,12 +66,14 @@ export class FakeHost implements Host {
       resolveExit = resolve;
     });
     const id = this.#nextServer.toString(16).padStart(12, '0');
+    this.#live.set(id, socketPath);
     const handle: ServerHandle = {
       endpoint: {socketPath},
       record: parseInstanceRecord(fakeRecord(id, socketPath)),
       alreadyLive: false,
       exited,
       stop: async () => {
+        this.#live.delete(id);
         this.network.unlisten(socketPath);
         resolveExit({code: null, logTail: '', stopOutcome: 'stopped'});
         await exited;
@@ -102,6 +106,15 @@ export class FakeHost implements Host {
         cause: error,
       });
     }
+  }
+
+  async stopInstance(id: string): Promise<StopResult> {
+    this.#assertOpen();
+    const socketPath = this.#live.get(id);
+    if (socketPath === undefined) return {id, outcome: 'not_running', route: null};
+    this.#live.delete(id);
+    this.network.unlisten(socketPath);
+    return {id, outcome: 'stopped', route: 'control_socket'};
   }
 
   async close(): Promise<void> {

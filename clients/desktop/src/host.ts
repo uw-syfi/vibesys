@@ -10,7 +10,7 @@
  * (`vibesys instances list --json`), so every layer above this interface is the same for both.
  */
 import type {Duplex} from 'node:stream';
-import type {InstanceRecord, StopOutcome} from './instances.js';
+import type {InstanceRecord, StopOutcome, StopResult} from './instances.js';
 
 /** A server's control endpoint, named in the host's own terms. */
 export interface Endpoint {
@@ -105,6 +105,14 @@ export interface Host {
    * `malformed` when the output is not JSON, and with `link` when the host cannot be reached.
    */
   invoke(argv: readonly string[]): Promise<unknown>;
+  /**
+   * Ask registry instance `id` to stop (`vibesys instances stop ID --json`), with `--force` when
+   * `options.force` is set, and resolve with what the host observed. `stopping` means the server
+   * accepted the stop and exits on its own at its next safe point: do not ask again. Rejects with
+   * `failed` when the command printed no stop document, and with `link` or `auth` when the host
+   * cannot be reached.
+   */
+  stopInstance(id: string, options?: {readonly force?: boolean}): Promise<StopResult>;
   /**
    * Destroy every stream this host opened and release its link. Servers it started keep running:
    * they are detached, and `ServerHandle.stop` is how one ends. Later calls reject with `closed`.

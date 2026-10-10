@@ -24,6 +24,7 @@ import {
   parseStopResult,
   RecordError,
   type StopOutcome,
+  type StopResult,
 } from './instances.js';
 import type {CommandOutput} from './process.js';
 
@@ -122,6 +123,27 @@ export class DetachedHost implements Host {
       throw new HostError('malformed', `vibesys ${argv.join(' ')} did not print JSON`, {
         cause: error,
       });
+    }
+  }
+
+  async stopInstance(id: string, options: {readonly force?: boolean} = {}): Promise<StopResult> {
+    this.#assertOpen();
+    const argv = [
+      'instances',
+      'stop',
+      id,
+      '--json',
+      ...(options.force === true ? ['--force'] : []),
+    ];
+    const output = await this.#access.run(argv, undefined);
+    try {
+      return parseStopResult(JSON.parse(lastLine(output.stdout) ?? '') as unknown);
+    } catch (error) {
+      throw new HostError(
+        'failed',
+        `vibesys ${argv.join(' ')} exited with ${output.code ?? 'a signal'} and printed no stop result: ${logTail(`${output.stdout}\n${output.stderr}`)}`,
+        {cause: error},
+      );
     }
   }
 

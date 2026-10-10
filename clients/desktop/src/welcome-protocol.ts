@@ -9,6 +9,7 @@
  * identity.
  */
 import type {HostKey} from './host-settings.js';
+import type {StopView} from './stop-run.js';
 
 export const WELCOME_CHANNELS = {
   overview: 'vibesys:welcome:overview',
@@ -24,6 +25,7 @@ export const WELCOME_CHANNELS = {
   showRun: 'vibesys:welcome:show-run',
   showWelcome: 'vibesys:welcome:show-welcome',
   retry: 'vibesys:welcome:retry',
+  stop: 'vibesys:welcome:stop',
 } as const;
 
 /** The one event the main process sends the welcome view: the window's state changed. */
@@ -35,14 +37,22 @@ export interface ChromeState {
   readonly mode: 'welcome' | 'run';
   /** The attached run, when there is one. */
   readonly attached: {
+    readonly host: HostKey;
     readonly hostLabel: string;
+    /** The registry id of the attached run; null when attached by socket path (it cannot be stopped). */
+    readonly instanceId: string | null;
+    readonly runId: string | null;
     readonly project: string;
     /** A short status (`connected`, `reconnecting (attempt 2)`, ...). */
     readonly status: string;
     readonly detail: string;
-    /** True when the connection stopped trying: offer Retry. */
+    /** True when the connection stopped trying: offer Retry, unless the run ended. */
     readonly stuck: boolean;
+    /** True when the run is no longer running: offer Resume, not Retry. */
+    readonly ended: boolean;
   } | null;
+  /** The stop flows past idle, by `stopKey` (host, newline, instance id). */
+  readonly stops: Readonly<Record<string, StopView>>;
 }
 
 /** A recent run as the welcome view lists it. */

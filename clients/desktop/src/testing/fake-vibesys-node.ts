@@ -36,6 +36,7 @@ export class FakeVibesysNode {
   run(argv: readonly string[], cwd: string | undefined): CommandResult {
     if (argv[0] === '--detach') return this.#detach(argv.slice(1), cwd);
     if (argv[0] === 'instances' && argv[1] === 'stop' && argv[3] === '--json') {
+      // `--force` (argv[4]) stops the same way here: the fake has one route.
       const id = argv[2] ?? '';
       const socketPath = this.#live.get(id);
       if (socketPath === undefined) {

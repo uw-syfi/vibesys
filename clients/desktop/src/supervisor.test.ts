@@ -479,6 +479,7 @@ describe('supervisor over an SSH host', () => {
           await host.invoke(argv);
           return JSON.parse(scripted.run(argv, undefined).stdout) as unknown;
         },
+        stopInstance: (stopId, options) => host.stopInstance(stopId, options),
         close: () => host.close(),
       },
       hostName: 'node-1',

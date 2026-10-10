@@ -25,6 +25,7 @@ import {
   app,
   BaseWindow,
   BrowserWindow,
+  dialog,
   type IpcMainInvokeEvent,
   ipcMain,
   Menu,
@@ -50,13 +51,22 @@ import {type AttachedRun, checkAttachment, observedDial} from './attachment.js';
 import {CONNECT_CHANNEL, WAKE_CHANNEL} from './bridge-protocol.js';
 import {HostError} from './host.js';
 import {HostPool, systemHostFactory} from './host-pool.js';
-import {type HostId, hostFromKey, hostKey, hostLabel, validHostPath} from './host-settings.js';
-import {versionSkewMessage} from './instances.js';
+import {
+  type HostId,
+  type HostKey,
+  hostFromKey,
+  hostKey,
+  hostLabel,
+  validHostPath,
+} from './host-settings.js';
+import {type InstanceRecord, versionSkewMessage} from './instances.js';
 import {type LaunchPlan, parseLaunch} from './launch-args.js';
 import {isAllowedRequest, isAppUrl, type LaunchTarget, originOf} from './launch-url.js';
+import {QuitGate} from './quit-gate.js';
 import {recentStatus} from './recent.js';
 import {type RelayPort, relay} from './relay.js';
 import {shellWords} from './shell-words.js';
+import {StopController} from './stop-controller.js';
 import {
   type ConnectionStatus,
   ConnectionSupervisor,
@@ -257,6 +267,8 @@ interface RunBinding {
   readonly run: AttachedRun;
   readonly supervisor: ConnectionSupervisor;
   readonly project: string;
+  readonly hostId: HostId;
+  readonly runId: string | null;
   status: ConnectionStatus;
 }
 
@@ -269,12 +281,27 @@ class DesktopApp {
   readonly #pool: HostPool;
   readonly #window: BaseWindow;
   readonly #welcome: WebContentsView;
+  readonly #stops: StopController;
   #run: RunBinding | null = null;
   #mode: 'welcome' | 'run' = 'welcome';
   #online = true;
 
   constructor(pool: HostPool) {
     this.#pool = pool;
+    this.#stops = new StopController({
+      stop: async (host, instanceId, force) => pool.stopRun(hostFromKey(host), instanceId, force),
+      confirm: async text => {
+        const {response} = await dialog.showMessageBox(this.#window, {
+          type: 'warning',
+          message: text,
+          buttons: ['Cancel', 'Stop'],
+          defaultId: 0,
+          cancelId: 0,
+        });
+        return response === 1;
+      },
+      changed: () => this.#sendChrome(),
+    });
     this.#window = new BaseWindow({
       width: 1440,
       height: 900,
@@ -333,15 +360,20 @@ class DesktopApp {
     const run = this.#run;
     return {
       mode: this.#mode,
+      stops: this.#stops.views(),
       attached:
         run === null
           ? null
           : {
+              host: hostKey(run.hostId),
+              instanceId: run.run.instanceId,
+              runId: run.runId,
               hostLabel: run.run.hostName,
               project: run.project,
               status: statusLabel(run.status),
               detail: statusDetail(run.status, run.run.hostName),
               stuck: isTerminal(run.status),
+              ended: run.status.kind === 'run-ended',
             },
     };
   }
@@ -368,6 +400,7 @@ class DesktopApp {
     socketPath: string,
     instanceId: string | null,
     project: string,
+    runId: string | null,
   ): Promise<void> {
     const host = await this.#pool.host(id);
     const hostName = hostLabel(id);
@@ -390,6 +423,9 @@ class DesktopApp {
         if (this.#run?.supervisor !== supervisor) return;
         const changed = status.kind !== this.#run.status.kind;
         this.#run.status = status;
+        if (status.kind === 'run-ended' && instanceId !== null) {
+          this.#stops.runEnded(hostKey(id), instanceId);
+        }
         this.#window.setTitle(`VibeSys · ${hostName} · ${statusLabel(status)}`);
         this.#sendChrome();
         if (changed) log(`${hostName}: ${statusLabel(status)}`);
@@ -400,6 +436,8 @@ class DesktopApp {
       run,
       supervisor,
       project,
+      hostId: id,
+      runId,
       status: {kind: 'connecting'},
     };
     this.#window.contentView.addChildView(runView);
@@ -431,7 +469,7 @@ class DesktopApp {
     }
     const {instance} = record;
     await this.#remember(id, instance.projectRoot, task, instance.id, instance.runId);
-    await this.openRun(id, instance.socketPath, instanceId, instance.projectRoot);
+    await this.openRun(id, instance.socketPath, instanceId, instance.projectRoot, instance.runId);
   }
 
   /** Start a detached run of `task` on `id` in `project` and attach to it. */
@@ -474,7 +512,13 @@ class DesktopApp {
         : `started run ${instance.id}; stop it with: vibesys instances stop ${instance.id}`,
     );
     await this.#remember(id, instance.projectRoot, task, instance.id, instance.runId);
-    await this.openRun(id, server.endpoint.socketPath, instance.id, instance.projectRoot);
+    await this.openRun(
+      id,
+      server.endpoint.socketPath,
+      instance.id,
+      instance.projectRoot,
+      instance.runId,
+    );
   }
 
   async #remember(
@@ -569,6 +613,7 @@ class DesktopApp {
       }
       const statuses: Record<string, WelcomeRecentStatus> = {};
       for (const run of runs) statuses[run.instanceId] = recentStatus(run, records);
+      if (Array.isArray(records)) this.#observe(hostKey(id), records);
       return statuses;
     });
     handle(WELCOME_CHANNELS.hosts, () => pool.aliases());
@@ -587,6 +632,7 @@ class DesktopApp {
         } satisfies WelcomeHost;
       }
       const records = await pool.records(id);
+      this.#observe(hostKey(id), records);
       return {
         key: hostKey(id),
         label: hostLabel(id),
@@ -646,6 +692,26 @@ class DesktopApp {
       );
       return null;
     });
+    handle(WELCOME_CHANNELS.stop, async (key, instance, force) => {
+      if (typeof instance !== 'string' || !/^[0-9a-f]{12}$/.test(instance)) {
+        throw new Error('pick a run to stop');
+      }
+      const id = hostFromKey(key);
+      const known = (await pool.recent()).runs.find(
+        run => run.host === hostKey(id) && run.instanceId === instance,
+      );
+      const attached = this.#run?.run.instanceId === instance ? this.#run : null;
+      await this.#stops.request(
+        {
+          host: hostKey(id),
+          hostLabel: hostLabel(id),
+          instanceId: instance,
+          label: known?.task ?? known?.runId ?? attached?.runId ?? instance,
+        },
+        force === true,
+      );
+      return null;
+    });
     handle(WELCOME_CHANNELS.showRun, async () => {
       this.#setMode('run');
       return null;
@@ -658,6 +724,18 @@ class DesktopApp {
       this.#run?.supervisor.dispatch({type: 'user-retry'});
       return null;
     });
+  }
+
+  /** Tell the stop flows of `host` which runs its registry lists. */
+  #observe(host: HostKey, records: readonly InstanceRecord[]): void {
+    this.#stops.observeRegistry(
+      host,
+      new Set(
+        records.map(record =>
+          record.kind === 'compatible' ? record.instance.id : (record.id ?? ''),
+        ),
+      ),
+    );
   }
 
   /** Report the network coming back (offline to online) to the supervisor. */
@@ -685,16 +763,14 @@ function runBundled(plan: Exclude<LaunchPlan, {kind: 'gateway'}>): void {
     {scheme: APP_SCHEME, privileges: {standard: true, secure: true}},
   ]);
   let desktop: DesktopApp | null = null;
-  let released = false;
-  app.on('will-quit', event => {
-    if (released || desktop === null) return;
-    event.preventDefault();
+  const quit = new QuitGate({
     // Runs are detached and keep going; quitting ends this app's streams and SSH masters only.
-    void desktop.pool.closeAll().finally(() => {
-      released = true;
-      app.quit();
-    });
+    release: async () => {
+      await desktop?.pool.closeAll();
+    },
+    exit: code => app.exit(code),
   });
+  app.on('will-quit', event => quit.willQuit(event));
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => app.quit());
   app.on('web-contents-created', (_event, contents) => guard(contents, isAppPage));
   app.on('window-all-closed', () => app.quit());
@@ -724,8 +800,7 @@ function runBundled(plan: Exclude<LaunchPlan, {kind: 'gateway'}>): void {
       await openPlan(desktop, plan);
     } catch (error) {
       log((error as Error).message);
-      released = true;
-      void desktop.pool.closeAll().finally(() => app.exit(1));
+      void quit.exit(1);
     }
   });
 }
@@ -746,7 +821,7 @@ async function openPlan(
       await desktop.startRun({kind: 'local'}, plan.project, null, plan.runArgs);
       return;
     case 'attach':
-      await desktop.openRun({kind: 'local'}, plan.socketPath, null, '');
+      await desktop.openRun({kind: 'local'}, plan.socketPath, null, '', null);
       return;
   }
 }

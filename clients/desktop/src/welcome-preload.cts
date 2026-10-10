@@ -32,6 +32,7 @@ const CHANNELS: Channels = {
   showRun: 'vibesys:welcome:show-run',
   showWelcome: 'vibesys:welcome:show-welcome',
   retry: 'vibesys:welcome:retry',
+  stop: 'vibesys:welcome:stop',
 };
 const CHROME: typeof import('./welcome-protocol.js').CHROME_CHANNEL = 'vibesys:welcome:chrome';
 
@@ -57,6 +58,8 @@ electron.contextBridge.exposeInMainWorld('vibesysWelcome', {
   showRun: () => call<null>(CHANNELS.showRun),
   showWelcome: () => call<null>(CHANNELS.showWelcome),
   retry: () => call<null>(CHANNELS.retry),
+  stop: (host: HostKey, instance: string, force: boolean) =>
+    call<null>(CHANNELS.stop, host, instance, force),
   onChrome: (listener: (state: ChromeState) => void) => {
     electron.ipcRenderer.on(CHROME, (_event, state: ChromeState) => listener(state));
   },

@@ -8,7 +8,21 @@
  */
 
 import type {HostKey} from './host-settings.js';
-import {filterHosts, type HostChoice, moveSelection} from './welcome-model.js';
+import {type StopView, stopKey} from './stop-run.js';
+import {WORDMARK} from './welcome-banner.js';
+import {
+  filterHosts,
+  type HostChoice,
+  moveSelection,
+  NO_TASKS,
+  recentChanged,
+  stripControls,
+  type TaskPicker,
+  taskChosen,
+  tasksAnswered,
+  tasksCleared,
+  tasksRequested,
+} from './welcome-model.js';
 import type {
   ChromeState,
   WelcomeHost,
@@ -34,6 +48,7 @@ interface WelcomeBridge {
   showRun(): Promise<WelcomeResult<null>>;
   showWelcome(): Promise<WelcomeResult<null>>;
   retry(): Promise<WelcomeResult<null>>;
+  stop(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
   onChrome(listener: (state: ChromeState) => void): void;
 }
 
@@ -69,6 +84,7 @@ function button(text: string, onClick: () => void, className = ''): HTMLButtonEl
 
 const bridge = window.vibesysWelcome;
 const banner = byId('banner');
+byId('wordmark').textContent = WORDMARK;
 const recentPane = byId('recent');
 const hostPanel = byId('host-panel');
 const hostSheet = byId('host-sheet');
@@ -79,10 +95,36 @@ const chip = byId<HTMLButtonElement>('host-chip');
 const conn = byId('conn');
 const back = byId<HTMLButtonElement>('back');
 const retry = byId<HTMLButtonElement>('retry');
+const stripStop = byId<HTMLButtonElement>('strip-stop');
+const stripForce = byId<HTMLButtonElement>('strip-force');
+const stripResume = byId<HTMLButtonElement>('strip-resume');
+const stripStopState = byId('strip-stop-state');
+/** How often the lists look again while an accepted stop is ending. */
+const REFRESH_MS = 3_000;
+
+/** The page behind the sheets, inert while one is open so focus and clicks stay in the sheet. */
+const behindSheets = [document.querySelector('header'), document.querySelector('main')];
+/** What had focus before the open sheet opened; focus returns there when it closes. */
+let sheetOpener: Element | null = null;
+
+function openSheet(sheet: HTMLElement): void {
+  if (!sheet.hidden) return;
+  sheetOpener = document.activeElement;
+  sheet.hidden = false;
+  for (const node of behindSheets) if (node !== null) node.inert = true;
+}
+
+function closeSheet(sheet: HTMLElement): void {
+  if (sheet.hidden) return;
+  sheet.hidden = true;
+  for (const node of behindSheets) if (node !== null) node.inert = false;
+  if (sheetOpener instanceof HTMLElement && sheetOpener.isConnected) sheetOpener.focus();
+  sheetOpener = null;
+}
 
 /** The host whose panel is shown. */
 let current: HostKey = 'local';
-let chrome: ChromeState = {mode: 'welcome', attached: null};
+let chrome: ChromeState = {mode: 'welcome', attached: null, stops: {}};
 
 function say(message: string, kind: 'info' | 'error' = 'info'): void {
   banner.textContent = message;
@@ -102,29 +144,52 @@ function failed<T>(
 
 // ---- title strip --------------------------------------------------------------------------------
 
-function dotClass(status: string, stuck: boolean): string {
-  if (status === 'connected') return 'dot ok';
-  return stuck ? 'dot error' : 'dot warn';
+function dotClass(attached: NonNullable<ChromeState['attached']>): string {
+  if (attached.status === 'connected') return 'dot ok';
+  if (attached.ended) return 'dot';
+  return attached.stuck ? 'dot error' : 'dot warn';
 }
 
 function renderChrome(state: ChromeState): void {
+  const stopsChanged = JSON.stringify(state.stops) !== JSON.stringify(chrome.stops);
+  const runChanged = recentChanged(chrome, state);
   chrome = state;
   document.body.classList.toggle('strip', state.mode === 'run');
+  // The strip hides the sheets; an open one would leave the strip inert.
+  if (state.mode === 'run') for (const sheet of [hostSheet, startSheet]) closeSheet(sheet);
   const attached = state.attached;
+  const controls = stripControls(state);
   chip.hidden = attached === null;
-  back.hidden = attached === null || state.mode === 'run';
-  retry.hidden = attached === null || !attached.stuck;
+  back.hidden = !controls.back;
+  retry.hidden = !controls.retry;
+  stripStop.hidden = !controls.stop;
+  stripForce.hidden = !controls.force;
+  stripResume.hidden = !controls.resume;
+  stripStopState.textContent = controls.stopText;
+  stripStopState.title = controls.stopText;
+  stripStopState.className = controls.stopError ? 'error' : 'muted';
   if (attached === null) {
     conn.textContent = '';
-    return;
+    conn.title = '';
+  } else {
+    const dot = element('span', '', dotClass(attached));
+    chip.replaceChildren(dot, document.createTextNode(attached.hostLabel));
+    chip.title =
+      state.mode === 'run' ? 'Show hosts and runs' : `Attached to a run on ${attached.hostLabel}`;
+    conn.textContent =
+      attached.detail === '' ? attached.status : `${attached.status}: ${attached.detail}`;
+    conn.title = conn.textContent;
+    conn.className = controls.retry ? 'error' : 'muted';
   }
-  const dot = element('span', '', dotClass(attached.status, attached.stuck));
-  chip.replaceChildren(dot, document.createTextNode(attached.hostLabel));
-  chip.title =
-    state.mode === 'run' ? 'Show hosts and runs' : `Attached to a run on ${attached.hostLabel}`;
-  conn.textContent =
-    attached.detail === '' ? attached.status : `${attached.status}: ${attached.detail}`;
-  conn.className = attached.stuck ? 'error' : 'muted';
+  if (runChanged) void reloadRecent();
+  if (stopsChanged) refreshLists();
+}
+
+/** Read the recent runs again (the main process just recorded one) and redraw them. */
+async function reloadRecent(): Promise<void> {
+  if (bridge === undefined) return;
+  const overview = await bridge.overview();
+  if (overview.ok) await renderRecent(overview.value.recent);
 }
 
 chip.addEventListener('click', () => {
@@ -133,6 +198,59 @@ chip.addEventListener('click', () => {
 });
 back.addEventListener('click', () => void bridge?.showRun());
 retry.addEventListener('click', () => void bridge?.retry());
+
+/** The attached run's instance id and host, when it can be stopped. */
+function stripTarget(): {host: HostKey; instance: string} | null {
+  const attached = chrome.attached;
+  return attached?.instanceId == null ? null : {host: attached.host, instance: attached.instanceId};
+}
+
+async function requestStop(host: HostKey, instance: string, force: boolean): Promise<void> {
+  if (bridge === undefined) return;
+  failed(await bridge.stop(host, instance, force));
+}
+
+stripStop.addEventListener('click', () => {
+  const target = stripTarget();
+  if (target !== null) void requestStop(target.host, target.instance, false);
+});
+stripForce.addEventListener('click', () => {
+  const target = stripTarget();
+  if (target !== null) void requestStop(target.host, target.instance, true);
+});
+stripResume.addEventListener('click', () => {
+  const attached = chrome.attached;
+  if (attached === null) return;
+  void bridge?.showWelcome();
+  void resume(attached.host, attached.project, attached.runId ?? '');
+});
+
+/** The stop controls of a live run in a list: Stop, "Stopping…", or the failure with Force stop. */
+function stopControls(host: HostKey, instance: string): HTMLElement[] {
+  const view: StopView | undefined = chrome.stops[stopKey(host, instance)];
+  if (view?.phase === 'stopping') return [element('span', view.text, 'muted')];
+  const controls: HTMLElement[] = [];
+  if (view?.phase === 'error') {
+    controls.push(element('span', view.text, 'error'));
+    if (view.canForce) {
+      controls.push(button('Force stop', () => void requestStop(host, instance, true)));
+    }
+  }
+  controls.push(button('Stop run', () => void requestStop(host, instance, false)));
+  return controls;
+}
+
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Redraw the lists from the stop views, polling while a stop that was accepted is ending. */
+function refreshLists(): void {
+  clearTimeout(refreshTimer);
+  void renderRecent(recentRuns);
+  void showHost(current, true);
+  if (Object.values(chrome.stops).some(view => view.phase === 'stopping')) {
+    refreshTimer = setTimeout(refreshLists, REFRESH_MS);
+  }
+}
 
 // ---- recent runs ----------------------------------------------------------------------------------
 
@@ -156,6 +274,7 @@ function fillRecentCell(
   if (status?.kind === 'live') {
     cell.action.append(
       button('Reattach', () => void attach(run.host, status.instanceId), 'primary'),
+      ...stopControls(run.host, status.instanceId),
     );
   } else if (status?.kind === 'ended') {
     cell.action.append(
@@ -166,9 +285,18 @@ function fillRecentCell(
   }
 }
 
+const lastStatus = new Map<string, WelcomeRecentStatus>();
+let recentRuns: readonly WelcomeRecent[] = [];
+
 async function renderRecent(recent: readonly WelcomeRecent[]): Promise<void> {
+  recentRuns = recent;
   if (bridge === undefined) return;
-  if (recent.length === 0) return;
+  if (recent.length === 0) {
+    recentPane.replaceChildren(
+      element('p', 'No runs yet. Runs you attach to appear here.', 'muted'),
+    );
+    return;
+  }
   const table = element('table');
   const head = element('tr');
   for (const title of ['Host', 'Project', 'Task', 'Run', 'Status', '']) {
@@ -190,6 +318,8 @@ async function renderRecent(recent: readonly WelcomeRecent[]): Promise<void> {
     );
     table.append(row);
     cells.set(`${run.host}\n${run.instanceId}`, {status, action});
+    const known = lastStatus.get(`${run.host}\n${run.instanceId}`);
+    if (known !== undefined) fillRecentCell({status, action}, run, known);
   }
   recentPane.replaceChildren(table);
   for (const host of new Set(recent.map(run => run.host))) {
@@ -200,6 +330,7 @@ async function renderRecent(recent: readonly WelcomeRecent[]): Promise<void> {
         const status = result.ok
           ? result.value[run.instanceId]
           : ({kind: 'unknown', detail: result.error} as const);
+        if (status !== undefined) lastStatus.set(`${run.host}\n${run.instanceId}`, status);
         fillRecentCell(cell, run, status);
       }
     });
@@ -208,11 +339,16 @@ async function renderRecent(recent: readonly WelcomeRecent[]): Promise<void> {
 
 // ---- host panel ---------------------------------------------------------------------------------
 
-async function showHost(key: HostKey): Promise<void> {
+async function showHost(key: HostKey, quiet = false): Promise<void> {
   if (bridge === undefined) return;
   current = key;
   const label = key === 'local' ? 'This Mac' : key.slice('ssh:'.length);
-  hostPanel.replaceChildren(element('h2', label), element('p', `Connecting to ${label}…`, 'muted'));
+  if (!quiet) {
+    hostPanel.replaceChildren(
+      element('h2', label),
+      element('p', `Connecting to ${label}…`, 'muted'),
+    );
+  }
   const result = await bridge.host(key);
   if (current !== key) return;
   if (!result.ok) {
@@ -239,7 +375,11 @@ function renderHost(host: WelcomeHost): void {
   const change = button(
     'Change',
     () => {
-      line.replaceWith(checkoutForm(host, host.checkout ?? ''));
+      const form = checkoutForm(host, host.checkout ?? '', () => {
+        form.replaceWith(line);
+        change.focus();
+      });
+      line.replaceWith(form);
     },
     'link',
   );
@@ -271,8 +411,11 @@ function signInButton(key: HostKey, label: string, where: HTMLElement): HTMLButt
   );
 }
 
-/** "Where is your VibeSys checkout on HOST?", checked by the host before it is saved. */
-function checkoutForm(host: WelcomeHost, value: string): HTMLElement {
+/**
+ * "Where is your VibeSys checkout on HOST?", checked by the host before it is saved. `cancel`, when
+ * given (changing a saved checkout), is offered as a Cancel button and Esc.
+ */
+function checkoutForm(host: WelcomeHost, value: string, cancel?: () => void): HTMLElement {
   const form = element('form');
   const question = element('p', `Where is your VibeSys checkout on ${host.label}?`);
   const hint = element(
@@ -289,6 +432,14 @@ function checkoutForm(host: WelcomeHost, value: string): HTMLElement {
   const save = element('button', 'Check and save', 'primary');
   save.type = 'submit';
   row.append(input, save);
+  if (cancel !== undefined) {
+    row.append(button('Cancel', cancel));
+    form.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      cancel();
+    });
+  }
   const status = element('p', '', 'status');
   if (host.suggestedCheckout !== null && value === host.suggestedCheckout) {
     status.textContent = 'Suggested by a VibeSys server running on this host.';
@@ -330,7 +481,10 @@ function runTable(host: WelcomeHost, runs: readonly WelcomeRun[]): HTMLElement {
     );
     const cell = element('td');
     if (run.blocked === null)
-      cell.append(button('Attach', () => void attach(host.key, run.id), 'primary'));
+      cell.append(
+        button('Attach', () => void attach(host.key, run.id), 'primary'),
+        ...stopControls(host.key, run.id),
+      );
     else cell.append(element('span', run.blocked, 'warn'));
     row.append(cell);
     table.append(row);
@@ -366,11 +520,11 @@ const startSummary = byId('start-summary');
 const startStatus = byId('start-status');
 const startGo = byId<HTMLButtonElement>('start-go');
 let startHost: WelcomeHost | null = null;
-let chosenTask: string | null = null;
+let picker: TaskPicker = NO_TASKS;
 
 function openStart(host: WelcomeHost): void {
   startHost = host;
-  chosenTask = null;
+  picker = tasksCleared(picker);
   byId('start-title').textContent = `Start a run on ${host.label}`;
   projectList.replaceChildren(
     ...host.projects.map(project => {
@@ -380,81 +534,93 @@ function openStart(host: WelcomeHost): void {
     }),
   );
   projectInput.value = host.projects[0] ?? '';
-  tasksPane.replaceChildren();
   argsInput.value = '';
   startStatus.textContent = '';
-  summarize();
-  startSheet.hidden = false;
+  renderTasks();
+  openSheet(startSheet);
   projectInput.focus();
   if (projectInput.value !== '') void listTasks();
 }
 
 function summarize(): void {
   const project = projectInput.value.trim();
-  startGo.disabled = chosenTask === null || project === '';
+  const task = picker.chosen;
+  startGo.disabled = task === null || project === '';
   startSummary.textContent =
-    chosenTask === null
+    task === null
       ? 'Pick a project, then one of its tasks.'
-      : `Runs vibesys --detach --task ${chosenTask}${argsInput.value.trim() === '' ? '' : ` ${argsInput.value.trim()}`} in ${project}. Agent runs cost tokens.`;
+      : `Runs vibesys --detach --task ${task}${argsInput.value.trim() === '' ? '' : ` ${argsInput.value.trim()}`} in ${project}. Agent runs cost tokens.`;
+}
+
+/** Show the picker's task list; the radio of the chosen task is checked. */
+function renderTasks(): void {
+  const list = picker.list;
+  if (list.kind === 'idle') tasksPane.replaceChildren();
+  else if (list.kind === 'loading') {
+    tasksPane.replaceChildren(element('span', 'Reading tasks…', 'muted'));
+  } else if (list.kind === 'failed') {
+    tasksPane.replaceChildren(element('span', list.error, 'error'));
+  } else if (list.tasks.length === 0) {
+    tasksPane.replaceChildren(element('span', 'This project defines no tasks.', 'warn'));
+  } else {
+    tasksPane.replaceChildren(
+      ...list.tasks.map(task => {
+        const label = element('label');
+        const radio = element('input');
+        radio.type = 'radio';
+        radio.name = 'task';
+        radio.value = task;
+        radio.checked = task === picker.chosen;
+        radio.addEventListener('change', () => {
+          picker = taskChosen(picker, task);
+          summarize();
+        });
+        label.append(radio, document.createTextNode(task));
+        return label;
+      }),
+    );
+  }
+  summarize();
 }
 
 async function listTasks(): Promise<void> {
   if (bridge === undefined || startHost === null) return;
   const host = startHost;
-  const project = projectInput.value;
-  chosenTask = null;
-  tasksPane.replaceChildren(element('span', 'Reading tasks…', 'muted'));
-  summarize();
-  const result = await bridge.tasks(host.key, project);
-  if (startHost !== host || projectInput.value !== project) return;
-  if (!result.ok) {
-    tasksPane.replaceChildren(element('span', result.error, 'error'));
-    return;
-  }
-  if (result.value.length === 0) {
-    tasksPane.replaceChildren(element('span', 'This project defines no tasks.', 'warn'));
-    return;
-  }
-  tasksPane.replaceChildren(
-    ...result.value.map((task, index) => {
-      const label = element('label');
-      const radio = element('input');
-      radio.type = 'radio';
-      radio.name = 'task';
-      radio.value = task;
-      radio.addEventListener('change', () => {
-        chosenTask = task;
-        summarize();
-      });
-      if (index === 0 && result.value.length === 1) {
-        radio.checked = true;
-        chosenTask = task;
-      }
-      label.append(radio, document.createTextNode(task));
-      return label;
-    }),
+  picker = tasksRequested(picker);
+  const request = picker.request;
+  renderTasks();
+  const result = await bridge.tasks(host.key, projectInput.value);
+  const before = picker;
+  picker = tasksAnswered(
+    picker,
+    request,
+    result.ok ? {ok: true, tasks: result.value} : {ok: false, error: result.error},
   );
-  summarize();
+  if (picker !== before) renderTasks();
 }
 
 byId('list-tasks').addEventListener('click', () => void listTasks());
+// The listed tasks belong to the project they were read from: editing it drops them.
+projectInput.addEventListener('input', () => {
+  picker = tasksCleared(picker);
+  renderTasks();
+});
 projectInput.addEventListener('change', () => void listTasks());
 projectInput.addEventListener('keydown', event => {
   if (event.key === 'Enter') void listTasks();
 });
 argsInput.addEventListener('input', summarize);
-byId('start-cancel').addEventListener('click', () => {
-  startSheet.hidden = true;
-});
+byId('start-cancel').addEventListener('click', () => closeSheet(startSheet));
 startGo.addEventListener('click', async () => {
-  if (bridge === undefined || startHost === null || chosenTask === null) return;
-  startStatus.textContent = `Starting ${chosenTask} on ${startHost.label}…`;
+  const task = picker.chosen;
+  if (bridge === undefined || startHost === null || task === null) return;
+  startStatus.textContent = `Starting ${task} on ${startHost.label}…`;
   startStatus.className = 'status';
   startGo.disabled = true;
-  const result = await bridge.start(startHost.key, projectInput.value, chosenTask, argsInput.value);
+  const result = await bridge.start(startHost.key, projectInput.value, task, argsInput.value);
   startGo.disabled = false;
   if (failed(result, startStatus)) return;
-  startSheet.hidden = true;
+  closeSheet(startSheet);
 });
 
 // ---- connect to host ------------------------------------------------------------------------------
@@ -465,8 +631,9 @@ let selected = -1;
 
 async function openHostSheet(): Promise<void> {
   if (bridge === undefined) return;
-  hostSheet.hidden = false;
+  openSheet(hostSheet);
   hostSearch.value = '';
+  selected = 0;
   hostSearch.focus();
   const result = await bridge.hosts();
   aliases = result.ok ? result.value : [];
@@ -497,7 +664,7 @@ function renderHostList(): void {
 }
 
 function pickHost(choice: HostChoice): void {
-  hostSheet.hidden = true;
+  closeSheet(hostSheet);
   void showHost(`ssh:${choice.alias}`);
 }
 
@@ -519,12 +686,12 @@ byId('connect').addEventListener('click', () => void openHostSheet());
 
 document.addEventListener('keydown', event => {
   if (event.key !== 'Escape') return;
-  if (!hostSheet.hidden) hostSheet.hidden = true;
-  else if (!startSheet.hidden) startSheet.hidden = true;
+  if (!hostSheet.hidden) closeSheet(hostSheet);
+  else if (!startSheet.hidden) closeSheet(startSheet);
 });
 for (const sheet of [hostSheet, startSheet]) {
   sheet.addEventListener('click', event => {
-    if (event.target === sheet) sheet.hidden = true;
+    if (event.target === sheet) closeSheet(sheet);
   });
 }
 
