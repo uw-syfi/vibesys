@@ -206,14 +206,12 @@ language = "python"
 directory = "."
 timeout_seconds = 1800
 commands = [
-  ["uv", "run", "--no-sync", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--cov-report=", "--ignore=tests/composition/crash"],
-  # The crash sweeps (tests/composition/crash) re-run one simulation per crash point, which is about
-  # twice as slow under coverage, and they add almost no coverage that the
-  # rest of the suite does not already reach (the lines only they reach have
-  # their own tests, e.g. libs/vs-core/tests/test_recovery_lost_inspection.py).
-  # Both invocations use the same shard assignment, so every test still runs
-  # in exactly one shard.
-  ["uv", "run", "--no-sync", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--no-cov", "tests/composition/crash"],
+  # One invocation per shard. The crash sweeps (tests/composition/crash) used to run
+  # in a second `pytest --no-cov` process because a simulation per crash point is
+  # slower under coverage, but that process paid a full startup (~30 s of imports
+  # and collection) for ~6 s of tests, which costs more than measuring them.
+  # Every test still runs in exactly one shard.
+  ["uv", "run", "--no-sync", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--cov-report="],
 ]
 
 # Combines the shards' coverage data and applies the repo-wide and per-module
