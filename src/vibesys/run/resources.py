@@ -389,14 +389,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             else:
                 workspace_files.create()
 
-        if existing:
-            # The previous host is gone (the resume holds the run's host lock), so
-            # whatever agent it left running is an orphan: end it before anything
-            # touches the workspace or the journal's in-flight turns are reconciled.
-            with boot_trace.span("reap_orphans"):
-                environment.reap_orphans(run_id, log=buffered_logs.append)
-            with boot_trace.span("workspace_repair"):
-                workspace_files.repair()
         project_excluded_dirs = set(workspace_files.excluded_dirs)
         if profiler_support_name is not None:
             project_excluded_dirs.add(profiler_support_name)
@@ -413,6 +405,13 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 execution_record,
                 orchestration_resume,
             )
+
+        def recover_existing_run() -> None:
+            """Recover external resources while the project-run owner holds its host lock."""
+            with boot_trace.span("reap_orphans"):
+                environment.reap_orphans(run_id, log=buffered_logs.append)
+            with boot_trace.span("workspace_repair"):
+                workspace_files.repair()
 
         try:
             project_resources = open_project_run_resources(
@@ -456,6 +455,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     on_log_ready=integration.attach,
                     git_repository=integration.git_repository,
                     state_stores=integration.state_stores,
+                    resume_recovery=recover_existing_run if existing else None,
                 ),
                 buffered_logs=buffered_logs,
                 resolve_resume=resolve_recorded_run,

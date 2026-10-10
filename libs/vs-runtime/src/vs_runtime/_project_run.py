@@ -146,6 +146,8 @@ class ProjectRunEffects:
     """
     state_stores: StateStoreFactory | None = None
     """Opens each run's ``StateStore``; ``None`` uses the project's crash-atomic local one."""
+    resume_recovery: Callable[[], None] | None = None
+    """Recover product resources after taking the run-host lock, before Git or state recovery."""
 
 
 def _repository(effects: ProjectRunEffects, root: Path) -> GitRepository | None:
@@ -342,6 +344,8 @@ def _assemble_project_run_resources(
         project = Project.open(request.project_root, state_stores=effects.state_stores)
         project_state = project.state
         teardown_stack.enter_context(project_state.exclusive_run_host(request.run_id))
+        if request.existing and effects.resume_recovery is not None:
+            effects.resume_recovery()
         log_dir = project_state.log_directory(request.run_id)
         log_dir.mkdir(parents=True, exist_ok=True)
 

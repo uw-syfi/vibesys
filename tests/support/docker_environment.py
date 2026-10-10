@@ -1,17 +1,19 @@
 """A Docker run environment that needs no Docker daemon.
 
 Agents always run in Docker, so a run that does not choose another environment
-opens :class:`DockerEnvironment`. Its only external process is the agent image
-build, which this spec replaces with an in-memory runner; pair it with a
-``FakeComputeBackend`` for the container itself.
+opens :class:`DockerEnvironment`. This spec replaces image builds, Docker daemon
+calls, and orphan-process confinement with in-memory fakes; pair it with a
+``FakeComputeBackend`` for the run's own container.
 """
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 from vibesys.api.request import RunEnvironmentSpec
-from vs_agent.api.testing import FakeDockerBuildRunner
+from vs_agent.api import reap_orphaned_agents
+from vs_agent.api.testing import FakeConfinement, FakeDockerBuildRunner
 from vs_sandbox.api.testing import FakeDockerEngine, HostExecutedContainerBackend
 
 if TYPE_CHECKING:
@@ -19,10 +21,19 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def fake_docker_environment() -> RunEnvironmentSpec:
-    """Return a Docker environment spec whose image build is an in-memory fake."""
+def fake_docker_environment(docker: FakeDockerEngine | None = None) -> RunEnvironmentSpec:
+    """Return a Docker environment spec whose host effects are in-memory fakes."""
+    engine = docker if docker is not None else FakeDockerEngine()
     return RunEnvironmentSpec(
-        "docker", {"build_runner": FakeDockerBuildRunner(), "docker": FakeDockerEngine()}
+        "docker",
+        {
+            "build_runner": FakeDockerBuildRunner(),
+            "docker": engine,
+            "orphan_reaper": partial(
+                reap_orphaned_agents,
+                confinement_for=lambda _container_id: FakeConfinement(),
+            ),
+        },
     )
 
 

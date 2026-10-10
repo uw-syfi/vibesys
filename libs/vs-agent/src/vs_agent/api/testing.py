@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import agentshim
 from agentshim.testing import (
     FakeClock,
+    FakeConfinement,
     FakeExecutor,
     FakeRun,
     SequentialIds,
@@ -89,6 +90,7 @@ __all__ = [
     "FakeAgentClient",
     "FakeAgentInvocationStore",
     "FakeAgentSessions",
+    "FakeConfinement",
     "FakeDockerBuildRunner",
     "FakeExecutor",
     "FakeInvocation",

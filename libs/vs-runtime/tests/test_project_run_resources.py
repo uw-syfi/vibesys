@@ -415,6 +415,31 @@ def test_resume_policy_failure_preserves_the_primary_error_and_cleans_logger(
     assert sys.stderr is original_stderr
 
 
+def test_resume_recovery_failure_releases_the_run_host_lock(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+    effects = _effects([])
+    with open_project_run_resources(
+        _request(root), effects=effects, resolve_resume=_unexpected_resume
+    ):
+        pass
+    failure = RuntimeError("resume recovery failed")
+
+    def fail_recovery() -> None:
+        raise failure
+
+    with pytest.raises(RuntimeError, match="resume recovery failed") as raised:
+        open_project_run_resources(
+            _request(root, existing=True),
+            effects=replace(effects, resume_recovery=fail_recovery),
+            resolve_resume=lambda _recorded: OrchestrationResumeDecision(descriptor=None),
+        )
+
+    assert raised.value is failure
+    with Project.open(root).state.exclusive_run_host(_RUN_ID):
+        pass
+
+
 def test_project_run_request_uses_canonical_project_root(tmp_path: Path) -> None:
     root = tmp_path / "project"
     _write_project(root)

@@ -20,15 +20,13 @@ from tests.vibesys.orchestration.plugin import EmptyOptions
 from entrypoints.run import supervise
 from headless import run as render_run
 from launch import LaunchSettings, default_runs
-from vibesys.api.request import RunEnvironmentSpec
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.contracts import ResumeRef, RunRequest
-from vs_agent.api.testing import FakeDockerBuildRunner
-from vs_project.api import OrchestrationDescriptor
+from vs_project.api import OrchestrationDescriptor, Project, ProjectStateError
 from vs_runtime.api import OrchestrationPlugin, RunStatus
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeContainer, FakeDockerEngine, HostExecutedContainerBackend
@@ -182,13 +180,7 @@ def _execute(
         cli_provider="claude",
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
-        run_environment=(
-            fake_docker_environment()
-            if host_docker is None
-            else RunEnvironmentSpec(
-                "docker", {"build_runner": FakeDockerBuildRunner(), "docker": host_docker}
-            )
-        ),
+        run_environment=fake_docker_environment(host_docker),
         resume=resume,
     )
     runs = default_runs(
@@ -264,6 +256,28 @@ def test_resuming_a_run_ends_the_containers_its_dead_host_left_behind(
 
     assert [c.container_id for c in host_docker.containers()] == [other]
     assert ("docker", "rm", "-f", own) in host_docker.calls
+
+
+def test_a_rejected_concurrent_resume_does_not_begin_orphan_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _engine, first = _execute(tmp_path, monkeypatch, exit_path="SIGINT")
+    host_docker = FakeDockerEngine()
+    orphan = _plant_container(host_docker, first.run_id)
+    calls_before_resume = tuple(host_docker.calls)
+    project = Project.open(tmp_path / "project")
+
+    with project.state.exclusive_run_host(first.run_id):
+        _execute(
+            tmp_path,
+            monkeypatch,
+            exit_path="SIGINT",
+            ends_with=ProjectStateError,
+            resumed=_Resumed(first.run_id, host_docker),
+        )
+
+    assert [container.container_id for container in host_docker.containers()] == [orphan]
+    assert tuple(host_docker.calls) == calls_before_resume
 
 
 def _plant_container(engine: FakeDockerEngine, run_id: str) -> str:

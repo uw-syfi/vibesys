@@ -652,19 +652,33 @@ def _host_evaluation_plan(request: RunEnvironmentRequest) -> TrustedEvaluationPl
     )
 
 
+class _OrphanReaper(Protocol):
+    """End the agent processes and containers a dead run host left behind."""
+
+    def __call__(
+        self,
+        run_id: str,
+        *,
+        docker: DockerCli,
+        log: Callable[[str], None],
+    ) -> tuple[str, ...]: ...
+
+
 @dataclass(frozen=True)
 class DockerEnvironmentConfig:
     """Optional image override and Docker CLI seam for the Docker run environment.
 
     ``docker`` is the CLI the environment probes the host daemon with (before
     any image build, for a task that needs a container runtime) and
-    ``build_runner`` is what runs the agent image's ``docker build``; ``None``
-    is the real ``docker`` binary for both.
+    ``build_runner`` is what runs the agent image's ``docker build``. The
+    unrecorded ``orphan_reaper`` effect lets tests keep recovery off the host.
+    ``None`` selects the production effect for each seam.
     """
 
     image: str | None = None
     docker: DockerCli | None = None
     build_runner: DockerBuildRunner | None = None
+    orphan_reaper: _OrphanReaper | None = None
 
 
 @dataclass(frozen=True)
@@ -703,7 +717,8 @@ class DockerEnvironment:
         """Build Docker configuration from CLI options.
 
         ``build_runner`` is the unrecorded injection seam for the agent image build,
-        ``docker`` the one for the host's ``docker`` client.
+        ``docker`` the one for the host's ``docker`` client, and ``orphan_reaper``
+        the one for process confinement while recovering the previous host.
         """
         image = options.get("image")
         build_runner = options.get("build_runner")
@@ -712,6 +727,7 @@ class DockerEnvironment:
                 image=str(image) if image else None,
                 docker=cast("DockerCli | None", options.get("docker")),
                 build_runner=cast("DockerBuildRunner | None", build_runner),
+                orphan_reaper=cast("_OrphanReaper | None", options.get("orphan_reaper")),
             )
         )
 
@@ -826,7 +842,12 @@ class DockerEnvironment:
 
     def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
         """End the agents and containers a previous host process left for *run_id*."""
-        reap_orphaned_agents(run_id, docker=self.config.docker or SubprocessDockerCli(), log=log)
+        reaper = (
+            self.config.orphan_reaper
+            if self.config.orphan_reaper is not None
+            else reap_orphaned_agents
+        )
+        reaper(run_id, docker=self.config.docker or SubprocessDockerCli(), log=log)
 
     def repair_workspace(
         self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]
