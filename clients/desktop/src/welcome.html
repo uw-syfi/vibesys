@@ -58,6 +58,8 @@
       td.path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
       .status { min-height: 1.4em; margin: 0 0 12px; color: var(--muted); white-space: pre-wrap; }
       .error { color: var(--error); white-space: pre-wrap; }
+      /* Paths, run arguments, and host errors can be one long word: wrap them inside the card. */
+      main p, .card p, .card span { overflow-wrap: anywhere; }
       .warn { color: var(--warn); }
       .ok { color: var(--ok); }
       .sheet { position: fixed; inset: var(--titlebar) 0 0 0; background: rgba(10, 14, 22, 0.5); display: flex; justify-content: center; align-items: center; padding: 24px; z-index: 4; }
