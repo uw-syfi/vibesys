@@ -13,6 +13,7 @@ import {WORDMARK} from './welcome-banner.js';
 import {
   filterHosts,
   type HostChoice,
+  hostOnReturn,
   moveSelection,
   NO_TASKS,
   recentChanged,
@@ -153,6 +154,7 @@ function dotClass(attached: NonNullable<ChromeState['attached']>): string {
 function renderChrome(state: ChromeState): void {
   const stopsChanged = JSON.stringify(state.stops) !== JSON.stringify(chrome.stops);
   const runChanged = recentChanged(chrome, state);
+  const returnedTo = hostOnReturn(chrome, state, current);
   chrome = state;
   document.body.classList.toggle('strip', state.mode === 'run');
   // The strip hides the sheets; an open one would leave the strip inert.
@@ -182,6 +184,10 @@ function renderChrome(state: ChromeState): void {
     conn.className = controls.retry ? 'error' : 'muted';
   }
   if (runChanged) void reloadRecent();
+  if (returnedTo !== null) {
+    void renderRecent(recentRuns);
+    void showHost(returnedTo, returnedTo === current);
+  }
   if (stopsChanged) refreshLists();
 }
 

@@ -3,7 +3,7 @@
  * where the keyboard selection moves, and what the checkout and project fields suggest. The page
  * and the main process only render and fetch; every choice is made here and tested here.
  */
-import {validAlias} from './host-settings.js';
+import {type HostKey, validAlias} from './host-settings.js';
 import type {InstanceRecord} from './instances.js';
 import type {RecentRun} from './recent.js';
 import {stopKey} from './stop-run.js';
@@ -129,6 +129,20 @@ export function recentChanged(before: ChromeState, after: ChromeState): boolean 
   if (run === null) return false;
   const was = before.attached;
   return was === null || was.host !== run.host || was.instanceId !== run.instanceId;
+}
+
+/**
+ * The host panel to redraw when the window comes back from a run to the welcome view, or null when
+ * it did not. The run's host when one is attached (its panel lists that run), else the panel shown
+ * (`shown`). The lists were drawn before the run view covered them, so they are stale by now.
+ */
+export function hostOnReturn(
+  before: ChromeState,
+  after: ChromeState,
+  shown: HostKey,
+): HostKey | null {
+  if (before.mode !== 'run' || after.mode !== 'welcome') return null;
+  return after.attached?.host ?? shown;
 }
 
 /** The task list of "Start a run": what the latest "List tasks" answered. */

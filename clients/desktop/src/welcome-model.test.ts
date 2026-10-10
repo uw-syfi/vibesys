@@ -5,6 +5,7 @@ import {parseTaskList} from './task-list.js';
 import {fakeRecord} from './testing/fake-record.js';
 import {
   filterHosts,
+  hostOnReturn,
   moveSelection,
   NO_TASKS,
   recentChanged,
@@ -266,6 +267,22 @@ describe('recentChanged', () => {
           before.attached.instanceId === after.attached.instanceId);
       expect(recentChanged(before, after)).toBe(!same);
       expect(recentChanged(after, after)).toBe(false);
+    }
+  });
+});
+
+describe('hostOnReturn', () => {
+  test('regression: coming back to the welcome view redraws the attached run host panel', () => {
+    const random = generator(17);
+    for (let round = 0; round < 500; round += 1) {
+      const before = chromeState(random);
+      const after = chromeState(random);
+      const shown = pick(random, ['local', 'ssh:gpu-box', 'ssh:login-node'] as const);
+      const returned = before.mode === 'run' && after.mode === 'welcome';
+      expect(hostOnReturn(before, after, shown)).toBe(
+        returned ? (after.attached?.host ?? shown) : null,
+      );
+      expect(hostOnReturn(after, after, shown)).toBeNull();
     }
   });
 });
