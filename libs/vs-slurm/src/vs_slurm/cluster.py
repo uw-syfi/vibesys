@@ -403,10 +403,16 @@ class SlurmCluster:
                 return ClusterUnknown(operation_id=None, reason="operation not found")
             record = record.model_copy(update={"cancelled": True})
             self._save(record)
-            self._runner.cancel_operation(record.operation_id)
             if not record.dispatched:
+                self._runner.cancel_operation(record.operation_id)
                 return ClusterCancelRequested(operation_id=record.operation_id)
-            observation = self._reconcile(record)
+            # Reconciliation cancels the live job. The remote tombstone costs
+            # four round trips and only guards a replay, which also finds the
+            # job cancelled, so it follows the scancel instead of delaying it.
+            try:
+                observation = self._reconcile(record)
+            finally:
+                self._runner.cancel_operation(record.operation_id)
             if isinstance(observation, ClusterUnknown):
                 return observation
             return ClusterCancelRequested(

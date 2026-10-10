@@ -523,11 +523,16 @@ class SlurmJobRunner:
         *,
         process: SlurmProcess | None = None,
         clock: Callable[[], float] = time.monotonic,
-        pause: Callable[[float], None] = time.sleep,
+        pause: Callable[[float], None] | None = None,
         invocation_id: Callable[[], str] = lambda: uuid.uuid4().hex,
         scratch_root: Path | None = None,
     ) -> None:
         """Create a runner with injectable process, clock, and identity effects.
+
+        ``pause`` replaces the pause between polls wholesale (tests advance a
+        virtual clock with it). Left unset, a wait that has a ``cancel_event``
+        pauses on that event, so a cancel ends the pause at once, and a wait
+        without one sleeps.
 
         ``scratch_root`` holds the runner's own transfer files (the job script,
         collected status, log, and batch results); the system temporary
@@ -955,7 +960,22 @@ class SlurmJobRunner:
             remaining = deadline - self._clock()
             if remaining <= 0:
                 return SlurmJobWaitResult(handle=handle, status=status, timed_out=True)
-            self._pause(min(self._config.poll_interval_seconds, remaining))
+            self._pause_between_polls(
+                min(self._config.poll_interval_seconds, remaining), cancel_event
+            )
+
+    def _pause_between_polls(self, seconds: float, cancel_event: Event | None) -> None:
+        """Pause *seconds*, ending early when *cancel_event* is set.
+
+        The pause is bounded by *seconds*, and the event's setter is the cancel
+        path of the caller that owns the wait, so no wait here is unbounded.
+        """
+        if self._pause is not None:
+            self._pause(seconds)
+        elif cancel_event is not None:
+            cancel_event.wait(seconds)
+        else:
+            time.sleep(seconds)
 
     def _await_terminal(
         self, handle: SlurmJobHandle, cancel_event: Event | None
