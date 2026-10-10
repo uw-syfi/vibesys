@@ -95,15 +95,19 @@ class _Subscriber:
         while True:
             try:
                 chunk = self.connection.recv(65536, HANG_GUARD_S)
-            except OSError:
+            except OSError as error:
+                self.seen.append(f"read failed: {error!r}")
                 return
             if not chunk:
+                self.seen.append("eof")
                 return
             buffer += chunk
             *lines, buffer = buffer.split(b"\n")
             for line in lines:
                 message = json.loads(line)
                 self.seen.append(message["type"])
+                if message["type"] == "error":
+                    self.seen.append(str(message))
                 self.seen.extend(
                     event["data"]["status"]
                     for event in message.get("events", [])
@@ -180,7 +184,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         assert (result.outcome, result.route) == (StopOutcome.STOPPED, StopRoute.CONTROL_SOCKET)
         # The server drained its streams before it released the record, so the
         # terminal status is already on the client's socket.
-        assert subscriber.stopped.wait(HANG_GUARD_S)
+        assert subscriber.stopped.wait(HANG_GUARD_S), subscriber.seen
     finally:
         if subscriber is not None:
             subscriber.close()
@@ -194,4 +198,5 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     assert subscriber is not None
     assert subscriber.seen[0] == "subscribed"
     statuses = [entry for entry in subscriber.seen if entry not in {"subscribed", "event_batch"}]
+    assert "stopped" in statuses, subscriber.seen
     assert statuses[-2:] == ["stopping", "stopped"]
