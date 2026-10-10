@@ -113,15 +113,16 @@ faulthandler_timeout = 120
 # Hard backstop for a hung test, not a test condition: no test may rely on it to
 # pass (a test synchronizes on the thing it waits for). CI's slowest legitimate
 # test takes about 93 s and a whole 16-way shard finishes in 2 to 2.5 minutes, so
-# 300 s is over three times the slowest test. `thread` dumps all
-# stacks and exits the worker process, which xdist reports as a failure of that
-# one test and replaces; `signal` would raise in a main thread that a hung
-# `asyncio.run` shutdown can keep blocked. Under xdist the plugin's own dump is
-# lost with the worker, so the stack in the log is faulthandler's, from 120 s.
-# Tests marked e2e, real_contract or slow get a higher bound from the root
-# conftest.py.
+# 300 s is over three times the slowest test. `signal` raises in the main thread,
+# which a blocked lock, join or read does not stop (CPython runs the handler after
+# the system call is interrupted), and xdist then reports one failed test and goes
+# on. `thread` was rejected: it kills the worker, and CI's `--dist loadgroup` then
+# stalls with no replacement worker until the job timeout (reproduced with
+# xdist 3.8.0; `--dist load` recovers). faulthandler's dump at 120 s shows where the
+# test was stuck. Tests marked e2e, real_contract or slow get a higher bound from
+# the root conftest.py.
 timeout = 300
-timeout_method = "thread"
+timeout_method = "signal"
 markers = [
     # Applied by `pytest_collection_modifyitems` in the root conftest.py, which
     # maps it onto an xdist scheduling group so CI's `-n auto --dist loadgroup`

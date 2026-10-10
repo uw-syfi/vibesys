@@ -14,15 +14,15 @@ PYPROJECT = tomllib.loads(
 PYTEST = PYPROJECT["tool"]["pytest"]["ini_options"]
 
 
-def test_a_hard_timeout_is_configured_with_the_thread_method() -> None:
+def test_a_hard_timeout_is_configured_with_the_signal_method() -> None:
     assert PYTEST["timeout"] > 0
-    # `signal` raises in the main thread, which a hung asyncio.run shutdown can keep blocked.
-    assert PYTEST["timeout_method"] == "thread"
+    # `thread` kills the worker, and CI's `--dist loadgroup` then stalls with no replacement.
+    assert PYTEST["timeout_method"] == "signal"
 
 
-def test_the_stack_dump_fires_before_the_worker_is_killed() -> None:
-    # Under xdist the thread method exits the worker without a dump reaching the log;
-    # faulthandler's earlier dump to stderr is what shows where the test was stuck.
+def test_the_stack_dump_fires_before_the_timeout() -> None:
+    # The timeout failure carries no all-thread stacks; faulthandler's earlier dump to
+    # stderr shows where the test was stuck.
     assert 0 < PYTEST["faulthandler_timeout"] < PYTEST["timeout"]
 
 
