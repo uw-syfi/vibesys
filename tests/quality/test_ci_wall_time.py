@@ -11,7 +11,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from hypothesis import given
+from hypothesis import assume, given
 from hypothesis import strategies as st
 from scripts.ci_wall_time import analyze, job_from_record, main, render
 
@@ -202,7 +202,11 @@ def test_extra_runner_wait_moves_time_from_execution_to_queue_only(
     graph: list[tuple[int, int, int]], extra: int
 ) -> None:
     """Delaying the last job by queueing changes elapsed and queue, never execution."""
-    last = max(range(len(graph)), key=lambda i: sum(graph[i]))
+    finish = [sum(job) for job in graph]
+    # With two jobs ending together, either is "the last"; the report follows the one the
+    # analysis picks, so the property is about a graph with a single last job.
+    assume(finish.count(max(finish)) == 1)
+    last = finish.index(max(finish))
     created, wait, ran = graph[last]
     delayed = list(graph)
     delayed[last] = (created, wait + extra, ran)
