@@ -89,7 +89,7 @@ depends_on = ["vibesys.api"]
 
 [[modules]]
 path = "server.api"
-depends_on = ["vibesys.api", "vibesys.api.hypothesis", "server.diagnostics", "server.journal", "server.execution", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle"]
+depends_on = ["vibesys.api", "vibesys.api.hypothesis", "server.diagnostics", "server.journal", "server.execution", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle", "vs_sim.api"]
 
 [[modules]]
 path = "server.chat"
@@ -101,7 +101,7 @@ depends_on = ["server.api", "vs_sim.api"]
 
 [[modules]]
 path = "server.controller"
-depends_on = ["server.diagnostics", "server.events", "server.execution", "server.run_lifecycle", "server.journal", "vibesys.api"]
+depends_on = ["server.diagnostics", "server.events", "server.execution", "server.run_lifecycle", "server.journal", "vibesys.api", "vs_sim.api"]
 
 [[modules]]
 path = "server.diagnostics"
@@ -113,11 +113,11 @@ depends_on = []
 
 [[modules]]
 path = "server.events"
-depends_on = ["server.diagnostics", "server.run_lifecycle", "server.event_index", "vibesys.api"]
+depends_on = ["server.diagnostics", "server.run_lifecycle", "server.event_index", "vibesys.api", "vs_sim.api"]
 
 [[modules]]
 path = "server.execution"
-depends_on = ["server.diagnostics", "server.events", "server.journal", "vibesys.api"]
+depends_on = ["server.diagnostics", "server.events", "server.journal", "vibesys.api", "vs_sim.api"]
 
 [[modules]]
 path = "server.integration"
@@ -125,7 +125,7 @@ depends_on = ["server", "server.execution", "server.chat", "server.events", "vib
 
 [[modules]]
 path = "server.journal"
-depends_on = ["server.events", "server.diagnostics"]
+depends_on = ["server.events", "server.diagnostics", "vs_sim.api"]
 
 [[modules]]
 path = "server.read_model"
@@ -137,7 +137,7 @@ depends_on = []
 
 [[modules]]
 path = "server.runtime"
-depends_on = ["server.read_model", "server.settings", "server.chat", "server.events", "server.execution", "server.journal", "vibesys.api", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics"]
+depends_on = ["server.read_model", "server.settings", "server.chat", "server.events", "server.execution", "server.journal", "vibesys.api", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics", "vs_sim.api"]
 
 [[modules]]
 path = "server.settings"

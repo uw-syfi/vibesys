@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 from contextlib import ExitStack, suppress
 from typing import TYPE_CHECKING, TypeVar
 
@@ -65,6 +64,7 @@ from server.transport.websocket import (
     browser_origin as browser_origin,  # noqa: PLC0414  # lint-waiver: LW-101108 [PLC0414]; re-export the browser-origin parser through the allowed runtime composition boundary, so the launcher validates `--web-origin` against the one definition the gateway enforces
 )
 from vibesys.api import ConfigurationError, RunStopped
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -72,6 +72,7 @@ if TYPE_CHECKING:
 
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
+    from vs_sim.api import Threads
 
 
 _RunValueT = TypeVar("_RunValueT")
@@ -97,8 +98,14 @@ class ServerRuntime:
         instance_path: Path | None = None,
         detach: bool = False,
         read_only_log: Path | None = None,
+        threads: Threads | None = None,
     ) -> None:
-        """Compose all server components around one shared condition."""
+        """Compose all server components around one shared condition.
+
+        ``threads`` supplies every lock, condition, event and worker thread the
+        server creates; it defaults to the operating system's.
+        """
+        self.threads = threads or OsThreads()
         self.runs = runs
         self.socket_path = socket_path
         self.web = web
@@ -109,18 +116,19 @@ class ServerRuntime:
         self.instance_path = instance_path
         self.detach = detach
         self.read_only_log = read_only_log
-        self._shutdown = threading.Event()
+        self._shutdown = self.threads.event()
         # Set once the Unix socket accepts connections: how a same-process
         # client learns it can dial without polling the filesystem.
-        self.transport_listening = threading.Event()
-        self.condition = threading.Condition(threading.RLock())
-        self.journal = WireJournal(self.condition)
+        self.transport_listening = self.threads.event()
+        self.condition = self.threads.condition(self.threads.rlock())
+        self.journal = WireJournal(self.condition, threads=self.threads)
         self.executions = ExecutionTracker(self.condition, self.journal)
         self.controller = RunController(self.condition, self.journal, self.executions)
         self.chat = ChatManager(
             self.condition,
             self.journal,
             run_status=self.controller.run_status,
+            threads=self.threads,
         )
         self.journal.add_listener(
             self.chat.apply_replayed_event,
@@ -142,6 +150,7 @@ class ServerRuntime:
             self.integration,
             session_provider=lambda: self.session,
             tui_defaults=tui_defaults,
+            threads=self.threads,
         )
         self.chat.enable_terminal_retention()
         self.session: RunSession | None = None
@@ -192,10 +201,10 @@ class ServerRuntime:
             )
         run_error: BaseException | None = None
         try:
-            subscriptions = SubscriptionTracker()
+            subscriptions = SubscriptionTracker(threads=self.threads)
             with ExitStack() as transports:
                 transport = transports.enter_context(
-                    UnixJsonlServer(self.socket_path, self.api, subscriptions)
+                    UnixJsonlServer(self.socket_path, self.api, subscriptions, self.threads)
                 )
                 self.transport_listening.set()
                 web_transport = (

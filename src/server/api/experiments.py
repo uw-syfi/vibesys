@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from threading import RLock
 from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
@@ -23,9 +22,11 @@ from vibesys.api.hypothesis import (
     HypothesisView,
     agent_projection,
 )
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from vibesys.api import RunView
+    from vs_sim.api import Threads
 
 _StrategyDisposition = Literal["available", "parked", "abandoned"]
 
@@ -141,9 +142,9 @@ class _Delta:
 class ExperimentProjection:
     """Revisioned, bounded cache of the frontend-neutral experiment projection."""
 
-    def __init__(self, *, history_limit: int = 64) -> None:
+    def __init__(self, *, history_limit: int = 64, threads: Threads | None = None) -> None:
         """Initialize an empty projection with bounded revision history."""
-        self._lock = RLock()
+        self._lock = (threads or OsThreads()).rlock()
         self._history: deque[_Delta] = deque(maxlen=history_limit)
         self._run_id: str | None = None
         self._source_id: str | None = None

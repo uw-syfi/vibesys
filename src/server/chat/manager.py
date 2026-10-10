@@ -17,13 +17,13 @@ from server.events import (
     EventType,
     RunEvent,
 )
-from vs_sim.api import MonotonicClock
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from server.chat.options import ChatRunSettings
     from server.journal import WireJournal
     from server.run_lifecycle import RunStatus
-    from vs_sim.api import Clock
+    from vs_sim.api import Condition, Lock, Threads
 
 _CHAT_DRAIN_TIMEOUT_SECONDS = 5.0
 _CHAT_THREAD_TITLE_MAX_CHARS = 40
@@ -72,7 +72,7 @@ class _ThreadRoute:
     """One installed handler and the lock serializing its turns."""
 
     handler: Callable[[str], ChatAnswer]
-    turn_lock: threading.Lock
+    turn_lock: Lock
 
 
 @dataclass(frozen=True)
@@ -80,7 +80,7 @@ class _ThreadLease:
     """A callable route whose turn lock and teardown lease are held."""
 
     handler: Callable[[str], ChatAnswer]
-    turn_lock: threading.Lock
+    turn_lock: Lock
 
     def __call__(self, text: str) -> ChatAnswer:
         """Invoke the leased route."""
@@ -109,12 +109,12 @@ class ChatManager:
 
     def __init__(
         self,
-        condition: threading.Condition,
+        condition: Condition,
         journal: WireJournal,
         *,
         run_status: Callable[[], RunStatus],
         drain_timeout_seconds: float = _CHAT_DRAIN_TIMEOUT_SECONDS,
-        clock: Clock | None = None,
+        threads: Threads | None = None,
     ) -> None:
         """Initialize chat routing over the shared server condition and journal.
 
@@ -122,7 +122,7 @@ class ChatManager:
         waits for an answer in flight before it defers the close.
         """
         self._condition = condition
-        self._clock = clock or MonotonicClock()
+        self._threads = threads or OsThreads()
         self._drain_timeout_seconds = drain_timeout_seconds
         self._journal = journal
         self._run_status = run_status
@@ -255,7 +255,7 @@ class ChatManager:
                 if accepting:
                     self._thread_specs[spec.thread_id] = spec
                     self._thread_handlers[spec.thread_id] = _ThreadRoute(
-                        handle.handler, threading.Lock()
+                        handle.handler, self._threads.lock()
                     )
             if not accepting:
                 handle.close()
@@ -456,7 +456,7 @@ class ChatManager:
             self._finish_thread_restoration(thread_id, restoration, error=exc)
             return
 
-        route = _ThreadRoute(handle.handler, threading.Lock())
+        route = _ThreadRoute(handle.handler, self._threads.lock())
         with self._condition:
             if self._thread_factory is factory:
                 self._thread_handlers[thread_id] = route
@@ -539,9 +539,9 @@ class ChatManager:
         )
 
     def _wait_locked(self, busy: Callable[[], bool], *, timeout: float | None) -> bool:
-        deadline = self._clock.now() + timeout if timeout is not None else None
+        deadline = self._threads.now() + timeout if timeout is not None else None
         while busy():
-            remaining = None if deadline is None else deadline - self._clock.now()
+            remaining = None if deadline is None else deadline - self._threads.now()
             if remaining is not None and remaining <= 0:
                 return False
             self._condition.wait(timeout=remaining)

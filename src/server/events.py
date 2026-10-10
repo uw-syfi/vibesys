@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import threading
 import uuid
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
@@ -34,6 +33,7 @@ from vibesys.api import (
 from vibesys.api import (
     JsonResultPayload as _JsonResultPayload,
 )
+from vs_sim.api import OsThreads
 
 CommandResultPayload = _CommandResultPayload
 JsonResultPayload = _JsonResultPayload
@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
     from server.event_index import SourceStat
+    from vs_sim.api import Threads
 
 
 class EventType(StrEnum):
@@ -866,7 +867,9 @@ class EventStore:
     state.
     """
 
-    def __init__(self, path: Path, run_id: str, *, read_only: bool = False) -> None:
+    def __init__(
+        self, path: Path, run_id: str, *, read_only: bool = False, threads: Threads | None = None
+    ) -> None:
         """Open an indexed event file, optionally without cache writes."""
         self.path = path
         self.run_id = run_id
@@ -878,8 +881,9 @@ class EventStore:
         # Neither ``path`` nor ``run_id`` can serve: a retired store can be
         # reopened at the same path, and ``run_id`` is reassigned in place.
         self.store_id = uuid.uuid4().hex
-        self._lock = threading.RLock()
-        self._changed = threading.Condition(self._lock)
+        threads = threads or OsThreads()
+        self._lock = threads.rlock()
+        self._changed = threads.condition(self._lock)
         self._parsed_records = 0
         self._records, self._malformed_tail_offset = self._scan_unlocked()
         # A valid final record whose line was never terminated must gain its

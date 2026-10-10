@@ -33,11 +33,13 @@ from server.events import (
 )
 from vibesys.api import AgentExecutionStartedData as CoreAgentExecutionStartedData
 from vibesys.api import CoreEvent
+from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
     from server.journal import WireJournal
+    from vs_sim.api import Clock, Condition
 
 
 @dataclass(frozen=True)
@@ -82,8 +84,15 @@ class ActiveAgentExecution(BaseModel):
 class ExecutionTracker:
     """Own live execution identity, activity, and lifecycle event emission."""
 
-    def __init__(self, condition: threading.Condition, journal: WireJournal) -> None:
+    def __init__(
+        self,
+        condition: Condition,
+        journal: WireJournal,
+        *,
+        clock: Clock | None = None,
+    ) -> None:
         """Initialize live execution state over the shared server condition."""
+        self._clock = clock or SystemClock()
         self._condition = condition
         self._journal = journal
         self._active: dict[str, ActiveAgentExecution] = {}
@@ -200,7 +209,7 @@ class ExecutionTracker:
             stage=request.kind,
             attempt=attempt,
             assignment=request.user_prompt,
-            started_at=datetime.now(UTC),
+            started_at=datetime.fromtimestamp(self._clock.now(), UTC),
             activity=activity,
             provider=request.provider,
             model=request.model,

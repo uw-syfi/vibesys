@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -48,6 +47,7 @@ from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
 from vibesys.api import RunRecordReadError
 from vibesys.api.hypothesis import agent_projection
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from server.journal import WireJournal
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunControl, RunRecord, RunView, WorkspaceChange
+    from vs_sim.api import Condition, Threads
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,7 @@ class RunApi:
     # lint-waiver: LW-009026 [PLR0913]; inject each request owner explicitly at the API composition boundary.
     def __init__(  # noqa: PLR0913
         self,
-        condition: threading.Condition,
+        condition: Condition,
         controller: RunController,
         executions: ExecutionTracker,
         journal: WireJournal,
@@ -131,8 +132,10 @@ class RunApi:
         *,
         session_provider: Callable[[], RunControl | None],
         tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
+        threads: Threads | None = None,
     ) -> None:
         """Initialize the API with the components that own each request surface."""
+        threads = threads or OsThreads()
         self._condition = condition
         self._controller = controller
         self._executions = executions
@@ -142,12 +145,12 @@ class RunApi:
         self._session_provider = session_provider
         self._tui_defaults_provider = tui_defaults
         self._tui_defaults: InteractiveSetupDefaults | None = None
-        self._tui_defaults_lock = threading.Lock()
+        self._tui_defaults_lock = threads.lock()
         # Keyed by the attached run so the projection's diff cache survives
         # across requests but never outlives the run it was built for.
         self._design: tuple[str, DesignLog] | None = None
-        self._design_lock = threading.Lock()
-        self._experiment_projection = ExperimentProjection()
+        self._design_lock = threads.lock()
+        self._experiment_projection = ExperimentProjection(threads=threads)
         self._journal.add_listener(
             self._observe_experiment_change,
             replay_filter=lambda _header: False,

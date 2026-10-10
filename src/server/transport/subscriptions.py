@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-import threading
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Protocol
 
+from vs_sim.api import OsThreads
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
+
+    from vs_sim.api import Condition, Threads
 
 # How long ``wait_for_none_active`` lingers after the count reaches zero
 # before declaring the server subscriber-free. A dropped client redials on a
@@ -31,7 +34,7 @@ class SettleWindow(Protocol):
 
     def wait_for(
         self,
-        condition: threading.Condition,
+        condition: Condition,
         predicate: Callable[[], bool],
         seconds: float,
     ) -> bool:
@@ -48,7 +51,7 @@ class ThreadingSettleWindow:
 
     def wait_for(
         self,
-        condition: threading.Condition,
+        condition: Condition,
         predicate: Callable[[], bool],
         seconds: float,
     ) -> bool:
@@ -66,11 +69,14 @@ class SubscriptionTracker:
     whether any client has ever subscribed, and never resets.
     """
 
-    def __init__(self, settle: SettleWindow | None = None) -> None:
+    def __init__(
+        self, settle: SettleWindow | None = None, *, threads: Threads | None = None
+    ) -> None:
         """Initialize subscription lifetime tracking and its condition lock."""
         self._settle = settle or ThreadingSettleWindow()
-        self._ever_subscribed = threading.Event()
-        self._condition = threading.Condition()
+        threads = threads or OsThreads()
+        self._ever_subscribed = threads.event()
+        self._condition = threads.condition()
         self._active = 0
 
     @contextmanager

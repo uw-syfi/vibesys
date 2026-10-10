@@ -10,12 +10,12 @@ from server.execution import AgentExecutionRequest
 from server.run_lifecycle import RunStatus, RunTrigger, transition
 
 if TYPE_CHECKING:
-    import threading
     from pathlib import Path
 
     from server.execution import ExecutionHandle, ExecutionTracker
     from server.journal import WireJournal
     from vibesys.api import RunRecord
+    from vs_sim.api import Condition
 
 
 class RunController:
@@ -23,7 +23,7 @@ class RunController:
 
     def __init__(
         self,
-        condition: threading.Condition,
+        condition: Condition,
         journal: WireJournal,
         executions: ExecutionTracker,
     ) -> None:

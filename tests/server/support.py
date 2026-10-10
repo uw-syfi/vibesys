@@ -26,6 +26,7 @@ from vs_runtime.api.infrastructure import (
     RunControlTransition,
     create_run_control_channel,
 )
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunRecord, RunView
     from vs_project.api import Project
+    from vs_sim.api import Condition, Threads
 
 
 class _ControlBridge:
@@ -114,7 +116,7 @@ def run_record(project: Project, run_id: str) -> RunRecord:
 class ServerParts:
     """Explicitly composed server components used by focused tests."""
 
-    condition: threading.Condition
+    condition: Condition
     journal: WireJournal
     executions: ExecutionTracker
     controller: RunController
@@ -191,22 +193,23 @@ def build_server_parts(
     record: RunRecord | None = None,
     tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
     chat_agent_builder: ChatAgentBuilder | None = None,
-    chat_drain_timeout_seconds: float | None = None,
+    threads: Threads | None = None,
 ) -> ServerParts:
-    """Compose real server components and optionally attach durable state."""
-    condition = threading.Condition(threading.RLock())
-    journal = WireJournal(condition)
+    """Compose real server components and optionally attach durable state.
+
+    ``threads`` supplies every lock, condition and event the components create; pass a
+    ``SimThreads`` to run them on the simulator.
+    """
+    threads = threads or OsThreads()
+    condition = threads.condition(threads.rlock())
+    journal = WireJournal(condition, threads=threads)
     executions = ExecutionTracker(condition, journal)
     controller = RunController(condition, journal, executions)
-    chat = (
-        ChatManager(condition, journal, run_status=controller.run_status)
-        if chat_drain_timeout_seconds is None
-        else ChatManager(
-            condition,
-            journal,
-            run_status=controller.run_status,
-            drain_timeout_seconds=chat_drain_timeout_seconds,
-        )
+    chat = ChatManager(
+        condition,
+        journal,
+        run_status=controller.run_status,
+        threads=threads,
     )
     journal.add_listener(chat.apply_replayed_event, replay_filter=chat.replay_filter)
     if chat_agent_builder is None:
@@ -235,6 +238,7 @@ def build_server_parts(
         integration,
         session_provider=lambda: control_bridge,
         tui_defaults=tui_defaults,
+        threads=threads,
     )
     parts = ServerParts(
         condition=condition,
@@ -257,6 +261,35 @@ def build_server_parts(
 DEADLOCK_GUARD_S = 30.0
 
 
+class Task[T]:
+    """A call running on its own worker thread, whose outcome the test collects with `result`.
+
+    Replaces a one-worker executor: it spawns through the test's `Threads`, so on the
+    simulator the call is a simulated thread and `result` costs no wall time.
+    """
+
+    def __init__(self, threads: Threads, call: Callable[[], T], *, name: str = "task") -> None:
+        """Start *call* on a new worker."""
+        self._outcome: list[T] = []
+        self._error: list[BaseException] = []
+
+        def body() -> None:
+            try:
+                self._outcome.append(call())
+            except BaseException as error:  # noqa: BLE001  # LW-100901 [BLE001]; the call's exception is handed to whoever collects the result.
+                self._error.append(error)
+
+        self._worker = threads.spawn(body, name=name)
+
+    def result(self) -> T:
+        """Wait for the call to end and return its value, or raise what it raised."""
+        self._worker.join(DEADLOCK_GUARD_S)
+        assert not self._worker.is_alive(), f"{self._worker.name} did not end"
+        if self._error:
+            raise self._error[0]
+        return self._outcome[0]
+
+
 class FakeSettleWindow:
     """A `SettleWindow` whose window ends only when the test says so.
 
@@ -271,12 +304,12 @@ class FakeSettleWindow:
         self._opened = 0
         self._ended = 0
         self._elapsed = False
-        self._condition: threading.Condition | None = None
+        self._condition: Condition | None = None
         self._window_opened = threading.Condition()
 
     def wait_for(
         self,
-        condition: threading.Condition,
+        condition: Condition,
         predicate: Callable[[], bool],
         seconds: float,
     ) -> bool:
