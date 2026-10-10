@@ -644,8 +644,10 @@ export class SocketSessionController implements SessionController {
 
   async openChatModelMenu(): Promise<void> {
     this.#setState(openChatModelMenu(this.#state));
+    const ownedMenu = this.#state.chatMenu;
     try {
       const response = await this.client.request({type: 'query.chat_options'});
+      if (this.#state.chatMenu !== ownedMenu) return;
       const options = response.chat_options;
       this.#setState(
         options === null || options === undefined
@@ -653,6 +655,7 @@ export class SocketSessionController implements SessionController {
           : setChatModelMenuOptions(this.#state, options),
       );
     } catch (error) {
+      if (this.#state.chatMenu !== ownedMenu) return;
       this.#setState(
         reportCaughtError(failChatMenu(this.#state, errorMessage(error)), error, 'request'),
       );

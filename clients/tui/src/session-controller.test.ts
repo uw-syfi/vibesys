@@ -1865,6 +1865,40 @@ describe('session controller', () => {
     expect(controller.state.chatMenu?.selected).toBe(-1);
   });
 
+  it('ignores a chat-options failure after the operator opens the thread menu', async () => {
+    const transport = new DeferredChatOptionsTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const loading = controller.openChatModelMenu();
+    controller.openChatResumeMenu();
+    const threadMenu = controller.state.chatMenu;
+    transport.rejectNext(new Error('options unavailable'));
+    await loading;
+
+    expect(controller.state.chatMenu).toBe(threadMenu);
+    expect(controller.state.chatMenu?.kind).toBe('resume');
+    expect(controller.state.errorBanner).toBeNull();
+  });
+
+  it('lets only the newest chat-options request fill the model menu', async () => {
+    const transport = new DeferredChatOptionsTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const first = controller.openChatModelMenu();
+    const second = controller.openChatModelMenu();
+    transport.resolveNext('stale-model');
+    await first;
+
+    expect(controller.state.chatMenu?.rows).toEqual([{kind: 'note', label: 'Loading options…'}]);
+
+    transport.resolveNext('current-model');
+    await second;
+    expect(controller.state.chatMenu?.rows.map(row => row.label)).toContain('current-model');
+    expect(controller.state.chatMenu?.rows.map(row => row.label)).not.toContain('stale-model');
+  });
+
   it('/clear starts a fresh thread on the current thread\u2019s settings', async () => {
     const transport = new ThreadTransport();
     const controller = new SocketSessionController(transport);
@@ -3482,6 +3516,45 @@ class ThreadTransport implements ServerTransport {
 
   close(): Promise<void> {
     return Promise.resolve();
+  }
+}
+
+/** Chat options stay under test control while the rest of the transport behaves normally. */
+class DeferredChatOptionsTransport extends ThreadTransport {
+  readonly #pending: Array<{
+    resolve: (response: ProtocolResponse) => void;
+    reject: (error: Error) => void;
+  }> = [];
+
+  override request(input: RequestInput): Promise<ProtocolResponse> {
+    if (input.type !== 'query.chat_options') return super.request(input);
+    this.requests.push(input);
+    return new Promise((resolve, reject) => this.#pending.push({resolve, reject}));
+  }
+
+  resolveNext(model: string): void {
+    const pending = this.#pending.shift();
+    if (pending === undefined) throw new Error('No pending chat-options request');
+    pending.resolve({
+      protocol_version: 1,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true,
+      chat_options: {
+        providers: [
+          {
+            provider: 'codex',
+            models: [{model, source: 'suggested', default: false}],
+          },
+        ],
+      },
+    });
+  }
+
+  rejectNext(error: Error): void {
+    const pending = this.#pending.shift();
+    if (pending === undefined) throw new Error('No pending chat-options request');
+    pending.reject(error);
   }
 }
 
