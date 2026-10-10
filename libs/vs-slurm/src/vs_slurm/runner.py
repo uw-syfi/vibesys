@@ -1315,6 +1315,10 @@ class SlurmJobRunner:
     def _submit(self, base: PurePosixPath, script: PurePosixPath, output: PurePosixPath) -> str:
         argv = (
             *self._config.sbatch_command,
+            # The job gets the cluster's environment, never the submitting process's
+            # (the local transport submits from the host, whose environment holds
+            # credentials). Before sbatch_arguments so that an operator can override it.
+            "--export=NONE",
             *self._config.sbatch_arguments,
             f"--job-name={operation_job_name(self._config, base.name)}",
             f"--output={output.as_posix()}",

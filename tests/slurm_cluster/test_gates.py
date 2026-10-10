@@ -112,7 +112,7 @@ def test_a_gate_kind_the_client_does_not_know_is_refused(run: OpenRun) -> None:
     assert gate.exit_code == 2, gate.output
 
 
-@pytest.mark.parametrize("kind", ["slurm", "slurm-gpu"])
+@pytest.mark.parametrize("kind", ["slurm", "slurm-local", "slurm-gpu"])
 def test_a_gate_the_task_did_not_plan_is_not_offered_and_not_runnable(
     kind: str, slurm_cluster: SlurmCluster, workdir: Path, agent_image_id: str
 ) -> None:

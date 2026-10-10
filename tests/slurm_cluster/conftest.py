@@ -132,7 +132,7 @@ def shared_runs(
         patch.undo()
 
 
-@pytest.fixture(scope="session", params=["slurm", "slurm-gpu"])
+@pytest.fixture(scope="session", params=["slurm", "slurm-local", "slurm-gpu"])
 def run(request: pytest.FixtureRequest, shared_runs: SharedRuns) -> OpenRun:
     """A shared open run of each environment kind in turn."""
     return shared_runs.get(request.param)
