@@ -190,6 +190,7 @@ def test_an_ordinary_sandbox_argv_and_metadata_are_exactly_the_historical_ones(
     assert run[2:5] == ("-d", "--name", run[4])
     assert run[5:7] == ("-v", f"{workspace}:/workspace")
     assert run[-5:] == ("--workdir", "/workspace", _IMAGE, "sleep", "infinity")
+    assert "--init" in run  # PID 1 must handle SIGTERM so `docker stop` is prompt
     metadata = json.loads((workspace / ".docker_metadata.json").read_text())
     assert set(metadata) == {
         "image", "gpus", "devices", "group_add", "entrypoint", "shm_size",

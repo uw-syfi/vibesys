@@ -451,6 +451,11 @@ class DockerSandbox(WorkspaceSandbox):
         ]
         cmd.extend(self._label_arguments())
         cmd.extend(self._container_runtime_arguments())
+        # PID 1 is `sleep infinity`, which ignores SIGTERM as an init-less PID 1,
+        # so `docker stop` would wait out its grace period and SIGKILL it. The
+        # engine's init (`--init`) is PID 1 instead: it forwards SIGTERM, reaps
+        # orphaned children, and leaves how agent processes are signalled alone.
+        cmd.append("--init")
         if self._auto_remove:
             # Auto-remove the container (and its overlay, which can hold many GB
             # of compiled artifacts) whenever it goes away — including when the
