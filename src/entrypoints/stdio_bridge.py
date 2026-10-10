@@ -3,7 +3,7 @@
 ``python -m entrypoints.stdio_bridge --socket PATH`` carries one protocol connection, so
 the desktop runs one per connection over its own ssh exec channel. The exit status and
 the stderr line are a contract owned by ``docs/contributing/wire-protocol.md``
-(``WP-STDIO-BRIDGE``): 0 when the client closed, a distinct status per other outcome,
+(section "The stdio bridge"): 0 when the client closed, a distinct status per other outcome,
 and one JSON line on stderr whenever the status is not 0.
 
 Startup is on every connection's critical path, so this module imports only the

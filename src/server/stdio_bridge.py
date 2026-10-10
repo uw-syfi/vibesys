@@ -5,7 +5,7 @@ protocol connection (``WP-ROLES``): the channel's stdin and stdout on one side, 
 run's control socket on the other. The relay copies bytes, not messages. The newline
 framing of the Unix transport (``WP-NEWLINE``, ``WP-FRAMER``) passes through unchanged,
 so the client keeps its own framer and the server sees an ordinary Unix client.
-``docs/contributing/wire-protocol.md`` (``WP-STDIO-BRIDGE``) owns the semantics.
+``docs/contributing/wire-protocol.md`` (section "The stdio bridge") owns the semantics.
 
 The module is a pure core and a thin shell. :func:`advance` folds what the two copy
 loops observe (a write started or finished, a side ended, time passed) into a

@@ -49,6 +49,7 @@ tests/conformance/
 | event fold runner | TypeScript (`clients/core-state/src/conformance.test.ts`) | follow-up to 888a | folds every shared event fixture through `core-state`, both batched and incrementally |
 | client scenario runner | TypeScript | 888b | replays connection scenarios through the client transport and `core-state` |
 | server scenario suite | Python (`tests/conformance/test_server_transports.py`) | follow-up to #811 | replays the bootstrap, control-path, and simultaneous two-client scenarios on every transport each declares |
+| stdio bridge runner | Python (`tests/e2e/test_stdio_bridge.py`) | #1785 | replays the Unix bootstrap, control-path, and tail-overflow scenarios through a real stdio bridge process |
 
 The corpus gate, event fold runner, and server scenario suite exist today. The connection-level
 client runner is still outstanding. Do not treat structural validation or event folding as evidence
@@ -56,8 +57,9 @@ that a scenario has executed against a transport.
 
 ### What executes today
 
-The checked-in inventory is `runners/server.json`, consumed directly by the Python server scenario
-suite. The remaining scenarios carry `required_setup` in their own files. This section deliberately
+The checked-in inventories are `runners/server.json`, consumed directly by the Python server scenario
+suite, and `runners/stdio-bridge.json`, consumed by the stdio bridge runner. Both replay steps through
+`replay.py`. The remaining scenarios carry `required_setup` in their own files. This section deliberately
 does not repeat either list: `node clients/scripts/check_conformance_corpus.mjs` derives the complete
 partition and fails when a scenario is in neither half or both.
 

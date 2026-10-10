@@ -2,7 +2,7 @@
 
 Kept apart from :mod:`server.stdio_bridge` so a relay that ends cleanly never pays for
 importing Pydantic: the bridge runs once per connection and its startup is on the
-connection's critical path. ``docs/contributing/wire-protocol.md`` (``WP-STDIO-BRIDGE``)
+connection's critical path. ``docs/contributing/wire-protocol.md`` (section "The stdio bridge")
 documents the line.
 """
 
