@@ -29,6 +29,8 @@ from vs_slurm.api import (
 
 # test-isolation: the Fake connector is an executable test double outside the library API.
 from vs_slurm.fake_connector import JOB_ID, handle, recorded_commands
+
+# test-isolation: SlurmCluster is the cluster the gate command is wired to; the api exports its interface only.
 from vs_slurm.wiring import SlurmCluster
 
 if TYPE_CHECKING:
