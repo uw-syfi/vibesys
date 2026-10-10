@@ -115,6 +115,18 @@ export function describeHostContract(name: string, makeWorld: () => HostWorld): 
       await world.host.close();
     });
 
+    test('stopInstance stops a live server by its id, and a gone one is not_running', async () => {
+      const world = makeWorld();
+      world.scriptServer(() => echo);
+      const server = await world.host.startServer([]);
+      const id = server.record.kind === 'compatible' ? server.record.instance.id : '';
+      expect((await world.host.stopInstance(id)).outcome).toBe('stopped');
+      expect(world.isListening(server.endpoint.socketPath)).toBe(false);
+      expect((await world.host.stopInstance(id, {force: true})).outcome).toBe('not_running');
+      await world.host.close();
+      await expectKind(world.host.stopInstance(id), 'closed');
+    });
+
     describeCommandContract(makeWorld);
     describeLifecycleContract(makeWorld);
   });

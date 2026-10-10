@@ -22,7 +22,12 @@ import {
   validHostPath,
   withHostSettings,
 } from './host-settings.js';
-import {type InstanceRecord, parseInstanceList, versionSkewMessage} from './instances.js';
+import {
+  type InstanceRecord,
+  parseInstanceList,
+  type StopResult,
+  versionSkewMessage,
+} from './instances.js';
 import {checkLocalCheckout, checkoutPython, LocalHost} from './local-host.js';
 import {EMPTY_RECENT, parseRecent, type RecentFile, type RecentRun, remember} from './recent.js';
 import {SshHost} from './ssh-host.js';
@@ -198,6 +203,11 @@ export class HostPool {
             }),
           },
     );
+  }
+
+  /** Ask `instanceId` on `id` to stop; `force` adds `--force`. */
+  async stopRun(id: HostId, instanceId: string, force: boolean): Promise<StopResult> {
+    return (await this.host(id)).stopInstance(instanceId, {force});
   }
 
   /** The tasks `project` defines on `id`, read with `vibesys tasks PROJECT --json`. */

@@ -8,6 +8,8 @@
  */
 
 import type {HostKey} from './host-settings.js';
+import {type StopView, stopKey} from './stop-run.js';
+import {WORDMARK} from './welcome-banner.js';
 import {filterHosts, type HostChoice, moveSelection} from './welcome-model.js';
 import type {
   ChromeState,
@@ -34,6 +36,7 @@ interface WelcomeBridge {
   showRun(): Promise<WelcomeResult<null>>;
   showWelcome(): Promise<WelcomeResult<null>>;
   retry(): Promise<WelcomeResult<null>>;
+  stop(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
   onChrome(listener: (state: ChromeState) => void): void;
 }
 
@@ -69,6 +72,7 @@ function button(text: string, onClick: () => void, className = ''): HTMLButtonEl
 
 const bridge = window.vibesysWelcome;
 const banner = byId('banner');
+byId('wordmark').textContent = WORDMARK;
 const recentPane = byId('recent');
 const hostPanel = byId('host-panel');
 const hostSheet = byId('host-sheet');
@@ -79,10 +83,16 @@ const chip = byId<HTMLButtonElement>('host-chip');
 const conn = byId('conn');
 const back = byId<HTMLButtonElement>('back');
 const retry = byId<HTMLButtonElement>('retry');
+const stripStop = byId<HTMLButtonElement>('strip-stop');
+const stripForce = byId<HTMLButtonElement>('strip-force');
+const stripResume = byId<HTMLButtonElement>('strip-resume');
+const stripStopState = byId('strip-stop-state');
+/** How often the lists look again while an accepted stop is ending. */
+const REFRESH_MS = 3_000;
 
 /** The host whose panel is shown. */
 let current: HostKey = 'local';
-let chrome: ChromeState = {mode: 'welcome', attached: null};
+let chrome: ChromeState = {mode: 'welcome', attached: null, stops: {}};
 
 function say(message: string, kind: 'info' | 'error' = 'info'): void {
   banner.textContent = message;
@@ -107,24 +117,40 @@ function dotClass(status: string, stuck: boolean): string {
   return stuck ? 'dot error' : 'dot warn';
 }
 
+/** The strip's stop controls for the attached run, from its stop flow and connection. */
+function renderStripStop(state: ChromeState): void {
+  const attached = state.attached;
+  const stoppable = attached !== null && attached.instanceId !== null;
+  const stop = stoppable ? state.stops[stopKey(attached.host, attached.instanceId)] : undefined;
+  const ended = attached !== null && (stop?.phase === 'ended' || attached.status === 'run ended');
+  stripStop.hidden = !stoppable || ended || stop?.phase === 'stopping';
+  stripForce.hidden = !(stop?.canForce ?? false) || ended;
+  stripResume.hidden = !ended;
+  stripStopState.textContent = ended ? '' : (stop?.text ?? '');
+  stripStopState.className = stop?.phase === 'error' ? 'error' : 'muted';
+}
+
 function renderChrome(state: ChromeState): void {
+  const stopsChanged = JSON.stringify(state.stops) !== JSON.stringify(chrome.stops);
   chrome = state;
   document.body.classList.toggle('strip', state.mode === 'run');
   const attached = state.attached;
   chip.hidden = attached === null;
   back.hidden = attached === null || state.mode === 'run';
   retry.hidden = attached === null || !attached.stuck;
+  renderStripStop(state);
   if (attached === null) {
     conn.textContent = '';
-    return;
+  } else {
+    const dot = element('span', '', dotClass(attached.status, attached.stuck));
+    chip.replaceChildren(dot, document.createTextNode(attached.hostLabel));
+    chip.title =
+      state.mode === 'run' ? 'Show hosts and runs' : `Attached to a run on ${attached.hostLabel}`;
+    conn.textContent =
+      attached.detail === '' ? attached.status : `${attached.status}: ${attached.detail}`;
+    conn.className = attached.stuck ? 'error' : 'muted';
   }
-  const dot = element('span', '', dotClass(attached.status, attached.stuck));
-  chip.replaceChildren(dot, document.createTextNode(attached.hostLabel));
-  chip.title =
-    state.mode === 'run' ? 'Show hosts and runs' : `Attached to a run on ${attached.hostLabel}`;
-  conn.textContent =
-    attached.detail === '' ? attached.status : `${attached.status}: ${attached.detail}`;
-  conn.className = attached.stuck ? 'error' : 'muted';
+  if (stopsChanged) refreshLists();
 }
 
 chip.addEventListener('click', () => {
@@ -133,6 +159,59 @@ chip.addEventListener('click', () => {
 });
 back.addEventListener('click', () => void bridge?.showRun());
 retry.addEventListener('click', () => void bridge?.retry());
+
+/** The attached run's instance id and host, when it can be stopped. */
+function stripTarget(): {host: HostKey; instance: string} | null {
+  const attached = chrome.attached;
+  return attached?.instanceId == null ? null : {host: attached.host, instance: attached.instanceId};
+}
+
+async function requestStop(host: HostKey, instance: string, force: boolean): Promise<void> {
+  if (bridge === undefined) return;
+  failed(await bridge.stop(host, instance, force));
+}
+
+stripStop.addEventListener('click', () => {
+  const target = stripTarget();
+  if (target !== null) void requestStop(target.host, target.instance, false);
+});
+stripForce.addEventListener('click', () => {
+  const target = stripTarget();
+  if (target !== null) void requestStop(target.host, target.instance, true);
+});
+stripResume.addEventListener('click', () => {
+  const attached = chrome.attached;
+  if (attached === null) return;
+  void bridge?.showWelcome();
+  void resume(attached.host, attached.project, attached.runId ?? '');
+});
+
+/** The stop controls of a live run in a list: Stop, "Stopping…", or the failure with Force stop. */
+function stopControls(host: HostKey, instance: string): HTMLElement[] {
+  const view: StopView | undefined = chrome.stops[stopKey(host, instance)];
+  if (view?.phase === 'stopping') return [element('span', view.text, 'muted')];
+  const controls: HTMLElement[] = [];
+  if (view?.phase === 'error') {
+    controls.push(element('span', view.text, 'error'));
+    if (view.canForce) {
+      controls.push(button('Force stop', () => void requestStop(host, instance, true)));
+    }
+  }
+  controls.push(button('Stop run', () => void requestStop(host, instance, false)));
+  return controls;
+}
+
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Redraw the lists from the stop views, polling while a stop that was accepted is ending. */
+function refreshLists(): void {
+  clearTimeout(refreshTimer);
+  void renderRecent(recentRuns);
+  void showHost(current, true);
+  if (Object.values(chrome.stops).some(view => view.phase === 'stopping')) {
+    refreshTimer = setTimeout(refreshLists, REFRESH_MS);
+  }
+}
 
 // ---- recent runs ----------------------------------------------------------------------------------
 
@@ -156,6 +235,7 @@ function fillRecentCell(
   if (status?.kind === 'live') {
     cell.action.append(
       button('Reattach', () => void attach(run.host, status.instanceId), 'primary'),
+      ...stopControls(run.host, status.instanceId),
     );
   } else if (status?.kind === 'ended') {
     cell.action.append(
@@ -166,7 +246,11 @@ function fillRecentCell(
   }
 }
 
+const lastStatus = new Map<string, WelcomeRecentStatus>();
+let recentRuns: readonly WelcomeRecent[] = [];
+
 async function renderRecent(recent: readonly WelcomeRecent[]): Promise<void> {
+  recentRuns = recent;
   if (bridge === undefined) return;
   if (recent.length === 0) return;
   const table = element('table');
@@ -190,6 +274,8 @@ async function renderRecent(recent: readonly WelcomeRecent[]): Promise<void> {
     );
     table.append(row);
     cells.set(`${run.host}\n${run.instanceId}`, {status, action});
+    const known = lastStatus.get(`${run.host}\n${run.instanceId}`);
+    if (known !== undefined) fillRecentCell({status, action}, run, known);
   }
   recentPane.replaceChildren(table);
   for (const host of new Set(recent.map(run => run.host))) {
@@ -200,6 +286,7 @@ async function renderRecent(recent: readonly WelcomeRecent[]): Promise<void> {
         const status = result.ok
           ? result.value[run.instanceId]
           : ({kind: 'unknown', detail: result.error} as const);
+        if (status !== undefined) lastStatus.set(`${run.host}\n${run.instanceId}`, status);
         fillRecentCell(cell, run, status);
       }
     });
@@ -208,11 +295,16 @@ async function renderRecent(recent: readonly WelcomeRecent[]): Promise<void> {
 
 // ---- host panel ---------------------------------------------------------------------------------
 
-async function showHost(key: HostKey): Promise<void> {
+async function showHost(key: HostKey, quiet = false): Promise<void> {
   if (bridge === undefined) return;
   current = key;
   const label = key === 'local' ? 'This Mac' : key.slice('ssh:'.length);
-  hostPanel.replaceChildren(element('h2', label), element('p', `Connecting to ${label}…`, 'muted'));
+  if (!quiet) {
+    hostPanel.replaceChildren(
+      element('h2', label),
+      element('p', `Connecting to ${label}…`, 'muted'),
+    );
+  }
   const result = await bridge.host(key);
   if (current !== key) return;
   if (!result.ok) {
@@ -330,7 +422,10 @@ function runTable(host: WelcomeHost, runs: readonly WelcomeRun[]): HTMLElement {
     );
     const cell = element('td');
     if (run.blocked === null)
-      cell.append(button('Attach', () => void attach(host.key, run.id), 'primary'));
+      cell.append(
+        button('Attach', () => void attach(host.key, run.id), 'primary'),
+        ...stopControls(host.key, run.id),
+      );
     else cell.append(element('span', run.blocked, 'warn'));
     row.append(cell);
     table.append(row);
