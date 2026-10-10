@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
+from contextlib import ExitStack
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,6 +16,7 @@ from entrypoints.launcher import _headless_requested
 from entrypoints.server import (
     _DetachedGatewayEffects,
     _headless_argv,
+    _register_detached_instance,
     _spawn_detached_instance,
     main,
 )
@@ -27,6 +30,7 @@ from server.instances import (
     LiveInstanceRecord,
     LiveRegistry,
     StopOutcome,
+    instance_root,
 )
 from vs_sim.api.testing import FakeProcessSignaller, ManualClock
 
@@ -234,3 +238,32 @@ def test_the_command_reads_this_users_runtime_root(
     assert InstanceList.model_validate_json(capsys.readouterr().out).instances == ()
     assert stat.S_IMODE((tmp_path / "vibesys").stat().st_mode) == 0o700
     assert [entry.name for entry in (tmp_path / "vibesys").iterdir()] == ["instances"]
+
+
+def test_a_detached_server_advertises_each_milestone_and_unregisters_on_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    registry = LiveRegistry(FileInstanceStore(instance_root(os.environ, os.getuid())))
+    socket_path = tmp_path / "vibesys" / "runs" / INSTANCE / "control.sock"
+
+    with ExitStack() as scope:
+        observer = _register_detached_instance(["--instance-id", INSTANCE], socket_path, scope)
+        starting = registry.find(INSTANCE)
+        observer.listening()
+        serving = registry.find(INSTANCE)
+        observer.run_ready("run-7")
+        ready = registry.find(INSTANCE)
+
+    assert starting is not None
+    assert (starting.status, starting.run_id, starting.pid) == (
+        InstanceStatus.STARTING,
+        None,
+        os.getpid(),
+    )
+    assert starting.socket_path == str(socket_path)
+    assert serving is not None
+    assert serving.status is InstanceStatus.SERVING
+    assert ready is not None
+    assert (ready.status, ready.run_id) == (InstanceStatus.SERVING, "run-7")
+    assert registry.list() == InstanceList(instances=())
