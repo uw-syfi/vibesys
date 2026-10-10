@@ -135,8 +135,11 @@ def _request(
         client.connect(os.environ[SOCKET_ENV])
         # The broker cancels the job when the connection closes.
         stop.on_stop = lambda: client.shutdown(socket.SHUT_RDWR)
-        client.sendall(json.dumps(call, separators=(",", ":")).encode() + b"\n")
         try:
+            # The broker may drop the connection before it reads the request: a
+            # send then fails with a broken pipe, the same dropped connection as
+            # a close after the send, so it takes the same exit.
+            client.sendall(json.dumps(call, separators=(",", ":")).encode() + b"\n")
             with client.makefile("rb") as frames:
                 for line in frames:
                     if len(line) > _MAX_FRAME_BYTES:
@@ -152,7 +155,8 @@ def _request(
                         _error(str(frame["error"]))
                         return _USAGE_ERROR
         except ConnectionError:
-            # A reset is a dropped connection, like a clean close without an exit status.
+            # A reset or broken pipe is a dropped connection, like a clean close
+            # without an exit status.
             pass
     if stop.status is not None:
         return stop.status
