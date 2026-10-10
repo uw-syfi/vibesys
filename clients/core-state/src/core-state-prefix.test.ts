@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import type {RunEvent} from '@vibesys/backend-client';
+import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
 import {
   chatEvent,
   event as fixtureEvent,
@@ -12,7 +12,8 @@ import {
   initialCoreState,
   reduceEventBatch,
   reduceEventPrefix,
-} from './core-state.js';
+  reduceSnapshot,
+} from './index.js';
 
 /**
  * Equivalence harness for the tail bootstrap.
@@ -21,13 +22,9 @@ import {
  * the same `CoreState` as folding its tail and then backfilling the preceding
  * chunks through `reduceEventPrefix`.
  *
- * Two divergences are inherent to folding a bare suffix, and each has a
- * test of its own below rather than a normalization here:
- * - `status` and the expected-phase seeding both need `run_started`, which a
- *   suffix does not carry.
- * - The typed-tool latch is stateful, so a producer that emits both typed tool
- *   events and legacy `tool`-channel chunks leaks the legacy chunks a suffix
- *   sees before its first typed event.
+ * Run status is the one intentional divergence from full replay: it can also
+ * come from a concurrent snapshot, so the newer state remains authoritative.
+ * The test below documents that policy rather than normalizing it here.
  */
 
 describe('prefix backfill equivalence', () => {
@@ -81,8 +78,8 @@ describe('prefix backfill equivalence', () => {
 
     // A round boundary splits no merged entry, so the tail's transcript is a
     // plain suffix. At an arbitrary boundary it is not: the entry the boundary
-    // falls inside is split in two, which is why `mergeTranscriptPrefix`
-    // re-folds instead of concatenating.
+    // falls inside is split in two, which is why prefix backfill replays the
+    // retained event deliveries instead of concatenating projected entries.
     const carried = full.transcript.filter(entry => Number(entry.id) <= floor).length;
     expect(tail.transcript.length).toBeGreaterThan(0);
     expect(tail.transcript).toEqual(full.transcript.slice(carried));
@@ -155,36 +152,19 @@ describe('prefix merges across the chunk boundary', () => {
     expect(poisoned.diagnostics[0]?.code).toBe('run_identity_mismatch');
   });
   it('replays an equal-sequence prefix entry before the suffix entry', () => {
-    const suffixEntry = {
-      id: '1',
-      kind: 'assistant' as const,
-      content: 'suffix',
-      turnId: 'turn',
-      invocationId: 'turn',
-    };
-    const suffix = {
-      ...initialCoreState(),
-      sequence: 1,
-      transcript: [suffixEntry],
-      historyAfterSequence: 1,
-    };
+    const suffix = reduceEventBatch(
+      initialCoreState(),
+      [chunkEvent(1, 'suffix')],
+      undefined,
+      undefined,
+      1,
+    );
+    const ordered = [chunkEvent(1, 'prefix '), chunkEvent(1, 'suffix')];
 
-    const merged = reduceEventPrefix(suffix, [chunkEvent(1, 'prefix ')], 0);
+    const merged = reduceEventPrefix(suffix, ordered.slice(0, 1), 0);
 
-    expect(merged.transcript).toEqual([
-      {
-        id: '1',
-        kind: 'assistant',
-        content: 'prefix suffix',
-        label: 'implementer · round-1-implementer',
-        agentKind: 'implementer',
-        roundLabel: 'round-1-implementer',
-        roundNumber: 1,
-        roundKey: {kind: 'number', number: 1},
-        turnId: 'turn',
-        invocationId: 'turn',
-      },
-    ]);
+    expect(merged).toEqual(reduceEventBatch(initialCoreState(), ordered));
+    expect(merged.transcript.map(entry => entry.content)).toEqual(['prefix ']);
   });
 
   it('keeps the newest per-execution status across tail replay and prefix backfill', () => {
@@ -653,6 +633,38 @@ describe('prefix merges across the chunk boundary', () => {
     ]);
   });
 
+  it('retains newer snapshot metadata for a thread created in the prefix', () => {
+    const tail = reduceEventBatch(
+      initialCoreState(),
+      [answeredChatEvent(2, 'thread-a', 'answer')],
+      undefined,
+      undefined,
+      1,
+    );
+    const snapshotted = reduceSnapshot(tail, {
+      run_id: '',
+      sequence: 2,
+      status: 'running',
+      chat_threads: [
+        {
+          thread_id: 'thread-a',
+          title: 'Snapshot title',
+          provider: 'codex',
+          model: 'gpt-5',
+        },
+      ],
+    } satisfies RunSnapshot);
+
+    const merged = reduceEventPrefix(snapshotted, [threadCreatedEvent(1, 'thread-a')], 0);
+
+    expect(merged.chatThreads).toContainEqual({
+      id: 'thread-a',
+      title: 'Snapshot title',
+      provider: 'codex',
+      model: 'gpt-5',
+    });
+  });
+
   it('folds a tail answer over a streamed chat turn left in the chunk', () => {
     const events = [
       threadCreatedEvent(1, 'thread-a'),
@@ -884,11 +896,10 @@ describe('prefix merges across the chunk boundary', () => {
     });
   });
 
-  // A bare suffix has no `run_started`, so the tail fold has no run status and
-  // no outer loop to seed a round's expected roles from. Both come back once the
-  // server carries the run-level events into the bootstrap batch; until then the
-  // merge cannot invent them, and the newer state owns run status by contract.
-  it('cannot recover run status or expected-phase seeding from a bare suffix', () => {
+  // A bare suffix has no `run_started`, so its status starts as `connecting`.
+  // Prefix replay recovers the journal projection, including expected phases,
+  // while the newer state still owns status because a snapshot may have set it.
+  it('recovers expected-phase seeding while preserving the newer run status', () => {
     const events = [runStartedEvent(1), chunkEvent(2, 'work'), chunkEvent(3, ' more')];
     const full = reduceEventBatch(initialCoreState(), events);
 
@@ -901,15 +912,12 @@ describe('prefix merges across the chunk boundary', () => {
     // table fallback for recordings that predate `expected_roles`.
     expect(full.expectedRoles).toBeNull();
     expect(full.phases.map(phase => phase.kind)).toEqual(['implementer', 'judge', 'perf_eval']);
-    expect(merged.phases.map(phase => phase.kind)).toEqual(['implementer']);
+    expect(merged.phases).toEqual(full.phases);
     expect(merged.transcript.map(entry => entry.content)).toEqual(['work more']);
+    expect({...merged, status: full.status}).toEqual(full);
   });
 
-  // The typed-tool latch is stateful: once a typed tool event is seen, legacy
-  // `tool`-channel chunks are dropped as duplicates. A suffix starts unlatched,
-  // so it keeps the legacy chunks it sees before its own first typed event, and
-  // no state-level merge can take them back out.
-  it('leaks legacy tool chunks a mixed producer emitted before the tail latched', () => {
+  it('drops legacy tool chunks a mixed producer emitted before the tail latched', () => {
     const events = [
       toolCallEvent(1, 'call-a'),
       toolResultEvent(2, 'call-a', 'first result'),
@@ -922,8 +930,10 @@ describe('prefix merges across the chunk boundary', () => {
     const merged = foldAsPrefix(events, 2);
 
     expect(full.transcript).toHaveLength(2);
-    expect(merged.transcript).toHaveLength(3);
-    expect(merged.transcript[1]?.content).toBe('duplicate of the next call');
+    expect(merged).toEqual(full);
+    expect(merged.transcript.map(entry => entry.content)).not.toContain(
+      'duplicate of the next call',
+    );
   });
 });
 

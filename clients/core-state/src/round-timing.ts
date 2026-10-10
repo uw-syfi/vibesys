@@ -3,42 +3,6 @@ interface AgentTimingInterval {
   readonly finishedAt: string;
 }
 
-interface TimingFinish {
-  key: string;
-  agentKind: string;
-  finishedAt: string;
-  sequence: number | null;
-  compatibility: boolean;
-}
-
-interface TimingCloseout {
-  finishedAt: string;
-  sequence: number | null;
-}
-
-interface TimingIntervalProvenance {
-  startKey: string;
-  startSequence: number | null;
-  startCompatibility: boolean;
-  finishKey: string;
-  agentKind: string;
-  finishSequence: number | null;
-  finishCompatibility: boolean;
-}
-
-/** Internal replay provenance used to join timing facts across prefix boundaries. */
-interface AgentTimingProvenance {
-  activeStarts: Record<string, TimingStartProvenance>;
-  intervals: Array<TimingIntervalProvenance | null>;
-  unmatchedFinishes: TimingFinish[];
-  closeouts: TimingCloseout[];
-}
-
-interface TimingStartProvenance {
-  sequence: number | null;
-  compatibility: boolean;
-}
-
 export interface RoundTimingState {
   readonly agentIntervals?: readonly AgentTimingInterval[];
   readonly activeAgentStarts?: Readonly<Record<string, string>>;
@@ -53,27 +17,13 @@ export interface AgentTimingEvent {
   type?: string;
 }
 
-const timingProvenances = new WeakMap<object, AgentTimingProvenance>();
-
 export function startAgentTiming<T extends RoundTimingState>(state: T, event: AgentTimingEvent): T {
   const key = timingKey(event);
   if (key === null) return state;
-  const provenance = timingProvenance(state);
-  const next = {
+  return {
     ...state,
     activeAgentStarts: {...(state.activeAgentStarts ?? {}), [key]: event.timestamp},
   };
-  recordTimingProvenance(next, {
-    ...provenance,
-    activeStarts: {
-      ...provenance.activeStarts,
-      [key]: {
-        sequence: event.sequence ?? null,
-        compatibility: event.type === 'phase_started',
-      },
-    },
-  });
-  return next;
 }
 
 export function finishAgentTiming<T extends RoundTimingState>(
@@ -81,238 +31,34 @@ export function finishAgentTiming<T extends RoundTimingState>(
   event: AgentTimingEvent,
 ): T {
   const exactKey = timingKey(event);
-  const agentKind = event.agent_kind;
-  if (exactKey === null || !agentKind) return state;
-  const provenance = timingProvenance(state);
+  if (exactKey === null || !event.agent_kind) return state;
   const activeAgentStarts = {...(state.activeAgentStarts ?? {})};
   const activeKey = findActiveTimingKey(activeAgentStarts, event, exactKey);
-  const startedAt = activeKey === null ? undefined : activeAgentStarts[activeKey];
-  const activeStarts = {...provenance.activeStarts};
-  const startProvenance = activeKey === null ? undefined : activeStarts[activeKey];
-  if (activeKey !== null) {
-    delete activeAgentStarts[activeKey];
-    delete activeStarts[activeKey];
-  }
-  const next = {
+  if (activeKey === null) return state;
+  const startedAt = activeAgentStarts[activeKey];
+  if (startedAt === undefined) return state;
+  delete activeAgentStarts[activeKey];
+  return {
     ...state,
-    ...(startedAt === undefined
-      ? {}
-      : {
-          agentIntervals: [
-            ...(state.agentIntervals ?? []),
-            {startedAt, finishedAt: event.timestamp},
-          ],
-        }),
+    agentIntervals: [...(state.agentIntervals ?? []), {startedAt, finishedAt: event.timestamp}],
     activeAgentStarts,
   };
-  recordTimingProvenance(next, {
-    activeStarts,
-    intervals:
-      startedAt === undefined
-        ? provenance.intervals
-        : [
-            ...provenance.intervals,
-            {
-              startKey: activeKey as string,
-              startSequence: startProvenance?.sequence ?? null,
-              startCompatibility: startProvenance?.compatibility ?? false,
-              finishKey: exactKey,
-              agentKind,
-              finishSequence: event.sequence ?? null,
-              finishCompatibility: event.type === 'phase_finished',
-            },
-          ],
-    unmatchedFinishes:
-      startedAt === undefined
-        ? [
-            ...provenance.unmatchedFinishes,
-            {
-              key: exactKey,
-              agentKind,
-              finishedAt: event.timestamp,
-              sequence: event.sequence ?? null,
-              compatibility: event.type === 'phase_finished',
-            },
-          ]
-        : provenance.unmatchedFinishes,
-    closeouts: provenance.closeouts,
-  });
-  return next;
 }
 
 export function closeActiveAgentTimings<T extends RoundTimingState>(
   state: T,
   timestamp: string,
-  sequence: number | null = null,
+  _sequence: number | null = null,
 ): T {
-  const activeEntries = Object.entries(state.activeAgentStarts ?? {});
-  const activeIntervals = activeEntries.map(([, startedAt]) => ({
+  const activeIntervals = Object.values(state.activeAgentStarts ?? {}).map(startedAt => ({
     startedAt,
     finishedAt: timestamp,
   }));
-  const provenance = timingProvenance(state);
-  const next = {
+  return {
     ...state,
     agentIntervals: [...(state.agentIntervals ?? []), ...activeIntervals],
     activeAgentStarts: {},
   };
-  recordTimingProvenance(next, {
-    activeStarts: {},
-    intervals: [
-      ...provenance.intervals,
-      ...activeEntries.map(([key]) => ({
-        startKey: key,
-        startSequence: provenance.activeStarts[key]?.sequence ?? null,
-        startCompatibility: provenance.activeStarts[key]?.compatibility ?? false,
-        finishKey: key,
-        agentKind: agentKindFromKey(key),
-        finishSequence: sequence,
-        finishCompatibility: false,
-      })),
-    ],
-    unmatchedFinishes: provenance.unmatchedFinishes,
-    closeouts: [...provenance.closeouts, {finishedAt: timestamp, sequence}],
-  });
-  return next;
-}
-
-/** Merges timing facts from an older prefix under a newer suffix. */
-export function mergeAgentTimingPrefix(
-  older: RoundTimingState,
-  newer: RoundTimingState,
-): RoundTimingState {
-  const fixedIntervals: TaggedInterval[] = [];
-  const operations: TimingOperation[] = [];
-  collectTimingFacts(older, timingProvenance(older), fixedIntervals, operations);
-  collectTimingFacts(newer, timingProvenance(newer), fixedIntervals, operations);
-  const replay = replayTimingOperations(operations, fixedIntervals);
-  return projectTimingReplay(older, newer, replay);
-}
-
-interface TimingReplay {
-  taggedIntervals: TaggedInterval[];
-  active: Map<string, TimingStart>;
-  unmatchedFinishes: TimingFinish[];
-}
-
-/** Replays provenance-bearing facts in event order into completed and active timings. */
-function replayTimingOperations(
-  operations: TimingOperation[],
-  fixedIntervals: TaggedInterval[],
-): TimingReplay {
-  operations.sort(compareTimingOperations);
-  const replay: TimingReplay = {
-    taggedIntervals: [...fixedIntervals],
-    active: new Map(),
-    unmatchedFinishes: [],
-  };
-  const completed = new Set<string>();
-  for (const operation of operations) {
-    applyTimingOperation(replay, completed, operation);
-  }
-  replay.taggedIntervals.sort(compareTaggedIntervals);
-  return replay;
-}
-
-/** Applies one ordered timing fact while enforcing compatibility-event deduplication. */
-function applyTimingOperation(
-  replay: TimingReplay,
-  completed: Set<string>,
-  operation: TimingOperation,
-): void {
-  if (operation.kind === 'start') {
-    if (operation.start.compatibility && replay.active.has(operation.start.key)) return;
-    replay.active.set(operation.start.key, operation.start);
-    completed.delete(operation.start.key);
-    return;
-  }
-  if (operation.kind === 'closeout') {
-    closeReplayTimings(replay, operation.closeout);
-    return;
-  }
-  finishReplayTiming(replay, completed, operation.finish);
-}
-
-/** Closes every active timing at a run- or round-level terminal event. */
-function closeReplayTimings(replay: TimingReplay, closeout: TimingCloseout): void {
-  for (const [startKey, start] of replay.active) {
-    replay.taggedIntervals.push({
-      interval: {startedAt: start.startedAt, finishedAt: closeout.finishedAt},
-      provenance: {
-        startKey,
-        startSequence: start.sequence,
-        startCompatibility: start.compatibility,
-        finishKey: startKey,
-        agentKind: start.agentKind,
-        finishSequence: closeout.sequence,
-        finishCompatibility: false,
-      },
-    });
-  }
-  replay.active.clear();
-}
-
-/** Matches a finish to its exact start or the oldest active start of the same role. */
-function finishReplayTiming(
-  replay: TimingReplay,
-  completed: Set<string>,
-  finish: TimingFinish,
-): void {
-  if (finish.compatibility && completed.has(finish.key)) return;
-  const startKey = findReplayTimingKey(replay.active, finish);
-  if (startKey === null) {
-    replay.unmatchedFinishes.push(finish);
-    completed.add(finish.key);
-    return;
-  }
-  const start = replay.active.get(startKey) as TimingStart;
-  replay.active.delete(startKey);
-  replay.taggedIntervals.push({
-    interval: {startedAt: start.startedAt, finishedAt: finish.finishedAt},
-    provenance: {
-      startKey,
-      startSequence: start.sequence,
-      startCompatibility: start.compatibility,
-      finishKey: finish.key,
-      agentKind: finish.agentKind,
-      finishSequence: finish.sequence,
-      finishCompatibility: finish.compatibility,
-    },
-  });
-  completed.add(finish.key);
-}
-
-/** Projects replay results while attaching the provenance needed by later prefix merges. */
-function projectTimingReplay(
-  older: RoundTimingState,
-  newer: RoundTimingState,
-  replay: TimingReplay,
-): RoundTimingState {
-  const {active, taggedIntervals, unmatchedFinishes} = replay;
-  const activeAgentStarts = Object.fromEntries(
-    [...active].map(([key, start]) => [key, start.startedAt]),
-  );
-  const activeStarts = Object.fromEntries(
-    [...active].map(([key, start]) => [
-      key,
-      {sequence: start.sequence, compatibility: start.compatibility},
-    ]),
-  );
-  const hadIntervals = older.agentIntervals !== undefined || newer.agentIntervals !== undefined;
-  const hadStarts = older.activeAgentStarts !== undefined || newer.activeAgentStarts !== undefined;
-  const merged: RoundTimingState = {
-    ...(hadIntervals || taggedIntervals.length > 0
-      ? {agentIntervals: taggedIntervals.map(tagged => tagged.interval)}
-      : {}),
-    ...(hadStarts || active.size > 0 ? {activeAgentStarts} : {}),
-  };
-  recordTimingProvenance(merged, {
-    activeStarts,
-    intervals: taggedIntervals.map(tagged => tagged.provenance),
-    unmatchedFinishes,
-    closeouts: mergeCloseouts(timingProvenance(older).closeouts, timingProvenance(newer).closeouts),
-  });
-  return merged;
 }
 
 /** The caller supplies time so this selector stays deterministic. */
@@ -329,161 +75,9 @@ export function hasActiveAgentTiming(state: RoundTimingState): boolean {
   return Object.keys(state.activeAgentStarts ?? {}).length > 0;
 }
 
-interface TaggedInterval {
-  interval: AgentTimingInterval;
-  provenance: TimingIntervalProvenance | null;
-}
-
-interface TimingStart {
-  key: string;
-  agentKind: string;
-  startedAt: string;
-  sequence: number | null;
-  compatibility: boolean;
-}
-
-type TimingOperation =
-  | {kind: 'start'; start: TimingStart}
-  | {kind: 'finish'; finish: TimingFinish}
-  | {kind: 'closeout'; closeout: TimingCloseout};
-
-function timingProvenance(state: RoundTimingState): AgentTimingProvenance {
-  const provenance =
-    (state.activeAgentStarts === undefined
-      ? undefined
-      : timingProvenances.get(state.activeAgentStarts)) ??
-    (state.agentIntervals === undefined ? undefined : timingProvenances.get(state.agentIntervals));
-  return {
-    activeStarts: provenance?.activeStarts ?? {},
-    intervals: provenance?.intervals ?? (state.agentIntervals ?? []).map(() => null),
-    unmatchedFinishes: provenance?.unmatchedFinishes ?? [],
-    closeouts: provenance?.closeouts ?? [],
-  };
-}
-
-function recordTimingProvenance(state: RoundTimingState, provenance: AgentTimingProvenance): void {
-  if (state.activeAgentStarts !== undefined) {
-    timingProvenances.set(state.activeAgentStarts, provenance);
-  }
-  if (state.agentIntervals !== undefined) timingProvenances.set(state.agentIntervals, provenance);
-}
-
-function collectTimingFacts(
-  state: RoundTimingState,
-  provenance: AgentTimingProvenance,
-  fixed: TaggedInterval[],
-  operations: TimingOperation[],
-): void {
-  for (const [index, interval] of (state.agentIntervals ?? []).entries()) {
-    const endpoints = provenance.intervals[index] ?? null;
-    if (endpoints === null) {
-      fixed.push({interval, provenance: null});
-      continue;
-    }
-    operations.push({
-      kind: 'start',
-      start: {
-        key: endpoints.startKey,
-        agentKind: agentKindFromKey(endpoints.startKey),
-        startedAt: interval.startedAt,
-        sequence: endpoints.startSequence,
-        compatibility: endpoints.startCompatibility,
-      },
-    });
-    operations.push({
-      kind: 'finish',
-      finish: {
-        key: endpoints.finishKey,
-        agentKind: endpoints.agentKind,
-        finishedAt: interval.finishedAt,
-        sequence: endpoints.finishSequence,
-        compatibility: endpoints.finishCompatibility,
-      },
-    });
-  }
-  for (const [key, startedAt] of Object.entries(state.activeAgentStarts ?? {})) {
-    operations.push({
-      kind: 'start',
-      start: {
-        key,
-        agentKind: agentKindFromKey(key),
-        startedAt,
-        sequence: provenance.activeStarts[key]?.sequence ?? null,
-        compatibility: provenance.activeStarts[key]?.compatibility ?? false,
-      },
-    });
-  }
-  for (const finish of provenance.unmatchedFinishes) operations.push({kind: 'finish', finish});
-  for (const closeout of provenance.closeouts) operations.push({kind: 'closeout', closeout});
-}
-
-function compareTimingOperations(left: TimingOperation, right: TimingOperation): number {
-  const leftSequence = operationSequence(left);
-  const rightSequence = operationSequence(right);
-  if (leftSequence !== null && rightSequence !== null) return leftSequence - rightSequence;
-  return operationTimestamp(left) - operationTimestamp(right);
-}
-
-function operationSequence(operation: TimingOperation): number | null {
-  if (operation.kind === 'start') return operation.start.sequence;
-  return operation.kind === 'finish' ? operation.finish.sequence : operation.closeout.sequence;
-}
-
-function operationTimestamp(operation: TimingOperation): number {
-  const timestamp =
-    operation.kind === 'start'
-      ? operation.start.startedAt
-      : operation.kind === 'finish'
-        ? operation.finish.finishedAt
-        : operation.closeout.finishedAt;
-  return new Date(timestamp).getTime();
-}
-
-function mergeCloseouts(
-  older: readonly TimingCloseout[],
-  newer: readonly TimingCloseout[],
-): TimingCloseout[] {
-  return [...older, ...newer].sort((left, right) => {
-    if (left.sequence !== null && right.sequence !== null) return left.sequence - right.sequence;
-    return new Date(left.finishedAt).getTime() - new Date(right.finishedAt).getTime();
-  });
-}
-
-function findReplayTimingKey(
-  active: ReadonlyMap<string, TimingStart>,
-  finish: TimingFinish,
-): string | null {
-  if (active.has(finish.key)) return finish.key;
-  let first: TimingStart | null = null;
-  for (const start of active.values()) {
-    if (start.agentKind !== finish.agentKind) continue;
-    if (
-      first === null ||
-      new Date(start.startedAt).getTime() < new Date(first.startedAt).getTime()
-    ) {
-      first = start;
-    }
-  }
-  return first?.key ?? null;
-}
-
-function compareTaggedIntervals(left: TaggedInterval, right: TaggedInterval): number {
-  const leftSequence = left.provenance?.finishSequence ?? null;
-  const rightSequence = right.provenance?.finishSequence ?? null;
-  if (leftSequence !== null && rightSequence !== null) return leftSequence - rightSequence;
-  return (
-    new Date(left.interval.finishedAt).getTime() - new Date(right.interval.finishedAt).getTime()
-  );
-}
-
 function timingKey(event: AgentTimingEvent): string | null {
   if (!event.agent_kind) return null;
   return `${event.agent_kind}:${event.execution_id ?? event.invocation_id ?? ''}`;
-}
-
-function agentKindFromKey(key: string): string {
-  const separator = key.indexOf(':');
-  return separator === -1 ? key : key.slice(0, separator);
 }
 
 function findActiveTimingKey(
@@ -500,7 +94,7 @@ function findActiveTimingKey(
   return candidates[0]?.[0] ?? null;
 }
 
-function intervalUnionElapsedMs(intervals: AgentTimingInterval[]): number {
+function intervalUnionElapsedMs(intervals: readonly AgentTimingInterval[]): number {
   const ranges = intervals
     .map(interval => ({
       start: new Date(interval.startedAt).getTime(),

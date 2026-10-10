@@ -5,6 +5,7 @@ import {
   type ControlTransport,
   type ProtocolResponse,
   type RequestInput,
+  type RunStatus,
   type ScheduleTimeout,
   type ServerMessage,
   type SubscribeOptions,
@@ -655,6 +656,34 @@ describe('WebSession', () => {
     expect(transport.subscriptions.length).toBeGreaterThan(1);
     expect(session.getState()).toEqual(healthy());
     expect(session.store.getState().sequence).toBe(1);
+
+    await session.close();
+  });
+
+  test('keeps reconnect and reattach available for a forward-compatible run status', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new ManualScheduler();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    transport.snapshots.push(snapshotResponse({status: 'waiting_for_capacity' as RunStatus}));
+    transport.silentDials = 1;
+
+    await session.start();
+    const resumed = transport.nextSubscription();
+    const parseFailure = new BackendClientError('parse', 'Invalid event batch message');
+    transport.subscriptions[0]?.onDisconnect(parseFailure);
+
+    expect(connectionBanners(session.store.getState(), session.getState())).toEqual({
+      stream: {message: STREAM_BANNER_COPY.live, reattach: true},
+      controls: null,
+    });
+    expect(scheduler.pendingDelays()).toEqual([0]);
+
+    scheduler.runNext();
+    await resumed;
+    expect(transport.subscriptions).toHaveLength(2);
 
     await session.close();
   });

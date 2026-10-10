@@ -8,6 +8,7 @@ import {
   type RequestInput,
   type RunEvent,
   type RunStatus,
+  type ScheduleTimeout,
   ServerError,
   type ServerMessage,
   type ServerTransport,
@@ -2671,6 +2672,25 @@ describe('stream reconnect', () => {
   /** Lets the zero-delay reconnect timer and its subscribe settle. */
   const settle = () => new Promise<void>(resolve => setTimeout(resolve, 1));
 
+  class ManualScheduler {
+    readonly #pending: Array<() => void> = [];
+
+    readonly scheduleTimeout: ScheduleTimeout = callback => {
+      this.#pending.push(callback);
+      return () => undefined;
+    };
+
+    get pendingCount(): number {
+      return this.#pending.length;
+    }
+
+    runNext(): void {
+      const callback = this.#pending.shift();
+      if (callback === undefined) throw new Error('No reconnect is scheduled');
+      callback();
+    }
+  }
+
   // The reconnect loop itself lives in and is tested against
   // PersistentEventStream; this checks only that the controller honors the
   // resumed tag it hands back, since the history floor is the controller's to
@@ -2811,6 +2831,32 @@ describe('stream reconnect', () => {
     // The redial policy for an ended run is unchanged: the boot dial and
     // nothing after it.
     expect(transport.subscribeCalls).toHaveLength(1);
+    await controller.stop();
+  });
+
+  it('reconnects after a fault when the snapshot carries a future run status', async () => {
+    const transport = new ReconnectTransport();
+    const scheduler = new ManualScheduler();
+    transport.snapshotStatus = 'waiting_for_capacity' as RunStatus;
+    const controller = new SocketSessionController(
+      transport,
+      undefined,
+      undefined,
+      [0],
+      scheduler.scheduleTimeout,
+    );
+    await controller.start();
+    const resumed = transport.nextSubscription();
+
+    transport.sever('Invalid event batch message');
+
+    expect(controller.state.eventStreamAvailable).toBe(false);
+    expect(controller.state.errorBanner).toMatchObject({scope: 'transport'});
+    expect(scheduler.pendingCount).toBe(1);
+
+    scheduler.runNext();
+    await resumed;
+    expect(transport.subscribeCalls).toHaveLength(2);
     await controller.stop();
   });
 
@@ -2999,6 +3045,7 @@ class ReconnectTransport implements ServerTransport {
   snapshotStatus: RunStatus = 'running';
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
+  readonly #subscriptionWaiters: Array<() => void> = [];
 
   request(input: RequestInput): Promise<ProtocolResponse> {
     this.requests.push(input);
@@ -3021,6 +3068,7 @@ class ReconnectTransport implements ServerTransport {
     options?: SubscribeOptions,
   ): Promise<EventSubscription> {
     this.subscribeCalls.push({afterSequence, tail: options?.tail, storeId: options?.storeId});
+    this.#subscriptionWaiters.shift()?.();
     if (this.refuseSubscribes > 0) {
       this.refuseSubscribes -= 1;
       return Promise.reject(new ServerError('Extra inputs are not permitted: store_id'));
@@ -3052,6 +3100,11 @@ class ReconnectTransport implements ServerTransport {
 
   sever(message = 'Server event stream disconnected'): void {
     this.#disconnect?.(new Error(message));
+  }
+
+  /** Resolves when the stream makes its next dial. */
+  nextSubscription(): Promise<void> {
+    return new Promise(resolve => this.#subscriptionWaiters.push(resolve));
   }
 
   close(): Promise<void> {
