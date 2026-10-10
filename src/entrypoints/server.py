@@ -478,7 +478,8 @@ def _spawn_detached_instance(
     registry = LiveRegistry(FileInstanceStore(root))
     instance_id = new_instance_id()
     run_directory = instance_run_directory(root, instance_id)
-    run_directory.mkdir(mode=0o700, parents=True)
+    run_directory.parent.mkdir(mode=0o700, exist_ok=True)
+    run_directory.mkdir(mode=0o700)
     log_path = run_directory / "server.log"
     descriptor = os.open(log_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
     with os.fdopen(descriptor, "w+b") as output:
