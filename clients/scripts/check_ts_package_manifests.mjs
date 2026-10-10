@@ -12,6 +12,10 @@ const POLICY = {
     runtimeWorkspaceDependencies: [],
     forbiddenDependencyPrefixes: [],
   },
+  '@vibesys/desktop': {
+    runtimeWorkspaceDependencies: [],
+    forbiddenDependencyPrefixes: ['@vibesys/'],
+  },
   '@vibesys/core-state': {
     runtimeWorkspaceDependencies: ['@vibesys/backend-client'],
     forbiddenDependencyPrefixes: ['@opentui/'],

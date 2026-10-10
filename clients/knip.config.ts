@@ -20,6 +20,11 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     entry: ['src/**/*.test.ts', 'bench/*.ts'],
     project: ['src/**/*.ts', 'bench/**/*.ts'],
   },
+  desktop: {
+    // The Electron main process is the package `main` (an entry by default).
+    entry: ['src/**/*.test.ts'],
+    project: ['src/**/*.ts'],
+  },
   tui: {
     entry: [
       // The frontend process: the launcher (the `bin`, an entry by default) spawns `dist/index.js`.

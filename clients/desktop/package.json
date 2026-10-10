@@ -1,0 +1,22 @@
+{
+  "name": "@vibesys/desktop",
+  "productName": "VibeSys",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/main.js",
+  "exports": {},
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\" && tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.check.json",
+    "test": "node ../scripts/run_bun_tests.mjs ./src",
+    "start": "pnpm build && electron ."
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/node": "^24.0.0",
+    "electron": "44.6.0",
+    "typescript": "^5.8.3"
+  }
+}

@@ -306,6 +306,32 @@ library decodes the target with `ascii`/`surrogateescape`, so a raw byte above
 0x7F arrives as a lone surrogate that strict UTF-8 refuses, just as
 `compare_digest` refuses a non-ASCII `str`.
 
+## Desktop app
+
+`scripts/run-desktop.sh` opens the same live web UI in an Electron window
+(`clients/desktop`). It starts the gateway with `entrypoints.web live`, then
+opens the window on the capability URL, passed in the `VIBESYS_DESKTOP_URL`
+environment variable rather than on a command line.
+
+```bash
+# Gateway and window on this machine
+./scripts/run-desktop.sh --project ~/proj [-- extra run args]
+./scripts/run-desktop.sh --demo
+
+# Gateway on an SSH host, window on the laptop
+./scripts/run-desktop.sh --remote USER@HOST --remote-repo '~/vibesys' \
+  --project '~/proj' [-- extra run args]
+```
+
+With `--remote`, the project and repository paths are paths on the host, and
+SSH must authenticate with a key (no prompts). The script forwards the port
+through an SSH control connection that it closes when the window closes. The
+local and remote port are the same (`--port`, default 8765) because the
+gateway checks the exact browser `Origin`; the script fails if the local port is
+busy. The gateway is detached and keeps running after the window closes; the
+script prints the exact `entrypoints.web stop` command at exit. Electron
+downloads its binary the first time the window starts.
+
 ## Remote host and local laptop
 
 The gateway intentionally binds only to loopback. For the one-command demo,

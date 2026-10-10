@@ -27,6 +27,7 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
     assert set(pins) == {
         "clients/backend-client/package.json",
         "clients/core-state/package.json",
+        "clients/desktop/package.json",
         "clients/tui/package.json",
         "clients/web/package.json",
     }
