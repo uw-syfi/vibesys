@@ -30,6 +30,8 @@ from vs_sandbox.fake_docker_command import (
 )
 from vs_sandbox.fake_docker_engine import FakeContainer, FakeDockerEngine
 from vs_sandbox.fake_host_container import HostExecutedContainer, HostExecutedContainerBackend
+from vs_sandbox.fake_stoppable_process import FakeStoppableProcess, StoppableScript
+from vs_sandbox.process_contracts import ProcessHarness, StoppableProcessContract
 
 __all__ = [
     "DEFAULT_RESULT",
@@ -46,9 +48,13 @@ __all__ = [
     "FakeExecution",
     "FakeLifecycleRunner",
     "FakeRunnerCreation",
+    "FakeStoppableProcess",
     "HostExecutedContainer",
     "HostExecutedContainerBackend",
+    "ProcessHarness",
     "ScriptedDockerCli",
+    "StoppableProcessContract",
+    "StoppableScript",
     "docker_missing",
     "docker_result",
     "docker_timed_out",

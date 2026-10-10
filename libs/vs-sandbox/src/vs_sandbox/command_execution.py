@@ -34,15 +34,18 @@ from typing import TYPE_CHECKING
 from vs_sandbox.execution import CommandResult, bounded_execution_result
 from vs_sandbox.process_execution import (
     DEFAULT_TERMINATION_GRACE_SECONDS,
+    CancelSignal,
     ProcessOutcome,
     ProcessStop,
+    SignalSender,
+    StoppableProcess,
     wait_stoppable,
 )
 
 if TYPE_CHECKING:
-    import signal
-    import threading
     from collections.abc import Callable
+
+    from vs_sim.api import Threads
 
 #: GNU ``timeout``'s exit status when it stops a command on its limit.
 TIMEOUT_EXIT_CODE = 124
@@ -71,18 +74,21 @@ def execute_command(  # noqa: PLR0913  # lint-waiver: LW-731010 [PLR0913]; the s
     *,
     timeout: int | None,
     default_timeout: int,
-    cancel: threading.Event | None,
+    cancel: CancelSignal | None,
     max_output_chars: int,
-    launch: Callable[[], subprocess.Popen[str]],
-    signal_remote: Callable[[signal.Signals], None] | None = None,
+    launch: Callable[[], StoppableProcess],
+    signal_remote: SignalSender | None = None,
     grace_seconds: float = DEFAULT_TERMINATION_GRACE_SECONDS,
+    threads: Threads | None = None,
 ) -> CommandResult:
     """Run *command* through *launch* under the module's result contract.
 
     *launch* starts the command as a process group leader with piped output
-    (:func:`~vs_sandbox.process_execution.start_process_group`). *signal_remote*
-    signals the command's processes where they actually live when that is
-    outside the launched group.
+    (:func:`~vs_sandbox.process_execution.start_process_group`, wrapped in a
+    :class:`~vs_sandbox.process_execution.PopenProcess`), or is a test's Fake
+    :class:`~vs_sandbox.process_execution.StoppableProcess`. *signal_remote* signals the command's processes where they actually
+    live when that is outside the launched group. *threads* is the clock the
+    timeout is measured on.
     """
     if not command or not isinstance(command, str):
         return rejected_result(
@@ -105,6 +111,7 @@ def execute_command(  # noqa: PLR0913  # lint-waiver: LW-731010 [PLR0913]; the s
         cancel=cancel,
         grace_seconds=grace_seconds,
         signal_remote=signal_remote,
+        threads=threads,
     )
     return result_of(outcome, effective_timeout, max_output_chars)
 

@@ -96,9 +96,7 @@
 {"path": "libs/vs-runtime/tests/test_trusted_evaluation_preparation.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-runtime/tests/test_workspace_requests.py", "rule": "threading", "count": 3}
 {"path": "libs/vs-sandbox/src/vs_sandbox/accelerator_discovery.py", "rule": "subprocess", "count": 2}
-{"path": "libs/vs-sandbox/src/vs_sandbox/command_execution.py", "rule": "signal", "count": 1}
-{"path": "libs/vs-sandbox/src/vs_sandbox/command_execution.py", "rule": "subprocess", "count": 2}
-{"path": "libs/vs-sandbox/src/vs_sandbox/command_execution.py", "rule": "threading", "count": 1}
+{"path": "libs/vs-sandbox/src/vs_sandbox/command_execution.py", "rule": "subprocess", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/container_runtime.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/cuda_backend.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/cuda_backend.py", "rule": "wall_clock", "count": 1}
@@ -135,10 +133,8 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "threading", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "time", "count": 6}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "process", "count": 1}
-{"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "signal", "count": 7}
-{"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "subprocess", "count": 11}
-{"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "threading", "count": 1}
-{"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "time", "count": 3}
+{"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "signal", "count": 3}
+{"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "subprocess", "count": 7}
 {"path": "libs/vs-sandbox/src/vs_sandbox/signal_relay.py", "rule": "signal", "count": 5}
 {"path": "libs/vs-sandbox/src/vs_sandbox/signal_relay.py", "rule": "socket", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/signal_relay.py", "rule": "threading", "count": 1}
