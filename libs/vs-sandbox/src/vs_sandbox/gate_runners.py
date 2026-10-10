@@ -131,11 +131,17 @@ class SrunGateRunner:
         *,
         env: Mapping[str, str],
     ) -> None:
-        """Bind the launcher, the gate allocation, the planned commands, and the host environment."""
+        """Bind the launcher, the gate allocation, the planned commands, and the host environment.
+
+        The host's own Slurm variables (``SLURM_*``) are dropped: a gate is always
+        a new allocation. A host started inside ``salloc`` or a batch job would
+        otherwise make ``srun`` run the gate as a step of that allocation, or fail
+        on one that has ended.
+        """
         self._launcher = launcher
         self._request = request
         self._planned = {kind: tuple(argv) for kind, argv in planned.items()}
-        self._env = dict(env)
+        self._env = {key: value for key, value in env.items() if not key.startswith("SLURM_")}
 
     def run(
         self,

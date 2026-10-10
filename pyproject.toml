@@ -122,6 +122,7 @@ markers = [
     # such test is skipped unless its opt-in environment variable is set.
     # The exhaustive crash-sequence sweep: deselected by default, run with `-m slow`.
     "slow: an exhaustive sweep too long for every run; select it with -m slow",
+    "slurm_cluster: runs the slurm and slurm-gpu environments against a real Slurm cluster in Docker; opt in with VIBESYS_SLURM_CLUSTER=1",
     "real_contract: runs a Fake-vs-real contract suite against the real implementation (real DB, subprocess, or service); opt in with VIBESYS_REAL_CONTRACTS=1",
 ]
 
