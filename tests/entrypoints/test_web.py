@@ -45,7 +45,12 @@ from entrypoints.web import (
     _wait_for_record,
 )
 from server.runtime import WebInstanceHold, WebPortObservation, WebPortState
-from vs_sim.api.testing import HANG_GUARD_S, SimThreads
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    FakeForegroundLauncher,
+    ForegroundScript,
+    SimThreads,
+)
 
 
 def _record() -> web.WebInstanceRecord:
@@ -164,24 +169,26 @@ def test_tool_lookup_reports_missing_dependencies(monkeypatch: pytest.MonkeyPatc
         _ssh()
 
 
+def _exits_with(status: int) -> FakeForegroundLauncher:
+    """A terminal-process launcher whose children exit at once with *status*."""
+    return FakeForegroundLauncher(
+        lambda _argv: ForegroundScript(returncode=status, exits_immediately=True)
+    )
+
+
 def test_run_dev_invokes_vite_with_the_requested_address(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[object]:
-        calls.append((args, kwargs))
-        return subprocess.CompletedProcess([], 7)
-
-    # test-isolation: subprocess invocation is the behavior under test.
+    children = _exits_with(7)
+    # test-isolation: the pnpm lookup searches the host's PATH, which the test does not control.
     monkeypatch.setattr(web, "_pnpm", lambda: "pnpm")
-    # test-isolation: subprocess invocation is the behavior under test.
-    monkeypatch.setattr(web.subprocess, "run", fake_run)
 
-    result = _run_dev(argparse.Namespace(host="127.0.0.1", port=5173), tmp_path)
+    result = _run_dev(argparse.Namespace(host="127.0.0.1", port=5173), tmp_path, children)
 
     assert result == 7
-    assert calls[0][0][0] == ["pnpm", "dev", "--host", "127.0.0.1", "--port", "5173"]
+    [child] = children.children
+    assert child.argv == ("pnpm", "dev", "--host", "127.0.0.1", "--port", "5173")
+    assert child.cwd == tmp_path / "clients" / "web"
 
 
 @given(polls_before_publication=integers(min_value=0, max_value=100))
@@ -229,11 +236,7 @@ def test_run_live_launches_gateway_and_prints_browser_links(
     project = tmp_path / "project"
     project.mkdir()
     instance = tmp_path / "record.json"
-    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[object]:
-        calls.append((args, kwargs))
-        return subprocess.CompletedProcess([], 0)
+    children = _exits_with(0)
 
     # test-isolation: live mode delegates to build, launch, and record discovery.
     monkeypatch.setattr(web, "_pnpm", lambda: "pnpm")
@@ -241,8 +244,6 @@ def test_run_live_launches_gateway_and_prints_browser_links(
     monkeypatch.setattr(web, "_live_command", lambda **_kwargs: ["gateway"])
     # test-isolation: live mode delegates to build, launch, and record discovery.
     monkeypatch.setattr(web, "_wait_for_record", lambda _path: _record())
-    # test-isolation: live mode delegates to build, launch, and record discovery.
-    monkeypatch.setattr(web.subprocess, "run", fake_run)
 
     args = argparse.Namespace(
         project=project,
@@ -257,14 +258,26 @@ def test_run_live_launches_gateway_and_prints_browser_links(
         run_args=(),
     )
 
-    assert _run_live(args, tmp_path) == 0
-    assert len(calls) == 2
-    assert calls[0][0][0] == ["pnpm", "build"]
-    assert calls[1][0][0] == ["gateway"]
+    assert _run_live(args, tmp_path, web._DefaultWebLiveEffects(children)) == 0  # noqa: SLF001  # lint-waiver: LW-101700 [SLF001]; the default effects are the unit that runs the build and the gateway
+    assert [child.argv for child in children.children] == [("pnpm", "build"), ("gateway",)]
     output = capsys.readouterr().out
     assert f"Web build: sha256:{'1' * 64}" in output
     assert "SSH tunnel:" in output
     assert "Browser harness URL:" in output
+
+
+@given(status=integers(min_value=1, max_value=255))
+def test_a_failed_bundle_build_stops_the_live_launch(status: int) -> None:
+    children = _exits_with(status)
+    effects = web._DefaultWebLiveEffects(children)  # noqa: SLF001  # lint-waiver: LW-101702 [SLF001]; the default effects are the unit that runs the build
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        # test-isolation: the pnpm lookup searches the host's PATH, which the test does not control.
+        monkeypatch.setattr(web, "_pnpm", lambda: "pnpm")
+        with pytest.raises(SystemExit, match=f"build failed with status {status}"):
+            effects.build(Path("/repository"))
+
+    assert [child.cwd for child in children.children] == [Path("/repository/clients/web")]
 
 
 def test_run_live_rejects_missing_project_for_non_demo_mode(tmp_path: Path) -> None:
@@ -298,12 +311,6 @@ def test_run_live_demo_stages_replay_log_for_gateway(
 
     # test-isolation: inspect gateway composition without starting a subprocess.
     monkeypatch.setattr(web, "_live_command", live_command)
-    # test-isolation: isolate the helper from a detached server process.
-    monkeypatch.setattr(
-        web.subprocess,
-        "run",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0),
-    )
     # test-isolation: return the record a real gateway publishes after startup.
     monkeypatch.setattr(web, "_wait_for_record", lambda _path: _record())
     args = argparse.Namespace(
@@ -319,7 +326,8 @@ def test_run_live_demo_stages_replay_log_for_gateway(
         run_args=(),
     )
 
-    assert _run_live(args, tmp_path) == 0
+    effects = web._DefaultWebLiveEffects(_exits_with(0))  # noqa: SLF001  # lint-waiver: LW-101701 [SLF001]; isolate the helper from a detached server process
+    assert _run_live(args, tmp_path, effects) == 0
     replay_log = cast("Path", captured["replay_log"])
     runtime_dir = tmp_path / "clients" / "web" / ".vibesys-demo"
     assert replay_log == runtime_dir / "run-events.jsonl"
@@ -451,16 +459,9 @@ def test_tunnel_requires_a_port_and_matching_forward() -> None:
 def test_tunnel_runs_ssh_with_the_capability_url(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[object]:
-        calls.append((args, kwargs))
-        return subprocess.CompletedProcess([], 3)
-
-    # test-isolation: SSH invocation is the behavior under test.
+    children = _exits_with(3)
+    # test-isolation: the ssh lookup searches the host's PATH, which the test does not control.
     monkeypatch.setattr(web, "_ssh", lambda: "ssh")
-    # test-isolation: SSH invocation is the behavior under test.
-    monkeypatch.setattr(web.subprocess, "run", fake_run)
     args = argparse.Namespace(
         url="http://127.0.0.1:8765/?token=secret",
         local_port=None,
@@ -468,8 +469,8 @@ def test_tunnel_runs_ssh_with_the_capability_url(
         host="user@host",
     )
 
-    assert _run_tunnel(args) == 3
-    assert calls[0][0][0] == ["ssh", "-N", "-L", "8765:127.0.0.1:8765", "user@host"]
+    assert _run_tunnel(args, children) == 3
+    assert children.children[0].argv == ("ssh", "-N", "-L", "8765:127.0.0.1:8765", "user@host")
     assert "Open locally:" in capsys.readouterr().out
 
 

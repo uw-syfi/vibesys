@@ -18,6 +18,7 @@ from vs_sim.processes import (
     ProcessSpec,
     RunningProcess,
     SubprocessLauncher,
+    run_foreground,
 )
 from vs_sim.randomness import RandomSource, SeededRandom, SystemRandomSource, derive_seed
 from vs_sim.signals import LoopSignalSource, PidfdProcessSignaller, ProcessSignaller, SignalSource
@@ -59,4 +60,5 @@ __all__ = [
     "UnixNetwork",
     "Worker",
     "derive_seed",
+    "run_foreground",
 ]

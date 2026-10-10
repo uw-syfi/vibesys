@@ -18,6 +18,7 @@ from vs_sim.states import Changes, wait_for_state
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+    from pathlib import Path
 
     from vs_sim.clock import Sleeper
     from vs_sim.probes import ProbeResult
@@ -249,11 +250,16 @@ class FakeForegroundChild:
     """A scripted child a test inspects and ends by hand."""
 
     def __init__(
-        self, argv: tuple[str, ...], env: Mapping[str, str] | None, script: ForegroundScript
+        self,
+        argv: tuple[str, ...],
+        env: Mapping[str, str] | None,
+        script: ForegroundScript,
+        cwd: Path | None = None,
     ) -> None:
         """Record how it was started; it runs until the script or a signal ends it."""
         self.argv = argv
         self.env = env
+        self.cwd = cwd
         self.received: list[signal.Signals] = []
         """Every signal delivered to it while it ran, in order."""
         self._script = script
@@ -301,10 +307,13 @@ class FakeForegroundLauncher:
         return self.children[index]
 
     async def start(
-        self, argv: Sequence[str], env: Mapping[str, str] | None = None
+        self,
+        argv: Sequence[str],
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> ForegroundChild:
         """Start the child the script describes for ``argv``."""
-        child = FakeForegroundChild(tuple(argv), env, self.script(tuple(argv)))
+        child = FakeForegroundChild(tuple(argv), env, self.script(tuple(argv)), cwd)
         self.children.append(child)
         self._started.notify()
         return child

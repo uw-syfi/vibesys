@@ -216,7 +216,6 @@
 {"path": "src/entrypoints/server.py", "rule": "threading", "count": 1}
 {"path": "src/entrypoints/web.py", "rule": "process", "count": 1}
 {"path": "src/entrypoints/web.py", "rule": "socket_io", "count": 1}
-{"path": "src/entrypoints/web.py", "rule": "subprocess", "count": 4}
 {"path": "src/server/api/protocol.py", "rule": "wall_clock", "count": 2}
 {"path": "src/server/chat/manager.py", "rule": "threading", "count": 1}
 {"path": "src/server/event_index.py", "rule": "fs_sync", "count": 2}
@@ -254,7 +253,7 @@
 {"path": "tests/entrypoints/test_server.py", "rule": "subprocess", "count": 4}
 {"path": "tests/entrypoints/test_web.py", "rule": "fs_sync", "count": 2}
 {"path": "tests/entrypoints/test_web.py", "rule": "process", "count": 1}
-{"path": "tests/entrypoints/test_web.py", "rule": "subprocess", "count": 11}
+{"path": "tests/entrypoints/test_web.py", "rule": "subprocess", "count": 4}
 {"path": "tests/entrypoints/test_web_script.py", "rule": "subprocess", "count": 1}
 {"path": "tests/evaluators/test_request_factory_evaluator.py", "rule": "process", "count": 4}
 {"path": "tests/evaluators/test_request_factory_evaluator.py", "rule": "subprocess", "count": 1}
