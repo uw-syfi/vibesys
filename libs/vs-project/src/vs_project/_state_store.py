@@ -120,12 +120,12 @@ class FakeStateStores:
     def __init__(self) -> None:
         """Start with no run stores."""
         self._stores: dict[tuple[Path, str], FakeStateStore] = {}
-        self._lock = RLock()
 
     def __call__(self, project: Project, run_id: str) -> FakeStateStore:
         """Return the run's store, creating an empty one on first use."""
-        with self._lock:
-            return self._stores.setdefault((project.root, run_id), FakeStateStore())
+        # ``dict.setdefault`` is atomic, so concurrent first uses of one run agree
+        # on a single store without a lock of our own.
+        return self._stores.setdefault((project.root, run_id), FakeStateStore())
 
 
 class LocalStateStore(StoreOperations):
