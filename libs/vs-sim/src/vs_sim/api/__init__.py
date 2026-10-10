@@ -16,7 +16,7 @@ from vs_sim.processes import (
     SubprocessLauncher,
 )
 from vs_sim.randomness import RandomSource, SeededRandom, SystemRandomSource, derive_seed
-from vs_sim.signals import LoopSignalSource, SignalSource
+from vs_sim.signals import LoopSignalSource, PidfdProcessSignaller, ProcessSignaller, SignalSource
 
 __all__ = [
     "BlockingRunner",
@@ -30,8 +30,10 @@ __all__ = [
     "MonotonicClock",
     "Network",
     "OsThreads",
+    "PidfdProcessSignaller",
     "ProcessLauncher",
     "ProcessOutcome",
+    "ProcessSignaller",
     "ProcessSpec",
     "RandomSource",
     "RunningProcess",

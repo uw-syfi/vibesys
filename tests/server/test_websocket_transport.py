@@ -47,6 +47,7 @@ from server.transport.discovery import (
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import (
+    WebSocketBindError,
     WebSocketGateway,
     WebSocketLimits,
     _connection_closed,
@@ -63,6 +64,7 @@ if TYPE_CHECKING:
     from websockets.typing import Origin
 
     from server.api.service import RunApi
+    from vs_sim.api import Event
 
 # The burst has to be larger than the send path can absorb, or the producing
 # coroutine never stalls and the write deadline under test never fires. The
@@ -990,8 +992,11 @@ def test_gateway_retries_after_a_failed_bind_without_holding_its_instance_claim(
     with socket.create_server(("127.0.0.1", 0)) as held:
         port = held.getsockname()[1]
         gateway = WebSocketGateway(parts.api, port=port, instance_path=instance_path)
-        with pytest.raises(RuntimeError, match="Unable to start WebSocket gateway"):
+        with pytest.raises(WebSocketBindError) as failure:
             gateway.start()
+        first_line = str(failure.value).splitlines()[0]
+        assert first_line.startswith(f"WebSocket gateway could not bind 127.0.0.1:{port}:")
+        assert "address already in use" in first_line.lower()
         assert WebInstanceClaim.is_held(instance_path) is False
 
     try:
@@ -1028,6 +1033,9 @@ class _StalledPublication:
 
     def wait_before_serve(self, stop: threading.Event) -> None:
         del stop
+
+    def wait_before_listener_start(self, stop: Event, bound_port: int) -> None:
+        del stop, bound_port
 
     def wait_before_publication(self, stop: threading.Event, bound_port: int) -> None:
         del stop

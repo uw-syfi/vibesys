@@ -32,6 +32,9 @@ from server.transport.discovery import (
     CAPABILITY_ROTATION_HEADER as CAPABILITY_ROTATION_HEADER,  # noqa: PLC0414  # lint-waiver: LW-936006 [PLC0414]; re-export the lifecycle HTTP contract through the runtime composition boundary; a wrapper would duplicate a constant and a direct entrypoint-to-transport import would bypass the boundary.
 )
 from server.transport.discovery import (
+    WebGatewayListener as WebGatewayListener,  # noqa: PLC0414  # lint-waiver: LW-102902 [PLC0414]; re-export verified port identity through the runtime composition boundary for operator entrypoints
+)
+from server.transport.discovery import (
     WebInstanceClaim as WebInstanceClaim,  # noqa: PLC0414  # lint-waiver: LW-101062 [PLC0414]; re-export discovery locking through the allowed runtime composition boundary
 )
 from server.transport.discovery import (
@@ -40,10 +43,22 @@ from server.transport.discovery import (
 from server.transport.discovery import (
     WebInstanceRecord as WebInstanceRecord,  # noqa: PLC0414  # lint-waiver: LW-101061 [PLC0414]; re-export the discovery record through the allowed runtime composition boundary
 )
+from server.transport.discovery import (
+    WebPortInspector as WebPortInspector,  # noqa: PLC0414  # lint-waiver: LW-102903 [PLC0414]; re-export Linux port discovery through the runtime composition boundary for operator entrypoints
+)
+from server.transport.discovery import (
+    WebPortObservation as WebPortObservation,  # noqa: PLC0414  # lint-waiver: LW-102904 [PLC0414]; re-export the port observation contract through the runtime composition boundary for operator entrypoints
+)
+from server.transport.discovery import (
+    WebPortState as WebPortState,  # noqa: PLC0414  # lint-waiver: LW-102905 [PLC0414]; re-export port classification through the runtime composition boundary for operator entrypoints
+)
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import (
     WEBSOCKET_CLOSE_TIMEOUT_SECONDS as WEBSOCKET_CLOSE_TIMEOUT_SECONDS,  # noqa: PLC0414  # lint-waiver: LW-107301 [PLC0414]; expose the transport's canonical close bound through the runtime boundary so launchers can outlast it without restating it
+)
+from server.transport.websocket import (
+    WebSocketBindError as WebSocketBindError,  # noqa: PLC0414  # lint-waiver: LW-102901 [PLC0414]; re-export the operator-facing bind failure through the runtime composition boundary so entrypoints do not import a concrete transport
 )
 from server.transport.websocket import WebSocketGateway
 from server.transport.websocket import (

@@ -136,6 +136,27 @@ class FakeSignalSource:
         return True
 
 
+class FakeProcessSignaller:
+    """Stable process signalling over an in-memory set of live process IDs."""
+
+    def __init__(self, live_pids: set[int]) -> None:
+        """Treat exactly ``live_pids`` as openable process identities."""
+        self.live_pids = set(live_pids)
+        self.opened: list[int] = []
+        self.terminated: list[int] = []
+
+    def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
+        """Open ``pid``, evaluate ``current``, and record a permitted termination."""
+        if pid not in self.live_pids:
+            raise ProcessLookupError(pid)
+        self.opened.append(pid)
+        if not current():
+            return False
+        self.terminated.append(pid)
+        self.live_pids.remove(pid)
+        return True
+
+
 @dataclass(frozen=True)
 class ProcessScript:
     """What a scripted process does: run for ``duration_s`` on the clock, then end like this."""

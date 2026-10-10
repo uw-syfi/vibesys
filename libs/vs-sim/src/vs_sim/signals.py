@@ -1,12 +1,13 @@
-"""Signal handlers behind an interface, so a test can deliver a signal without a process."""
+"""Incoming and outgoing process signals behind deterministic interfaces."""
 
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    import signal
     from collections.abc import Callable
 
 
@@ -32,3 +33,35 @@ class LoopSignalSource:
     def remove_handler(self, number: signal.Signals) -> bool:
         """Remove the running loop's handler for ``number``."""
         return asyncio.get_running_loop().remove_signal_handler(number)
+
+
+class ProcessSignaller(Protocol):
+    """Terminate an existing process only after validating a stable identity for it."""
+
+    def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
+        """Send SIGTERM to stable ``pid`` iff ``current`` remains true; whether it was sent.
+
+        The implementation acquires its stable process reference before evaluating
+        ``current``. It raises ``ProcessLookupError`` when ``pid`` no longer exists and
+        ``NotImplementedError`` when the host cannot provide a stable reference.
+        """
+        ...
+
+
+class PidfdProcessSignaller:
+    """Linux pidfd-backed signalling that cannot target a reused process ID."""
+
+    def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
+        """Open ``pid``, revalidate caller identity, and send SIGTERM through its pidfd."""
+        pidfd_open = getattr(os, "pidfd_open", None)
+        pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
+        if pidfd_open is None or pidfd_send_signal is None:
+            raise NotImplementedError("safe process signalling requires Linux pidfds")
+        descriptor = pidfd_open(pid)
+        try:
+            if not current():
+                return False
+            pidfd_send_signal(descriptor, signal.SIGTERM)
+            return True
+        finally:
+            os.close(descriptor)

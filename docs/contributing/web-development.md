@@ -65,6 +65,26 @@ uv run python -m entrypoints.web rotate --instance clients/web/.vibesys-demo/web
 uv run python -m entrypoints.web stop --instance clients/web/.vibesys-demo/web-gateway.json
 ```
 
+If the record is missing or belongs to another checkout, use the fixed port
+instead. A bind failure prints these commands on its first diagnostic:
+
+```bash
+uv run python -m entrypoints.web status --port 8765
+uv run python -m entrypoints.web stop --port 8765
+```
+
+Port-keyed discovery is Linux-only and fail-closed. It reads listening sockets
+from `/proc/net/tcp` and `/proc/net/tcp6`, maps them through same-user descriptors,
+and accepts it as a VibeSys gateway only when the process command names
+`entrypoints.server`, the requested web port and an explicit instance path,
+and that process also holds the matching instance claim. `stop --port` then
+uses a pidfd and rechecks that complete identity before sending SIGTERM. It
+works with the default derived instance path because the detached launcher
+normalizes that path into the child process command. The port-keyed command
+refuses unrelated listeners, multiple owners, other-user or unreadable
+listeners, identity changes, and hosts without `/proc` or pidfd signalling.
+It never sends a signal based only on a port or pid.
+
 `stop`'s exit status is the only signal that says whether the instance
 directory's files are free, so anything that removes or reuses that directory
 must be conditional on it:

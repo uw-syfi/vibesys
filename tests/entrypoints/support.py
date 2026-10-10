@@ -6,7 +6,13 @@ import math
 from pathlib import Path
 
 from entrypoints.server import GATEWAY_STOP_TIMEOUT_SECONDS
-from server.transport.discovery import WebInstanceHold, WebInstanceRecord
+from server.runtime import (
+    WebGatewayListener,
+    WebInstanceHold,
+    WebInstanceRecord,
+    WebPortObservation,
+    WebPortState,
+)
 
 INSTANCE_PATH = Path("/project/.vibesys/web-gateway.json")
 GATEWAY_PID = 4321
@@ -14,6 +20,25 @@ IDLE_DIRECTORY = WebInstanceHold(holders=(), log_locked=False)
 POLL_SECONDS = 0.05
 BUDGET_POLLS = int(GATEWAY_STOP_TIMEOUT_SECONDS / POLL_SECONDS)
 """Waits the stop budget allows: the last one can still report `STOPPED`."""
+PORT = 8765
+PORT_LISTENER = WebGatewayListener(
+    host="127.0.0.1",
+    port=PORT,
+    pid=GATEWAY_PID,
+    instance_path=INSTANCE_PATH,
+    socket_inodes=(12345,),
+    process_start_time=67890,
+    claim_device=1,
+    claim_inode=2,
+)
+PORT_GATEWAY = WebPortObservation(
+    WebPortState.VIBESYS_GATEWAY,
+    "127.0.0.1",
+    PORT,
+    PORT_LISTENER,
+    (GATEWAY_PID,),
+)
+PORT_FREE = WebPortObservation(WebPortState.FREE, "127.0.0.1", PORT)
 
 
 def gateway_record(pid: int) -> WebInstanceRecord:
@@ -122,4 +147,46 @@ class FakeDetachedGateway:
 
     def sleep(self, seconds: float) -> None:
         """Record a wait, which is the only thing that advances the clock."""
+        self.sleeps.append(seconds)
+
+
+class FakePortGateway:
+    """Script port observations and record the verified identities signalled."""
+
+    def __init__(
+        self,
+        observations: tuple[WebPortObservation, ...],
+        *,
+        signal_error: OSError | NotImplementedError | None = None,
+    ) -> None:
+        assert observations
+        self.observations = observations
+        self.signal_error = signal_error
+        self.inspections = 0
+        self.signals: list[WebGatewayListener] = []
+        self.sleeps: list[float] = []
+
+    def inspect_port(self, port: int) -> WebPortObservation:
+        """Return the next observation, repeating the final state indefinitely."""
+        assert port == PORT
+        index = min(self.inspections, len(self.observations) - 1)
+        self.inspections += 1
+        return self.observations[index]
+
+    def inspect(self, port: int) -> WebPortObservation:
+        """Expose the inspector API used by status without changing the script."""
+        return self.inspect_port(port)
+
+    def terminate_listener(self, listener: WebGatewayListener) -> None:
+        """Record the exact verified identity the stop policy addressed."""
+        if self.signal_error is not None:
+            raise self.signal_error
+        self.signals.append(listener)
+
+    def monotonic(self) -> float:
+        """Return a clock advanced only by explicit sleeps."""
+        return math.fsum(self.sleeps)
+
+    def sleep(self, seconds: float) -> None:
+        """Advance the deterministic clock."""
         self.sleeps.append(seconds)
