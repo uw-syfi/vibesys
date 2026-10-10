@@ -1,7 +1,10 @@
 # Issue Authoring
 
 Use this guide for issues created by people, agents, scripts, or integrations.
-The forms in `.github/ISSUE_TEMPLATE/` are the authoritative schemas.
+Each form in `.github/ISSUE_TEMPLATE/` defines its sections, required fields,
+and allowed values. Issues created outside the web form render each form label
+as a Markdown heading, in form order, and omit an optional section only when it
+has nothing useful.
 
 ## Core Rule
 
@@ -28,9 +31,29 @@ that item instead of opening a duplicate.
 | Engineering change | Features, refactors, performance, or developer experience | `02-engineering-change.yml` | `enhancement` |
 | Expansion work | Scenarios, shared contracts, and evaluator harnesses | `03-expansion-work.yml` | `vibeserve-expansion` |
 | Research experiment | A bounded experiment intended to answer a decision-relevant question | `04-experiment.yml` | Set during triage |
+| Roadmap | A multi-outcome direction lasting weeks or more | `05-roadmap.yml` | `type/roadmap` |
 
-Roadmap and area-parent issues are maintainer-authored planning objects. Create
-them only when explicitly requested.
+## Roadmaps and Sub-issues
+
+- **Three levels.** A roadmap is a direction lasting weeks or more, broken into
+  several outcomes. A sub-issue is one independently closable outcome, usually
+  one to a few PRs. A PR is one change. Small work (a fix, a cleanup, a
+  single-PR change) needs no issue.
+- **Find a home first.** Before proposing a roadmap, look for an existing one
+  the work fits and add a sub-issue there.
+- **Approval.** A new roadmap is created only after a maintainer approves its
+  plan. Agents may draft it, create it once approved, and maintain it. Agents
+  may add sub-issues under an already approved roadmap.
+- **Progress** is the roadmap's native sub-issue count. New work becomes a new
+  sub-issue rather than growing an existing one. PRs close sub-issues
+  (`Closes #N`), never the roadmap.
+- **Changes.** Update the roadmap body when the plan changes, with a dated
+  one-line note of what changed and why. Post a short progress comment at
+  milestones (a sub-issue closed, a plan change, a blocker), not on a timer.
+- **Closing.** Close the roadmap when its last sub-issue closes, with a comment
+  summarizing the outcome and where follow-ups went. Parked work closes as not
+  planned with the reason, or stays open with Status `Blocked` if it will
+  resume.
 
 ## Titles
 
@@ -46,55 +69,6 @@ Good examples:
 
 Avoid vague titles such as `Improve performance`, `Fix CLI`, or `Simulator
 work`.
-
-## Required Schemas
-
-API-created issues must render the form labels below as Markdown headings.
-Omit an optional section only when it has no useful content.
-
-### Bug Report
-
-- Observed behavior
-- Expected behavior
-- Reproduction
-- Affected subsystem
-- Environment
-- Impact
-- Relevant logs
-- Related issues or pull requests
-
-### Engineering Change
-
-- Workstream
-- Problem
-- Desired outcome
-- Acceptance criteria
-- Scope and non-goals
-- Constraints or design considerations
-- Verification approach
-- Parent, dependencies, or related work
-
-### Expansion Scenario or Harness
-
-- Work item type
-- Parent issue
-- Purpose and motivation
-- Required behavior or semantic contract
-- Correctness checks
-- Benchmark dimensions
-- Non-goals
-- Research or implementation anchors
-
-### Research Experiment
-
-- Research question and hypothesis
-- Decision this experiment informs
-- Baseline
-- Metrics and success criteria
-- Experimental protocol
-- Stopping condition
-- Required artifacts
-- Parent or related issue
 
 ## Metadata
 
@@ -115,14 +89,3 @@ Use the following Workstream defaults when the mapping is clear:
 - Research experiment: `Research/experiments`
 - Engineering change: the exact value selected in its Workstream field
 - Bug report: infer from the affected subsystem, or leave unset for triage
-
-## Agent and API Checklist
-
-When an issue is not submitted through the web form:
-
-1. Follow the matching form's labels and section order.
-2. Create a native parent/sub-issue relationship when a parent is known.
-3. Verify the issue appears in the `uw-syfi/1` VibeSys Work project.
-4. Set Workstream when unambiguous; leave scheduling fields for triage.
-5. Re-read the created issue and verify its title, body, labels, project, and
-   parent relationship.

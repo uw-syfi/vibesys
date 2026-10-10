@@ -1,15 +1,15 @@
 ---
 name: create-issue
-description: Investigate, draft, and file well-scoped VibeSys GitHub issues using the repository issue forms and project conventions. Use when a user asks to create, open, or file a bug report, engineering change, expansion scenario or harness, or research experiment issue, or asks to turn findings, TODOs, or proposed work into GitHub issues.
+description: Investigate, draft, and file well-scoped VibeSys GitHub issues using the repository issue forms and project conventions. Use when a user asks to create, open, or file a bug report, engineering change, expansion scenario or harness, research experiment, or roadmap issue, roadmap, or asks to turn findings, TODOs, or proposed work into GitHub issues.
 ---
 
 # Create Issue
 
 ## Overview
 
-Create issues only after confirming that the work is not already tracked or
-implemented. Use the same schemas as human reporters, preserve project
-metadata, and leave prioritization to maintainers.
+Create issues only after confirming the work is not already tracked or
+implemented. Use the human forms' schemas and leave prioritization to
+maintainers.
 
 ## Workflow
 
@@ -21,12 +21,17 @@ metadata, and leave prioritization to maintainers.
    - `.github/ISSUE_TEMPLATE/02-engineering-change.yml`
    - `.github/ISSUE_TEMPLATE/03-expansion-work.yml`
    - `.github/ISSUE_TEMPLATE/04-experiment.yml`
+   - `.github/ISSUE_TEMPLATE/05-roadmap.yml`
+
+   If the work needs several PRs, follow "Roadmaps and Sub-issues" in the doc:
+   file a sub-issue under an existing roadmap; propose a new roadmap to the
+   maintainer for approval instead of creating one unasked.
 4. Search the codebase and both open and closed issues. Check related pull
    requests when they may show that the behavior is already implemented.
 5. If the request is a duplicate or already implemented, stop before creating
    an issue. Report the supporting issue, pull request, and code evidence.
 6. Draft an outcome-oriented title and a body with the form's rendered section
-   headings. Keep acceptance criteria observable and testable.
+   headings, in form order. Keep acceptance criteria observable and testable.
 7. Create the issue through the connected GitHub tooling. Apply the form's
    labels and redact credentials, tokens, private paths, and sensitive logs.
 8. Add the native parent/sub-issue relationship when a parent is known. A body
@@ -40,19 +45,20 @@ metadata, and leave prioritization to maintainers.
     membership, and parent relationship. Return its URL and any metadata that
     remains for triage.
 
+When creating an approved roadmap, also create its planned sub-issues in
+dependency order, each with a native parent link to the roadmap.
+
 ## Authoring Rules
 
-- Make one issue represent one independently closable outcome.
+Title and body rules are in `docs/contributing/issue-authoring.md`. Also:
+
 - Lead with the problem, evidence, or research question rather than a proposed
   implementation.
-- State non-goals for work that could otherwise expand without a clear bound.
-- Use checkboxes for acceptance or success criteria.
-- For expansion work, specify externally observable semantics and correctness
-  checks without prescribing an optimization strategy.
-- For experiments, require a decision, baseline, metric, protocol, stopping
+- State non-goals for unbounded work; use checkboxes for acceptance criteria.
+- Expansion work: specify observable semantics and correctness checks, not an
+  optimization strategy.
+- Experiments: require a decision, baseline, metric, protocol, stopping
   condition, and retained artifacts.
-- Link related work using native parents, dependencies, and closing keywords
-  where supported.
 
 ## GitHub Boundaries
 
