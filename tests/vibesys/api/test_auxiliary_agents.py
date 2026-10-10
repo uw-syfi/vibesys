@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
-from tests.support.run_execution import run_execution_record
 
 from launch import LaunchSettings, create_session, default_runs
 from launch.agents import BuiltInSessionAgents
@@ -30,6 +29,7 @@ from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.integration import RunResources
 from vs_agent.api import NULL_AGENT_EVENT_SINK
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api.testing import run_execution_record
 from vs_runtime.api import OrchestrationPlugin, Run
 from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import HostEnvironmentFacts, RunEnvironmentPresentation

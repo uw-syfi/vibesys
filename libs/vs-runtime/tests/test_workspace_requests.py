@@ -15,9 +15,6 @@ from typing import TYPE_CHECKING, Literal, TypedDict, cast
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.executor_context import RevocableLease
-from tests.support.observation_contract import assert_core_accepts
-from tests.support.run_execution import run_execution_record
 from tests.support.session_world import RunningRunInvocations, SettledRunInvocations
 
 from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
@@ -61,6 +58,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
     run_git,
 )
+from vs_project.api.testing import run_execution_record
 from vs_runtime.api import RuntimeContractError
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
@@ -72,6 +70,7 @@ from vs_runtime.api.core import (
     RuntimeWorkspaceRequests,
     revision_ref,
 )
+from vs_runtime.api.executor_contexts import RevocableLease
 from vs_runtime.api.infrastructure import (
     AgentPaths,
     BlockingOperations,
@@ -88,6 +87,7 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
 )
+from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink, FakeRunControlEventSink
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend

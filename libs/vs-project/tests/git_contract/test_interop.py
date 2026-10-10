@@ -24,9 +24,8 @@ from hypothesis import strategies as st
 from vs_project.api import GitCommandError, run_git
 
 if TYPE_CHECKING:
-    from tests.support.git_contract import RepositoryFactory, Sandbox
-
     from vs_project.api import GitRepository
+    from vs_project.api.testing import ContractProject, RepositoryFactory
 
 REQUIRES_ON_DISK_REPOSITORY = True
 """This module shares one repository with plain ``git``; see ``conftest.ON_DISK``."""
@@ -171,7 +170,7 @@ def test_alternating_implementations_and_git_agree_with_an_all_cli_run(
 
 
 def test_a_held_index_lock_refuses_index_changes_and_leaves_the_index_alone(
-    sandbox: Sandbox,
+    sandbox: ContractProject,
 ) -> None:
     sandbox.start({"a.txt": "1\n"})
     repo = sandbox.repo
@@ -197,7 +196,9 @@ def test_a_held_index_lock_refuses_index_changes_and_leaves_the_index_alone(
     assert repo.has_staged_changes(["b.txt"])
 
 
-def test_a_held_ref_lock_refuses_the_update_and_leaves_the_ref_alone(sandbox: Sandbox) -> None:
+def test_a_held_ref_lock_refuses_the_update_and_leaves_the_ref_alone(
+    sandbox: ContractProject,
+) -> None:
     first = sandbox.start({"a.txt": "1\n"})
     sandbox.write("a.txt", "2\n")
     second = sandbox.commit_all("second")
@@ -220,7 +221,7 @@ def test_a_held_ref_lock_refuses_the_update_and_leaves_the_ref_alone(sandbox: Sa
 
 
 def test_history_with_merges_and_several_roots_reads_like_the_oracle(
-    sandbox: Sandbox, oracle_factory: RepositoryFactory
+    sandbox: ContractProject, oracle_factory: RepositoryFactory
 ) -> None:
     base = sandbox.start({"a.txt": "1\n"})
     root = sandbox.root
@@ -253,7 +254,7 @@ def test_history_with_merges_and_several_roots_reads_like_the_oracle(
     assert not repo.is_ancestor("HEAD", orphan)
 
 
-def test_an_index_rewrite_keeps_same_second_edits_visible_to_git(sandbox: Sandbox) -> None:
+def test_an_index_rewrite_keeps_same_second_edits_visible_to_git(sandbox: ContractProject) -> None:
     """Git trusts an entry's file stat unless the entry is "racily clean".
 
     It judges that against the index file's timestamp, whole seconds only, so a

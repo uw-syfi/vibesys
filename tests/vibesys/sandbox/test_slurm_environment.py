@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.docker_daemon import DaemonBackend, daemon_docker_config, daemon_engine
 
 from vibesys.run.environment import open_run_environment
 from vs_project.api import RunResourceRequest
@@ -24,6 +23,7 @@ from vs_runtime.api.infrastructure import (
     SlurmGpuEnvironment,
     TrustedEvaluatorRequirements,
 )
+from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api import DockerSandbox, SandboxKind
 
 if TYPE_CHECKING:

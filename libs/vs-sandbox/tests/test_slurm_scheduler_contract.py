@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.support.started_operation import wait_until_executor_started
 
 import vs_evaluation.api.testing as evaluation_testing
 from vs_evaluation.api import (
@@ -33,6 +32,7 @@ from vs_evaluation.api import (
     EvaluationStep,
     PollPhase,
 )
+from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (

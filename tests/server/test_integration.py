@@ -14,7 +14,6 @@ from tests.server.support import (
     build_server_parts,
     run_record,
 )
-from tests.support.run_execution import run_execution_record
 
 from server.api.protocol import ChatQuery, ChatThreadCreateQuery
 from server.diagnostics import DiagnosticScope, DiagnosticSeverity
@@ -51,6 +50,7 @@ from vibesys.events import (
 )
 from vibesys.events import RunStartedData as CoreRunStartedData
 from vs_project.api import Project, RunEnvironmentRecord
+from vs_project.api.testing import run_execution_record
 
 if TYPE_CHECKING:
     from pathlib import Path

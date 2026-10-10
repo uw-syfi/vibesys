@@ -15,7 +15,6 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from pydantic import ValidationError
-from tests.support.liveness import Journal
 
 from vs_core.api import (
     AdoptionObserved,
@@ -45,6 +44,7 @@ from vs_core.api import (
     WorkspaceObserved,
 )
 from vs_core.testing.drive import Failed, Harness, Retryable, Running, Succeeded, Unknown, new_run
+from vs_core.testing.liveness import Journal
 from vs_project.api import FakeStateStore
 from vs_runtime.api.core import (
     CoreRunHost,

@@ -8,7 +8,7 @@ events the observer saw, how usage maps onto the neutral contract, and when a
 conversation is retired.
 
 Sandbox-facing scenarios run against two ``WorkspaceSandbox`` doubles,
-``_FakeHostSandbox`` and ``FakeDockerSandbox``: the launcher has one code path
+``_FakeHostSandbox`` and ``FakeDockerConfinement``: the launcher has one code path
 for both (:func:`vs_agent.session_launch.confine_to_sandbox`), so a
 test that is really about that path is parametrized over both rather than
 duplicated per mode.
@@ -39,7 +39,6 @@ from agentshim.testing import (
 )
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
 from vibesys.events import CommandResultPayload
 from vibesys.orchestration.multi.contracts import ImplementerResponse, JudgeResponse
@@ -69,6 +68,7 @@ from vs_agent.contracts import (
     AgentTurnRequest,
 )
 from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
+from vs_sandbox.api.testing import FakeDockerConfinement
 from vs_sim.api.testing import HANG_GUARD_S, start_thread
 
 if TYPE_CHECKING:
@@ -537,7 +537,7 @@ def test_confine_to_sandbox_rewrites_argv_through_any_workspace_sandbox(
 ) -> None:
     """One transform serves a host confinement policy and a Docker sandbox alike."""
     sandbox = (
-        _FakeHostSandbox() if sandbox_kind == "host" else FakeDockerSandbox(workspace=tmp_path)
+        _FakeHostSandbox() if sandbox_kind == "host" else FakeDockerConfinement(workspace=tmp_path)
     )
     fake = FakeExecutor(scripted_turn("claude", text="ok"))
 
@@ -550,7 +550,7 @@ def test_confine_to_sandbox_rewrites_argv_through_any_workspace_sandbox(
     )
 
     argv = list(fake.requests[-1].argv)
-    if isinstance(sandbox, FakeDockerSandbox):
+    if isinstance(sandbox, FakeDockerConfinement):
         assert argv[:3] == ["docker", "exec", "-i"]
         assert argv[argv.index("-w") + 1] == "/workspace"
     else:
@@ -663,7 +663,7 @@ def test_a_container_mcp_server_runs_on_the_images_interpreter_and_import_roots(
         installed.append(installed_mcp_servers("claude", request, tmp_path))
         return scripted_turn("claude", text="ok")
 
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
     launcher, _fake = _launcher("claude", run, docker_sandboxes={"implementer": sandbox})
     session = launcher.launch(
         _spec(
@@ -723,7 +723,7 @@ def test_a_container_turn_carries_the_sandbox_environment_and_workdir(
     per-turn environment-forwarding path any more, so the session hands the
     library exactly ``sandbox.env``.
     """
-    sandbox = FakeDockerSandbox(workspace=tmp_path, extra_env={"VIBESYS_ROUND": "3"})
+    sandbox = FakeDockerConfinement(workspace=tmp_path, extra_env={"VIBESYS_ROUND": "3"})
     launcher, fake = _launcher(
         provider, scripted_turn(provider, text="ok"), docker_sandboxes={"implementer": sandbox}
     )
@@ -753,7 +753,7 @@ def test_a_container_binary_check_gets_the_container_budget(
     A failed health check ends the run before the first turn, so the budget
     has to survive a daemon that is busy rather than dead.
     """
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
     launcher, fake = _launcher(
         provider, scripted_turn(provider, text="ok"), docker_sandboxes={"implementer": sandbox}
     )
@@ -770,7 +770,7 @@ def test_the_binary_check_budget_is_a_launcher_option(
     tmp_path: Path,
     provider: str,
 ) -> None:
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
     launcher, fake = _launcher(
         provider,
         scripted_turn(provider, text="ok"),
@@ -807,7 +807,7 @@ def test_container_session_mcp_servers_are_installed_on_the_host_workspace(
         installed.append(installed_mcp_servers(provider, request, tmp_path))
         return scripted_turn(provider, text="ok")
 
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
     launcher, _fake = _launcher(provider, run, docker_sandboxes={"implementer": sandbox})
     session = launcher.launch(_container_spec(tmp_path, provider, mcp_servers=(server,)))
 
@@ -843,7 +843,9 @@ def test_a_container_timeout_reports_no_docker_transport_in_its_message(
         # included; only the turn itself is the one that hangs.
         return FakeRun() if "--help" in request.argv else FakeRun(timeout=True)
 
-    sandbox = FakeDockerSandbox(workspace=tmp_path, extra_env={"ANTHROPIC_AUTH_TOKEN": "secret"})
+    sandbox = FakeDockerConfinement(
+        workspace=tmp_path, extra_env={"ANTHROPIC_AUTH_TOKEN": "secret"}
+    )
     launcher, _fake = _launcher(provider, run, docker_sandboxes={"implementer": sandbox})
     session = launcher.launch(_container_spec(tmp_path, provider))
 
@@ -908,7 +910,7 @@ def test_a_container_native_schema_directory_is_mapped_through_agent_path(
     if profile.output_schema is not agentshim.OutputSchemaStyle.FILE_PATH:
         pytest.skip(f"{provider} does not reference a schema file path")
     payload = {"analysis": "it improved", "verdict": "accept"}
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
     launcher, fake = _launcher(
         provider,
         scripted_turn(provider, text="", structured_output=payload),
@@ -1929,7 +1931,7 @@ def test_a_host_policy_on_a_container_launcher_is_rejected(
     tmp_path: Path,
     provider: str,
 ) -> None:
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
     launcher, _fake = _launcher(
         provider, scripted_turn(provider, text="ok"), docker_sandboxes={"implementer": sandbox}
     )
@@ -2223,7 +2225,7 @@ def _requests_session_scope(
 def test_a_container_launcher_reports_no_config_isolation_even_with_a_run_home(
     tmp_path: Path,
 ) -> None:
-    sandboxes: dict[str, Any] = {"implementer": FakeDockerSandbox(workspace=tmp_path)}
+    sandboxes: dict[str, Any] = {"implementer": FakeDockerConfinement(workspace=tmp_path)}
     launcher = subject.ConfinedSessionLauncher(
         provider="codex",
         docker_sandboxes=sandboxes,
@@ -2276,7 +2278,7 @@ def test_process_spawn_os_errors_are_retryable_typed_faults(
         executor = _SpawnFailureExecutor(failure, health_check=health_check)
         launcher = subject.ConfinedSessionLauncher(
             provider="claude",
-            docker_sandboxes={"worker": cast("DockerSandbox", FakeDockerSandbox(tmp_path))},
+            docker_sandboxes={"worker": cast("DockerSandbox", FakeDockerConfinement(tmp_path))},
             executor_factory=lambda: executor,
             launcher_env=dict,
         )

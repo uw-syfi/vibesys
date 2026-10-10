@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import pytest
-from tests.support.run_execution import run_execution_record
 
 from vs_agent.api import (
     AgentCapabilities,
@@ -40,6 +39,7 @@ from vs_project.api import (
     Project,
     RunEnvironmentRecord,
 )
+from vs_project.api.testing import run_execution_record
 from vs_sim.api.testing import HANG_GUARD_S, wait_or_fail
 
 if TYPE_CHECKING:

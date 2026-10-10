@@ -6,11 +6,10 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
-from tests.support.run_execution import run_execution_record
-from tests.support.runtime_core_shell import CounterState, CounterStrategy, ShellTraceTransitions
 
 from vs_core.api import EventCursor, HostFence, HostId, RunEnvelope, RunId, initial_state
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
+from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import (
     CoreResumeError,
     CoreRuntime,
@@ -19,6 +18,7 @@ from vs_runtime.api.core import (
     reject_legacy_resume,
     resolve_core_resume,
 )
+from vs_runtime.api.core_shell_fixtures import CounterState, CounterStrategy, ShellTraceTransitions
 
 if TYPE_CHECKING:
     from collections.abc import Callable

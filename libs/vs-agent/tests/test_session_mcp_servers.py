@@ -23,7 +23,6 @@ from agentshim.testing import (
 )
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent import session_launch as subject
@@ -33,6 +32,7 @@ from vs_agent.api import (
     AgentTurnRequest,
     MCPServerSpec,
 )
+from vs_sandbox.api.testing import FakeDockerConfinement
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -63,7 +63,7 @@ def _run_turns(
     """Open a containerized session with *servers* and run *turns* turns on it."""
     with TemporaryDirectory() as raw:
         workspace = Path(raw)
-        sandbox = FakeDockerSandbox(workspace=workspace)
+        sandbox = FakeDockerConfinement(workspace=workspace)
         launcher = subject.ConfinedSessionLauncher(
             provider=provider,
             docker_sandboxes={"implementer": cast("DockerSandbox", sandbox)},

@@ -14,8 +14,6 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 import pytest
-from tests.support.runtime_evaluation import ScenarioCluster, build_stack
-from tests.support.started_operation import wait_until_executor_started
 
 from vs_evaluation.api import (
     ContentDigest,
@@ -35,12 +33,14 @@ from vs_evaluation.api import (
 from vs_evaluation.api import (
     PollingEvaluationExecutor as PollingExecutorPort,
 )
+from vs_evaluation.api.testing import wait_until_executor_started
 from vs_runtime.api import (
     AccuracyEvaluation,
     BenchmarkFailureKind,
     PollingEvaluationExecutor,
     render_stage_failure,
 )
+from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
 from vs_slurm.api import SlurmJobStatus
 

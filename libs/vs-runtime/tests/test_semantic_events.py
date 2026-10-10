@@ -8,13 +8,13 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.executor_context import context_for
-from tests.support.observation_contract import assert_core_accepts
-from tests.support.runtime_operations import SCOPE
 
 from vs_core.api import BlockIntent, ObservationStatus, RequestId
 from vs_project.api import Project
 from vs_runtime.api.core import JournalSemanticEvents, ReceiptStore, RequestExecutors
+from vs_runtime.api.executor_contexts import context_for
+from vs_runtime.api.observation_contracts import assert_core_accepts
+from vs_runtime.api.operation_fixtures import SCOPE
 
 pytestmark = pytest.mark.asyncio
 

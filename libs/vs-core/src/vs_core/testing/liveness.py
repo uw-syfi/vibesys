@@ -27,21 +27,17 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from vs_core.api import (
-    CoreState,
-    Intent,
-    MeasurementFailure,
-    Observation,
-    RequestObserved,
-    RunStatus,
-    orphan_waits,
-    phase_waits,
-)
+from vs_core._waits import orphan_waits, phase_waits
+from vs_core.types.common import Observation, RunStatus
+from vs_core.types.intents import Intent, RequestObserved
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from vs_core.api import EvidenceRef, Request
+    from vs_core.types.evaluation import EvidenceRef
+    from vs_core.types.intents import Request
+    from vs_core.types.job_observations import MeasurementFailure
+    from vs_core.types.kernel import CoreState
 
 
 class Invariant(StrEnum):
@@ -104,6 +100,10 @@ _IDENTITY = {"request_id", "depends_on", "decision_id", "admission_id", "decisio
 # Kinds that poll a resource: asking again is how a wait makes progress.
 _POLLS = frozenset({"observe_owned_job", "inspect_owned_job", "inspect_request"})
 _TURNS = frozenset({"dispatch_turn", "resume_session_turn"})
+
+
+_SHOWN_LINES = 24
+_SHOWN_REPEATS = 8
 
 
 def _dump(value: object) -> str:
@@ -169,7 +169,9 @@ class Journal:
 
     def issue(self, request: Request) -> None:
         """Record that ``request`` was dispatched."""
-        assert request.request_id is not None, "a dispatched request carries its identity"
+        if request.request_id is None:
+            message = "a dispatched request carries its identity"
+            raise AssertionError(message)
         owner = request.scope.owner
         self.entries.append(
             _Issued(
@@ -250,7 +252,7 @@ def _requests(journal: Journal) -> list[_Issued]:
 
 def _render(issued: Sequence[_Issued], marked: set[int]) -> str:
     lines = [f"  #{i}{' <-' if i in marked else '  '} {row.label}" for i, row in enumerate(issued)]
-    if len(lines) > 24:
+    if len(lines) > _SHOWN_LINES:
         lines = [*lines[:6], f"  ... {len(lines) - 18} more ...", *lines[-12:]]
     return "\n".join(lines)
 
@@ -316,7 +318,7 @@ def spin_violations(journal: Journal) -> list[Violation]:
             Invariant.SPIN,
             f"{len(indexes) - 1} repeats of {issued[indexes[0]].label}, each issued after the "
             "previous one was answered and with no new observation in between "
-            f"(requests {indexes[:8]}{'...' if len(indexes) > 8 else ''}):\n"
+            f"(requests {indexes[:_SHOWN_REPEATS]}{'...' if len(indexes) > _SHOWN_REPEATS else ''}):\n"
             + _render(issued, set(indexes)),
         )
         for indexes in repeats.values()
@@ -337,8 +339,9 @@ class End(StrEnum):
 
 
 def final_state(core: CoreState, end: End = End.TERMINAL) -> list[Violation]:
-    """Quiescence: no wait without a producer, and for a finished run a terminal status
-    with no open intent.
+    """Quiescence: no wait without a producer, and for a finished run a terminal status.
+
+    A finished run also has no open intent.
     """
     found: list[Violation] = []
     if end is End.TERMINAL:

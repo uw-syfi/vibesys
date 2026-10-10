@@ -12,22 +12,6 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.observation_contract import assert_core_accepts
-from tests.support.runtime_operations import (
-    SCENARIO_NAMES,
-    SCOPE,
-    EchoOwner,
-    EchoRequest,
-    OperationScenario,
-    RenderRoleArtifacts,
-    SimulatedCrashError,
-    VerifyParentRevision,
-    catalog_of,
-    commit_of,
-    execute_request,
-    scenarios,
-)
-from tests.support.runtime_operations import revision as revision_ref
 
 from vs_core.api import (
     CancelOwnedResource,
@@ -64,6 +48,22 @@ from vs_runtime.api.core import (
     VerifyRevisionOwner,
     owner_key,
 )
+from vs_runtime.api.observation_contracts import assert_core_accepts
+from vs_runtime.api.operation_fixtures import (
+    SCENARIO_NAMES,
+    SCOPE,
+    EchoOwner,
+    EchoRequest,
+    OperationScenario,
+    RenderRoleArtifacts,
+    SimulatedCrashError,
+    VerifyParentRevision,
+    catalog_of,
+    commit_of,
+    execute_request,
+    scenarios,
+)
+from vs_runtime.api.operation_fixtures import revision as revision_ref
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
 
 pytestmark = pytest.mark.asyncio

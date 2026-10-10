@@ -12,11 +12,11 @@ from vs_project.api import GitCommandError
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support.git_contract import Sandbox
+    from vs_project.api.testing import ContractProject
 
 
 def test_clean_keeps_files_under_a_directory_that_replaced_a_tracked_file(
-    sandbox: Sandbox,
+    sandbox: ContractProject,
 ) -> None:
     sandbox.start({"a.txt": "1\n"})
     sandbox.delete("a.txt")
@@ -29,7 +29,7 @@ def test_clean_keeps_files_under_a_directory_that_replaced_a_tracked_file(
     assert (sandbox.root / "a.txt").read_text(encoding="utf-8") == "1\n"
 
 
-def test_reset_index_unstages_everything_and_keeps_head_and_files(sandbox: Sandbox) -> None:
+def test_reset_index_unstages_everything_and_keeps_head_and_files(sandbox: ContractProject) -> None:
     head = sandbox.start({"a.txt": "1\n"})
     sandbox.write("a.txt", "2\n")
     sandbox.write("b.txt", "b\n")
@@ -44,7 +44,7 @@ def test_reset_index_unstages_everything_and_keeps_head_and_files(sandbox: Sandb
 
 
 def test_restore_worktree_rebuilds_tracked_files_without_moving_head_or_index(
-    sandbox: Sandbox,
+    sandbox: ContractProject,
 ) -> None:
     first = sandbox.start({"a.txt": "1\n", "keep/cfg.txt": "cfg1\n"})
     sandbox.write("a.txt", "2\n")
@@ -65,14 +65,14 @@ def test_restore_worktree_rebuilds_tracked_files_without_moving_head_or_index(
     assert (sandbox.root / "keep/cfg.txt").read_text(encoding="utf-8") == "cfg1\n"
 
 
-def test_restore_of_an_unknown_revision_is_a_command_error(sandbox: Sandbox) -> None:
+def test_restore_of_an_unknown_revision_is_a_command_error(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n"})
     with pytest.raises(GitCommandError):
         sandbox.repo.restore_worktree("1" * 40)
 
 
 def test_clean_removes_untracked_files_but_not_ignored_or_protected_ones(
-    sandbox: Sandbox,
+    sandbox: ContractProject,
 ) -> None:
     sandbox.start({"a.txt": "1\n"})
     repo = sandbox.repo
@@ -95,7 +95,7 @@ def test_clean_removes_untracked_files_but_not_ignored_or_protected_ones(
     assert (sandbox.root / "cfg/settings.txt").exists()
 
 
-def test_restore_then_clean_yields_exactly_the_revision(sandbox: Sandbox) -> None:
+def test_restore_then_clean_yields_exactly_the_revision(sandbox: ContractProject) -> None:
     first = sandbox.start({"a.txt": "1\n", "dir/b.txt": "1\n"})
     sandbox.write("a.txt", "2\n")
     sandbox.write("dir/c.txt", "c\n")
@@ -111,7 +111,7 @@ def test_restore_then_clean_yields_exactly_the_revision(sandbox: Sandbox) -> Non
 
 
 def test_linked_worktrees_share_history_and_have_their_own_head(
-    sandbox: Sandbox, tmp_path: Path
+    sandbox: ContractProject, tmp_path: Path
 ) -> None:
     base = sandbox.start({"a.txt": "1\n"})
     destination = tmp_path / "linked" / "candidate"
@@ -137,7 +137,7 @@ def test_linked_worktrees_share_history_and_have_their_own_head(
 
 
 def test_a_removed_worktree_can_be_added_again_at_the_same_path(
-    sandbox: Sandbox, tmp_path: Path
+    sandbox: ContractProject, tmp_path: Path
 ) -> None:
     base = sandbox.start({"a.txt": "1\n"})
     destination = tmp_path / "linked"
@@ -152,7 +152,9 @@ def test_a_removed_worktree_can_be_added_again_at_the_same_path(
     assert repo.worktree_head(destination) == base
 
 
-def test_removal_and_pruning_tolerate_unknown_worktrees(sandbox: Sandbox, tmp_path: Path) -> None:
+def test_removal_and_pruning_tolerate_unknown_worktrees(
+    sandbox: ContractProject, tmp_path: Path
+) -> None:
     sandbox.start({"a.txt": "1\n"})
 
     sandbox.repo.remove_worktree(tmp_path / "never-added")
@@ -160,7 +162,7 @@ def test_removal_and_pruning_tolerate_unknown_worktrees(sandbox: Sandbox, tmp_pa
 
 
 def test_adding_a_worktree_at_a_missing_commit_is_a_command_error(
-    sandbox: Sandbox, tmp_path: Path
+    sandbox: ContractProject, tmp_path: Path
 ) -> None:
     sandbox.start({"a.txt": "1\n"})
 
@@ -170,7 +172,7 @@ def test_adding_a_worktree_at_a_missing_commit_is_a_command_error(
 
 
 def test_worktree_head_of_a_plain_directory_is_a_command_error(
-    sandbox: Sandbox, tmp_path: Path
+    sandbox: ContractProject, tmp_path: Path
 ) -> None:
     sandbox.start({"a.txt": "1\n"})
     plain = tmp_path / "plain"

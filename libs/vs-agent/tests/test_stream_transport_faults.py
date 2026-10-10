@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
-from tests.support.observation_contract import assert_core_accepts
 from tests.support.session_world import (
     dispatch_request,
     ensure_request,
@@ -35,6 +34,7 @@ from vs_faults.api import Boundary, FaultPlan, FaultRule, ProcessFault
 from vs_project.api import Project
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.core import ExecutionResult, ReceiptStore
+from vs_runtime.api.observation_contracts import assert_core_accepts
 
 if TYPE_CHECKING:
     from vs_core.api import RequestBase

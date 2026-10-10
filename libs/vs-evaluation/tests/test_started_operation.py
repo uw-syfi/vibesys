@@ -9,10 +9,9 @@ from enum import StrEnum
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.started_operation import wait_until_executor_started
 
 from vs_evaluation.api import EvaluationState
-from vs_evaluation.api.testing import FakeEvaluationExecutor
+from vs_evaluation.api.testing import FakeEvaluationExecutor, wait_until_executor_started
 from vs_sim.api.testing import (
     ManualClock,
     arrival,

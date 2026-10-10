@@ -14,7 +14,6 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.started_operation import wait_until_executor_started
 
 from vs_evaluation.api import (
     EvaluationRequest,
@@ -23,6 +22,7 @@ from vs_evaluation.api import (
     PollPhase,
     ResourceRequirements,
 )
+from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import (
     SharedSlurmAdmission,
     SlurmEvaluationExecutor,

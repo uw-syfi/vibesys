@@ -17,7 +17,6 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
-from tests.support.runtime_evaluation import ScenarioCluster
 from tests.support.session_world import (
     FakeSessionResolver,
     ProviderFaults,
@@ -26,7 +25,6 @@ from tests.support.session_world import (
 from tests.support.skeleton_faults import FaultingExecutors, FaultingReceipts, FaultingStore
 from tests.support.skeleton_strategy import DECLARATION, DIGEST, SkeletonState, SkeletonStrategy
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
-from tests.support.world_git import CliWorldGit, GitKind, WorldGit, world_git
 
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
@@ -40,6 +38,7 @@ from vs_core.api import (
     TurnSpec,
 )
 from vs_evaluation.api import ExecutorPoll, PollPhase
+from vs_project.api.testing import CliWorldGit, GitKind, WorldGit, world_git
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import render_stage_failure
 from vs_runtime.api.core import (
@@ -66,6 +65,7 @@ from vs_runtime.api.infrastructure import (
     SemanticSlurmEvaluationExecutor,
     TrustedEvaluationPlan,
 )
+from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
 from vs_sim.api.testing import clock_from
 from vs_slurm.api import (

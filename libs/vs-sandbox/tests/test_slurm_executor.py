@@ -11,7 +11,6 @@ from tempfile import TemporaryDirectory
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.support.started_operation import wait_until_executor_started
 
 import vs_evaluation.api.testing as evaluation_testing
 from vs_evaluation.api import (
@@ -26,6 +25,7 @@ from vs_evaluation.api import (
     PollPhase,
     StageState,
 )
+from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import (
     SharedSlurmAdmission,
     SlurmCommandResult,

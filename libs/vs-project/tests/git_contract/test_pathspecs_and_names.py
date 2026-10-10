@@ -15,16 +15,15 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.git_contract import Sandbox, twin
 
 from vs_project.api import GitCommandError
+from vs_project.api.testing import ContractProject, twin
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from tests.support.git_contract import RepositoryFactory
-
     from vs_project.api import GitRepository
+    from vs_project.api.testing import RepositoryFactory
 
 _FILES = (
     "a.txt",
@@ -83,7 +82,7 @@ _PATHSPECS = st.sampled_from(
 _SPEC_LISTS = st.lists(_PATHSPECS, min_size=1, max_size=3)
 
 
-def _populate(sandbox: Sandbox) -> None:
+def _populate(sandbox: ContractProject) -> None:
     """A history with the files above, then staged and unstaged edits across them."""
     sandbox.start({path: f"{path}\n" for path in _FILES})
     sandbox.write("b.py", "edited\n")
@@ -99,28 +98,30 @@ def _populate(sandbox: Sandbox) -> None:
 
 
 @pytest.fixture
-def populated(sandbox: Sandbox) -> Sandbox:
+def populated(sandbox: ContractProject) -> ContractProject:
     _populate(sandbox)
     return sandbox
 
 
 @pytest.fixture
-def populated_oracle(populated: Sandbox, oracle_factory: RepositoryFactory) -> Sandbox:
+def populated_oracle(
+    populated: ContractProject, oracle_factory: RepositoryFactory
+) -> ContractProject:
     return twin(populated, oracle_factory, _populate)
 
 
-def _start(sandbox: Sandbox) -> None:
+def _start(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n"})
 
 
 @pytest.fixture
-def started(sandbox: Sandbox) -> Sandbox:
+def started(sandbox: ContractProject) -> ContractProject:
     _start(sandbox)
     return sandbox
 
 
 @pytest.fixture
-def started_oracle(started: Sandbox, oracle_factory: RepositoryFactory) -> Sandbox:
+def started_oracle(started: ContractProject, oracle_factory: RepositoryFactory) -> ContractProject:
     return twin(started, oracle_factory, _start)
 
 
@@ -135,7 +136,7 @@ def _outcome(call: Callable[[], object]) -> object:
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=40)
 @given(specs=_SPEC_LISTS)
 def test_pathspec_reads_agree_with_the_oracle(
-    populated: Sandbox, populated_oracle: Sandbox, specs: list[str]
+    populated: ContractProject, populated_oracle: ContractProject, specs: list[str]
 ) -> None:
     # Reads only: one populated sandbox serves every example.
     oracle = populated_oracle.repo
@@ -170,7 +171,7 @@ def test_unstage_agrees_with_the_oracle(
         for name, make in (("subject", factory), ("oracle", oracle_factory)):
             root = Path(scratch) / name
             root.mkdir()
-            sandbox = Sandbox(root=root, factory=make)
+            sandbox = ContractProject(root=root, factory=make)
             _populate(sandbox)
             sandbox.repo.stage_all(["."])
             outcome = _outcome(lambda repo=sandbox.repo: repo.unstage(specs))
@@ -215,7 +216,7 @@ def _fragments() -> st.SearchStrategy[str]:
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=200)
 @given(name=_fragments())
 def test_name_rules_agree_with_the_oracle_on_assembled_names(
-    sandbox: Sandbox, oracle_factory: RepositoryFactory, name: str
+    sandbox: ContractProject, oracle_factory: RepositoryFactory, name: str
 ) -> None:
     oracle = oracle_factory(sandbox.root)
     repo = sandbox.repo
@@ -229,21 +230,25 @@ def test_name_rules_agree_with_the_oracle_on_assembled_names(
 # -- reading the same repository through two instances ---------------------------------------
 
 
-def test_a_tag_with_a_branch_name_does_not_change_the_current_branch(sandbox: Sandbox) -> None:
+def test_a_tag_with_a_branch_name_does_not_change_the_current_branch(
+    sandbox: ContractProject,
+) -> None:
     head = sandbox.start({"a.txt": "1\n"})
     sandbox.repo.update_ref("refs/tags/main", head)
 
     assert sandbox.repo.current_branch() == "main"
 
 
-def test_a_directory_is_not_a_blob(sandbox: Sandbox) -> None:
+def test_a_directory_is_not_a_blob(sandbox: ContractProject) -> None:
     sandbox.start({"dir/a.txt": "1\n"})
 
     assert sandbox.repo.read_blob("HEAD", "dir") is None
     assert sandbox.repo.read_blob("HEAD", "dir/a.txt") == b"1\n"
 
 
-def test_resetting_the_index_before_the_first_commit_is_a_command_error(sandbox: Sandbox) -> None:
+def test_resetting_the_index_before_the_first_commit_is_a_command_error(
+    sandbox: ContractProject,
+) -> None:
     sandbox.repo.initialize(initial_branch="main")
     sandbox.repo.bind()
 
@@ -251,7 +256,7 @@ def test_resetting_the_index_before_the_first_commit_is_a_command_error(sandbox:
         sandbox.repo.reset_index()
 
 
-def test_non_ascii_paths_are_reported_as_they_are_named(sandbox: Sandbox) -> None:
+def test_non_ascii_paths_are_reported_as_they_are_named(sandbox: ContractProject) -> None:
     sandbox.start({"é.txt": "1\n", "plain.txt": "1\n"})
     sandbox.write("é.txt", "2\n")
 
@@ -261,7 +266,7 @@ def test_non_ascii_paths_are_reported_as_they_are_named(sandbox: Sandbox) -> Non
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=40)
 @given(length=st.integers(min_value=1, max_value=40), unknown=st.booleans())
 def test_revisions_resolve_like_the_oracle(
-    started: Sandbox, started_oracle: Sandbox, length: int, *, unknown: bool
+    started: ContractProject, started_oracle: ContractProject, length: int, *, unknown: bool
 ) -> None:
     # Commit ids differ between implementations, so compare what each abbreviation resolves to.
     answers = []
@@ -293,7 +298,7 @@ _LINES = st.sampled_from(["fix", "part two", "  indented", "trail  ", "\t", "", 
     limit=st.integers(min_value=0, max_value=4),
 )
 def test_subjects_read_like_the_oracle(
-    started: Sandbox, started_oracle: Sandbox, lines: Sequence[str], limit: int
+    started: ContractProject, started_oracle: ContractProject, lines: Sequence[str], limit: int
 ) -> None:
     message = "\n".join(lines)
     if not message.strip():

@@ -11,9 +11,6 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from tests.support.run_execution import run_execution_record
-from tests.support.world_git import GitKind
-
 from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
 from vs_project.api import (
     NullGitTrackerEvents,
@@ -21,7 +18,7 @@ from vs_project.api import (
     Project,
     RunEnvironmentRecord,
 )
-from vs_project.api.testing import FakeGitRepositories
+from vs_project.api.testing import FakeGitRepositories, GitKind, run_execution_record
 from vs_runtime.api.infrastructure import (
     AgentPaths,
     BlockingOperations,

@@ -10,7 +10,6 @@ from uuid import UUID
 
 import pytest
 from pydantic import BaseModel, ConfigDict
-from tests.support.run_execution import run_execution_record
 
 from vs_project.api import (
     OrchestrationDescriptor,
@@ -22,6 +21,7 @@ from vs_project.api import (
     generate_run_id,
     is_project_state_path,
 )
+from vs_project.api.testing import run_execution_record
 
 NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 

@@ -23,7 +23,7 @@ from vs_project.api import GitCommandError, GitRepository
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.support.git_contract import RepositoryFactory
+    from vs_project.api.testing import RepositoryFactory
 
 _PATHS = ("a.txt", "b.txt", "dir/c.txt")
 _TEXTS = ("one\n", "two\n", "three\n")

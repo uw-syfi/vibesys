@@ -293,6 +293,12 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.Outco
 "libs/vs-sandbox/src/vs_sandbox/*_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/concurrency_contracts.py" = ["S101", "PLR2004"]
+"libs/vs-runtime/src/vs_runtime/api/*_contracts.py" = ["S101", "PLR2004"]
+# Scenario and fixture builders for the runtime's own test suites, moved out of tests/support
+# (where D, S101 and PLR2004 were already waived) so every consumer reaches them through
+# `vs_runtime.api`; their members are named scenarios and builders, documented by their module.
+"libs/vs-runtime/src/vs_runtime/api/*_fixtures.py" = ["S101", "PLR2004", "D101", "D102", "D103", "D105", "D107"]
+"libs/vs-runtime/src/vs_runtime/api/slurm_evaluation_stack.py" = ["S101", "PLR2004", "D101", "D102", "D103", "D105", "D107"]
 # scripts/ holds standalone CI helper tools whose job is to report diagnostics
 # on stdout, so `print` is the intended output mechanism rather than a stray
 # debug statement. Same categorical treatment as S101 in tests/.

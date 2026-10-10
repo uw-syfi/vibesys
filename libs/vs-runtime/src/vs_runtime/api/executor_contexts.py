@@ -16,6 +16,7 @@ class RevocableLease:
     """A host lease the test can revoke."""
 
     def __init__(self) -> None:
+        """Start with the lease held."""
         self.valid = True
 
     def renew(self, *, now_at: float, lease_duration: float) -> None:

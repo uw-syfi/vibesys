@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.run_execution import run_execution_record
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
@@ -51,6 +50,7 @@ from vs_project.api import (
     OrchestrationDescriptor,
     RunEnvironmentRecord,
 )
+from vs_project.api.testing import run_execution_record
 from vs_runtime.api import BenchmarkFailureKind, PollingEvaluationExecutor
 from vs_runtime.api.infrastructure import (
     AgentPaths,

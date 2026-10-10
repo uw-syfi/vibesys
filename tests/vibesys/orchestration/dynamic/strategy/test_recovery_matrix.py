@@ -2,7 +2,7 @@
 
 The production shell runs the dynamic search with the requests of one kind answered in
 one of four ways, at a concurrency cap of one or two (two implementer workstreams in
-flight, the cap alternating across the cases). Whatever the answer, `tests.support.liveness`
+flight, the cap alternating across the cases). Whatever the answer, `vs_core.testing.liveness`
 must hold: the run ends terminal, no intent is left open, requests stay bounded and none repeats without new information.
 No request identity is executed twice. The kinds come from core's closed registry
 (`REQUEST_DISPATCH`), so a kind that is added must be classified here, either as issued
@@ -16,7 +16,6 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.liveness import LivenessViolationError
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
@@ -28,6 +27,7 @@ from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
 
 from vs_core.api import ResourceId, SubmitMeasurement
 from vs_core.testing.drive import Retryable, Running, Unknown
+from vs_core.testing.liveness import LivenessViolationError
 from vs_runtime.api.core import REQUEST_DISPATCH
 
 if TYPE_CHECKING:

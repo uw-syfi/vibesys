@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.run_execution import run_execution_record
 
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from entrypoints.headless import main as headless_main
@@ -20,6 +19,7 @@ from launch import default_runs
 from vibesys.api import ConfigurationError
 from vibesys.orchestration.dynamic import DynamicOptions
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api.testing import run_execution_record
 
 if TYPE_CHECKING:
     from pathlib import Path

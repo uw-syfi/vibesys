@@ -12,17 +12,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.git_contract import Sandbox
 
 from vs_project.api import CliGitRepository, NullGitTrackerEvents, Pygit2GitRepository
-from vs_project.api.testing import FakeGitRepositories
+from vs_project.api.testing import ContractProject, FakeGitRepositories
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support.git_contract import RepositoryFactory
-
     from vs_project.api import GitRepository
+    from vs_project.api.testing import RepositoryFactory
 
 
 def _cli(root: Path) -> GitRepository:
@@ -68,7 +66,7 @@ def oracle_factory() -> RepositoryFactory:
 
 
 @pytest.fixture
-def sandbox(factory: RepositoryFactory, tmp_path: Path) -> Sandbox:
+def sandbox(factory: RepositoryFactory, tmp_path: Path) -> ContractProject:
     root = tmp_path / "project"
     root.mkdir()
-    return Sandbox(root=root, factory=factory)
+    return ContractProject(root=root, factory=factory)

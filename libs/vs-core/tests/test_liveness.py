@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.liveness import Invariant, Journal, spin_violations
 
 from vs_core.api import (
     CollectEvidence,
@@ -17,6 +16,9 @@ from vs_core.api import (
     RunId,
     Scope,
 )
+
+# test-isolation: the liveness checker is test support published at vs_core.testing; vs_core.api carries no test support.
+from vs_core.testing.liveness import Invariant, Journal, spin_violations
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 JOB = ResourceId(root="job:1")

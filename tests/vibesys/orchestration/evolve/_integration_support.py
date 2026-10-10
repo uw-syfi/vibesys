@@ -7,7 +7,6 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 from tests.support.docker_environment import fake_docker_environment
-from tests.support.world_git import IN_MEMORY_GIT
 
 from launch.testing import create_session
 from vibesys.api import ComputeBackend, Config, OrchestrationRegistry
@@ -17,6 +16,7 @@ from vibesys.orchestration.evolve.models import EvolveState
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import ResumeRef, RunRequest
 from vs_project.api import OrchestrationDescriptor, Project
+from vs_project.api.testing import IN_MEMORY_GIT
 from vs_runtime.api import RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend
 

@@ -15,7 +15,6 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel
-from tests.support.executor_context import context_for
 
 from vs_agent.api import (
     AgentClient,
@@ -54,6 +53,7 @@ from vs_runtime.api.core import (
     ReceiptStore,
     RuntimeSessionRequests,
 )
+from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.testing import FakeWorkspace
 from vs_runtime.contracts import WorkspaceAccess
 
@@ -61,10 +61,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tests.support.executor_context import RevocableLease
-
     from vs_core.api import RequestBase
     from vs_runtime.api.core import AccessGuardedWorkspace, SessionResolver
+    from vs_runtime.api.executor_contexts import RevocableLease
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 ROLE = RoleId(root="worker")

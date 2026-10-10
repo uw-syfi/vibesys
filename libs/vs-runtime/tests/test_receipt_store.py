@@ -10,8 +10,6 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict
-from tests.support.executor_context import RevocableLease, context_for
-from tests.support.runtime_operations import SCOPE
 
 from vs_core.api import BlockIntent, RequestId
 from vs_project.api import Project, ProjectStateError
@@ -25,6 +23,8 @@ from vs_runtime.api.core import (
     Settled,
     Transient,
 )
+from vs_runtime.api.executor_contexts import RevocableLease, context_for
+from vs_runtime.api.operation_fixtures import SCOPE
 
 if TYPE_CHECKING:
     from vs_runtime.api.core import ExecutionContext

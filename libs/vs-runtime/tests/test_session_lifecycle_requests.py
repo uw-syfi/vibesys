@@ -11,8 +11,6 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.executor_context import RevocableLease, context_for
-from tests.support.observation_contract import assert_core_accepts
 from tests.support.session_lifecycle_world import (
     TurnGate,
     cancel_request,
@@ -41,6 +39,8 @@ from vs_runtime.api.core import (
     ReceiptStore,
     ReleasedRunInvocations,
 )
+from vs_runtime.api.executor_contexts import RevocableLease, context_for
+from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:

@@ -15,8 +15,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
-from vs_project.api import run_git
-from vs_project.api.testing import FakeGitRepositories
+from vs_project._fake_git_repository import FakeGitRepositories
+from vs_project._git_process import run_git
 
 IN_MEMORY_GIT = FakeGitRepositories()
 """One in-memory disk for harnesses that build a fresh run per call.
@@ -76,6 +76,7 @@ class CliWorldGit:
         return result.stdout.decode()
 
     def worktrees(self) -> list[Path]:
+        """See :class:`WorldGit`."""
         listing = self._git(self._root, "worktree", "list", "--porcelain")
         return [
             Path(line.removeprefix("worktree "))
@@ -84,14 +85,17 @@ class CliWorldGit:
         ]
 
     def commit_all(self, tree: Path, message: str) -> str:
+        """See :class:`WorldGit`."""
         self._git(tree, "add", "-A")
         self._git(tree, "commit", "-m", message)
         return self._git(tree, "rev-parse", "HEAD").strip()
 
     def tree_of(self, commit: str) -> str:
+        """See :class:`WorldGit`."""
         return self._git(self._root, "rev-parse", f"{commit}^{{tree}}").strip()
 
     def effects(self) -> int:
+        """See :class:`WorldGit`."""
         worktrees = len(self._git(self._root, "worktree", "list").splitlines())
         commits = int(self._git(self._root, "rev-list", "--all", "--count"))
         refs = len(self._git(self._root, "for-each-ref", "--count=1000").splitlines())
@@ -107,9 +111,11 @@ class FakeWorldGit:
         self._disk = disk
 
     def worktrees(self) -> list[Path]:
+        """See :class:`WorldGit`."""
         return list(self._disk.worktrees(self._root))
 
     def commit_all(self, tree: Path, message: str) -> str:
+        """See :class:`WorldGit`."""
         repository = self._disk.repository(tree)
         repository.stage_all(["."])
         repository.commit(message)
@@ -120,10 +126,12 @@ class FakeWorldGit:
         return head
 
     def effects(self) -> int:
+        """See :class:`WorldGit`."""
         census = self._disk.census(self._root)
         return census.worktrees + census.commits + census.refs
 
     def tree_of(self, commit: str) -> str:
+        """See :class:`WorldGit`."""
         tree = self._disk.repository(self._root).tree_of(commit)
         if tree is None:
             message = f"unknown commit {commit}"
