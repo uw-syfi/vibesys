@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -16,8 +17,14 @@ from pydantic import (
     field_validator,
 )
 
-from vs_sandbox.slurm_gpu import AgentGpuConfig
-from vs_slurm.api import PORT_PLACEHOLDER, SlurmConfig, SlurmLocalTransport, SlurmService
+from vs_sandbox.agent_gpu import AgentGpuConfig
+from vs_slurm.api import (
+    PORT_PLACEHOLDER,
+    SlurmConfig,
+    SlurmLocalTransport,
+    SlurmService,
+    load_slurm_config,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -157,6 +164,34 @@ def agent_gpu_capability(
     if not isinstance(config.transport, SlurmLocalTransport):
         raise SlurmPolicyError.agent_gpu_needs_local_transport(config.transport.kind)
     return policy.agent_gpu
+
+
+@dataclass(frozen=True, slots=True)
+class SlurmOperatorSettings:
+    """Everything the operator's Slurm file says, parsed and checked once.
+
+    The cluster (``[slurm]``), the VibeSys policy (``[vibesys]``), and, through
+    the policy, the agent GPU limits. Construction rejects a combination the
+    run could not honor (agent GPU commands without the local transport), so
+    holding a value means the file is usable and no later read can differ.
+    """
+
+    config: SlurmConfig
+    policy: SlurmExecutionPolicy
+
+    def __post_init__(self) -> None:
+        """Reject agent GPU limits that the cluster transport cannot serve."""
+        agent_gpu_capability(self.config, self.policy)
+
+    @property
+    def agent_gpu(self) -> AgentGpuConfig | None:
+        """The agent's GPU limits, or ``None`` when the capability is off."""
+        return self.policy.agent_gpu
+
+
+def load_slurm_operator_settings(path: Path) -> SlurmOperatorSettings:
+    """Parse the operator file once; failures name the file and the offending fields."""
+    return SlurmOperatorSettings(load_slurm_config(path), load_slurm_policy(path))
 
 
 def _is_python(executable: str) -> bool:

@@ -74,9 +74,7 @@ def _fake_runner(root: Path, remote: Path) -> SlurmJobRunner:
     )
 
 
-def _config(
-    remote: Path, transport: SlurmConnectorTransport | SlurmLocalTransport
-) -> SlurmConfig:
+def _config(remote: Path, transport: SlurmConnectorTransport | SlurmLocalTransport) -> SlurmConfig:
     return SlurmConfig(name="fake", remote_workspace_root=str(remote), transport=transport)
 
 

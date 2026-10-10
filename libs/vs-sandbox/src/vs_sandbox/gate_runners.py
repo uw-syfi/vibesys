@@ -7,11 +7,7 @@ host, so the host runs it for the container:
 * :class:`SlurmCommandGateRunner` for the ``slurm`` environment runs the planned
   gate through ``vs_sandbox.slurm_command``, which stages the workspace to the
   remote cluster, runs the job there, and copies the result back.
-* :class:`SrunGateRunner` for the ``slurm-gpu`` environment runs the planned
-  command in a new local Slurm allocation, unconfined: it is the framework's
-  trusted command, not the agent's.
-
-Both stop when asked to: cancelling a gate cancels its Slurm job.
+Cancelling a gate cancels its Slurm job.
 """
 
 from __future__ import annotations
@@ -21,8 +17,6 @@ import subprocess
 import sys
 import threading
 from typing import TYPE_CHECKING
-
-from vs_sandbox.slurm_gpu import GpuCommand, GpuJobRequest, GpuLauncher
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -117,53 +111,4 @@ def _stop_when_asked(
         process.kill()
 
 
-class SrunGateRunner:
-    """Run a gate's planned command in a new local Slurm allocation, unconfined.
-
-    *planned* maps each gate the run offers to its fixed argv; the arguments
-    the broker validated are appended. *request* sizes every gate's job.
-    """
-
-    def __init__(
-        self,
-        launcher: GpuLauncher,
-        request: GpuJobRequest,
-        planned: Mapping[GateKind, Sequence[str]],
-        *,
-        env: Mapping[str, str],
-    ) -> None:
-        """Bind the launcher, the gate allocation, the planned commands, and the host environment.
-
-        The host's own Slurm variables (``SLURM_*``) are dropped: a gate is always
-        a new allocation. A host started inside ``salloc`` or a batch job would
-        otherwise make ``srun`` run the gate as a step of that allocation, or fail
-        on one that has ended.
-        """
-        self._launcher = launcher
-        self._request = request
-        self._planned = {kind: tuple(argv) for kind, argv in planned.items()}
-        self._env = {key: value for key, value in env.items() if not key.startswith("SLURM_")}
-
-    def run(
-        self,
-        kind: GateKind,
-        arguments: Sequence[str],
-        *,
-        cwd: Path,
-        write: Callable[[bytes], None],
-        cancel: Event,
-    ) -> int:
-        """Run the planned *kind* gate from *cwd*; a gate the run did not plan exits 2."""
-        planned = self._planned.get(kind)
-        if planned is None:
-            write(f"vibesys-gpu: the {kind.value} gate is not configured\n".encode())
-            return 2
-        return self._launcher.run(
-            self._request,
-            GpuCommand(argv=(*planned, *arguments), cwd=cwd, env=self._env),
-            write=write,
-            cancel=cancel,
-        )
-
-
-__all__ = ["DEFAULT_WRAPPER", "SlurmCommandGateRunner", "SrunGateRunner"]
+__all__ = ["DEFAULT_WRAPPER", "SlurmCommandGateRunner"]

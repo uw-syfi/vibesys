@@ -134,6 +134,7 @@ if TYPE_CHECKING:
         DockerCli,
         WorkspaceSandbox,
     )
+    from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
 
 
 @dataclass(frozen=True)
@@ -171,7 +172,7 @@ class RunEnvironmentView:
     share_agent_session: bool = False
     host_device_reselect: bool = True
     # Coarse environment label for diagnostics and adapter selection:
-    # ``"host"`` | ``"docker"`` | ``"modal"`` | ``"skypilot"`` | ``"slurm"`` | ``"slurm-gpu"``.
+    # ``"host"`` | ``"docker"`` | ``"modal"`` | ``"skypilot"`` | ``"slurm"``.
     env_kind: str = "host"
     # Where a profiler must execute to observe the production hot path. Prompt
     # templates branch on this capability rather than on a concrete provider.
@@ -190,6 +191,8 @@ class RunEnvironmentView:
     framework_setup_timeout_seconds: int = 0
     profiler_mcp_env: tuple[tuple[str, str], ...] = ()
     profiler_mcp_resources: tuple[HostResource, ...] = ()
+    # Set when trusted evaluation runs as Slurm jobs; ``None`` otherwise.
+    cluster_evaluation: ClusterEvaluationFacts | None = None
 
     @property
     def parallel_candidate_obstacle(self) -> str | None:
@@ -230,6 +233,29 @@ class HostEnvironmentFacts:
 @dataclass(frozen=True)
 class DockerEnvironmentFacts:
     """Presentation facts for Docker execution."""
+
+
+@dataclass(frozen=True)
+class ClusterEvaluationFacts:
+    """What an environment whose trusted evaluation runs on a Slurm cluster reports.
+
+    ``settings`` is the operator file as the run parsed it once, and ``plan`` the
+    evaluation plan the run wrote. Consumers read the cluster's capacity and the
+    executor's inputs here instead of re-reading either file.
+    """
+
+    settings: SlurmOperatorSettings
+    plan: SlurmEvaluationPlan
+
+    @property
+    def evaluation_capacity(self) -> int:
+        """How many evaluations the cluster runs at once."""
+        return self.settings.config.evaluation_capacity
+
+    @property
+    def captures_profile(self) -> bool:
+        """Whether the cluster runs a profile capture for this run."""
+        return self.plan.profile_command is not None
 
 
 @dataclass(frozen=True)

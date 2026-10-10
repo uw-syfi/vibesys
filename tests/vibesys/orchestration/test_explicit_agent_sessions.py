@@ -363,7 +363,7 @@ remote_python = "/remote/venv/bin/python"
     profiler_paths = {resource.path for resource in observed[1]}
     assert config_path not in worker_paths
     assert raw_socket_path not in worker_paths
-    assert config_path in profiler_paths
+    assert any(path.name == "slurm-operator.toml" for path in profiler_paths)
     assert raw_socket_path not in profiler_paths
     broker_resources = [
         resource

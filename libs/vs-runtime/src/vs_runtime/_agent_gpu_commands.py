@@ -1,8 +1,8 @@
 """The agent's own GPU commands, run as Slurm jobs: what the broker offers and the container sees.
 
 This is the one implementation of the capability. The ``slurm`` environment
-enables it from ``[vibesys.agent_gpu]``; the ``slurm-gpu`` environment enables
-it from ``[slurm_gpu]``. In both, the agent's container binds no GPU and runs
+enables it from ``[vibesys.agent_gpu]`` (the deprecated ``slurm-gpu`` alias
+translates its old file into that table). The agent's container binds no GPU and runs
 ``vibesys-gpu --gpus N --time MINUTES -- COMMAND...``; the host broker checks
 the request against the operator's limits and runs the command in a new Slurm
 job under the job confinement.
@@ -14,7 +14,7 @@ import os
 from typing import TYPE_CHECKING
 
 from vs_agent.api import declare_command_host_resources
-from vs_sandbox.api.slurm import GpuCommands, HostJobConfinement, SlurmGpuLauncher
+from vs_sandbox.api.slurm import AgentGpuLauncher, GpuCommands, HostJobConfinement
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -34,7 +34,7 @@ def agent_gpu_commands(
     workspace: Path,
     project_path_policy: ProjectPathPolicy,
     confinement: JobConfinement | None = None,
-    launcher: SlurmGpuLauncher | None = None,
+    launcher: AgentGpuLauncher | None = None,
 ) -> GpuCommands:
     """Return what the broker needs to offer the ``gpu`` operation under *config*.
 
@@ -52,7 +52,7 @@ def agent_gpu_commands(
     # Fail closed now, not at the first GPU command: a host that cannot confine
     # a job must not start a run whose agent can only use GPUs through jobs.
     confinement.wrap(workspace, [])
-    return GpuCommands(config, confinement, host_env, launcher=launcher or SlurmGpuLauncher(config))
+    return GpuCommands(config, confinement, host_env, launcher=launcher or AgentGpuLauncher(config))
 
 
 def agent_gpu_env(launcher: Path) -> dict[str, str]:

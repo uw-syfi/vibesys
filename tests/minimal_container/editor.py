@@ -4,7 +4,7 @@ The editor is opened through ``open_run_environment`` exactly as a run opens it:
 the real ``docker build`` of the agent layer on the backend's default base image,
 the real mounts, environment and user remapping, and a real host broker whose
 ``srun`` is a local program. What a run on a GPU host has and this does not is the
-accelerator: the editor of the ``slurm-gpu`` environment holds none (its GPU work
+accelerator: the editor of the ``slurm`` environment with agent GPU commands holds none (its GPU work
 is a job), so the CUDA and ROCm bases are built and started without a device.
 """
 
@@ -29,15 +29,15 @@ from vibesys.orchestration.profilers import (
 from vibesys.run.environment import open_run_environment
 from vs_agent.api import MCPServerSpec, containerize_server
 from vs_mcp.api import StdioServerDescriptor
-from vs_project.api import RunResourceRequest
 from vs_runtime.api.infrastructure import (
     DockerEnvironmentConfig,
     RunEnvironmentRequest,
     RunEnvironmentSession,
-    SlurmGpuEnvironment,
+    SlurmEnvironment,
     TrustedEvaluatorRequirements,
 )
 from vs_sandbox.api import ComputeBackend, ComputeBackendImpl, DockerSandbox, create_compute_backend
+from vs_sandbox.api.slurm import load_slurm_operator_settings
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -59,6 +59,16 @@ _FAKE_SLURM = textwrap.dedent(
     if "--" in sys.argv:
         command = sys.argv[sys.argv.index("--") + 1 :]
         os.execvp(command[0], command)
+    """
+)
+#: Stands in for ``vs_sandbox.slurm_command``: runs the planned gate right here.
+_FAKE_GATE = textwrap.dedent(
+    """\
+    import json, os, sys
+    plan = json.load(open(sys.argv[sys.argv.index("--plan") + 1]))
+    kind = sys.argv[sys.argv.index("--plan") + 2]
+    command = plan[kind + "_command"] + sys.argv[sys.argv.index("--plan") + 3 :]
+    os.execvp(command[0], command)
     """
 )
 ACCURACY_SCRIPT = 'print("accuracy ok")\n'
@@ -176,18 +186,24 @@ def make_backend(base: Base, log_dir: Path) -> ComputeBackendImpl:
     return create_compute_backend(base.backend, log_dir, log=lambda _: None, image=base.image)
 
 
-def _slurm_gpu_config(directory: Path) -> Path:
+def _slurm_config(directory: Path) -> Path:
     fake = directory / "fake_slurm.py"
     fake.write_text(_FAKE_SLURM, encoding="utf-8")
-    config = directory / "slurm-gpu.toml"
+    config = directory / "slurm.toml"
     config.write_text(
         textwrap.dedent(
             f"""\
-            [slurm_gpu]
+            [slurm]
+            name = "minimal-container"
+            remote_workspace_root = "{directory / "stage"}"
+
+            [slurm.transport]
+            kind = "local"
+
+            [vibesys.agent_gpu]
             partitions = ["main"]
             max_gpus = 8
             max_time_minutes = 120
-            gate_time_minutes = 40
             srun_command = ["{sys.executable}", "{fake}"]
             scancel_command = ["{sys.executable}", "{fake}"]
             """
@@ -231,9 +247,11 @@ def open_editor(base: Base, directory: Path) -> Iterator[Editor]:
         profiler_support_name=definition.support_name,
         profiler_support_extra=profiler_support_extra(definition),
     )
-    environment = SlurmGpuEnvironment(
-        _slurm_gpu_config(directory),
-        RunResourceRequest(accelerators_per_node=1, accelerator_backend="cuda"),
+    gate = directory / "fake_gate.py"
+    gate.write_text(_FAKE_GATE, encoding="utf-8")
+    environment = SlurmEnvironment(
+        load_slurm_operator_settings(_slurm_config(directory)),
+        gate_wrapper=(sys.executable, str(gate)),
         docker=DockerEnvironmentConfig(),
         job_confinement=PassThroughConfinement(),
     )

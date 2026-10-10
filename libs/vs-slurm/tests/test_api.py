@@ -497,8 +497,7 @@ def test_local_transport_runs_commands_and_copies_on_this_host(tmp_path: Path) -
         assert source.startswith("/")
         assert destination.startswith("/")
     assert all(
-        call[0][0] in {"/operator/bin/login-shell", "/operator/bin/rsync"}
-        for call in process.calls
+        call[0][0] in {"/operator/bin/login-shell", "/operator/bin/rsync"} for call in process.calls
     )
 
 

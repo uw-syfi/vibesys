@@ -199,7 +199,7 @@ a host without `sysbox-runc` fails early. See
 [Docker-in-Docker](running-vibesys.md#docker-in-docker).
 
 The host-sandbox variables below apply to the `host` environment (Metal on macOS) and to the
-confinement of `slurm-gpu` GPU jobs on compute nodes.
+confinement of agent GPU jobs on compute nodes.
 `VIBESYS_AGENT_SANDBOX` selects the Linux mechanism. `auto` (the default) and
 `bwrap` both require bubblewrap. `landlock` opts in to a weaker backend for
 hosts that block unprivileged user namespaces, which is the common reason
@@ -437,7 +437,7 @@ evaluation runs.
 | `--modal` | On Modal: GPU-bound work dispatches through the candidate's own `modal run` from a local CPU Docker editor. | Mutually exclusive with `--skypilot`. Same overlays as the default. |
 | `--run-environment skypilot` | On a SkyPilot cluster, from a local CPU Docker editor. | Requires portable task resources and an operator-owned cluster profile. Same overlays as the default. See [Remote Slurm execution](remote-slurm-execution.md). |
 | `--run-environment slurm`, or `--slurm-config` | On a Slurm cluster. | The editor runs in a local Docker container; trusted gates run on the host through a broker the container reaches over a socket. With `[vibesys.agent_gpu]` in the operator file (local transport only) the agent also runs its own GPU commands as Slurm jobs through `vibesys-gpu`; see [GPU commands through Slurm](slurm-gpu-commands.md). See [Remote Slurm execution](remote-slurm-execution.md) and [Sandboxing](contributing/sandboxing.md#known-limits). |
-| `--run-environment slurm-gpu` | Agent in a local Docker container on the Slurm submit host; GPU commands and trusted gates run as `srun` jobs through a host broker. | The agent sandbox has no GPUs and uses `vibesys-gpu --gpus N --time MIN -- CMD`. `--slurm-config` names the operator limits. See [GPU commands through Slurm](slurm-gpu-commands.md). |
+| `--run-environment slurm-gpu` (deprecated) | Alias for `--run-environment slurm` with local transport and `[vibesys.agent_gpu]`, built by translating the old `[slurm_gpu]` file. | Logs one deprecation warning. `--slurm-config` names the old file. See [the alias](slurm-gpu-commands.md#the-deprecated-slurm-gpu-alias). |
 
 `--docker` and `--run-environment local` were removed. Both are rejected with an
 error instead of being ignored, because neither selects anything any more. A run

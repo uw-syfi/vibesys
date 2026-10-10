@@ -7,8 +7,7 @@ import json
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -54,6 +53,9 @@ from vs_project.api import (
 )
 from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, run_environment_record
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _LOOP_RUN_TARGETS = {
     "agent": "vibesys.api._session.run_plugin",
@@ -170,7 +172,7 @@ accelerator_backend = "rocm"
 
 def test_cli_selects_slurm_with_external_operator_config(tmp_path: Path) -> None:
     project = _write_input_project(tmp_path)
-    config_path = tmp_path / "operator-slurm.toml"
+    config_path = _write_operator_slurm_file(tmp_path / "operator-slurm.toml")
 
     invocation = parse_cli_invocation(["--input", str(project), "--slurm-config", str(config_path)])
     spec = run_environment_spec_from_args(invocation.args)
@@ -212,8 +214,20 @@ _MODAL_ENVIRONMENT = RunEnvironmentRecord(
     model_volume="weights",
     app="run-app",
 )
-_SLURM_CONFIG = Path("/srv/vibesys/operator/slurm.toml")
-_SLURM_ENVIRONMENT = RunEnvironmentRecord(name="slurm", config_path=str(_SLURM_CONFIG))
+_OPERATOR_SLURM_FILE = """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+"""
+
+
+def _write_operator_slurm_file(path: Path) -> Path:
+    """Write a valid operator file: the CLI parses it once when it builds the environment."""
+    path.write_text(_OPERATOR_SLURM_FILE, encoding="utf-8")
+    return path
 
 
 def _common_configuration() -> _CommonConfiguration:
@@ -1822,11 +1836,14 @@ def test_resume_restores_the_external_slurm_config_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = _write_input_project(tmp_path)
+    slurm_config = _write_operator_slurm_file(tmp_path / "slurm.toml")
     run_id = "20260811-120000-11111111-agent"
     _write_project_run(
         project,
         run_id,
-        configuration=_agent_configuration(run_environment=_SLURM_ENVIRONMENT),
+        configuration=_agent_configuration(
+            run_environment=RunEnvironmentRecord(name="slurm", config_path=str(slurm_config))
+        ),
         created_at=datetime(2026, 8, 11, 12, tzinfo=UTC),
     )
     monkeypatch.chdir(project)
@@ -1834,10 +1851,10 @@ def test_resume_restores_the_external_slurm_config_path(
     args = parse_cli_invocation(["--resume", run_id]).args
     spec = run_environment_spec_from_args(args)
 
-    assert args.slurm_config == _SLURM_CONFIG
-    assert spec == RunEnvironmentSpec("slurm", {"config_path": str(_SLURM_CONFIG)})
+    assert args.slurm_config == slurm_config
+    assert spec == RunEnvironmentSpec("slurm", {"config_path": str(slurm_config)})
 
-    matching = parse_cli_invocation(["--resume", run_id, "--slurm-config", str(_SLURM_CONFIG)]).args
+    matching = parse_cli_invocation(["--resume", run_id, "--slurm-config", str(slurm_config)]).args
     assert run_environment_spec_from_args(matching) == spec
 
     with pytest.raises(ConfigurationError, match=r"run_environment\.config_path"):

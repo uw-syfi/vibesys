@@ -8,8 +8,16 @@ evaluation executor.
 from pathlib import Path
 
 from vs_sandbox import host_command_client
+from vs_sandbox.agent_gpu import (
+    AgentGpuConfig,
+    AgentGpuLauncher,
+    AgentGpuRequestError,
+    GpuCommand,
+    GpuJobRequest,
+    choose_partition,
+)
 from vs_sandbox.benchmark_output import BenchmarkOutputKind, classify_benchmark_output
-from vs_sandbox.gate_runners import DEFAULT_WRAPPER, SlurmCommandGateRunner, SrunGateRunner
+from vs_sandbox.gate_runners import DEFAULT_WRAPPER, SlurmCommandGateRunner
 from vs_sandbox.host_command_broker import (
     BrokerTransport,
     GateKind,
@@ -43,21 +51,17 @@ from vs_sandbox.slurm_executor import (
     SlurmStagePayload,
     SlurmTargetLifecycle,
 )
-from vs_sandbox.slurm_gpu import (
-    AgentGpuConfig,
-    GpuCommand,
-    GpuJobRequest,
-    SlurmGpuConfig,
-    SlurmGpuConfigError,
-    SlurmGpuLauncher,
-    SlurmGpuRequestError,
-    choose_partition,
-    load_slurm_gpu_config,
+from vs_sandbox.slurm_gpu_alias import (
+    SlurmGpuAliasError,
+    load_slurm_gpu_alias_settings,
+    translate_slurm_gpu,
 )
 from vs_sandbox.slurm_policy import (
     SlurmExecutionPolicy,
+    SlurmOperatorSettings,
     SlurmPolicyError,
     agent_gpu_capability,
+    load_slurm_operator_settings,
     load_slurm_policy,
 )
 from vs_sandbox.slurm_profile import (
@@ -68,6 +72,7 @@ from vs_sandbox.slurm_profile import (
     require_profile_fields,
     trusted_profile_command,
 )
+from vs_sandbox.slurm_settings_toml import render_slurm_operator_toml
 
 #: The single-file, standard-library-only client an agent's container runs.
 HOST_COMMAND_CLIENT = Path(host_command_client.__file__).resolve()
@@ -79,6 +84,8 @@ __all__ = [
     "HOST_COMMAND_CLIENT",
     "PROFILE_OUTPUT_ROOT",
     "AgentGpuConfig",
+    "AgentGpuLauncher",
+    "AgentGpuRequestError",
     "BenchmarkOutputKind",
     "BrokerTransport",
     "GateKind",
@@ -102,28 +109,28 @@ __all__ = [
     "SlurmEvaluationPlan",
     "SlurmExecutionMetadata",
     "SlurmExecutionPolicy",
-    "SlurmGpuConfig",
-    "SlurmGpuConfigError",
-    "SlurmGpuLauncher",
-    "SlurmGpuRequestError",
+    "SlurmGpuAliasError",
+    "SlurmOperatorSettings",
     "SlurmOutcomeUnknownError",
     "SlurmPolicyError",
     "SlurmProcessBroker",
     "SlurmProcessBrokerError",
     "SlurmStagePayload",
     "SlurmTargetLifecycle",
-    "SrunGateRunner",
     "agent_gpu_capability",
     "choose_partition",
     "classify_benchmark_output",
     "configured_capture_lifecycle",
-    "load_slurm_gpu_config",
+    "load_slurm_gpu_alias_settings",
+    "load_slurm_operator_settings",
     "load_slurm_policy",
     "profile_capture_descriptor",
     "read_slurm_capture_plan",
     "read_slurm_evaluation_plan",
+    "render_slurm_operator_toml",
     "require_profile_fields",
     "run_brokered_process",
+    "translate_slurm_gpu",
     "trusted_profile_command",
     "write_slurm_capture_plan",
     "write_slurm_evaluation_plan",

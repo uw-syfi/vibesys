@@ -22,7 +22,6 @@ from vs_runtime._run_environment import (
     SkyPilotEnvironment,
 )
 from vs_runtime._slurm_environment import SlurmEnvironment
-from vs_runtime._slurm_gpu_environment import SlurmGpuEnvironment
 from vs_sandbox.api import backend_is_host_only
 
 if TYPE_CHECKING:
@@ -116,7 +115,10 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
     if spec.name == "slurm":
         return SlurmEnvironment.from_options(spec.options)
     if spec.name == "slurm-gpu":
-        return SlurmGpuEnvironment(Path(str(spec.options["config_path"])), spec.resources)
+        # Deprecated alias: the old file, translated, opens the slurm environment.
+        return SlurmEnvironment.from_slurm_gpu(
+            Path(str(spec.options["config_path"])), spec.resources
+        )
     message = f"unknown run environment: {spec.name!r}"
     raise ValueError(message)
 
