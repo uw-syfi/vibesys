@@ -41,6 +41,7 @@ from server.transport.discovery import (
     WebInstanceRecord,
 )
 from server.transport.subscriptions import SubscriptionTracker
+from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
     from websockets.http11 import Response as HttpResponse
 
     from server.api.service import RunApi, SubscriptionBootstrap
+    from vs_sim.api import Clock
 
 _LOG = logging.getLogger(__name__)
 
@@ -300,6 +302,7 @@ class WebSocketGateway:
         allowed_origins: Sequence[str] = (),
         limits: WebSocketLimits | None = None,
         startup: StartupSynchronization | None = None,
+        clock: Clock | None = None,
     ) -> None:
         """Create a loopback gateway around a shared run API.
 
@@ -328,6 +331,7 @@ class WebSocketGateway:
         self.subscriptions = subscriptions or SubscriptionTracker()
         self._start_lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
+        self._clock = clock or SystemClock()
         self._attempt: _GatewayAttempt | None = None
 
     @property
@@ -584,6 +588,7 @@ class WebSocketGateway:
                         port=bound_port,
                         token=self._token,
                         project_root=self.project_root,
+                        clock=self._clock,
                     )
                 staged_path = self.instance_path.with_name(
                     f".{self.instance_path.name}.{os.getpid()}.{secrets.token_hex(6)}.startup"
@@ -648,6 +653,7 @@ class WebSocketGateway:
                 port=bound_port,
                 token=current_token,
                 project_root=self.project_root,
+                clock=self._clock,
             )
             record.write(staged_path)
 

@@ -12,7 +12,7 @@ from tests.server.support import build_server_parts
 from server.api.protocol import ChatQuery
 from server.chat.manager import ChatAnswer
 from server.events import EventType
-from vs_sim.api.testing import wait_until_started_sync
+from vs_sim.api.testing import wait_or_fail, wait_until_started_sync
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -25,7 +25,7 @@ def test_chat_response_excludes_concurrent_run_events(tmp_path: Path) -> None:
 
     def handler(_question: str) -> ChatAnswer:
         handler_started.set()
-        release_handler.wait()
+        wait_or_fail(release_handler, "the test to release the handler")
         return ChatAnswer(text="bounded answer", invocation_id="exec-bounded")
 
     parts.chat.install_default_handler(handler)

@@ -123,6 +123,7 @@ graph TD
     launch --> vs_sandbox
     server --> vibesys
     server --> vs_prompts
+    server --> vs_sim
     vibesys --> vs_agent
     vibesys --> vs_core
     vibesys --> vs_evaluation

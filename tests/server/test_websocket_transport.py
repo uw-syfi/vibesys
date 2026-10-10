@@ -52,7 +52,7 @@ from server.transport.websocket import (
     _connection_closed,
     _content_type,
 )
-from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
+from vs_sim.api.testing import HANG_GUARD_S, join_or_fail, wait_or_fail
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -1022,9 +1022,9 @@ class _StalledPublication:
         if self._first_wait:
             self._first_wait = False
             if self._timeout_first:
-                self.timeout.wait()
+                wait_or_fail(self.timeout, "the test to time out the first readiness wait")
                 return False
-        return ready.wait()
+        return ready.wait(HANG_GUARD_S)
 
     def wait_before_serve(self, stop: threading.Event) -> None:
         del stop
@@ -1039,7 +1039,7 @@ class _StalledPublication:
         # The old worker has started its listener and entered the publication
         # phase. Retirement must close it and make publication impossible
         # without depending on this Fake observing `stop`.
-        self.release.wait()
+        wait_or_fail(self.release, "the test to release the stalled publication")
         self.publication_barrier_released.set()
 
     def join_first_worker(self) -> None:

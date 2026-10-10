@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import Future
@@ -18,11 +17,13 @@ from server.events import (
     EventType,
     RunEvent,
 )
+from vs_sim.api import MonotonicClock
 
 if TYPE_CHECKING:
     from server.chat.options import ChatRunSettings
     from server.journal import WireJournal
     from server.run_lifecycle import RunStatus
+    from vs_sim.api import Clock
 
 _CHAT_DRAIN_TIMEOUT_SECONDS = 5.0
 _CHAT_THREAD_TITLE_MAX_CHARS = 40
@@ -113,6 +114,7 @@ class ChatManager:
         *,
         run_status: Callable[[], RunStatus],
         drain_timeout_seconds: float = _CHAT_DRAIN_TIMEOUT_SECONDS,
+        clock: Clock | None = None,
     ) -> None:
         """Initialize chat routing over the shared server condition and journal.
 
@@ -120,6 +122,7 @@ class ChatManager:
         waits for an answer in flight before it defers the close.
         """
         self._condition = condition
+        self._clock = clock or MonotonicClock()
         self._drain_timeout_seconds = drain_timeout_seconds
         self._journal = journal
         self._run_status = run_status
@@ -536,9 +539,9 @@ class ChatManager:
         )
 
     def _wait_locked(self, busy: Callable[[], bool], *, timeout: float | None) -> bool:
-        deadline = time.monotonic() + timeout if timeout is not None else None
+        deadline = self._clock.now() + timeout if timeout is not None else None
         while busy():
-            remaining = None if deadline is None else deadline - time.monotonic()
+            remaining = None if deadline is None else deadline - self._clock.now()
             if remaining is not None and remaining <= 0:
                 return False
             self._condition.wait(timeout=remaining)
