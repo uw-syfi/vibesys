@@ -70,7 +70,7 @@ describeHostContract(
     const machine = node(scripts);
     const host = new SshHost({
       alias: 'node-1',
-      vibesysCommand: 'vibesys',
+      checkout: '/home/user/src/vibesys',
       controlPath: '/tmp/vsd/%C',
       askpass: '/app/askpass',
       runner: new FakeSsh(machine),

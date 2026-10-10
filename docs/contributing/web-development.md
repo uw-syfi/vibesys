@@ -350,10 +350,10 @@ or on an SSH host; local and remote share every layer above the `Host`
 interface, and the page cannot tell them apart.
 
 ```bash
-# The host and run picker: This Mac plus the Host entries of ~/.ssh/config
+# The welcome view: recent runs, This Mac, and Connect to host
 pnpm --dir clients --filter @vibesys/desktop start
 
-# The picker on one SSH host, or straight into one of its detached runs
+# The welcome view on one SSH host, or straight into one of its detached runs
 pnpm --dir clients --filter @vibesys/desktop start -- --host HOST [--instance ID]
 
 # Start a detached run for a local project and open the window on it
@@ -370,7 +370,19 @@ the `app://vibesys` origin. The page has no network access: the main process
 cancels every http(s) and ws(s) request and the page's Content Security Policy
 forbids connections. Its only way to the server is the preload bridge,
 `window.vibesysDesktop.connect()`, which takes no host or path: the main process
-binds each window to one run. Each connection is a MessagePort that the main
+binds the run view to one run.
+
+The app has one window with two views. It opens on the welcome view
+(`clients/desktop/src/welcome.html`, served from the same origin with its own
+narrow preload, `welcome-preload.cts`): recent runs (status refreshed from each
+host's registry, one click to reattach), This Mac's live runs and "Start a
+run", and "Connect to host", a searchable list of the concrete `Host` aliases
+in `~/.ssh/config` that also accepts a typed `user@host` (arrows, Enter, Esc).
+The main process answers the welcome view's requests only for that view's web
+contents and validates every value (host keys, paths, task names) before it
+reaches a host. Once attached, the run view (the web UI) fills the window and
+the welcome view shrinks to the title strip above it, showing the host and the
+connection status; clicking the host brings the welcome view back. Each connection is a MessagePort that the main
 process relays to a new byte stream from the window's host
 (`clients/desktop/src/relay.ts`), reframing one port message as one
 newline-delimited line in each direction (see `wire-protocol.md`). The page
@@ -383,20 +395,20 @@ The main process reaches servers only through the `Host` interface
 `DetachedHost` over a `HostAccess` (how `vibesys` runs and how a Unix socket is
 reached on that machine):
 
-- `LocalHost` runs `python -m entrypoints.launcher ARGV` (`VIBESYS_PYTHON` when
-  set, otherwise `uv run` in the repository the app was built from) and dials
-  sockets directly.
+- `LocalHost` runs `uv run --project CHECKOUT python -m entrypoints.launcher
+  ARGV` and dials sockets directly.
 - `SshHost` uses the system `ssh`, so `~/.ssh/config`, ProxyJump, agents, and
   certificates work unchanged. The app owns one master connection per host
   (`ControlMaster`, `ControlPath=/tmp/vsd-<uid>/%C`, `ControlPersist=30m`,
   `ServerAliveInterval`). Only the master authenticates, through an askpass
   helper that shows ssh's prompt (password, 2FA, an untrusted host key's
-  yes/no) in a native dialog, and only when the user asks (the picker's
+  yes/no) in a native dialog, and only when the user asks (the welcome view's
   sign-in, a Retry); a host key is never accepted silently. Every other ssh
-  run is a `BatchMode` channel over the master: `invoke` runs the host's vibesys
-  command, `startServer` runs it with `--detach` and reads the record, and each
-  `dial` runs the stdio bridge (`<python> -m entrypoints.stdio_bridge --socket
-  PATH`, see `wire-protocol.md`) on its own channel. The bridge's exit status
+  run is a `BatchMode` channel over the master: `invoke` runs `uv run --project
+  CHECKOUT vibesys`, `startServer` runs it with `--detach` and reads the
+  record, and each `dial` runs the stdio bridge (`uv run --project CHECKOUT
+  python -m entrypoints.stdio_bridge --socket PATH`, see `wire-protocol.md`) on
+  its own channel. The bridge's exit status
   names how a stream ended: 4 means the run is gone, 255 and the stall and
   transport statuses mean the link broke, 5 is a permission failure; its
   one-line JSON report on stderr becomes the message.
@@ -406,24 +418,31 @@ reached on that machine):
   `clients/desktop/src/ssh-host.shells.test.ts` runs the exact strings under
   every installed shell.
 
-Each SSH host has a "vibesys command" (default `vibesys`; for example
-`uv run --project ~/src/vibesys vibesys` for a checkout), set in the picker and
-stored in the app's user data (`hosts.json`), never in the repository. A
-non-interactive ssh session often lacks `~/.local/bin` on PATH, so the
-command's first word is also probed in a few common directories, and a miss
-names every place tried. The bridge runs on the Python of that command
-(`uv run ... python`, or the `#!` interpreter of an installed script when that
-is a Python). Any other launcher (a `#!/bin/sh` script) needs the host's
-"Python command", also set in the picker.
+Every host, This Mac included, runs VibeSys from a source checkout: the
+directory whose `pyproject.toml` declares the `vibesys` project (for now a dev
+checkout is required on every host). This Mac defaults to the checkout the app
+was built from. On first use of an SSH host the welcome view asks "Where is
+your VibeSys checkout on HOST?", pre-filled from the `vibesys_root` that live
+servers there publish in their registry records, checks the answer on the host
+(the directory exists, its `pyproject.toml` declares `vibesys`, and `uv` is
+found on the non-interactive PATH, a login shell's PATH, or a few common
+directories), and names exactly what is missing. The checkout is stored in the
+app's user data (`hosts.json`, version 2: one `checkout` per host key), never
+in the repository. A version 1 file (free-form vibesys and Python commands) is
+migrated when empty and otherwise ignored with a message saying to remove it.
 
-The picker starts a run with `vibesys --detach --project PATH ARGS` (the
-arguments are split like a shell's words) and resumes a stopped one with
-`vibesys --detach --resume [RUN]` in the project directory. A launch that
-starts nothing prints a `DetachedLaunchFailure`, shown with its code, message,
-and log path; `run_already_live` attaches to the server already driving the
-run.
+The project directory is a separate, per-run choice: the candidate repository
+with `.vibesys/tasks/`, used as the run's working directory. "Start a run"
+offers the projects of the host's live records and recent runs (or a typed
+path), lists that project's tasks with `vibesys tasks PROJECT --json`, and
+starts `vibesys --detach --task TASK [ARGS]` in the project (extra arguments
+are split like a shell's words). A stopped run resumes with `vibesys --detach
+--resume [RUN]` in its project directory. A launch that starts nothing prints a
+`DetachedLaunchFailure`, shown with its code, message, and log path;
+`run_already_live` attaches to the server already driving the run. Runs the
+user attaches to are remembered in `recent.json` in the app's user data.
 
-Each run window has a connection supervisor (`clients/desktop/src/supervisor.ts`,
+The attached run has a connection supervisor (`clients/desktop/src/supervisor.ts`,
 a pure `step` core and a thin shell). When a stream reports a broken link, the
 machine wakes, or the network comes back, it restores the host link and
 confirms the run is still in the host's registry and speaks this client's
@@ -433,10 +452,10 @@ wedged server), so a recovery keeps its place in the backoff until a stream
 stays up for 30 seconds, and a dial the bridge refuses outright
 (`connect_denied`) stops at once with the bridge's report. There is one retry loop per layer: the page
 never restores links, and the supervisor never redials streams. It stops, with
-the status in the window title and a dialog offering Retry, on what retrying
+the status in the title strip and a Retry button there, on what retrying
 cannot fix: credentials the user must give, a run that ended, a protocol
 version mismatch (the message names both versions and the host's vibesys
-command), or a missing command. Runs are detached: closing the app ends its
+command), or a missing `uv`. Runs are detached: closing the app ends its
 streams and SSH masters, never a run (`vibesys instances stop ID` does).
 
 Every implementation, including the in-memory `FakeHost`, passes the contract

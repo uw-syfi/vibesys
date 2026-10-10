@@ -1,8 +1,8 @@
 /**
  * What the app was asked to open, from its command line and environment, as a pure function.
  *
- * - No arguments: the host and run picker.
- * - `--host NAME`: the picker, on that SSH host. `--host NAME --instance ID` attaches to that host's
+ * - No arguments: the welcome view.
+ * - `--host NAME`: the welcome view, on that SSH host. `--host NAME --instance ID` attaches to that host's
  *   detached run `ID`; `--instance ID` alone attaches to one on this machine.
  * - `--project PATH [-- RUN_ARGS...]`: start a detached run for that project on this machine and
  *   open the bundled UI on it.
@@ -17,7 +17,7 @@ import {type LaunchTarget, parseLaunchUrl} from './launch-url.js';
 
 export type LaunchPlan =
   | {readonly kind: 'gateway'; readonly target: LaunchTarget}
-  | {readonly kind: 'picker'; readonly host: HostId | null}
+  | {readonly kind: 'welcome'; readonly host: HostId | null}
   | {readonly kind: 'instance'; readonly host: HostId; readonly instanceId: string}
   | {readonly kind: 'start'; readonly project: string; readonly runArgs: readonly string[]}
   | {readonly kind: 'attach'; readonly socketPath: string};
@@ -68,10 +68,10 @@ export function parseLaunch(
   return hostPlan(values.get('--host'), values.get('--instance'));
 }
 
-/** The picker (on `alias` when given), or the run `instanceId` on that host or this machine. */
+/** The welcome view (on `alias` when given), or the run `instanceId` on that host or this machine. */
 function hostPlan(alias: string | undefined, instanceId: string | undefined): LaunchPlan {
   const host: HostId | null = alias === undefined ? null : {kind: 'ssh', alias: hostAlias(alias)};
-  if (instanceId === undefined) return {kind: 'picker', host};
+  if (instanceId === undefined) return {kind: 'welcome', host};
   if (!INSTANCE_ID.test(instanceId)) {
     throw new LaunchError(`--instance needs a run id of 12 hex digits, not ${instanceId}`);
   }

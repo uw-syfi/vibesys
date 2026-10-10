@@ -8,10 +8,12 @@
  */
 import {spawn} from 'node:child_process';
 import {createConnection} from 'node:net';
+import {homedir} from 'node:os';
 import type {Duplex} from 'node:stream';
 import {DetachedHost, type HostAccess} from './detached-host.js';
 import {HostError} from './host.js';
 import {type CommandOutput, finish, fromChild, type SpawnedProcess} from './process.js';
+import {checkoutProblem, localCheckArgs, PROBED_DIRECTORIES} from './ssh-host.js';
 
 /** The operating-system effects `LocalHost` performs. */
 export interface LocalSystem {
@@ -64,6 +66,52 @@ class LocalAccess implements HostAccess {
   async close(): Promise<void> {}
 }
 
+/** A checkout on this machine, checked: its physical path and the `uv` that runs it. */
+export interface LocalCheckout {
+  readonly root: string;
+  readonly uv: string;
+}
+
+/**
+ * Check `checkout` on this machine with the same scripts an SSH host runs (`/bin/sh`), and find
+ * `uv`. Rejects with `failed` naming exactly what is missing.
+ */
+export async function checkLocalCheckout(
+  checkout: string,
+  system: LocalSystem = nodeSystem,
+): Promise<LocalCheckout> {
+  const where = `${checkout} on This Mac`;
+  const verify = await finish(
+    system.spawn('/bin/sh', localCheckArgs('verify', checkout), undefined),
+  );
+  const verdict = verify.stdout.split('\n')[0]?.trim() ?? '';
+  if (verify.code !== 0 || !verdict.startsWith('root ')) {
+    throw new HostError('failed', checkoutProblem(verdict, where, verify.stderr));
+  }
+  const probe = await finish(system.spawn('/bin/sh', localCheckArgs('probe', 'uv'), undefined));
+  const uv = probe.stdout
+    .split('\n')
+    .find(line => line.startsWith('found '))
+    ?.slice('found '.length);
+  if (probe.code !== 0 || uv === undefined) {
+    const tried = [
+      "this app's PATH",
+      "the login shell's PATH",
+      ...PROBED_DIRECTORIES.map(d => `${d}/uv`),
+    ];
+    throw new HostError(
+      'failed',
+      `uv was not found on This Mac; tried ${tried.join(', ')}. Install uv (https://docs.astral.sh/uv/).`,
+    );
+  }
+  return {root: verdict.slice('root '.length), uv};
+}
+
+/** How `LocalHost` runs Python from a checked checkout: `uv run --project ROOT python`. */
+export function checkoutPython(checkout: LocalCheckout): string[] {
+  return [checkout.uv, 'run', '--project', checkout.root, 'python'];
+}
+
 /** The real operating system. */
 const nodeSystem: LocalSystem = {
   connect: path =>
@@ -76,5 +124,11 @@ const nodeSystem: LocalSystem = {
       socket.once('error', reject);
     }),
   spawn: (command, args, cwd) =>
-    fromChild(spawn(command, args, {stdio: 'pipe', ...(cwd === undefined ? {} : {cwd})})),
+    fromChild(
+      spawn(command, args, {
+        stdio: 'pipe',
+        env: {...process.env, HOME: process.env['HOME'] ?? homedir()},
+        ...(cwd === undefined ? {} : {cwd}),
+      }),
+    ),
 };

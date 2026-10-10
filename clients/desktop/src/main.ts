@@ -1,14 +1,17 @@
 /**
- * Electron main process: the host and run picker, and one window per attached run.
+ * Electron main process: one window that opens on the welcome view and becomes the run view.
  *
- * Bundled mode (see `launch-args.ts`): every window loads pages shipped inside the app from
- * `app://vibesys` and has no network access. A run window's only way to its server is the preload
- * bridge: each `connect()` hands this process a MessagePort, which `relay` joins to a new byte
- * stream from the window's `Host` (this machine or an SSH host; the page cannot tell which). Each
- * run window has a `ConnectionSupervisor` that restores the host link after drops, sleep, and
- * network changes, then wakes the page so its own session resumes. The picker window is the
- * trusted place where hosts are chosen: its requests are answered only for picker windows, and
- * only for hosts the app offered.
+ * Bundled mode (see `launch-args.ts`): every view loads pages shipped inside the app from
+ * `app://vibesys` and has no network access. The window holds two views. The welcome view
+ * (`welcome.html`, its own narrow preload) is the trusted place where hosts, checkouts, projects,
+ * and tasks are chosen: its requests are answered only for its own web contents, and every value is
+ * validated here before it reaches a host. The run view (the web UI, `desktop.html`) names no
+ * host, path, or command: its only way to its server is the preload bridge, where each `connect()`
+ * hands this process a MessagePort that `relay` joins to a new byte stream from the run's `Host`.
+ * While a run is shown, the welcome view shrinks to the title strip above it, showing the host and
+ * the connection status; clicking the host brings the welcome view back. A `ConnectionSupervisor`
+ * restores the host link after drops, sleep, and network changes, then wakes the page so its own
+ * session resumes.
  *
  * Gateway mode (`VIBESYS_DESKTOP_URL`, set by `scripts/run-desktop.sh`): the window displays a web
  * gateway that is already running, confined to its origin; the token never reaches a log line.
@@ -20,8 +23,8 @@ import {fileURLToPath} from 'node:url';
 import type {ScheduleTimeout} from '@vibesys/backend-client';
 import {
   app,
+  BaseWindow,
   BrowserWindow,
-  dialog,
   type IpcMainInvokeEvent,
   ipcMain,
   Menu,
@@ -32,6 +35,7 @@ import {
   protocol,
   session,
   type WebContents,
+  WebContentsView,
 } from 'electron';
 import {
   APP_ENTRY_URL,
@@ -45,12 +49,12 @@ import {controlDirectory, installAskpass} from './askpass.js';
 import {type AttachedRun, checkAttachment, observedDial} from './attachment.js';
 import {CONNECT_CHANNEL, WAKE_CHANNEL} from './bridge-protocol.js';
 import {HostError} from './host.js';
-import {HostPool, hostKey} from './host-pool.js';
-import type {HostId} from './host-settings.js';
-import {parseInstanceList, versionSkewMessage} from './instances.js';
+import {HostPool, systemHostFactory} from './host-pool.js';
+import {type HostId, hostFromKey, hostKey, hostLabel, validHostPath} from './host-settings.js';
+import {versionSkewMessage} from './instances.js';
 import {type LaunchPlan, parseLaunch} from './launch-args.js';
 import {isAllowedRequest, isAppUrl, type LaunchTarget, originOf} from './launch-url.js';
-import {PICKER_CHANNELS, type PickerResult} from './picker-protocol.js';
+import {recentStatus} from './recent.js';
 import {type RelayPort, relay} from './relay.js';
 import {shellWords} from './shell-words.js';
 import {
@@ -59,16 +63,26 @@ import {
   isTerminal,
   type StreamEnd,
 } from './supervisor.js';
-import {windowChrome} from './window-chrome.js';
+import {suggestCheckout, suggestProjects} from './welcome-model.js';
+import {
+  CHROME_CHANNEL,
+  type ChromeState,
+  WELCOME_CHANNELS,
+  type WelcomeHost,
+  type WelcomeOverview,
+  type WelcomeRecentStatus,
+  type WelcomeResult,
+} from './welcome-protocol.js';
+import {TITLEBAR_HEIGHT, windowChrome} from './window-chrome.js';
 
 /** The one browser permission the web UI uses (copying run IDs). */
 const ALLOWED_PERMISSIONS: ReadonlySet<string> = new Set(['clipboard-sanitized-write']);
 const NETWORK_URLS = ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'];
-/** `dist/ui`: the web UI bundle the build copies in, with the picker page beside it. */
+/** `dist/ui`: the web UI bundle the build copies in, with the welcome page beside it. */
 const UI_ROOT = fileURLToPath(new URL('./ui/', import.meta.url));
-const PICKER_URL = 'app://vibesys/picker.html';
-/** The repository checkout this app was built in; `uv` runs VibeSys from it. */
-const REPOSITORY_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const WELCOME_URL = 'app://vibesys/welcome.html';
+/** The repository checkout this app was built in: This Mac's VibeSys checkout by default. */
+const REPOSITORY_ROOT = fileURLToPath(new URL('../../../', import.meta.url)).replace(/\/+$/, '');
 /** How often the main process looks for the network coming back. */
 const NETWORK_POLL_MS = 5_000;
 
@@ -81,7 +95,7 @@ const realTimers: ScheduleTimeout = (callback, ms) => {
   return () => clearTimeout(timer);
 };
 
-/** Keep every window on `allowed` pages and refuse every new window. */
+/** Keep every view on `allowed` pages and refuse every new window. */
 function guard(contents: WebContents, allowed: (url: string) => boolean): void {
   const stay = (event: {readonly url: string; preventDefault(): void}): void => {
     if (allowed(event.url)) return;
@@ -112,8 +126,26 @@ function secureSession(allowed: (url: string) => boolean): void {
   );
 }
 
-function openWindow(url: string, describe: string, preload = 'preload.cjs'): BrowserWindow {
-  // The web UI has one dark theme; make native menus and controls follow it.
+const WEB_PREFERENCES = {
+  contextIsolation: true,
+  sandbox: true,
+  nodeIntegration: false,
+  webSecurity: true,
+  spellcheck: false,
+} as const;
+
+/** A sandboxed view with `preload` as its only way out. */
+function view(preload: string): WebContentsView {
+  return new WebContentsView({
+    webPreferences: {
+      ...WEB_PREFERENCES,
+      preload: fileURLToPath(new URL(`./${preload}`, import.meta.url)),
+    },
+  });
+}
+
+/** The gateway window: one page on the gateway's origin. */
+function openGatewayWindow(url: string, describe: string): BrowserWindow {
   nativeTheme.themeSource = 'dark';
   const window = new BrowserWindow({
     width: 1440,
@@ -124,12 +156,8 @@ function openWindow(url: string, describe: string, preload = 'preload.cjs'): Bro
     title: 'VibeSys',
     ...windowChrome(process.platform),
     webPreferences: {
-      preload: fileURLToPath(new URL(`./${preload}`, import.meta.url)),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-      webSecurity: true,
-      spellcheck: false,
+      ...WEB_PREFERENCES,
+      preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)),
     },
   });
   window.once('ready-to-show', () => window.show());
@@ -152,7 +180,7 @@ function runGateway(target: LaunchTarget): void {
   void app.whenReady().then(() => {
     secureSession(url => isAllowedRequest(url, target.origin));
     Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenu()));
-    openWindow(target.url, target.origin);
+    openGatewayWindow(target.url, target.origin);
   });
 }
 
@@ -187,13 +215,7 @@ function relayPort(port: MessagePortMain): RelayPort {
   };
 }
 
-function pythonCommand(): string[] {
-  const configured = process.env['VIBESYS_PYTHON'];
-  if (configured) return [configured];
-  return ['uv', 'run', '--project', REPOSITORY_ROOT, 'python'];
-}
-
-/** What a run window's title says about its connection. */
+/** What the title strip says about the connection. */
 function statusLabel(status: ConnectionStatus): string {
   switch (status.kind) {
     case 'connecting':
@@ -220,7 +242,7 @@ function statusDetail(status: ConnectionStatus, hostName: string): string {
     case 'auth-needed':
       return `${hostName} asked for credentials that were not given (${status.detail}). Retry to sign in again.`;
     case 'run-ended':
-      return `The run on ${hostName} is no longer running. Its transcript stays on screen; open the picker to attach to another run.`;
+      return `The run on ${hostName} is no longer running. Its transcript stays on screen; click the host to attach to another run.`;
     case 'offline':
     case 'incompatible':
     case 'failed':
@@ -231,38 +253,124 @@ function statusDetail(status: ConnectionStatus, hostName: string): string {
 }
 
 interface RunBinding {
+  readonly view: WebContentsView;
   readonly run: AttachedRun;
   readonly supervisor: ConnectionSupervisor;
+  readonly project: string;
+  status: ConnectionStatus;
 }
 
-/** The bundled app: the picker, run windows, their supervisors, and the hosts behind them. */
+/**
+ * The bundled app's one window: the welcome view (trusted, `welcome-preload`) and, once attached,
+ * the run view (the web UI, `preload`) under the welcome view's title strip. The main process owns
+ * the hosts, the attached run's supervisor, and which view fills the window.
+ */
 class DesktopApp {
   readonly #pool: HostPool;
-  readonly #runs = new Map<number, RunBinding>();
-  readonly #pickers = new Set<number>();
+  readonly #window: BaseWindow;
+  readonly #welcome: WebContentsView;
+  #run: RunBinding | null = null;
+  #mode: 'welcome' | 'run' = 'welcome';
   #online = true;
 
   constructor(pool: HostPool) {
     this.#pool = pool;
+    this.#window = new BaseWindow({
+      width: 1440,
+      height: 900,
+      minWidth: 960,
+      minHeight: 600,
+      title: 'VibeSys',
+      ...windowChrome(process.platform),
+    });
+    this.#welcome = view('welcome-preload.cjs');
+    this.#window.contentView.addChildView(this.#welcome);
+    this.#window.on('resize', () => this.#layout());
+    this.#window.on('closed', () => this.#detach());
+    this.#layout();
+    this.#welcome.webContents
+      .loadURL(WELCOME_URL)
+      .catch(() => log('could not load the welcome view'));
   }
 
   get pool(): HostPool {
     return this.#pool;
   }
 
-  openPicker(host: HostId | null): void {
-    const query = host === null ? '' : `?host=${encodeURIComponent(hostKey(host))}`;
-    const window = openWindow(`${PICKER_URL}${query}`, 'the picker', 'picker-preload.cjs');
-    window.setSize(980, 640);
-    const id = window.webContents.id;
-    this.#pickers.add(id);
-    window.on('closed', () => this.#pickers.delete(id));
+  /** Show the welcome view, on `host`'s panel when given. */
+  showWelcome(host: HostId | null): void {
+    if (host !== null) {
+      void this.#welcome.webContents.executeJavaScript(
+        `window.location.hash = ${JSON.stringify(hostKey(host))}`,
+      );
+    }
+    this.#setMode('welcome');
   }
 
-  /** Open a run window on `endpoint` of `host`, supervised. */
-  async openRun(id: HostId, socketPath: string, instanceId: string | null): Promise<void> {
+  #setMode(mode: 'welcome' | 'run'): void {
+    this.#mode = this.#run === null ? 'welcome' : mode;
+    this.#layout();
+    this.#sendChrome();
+  }
+
+  /** Lay the views out: the filling view, and the welcome view's strip over a run. */
+  #layout(): void {
+    if (this.#window.isDestroyed()) return;
+    const {width, height} = this.#window.getContentBounds();
+    const full = {x: 0, y: 0, width, height};
+    // The run page follows one dark theme; the welcome view follows the system's.
+    nativeTheme.themeSource = this.#mode === 'run' ? 'dark' : 'system';
+    if (this.#run !== null) {
+      this.#run.view.setBounds(full);
+      this.#run.view.setVisible(this.#mode === 'run');
+    }
+    this.#welcome.setBounds(this.#mode === 'run' ? {...full, height: TITLEBAR_HEIGHT} : full);
+    // Re-adding moves the welcome view (the title strip) above the run view.
+    this.#window.contentView.addChildView(this.#welcome);
+  }
+
+  chrome(): ChromeState {
+    const run = this.#run;
+    return {
+      mode: this.#mode,
+      attached:
+        run === null
+          ? null
+          : {
+              hostLabel: run.run.hostName,
+              project: run.project,
+              status: statusLabel(run.status),
+              detail: statusDetail(run.status, run.run.hostName),
+              stuck: isTerminal(run.status),
+            },
+    };
+  }
+
+  #sendChrome(): void {
+    if (!this.#welcome.webContents.isDestroyed()) {
+      this.#welcome.webContents.send(CHROME_CHANNEL, this.chrome());
+    }
+  }
+
+  /** End the attached run's view and supervisor; the run itself keeps going on its host. */
+  #detach(): void {
+    const run = this.#run;
+    if (run === null) return;
+    this.#run = null;
+    run.supervisor.dispose();
+    if (!this.#window.isDestroyed()) this.#window.contentView.removeChildView(run.view);
+    run.view.webContents.close();
+  }
+
+  /** Show the run on `socketPath` of `id` in the window, supervised, replacing any other. */
+  async openRun(
+    id: HostId,
+    socketPath: string,
+    instanceId: string | null,
+    project: string,
+  ): Promise<void> {
     const host = await this.#pool.host(id);
-    const hostName = id.kind === 'local' ? 'This Mac' : id.alias;
+    const hostName = hostLabel(id);
     const run: AttachedRun = {
       host,
       hostName,
@@ -270,55 +378,46 @@ class DesktopApp {
       instanceId,
       endpoint: {socketPath},
     };
-    const window = openWindow(APP_ENTRY_URL, 'the app bundle');
-    const contentsId = window.webContents.id;
-    let shown: ConnectionStatus['kind'] | null = null;
+    this.#detach();
+    const runView = view('preload.cjs');
     const supervisor: ConnectionSupervisor = new ConnectionSupervisor({
       check: interactive => checkAttachment(run, interactive),
       scheduleTimeout: realTimers,
       wakePage: () => {
-        if (!window.isDestroyed()) window.webContents.send(WAKE_CHANNEL);
+        if (!runView.webContents.isDestroyed()) runView.webContents.send(WAKE_CHANNEL);
       },
       show: status => {
-        if (window.isDestroyed()) return;
-        window.setTitle(`VibeSys · ${hostName} · ${statusLabel(status)}`);
-        if (status.kind === shown) return;
-        shown = status.kind;
-        log(`${hostName}: ${statusLabel(status)}`);
-        if (!isTerminal(status) && status.kind !== 'offline') return;
-        void dialog
-          .showMessageBox(window, {
-            type: status.kind === 'run-ended' ? 'info' : 'warning',
-            message: `${hostName}: ${statusLabel(status)}`,
-            detail: statusDetail(status, hostName),
-            buttons: ['Retry', 'Dismiss'],
-            defaultId: 0,
-            cancelId: 1,
-          })
-          .then(({response}) => {
-            if (response === 0) supervisor.dispatch({type: 'user-retry'});
-          });
+        if (this.#run?.supervisor !== supervisor) return;
+        const changed = status.kind !== this.#run.status.kind;
+        this.#run.status = status;
+        this.#window.setTitle(`VibeSys · ${hostName} · ${statusLabel(status)}`);
+        this.#sendChrome();
+        if (changed) log(`${hostName}: ${statusLabel(status)}`);
       },
     });
-    this.#runs.set(contentsId, {run, supervisor});
-    window.on('closed', () => {
-      this.#runs.delete(contentsId);
-      supervisor.dispose();
-    });
-    window.setTitle(`VibeSys · ${hostName} · connecting`);
+    this.#run = {
+      view: runView,
+      run,
+      supervisor,
+      project,
+      status: {kind: 'connecting'},
+    };
+    this.#window.contentView.addChildView(runView);
+    this.#window.setTitle(`VibeSys · ${hostName} · connecting`);
+    runView.webContents.loadURL(APP_ENTRY_URL).catch(() => log('could not load the run view'));
+    this.#setMode('run');
     supervisor.dispatch({type: 'start'});
   }
 
   /** Attach to registry run `instanceId` on `id`, refusing a version mismatch with its message. */
-  async attachInstance(id: HostId, instanceId: string): Promise<void> {
-    const host = await this.#pool.host(id);
-    const listing = parseInstanceList(await host.invoke(['instances', 'list', '--json']));
-    const record = listing.records.find(candidate =>
+  async attachInstance(id: HostId, instanceId: string, task: string | null = null): Promise<void> {
+    const records = await this.#pool.records(id);
+    const record = records.find(candidate =>
       candidate.kind === 'compatible'
         ? candidate.instance.id === instanceId
         : candidate.id === instanceId,
     );
-    const hostName = id.kind === 'local' ? 'This Mac' : id.alias;
+    const hostName = hostLabel(id);
     if (record === undefined) throw new Error(`no live run ${instanceId} on ${hostName}`);
     if (record.kind === 'incompatible') {
       throw new Error(
@@ -330,50 +429,87 @@ class DesktopApp {
         }),
       );
     }
-    await this.openRun(id, record.instance.socketPath, instanceId);
+    const {instance} = record;
+    await this.#remember(id, instance.projectRoot, task, instance.id, instance.runId);
+    await this.openRun(id, instance.socketPath, instanceId, instance.projectRoot);
   }
 
-  /** Start a detached run on `id` in `project` and attach to it. */
-  async startRun(id: HostId, project: string, args: readonly string[]): Promise<void> {
-    await this.#launch(id, project, ['--project', project, ...args]);
+  /** Start a detached run of `task` on `id` in `project` and attach to it. */
+  async startRun(
+    id: HostId,
+    project: string,
+    task: string | null,
+    args: readonly string[],
+  ): Promise<void> {
+    await this.#launch(id, project, task, [...(task === null ? [] : ['--task', task]), ...args]);
   }
 
   /** Resume stopped run `run` (the latest when empty) of `project` on `id`, detached, and attach. */
   async resumeRun(id: HostId, project: string, run: string): Promise<void> {
-    await this.#launch(id, project, ['--resume', ...(run === '' ? [] : [run])]);
+    await this.#launch(id, project, null, ['--resume', ...(run === '' ? [] : [run])]);
   }
 
-  async #launch(id: HostId, project: string, args: readonly string[]): Promise<void> {
+  async #launch(
+    id: HostId,
+    project: string,
+    task: string | null,
+    args: readonly string[],
+  ): Promise<void> {
     const host = await this.#pool.host(id);
     const server = await host.startServer(args, {cwd: project});
     if (server.record.kind === 'incompatible') {
-      const hostName = id.kind === 'local' ? 'This Mac' : id.alias;
       throw new Error(
         versionSkewMessage({
-          hostName,
+          hostName: hostLabel(id),
           vibesysCommand: await this.#pool.command(id),
           protocolVersion: server.record.protocolVersion,
           vibesysVersion: server.record.vibesysVersion,
         }),
       );
     }
-    const instance = server.record.instance.id;
+    const {instance} = server.record;
     log(
       server.alreadyLive
-        ? `the run is already live as ${instance}; attaching to it`
-        : `started run ${instance}; stop it with: vibesys instances stop ${instance}`,
+        ? `the run is already live as ${instance.id}; attaching to it`
+        : `started run ${instance.id}; stop it with: vibesys instances stop ${instance.id}`,
     );
-    await this.openRun(id, server.endpoint.socketPath, server.record.instance.id);
+    await this.#remember(id, instance.projectRoot, task, instance.id, instance.runId);
+    await this.openRun(id, server.endpoint.socketPath, instance.id, instance.projectRoot);
   }
 
-  /** Relay each run window's connections to its run; refuse every other sender. */
+  async #remember(
+    id: HostId,
+    project: string,
+    task: string | null,
+    instanceId: string,
+    runId: string | null,
+  ): Promise<void> {
+    try {
+      await this.#pool.remember({
+        host: hostKey(id),
+        project,
+        task,
+        instanceId,
+        runId,
+        attachedAt: Date.now(),
+      });
+    } catch (error) {
+      log(`could not remember the run: ${(error as Error).message}`);
+    }
+  }
+
+  /** Relay the run view's connections to its run; refuse every other sender. */
   bindConnections(): void {
     ipcMain.on(CONNECT_CHANNEL, event => {
       const [port] = event.ports;
       if (port === undefined) return;
-      const binding = this.#runs.get(event.sender.id);
-      if (binding === undefined || !isAppPage(event.senderFrame?.url ?? '')) {
-        log('refused a connection from a window that is not bound to a run');
+      const binding = this.#run;
+      if (
+        binding === null ||
+        event.sender.id !== binding.view.webContents.id ||
+        !isAppPage(event.senderFrame?.url ?? '')
+      ) {
+        log('refused a connection from a view that is not bound to a run');
         port.close();
         return;
       }
@@ -382,70 +518,153 @@ class DesktopApp {
         binding.supervisor.dispatch({type: 'stream-ended', end, detail});
       void relay(relayPort(port), observedDial(binding.run, report));
     });
-    // A machine that slept has dead connections nobody has noticed yet: check every link now.
-    powerMonitor.on('resume', () => this.#broadcast('resumed'));
+    // A machine that slept has dead connections nobody has noticed yet: check the link now.
+    powerMonitor.on('resume', () => this.#run?.supervisor.dispatch({type: 'resumed'}));
     this.#watchNetwork();
   }
 
-  /** Answer the picker page's requests, for picker windows only. */
-  bindPicker(): void {
-    const handle = <T>(channel: string, answer: (...args: unknown[]) => Promise<T>): void => {
-      ipcMain.handle(channel, async (event: IpcMainInvokeEvent, ...args: unknown[]) => {
-        if (!this.#pickers.has(event.sender.id)) return failure(new Error('not a picker window'));
-        try {
-          return {ok: true, value: await answer(...args)} satisfies PickerResult<T>;
-        } catch (error) {
-          return failure(error);
-        }
-      });
-    };
-    handle(PICKER_CHANNELS.hosts, () => this.#pool.offered());
-    handle(PICKER_CHANNELS.runs, async key => this.#pool.runs(await this.#host(key)));
-    handle(PICKER_CHANNELS.signIn, async key => {
-      await (await this.#pool.host(await this.#host(key))).ensureLink();
+  /** Answer the welcome view's requests, for the welcome view only. */
+  bindWelcome(): void {
+    this.#bindQueries();
+    this.#bindActions();
+  }
+
+  /** Answer `channel` with `answer`, for the welcome view's own web contents only. */
+  #handle<T>(channel: string, answer: (...args: unknown[]) => Promise<T>): void {
+    ipcMain.handle(channel, async (event: IpcMainInvokeEvent, ...args: unknown[]) => {
+      if (
+        event.sender.id !== this.#welcome.webContents.id ||
+        event.senderFrame?.url.startsWith(WELCOME_URL) !== true
+      ) {
+        return failure(new Error('not the welcome view'));
+      }
+      try {
+        return {ok: true, value: await answer(...args)} satisfies WelcomeResult<T>;
+      } catch (error) {
+        return failure(error);
+      }
+    });
+  }
+
+  /** What the welcome view reads: the overview, recent statuses, hosts, and one host's panel. */
+  #bindQueries(): void {
+    const handle = this.#handle.bind(this);
+    const pool = this.#pool;
+    handle(WELCOME_CHANNELS.overview, async () => {
+      const recent = await pool.recent();
+      return {
+        settingsProblem: await pool.settingsCheck(),
+        recent: recent.runs.map(run => ({...run, hostLabel: hostLabel(hostFromKey(run.host))})),
+        chrome: this.chrome(),
+      } satisfies WelcomeOverview;
+    });
+    handle(WELCOME_CHANNELS.recentStatus, async key => {
+      const id = hostFromKey(key);
+      const runs = (await pool.recent()).runs.filter(run => run.host === hostKey(id));
+      let records: Awaited<ReturnType<HostPool['records']>> | {error: string};
+      try {
+        records = await pool.records(id);
+      } catch (error) {
+        records = {error: (error as Error).message};
+      }
+      const statuses: Record<string, WelcomeRecentStatus> = {};
+      for (const run of runs) statuses[run.instanceId] = recentStatus(run, records);
+      return statuses;
+    });
+    handle(WELCOME_CHANNELS.hosts, () => pool.aliases());
+    handle(WELCOME_CHANNELS.host, async key => {
+      const id = hostFromKey(key);
+      const checkout = await pool.checkout(id);
+      const recent = (await pool.recent()).runs;
+      if (checkout === null) {
+        return {
+          key: hostKey(id),
+          label: hostLabel(id),
+          checkout,
+          suggestedCheckout: await pool.suggestedCheckout(id),
+          runs: [],
+          projects: suggestProjects([], recent, hostKey(id)),
+        } satisfies WelcomeHost;
+      }
+      const records = await pool.records(id);
+      return {
+        key: hostKey(id),
+        label: hostLabel(id),
+        checkout,
+        suggestedCheckout: suggestCheckout(records),
+        runs: await pool.runs(id, records),
+        projects: suggestProjects(records, recent, hostKey(id)),
+      } satisfies WelcomeHost;
+    });
+  }
+
+  /** What the welcome view does: set a checkout, sign in, list tasks, attach, start, resume. */
+  #bindActions(): void {
+    const handle = this.#handle.bind(this);
+    const pool = this.#pool;
+    handle(WELCOME_CHANNELS.setCheckout, async (key, path) =>
+      pool.setCheckout(hostFromKey(key), path),
+    );
+    handle(WELCOME_CHANNELS.signIn, async key => {
+      await pool.signIn(hostFromKey(key));
       return null;
     });
-    handle(PICKER_CHANNELS.attach, async (key, instance) => {
-      if (typeof instance !== 'string') throw new Error('pick a run to attach to');
-      await this.attachInstance(await this.#host(key), instance);
+    handle(WELCOME_CHANNELS.tasks, async (key, project) => pool.tasks(hostFromKey(key), project));
+    handle(WELCOME_CHANNELS.attach, async (key, instance) => {
+      if (typeof instance !== 'string' || !/^[0-9a-f]{12}$/.test(instance)) {
+        throw new Error('pick a run to attach to');
+      }
+      const id = hostFromKey(key);
+      const known = (await pool.recent()).runs.find(
+        run => run.host === hostKey(id) && run.instanceId === instance,
+      );
+      await this.attachInstance(id, instance, known?.task ?? null);
       return null;
     });
-    handle(PICKER_CHANNELS.start, async (key, project, args) => {
+    handle(WELCOME_CHANNELS.start, async (key, project, task, args) => {
+      if (typeof task !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,127}$/.test(task)) {
+        throw new Error("pick one of the project's tasks");
+      }
       const words = typeof args === 'string' ? shellWords(args) : [];
-      await this.startRun(await this.#host(key), projectPath(project), words);
+      await this.startRun(
+        hostFromKey(key),
+        validHostPath(project, 'the project directory'),
+        task,
+        words,
+      );
       return null;
     });
-    handle(PICKER_CHANNELS.resume, async (key, project, run) => {
+    handle(WELCOME_CHANNELS.resume, async (key, project, run) => {
       const runId = typeof run === 'string' ? run.trim() : '';
       if (!/^[A-Za-z0-9._-]*$/.test(runId) || runId.startsWith('-')) {
         throw new Error('a run id is letters, digits, ".", "_", and "-", not starting with "-"');
       }
-      await this.resumeRun(await this.#host(key), projectPath(project), runId);
+      await this.resumeRun(
+        hostFromKey(key),
+        validHostPath(project, 'the project directory'),
+        runId,
+      );
       return null;
     });
-    handle(PICKER_CHANNELS.saveSettings, async (key, command, python) => {
-      const id = await this.#host(key);
-      if (id.kind !== 'ssh') throw new Error('this machine has no vibesys command setting');
-      await this.#pool.saveCommands(id.alias, command, python);
+    handle(WELCOME_CHANNELS.showRun, async () => {
+      this.#setMode('run');
+      return null;
+    });
+    handle(WELCOME_CHANNELS.showWelcome, async () => {
+      this.#setMode('welcome');
+      return null;
+    });
+    handle(WELCOME_CHANNELS.retry, async () => {
+      this.#run?.supervisor.dispatch({type: 'user-retry'});
       return null;
     });
   }
 
-  async #host(key: unknown): Promise<HostId> {
-    const id = await this.#pool.resolve(key);
-    if (id === null) throw new Error('that host is not in ~/.ssh/config');
-    return id;
-  }
-
-  #broadcast(type: 'resumed' | 'network-changed'): void {
-    for (const {supervisor} of this.#runs.values()) supervisor.dispatch({type});
-  }
-
-  /** Report the network coming back (offline to online) to every supervisor. */
+  /** Report the network coming back (offline to online) to the supervisor. */
   #watchNetwork(): void {
     const poll = (): void => {
       const online = net.isOnline();
-      if (online && !this.#online) this.#broadcast('network-changed');
+      if (online && !this.#online) this.#run?.supervisor.dispatch({type: 'network-changed'});
       this.#online = online;
       realTimers(poll, NETWORK_POLL_MS);
     };
@@ -453,16 +672,7 @@ class DesktopApp {
   }
 }
 
-/** A project path from the picker: non-empty, one line, and never read as an option. */
-function projectPath(project: unknown): string {
-  const path = typeof project === 'string' ? project.trim() : '';
-  if (path === '') throw new Error('name a project path');
-  if (path.startsWith('-')) throw new Error('a project path cannot start with "-"');
-  if (/[\n\r\0]/.test(path)) throw new Error('a project path is one line');
-  return path;
-}
-
-function failure(error: unknown): PickerResult<never> {
+function failure(error: unknown): WelcomeResult<never> {
   return {
     ok: false,
     error: error instanceof Error ? error.message : String(error),
@@ -489,7 +699,7 @@ function runBundled(plan: Exclude<LaunchPlan, {kind: 'gateway'}>): void {
   app.on('web-contents-created', (_event, contents) => guard(contents, isAppPage));
   app.on('window-all-closed', () => app.quit());
   void app.whenReady().then(async () => {
-    // Pages reach servers only through the main process: no request leaves a window.
+    // Pages reach servers only through the main process: no request leaves a view.
     secureSession(() => false);
     serveBundledUi();
     Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenu()));
@@ -499,14 +709,17 @@ function runBundled(plan: Exclude<LaunchPlan, {kind: 'gateway'}>): void {
       new HostPool({
         sshConfigPath: join(homedir(), '.ssh', 'config'),
         settingsPath: join(userData, 'hosts.json'),
-        controlPath: join(await controlDirectory(uid), '%C'),
-        askpass: await installAskpass(join(userData, 'askpass.sh')),
-        localPython: pythonCommand(),
+        recentPath: join(userData, 'recent.json'),
+        localCheckout: REPOSITORY_ROOT,
+        factory: systemHostFactory({
+          controlPath: join(await controlDirectory(uid), '%C'),
+          askpass: await installAskpass(join(userData, 'askpass.sh')),
+        }),
         log,
       }),
     );
     desktop.bindConnections();
-    desktop.bindPicker();
+    desktop.bindWelcome();
     try {
       await openPlan(desktop, plan);
     } catch (error) {
@@ -522,18 +735,18 @@ async function openPlan(
   plan: Exclude<LaunchPlan, {kind: 'gateway'}>,
 ): Promise<void> {
   switch (plan.kind) {
-    case 'picker':
-      desktop.openPicker(plan.host);
+    case 'welcome':
+      desktop.showWelcome(plan.host);
       return;
     case 'instance':
       await desktop.attachInstance(plan.host, plan.instanceId);
       return;
     case 'start':
       log('starting a detached VibeSys run');
-      await desktop.startRun({kind: 'local'}, plan.project, plan.runArgs);
+      await desktop.startRun({kind: 'local'}, plan.project, null, plan.runArgs);
       return;
     case 'attach':
-      await desktop.openRun({kind: 'local'}, plan.socketPath, null);
+      await desktop.openRun({kind: 'local'}, plan.socketPath, null, '');
       return;
   }
 }

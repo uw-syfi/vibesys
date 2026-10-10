@@ -2,15 +2,15 @@ import {describe, expect, test} from 'bun:test';
 import type {Duplex} from 'node:stream';
 import {HostError, type HostErrorKind} from './host.js';
 import {LocalHost} from './local-host.js';
-import {PROBED_DIRECTORIES, SshHost} from './ssh-host.js';
+import {checkoutProblem, PROBED_DIRECTORIES, SshHost, shellPath} from './ssh-host.js';
 import type {CommandResult} from './testing/fake-host.js';
 import {fakeLocalSystem} from './testing/fake-local-system.js';
 import {fakeRecord} from './testing/fake-record.js';
-import {FAKE_VIBESYS_PATH, FAKE_VIBESYS_PYTHON, FakeSsh} from './testing/fake-ssh.js';
+import {FAKE_CHECKOUT_ROOT, FAKE_UV_PATH, FakeSsh} from './testing/fake-ssh.js';
 import {FakeVibesysNode} from './testing/fake-vibesys-node.js';
 
 function world(
-  options: {vibesysCommand?: string; command?: (argv: readonly string[]) => CommandResult} = {},
+  options: {checkout?: string; command?: (argv: readonly string[]) => CommandResult} = {},
 ) {
   const node = new FakeVibesysNode({
     server: () => connection => connection.pipe(connection),
@@ -19,7 +19,7 @@ function world(
   const ssh = new FakeSsh(node);
   const host = new SshHost({
     alias: 'node-1',
-    vibesysCommand: options.vibesysCommand ?? 'vibesys',
+    checkout: options.checkout ?? '/home/user/src/vibesys',
     controlPath: '/tmp/vsd/%C',
     askpass: '/app/askpass',
     runner: ssh,
@@ -137,39 +137,6 @@ describe('SshHost', () => {
     await host.close();
   });
 
-  test('the bridge Python comes from a Python shebang only; any other needs the setting', async () => {
-    for (const [firstLine, python] of [
-      ['#!/usr/bin/env python3', "'/usr/bin/env' 'python3'"],
-      ['#!/opt/py/bin/python3.12', "'/opt/py/bin/python3.12'"],
-      ['#!/bin/sh', null],
-      ['#!/usr/bin/env bash', null],
-      ['\u007fELF', null],
-    ] as const) {
-      const {ssh, host} = world();
-      ssh.firstLine = firstLine;
-      const server = await host.startServer([]);
-      if (python === null) {
-        expect(await kindOf(host.dial(server.endpoint))).toBe('failed');
-      } else {
-        (await host.dial(server.endpoint)).destroy();
-        expect(ssh.ran).toContain(python);
-      }
-      await host.close();
-    }
-    const configured = world();
-    configured.ssh.firstLine = '#!/bin/sh';
-    const set = new SshHost({
-      alias: 'node-1',
-      vibesysCommand: 'vibesys',
-      pythonCommand: '/srv/venv/bin/python',
-      controlPath: '/tmp/vsd/%C',
-      runner: configured.ssh,
-    });
-    (await set.dial((await set.startServer([])).endpoint)).destroy();
-    expect(configured.ssh.ran).toContain('/srv/venv/bin/python');
-    await set.close();
-  });
-
   test('refused credentials are auth and an unreachable network is link', async () => {
     const refused = world();
     refused.ssh.keyLogin = false;
@@ -249,7 +216,7 @@ describe('SshHost', () => {
     await host.close();
   });
 
-  test('a missing vibesys command names every place tried', async () => {
+  test('a missing uv names every place tried', async () => {
     const {ssh, host} = world();
     ssh.installed = false;
     try {
@@ -258,22 +225,52 @@ describe('SshHost', () => {
     } catch (error) {
       expect((error as HostError).kind).toBe('failed');
       const message = (error as Error).message;
-      expect(message).toContain('"vibesys"');
-      for (const directory of PROBED_DIRECTORIES) expect(message).toContain(directory);
+      expect(message).toContain('uv was not found on node-1');
+      expect(message).toContain("login shell's PATH");
+      for (const directory of PROBED_DIRECTORIES) expect(message).toContain(`${directory}/uv`);
     }
   });
 
-  test('the bridge runs on the Python of the resolved command', async () => {
-    const installed = world();
-    await installed.host.dial((await installed.host.startServer([])).endpoint);
-    expect(installed.ssh.ran).toContain(`'${FAKE_VIBESYS_PYTHON}'`);
-    expect(installed.ssh.ran[0]).toBe(`'${FAKE_VIBESYS_PATH}'`);
-    await installed.host.close();
+  test('commands and the bridge run from the checkout through the resolved uv', async () => {
+    const absolute = world();
+    await absolute.host.dial((await absolute.host.startServer([])).endpoint);
+    expect(absolute.ssh.ran).toEqual([
+      `'${FAKE_UV_PATH}' run --project '/home/user/src/vibesys' vibesys`,
+      `'${FAKE_UV_PATH}' run --project '/home/user/src/vibesys' python`,
+    ]);
+    await absolute.host.close();
 
-    const checkout = world({vibesysCommand: 'uv run --project ~/src/vibesys vibesys'});
-    await checkout.host.dial((await checkout.host.startServer([])).endpoint);
-    expect(checkout.ssh.ran).toContain(`'${FAKE_VIBESYS_PATH}' run --project ~/src/vibesys python`);
-    await checkout.host.close();
+    const home = world({checkout: '~/src/vibesys'});
+    await home.host.dial((await home.host.startServer([])).endpoint);
+    expect(home.ssh.ran).toContain(`'${FAKE_UV_PATH}' run --project "$HOME"/'src/vibesys' python`);
+    await home.host.close();
+  });
+
+  test('a checkout path is one sh word whatever it contains', () => {
+    expect(shellPath("/srv/it's here")).toBe(`'/srv/it'\\''s here'`);
+    expect(shellPath('~')).toBe('"$HOME"');
+    expect(shellPath('~/a b')).toBe(`"$HOME"/'a b'`);
+  });
+
+  test('verifyCheckout resolves the physical checkout or names what is missing', async () => {
+    const {ssh, host} = world({checkout: '~/src/vibesys'});
+    expect(await host.verifyCheckout()).toBe(FAKE_CHECKOUT_ROOT);
+    for (const verdict of ['nodir', 'nopyproject', 'notvibesys'] as const) {
+      ssh.checkout = verdict;
+      await expect(host.verifyCheckout()).rejects.toThrow(
+        checkoutProblem(verdict, '~/src/vibesys on node-1'),
+      );
+    }
+    ssh.checkout = 'ok';
+    ssh.installed = false;
+    await expect(host.verifyCheckout()).rejects.toThrow('uv was not found on node-1');
+    await host.close();
+  });
+
+  test('checkout problems say what is wrong in words', () => {
+    expect(checkoutProblem('nodir', '/x on h')).toBe('/x on h is not a directory.');
+    expect(checkoutProblem('nopyproject', '/x on h')).toContain('has no pyproject.toml');
+    expect(checkoutProblem('notvibesys', '/x on h')).toContain('does not declare the vibesys');
   });
 
   test('argv reaches the remote vibesys word for word, whatever it contains', async () => {
@@ -336,7 +333,7 @@ describe('detached launch and stop contracts', () => {
     const ssh = new FakeSsh(node);
     const host = new SshHost({
       alias: 'node-1',
-      vibesysCommand: 'vibesys',
+      checkout: '/home/user/src/vibesys',
       controlPath: '/tmp/vsd/%C',
       runner: ssh,
     });

@@ -4,8 +4,9 @@
  * ssh hands a remote command to the user's login shell, so the exact strings `SshHost` sends are run
  * here with `<shell> -c COMMAND`, the way sshd runs them, under every shell installed on this
  * machine (sh, dash, bash, zsh, tcsh, csh, fish; an absent one is skipped and says so). On the far
- * side, stub `vibesys` and `python` executables record their working directory and argv, so the
- * test checks that data survives each shell byte for byte, whatever it contains. The master
+ * side, a stub `uv` records its working directory and argv, so the test checks that data (the
+ * checkout path included) survives each shell byte for byte, whatever it contains, and the checkout
+ * check reads real directories. The master
  * connection is not modelled: `-O` and master runs succeed, and only channels reach a shell.
  *
  * Processes run with `spawnSync`, so nothing here waits on time; the timeout only guards a hang.
@@ -51,6 +52,8 @@ let root = '';
 let home = '';
 let bin = '';
 let out = '';
+/** A checkout whose path needs quoting, with a pyproject.toml that declares vibesys. */
+let checkout = '';
 const servers: Server[] = [];
 
 beforeAll(() => {
@@ -62,9 +65,17 @@ beforeAll(() => {
   mkdirSync(home);
   mkdirSync(bin);
   mkdirSync(join(home, 'bin'));
-  for (const path of [join(bin, 'vibesys'), join(bin, 'python'), join(home, 'bin', 'vibesys')]) {
-    writeFileSync(path, STUB);
-    chmodSync(path, 0o755);
+  writeFileSync(join(bin, 'uv'), STUB);
+  chmodSync(join(bin, 'uv'), 0o755);
+  checkout = join(root, "ck it's $(id)");
+  for (const [directory, manifest] of [
+    [checkout, '[project]\nname = "vibesys"\n'],
+    [join(home, 'src', 'vibesys'), "[tool.x]\nname = 'other'\n[project]\nname = 'vibesys'\n"],
+    [join(home, 'other'), '[project]\nname = "vibesys-extra"\n'],
+    [join(home, 'empty'), null],
+  ] as const) {
+    mkdirSync(directory, {recursive: true});
+    if (manifest !== null) writeFileSync(join(directory, 'pyproject.toml'), manifest);
   }
 });
 
@@ -139,7 +150,7 @@ async function expectStartedIn(
   });
   expect(recorded()).toEqual({
     cwd: tilde ? join(home, directory) : cwd,
-    argv: ['--detach', ...argv],
+    argv: ['run', '--project', checkout, 'vibesys', '--detach', ...argv],
   });
 }
 
@@ -164,12 +175,11 @@ for (const name of SHELLS) {
   const shell = which(name);
   const label = shell === null ? `${name} (skipped: not installed)` : `under ${name}`;
   describe.skipIf(shell === null)(`SshHost remote commands ${label}`, () => {
-    const make = (options: {vibesysCommand?: string; pythonCommand?: string} = {}) => {
+    const make = (options: {checkout?: string} = {}) => {
       const ssh = new LoginShellSsh(shell ?? '');
       const host = new SshHost({
         alias: 'node-1',
-        vibesysCommand: options.vibesysCommand ?? 'vibesys',
-        ...(options.pythonCommand === undefined ? {} : {pythonCommand: options.pythonCommand}),
+        checkout: options.checkout ?? checkout,
         controlPath: '/tmp/vsd/%C',
         runner: ssh,
       });
@@ -185,41 +195,67 @@ for (const name of SHELLS) {
         );
         if (random() < 0.3) argv.unshift('-leading');
         await host.invoke(argv);
-        expect(recorded()).toEqual({cwd: home, argv});
+        expect(recorded()).toEqual({
+          cwd: home,
+          argv: ['run', '--project', checkout, 'vibesys', ...argv],
+        });
 
         await expectStartedIn(host, random, argv);
       }
       await host.close();
     });
 
-    test('a command under ~/ is found and run', async () => {
-      const {host} = make({vibesysCommand: '~/bin/vibesys'});
+    test('a checkout under ~/ runs from the home directory', async () => {
+      const {host} = make({checkout: '~/src/vibesys'});
       await host.invoke(['instances', 'list', '--json']);
-      expect(recorded().argv).toEqual(['instances', 'list', '--json']);
+      expect(recorded().argv).toEqual([
+        'run',
+        '--project',
+        join(home, 'src', 'vibesys'),
+        'vibesys',
+        'instances',
+        'list',
+        '--json',
+      ]);
       await host.close();
+    });
+
+    test('the checkout check accepts the vibesys project and names every other case', async () => {
+      expect(await make().host.verifyCheckout()).toBe(checkout);
+      expect(await make({checkout: '~/src/vibesys'}).host.verifyCheckout()).toBe(
+        join(home, 'src', 'vibesys'),
+      );
+      for (const [path, problem] of [
+        ['~/missing', 'is not a directory'],
+        ['~/empty', 'has no pyproject.toml'],
+        ['~/other', 'does not declare the vibesys project'],
+      ] as const) {
+        await expect(make({checkout: path}).host.verifyCheckout()).rejects.toThrow(problem);
+      }
     });
 
     test('the bridge gets the socket path byte for byte, and a missing socket is unreachable', async () => {
       const random = generator(7 + name.length);
       mkdirSync(join(root, `s-${name}`), {recursive: true});
-      const {host} = make({pythonCommand: join(bin, 'python')});
+      const {host} = make();
       for (let round = 0; round < 8; round += 1) {
         const socketPath = join(root, `s-${name}`, `${round}${awkwardName(random)}`);
         await listen(socketPath);
         await drain(await host.dial({socketPath}));
-        expect(recorded().argv).toEqual(['-m', 'entrypoints.stdio_bridge', '--socket', socketPath]);
+        expect(recorded().argv).toEqual([
+          'run',
+          '--project',
+          checkout,
+          'python',
+          '-m',
+          'entrypoints.stdio_bridge',
+          '--socket',
+          socketPath,
+        ]);
       }
       await expect(
         host.dial({socketPath: join(root, 'missing $(id) `id` !!')}),
       ).rejects.toMatchObject({kind: 'unreachable'});
-      await host.close();
-    });
-
-    test('a #!/bin/sh vibesys names no Python, so the user is asked for one', async () => {
-      const {host} = make();
-      await expect(host.dial({socketPath: join(root, 'any')})).rejects.toThrow(
-        "set the host's Python command",
-      );
       await host.close();
     });
   });
@@ -230,7 +266,7 @@ describe('SshHost data that cannot cross a command line', () => {
     const ssh = new LoginShellSsh('/bin/sh');
     const host = new SshHost({
       alias: 'node-1',
-      vibesysCommand: 'vibesys',
+      checkout: '/srv/vibesys',
       controlPath: '/tmp/vsd/%C',
       runner: ssh,
     });

@@ -16,9 +16,13 @@ import type {SshRunner} from '../ssh-host.js';
 import {type FakeProcess, fakeProcess, finishedProcess} from './fake-process.js';
 import type {FakeVibesysNode} from './fake-vibesys-node.js';
 
-/** Where the fake machine has VibeSys installed. */
-export const FAKE_VIBESYS_PATH = '/home/user/.local/bin/vibesys';
-export const FAKE_VIBESYS_PYTHON = '/home/user/.local/share/uv/tools/vibesys/bin/python';
+/** Where the fake machine has `uv` installed. */
+export const FAKE_UV_PATH = '/home/user/.local/bin/uv';
+/** The physical path of the fake machine's VibeSys checkout. */
+export const FAKE_CHECKOUT_ROOT = '/home/user/src/vibesys';
+
+/** What the fake machine's checkout check finds (`VERIFY_SCRIPT`'s verdicts). */
+export type FakeCheckout = 'ok' | 'nodir' | 'nopyproject' | 'notvibesys';
 
 export interface FakeSshCall {
   readonly args: readonly string[];
@@ -36,10 +40,12 @@ export class FakeSsh implements SshRunner {
   hostKeyKnown = true;
   /** Whether the user answers "yes" when asked to trust the host's key. */
   acceptsHostKey = true;
-  /** Whether `vibesys` is installed where the probe finds it. */
+  /** Whether `uv` is installed where the probe finds it. */
   installed = true;
-  /** The first line of the installed `vibesys`. */
-  firstLine = `#!${FAKE_VIBESYS_PYTHON}`;
+  /** What the checkout check finds. */
+  checkout: FakeCheckout = 'ok';
+  /** The `vibesys_root` of each record file in the fake registry. */
+  registry: string[] = [];
   /**
    * When set, every bridge exits at once with this outcome, as `stdio_bridge` reports it: before
    * the ready marker (the socket check failed) or, with `afterReady`, right after it.
@@ -109,9 +115,18 @@ export class FakeSsh implements SshRunner {
   /** Run one channel's remote command on the fake machine. */
   #remote({role, rest}: {readonly role: string; readonly rest: readonly string[]}): SpawnedProcess {
     if (role === 'vibesys-probe') {
+      return finishedProcess(0, this.installed ? `found ${FAKE_UV_PATH}\n` : 'missing\n');
+    }
+    if (role === 'vibesys-registry') {
       return finishedProcess(
         0,
-        this.installed ? `found ${FAKE_VIBESYS_PATH}\nfirst ${this.firstLine}\n` : 'missing\n',
+        this.registry.map(root => `{"vibesys_root": "${root}"}\n`).join(''),
+      );
+    }
+    if (role === 'vibesys-verify') {
+      return finishedProcess(
+        0,
+        this.checkout === 'ok' ? `root ${FAKE_CHECKOUT_ROOT}\n` : `${this.checkout}\n`,
       );
     }
     if (role === 'vibesys-run') return this.#run(rest);

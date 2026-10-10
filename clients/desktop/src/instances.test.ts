@@ -29,8 +29,22 @@ describe('registry records', () => {
         startedAt: 1_700_000_000,
         hostname: 'node-1',
         vibesysVersion: '0.0.0+fake',
+        vibesysRoot: null,
       },
     });
+  });
+
+  test('vibesys_root is read when present and null when an older server leaves it out', () => {
+    const record = parseInstanceRecord({
+      ...fakeRecord(ID, SOCKET, 1),
+      vibesys_root: '/home/me/src/vibesys',
+    });
+    expect(record.kind === 'compatible' && record.instance.vibesysRoot).toBe(
+      '/home/me/src/vibesys',
+    );
+    expect(() => parseInstanceRecord({...fakeRecord(ID, SOCKET, 1), vibesys_root: 3})).toThrow(
+      'record.vibesys_root must be a string or null',
+    );
   });
 
   test('a record of another protocol is incompatible, whatever else it carries', () => {

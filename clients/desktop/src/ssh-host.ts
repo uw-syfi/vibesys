@@ -11,20 +11,26 @@
  * connects directly with keys and the agent only, and fails with its status 255 when that cannot
  * log in; this host reports that as `auth` (a refusal, or a host key not yet trusted) or `link`.
  *
- * - `invoke(argv)` runs `<vibesys command> argv` on the host.
- * - `startServer(args)` runs `<vibesys command> --detach args` and returns the record's socket.
+ * VibeSys runs from a source checkout on the host (`checkout`, set once per host in the app):
+ *
+ * - `invoke(argv)` runs `uv run --project <checkout> vibesys argv` on the host.
+ * - `startServer(args)` runs that with `--detach args` and returns the record's socket.
  * - `dial(endpoint)` opens one channel per connection running the stdio bridge
- *   (`<python> -m entrypoints.stdio_bridge --socket PATH`), whose stdin and stdout are the stream.
+ *   (`uv run --project <checkout> python -m entrypoints.stdio_bridge --socket PATH`), whose stdin
+ *   and stdout are the stream.
+ * - `verifyCheckout()` checks the checkout (a directory whose `pyproject.toml` declares the
+ *   `vibesys` project) and `uv`, with an error naming exactly what is missing.
  *
  * Remote commands must mean the same under any login shell (sh, bash, zsh, tcsh, fish), since ssh
  * hands them to that shell. Each is `sh -c '<fixed one-line script>' <role> <data>...`: the script
  * contains no single quote, `!`, newline, or backslash pair, so every one of those shells passes it
  * to `sh` unchanged, and each datum (paths, the configured command, argv) is hex-encoded (`x6869`),
  * which no shell alters; the script decodes them back into `"$@"`. Nothing from a page or a record
- * is ever spliced into script text. The configured vibesys command is the one thing `sh` evaluates,
- * because it is a command line the user typed in the app's settings (`uv run --project
- * ~/src/vibesys vibesys`). Non-interactive ssh sessions often lack `~/.local/bin` on PATH, so its
- * first word is probed there and in a few common places, and a failure names every place tried.
+ * is ever spliced into script text. The one thing `sh` evaluates is the command line this module
+ * builds from the resolved `uv` path and the checkout, each single-quoted for `sh` (a `~/` checkout
+ * becomes `"$HOME"/'rest'`). Non-interactive ssh sessions often lack `~/.local/bin` on PATH, so
+ * `uv` is looked up on that PATH, then on a login shell's PATH, then in a few common places, and a
+ * failure names every place tried.
  */
 import {spawn} from 'node:child_process';
 import {Duplex} from 'node:stream';
@@ -40,10 +46,8 @@ export interface SshRunner {
 export interface SshHostOptions {
   /** The `Host` alias from `~/.ssh/config` (validated by `host-settings.ts`). */
   readonly alias: string;
-  /** The command line that runs VibeSys on the host, e.g. `vibesys`. */
-  readonly vibesysCommand: string;
-  /** The command line that runs the Python VibeSys is installed in; derived when absent. */
-  readonly pythonCommand?: string;
+  /** The VibeSys checkout on the host (validated by `host-settings.ts`), e.g. `~/src/vibesys`. */
+  readonly checkout: string;
   /** The master connection's socket path on this machine; short (Unix sockets cap paths). */
   readonly controlPath: string;
   /** The askpass helper the master uses for password and 2FA prompts. */
@@ -51,7 +55,7 @@ export interface SshHostOptions {
   readonly runner?: SshRunner;
 }
 
-/** Directories probed for the vibesys command's first word when it is not on the host's PATH. */
+/** Directories probed for `uv` when it is on neither the host's PATH nor a login shell's. */
 export const PROBED_DIRECTORIES = [
   '$HOME/.local/bin',
   '$HOME/.cargo/bin',
@@ -77,25 +81,46 @@ const QUOTED_ALL = hex('"$@"');
 const QUOTED_SECOND = hex('"$2"');
 
 /**
- * Resolve the configured command's first word: on PATH, then in each probed directory. Prints
- * `found PATH` and `first LINE` (the resolved file's first line, its `#!` line for a script), or
- * `missing`.
+ * Resolve program `$1` (`uv`): on PATH, then on the PATH of the user's login shell, then in each
+ * probed directory. Prints `found PATH`, or `missing`.
  */
 const PROBE_SCRIPT = [
   DECODE,
-  'set -f; set -- $1; w=$1; eval "w=$w"; found=;',
-  'case $w in */*) if [ -x "$w" ]; then found=$w; fi ;; *) found=$(command -v "$w" 2>/dev/null) || found= ;; esac;',
-  `if [ -z "$found" ]; then case $w in */*) ;; *) for x in ${PROBED_DIRECTORIES.map(d => `"${d}"`).join(' ')}; do if [ -x "$x/$w" ]; then found=$x/$w; break; fi; done ;; esac; fi;`,
+  'w=$1; found=$(command -v "$w" 2>/dev/null) || found=;',
+  `if [ -z "$found" ]; then found=$("\${SHELL:-/bin/sh}" -l -c "command -v $w" </dev/null 2>/dev/null | tail -n 1); [ -x "$found" ] || found=; fi;`,
+  `if [ -z "$found" ]; then for x in ${PROBED_DIRECTORIES.map(d => `"${d}"`).join(' ')}; do if [ -x "$x/$w" ]; then found=$x/$w; break; fi; done; fi;`,
   'if [ -z "$found" ]; then echo missing; exit 0; fi;',
-  'printf "found %s" "$found"; echo;',
-  'l=$(dd if="$found" bs=256 count=1 2>/dev/null | head -n 1);',
-  'printf "first %s" "$l"; echo',
+  'printf "found %s" "$found"; echo',
+].join(' ');
+
+/**
+ * Check checkout `$1` (`~` and `~/` mean the home directory). Prints `root PATH` (its physical
+ * path) when its `pyproject.toml` declares the `vibesys` project; otherwise `nodir`,
+ * `nopyproject`, or `notvibesys`.
+ */
+const VERIFY_SCRIPT = [
+  DECODE,
+  `p=$1; case $p in "~") p=$HOME ;; "~/"*) p="$HOME/\${p#??}" ;; esac;`,
+  'if [ ! -d "$p" ]; then echo nodir; exit 0; fi;',
+  'if [ ! -f "$p/pyproject.toml" ]; then echo nopyproject; exit 0; fi;',
+  'awk "/^[[]project[]]/ {s=1; next} /^[[]/ {s=0} s" "$p/pyproject.toml" | grep -q "^name *= *.vibesys.[ ]*$" || { echo notvibesys; exit 0; };',
+  'cd -- "$p" && printf "root %s" "$(pwd -P)"; echo',
+].join(' ');
+
+/**
+ * Print every record file of the live registry (`server.instances.instance_root`), one per line,
+ * without checking liveness: the app reads only their `vibesys_root` to suggest a checkout.
+ */
+const REGISTRY_SCRIPT = [
+  DECODE,
+  `r=\${XDG_RUNTIME_DIR:+$XDG_RUNTIME_DIR/vibesys}; r=\${r:-/tmp/vibesys-$(id -u)};`,
+  'for f in "$r"/instances/*.json; do if [ -f "$f" ]; then tr -d "[:cntrl:]" < "$f"; echo; fi; done',
 ].join(' ');
 
 /** Run the resolved command (`$2`) with the remaining arguments, in directory `$1` when given. */
 const RUN_SCRIPT = [
   DECODE,
-  `case $1 in "") ;; "~/"*) cd -- "$HOME/\${1#??}" || exit 1 ;; *) cd -- "$1" || exit 1 ;; esac;`,
+  `case $1 in "") ;; "~") cd -- "$HOME" || exit 1 ;; "~/"*) cd -- "$HOME/\${1#??}" || exit 1 ;; *) cd -- "$1" || exit 1 ;; esac;`,
   `shift; c=$1; shift; e=$(d ${QUOTED_ALL}); eval "exec $c $e"`,
 ].join(' ');
 
@@ -137,6 +162,18 @@ function shellQuote(word: string): string {
   return `'${word.replaceAll("'", `'\\''`)}'`;
 }
 
+/** A checkout path as one `sh` word: quoted, with a leading `~` meaning `$HOME`. */
+export function shellPath(path: string): string {
+  if (path === '~') return '"$HOME"';
+  if (path.startsWith('~/')) return `"$HOME"/${shellQuote(path.slice(2))}`;
+  return shellQuote(path);
+}
+
+/** How the app runs VibeSys from `checkout`: `uv` (resolved to `uv`) then `run --project ...`. */
+function checkoutCommand(uv: string, checkout: string, program: 'vibesys' | 'python'): string {
+  return `${uv} run --project ${shellPath(checkout)} ${program}`;
+}
+
 /** `word` as a token every shell leaves alone: `x` and its UTF-8 bytes in hex. */
 function hex(word: string): string {
   return `x${Buffer.from(word, 'utf8').toString('hex')}`;
@@ -157,16 +194,51 @@ function remoteCommand(script: string, role: string, args: readonly string[]): s
 }
 
 interface Resolved {
-  /** The vibesys command with its first word replaced by the path found. */
+  /** `uv run --project <checkout> vibesys`, with `uv` resolved to the path found. */
   readonly vibesys: string;
-  /** The Python the bridge runs on, or why it is unknown (commands still run without it). */
-  readonly python: {readonly command: string} | {readonly problem: string};
+  /** `uv run --project <checkout> python`: the Python the bridge runs on. */
+  readonly python: string;
 }
 
 export class SshHost extends DetachedHost {
+  readonly #access: SshAccess;
+
   constructor(options: SshHostOptions) {
-    super(new SshAccess(options));
+    const access = new SshAccess(options);
+    super(access);
+    this.#access = access;
   }
+
+  /**
+   * Check that the checkout is the VibeSys project and `uv` runs there; resolve with the
+   * checkout's physical path. Rejects with `failed` naming exactly what is missing, and with `link`
+   * or `auth` when the host cannot be reached (never prompting).
+   */
+  verifyCheckout(): Promise<string> {
+    return this.#access.verifyCheckout();
+  }
+
+  /** The `vibesys_root` of each record in the host's registry, live or not; never prompts. */
+  registryRoots(): Promise<string[]> {
+    return this.#access.registryRoots();
+  }
+}
+
+/** The absolute `vibesys_root` values in registry record lines, each once. */
+function registryRoots(stdout: string): string[] {
+  const roots: string[] = [];
+  for (const line of stdout.split('\n')) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line) as unknown;
+    } catch {
+      continue;
+    }
+    if (typeof parsed !== 'object' || parsed === null) continue;
+    const root = (parsed as {vibesys_root?: unknown}).vibesys_root;
+    if (typeof root === 'string' && root.startsWith('/') && !roots.includes(root)) roots.push(root);
+  }
+  return roots;
 }
 
 class SshAccess implements HostAccess {
@@ -220,8 +292,7 @@ class SshAccess implements HostAccess {
   async connect(socketPath: string): Promise<Duplex> {
     await this.#ensure(false);
     const {python} = await this.#resolve();
-    if ('problem' in python) throw new HostError('failed', python.problem);
-    const process = this.#channel(BRIDGE_SCRIPT, 'vibesys-bridge', [python.command, socketPath]);
+    const process = this.#channel(BRIDGE_SCRIPT, 'vibesys-bridge', [python, socketPath]);
     const stderr = new Tail();
     process.stderr.setEncoding('utf8');
     process.stderr.on('data', (chunk: string) => stderr.push(chunk));
@@ -285,36 +356,51 @@ class SshAccess implements HostAccess {
   }
 
   async #probe(): Promise<Resolved> {
-    const command = this.#options.vibesysCommand;
-    const output = await finish(this.#channel(PROBE_SCRIPT, 'vibesys-probe', [command]));
+    const output = await finish(this.#channel(PROBE_SCRIPT, 'vibesys-probe', ['uv']));
     if (output.code === SSH_FAILED) throw this.#sshError(output.stderr);
-    const lines = output.stdout.split('\n');
-    const found = lines.find(line => line.startsWith('found '))?.slice('found '.length);
-    const first = command.split(' ')[0] ?? command;
+    const found = output.stdout
+      .split('\n')
+      .find(line => line.startsWith('found '))
+      ?.slice('found '.length);
     if (output.code !== 0 || found === undefined) {
       const tried = [
         'the PATH of a non-interactive shell',
-        ...PROBED_DIRECTORIES.map(d => `${d}/${first}`),
+        "the login shell's PATH",
+        ...PROBED_DIRECTORIES.map(d => `${d}/uv`),
       ];
       throw new HostError(
         'failed',
-        `the vibesys command "${command}" was not found on ${this.#options.alias}; tried ` +
-          `${tried.join(', ')}. Set the host's vibesys command to a full path.`,
+        `uv was not found on ${this.#options.alias}; tried ${tried.join(', ')}. ` +
+          'Install uv there (https://docs.astral.sh/uv/) or put it on the PATH.',
       );
     }
-    const rest = command.slice(first.length);
-    const vibesys = `${shellQuote(found)}${rest}`;
-    const head = lines.find(line => line.startsWith('first '))?.slice('first '.length) ?? '';
-    const shebang = head.startsWith('#!') ? head.slice(2) : '';
-    const python = this.#options.pythonCommand ?? derivePython(vibesys, rest, shebang);
-    if (python === null) {
-      const problem =
-        `cannot tell which Python runs "${command}" on ${this.#options.alias}` +
-        (shebang === '' ? '' : ` (its first line is "#!${shebang.trim()}")`) +
-        "; set the host's Python command in the picker.";
-      return {vibesys, python: {problem}};
+    const uv = shellQuote(found);
+    return {
+      vibesys: checkoutCommand(uv, this.#options.checkout, 'vibesys'),
+      python: checkoutCommand(uv, this.#options.checkout, 'python'),
+    };
+  }
+
+  async registryRoots(): Promise<string[]> {
+    await this.#ensure(false);
+    const output = await finish(this.#channel(REGISTRY_SCRIPT, 'vibesys-registry', []));
+    if (output.code === SSH_FAILED) throw this.#sshError(output.stderr);
+    return registryRoots(output.stdout);
+  }
+
+  async verifyCheckout(): Promise<string> {
+    await this.#ensure(false);
+    const {alias, checkout} = this.#options;
+    const output = await finish(this.#channel(VERIFY_SCRIPT, 'vibesys-verify', [checkout]));
+    if (output.code === SSH_FAILED) throw this.#sshError(output.stderr);
+    const line = output.stdout.split('\n')[0]?.trim() ?? '';
+    const where = `${checkout} on ${alias}`;
+    if (output.code === 0 && line.startsWith('root ')) {
+      this.#resolved = null;
+      await this.#resolve();
+      return line.slice('root '.length);
     }
-    return {vibesys, python: {command: python}};
+    throw new HostError('failed', checkoutProblem(line, where, output.stderr));
   }
 
   #channel(script: string, role: string, args: readonly string[]): SpawnedProcess {
@@ -393,19 +479,27 @@ const AUTH_FAILURE =
   /Permission denied|Too many authentication failures|Authentication failed|Host key verification failed/;
 
 /**
- * The Python for a vibesys command: a launcher like `uv run ... vibesys` runs `uv run ... python`;
- * an installed script runs the interpreter of its `#!` line when that is a Python (directly or
- * through `env`). Null otherwise: a `#!/bin/sh` launcher (uv's polyglot scripts) names no Python.
+ * The `sh` arguments that run the checkout check (`verify`) or the `uv` lookup (`probe`) on this
+ * machine, the same scripts a host runs over ssh, so This Mac's checkout is checked the same way.
  */
-function derivePython(vibesys: string, rest: string, shebang: string): string | null {
-  const words = rest.trim().split(/\s+/);
-  if (rest.trim() !== '' && words.at(-1) === 'vibesys') {
-    return `${vibesys.slice(0, vibesys.length - 'vibesys'.length)}python`;
+export function localCheckArgs(check: 'verify' | 'probe', datum: string): string[] {
+  const [script, role] =
+    check === 'verify' ? [VERIFY_SCRIPT, 'vibesys-verify'] : [PROBE_SCRIPT, 'vibesys-probe'];
+  return ['-c', script, role, hex(datum)];
+}
+
+/** What a failed checkout check means, for a `where` (`PATH on HOST`). */
+export function checkoutProblem(verdict: string, where: string, stderr = ''): string {
+  switch (verdict) {
+    case 'nodir':
+      return `${where} is not a directory.`;
+    case 'nopyproject':
+      return `${where} has no pyproject.toml; pick the directory you cloned VibeSys into.`;
+    case 'notvibesys':
+      return `${where} has a pyproject.toml, but it does not declare the vibesys project.`;
+    default:
+      return `could not check ${where}: ${lastLine(stderr)}`;
   }
-  const interpreter = shebang.trim().split(/\s+/);
-  const program = interpreter[0]?.endsWith('/env') ? interpreter[1] : interpreter[0];
-  const name = program?.split('/').at(-1) ?? '';
-  return /^python[0-9.]*$/.test(name) ? interpreter.map(shellQuote).join(' ') : null;
 }
 
 /**
