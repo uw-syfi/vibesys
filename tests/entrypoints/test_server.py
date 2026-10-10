@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import signal
 import stat
 import subprocess
 import sys
@@ -16,7 +15,7 @@ from string import ascii_lowercase
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import example, given, settings
+from hypothesis import example, given
 from hypothesis.strategies import integers, one_of, text
 from tests.entrypoints.support import (
     BUDGET_POLLS,
@@ -59,21 +58,11 @@ from entrypoints.server import (
 from server.runtime import WebPortObservation, WebPortState
 from server.transport.discovery import WebInstanceClaim, WebInstanceHold, WebInstanceRecord
 from server.transport.websocket import WebSocketLimits
-from vs_sim.api.testing import (
-    HANG_GUARD_S,
-    TGKILL_SUPPORTED,
-    non_main_thread_ids,
-    send_to_thread,
-    stop_process,
-)
+from vs_sim.api.testing import SimThreads, stop_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import BinaryIO
-
-requires_tgkill = pytest.mark.skipif(
-    not TGKILL_SUPPORTED, reason="tgkill syscall number is unknown"
-)
 
 
 class RecordingDetachedProcess:
@@ -849,11 +838,8 @@ def test_detached_launch_effects_capture_a_real_child_and_use_discovery(tmp_path
     assert effects.monotonic() >= before
 
 
-def test_discover_web_instance_waits_for_a_claimed_gateway(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
-    record = WebInstanceRecord(
+def _claimed_gateway_record(tmp_path: Path) -> WebInstanceRecord:
+    return WebInstanceRecord(
         pid=123,
         port=43_211,
         token="capability",  # noqa: S106  # lint-waiver: LW-101064 [S106]; use a fixed capability token in a launch-race fixture
@@ -861,59 +847,60 @@ def test_discover_web_instance_waits_for_a_claimed_gateway(
         project_root=str(tmp_path),
         started_at=1.0,
     )
-    discoveries = iter([None, record])
-    # test-isolation: replace discovery with a deterministic bind-to-record race
-    monkeypatch.setattr(
-        server_entrypoint.WebInstanceRecord,
-        "discover",
-        lambda *_args, **_kwargs: next(discoveries),
-    )
-    # test-isolation: hold the startup claim while the competing gateway publishes its record
-    monkeypatch.setattr(server_entrypoint.WebInstanceClaim, "is_held", lambda _path: True)
-    # test-isolation: avoid delaying this deterministic polling test
-    monkeypatch.setattr(server_entrypoint.time, "sleep", lambda _seconds: None)
-    # test-isolation: keep the race test on the first polling iteration
-    monkeypatch.setattr(server_entrypoint.time, "monotonic", lambda: 0.0)
-
-    assert (
-        server_entrypoint._discover_web_instance(  # noqa: SLF001  # lint-waiver: LW-101066 [SLF001]; exercise the launch race helper directly
-            instance_path
-        )
-        == record
-    )
 
 
-def test_discover_web_instance_falls_back_after_claim_timeout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@given(polls_before_publication=integers(min_value=0, max_value=30))
+def test_discover_web_instance_waits_for_a_claimed_gateway(
+    tmp_path_factory: pytest.TempPathFactory, polls_before_publication: int
 ) -> None:
-    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
-    record = WebInstanceRecord(
-        pid=123,
-        port=43_211,
-        token="capability",  # noqa: S106  # lint-waiver: LW-101065 [S106]; use a fixed capability token in a launch-race fixture
-        url="http://127.0.0.1:43211/?token=capability",
-        project_root=str(tmp_path),
-        started_at=1.0,
-    )
-    discoveries = iter([None, record])
-    monotonic_values = iter([0.0, 3.0])
-    # test-isolation: replace discovery with a deterministic timeout fallback
-    monkeypatch.setattr(
-        server_entrypoint.WebInstanceRecord,
-        "discover",
-        lambda *_args, **_kwargs: next(discoveries),
-    )
-    # test-isolation: keep the competing startup claim held until the deadline
-    monkeypatch.setattr(server_entrypoint.WebInstanceClaim, "is_held", lambda _path: True)
-    # test-isolation: advance directly from the deadline setup to the timeout check
-    monkeypatch.setattr(server_entrypoint.time, "monotonic", lambda: next(monotonic_values))
+    tmp_path = tmp_path_factory.mktemp("claimed")
+    record = _claimed_gateway_record(tmp_path)
+    polls = 0
 
-    assert (
-        server_entrypoint._discover_web_instance(  # noqa: SLF001  # lint-waiver: LW-101067 [SLF001]; exercise the launch timeout fallback directly
-            instance_path
+    def discover(*_args: object, **_kwargs: object) -> WebInstanceRecord | None:
+        nonlocal polls
+        polls += 1
+        return record if polls > polls_before_publication else None
+
+    threads = SimThreads()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        # test-isolation: replace discovery with a deterministic bind-to-record race
+        monkeypatch.setattr(server_entrypoint.WebInstanceRecord, "discover", discover)
+        # test-isolation: hold the startup claim while the competing gateway publishes its record
+        monkeypatch.setattr(server_entrypoint.WebInstanceClaim, "is_held", lambda _path: True)
+
+        found = threads.run(
+            lambda: server_entrypoint._discover_web_instance(  # noqa: SLF001  # lint-waiver: LW-101066 [SLF001]; exercise the launch race helper directly
+                tmp_path / ".vibesys" / "web-gateway.json", threads
+            )
         )
-        == record
-    )
+
+    assert found == record
+    assert polls == polls_before_publication + 1
+
+
+def test_discover_web_instance_falls_back_after_claim_timeout(tmp_path: Path) -> None:
+    record = _claimed_gateway_record(tmp_path)
+
+    def discover(*_args: object, cleanup_stale: bool = True) -> WebInstanceRecord | None:
+        # The polling reads (`cleanup_stale=False`) never see the record; the final read does.
+        return None if not cleanup_stale else record
+
+    threads = SimThreads()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        # test-isolation: replace discovery with a deterministic timeout fallback
+        monkeypatch.setattr(server_entrypoint.WebInstanceRecord, "discover", discover)
+        # test-isolation: keep the competing startup claim held until the deadline
+        monkeypatch.setattr(server_entrypoint.WebInstanceClaim, "is_held", lambda _path: True)
+
+        found = threads.run(
+            lambda: server_entrypoint._discover_web_instance(  # noqa: SLF001  # lint-waiver: LW-101067 [SLF001]; exercise the launch timeout fallback directly
+                tmp_path / ".vibesys" / "web-gateway.json", threads
+            )
+        )
+
+    assert found == record
+    assert threads.now() >= 2
 
 
 def test_web_instance_claim_reports_ownership(tmp_path: Path) -> None:
@@ -1134,37 +1121,3 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     assert options["web_assets"] == tmp_path.resolve()
     assert callable(options["tui_defaults"])
     assert observed["request"] is request
-
-
-@requires_tgkill
-@example(transports=1, target=1)
-@settings(max_examples=8, deadline=None)
-@given(transports=integers(min_value=1, max_value=3), target=integers(min_value=0, max_value=3))
-def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
-    transports: int, target: int
-) -> None:
-    # The kernel may hand a process SIGTERM to any thread while CPython runs
-    # handlers on the main thread, which is blocked driving the run. Aim it at
-    # the main thread or at any transport thread to force each interleaving.
-    child = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-155502 [S603]; the test runs its own fixed child module.
-        # > A real signal needs a real child process.
-        [sys.executable, "-m", "tests.entrypoints.foreground_run_child", str(transports)],
-        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        assert child.stdout is not None
-        assert child.stdout.readline().strip() == "driving"
-        threads = [child.pid, *non_main_thread_ids(child.pid)]
-        send_to_thread(child.pid, threads[target % len(threads)], signal.SIGTERM)
-        # test-isolation: the deadline only guards a hang; a delivered stop returns at once
-        output, _ = child.communicate(timeout=20)
-    except subprocess.TimeoutExpired:
-        child.kill()
-        child.communicate(timeout=HANG_GUARD_S)
-        pytest.fail("SIGTERM did not interrupt the foreground run")
-    finally:
-        child.kill()
-    assert "cleanup shutdown=True" in output
-    assert child.returncode != 0

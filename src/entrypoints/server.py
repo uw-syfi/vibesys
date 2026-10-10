@@ -8,7 +8,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 import webbrowser
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -38,6 +37,7 @@ from vibesys.api.request import generate_experiment_name, repository_name_from_e
 from vs_github.api import GitHubCLI, GitHubCLIError
 from vs_project.api import Project
 from vs_sandbox.api import relay_signals
+from vs_sim.api import OsThreads
 
 _WEB_PORT_MAX = 65_535
 _DETACHED_START_TIMEOUT_SECONDS = 10.0
@@ -57,6 +57,7 @@ if TYPE_CHECKING:
 
     from server.runtime import ServerRuntime
     from vibesys.api import Config
+    from vs_sim.api import Threads
 
 
 @contextmanager
@@ -324,8 +325,11 @@ class _DetachedGatewayEffects:
     One class covers launching and stopping because both act on the same
     gateway through the same mechanisms. `stop_detached_gateway` reaches it
     through the narrower `WebGatewayStopEffects` Protocol, which omits `spawn`
-    and `discover`.
+    and `discover`. Time passes on *threads* (the real clock by default).
     """
+
+    def __init__(self, threads: Threads | None = None) -> None:
+        self._threads = OsThreads() if threads is None else threads
 
     def spawn(
         self,
@@ -362,10 +366,10 @@ class _DetachedGatewayEffects:
         WebPortInspector().terminate(listener)
 
     def monotonic(self) -> float:
-        return time.monotonic()
+        return self._threads.now()
 
     def sleep(self, seconds: float) -> None:
-        time.sleep(seconds)
+        self._threads.sleep(seconds)
 
 
 _DETACHED_EFFECTS = _DetachedGatewayEffects()
@@ -704,18 +708,19 @@ def _detached_failure(summary: str, log_path: Path, output: BinaryIO) -> str:
     return f"{tail}\n{message}" if tail else message
 
 
-def _discover_web_instance(path: Path) -> WebInstanceRecord | None:
+def _discover_web_instance(path: Path, threads: Threads | None = None) -> WebInstanceRecord | None:
     """Wait through the bind-to-record race before deciding to launch again."""
-    deadline = time.monotonic() + 2
+    clock = OsThreads() if threads is None else threads
+    deadline = clock.now() + 2
     while True:
         record = WebInstanceRecord.discover(path, cleanup_stale=False)
         if record is not None:
             return record
         if not WebInstanceClaim.is_held(path):
             return WebInstanceRecord.discover(path)
-        if time.monotonic() >= deadline:
+        if clock.now() >= deadline:
             return WebInstanceRecord.discover(path)
-        time.sleep(0.05)
+        clock.sleep(0.05)
 
 
 def main(argv: list[str] | None = None) -> None:
