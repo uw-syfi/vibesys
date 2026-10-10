@@ -187,13 +187,17 @@ def _headless_requested(args: list[str]) -> bool:
         or "-h" in args
     ):
         return True
-    if args and args[0] in {"tui-defaults", "validate", "web", "instances"}:
+    if args and args[0] in {"tui-defaults", "validate", "web", "instances", "tasks"}:
         return True
     return not (sys.stdin.isatty() and sys.stdout.isatty())
 
 
 def _run_headless(args: list[str], host: LauncherHost) -> int:
-    subcommands = {"web": "entrypoints.web", "instances": "entrypoints.instances"}
+    subcommands = {
+        "web": "entrypoints.web",
+        "instances": "entrypoints.instances",
+        "tasks": "entrypoints.tasks",
+    }
     module = (
         subcommands[args[0]]
         if args and args[0] in subcommands

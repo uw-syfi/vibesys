@@ -528,3 +528,11 @@ def test_socket_paths_fit_the_unix_limit_with_room_to_spare() -> None:
     assert len(str(instance_socket_path(root, new_instance_id())).encode()) <= (
         MAX_SOCKET_PATH_BYTES - 40
     )
+
+
+def test_record_without_vibesys_root_still_parses_as_version_1() -> None:
+    document = _record(IDS[0]).model_dump(exclude={"vibesys_root"})
+
+    record = LiveInstanceRecord.model_validate(document)
+
+    assert (record.version, record.vibesys_root) == (1, None)

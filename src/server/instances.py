@@ -95,6 +95,14 @@ class LiveInstanceRecord(BaseModel):
     hostname: str
     protocol_version: Literal[1] = PROTOCOL_VERSION
     vibesys_version: str
+    vibesys_root: str | None = None
+    """Absolute path of the VibeSys source checkout this server runs from.
+
+    ``None`` when the server runs from an installed distribution rather than a
+    checkout, and in records written before the field existed (the field is
+    additive, so the record stays version 1). A client uses it to suggest the
+    checkout it should run ``vibesys`` from on this host.
+    """
 
 
 class InstanceList(BaseModel):
