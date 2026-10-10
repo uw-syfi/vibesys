@@ -1,17 +1,18 @@
+"""Fixtures shared by the tests under ``tests/``.
+
+Nothing here imports the product. pytest imports this file in the xdist controller
+as well as in every worker, and the controller runs no test: a top-level ``vibesys``
+import made it build the whole model graph (seconds, several times that under
+coverage) for nothing. A fixture that needs the product lives in the test module that
+uses it.
+"""
+
 import shutil
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-
-from vibesys.inputs import (
-    MANIFEST_NAME,
-    InputBundle,
-    load_input_bundle,
-    load_project_task,
-)
-from vs_project.api import Project, ProjectNotInitializedError
 
 
 @pytest.fixture
@@ -72,22 +73,3 @@ def socket_dir() -> Iterator[Path]:
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return Path(__file__).parents[1]
-
-
-@pytest.fixture(scope="session")
-def example_input_bundles(repo_root: Path) -> tuple[InputBundle, ...]:
-    manifests = sorted((repo_root / "examples").glob(f"**/{MANIFEST_NAME}"))
-    bundles: list[InputBundle] = []
-    for manifest in manifests:
-        try:
-            project = Project.discover(manifest)
-        except ProjectNotInitializedError:
-            bundles.append(load_input_bundle(manifest.parent))
-            continue
-        task = next(
-            task for task in project.discover_tasks() if task.manifest_path == manifest.resolve()
-        )
-        bundles.append(load_project_task(project, task))
-
-    assert bundles, f"No example input bundles found under {repo_root / 'examples'}"
-    return tuple(bundles)
