@@ -19,12 +19,11 @@ from typing import TYPE_CHECKING
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.support.agent_tool_world import Program, ScriptedAgent, scenario
-from tests.support.host_clock import clock_from
 from tests.support.skeleton_world import LEASE, Process, drive
 from tests.support.waiting_loop_strategy import LoopState, LoopStrategy
 
 from vs_core.api import Limits, RunStatus
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import VirtualClock, clock_from, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path

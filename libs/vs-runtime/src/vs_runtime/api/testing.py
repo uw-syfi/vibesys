@@ -7,6 +7,7 @@ from vs_runtime._fake_core_execution import (
     FakePublicationDelivery,
     FakeRequestExecution,
 )
+from vs_runtime._run_clocks import CrashableRunClock, ProbedRunClock
 from vs_runtime._run_environment import HostEnvironment
 from vs_runtime._runs import FakeRunHandle, FakeRuns
 from vs_runtime.fakes import (
@@ -55,6 +56,7 @@ def unconfined_host_environment() -> HostEnvironment:
 
 
 __all__ = [
+    "CrashableRunClock",
     "ExecutedRequest",
     "FakeAccuracyCall",
     "FakeAgentExecutionEnvironment",
@@ -94,6 +96,7 @@ __all__ = [
     "FakeWorkspaceAgentSessions",
     "FakeWorkspaces",
     "ObservationCall",
+    "ProbedRunClock",
     "TurnResponder",
     "unconfined_host_environment",
 ]

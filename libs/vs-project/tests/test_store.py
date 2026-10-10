@@ -13,7 +13,6 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, Json, ValidationError
-from tests.support.file_effects import file_size_limit
 from tests.support.run_execution import run_execution_record
 
 from vs_project.api import (
@@ -31,6 +30,7 @@ from vs_project.api import (
     generate_run_id,
     is_project_state_path,
 )
+from vs_sim.api.testing import file_size_limit
 
 NOW = datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC)
 UNIQUE = UUID("12345678-1234-5678-1234-567812345678")

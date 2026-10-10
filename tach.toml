@@ -429,7 +429,7 @@ depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "v
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_async_ops.api", "vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations", "vs_mcp", "vs_sim.api"]
+depends_on = ["vs_async_ops.api", "vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_runtime._fake_agent_invocations"
@@ -662,7 +662,7 @@ depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.n
 [[modules]]
 path = "vs_sim.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.fakes", "vs_sim.gate", "vs_sim.manual", "vs_sim.seeds", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
+depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.fakes", "vs_sim.file_effects", "vs_sim.gate", "vs_sim.host_clock", "vs_sim.manual", "vs_sim.pairwise", "vs_sim.seeds", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
 
 [[modules]]
 path = "vs_sim.blocking"
@@ -725,12 +725,27 @@ layer = "prompts_and_lower_libs"
 depends_on = ["vs_sim.clock", "vs_sim.gate", "vs_sim.processes"]
 
 [[modules]]
+path = "vs_sim.file_effects"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
 path = "vs_sim.gate"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_sim.concurrency"]
 
 [[modules]]
+path = "vs_sim.host_clock"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.virtual"]
+
+[[modules]]
 path = "vs_sim.manual"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.pairwise"
 layer = "prompts_and_lower_libs"
 depends_on = []
 

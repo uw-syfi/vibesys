@@ -35,7 +35,6 @@ from tests.composition.dynamic._harness import (
     simulated_clock,
     workstream,
 )
-from tests.support.host_clock import HostCrashedError
 
 from vibesys.api import RunFailureKind, RunStatus
 from vibesys.events import CoreEventType
@@ -43,6 +42,7 @@ from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATO
 from vs_agent.api import AgentOutputSchemaError, AgentSpawnError, AgentTurnTimeoutError
 from vs_project.api import Project
 from vs_runtime.api.core import RunStalledError
+from vs_sim.api.testing import HostCrashedError
 
 if TYPE_CHECKING:
     from collections.abc import Callable

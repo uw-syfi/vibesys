@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Any
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
-from tests.support.host_clock import clock_from
 from tests.support.session_world import ProviderFaults, SessionHost
 from tests.support.skeleton_strategy import ATTEMPT, DIGEST, SkeletonState, SkeletonStrategy
 from tests.support.skeleton_world import (
@@ -68,7 +67,7 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
 )
 from vs_runtime.contracts import AgentRole, AgentTool
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import VirtualClock, clock_from, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

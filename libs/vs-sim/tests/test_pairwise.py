@@ -6,7 +6,8 @@ from itertools import combinations, product
 
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.pairwise import pairwise_rows
+
+from vs_sim.api.testing import pairwise_rows
 
 FACTORS = st.lists(
     st.lists(st.integers(0, 5), min_size=1, max_size=5, unique=True), min_size=2, max_size=5

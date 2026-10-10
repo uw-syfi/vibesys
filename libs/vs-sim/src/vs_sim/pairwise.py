@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 type Row = tuple[object, ...]
 
+_PAIR = 2
+
 
 def _pairs(row: Row) -> set[tuple[int, object, int, object]]:
     return {(i, row[i], j, row[j]) for i, j in combinations(range(len(row)), 2)}
@@ -27,7 +29,7 @@ def pairwise_rows(*factors: Sequence[object]) -> list[Row]:
     Greedy: repeatedly take the first row of the cross product that covers the most
     still-uncovered pairs. The result is a pure function of the factors' order.
     """
-    if len(factors) < 2:
+    if len(factors) < _PAIR:
         return list(product(*factors))
     candidates = [(row, _pairs(row)) for row in product(*factors)]
     uncovered = set().union(*(pairs for _, pairs in candidates)) if candidates else set()

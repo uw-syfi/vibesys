@@ -21,7 +21,6 @@ from tests.support.concurrent_turns_strategy import (
     ConcurrentTurnsState,
     ConcurrentTurnsStrategy,
 )
-from tests.support.host_clock import clock_from
 from tests.support.skeleton_world import LEASE, drive
 
 from vs_core.api import (
@@ -34,7 +33,7 @@ from vs_core.api import (
     ResourceId,
     RunStatus,
 )
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import VirtualClock, clock_from, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path
