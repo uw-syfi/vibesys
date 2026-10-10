@@ -41,7 +41,8 @@ def _signal_client(run: OpenRun, number: signal.Signals) -> None:
 def test_signalling_the_agents_client_cancels_the_job_and_gives_the_shell_status(
     run: OpenRun, slurm_cluster: SlurmCluster, number: signal.Signals, status: int, via: str
 ) -> None:
-    pending = in_background(lambda: run.agent(_hold(run, via)))
+    command = _hold(run, via)
+    pending = in_background(lambda: run.agent(command))
     job = slurm_cluster.wait_for_job("")
 
     _signal_client(run, number)
@@ -58,7 +59,8 @@ def test_cancelling_the_agents_command_stops_its_client_and_its_job(
     run: OpenRun, slurm_cluster: SlurmCluster, via: str
 ) -> None:
     cancel = threading.Event()
-    pending = in_background(lambda: run.agent(_hold(run, via), cancel=cancel))
+    command = _hold(run, via)
+    pending = in_background(lambda: run.agent(command, cancel=cancel))
     job = slurm_cluster.wait_for_job("")
 
     cancel.set()
