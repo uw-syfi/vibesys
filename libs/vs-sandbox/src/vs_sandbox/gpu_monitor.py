@@ -15,18 +15,17 @@ experiment's log directory.
 from __future__ import annotations
 
 import json
-import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
-from vs_sim.api import Clock, OsThreads, SystemClock, Threads
+from vs_sim.api import Clock, OsThreads, SubprocessProbe, SystemClock, Threads
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from vs_sim.api import Worker
+    from vs_sim.api import CommandProbe, Worker
 GPU_QUERY_COLUMN_COUNT = 6
 GPU_PROCESS_QUERY_COLUMN_COUNT = 4
 
@@ -120,8 +119,15 @@ class GpuTelemetry(Protocol):
 class NvidiaSmiTelemetry:
     """:class:`GpuTelemetry` read by running ``nvidia-smi``."""
 
-    def __init__(self, executable: str = "nvidia-smi", timeout: float = 10.0) -> None:
+    def __init__(
+        self,
+        executable: str = "nvidia-smi",
+        timeout: float = 10.0,
+        *,
+        probe: CommandProbe | None = None,
+    ) -> None:
         """Run *executable* (looked up on ``PATH`` when bare), giving up after *timeout* seconds."""
+        self._probe: CommandProbe = probe or SubprocessProbe()
         self._executable = executable
         self._timeout = timeout
 
@@ -138,15 +144,11 @@ class NvidiaSmiTelemetry:
         return self._query("--query-compute-apps=pid,process_name,used_gpu_memory,gpu_uuid")
 
     def _query(self, query: str) -> str:
-        try:
-            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-009048 [S603]; the executable is configuration and the query is a constant.
-                [self._executable, query, "--format=csv,noheader,nounits"],
-                capture_output=True,
-                text=True,
-                timeout=self._timeout,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
+        result = self._probe.run(
+            [self._executable, query, "--format=csv,noheader,nounits"],
+            timeout_seconds=self._timeout,
+        )
+        if result is None:
             return ""
         return result.stdout if result.returncode == 0 else ""
 

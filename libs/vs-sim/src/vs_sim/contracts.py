@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
     from vs_sim.blocking import BlockingRunner
     from vs_sim.clock import Clock, Sleeper
+    from vs_sim.probes import CommandProbe
     from vs_sim.processes import ForegroundLauncher, ProcessLauncher, ProcessOutcome
     from vs_sim.signals import ProcessSignaller, SignalSource
 
@@ -582,3 +583,45 @@ class ForegroundLauncherContract:
             return
         message = "starting a missing program did not raise OSError"
         raise AssertionError(message)
+
+
+@dataclass(frozen=True)
+class ProbeUnderTest:
+    """A probe and commands with known outcomes for it."""
+
+    probe: CommandProbe
+    exit_with_stdout: Callable[[int, str], tuple[str, ...]]
+    """A command that writes the text to stdout and exits with the status."""
+    blocks_forever: tuple[str, ...]
+    """A command that never ends by itself."""
+    missing_program: tuple[str, ...]
+    """A command whose program does not exist."""
+
+
+class CommandProbeContract:
+    """Cases for :class:`~vs_sim.probes.CommandProbe`. Implement :meth:`probe_under_test`."""
+
+    def probe_under_test(self) -> ProbeUnderTest:
+        """A fresh probe with its harness."""
+        raise NotImplementedError
+
+    def test_status_and_output_come_back(self) -> None:
+        """The result carries the exit status, zero or not, and what the command printed."""
+        for seed in range(_CASES):
+            rng = SeededRandom(seed)
+            subject = self.probe_under_test()
+            status = rng.randint(0, 100)
+            text = "".join(chr(rng.randint(32, 126)) for _ in range(rng.randint(0, 20)))
+            result = subject.probe.run(subject.exit_with_stdout(status, text), timeout_seconds=30)
+            assert result is not None, seed
+            assert (result.returncode, result.stdout) == (status, text), seed
+
+    def test_a_missing_program_is_unavailable(self) -> None:
+        """A program that does not exist gives ``None`` instead of raising."""
+        subject = self.probe_under_test()
+        assert subject.probe.run(subject.missing_program, timeout_seconds=30) is None
+
+    def test_a_command_that_outlives_the_timeout_is_unavailable(self) -> None:
+        """A command still running at the timeout gives ``None``."""
+        subject = self.probe_under_test()
+        assert subject.probe.run(subject.blocks_forever, timeout_seconds=0.2) is None

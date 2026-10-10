@@ -10,6 +10,10 @@ import pytest
 from vs_sandbox import api as sandbox_api
 from vs_sandbox import host_sandbox
 from vs_sandbox.api import HostSandbox
+from vs_sim.api import ProbeResult
+from vs_sim.api.testing import ScriptedProbe
+
+_WORKING_BWRAP = ScriptedProbe(lambda _argv: ProbeResult(0, ""))
 
 
 def _host_devices(pattern: str) -> list[Path]:
@@ -19,8 +23,7 @@ def _host_devices(pattern: str) -> list[Path]:
 
 def _build_host_sandbox(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> HostSandbox:
     monkeypatch.setattr(host_sandbox.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/bwrap")
-    monkeypatch.setattr(host_sandbox, "_bwrap_confines", lambda _bwrap: True)
-    sandbox = sandbox_api.build_host_sandbox(workspace, env={})
+    sandbox = sandbox_api.build_host_sandbox(workspace, env={}, probe=_WORKING_BWRAP)
     assert isinstance(sandbox, HostSandbox)
     return sandbox
 
@@ -79,12 +82,12 @@ class TestAcceleratorDeviceNodes:
         monkeypatch.setattr(
             host_sandbox.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/bwrap"
         )
-        # test-isolation: the host may lack bwrap and GPUs; pin both to reach the GPU branch.
-        monkeypatch.setattr(host_sandbox, "_bwrap_confines", lambda _bwrap: True)
-        # test-isolation: the host may lack bwrap and GPUs; pin both to reach the GPU branch.
+        # test-isolation: the host may lack GPUs; pin them to reach the GPU branch.
         monkeypatch.setattr(host_sandbox, "_gpu_device_nodes", lambda: [Path("/dev/nvidia0")])
         sandbox = sandbox_api.build_host_sandbox(
-            tmp_path, env={sandbox_api.SANDBOX_GPU_DEVICES_ENV: "none"}
+            tmp_path,
+            env={sandbox_api.SANDBOX_GPU_DEVICES_ENV: "none"},
+            probe=_WORKING_BWRAP,
         )
 
         assert isinstance(sandbox, HostSandbox)

@@ -99,10 +99,8 @@
 {"path": "libs/vs-runtime/tests/test_trusted_evaluation.py", "rule": "threading", "count": 3}
 {"path": "libs/vs-runtime/tests/test_trusted_evaluation_preparation.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-runtime/tests/test_workspace_requests.py", "rule": "threading", "count": 3}
-{"path": "libs/vs-sandbox/src/vs_sandbox/accelerator_discovery.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/command_execution.py", "rule": "subprocess", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/container_runtime.py", "rule": "subprocess", "count": 2}
-{"path": "libs/vs-sandbox/src/vs_sandbox/cuda_backend.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/cuda_backend.py", "rule": "wall_clock", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/device_lease.py", "rule": "wall_clock", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/docker_cli.py", "rule": "subprocess", "count": 5}
@@ -118,12 +116,10 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/gate_runners.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/gate_runners.py", "rule": "subprocess", "count": 6}
 {"path": "libs/vs-sandbox/src/vs_sandbox/gate_runners.py", "rule": "threading", "count": 3}
-{"path": "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/host_command_client.py", "rule": "signal", "count": 5}
 {"path": "libs/vs-sandbox/src/vs_sandbox/host_command_client.py", "rule": "socket", "count": 4}
 {"path": "libs/vs-sandbox/src/vs_sandbox/host_command_client.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/host_sandbox.py", "rule": "process", "count": 1}
-{"path": "libs/vs-sandbox/src/vs_sandbox/host_sandbox.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/landlock.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "fs_sync", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "rule": "socket_io", "count": 2}
@@ -154,7 +150,7 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "executor", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "subprocess", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "time", "count": 2}
-{"path": "libs/vs-sandbox/src/vs_sandbox/slurm_gpu.py", "rule": "subprocess", "count": 11}
+{"path": "libs/vs-sandbox/src/vs_sandbox/slurm_gpu.py", "rule": "subprocess", "count": 7}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_gpu.py", "rule": "threading", "count": 3}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_policy.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_atomic_metadata.py", "rule": "process", "count": 1}

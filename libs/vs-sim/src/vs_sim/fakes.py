@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from vs_sim.clock import Sleeper
+    from vs_sim.probes import ProbeResult
 
 
 class InlineBlockingRunner:
@@ -307,3 +308,22 @@ class FakeForegroundLauncher:
         self.children.append(child)
         self._started.notify()
         return child
+
+
+@dataclass
+class ScriptedProbe:
+    """A :class:`~vs_sim.probes.CommandProbe` whose answers come from a script.
+
+    ``script`` maps an argument vector to what the command printed, or to ``None`` for a
+    command that could not start or timed out.
+    """
+
+    script: Callable[[tuple[str, ...]], ProbeResult | None]
+    calls: list[tuple[tuple[str, ...], float]] = field(default_factory=list)
+    """Each probed argument vector with the timeout it was given."""
+
+    def run(self, argv: Sequence[str], *, timeout_seconds: float) -> ProbeResult | None:
+        """Record the call and answer as scripted."""
+        command = tuple(argv)
+        self.calls.append((command, timeout_seconds))
+        return self.script(command)

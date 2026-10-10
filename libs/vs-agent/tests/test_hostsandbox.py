@@ -80,7 +80,7 @@ def _stub_working_bwrap(monkeypatch: pytest.MonkeyPatch, path: str = "/usr/bin/b
     probe, so they stub each half.
     """
     monkeypatch.setattr(hostsandbox.shutil, "which", lambda *_a, **_k: path)
-    monkeypatch.setattr(hostsandbox, "_bwrap_confines", lambda _path: True)
+    monkeypatch.setattr(hostsandbox, "_bwrap_confines", lambda _path, _probe: True)
 
 
 # CI sets ``VIBESYS_REQUIRE_SANDBOX_TESTS=1`` so the real-confinement tests must

@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+from vs_sim.api import SubprocessProbe
+
+if TYPE_CHECKING:
+    from vs_sim.api import CommandProbe
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,8 +41,10 @@ class SystemAcceleratorDiscovery:
         *,
         device_root: Path = Path("/dev"),
         executable_search_path: str | None = None,
+        probe: CommandProbe | None = None,
     ) -> None:
-        """Configure filesystem and subprocess seams used for discovery."""
+        """Configure the filesystem and command seams used for discovery."""
+        self._probe: CommandProbe = probe or SubprocessProbe()
         self._device_root = Path(device_root)
         self._executable_search_path = executable_search_path
 
@@ -71,15 +77,8 @@ class SystemAcceleratorDiscovery:
         rocm_smi = shutil.which("rocm-smi", path=self._executable_search_path)
         if rocm_smi is None:
             return None
-        try:
-            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-920431 [S603]; execute the resolved vendor status utility with fixed read-only arguments.
-                [rocm_smi, "--showid", "--csv"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        result = self._probe.run([rocm_smi, "--showid", "--csv"], timeout_seconds=10)
+        if result is None:
             return None
         if result.returncode != 0:
             return None

@@ -99,7 +99,7 @@ def _broker(
             "scancel_command": (sys.executable, str(fake)),
         }
     )
-    launcher = SlurmGpuLauncher(config, windows=lambda _config: None)
+    launcher = SlurmGpuLauncher(config)
     env = dict(os.environ)
     workspace = tmp_path / "workspace"
     (workspace / "sub").mkdir(parents=True)

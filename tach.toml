@@ -662,7 +662,7 @@ depends_on = []
 [[modules]]
 path = "vs_sim.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.network", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals"]
+depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.network", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals"]
 
 [[modules]]
 path = "vs_sim.api.testing"
@@ -686,6 +686,11 @@ depends_on = []
 
 [[modules]]
 path = "vs_sim.network"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.probes"
 layer = "prompts_and_lower_libs"
 depends_on = []
 
@@ -717,7 +722,7 @@ depends_on = ["vs_sim.concurrency", "vs_sim.network", "vs_sim.randomness", "vs_s
 [[modules]]
 path = "vs_sim.contracts"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.child", "vs_sim.clock", "vs_sim.gate", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals"]
+depends_on = ["vs_sim.blocking", "vs_sim.child", "vs_sim.clock", "vs_sim.gate", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals"]
 
 [[modules]]
 path = "vs_sim.crash"
@@ -727,7 +732,7 @@ depends_on = []
 [[modules]]
 path = "vs_sim.fakes"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.clock", "vs_sim.gate", "vs_sim.processes", "vs_sim.states"]
+depends_on = ["vs_sim.clock", "vs_sim.gate", "vs_sim.probes", "vs_sim.processes", "vs_sim.states"]
 
 [[modules]]
 path = "vs_sim.faults"

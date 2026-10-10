@@ -60,7 +60,6 @@ from __future__ import annotations
 import enum
 import os
 import shutil
-import subprocess
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -71,11 +70,13 @@ from vs_sandbox import landlock
 from vs_sandbox.host_resource_importer import prepare_host_resource_imports
 from vs_sandbox.linked_worktree import linked_worktree_git_paths
 from vs_sandbox.project_paths import ProjectPathPolicy
+from vs_sim.api import SubprocessProbe
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
     from vs_sandbox.host_resources import HostResource
+    from vs_sim.api import CommandProbe
 DISABLE_ENV = "VIBESYS_AGENT_SANDBOX"
 #: Set to ``none`` in the environment a sandbox is built with to withhold the
 #: host's accelerator device nodes, as when GPU work runs only in Slurm jobs.
@@ -114,6 +115,7 @@ class _BuildOptions:
     log: Callable[[str], None]
     project_path_policy: ProjectPathPolicy
     require_enforcement: bool
+    probe: CommandProbe
 
 
 # Read-only system/toolchain roots exposed inside the Linux namespace. Bound
@@ -633,6 +635,7 @@ def build(  # noqa: PLR0913  # lint-waiver: LW-010194 [PLR0913]; Preserve build'
     project_path_policy: ProjectPathPolicy | None = None,
     require_enforcement: bool = False,
     docker: WorkspaceSandbox | None = None,
+    probe: CommandProbe | None = None,
 ) -> WorkspaceSandbox | None:
     """Build a host confinement policy for *workspace*, or ``None`` if not enforced.
 
@@ -644,6 +647,9 @@ def build(  # noqa: PLR0913  # lint-waiver: LW-010194 [PLR0913]; Preserve build'
     *break* a run that used to work, it only ever adds a boundary. Set
     ``require_enforcement`` to fail closed with :class:`SandboxUnavailableError`
     instead. Omitting both new policy arguments preserves the legacy behavior.
+
+    Pass *probe* to replace the real dry run that checks ``bwrap`` can create a
+    namespace on this host.
 
     Pass *docker* — an already constructed
     :class:`~vs_sandbox.docker_sandbox.DockerSandbox` — to select container
@@ -674,6 +680,7 @@ def build(  # noqa: PLR0913  # lint-waiver: LW-010194 [PLR0913]; Preserve build'
         log=_log,
         project_path_policy=policy,
         require_enforcement=require_enforcement,
+        probe=probe or SubprocessProbe(),
     )
 
     if _is_disabled(env):
@@ -725,7 +732,7 @@ def _requested_linux_backend(env: dict[str, str]) -> LinuxBackend:
         ) from None
 
 
-def _bwrap_confines(bwrap: str) -> bool:
+def _bwrap_confines(bwrap: str, probe: CommandProbe) -> bool:
     """Return whether *bwrap* can actually create a namespace on this host.
 
     A present-but-blocked ``bwrap`` is a real configuration: Ubuntu's
@@ -734,16 +741,10 @@ def _bwrap_confines(bwrap: str) -> bool:
     unpacked elsewhere exits non-zero at launch. Probing here turns that into
     one clear startup error instead of an agent that dies every round.
     """
-    try:
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007118 [S603]; bwrap is resolved from PATH and probed with fixed argv without a shell.
-            [bwrap, "--ro-bind", "/", "/", "--unshare-user", "--", "/bin/true"],
-            capture_output=True,
-            check=False,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+    result = probe.run(
+        [bwrap, "--ro-bind", "/", "/", "--unshare-user", "--", "/bin/true"], timeout_seconds=10
+    )
+    return result is not None and result.returncode == 0
 
 
 def _build_linux(
@@ -755,7 +756,7 @@ def _build_linux(
 
     if requested is not LinuxBackend.LANDLOCK:
         bwrap = shutil.which("bwrap", path=options.env.get("PATH")) or shutil.which("bwrap")
-        if bwrap and _bwrap_confines(bwrap):
+        if bwrap and _bwrap_confines(bwrap, options.probe):
             return HostSandbox(
                 bwrap_path=bwrap,
                 workspace=workspace,
