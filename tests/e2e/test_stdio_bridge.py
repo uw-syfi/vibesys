@@ -75,8 +75,15 @@ class _BridgeConnection:
             stdin.close()
 
     def finish(self) -> tuple[int, bytes]:
-        """Wait for the process to end; its exit status and stderr."""
+        """Close stdin (the client going away), then wait; the exit status and stderr."""
         self.close()
+        return self.wait_for_exit()
+
+    def wait_for_exit(self) -> tuple[int, bytes]:
+        """Wait for the process to end on its own, leaving stdin open; status and stderr.
+
+        The bound only guards against a hang.
+        """
         status = self.process.wait(timeout=DEADLOCK_GUARD_S)
         stderr = cast("IO[bytes]", self.process.stderr).read()
         return status, stderr
@@ -168,6 +175,9 @@ def test_a_server_close_relays_the_last_frame_then_exits_as_server_closed(
         with server:
             server.sendall(json.dumps(final).encode() + b"\n")
     assert connection.receive() == final
-    status, stderr = connection.finish()
+    # Stdin stays open until the bridge has ended: closing it here would race the bridge's
+    # read of the server's close, and either end could win (status 0 or 3).
+    status, stderr = connection.wait_for_exit()
+    connection.close()
     assert status == EXIT_STATUS[BridgeOutcome.SERVER_CLOSED]
     assert BridgeReport.model_validate_json(stderr).outcome is BridgeOutcome.SERVER_CLOSED
