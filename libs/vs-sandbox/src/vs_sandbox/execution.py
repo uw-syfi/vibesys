@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    import threading
+    from vs_sim.api import Event
 
 _TRUNCATION_MARKER = "\n...[truncated]...\n"
 
@@ -45,7 +45,7 @@ class CommandRunner(Protocol):
         command: str,
         *,
         timeout: int | None = None,
-        cancel: threading.Event | None = None,
+        cancel: Event | None = None,
     ) -> CommandResult:
         """Run a shell command and return its bounded result.
 

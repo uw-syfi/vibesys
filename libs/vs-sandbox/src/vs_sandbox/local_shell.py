@@ -16,9 +16,8 @@ from vs_sandbox.command_execution import execute_command
 from vs_sandbox.process_execution import PopenProcess, start_process_group
 
 if TYPE_CHECKING:
-    import threading
-
     from vs_sandbox.execution import CommandResult
+    from vs_sim.api import Event
 
 DEFAULT_EXECUTE_TIMEOUT = 120
 DEFAULT_MAX_OUTPUT_CHARS = 100_000
@@ -64,7 +63,7 @@ class LocalShellRunner:
         command: str,
         *,
         timeout: int | None = None,
-        cancel: threading.Event | None = None,
+        cancel: Event | None = None,
     ) -> CommandResult:
         """Run *command* under ``/bin/sh -c`` and return its bounded result.
 

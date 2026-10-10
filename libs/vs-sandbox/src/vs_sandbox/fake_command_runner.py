@@ -15,14 +15,18 @@ call is recorded for direct assertions.
 
 from __future__ import annotations
 
-import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vs_sandbox.command_execution import rejected_result, result_of, validate_timeout
 from vs_sandbox.execution import CommandResult
 from vs_sandbox.process_execution import ProcessOutcome, ProcessStop
+from vs_sim.api import OsThreads, Threads
+
+if TYPE_CHECKING:
+    from vs_sim.api import Event
 
 #: Result an unscripted command receives when no other default was set.
 DEFAULT_RESULT = CommandResult(output="", exit_code=0, stdout="", stderr="")
@@ -59,7 +63,14 @@ class FakeCommandRunner:
     max_output_chars: int = _DEFAULT_MAX_OUTPUT_CHARS
     calls: list[FakeExecution] = field(default_factory=list)
     _scripted: dict[str, CommandResult | ProcessOutcome | _Hang] = field(default_factory=dict)
-    _hanging: threading.Event = field(default_factory=threading.Event, repr=False)
+    #: Where the hang event comes from; a test passes simulated threads so a hang waits on
+    #: the simulation's timeline, production-like callers keep the real default.
+    threads: Threads = field(default_factory=OsThreads, repr=False)
+    _hanging: Event = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """Create the hang event on this runner's threads."""
+        self._hanging = self.threads.event()
 
     @property
     def id(self) -> str:
@@ -117,7 +128,7 @@ class FakeCommandRunner:
         command: str,
         *,
         timeout: int | None = None,
-        cancel: threading.Event | None = None,
+        cancel: Event | None = None,
     ) -> CommandResult:
         """Return the scripted result for *command*, or the default result.
 

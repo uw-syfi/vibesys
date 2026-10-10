@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -64,7 +63,7 @@ def _working_bwrap() -> str | None:
             check=False,
             timeout=10,
         )
-    except (OSError, subprocess.SubprocessError):
+    except OSError:
         return None
     return bwrap if result.returncode == 0 else None
 

@@ -35,11 +35,11 @@ from vs_sandbox.process_execution import PopenProcess
 
 if TYPE_CHECKING:
     import signal
-    import threading
     from collections.abc import Mapping, Sequence
 
     from vs_sandbox.execution import CommandResult
     from vs_sandbox.host_resources import HostResource
+    from vs_sim.api import Event
 
 # Global registry of live containers for cleanup on exit / SIGINT.
 _live_containers: dict[str, str] = {}  # container_id -> container_name
@@ -904,7 +904,7 @@ class DockerSandbox(WorkspaceSandbox):
         command: str,
         *,
         timeout: int | None = None,
-        cancel: threading.Event | None = None,
+        cancel: Event | None = None,
     ) -> CommandResult:
         """Execute a command inside the Docker container.
 

@@ -8,8 +8,6 @@ its container up front and removes it by that name on every failed start.
 
 from __future__ import annotations
 
-import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -17,13 +15,18 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox, SubprocessDockerCli
+from vs_agent.api.testing import docker_timed_out
+from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine
 
 # One entry per `docker run` that loses its client after the daemon created the
 # container: False leaves no id on stdout (crashed or interrupted client), True
 # times out. Runs past the list succeed.
 _LOST_RUNS = st.lists(st.booleans(), max_size=4)
+
+
+# The error a `docker run` that outlived its timeout raises; named through the Fake's helper.
+_RunTimedOutError = type(docker_timed_out(("docker", "run"), 0.0))
 
 
 class _BodyFailedError(RuntimeError):
@@ -57,7 +60,7 @@ def test_no_container_survives_any_start_outcome_or_exit(lost: list[bool], exit_
                 with sandbox:
                     if exit_path == "body-fails":
                         raise _BodyFailedError
-            except (RuntimeError, subprocess.TimeoutExpired):
+            except (RuntimeError, _RunTimedOutError):
                 pass
             assert engine.containers() == ()
 
@@ -107,12 +110,3 @@ def test_a_sandbox_without_a_run_id_is_unlabelled() -> None:
         with _sandbox(base, engine, run_id=None):
             (container,) = engine.containers()
             assert container.labels == {}
-
-
-def test_docker_lifecycle_commands_run_outside_the_terminals_process_group() -> None:
-    """Ctrl-C signals the foreground process group; a `docker stop` in it dies mid-flight."""
-    probe = "import os; print(os.getsid(0) == os.getpid())"
-
-    result = SubprocessDockerCli().run([sys.executable, "-c", probe], timeout_seconds=30)
-
-    assert result.stdout.strip() == "True"

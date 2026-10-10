@@ -6,10 +6,9 @@ file covers scripting and call-recording, which only a fake has.
 
 from __future__ import annotations
 
-import threading
-
 from vs_sandbox.api import CommandResult
 from vs_sandbox.api.testing import FakeCommandRunner
+from vs_sim.api.testing import SimThreads
 
 
 def test_unscripted_command_returns_the_default_result() -> None:
@@ -64,7 +63,7 @@ def test_two_instances_have_distinct_ids() -> None:
     assert FakeCommandRunner().id != FakeCommandRunner().id
 
 
-class _ObservedCancel(threading.Event):
+class _ObservedCancel:
     """A cancel event that records whether the fake was hanging when waited on.
 
     The fake waits on the event only once its command is blocked, so the
@@ -74,9 +73,18 @@ class _ObservedCancel(threading.Event):
     """
 
     def __init__(self, runner: FakeCommandRunner) -> None:
-        super().__init__()
         self._runner = runner
+        self._set = False
         self.hanging_when_waited_on: bool | None = None
+
+    def is_set(self) -> bool:
+        return self._set
+
+    def set(self) -> None:
+        self._set = True
+
+    def clear(self) -> None:
+        self._set = False
 
     def wait(self, timeout: float | None = None) -> bool:
         del timeout
@@ -101,7 +109,7 @@ def test_a_hang_reports_it_is_running_before_it_waits_for_a_cancel() -> None:
 def test_a_cancel_set_before_the_call_never_starts_the_hang() -> None:
     sandbox = FakeCommandRunner()
     sandbox.script_hang("hang", stdout="partial-out", stderr="partial-err")
-    cancel = threading.Event()
+    cancel = SimThreads().event()
     cancel.set()
 
     result = sandbox.execute("hang", cancel=cancel)
