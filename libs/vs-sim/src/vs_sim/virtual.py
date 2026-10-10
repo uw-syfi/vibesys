@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import collections.abc
-import math
+import heapq
 import selectors
 from typing import TYPE_CHECKING, Any, overload
 
@@ -53,11 +53,32 @@ class VirtualTimeLimitError(RuntimeError):
     """A run slept past ``VirtualClock.limit``: it is stuck, not slow, because virtual time is free."""
 
 
-_TIE_BREAK_STEPS = 1 << 16
-"""Float steps a seeded schedule may add to a timer's due time; far below any real delay."""
+class _Timer(asyncio.TimerHandle):
+    """A timer that, among timers due at the same instant, fires in ``rank`` order."""
 
-_DUE_MEMORY = 4096
-"""Due instants remembered before the ones already past are forgotten."""
+    __slots__ = ("_rank",)
+
+    def __init__(
+        self,
+        when: float,
+        callback: Callable[..., object],
+        args: tuple[object, ...],
+        loop: asyncio.AbstractEventLoop,
+        context: contextvars.Context | None,
+    ) -> None:
+        super().__init__(when, callback, args, loop, context)
+        self._rank: tuple[float, int] = (0.0, 0)
+
+    def __lt__(self, other: object) -> bool:
+        if isinstance(other, _Timer):
+            return (self.when(), self._rank) < (other.when(), other._rank)
+        return NotImplemented
+
+    def push(self, heap: list[asyncio.TimerHandle], rank: tuple[float, int]) -> None:
+        """Enter the loop's timer heap at ``rank``, marked as scheduled so ``cancel`` tells the loop."""
+        self._rank = rank
+        heapq.heappush(heap, self)
+        self._scheduled = True  # ty: ignore[unresolved-attribute]
 
 
 class _VirtualSelector(selectors.DefaultSelector):
@@ -158,9 +179,8 @@ class _VirtualLoop(asyncio.SelectorEventLoop):
         selector.loop = self
         self._clock = clock
         self._schedule = None if schedule_seed is None else SeededRandom(schedule_seed)
-        self._taken: set[float] = set()
+        self._timers_started = 0
         self.clock = clock
-        self._due: dict[float, float] = {}
         self.workers_in_flight = 0
         if trace is not None:
             self._created = 0
@@ -179,48 +199,33 @@ class _VirtualLoop(asyncio.SelectorEventLoop):
     ) -> asyncio.TimerHandle:
         # asyncio keeps timers in a heap that is not stable: timers due at the same instant
         # pop in an arbitrary order, and on this loop every sleep started in one turn has
-        # the same due time. Nudge each later timer for an instant by one float step so
-        # equal sleeps wake in the order they started. The clock itself still jumps to
-        # the first due time, and the nudge is far inside the loop's timer resolution.
-        if self._schedule is not None:
-            due = self._seeded_due(self._schedule, when)
-            return super().call_at(due, callback, *args, context=context)
-        if len(self._due) > _DUE_MEMORY:
-            self._due = {at: last for at, last in self._due.items() if at > self._clock.at}
-        last = self._due.get(when)
-        due = when if last is None else math.nextafter(last, math.inf)
-        self._due[when] = due
-        return super().call_at(due, callback, *args, context=context)
+        # the same due time. Rank timers for an instant explicitly, by start order or by a
+        # seeded draw, and keep the due time itself exact so the clock and every other
+        # timer are untouched by the tie-break.
+        self._check_closed()  # ty: ignore[unresolved-attribute]
+        self._timers_started += 1
+        draw = 0.0 if self._schedule is None else self._schedule.random()
+        timer = _Timer(when, callback, args, self, context)
+        timer.push(self._scheduled, (draw, self._timers_started))  # ty: ignore[unresolved-attribute]
+        return timer
 
-    def _seeded_due(self, schedule: SeededRandom, when: float) -> float:
-        # Under a schedule seed every timer gets its own due time a random few float steps
-        # after the requested one, so timers meant for one instant fire in a seeded order.
-        if not math.isfinite(when):
-            return when
-        if len(self._taken) > _DUE_MEMORY:
-            self._taken = {at for at in self._taken if at > self._clock.at}
-        step = math.ulp(when)
-        while True:
-            due = when + step * schedule.randint(0, _TIE_BREAK_STEPS - 1)
-            if due not in self._taken:
-                self._taken.add(due)
-                return due
-
-    def call_soon(
-        self,
-        callback: Callable[..., object],
-        *args: object,
-        context: contextvars.Context | None = None,
-    ) -> asyncio.Handle:
-        handle = super().call_soon(callback, *args, context=context)
+    def _run_once(self) -> None:
+        # Under a schedule seed, the callbacks ready at the start of a turn run in a seeded
+        # permutation. Permuting the whole batch once per turn (rather than inserting each new
+        # callback at a random queue position) keeps asyncio's contract that a callback
+        # scheduled in one turn runs in the next: `_run_once` runs exactly the handles queued
+        # when it starts, so a handle inserted among them could push an older one out of that
+        # turn, again and again, and a run that finished first never ran it.
+        # `_ready` is asyncio's own queue, which this loop subclasses; the standard library's
+        # queue is not in the type stubs.
         if self._schedule is not None:
-            # Ready callbacks run in queue order; put the new one at a seeded position
-            # instead of the back. `_ready` is asyncio's own queue, which this loop subclasses.
-            # The standard library's queue is not in the type stubs.
             ready = self._ready  # ty: ignore[unresolved-attribute]
-            ready.pop()
-            ready.insert(self._schedule.randint(0, len(ready)), handle)
-        return handle
+            if len(ready) > 1:
+                batch = list(ready)
+                self._schedule.shuffle(batch)
+                ready.clear()
+                ready.extend(batch)
+        super()._run_once()  # ty: ignore[unresolved-attribute]
 
     def run_in_executor[*Ts, T](
         self,
