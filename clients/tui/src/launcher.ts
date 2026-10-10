@@ -13,6 +13,8 @@ const READY_POLL_INTERVAL_MS = 25;
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 const BACKEND_EXIT_GRACE_MS = 2_000;
 const FRONTEND_EXIT_GRACE_MS = 2_000;
+const BACKEND_LOG_EXCERPT_LINES = 20;
+const BACKEND_DIAGNOSTIC_PREFIX = 'vibesys: ';
 
 export async function launch(argv: string[]): Promise<number> {
   const python = resolvePythonCommand();
@@ -285,13 +287,21 @@ async function waitOrKill(process: ChildProcess): Promise<void> {
 async function reportBackendFailure(backend: ChildProcess, logPath: string): Promise<void> {
   const code = exitStatus(backend) ?? 1;
   console.error(`vs: backend exited with status ${code}`);
-  const tail = await readLogTail(logPath);
-  if (tail.length > 0) console.error(tail.join('\n'));
+  const excerpt = await readBackendLogExcerpt(logPath);
+  if (excerpt.length > 0) console.error(excerpt.join('\n'));
 }
 
-async function readLogTail(path: string): Promise<string[]> {
+/** Return a bounded startup excerpt with the backend's actionable diagnostics first. */
+async function readBackendLogExcerpt(path: string): Promise<string[]> {
   try {
-    return (await readFile(path, 'utf8')).split(/\r?\n/).slice(-20);
+    const lines = (await readFile(path, 'utf8')).split(/\r?\n/);
+    while (lines.at(-1) === '') lines.pop();
+    const diagnostics = lines.filter(line => line.startsWith(BACKEND_DIAGNOSTIC_PREFIX));
+    const prioritized = diagnostics.slice(-BACKEND_LOG_EXCERPT_LINES);
+    const remaining = BACKEND_LOG_EXCERPT_LINES - prioritized.length;
+    if (remaining === 0) return prioritized;
+    const context = lines.filter(line => !line.startsWith(BACKEND_DIAGNOSTIC_PREFIX));
+    return [...prioritized, ...context.slice(-remaining)];
   } catch {
     return [];
   }

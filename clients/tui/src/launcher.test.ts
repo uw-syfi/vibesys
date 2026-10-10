@@ -1,4 +1,5 @@
 import {afterEach, describe, expect, it} from 'bun:test';
+import {spawn} from 'node:child_process';
 import {access, chmod, mkdtemp, readFile, realpath, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
@@ -137,6 +138,63 @@ setInterval(() => undefined, 1000);
     await access(frontendTerminated);
     expect(errors.join('\n')).toContain('backend exited with status 3');
     expect(errors.join('\n')).toContain('configuration is unreadable');
+  }, 15_000);
+
+  it('preserves the backend diagnostic ahead of a longer usage block', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'vs-launcher-test-'));
+    const frontendReady = join(tempDir, 'frontend-ready');
+    const frontendTerminated = join(tempDir, 'frontend-terminated');
+    const backend = await writeExecutable(
+      'usage-error-backend.mjs',
+      `
+import {existsSync, watch} from 'node:fs';
+
+const ready = ${JSON.stringify(frontendReady)};
+const usage = Array.from({length: 39}, (_, index) => \`usage line \${index + 1}\`);
+const fail = () => {
+  console.error('vibesys: unrecognized arguments: --zzbogus');
+  console.error(usage.join('\\n'));
+  process.exit(3);
+};
+const watcher = watch(${JSON.stringify(tempDir)}, () => {
+  if (!existsSync(ready)) return;
+  watcher.close();
+  fail();
+});
+if (existsSync(ready)) {
+  watcher.close();
+  fail();
+}
+`,
+    );
+    const frontend = await writeExecutable(
+      'waiting-frontend.mjs',
+      `
+import {writeFileSync} from 'node:fs';
+process.on('SIGTERM', () => {
+  writeFileSync(${JSON.stringify(frontendTerminated)}, 'terminated');
+  process.exit(143);
+});
+writeFileSync(${JSON.stringify(frontendReady)}, 'ready');
+setInterval(() => undefined, 1000);
+`,
+    );
+
+    const result = await runLauncherCli(['--stub-agent', '--zzbogus'], {
+      VIBESYS_PYTHON: backend,
+      VIBESYS_TUI_RUNTIME: process.execPath,
+      VIBESYS_TUI_ENTRYPOINT: frontend,
+      VIBESYS_RELEASE_SMOKE_MARKER: '',
+    });
+
+    expect(result.exitCode).toBe(3);
+    await access(frontendTerminated);
+    const lines = result.stderr.trimEnd().split(/\r?\n/);
+    expect(lines[0]).toBe('vs: backend exited with status 3');
+    expect(lines[1]).toBe('vibesys: unrecognized arguments: --zzbogus');
+    expect(lines).toHaveLength(21);
+    expect(lines[2]).toBe('usage line 21');
+    expect(lines).toContain('usage line 39');
   }, 15_000);
 
   it('terminates a lingering frontend when the backend dies after it listens', async () => {
@@ -618,4 +676,30 @@ async function writeExecutable(name: string, source: string): Promise<string> {
   await writeFile(path, `#!/usr/bin/env node\n${source}`);
   await chmod(path, 0o755);
   return path;
+}
+
+async function runLauncherCli(
+  argv: readonly string[],
+  env: Readonly<Record<string, string>>,
+): Promise<{exitCode: number; stderr: string}> {
+  const launcher = fileURLToPath(new URL('./launcher.ts', import.meta.url));
+  const child = spawn(process.execPath, [launcher, ...argv], {
+    env: {...process.env, ...env},
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  child.stderr.setEncoding('utf8');
+  let stderr = '';
+  child.stderr.on('data', chunk => {
+    stderr += chunk;
+  });
+  return new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code, signal) => {
+      if (code === null) {
+        reject(new Error(`launcher exited from signal ${signal ?? 'unknown'}`));
+        return;
+      }
+      resolve({exitCode: code, stderr});
+    });
+  });
 }
