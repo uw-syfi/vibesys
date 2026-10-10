@@ -21,6 +21,7 @@ from vs_sim.api import (
     SubprocessProbe,
     SystemClock,
     ThreadBlockingRunner,
+    run_foreground,
 )
 from vs_sim.api.testing import (
     HANG_GUARD_S,
@@ -56,6 +57,8 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vs_sim.api import ProcessSpec
 
 _REAL_TICK_S = 0.001
@@ -324,3 +327,32 @@ class TestScriptedProbe(CommandProbeContract):
             blocks_forever=("block",),
             missing_program=("no-such-program",),
         )
+
+
+def test_inherited_stdio_launcher_starts_the_child_in_the_requested_directory(
+    tmp_path: Path,
+) -> None:
+    here = _python(
+        "import os, sys; sys.exit(0 if os.getcwd() == sys.argv[1] else 1)", str(tmp_path.resolve())
+    )
+
+    inside = asyncio.run(run_foreground(InheritedStdioLauncher(), here, cwd=tmp_path))
+    outside = asyncio.run(run_foreground(InheritedStdioLauncher(), here))
+
+    assert (inside, outside) == (0, 1)
+
+
+def test_fake_foreground_launcher_records_how_a_child_was_started(tmp_path: Path) -> None:
+    launcher = FakeForegroundLauncher(
+        lambda _argv: ForegroundScript(returncode=4, exits_immediately=True)
+    )
+
+    status = asyncio.run(run_foreground(launcher, ["tool", "--flag"], env={"K": "v"}, cwd=tmp_path))
+
+    child = launcher.children[0]
+    assert (status, child.argv, child.env, child.cwd) == (
+        4,
+        ("tool", "--flag"),
+        {"K": "v"},
+        tmp_path,
+    )
