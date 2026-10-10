@@ -175,7 +175,11 @@ class RunEnvironmentView:
     # Where a profiler must execute to observe the production hot path. Prompt
     # templates branch on this capability rather than on a concrete provider.
     profile_execution: Literal["local", "remote"] = "local"
-    supports_parallel_candidate_evaluation: bool = False
+    # Why a session whose editor sits in its own container still cannot open one
+    # session per candidate, or ``None`` when nothing stops it. A reason is
+    # worth stating: ``supports_parallel_candidate_evaluation`` follows from
+    # the structure above and this, and the refusal quotes it.
+    parallel_candidate_blocker: str | None = None
     # Optional environment variable understood by the environment-owned
     # evaluator wrapper when the final trusted command should release its
     # deployment lease.
@@ -185,6 +189,28 @@ class RunEnvironmentView:
     framework_setup_timeout_seconds: int = 0
     profiler_mcp_env: tuple[tuple[str, str], ...] = ()
     profiler_mcp_resources: tuple[HostResource, ...] = ()
+
+    @property
+    def parallel_candidate_obstacle(self) -> str | None:
+        """Why this session cannot open an isolated session per candidate, or ``None``.
+
+        A candidate session is a second session of the same environment, so it
+        has its own sandbox exactly when the agent's CLI runs in a container
+        this session starts (``cli_sandboxed``) and agent clients do not borrow
+        the run-owned sandbox and bridge (``share_agent_session``). Nothing
+        declares the answer: it follows from those facts and from
+        ``parallel_candidate_blocker``.
+        """
+        if not self.cli_sandboxed:
+            return "its agent does not run in a container of its own"
+        if self.share_agent_session:
+            return "its agent clients borrow the run-owned sandbox and bridge"
+        return self.parallel_candidate_blocker
+
+    @property
+    def supports_parallel_candidate_evaluation(self) -> bool:
+        """Whether each candidate can get its own worktree and container session."""
+        return self.parallel_candidate_obstacle is None
 
 
 @dataclass(frozen=True)
@@ -703,10 +729,6 @@ class DockerEnvironment:
                 isolated=True,
                 cli_sandboxed=True,
                 env_kind="docker",
-                # Each candidate gets its own worktree and its own container
-                # (see ``open_workspace``); the containers share the run's
-                # device lease like every other child workspace session.
-                supports_parallel_candidate_evaluation=True,
             ),
         )
 
@@ -1074,7 +1096,6 @@ class SkyPilotEnvironment(DockerEnvironment):
                 host_device_reselect=False,
                 env_kind="skypilot",
                 profile_execution="remote",
-                supports_parallel_candidate_evaluation=False,
             ),
         )
 
@@ -1298,7 +1319,6 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                 host_device_reselect=False,
                 env_kind="modal",
                 profile_execution="remote",
-                supports_parallel_candidate_evaluation=True,
                 deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
                 framework_setup_timeout_seconds=setup_timeout_seconds,
             ),

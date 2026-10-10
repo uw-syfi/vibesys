@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from vs_runtime._workspace_access import WorkspaceAccessRecovery
 from vs_runtime.contracts import (
+    AgentWorkspaceRouteError,
     RuntimeContractError,
     WorkspaceRestoreError,
     Workspaces,
@@ -435,14 +436,22 @@ class RuntimeWorkspaces:
     def agent_sandbox_at(self, path: Path) -> CommandRunner | None:
         """Return the sandbox of the live candidate checked out at ``path``.
 
-        ``None`` for the root and for a path no live candidate owns: a caller
-        serving several workspaces from one client falls back to its own
-        sandbox there.
+        ``None`` only for the root workspace: the role's own sandbox serves it,
+        so a caller serving several workspaces from one client uses that one
+        there. Any other path raises :class:`AgentWorkspaceRouteError` (a released
+        or unknown candidate, or one whose environment has no sandbox for it)
+        instead of returning ``None``, which the caller would read as "use the
+        root container" and fail in a directory that container lacks (#1552).
         """
+        if path == self.root.path:
+            return None
         for candidate in tuple(self._candidates.values()):
             if candidate.path == path:
-                return self.resource_for(candidate).agent_sandbox()
-        return None
+                sandbox = self.resource_for(candidate).agent_sandbox()
+                if sandbox is None:
+                    raise AgentWorkspaceRouteError(path, "its candidate has no agent sandbox")
+                return sandbox
+        raise AgentWorkspaceRouteError(path, "it is neither the root nor a live candidate")
 
     def workspace_for(self, workspace: Workspace) -> RuntimeWorkspace:
         """Return one live handle owned by this collection."""

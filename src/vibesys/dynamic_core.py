@@ -146,7 +146,8 @@ def _require_candidate_sandboxes(environment: RunEnvironmentView) -> None:
     Every workstream runs in its own candidate sandbox, so without them the input
     measurement would fail and the planner would be paid for work that cannot start.
     """
-    if not environment.supports_parallel_candidate_evaluation:
+    obstacle = environment.parallel_candidate_obstacle
+    if obstacle is not None:
         raise ConfigurationError(
             ConfigurationDiagnostic(
                 code="dynamic_run_environment_unsupported",
@@ -154,8 +155,8 @@ def _require_candidate_sandboxes(environment: RunEnvironmentView) -> None:
                 message=(
                     f"the dynamic loop cannot run on the {environment.env_kind!r} run "
                     "environment: it cannot open isolated candidate sandboxes (parallel "
-                    "candidate evaluation); choose a run environment that can, such as "
-                    "docker, slurm or modal"
+                    f"candidate evaluation) because {obstacle}; choose a run environment "
+                    "that can, such as docker, slurm or modal"
                 ),
             )
         )

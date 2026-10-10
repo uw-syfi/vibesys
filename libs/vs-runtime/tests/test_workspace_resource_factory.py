@@ -116,7 +116,7 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
     def open_session(_request: RunEnvironmentRequest) -> RunEnvironmentSession:
         session = _Session(
             FakeCommandRunner(),
-            RunEnvironmentView(paths=AgentPaths(), supports_parallel_candidate_evaluation=True),
+            RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True),
         )
         opened_sessions.append(session)
         return session

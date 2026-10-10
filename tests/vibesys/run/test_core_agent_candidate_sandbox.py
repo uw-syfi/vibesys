@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.fake_run_clock import FakeRunClock
@@ -33,6 +34,7 @@ from vs_agent.api.testing import (
     FakeExecutor,
     stream_peers,
 )
+from vs_runtime.api import AgentWorkspaceRouteError
 from vs_runtime.api.core import RunTiming
 from vs_sandbox.api.testing import FakeDockerEngine
 
@@ -99,7 +101,8 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
                 assert sandbox is not roots["implementer"]
                 mapped.append(sandbox.agent_path(path))
                 await candidate.discard()
-                assert lookup(path) is None
+                with pytest.raises(AgentWorkspaceRouteError):
+                    lookup(path)
             return root_served, mapped
 
     try:
