@@ -1,9 +1,9 @@
 import {useEffect, useMemo, useState} from 'react';
 import type {CampaignRecord} from './campaign-record.js';
 import type {
+  CampaignTimeline,
   CampaignView,
   CampaignViewModel,
-  CampaignTimeline,
   WorkstreamLayout,
   WorkstreamSort,
 } from './campaign-view.js';

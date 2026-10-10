@@ -24,6 +24,7 @@ from server.events import (
     RunStartedData,
 )
 from server.integration import (
+    _CONTROL_EVENT_TYPES,
     _CORE_FAILURE_CONTEXTS,
     _EVENT_DATA_ADAPTER,
 )
@@ -35,6 +36,9 @@ from vibesys.events import (
     AgentExecutionFinishedData,
     AgentExecutionStartedData,
     AgentOutputChunkData,
+    AsyncOperationKind,
+    AsyncOperationLifecycleData,
+    AsyncOperationState,
     CoreEventType,
     FrameworkSource,
     FrameworkWarningData,
@@ -198,6 +202,35 @@ def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path: Pa
     assert (tmp_path / "core-events.jsonl").is_file()
 
 
+def test_an_async_operation_lifecycle_event_reaches_the_wire_journal_with_its_scope(
+    tmp_path: Path,
+) -> None:
+    """A profiler or evaluation lifecycle fact projects onto the wire with its `scope_id` intact.
+
+    Regression test: `ASYNC_OPERATION_LIFECYCLE` had no `EventType` counterpart,
+    so `project_event` raised `ValueError` from `EventType(event.type.value)`
+    for every profiler or evaluation lifecycle fact a run emitted.
+    """
+    parts = build_server_parts(tmp_path)
+
+    parts.core_events.emit(
+        CoreEventType.ASYNC_OPERATION_LIFECYCLE,
+        data=AsyncOperationLifecycleData(
+            operation_kind=AsyncOperationKind.PROFILER,
+            operation_id="profiler-op-1",
+            state=AsyncOperationState.RUNNING,
+            scope_id="hypothesis-7",
+        ),
+    )
+
+    event = next(e for e in parts.journal.read() if e.type is EventType.ASYNC_OPERATION_LIFECYCLE)
+    assert event.data is not None
+    assert event.data.kind == "async_operation_lifecycle"
+    assert event.data.operation_kind == "profiler"
+    assert event.data.state == "running"
+    assert event.data.scope_id == "hypothesis-7"
+
+
 def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     _emit_execution_started(parts, "round-1", _execution_started_data("implementer", "work"))
@@ -357,6 +390,24 @@ def test_core_failure_synthesis_covers_the_journal_failure_invariant() -> None:
     # Every event the journal refuses without a diagnostic must have a
     # synthesis entry, or a diagnostic-less core failure would crash append.
     assert set(_CORE_FAILURE_CONTEXTS) == DIAGNOSTIC_FAILURE_EVENTS
+
+
+def test_every_non_control_core_event_type_has_a_wire_event_counterpart() -> None:
+    """`project_event` needs `EventType(event.type.value)` to succeed for every event it does not
+    hand to `_project_control_event`, or the run coroutine crashes on an uncaught `ValueError`.
+
+    `ASYNC_OPERATION_LIFECYCLE` violated this until it gained an `EventType` counterpart; this
+    sweeps the whole enum so the same asymmetry cannot reappear for a future `CoreEventType`.
+    """
+    missing = []
+    for core_type in CoreEventType:
+        if core_type in _CONTROL_EVENT_TYPES:
+            continue
+        try:
+            EventType(core_type.value)
+        except ValueError:
+            missing.append(core_type.value)
+    assert not missing, f"CoreEventType members with no EventType counterpart: {missing}"
 
 
 def test_track_started_does_not_double_track_a_repeated_start_event(

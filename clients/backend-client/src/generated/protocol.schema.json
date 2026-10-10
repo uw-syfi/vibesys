@@ -349,6 +349,104 @@
       "title": "AgentStatusData",
       "type": "object"
     },
+    "AsyncOperationKind": {
+      "description": "Framework-owned categories of asynchronous operation.",
+      "enum": [
+        "evaluation",
+        "profiler"
+      ],
+      "title": "AsyncOperationKind",
+      "type": "string"
+    },
+    "AsyncOperationLifecycleData": {
+      "description": "Backend-neutral lifecycle fact for host-owned asynchronous work.",
+      "properties": {
+        "kind": {
+          "const": "async_operation_lifecycle",
+          "default": "async_operation_lifecycle",
+          "title": "Kind",
+          "type": "string"
+        },
+        "operation_kind": {
+          "$ref": "#/$defs/AsyncOperationKind"
+        },
+        "operation_id": {
+          "minLength": 1,
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/AsyncOperationState"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        },
+        "scope_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scope Id"
+        },
+        "current_stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Stage"
+        },
+        "source": {
+          "$ref": "#/$defs/FrameworkSource",
+          "default": "loop"
+        }
+      },
+      "required": [
+        "kind",
+        "operation_kind",
+        "operation_id",
+        "state"
+      ],
+      "title": "AsyncOperationLifecycleData",
+      "type": "object"
+    },
+    "AsyncOperationState": {
+      "description": "Union of backend-neutral lifecycle states published by operation services.",
+      "enum": [
+        "submitted",
+        "queued",
+        "starting",
+        "running",
+        "succeeded",
+        "completed",
+        "failed",
+        "canceled",
+        "interrupted",
+        "superseded",
+        "timed_out"
+      ],
+      "title": "AsyncOperationState",
+      "type": "string"
+    },
     "BenchmarkResultData": {
       "description": "Metric result emitted by a benchmark stage.",
       "properties": {
@@ -1419,7 +1517,8 @@
         "gate_finished",
         "workspace_snapshot",
         "run_configured",
-        "framework_warning"
+        "framework_warning",
+        "async_operation_lifecycle"
       ],
       "title": "EventType",
       "type": "string"
@@ -3370,6 +3469,7 @@
                   "agent_execution_finished": "#/$defs/AgentExecutionFinishedData",
                   "agent_execution_started": "#/$defs/AgentExecutionStartedData",
                   "agent_output_chunk": "#/$defs/AgentOutputChunkData",
+                  "async_operation_lifecycle": "#/$defs/AsyncOperationLifecycleData",
                   "benchmark_result": "#/$defs/BenchmarkResultData",
                   "chat": "#/$defs/ChatData",
                   "chat_thread_created": "#/$defs/ChatThreadCreatedData",
@@ -3485,6 +3585,9 @@
                 },
                 {
                   "$ref": "#/$defs/FrameworkWarningData"
+                },
+                {
+                  "$ref": "#/$defs/AsyncOperationLifecycleData"
                 }
               ]
             },

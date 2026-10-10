@@ -21,8 +21,78 @@ function replayFixturePlugin(): Plugin {
   };
 }
 
+function clampInterval(raw: string | null): number {
+  // `Number(null)` and `Number('')` are both 0, a finite number, so an absent
+  // or empty `interval` param must be rejected before the numeric conversion
+  // or it silently clamps to the 20ms floor instead of this default.
+  if (raw === null || raw === '') return 350;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return 350;
+  return Math.min(5000, Math.max(20, value));
+}
+
+/**
+ * Dev-only replay-as-live server. Loads the committed campaign record, converts
+ * it to the frame stream a live run would emit (via the app's own
+ * `framesFromRecord`, so there is no second producer), and pushes frames over
+ * Server-Sent Events on a timer. `?interval=<ms>` paces playback. See
+ * docs/design/live-campaign-streaming.md.
+ */
+function campaignStreamPlugin(): Plugin {
+  const recordPath = fileURLToPath(
+    new URL('./dev/fixtures/trajectory-replay.json', import.meta.url),
+  );
+  return {
+    name: 'vibesys-campaign-stream',
+    configureServer(server) {
+      server.middlewares.use('/__vibesys/campaign/stream', async (request, response) => {
+        let frames: unknown[];
+        try {
+          const [{parseReplayScenario}, {framesFromRecord}] = await Promise.all([
+            server.ssrLoadModule('/src/replay-scenario.ts'),
+            server.ssrLoadModule('/src/campaign-replay.ts'),
+          ]);
+          const record = parseReplayScenario(JSON.parse(await readFile(recordPath, 'utf8')));
+          frames = framesFromRecord(record);
+        } catch (error) {
+          response.statusCode = 500;
+          response.end(error instanceof Error ? error.message : String(error));
+          return;
+        }
+        // The client may already be gone by the time the awaits above resolve;
+        // `request.on('close', ...)` below would never fire for a close that
+        // already happened, leaking the timer and writing every frame into the
+        // void for the rest of this replay.
+        if (request.destroyed) return;
+
+        const interval = clampInterval(
+          new URL(request.url ?? '', 'http://localhost').searchParams.get('interval'),
+        );
+        response.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+        });
+
+        let index = 0;
+        const timer = setInterval(() => {
+          if (index >= frames.length) {
+            clearInterval(timer);
+            // Leave the connection open and idle: the run has completed, so the
+            // browser's EventSource should not reconnect and replay.
+            return;
+          }
+          response.write(`data: ${JSON.stringify(frames[index])}\n\n`);
+          index += 1;
+        }, interval);
+        request.on('close', () => clearInterval(timer));
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), replayFixturePlugin()],
+  plugins: [react(), replayFixturePlugin(), campaignStreamPlugin()],
   resolve: {
     alias: [
       {

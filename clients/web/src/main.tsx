@@ -1,6 +1,7 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {createDemoApp, createLiveApp} from './App.js';
+import {createDemoApp, createLiveApp, createLiveCampaignApp} from './App.js';
+import {EventSourceCampaignStream} from './campaign-stream.js';
 import {
   bootstrapGateway,
   GatewaySessionStore,
@@ -23,6 +24,22 @@ if (root === null) throw new Error('Web viewer root is missing');
 const reactRoot = createRoot(root);
 
 async function start(): Promise<void> {
+  // A dev-only route that drives the campaign dashboard from the replay-as-live
+  // frame stream (see docs/design/live-campaign-streaming.md). It takes no
+  // gateway and no capability token. `?interval=<ms>` paces playback.
+  const launchParams = new URL(launchUrl).searchParams;
+  if (import.meta.env.DEV && launchParams.has('campaign-live')) {
+    const interval = launchParams.get('interval');
+    const streamUrl =
+      interval === null
+        ? '/__vibesys/campaign/stream'
+        : `/__vibesys/campaign/stream?interval=${encodeURIComponent(interval)}`;
+    reactRoot.render(
+      <StrictMode>{createLiveCampaignApp(new EventSourceCampaignStream(streamUrl))}</StrictMode>,
+    );
+    return;
+  }
+
   const storedSessions = new GatewaySessionStore(() => window.sessionStorage);
   let target: GatewayTarget | null;
   try {
