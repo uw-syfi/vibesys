@@ -16,7 +16,7 @@ export type LaunchPlan =
   | {readonly kind: 'start'; readonly serverArgs: readonly string[]}
   | {readonly kind: 'attach'; readonly socketPath: string};
 
-export const USAGE =
+const USAGE =
   'usage: vibesys-desktop (--project PATH [-- RUN_ARGS...] | --socket PATH)\n' +
   '       or VIBESYS_DESKTOP_URL=<gateway URL> vibesys-desktop';
 
@@ -37,7 +37,10 @@ export function parseLaunch(
     if (argv.length > 0) throw new LaunchError('VIBESYS_DESKTOP_URL does not take arguments');
     return {kind: 'gateway', target: parseLaunchUrl(gatewayUrl)};
   }
-  const {paths, runArgs} = readOptions(argv, cwd);
+  // `pnpm start -- ARGS` hands the app its `--` separator too. Run arguments only ever follow a
+  // `--project`, so a leading separator carries nothing and is dropped.
+  const options = argv[0] === '--' ? argv.slice(1) : argv;
+  const {paths, runArgs} = readOptions(options, cwd);
   const project = paths.get('--project');
   const socket = paths.get('--socket');
   if (project !== undefined && socket !== undefined) {

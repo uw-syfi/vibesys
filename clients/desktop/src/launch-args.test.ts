@@ -15,6 +15,13 @@ describe('parseLaunch', () => {
     });
   });
 
+  test('drops the separator pnpm passes before the arguments', () => {
+    expect(parseLaunch(['--', '--project', 'p', '--', 'x'], undefined, CWD)).toEqual({
+      kind: 'start',
+      serverArgs: ['--project', '/home/me/p', 'x'],
+    });
+  });
+
   test('attaches to a running server by socket', () => {
     expect(parseLaunch(['--socket', 's.sock'], '', CWD)).toEqual({
       kind: 'attach',
@@ -30,6 +37,8 @@ describe('parseLaunch', () => {
   test('rejects every malformed command line, naming the problem', () => {
     const cases: [readonly string[], string][] = [
       [[], 'pass --project or --socket'],
+      [['--'], 'pass --project or --socket'],
+      [['--', '--', '--project', 'p'], 'pass --project or --socket'],
       [['--project'], '--project needs a path'],
       [['--project='], '--project needs a path'],
       [['--project', 'a', '--project', 'b'], '--project is given twice'],

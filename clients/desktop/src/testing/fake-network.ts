@@ -40,7 +40,7 @@ class LinkedEnd extends Duplex {
 }
 
 /** Two linked stream ends: what one writes, the other reads. */
-export function linkedPair(): [Duplex, Duplex] {
+function linkedPair(): [Duplex, Duplex] {
   const left = new LinkedEnd();
   const right = new LinkedEnd();
   left.peer = right;

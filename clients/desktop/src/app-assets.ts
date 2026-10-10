@@ -11,7 +11,7 @@ import {extname, isAbsolute, join, normalize, relative, sep} from 'node:path';
 
 export const APP_SCHEME = 'app';
 const APP_HOST = 'vibesys';
-export const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
+const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
 /** The page the window opens. */
 export const APP_ENTRY_URL = `${APP_ORIGIN}/desktop.html`;
 

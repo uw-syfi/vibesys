@@ -30,7 +30,7 @@ export interface DesktopSocketHandlers {
 }
 
 /** The page's end of one connection. */
-export interface DesktopSocket {
+interface DesktopSocket {
   /** Send one protocol message; only after `onOpen`. */
   send(data: string): void;
   close(): void;
