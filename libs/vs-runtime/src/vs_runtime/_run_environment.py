@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from vs_agent.api import (
+    CONTAINER_FRAMEWORK_ROOT,
     CONTAINER_RUNTIME_TOOLCHAIN,
     AgentBackend,
     auth_bind_mounts,
@@ -51,7 +52,6 @@ from vs_agent.api import (
 from vs_project.api import RunResourceRequest  # noqa: TC001
 from vs_runtime import _boot_trace as boot_trace
 from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_and_auth_files
-from vs_runtime._container_paths import CONTAINER_FRAMEWORK_ROOT
 from vs_runtime._container_runtime_policy import (
     DOCKER_IN_DOCKER_NOTICE,
     attaches_accelerator,

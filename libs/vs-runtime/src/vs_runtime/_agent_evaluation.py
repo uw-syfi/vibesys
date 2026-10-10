@@ -83,11 +83,9 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.tools import (
     CORE_EVALUATION_TOOLS,
-    CORE_MCP_PACKAGES,
     core_evaluation_mcp_descriptor,
 )
 from vs_runtime._agent_tool_errors import ToolRefusal, ToolRefusedError, render_tool_refusal
-from vs_runtime._container_paths import CONTAINER_FRAMEWORK_ROOT
 from vs_runtime._core_loop import AdmissionBusyError
 from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._workspace_lookup import find_scope_workspace
@@ -293,12 +291,6 @@ class _Scoped:
             self.waits = ()
 
 
-_CONTAINER_MCP_IMPORT_ROOTS = tuple(
-    f"{CONTAINER_FRAMEWORK_ROOT}/libs/{name}/src" for name in CORE_MCP_PACKAGES
-)
-"""Where the agent container's read-only framework mount holds the tool server's packages."""
-
-
 class AgentEvaluationBridge:
     """The unix-socket service, token minting and yield producer of one run.
 
@@ -340,13 +332,7 @@ class AgentEvaluationBridge:
         """The evaluation tool server for roles that declare it; none for any other role."""
         if not any(tool.id == EVALUATION_TOOL_ID for tool in role.extra_tools):
             return ()
-        return (
-            core_evaluation_mcp_descriptor(
-                self._token(scope),
-                str(self._socket_path),
-                import_roots=_CONTAINER_MCP_IMPORT_ROOTS,
-            ),
-        )
+        return (core_evaluation_mcp_descriptor(self._token(scope), str(self._socket_path)),)
 
     def _token(self, scope: Scope) -> str:
         body = base64.urlsafe_b64encode(scope.model_dump_json().encode()).decode()

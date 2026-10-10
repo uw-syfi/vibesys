@@ -21,6 +21,8 @@ from hypothesis import strategies as st
 
 from vs_agent.api import (
     CLI_VERSIONS,
+    CONTAINER_PYTHON_HOME,
+    CONTAINER_PYTHON_VERSION,
     CONTAINER_RUNTIME_TOOLCHAIN,
     DOCKER_COMPOSE_VERSION,
     DOCKER_ENGINE_VERSION,
@@ -82,6 +84,8 @@ def _expected_version_args() -> tuple[str, ...]:
     args: list[str] = ["--build-arg", f"NODE_VERSION={NODE_VERSION}"]
     for provider, version in CLI_VERSIONS.items():
         args += ["--build-arg", f"{provider.upper()}_VERSION={version}"]
+    args += ["--build-arg", f"PYTHON_VERSION={CONTAINER_PYTHON_VERSION}"]
+    args += ["--build-arg", f"PYTHON_HOME={CONTAINER_PYTHON_HOME}"]
     return tuple(args)
 
 

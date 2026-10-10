@@ -204,8 +204,13 @@ In each container it checks that:
   broker (its `srun` is a local program);
 - the `agent` user has a group of its own name and the host's uid and gid.
 
-A fourth, small stand-in base (`ubuntu:24.04`, which owns uid 1000 as `ubuntu`) runs
-only the last check, so a host that cannot pull the large images still covers it.
+A fourth, small stand-in base (`ubuntu:24.04`, which owns uid 1000 as `ubuntu` and has
+no `python` command) runs the tool-server and identity checks, so a host that cannot
+pull the large images still covers them.
+
+Tool servers do not use the base image's `python`: the agent image installs a uv-managed
+Python at a fixed path, and the agent launcher starts every Python server on it with
+the framework's source roots on `PYTHONPATH` (`vs_agent.containerize_server`).
 
 The tier is marked `minimal_container` and skipped unless `VIBESYS_MINIMAL_CONTAINER=1`
 and Docker are available. It is not in PR CI. The script sets the variable, removes

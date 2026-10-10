@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support import run_test_command
 
+from vs_agent.api import CONTAINER_PYTHON
 from vs_agent.api.images import agent_image, build_task_image
 
 if TYPE_CHECKING:
@@ -41,7 +42,7 @@ _RUN_TIMEOUT_S = 120.0
 #: Proves the image runs as the non-root ``agent`` user with the fixed uid
 #: the sandbox remaps to the host uid at container start (see
 #: ``agent.Dockerfile``), then that every shipped CLI, both optional
-#: toolchains, ripgrep, and the ``mcp`` package are all reachable.
+#: toolchains, ripgrep, and VibeSys's own Python with the ``mcp`` package are all reachable.
 _CHECK_SCRIPT = (
     "set -e; "
     "id -u; "
@@ -52,7 +53,7 @@ _CHECK_SCRIPT = (
     "cargo --version; "
     "go version; "
     "rg --version; "
-    'python3 -c "import mcp"'
+    f'{CONTAINER_PYTHON} -c "import mcp, sys; assert sys.version_info >= (3, 12)"'
 )
 
 

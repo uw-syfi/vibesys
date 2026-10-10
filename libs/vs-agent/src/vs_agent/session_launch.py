@@ -565,7 +565,7 @@ class ConfinedSessionLauncher:
                 str(spec.workspace),
                 mcp_servers=tuple(
                     shim_translation.mcp_server_from(
-                        server, agent_path, pin_interpreter=not spec.policy.containerized
+                        server, agent_path, containerized=spec.policy.containerized
                     )
                     for server in spec.mcp_servers
                 ),

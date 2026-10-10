@@ -15,6 +15,11 @@ ARG CLAUDE_VERSION
 ARG CODEX_VERSION
 ARG GEMINI_VERSION
 ARG OPENCODE_VERSION
+# The interpreter of every VibeSys-owned process in the container (its tool
+# servers). Independent of the base image's `python`, which may be a conda
+# Python 3.10 or absent.
+ARG PYTHON_VERSION
+ARG PYTHON_HOME
 # Space-separated subset of "rust go container-runtime". Empty skips all of them.
 ARG TOOLCHAINS=""
 ARG RUST_VERSION
@@ -84,7 +89,19 @@ RUN npm install -g --include=optional \
 # Debian 12+ marks the system Python as externally managed (PEP 668); this
 # image has no other consumer of that protection.
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
-RUN pip install --no-cache-dir uv 'mcp>=1.0,<2' ${PIP_EXTRAS}
+RUN pip install --no-cache-dir uv ${PIP_EXTRAS}
+
+# VibeSys's own interpreter: a uv-managed Python (never the base image's) in a
+# virtual environment at a fixed path, holding the MCP library (and so
+# pydantic) the framework's tool servers import. The framework's own packages
+# arrive on PYTHONPATH from the read-only framework mount at run time.
+RUN set -eux; \
+    UV_PYTHON_INSTALL_DIR=/opt/vibesys-python-install uv python install --no-cache "${PYTHON_VERSION}"; \
+    UV_PYTHON_INSTALL_DIR=/opt/vibesys-python-install uv venv --no-cache \
+        --python "${PYTHON_VERSION}" --python-preference only-managed "${PYTHON_HOME}"; \
+    uv pip install --no-cache --python "${PYTHON_HOME}/bin/python" 'mcp>=1.0,<2'; \
+    chmod -R a+rX /opt/vibesys-python-install "${PYTHON_HOME}"; \
+    "${PYTHON_HOME}/bin/python" -c 'import mcp, pydantic, sys; print(sys.version)'
 
 # Harmless when the corresponding toolchain is absent, so these are set
 # unconditionally rather than only inside the TOOLCHAINS branches below.

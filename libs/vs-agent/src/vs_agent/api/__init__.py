@@ -20,6 +20,15 @@ from vs_agent.cli_docker import (
     auth_env_vars,
     auth_paths,
 )
+from vs_agent.container_python import (
+    CONTAINER_FRAMEWORK_ROOT,
+    CONTAINER_PYTHON,
+    CONTAINER_PYTHON_HOME,
+    CONTAINER_PYTHON_VERSION,
+    CONTAINER_SERVER_PACKAGES,
+    container_import_roots,
+    containerize_server,
+)
 from vs_agent.contracts import (
     AgentCapabilities,
     AgentClientProtocol,
@@ -144,7 +153,12 @@ if TYPE_CHECKING:
 __all__ = [
     "BASE_ENV_ALLOWLIST",
     "CLI_VERSIONS",
+    "CONTAINER_FRAMEWORK_ROOT",
+    "CONTAINER_PYTHON",
+    "CONTAINER_PYTHON_HOME",
+    "CONTAINER_PYTHON_VERSION",
     "CONTAINER_RUNTIME_TOOLCHAIN",
+    "CONTAINER_SERVER_PACKAGES",
     "DEFAULT_CLI_PROVIDER",
     "DOCKER_COMPOSE_VERSION",
     "DOCKER_ENGINE_VERSION",
@@ -236,6 +250,8 @@ __all__ = [
     "build_agent_client",
     "cli_mcp_config_files",
     "cli_skill_dirs",
+    "container_import_roots",
+    "containerize_server",
     "declare_command_host_resources",
     "declare_provider_state_resources",
     "describe_validation_error",

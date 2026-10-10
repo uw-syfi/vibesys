@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 import agentshim
 
+from vs_agent.container_python import containerize_server
 from vs_agent.contracts import (
     AgentEvent,
     AgentEventKind,
@@ -55,22 +56,26 @@ def mcp_server_from(
     spec: MCPServerSpec,
     agent_path: Callable[[str], str],
     *,
-    pin_interpreter: bool,
+    containerized: bool,
 ) -> agentshim.StdioMcpServer:
     """Translate one VibeSys MCP spec into the library's stdio spec.
 
-    A host agent inherits a login shell's PATH, where a bare ``python`` may be
-    an interpreter without the MCP dependencies, so *pin_interpreter* (true
-    only on the host) substitutes the interpreter running VibeSys itself. A
-    container image resolves its own, so nothing is substituted there. Every
-    absolute path in the command or args -- including that pinned interpreter
-    -- is then mapped through *agent_path* so a file the sandbox presents at a
-    different location (a bind-mounted workspace, say) still resolves; a
-    relative argument such as a flag or a workspace-relative path is left
-    untouched.
+    A bare ``python`` is whatever the agent's PATH resolves, which may lack the
+    MCP dependencies or the framework. On the host the interpreter running
+    VibeSys itself replaces it. In a container (*containerized*) the agent
+    image's own interpreter and the framework's import roots do
+    (:func:`~vs_agent.container_python.containerize_server`). Every absolute
+    path in the command or args -- including that interpreter -- is then mapped
+    through *agent_path* so a file the sandbox presents at a different location
+    (a bind-mounted workspace, say) still resolves; a relative argument such as
+    a flag or a workspace-relative path is left untouched.
     """
+    if containerized:
+        spec = containerize_server(spec)
     command = (
-        sys.executable if pin_interpreter and spec.command in _PYTHON_MCP_COMMANDS else spec.command
+        sys.executable
+        if not containerized and spec.command in _PYTHON_MCP_COMMANDS
+        else spec.command
     )
     return agentshim.StdioMcpServer(
         name=spec.name,
