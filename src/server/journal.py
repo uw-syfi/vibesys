@@ -167,8 +167,12 @@ class WireJournal:
                 self.log_dir = log_dir
                 self._read_only = read_only
                 return
+            # Until the run is ready the server does not know its id, and events
+            # name no run (an empty ``run_id``). A client latches the first id
+            # it folds, so a stand-in derived from a path would make it ignore
+            # every event the run sends once its real id is known.
             durable = (
-                EventStore(events_path, run_id=run_id or log_dir.parent.name, threads=self._threads)
+                EventStore(events_path, run_id=run_id or "", threads=self._threads)
                 if not read_only
                 else EventStore(events_path, run_id="", read_only=True, threads=self._threads)
             )
