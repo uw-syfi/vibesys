@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.minimal_container.conftest import expect_failure_for
 from tests.minimal_container.stdio import StdioJsonProcess, mcp_initialize, mcp_tool_names
 from tests.support.skeleton_strategy import ATTEMPT, DIGEST
 
@@ -28,6 +27,9 @@ if TYPE_CHECKING:
     from tests.minimal_container.editor import Editor
 
 pytestmark = pytest.mark.minimal_container
+
+#: Also run on the stand-in bases: an Ubuntu base has no `python` of its own.
+INCLUDE_STAND_INS = True
 
 
 _POLICY = AgentEvaluationPolicy(
@@ -49,9 +51,8 @@ class _NoWorkspaces:
 
 
 def test_the_core_evaluation_server_initializes_and_lists_its_tools(
-    editor: Editor, tmp_path: Path, request: pytest.FixtureRequest
+    editor: Editor, tmp_path: Path
 ) -> None:
-    expect_failure_for(request, editor, ("rocm",), 1627)
     bridge = AgentEvaluationBridge(tmp_path / "evaluation.sock", _POLICY, _NoWorkspaces())
     role = AgentRole(
         id="implementer", system_prompt="implement", extra_tools=(AgentTool(id=EVALUATION_TOOL_ID),)
@@ -59,22 +60,14 @@ def test_the_core_evaluation_server_initializes_and_lists_its_tools(
     (descriptor,) = bridge.servers(role, Scope(owner=ATTEMPT.attempt_id, generation=0))
     assert isinstance(descriptor, StdioServerDescriptor)
 
-    with StdioJsonProcess(
-        editor.argv(
-            [descriptor.command, *descriptor.args],
-            env=(*descriptor.env, *descriptor.runtime_env),
-        )
-    ) as server:
+    with StdioJsonProcess(editor.server_argv(descriptor)) as server:
         mcp_initialize(server)
         tools = mcp_tool_names(server)
 
     assert sorted(tools) == sorted(CORE_EVALUATION_TOOLS)
 
 
-def test_the_per_role_evaluation_server_initializes_and_lists_tools(
-    editor: Editor, request: pytest.FixtureRequest
-) -> None:
-    expect_failure_for(request, editor, ("cpu", "cuda", "rocm"), 1626)
+def test_the_per_role_evaluation_server_initializes_and_lists_tools(editor: Editor) -> None:
     grant = EvaluationGrant(
         token="t" * 32,
         principal_id="implementer",
@@ -84,12 +77,7 @@ def test_the_per_role_evaluation_server_initializes_and_lists_tools(
     descriptor = evaluation_mcp_descriptor(grant, "/tmp/evaluation.sock")  # noqa: S108  # lint-waiver: LW-960022 [S108]; a socket path this test never connects to.
     assert isinstance(descriptor, StdioServerDescriptor)
 
-    with StdioJsonProcess(
-        editor.argv(
-            [descriptor.command, *descriptor.args],
-            env=(*descriptor.env, *descriptor.runtime_env),
-        )
-    ) as server:
+    with StdioJsonProcess(editor.server_argv(descriptor)) as server:
         mcp_initialize(server)
         tools = mcp_tool_names(server)
 

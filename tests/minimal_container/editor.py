@@ -27,6 +27,8 @@ from vibesys.orchestration.profilers import (
     profiler_support_extra,
 )
 from vibesys.run.environment import open_run_environment
+from vs_agent.api import MCPServerSpec, containerize_server
+from vs_mcp.api import StdioServerDescriptor
 from vs_project.api import RunResourceRequest
 from vs_runtime.api.infrastructure import (
     DockerEnvironmentConfig,
@@ -40,6 +42,8 @@ from vs_sandbox.api import ComputeBackend, ComputeBackendImpl, DockerSandbox, cr
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from pathlib import Path
+
+    from vs_mcp.api import ToolServerDescriptor
 
 #: The label ``DockerSandbox`` puts on its containers (``vs_sandbox.docker_sandbox.RUN_ID_LABEL``).
 RUN_ID_LABEL = "vibesys.run-id"
@@ -127,6 +131,20 @@ class Editor:
         """Wrap *command* as a ``docker exec -i`` call, with *env* set for it alone."""
         inner = ["env", *(f"{key}={value}" for key, value in env), *command] if env else command
         return self.sandbox.wrap(list(inner), cwd or self.request.workspace)
+
+    def server_argv(self, descriptor: ToolServerDescriptor) -> list[str]:
+        """Start *descriptor*'s server the way the agent launcher starts it in this container."""
+        assert isinstance(descriptor, StdioServerDescriptor)
+        started = containerize_server(
+            MCPServerSpec(
+                descriptor.name,
+                descriptor.command,
+                descriptor.args,
+                descriptor.env,
+                descriptor.runtime_env,
+            )
+        )
+        return self.argv([started.command, *started.args], env=(*started.env, *started.runtime_env))
 
     def run(self, command: str) -> tuple[int, str]:
         """Run a shell *command* as the agent; return its exit status and output."""

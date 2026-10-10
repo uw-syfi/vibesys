@@ -86,8 +86,8 @@ HOST_CANARY_VALUE = "never-in-a-job-0f3a9c"
 class SharedRuns:
     """Opened run environments, one per kind, shared by the tests that do not close them.
 
-    Closing a Docker editor takes about ten seconds (its PID 1 ignores SIGTERM), so
-    tests that only use a session share one; tests about closing open their own.
+    Opening a Docker editor starts a container and its brokers, so tests that only
+    use a session share one; tests about closing open their own.
     """
 
     def __init__(self, cluster: SlurmCluster, directory: Path, image_id: str) -> None:

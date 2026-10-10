@@ -794,7 +794,9 @@ expose = ["api", "api\\..*"]
 from = ["vs_prompts"]
 
 [[interfaces]]
-expose = ["api", "api\\..*"]
+# `cpu_profilers` is the standard-library-only leaf the in-container linux-cpu profiler
+# server imports; `vs_runtime.api` pulls in the whole run runtime.
+expose = ["api", "api\\..*", "cpu_profilers"]
 from = ["vs_runtime"]
 
 [[interfaces]]

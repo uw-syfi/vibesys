@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from vs_agent import provider_policy
+from vs_agent.container_python import CONTAINER_PYTHON_HOME, CONTAINER_PYTHON_VERSION
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
@@ -397,6 +398,8 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     build_args += ["--build-arg", f"NODE_VERSION={provider_policy.NODE_VERSION}"]
     for provider, version in provider_policy.CLI_VERSIONS.items():
         build_args += ["--build-arg", f"{provider.upper()}_VERSION={version}"]
+    build_args += ["--build-arg", f"PYTHON_VERSION={CONTAINER_PYTHON_VERSION}"]
+    build_args += ["--build-arg", f"PYTHON_HOME={CONTAINER_PYTHON_HOME}"]
     build_args += ["--build-arg", f"TOOLCHAINS={' '.join(sorted(set(toolchains)))}"]
     build_args += ["--build-arg", f"RUST_VERSION={provider_policy.RUST_TOOLCHAIN_VERSION}"]
     build_args += ["--build-arg", f"GO_VERSION={provider_policy.GO_TOOLCHAIN_VERSION}"]

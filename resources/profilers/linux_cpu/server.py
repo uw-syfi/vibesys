@@ -4,7 +4,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from vs_runtime.api.infrastructure import (
+from vs_runtime.cpu_profilers import (
     collect_linux_profile,
     detect_linux_profiler,
     parse_profile_command,

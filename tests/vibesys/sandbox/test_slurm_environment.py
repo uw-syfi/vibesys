@@ -7,9 +7,7 @@ program stands in for the cluster, so nothing patches the code under test.
 
 from __future__ import annotations
 
-import os
 import shlex
-import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -188,46 +186,6 @@ def test_closing_the_session_removes_every_host_socket(tmp_path: Path, name: str
     session.close()
 
     assert not any(socket.exists() for socket in sockets)
-
-
-# What an agent image is guaranteed to provide to the profiler server: the standard
-# library and pydantic (its MCP library requires it).
-_ALLOWED_THIRD_PARTY = frozenset(
-    {"pydantic", "pydantic_core", "annotated_types", "typing_extensions", "typing_inspection"}
-)
-_IMPORT_PROBE = """\
-import sys
-import vs_sandbox.api.slurm, vs_slurm.api, vs_slurm.wiring
-allowed = sys.stdlib_module_names | set(sys.argv[1:])
-loaded = {name.split(".")[0] for name in sys.modules}
-extra = sorted(name for name in loaded if name not in allowed and not name.startswith(("vs_", "_")))
-print(",".join(extra))
-"""
-
-
-def test_the_profiler_server_can_import_the_slurm_adapter_in_a_plain_image(
-    tmp_path: Path,
-) -> None:
-    """The container's Python has no VibeSys install; the mounted sources must be enough."""
-    framework_root = Path(__file__).resolve().parents[3]
-    backend = DaemonBackend(daemon_engine(tmp_path))
-    request = _request(tmp_path, backend, framework_root=framework_root)
-    session = open_run_environment(_environment(tmp_path, "slurm", backend), request)
-    try:
-        pythonpath = dict(session.view.profiler_mcp_env)["PYTHONPATH"]
-    finally:
-        session.close()
-
-    probe = subprocess.run(  # noqa: S603  # lint-waiver: LW-954392 [S603]; run the test's own interpreter on a fixed probe script.
-        [sys.executable, "-c", _IMPORT_PROBE, *_ALLOWED_THIRD_PARTY],
-        env={**os.environ, "PYTHONPATH": pythonpath},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert probe.returncode == 0, probe.stderr
-    assert probe.stdout.strip() == ""
 
 
 # What the agent types to reach the host broker's gates, per environment.

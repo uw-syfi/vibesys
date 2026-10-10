@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession, HostBroker
-from vs_runtime._container_paths import CONTAINER_FRAMEWORK_ROOT
 from vs_runtime._container_runtime_policy import reject_docker_in_docker
 from vs_runtime._host_command_bridge import (
     bridge_editor_extras,
@@ -63,34 +62,12 @@ if TYPE_CHECKING:
 
     from vs_agent.api.images import DockerBuildRunner
 
-#: The framework's packages a profiler server imports, in the container, from
-#: the read-only ``libs`` mount: the Slurm adapter and what it needs.
-PROFILER_PYTHON_PACKAGES: tuple[str, ...] = (
-    "vs-async-ops",
-    "vs-evaluation",
-    "vs-evaluator-protocol",
-    "vs-project",
-    "vs-sandbox",
-    "vs-slurm",
-)
 _GATE_LAUNCHER = "vibesys-gate"
 
 
 def _slurm_service_command(policy: SlurmExecutionPolicy) -> tuple[str, ...]:
     service = policy.remote_service()
     return () if service is None else service.command
-
-
-def profiler_python_path(framework_root: Path) -> str:
-    """Return the ``PYTHONPATH`` that lets a container's Python import the Slurm adapter.
-
-    The profiler server runs in the container, with whatever Python its image
-    provides and ``pydantic`` (which its MCP library needs). The framework
-    packages it imports sit in the read-only ``libs`` mount, whose host path is
-    also its container path.
-    """
-    sources = (framework_root / "libs" / name / "src" for name in PROFILER_PYTHON_PACKAGES)
-    return os.pathsep.join((CONTAINER_FRAMEWORK_ROOT, *(str(path) for path in sources)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,11 +207,10 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                     profiler_mcp_env=(
                         ("VIBESYS_SLURM_CONFIG", str(self.config_path)),
                         ("VIBESYS_SLURM_EVALUATOR_PLAN", str(plans.capture)),
-                        ("PYTHONPATH", profiler_python_path(request.framework_root)),
                         *transport_env,
                     ),
                     profiler_mcp_resources=(
-                        *_profiler_resources(self.config_path, request, plans),
+                        *_profiler_resources(self.config_path, plans),
                         *transport_resources,
                     ),
                 ),
@@ -379,9 +355,7 @@ def _start_transport_broker(
     )
 
 
-def _profiler_resources(
-    config_path: Path, request: RunEnvironmentRequest, plans: _ClusterPlans
-) -> tuple[HostResource, ...]:
+def _profiler_resources(config_path: Path, plans: _ClusterPlans) -> tuple[HostResource, ...]:
     return (
         HostResource(
             plans.state_root,
@@ -390,9 +364,6 @@ def _profiler_resources(
         ),
         HostResource(config_path, HostResourceAccess.READ_ONLY, "Slurm profiler configuration"),
         HostResource(plans.capture, HostResourceAccess.READ_ONLY, "Slurm profiler plan"),
-        HostResource(
-            request.framework_root / "libs", HostResourceAccess.READ_ONLY, "Slurm adapter libraries"
-        ),
         *(
             HostResource(path, HostResourceAccess.READ_ONLY, f"Slurm support tree {name}")
             for name, path in sorted(plans.support_paths.items())

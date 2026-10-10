@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import shlex
 import subprocess
 import sys
@@ -470,13 +469,8 @@ remote_python = "/remote/venv/bin/python"
     )
     assert Path(profiler_env["VIBESYS_SLURM_BROKER_SOCKET"]).is_socket()
     assert profiler_env["VIBESYS_SLURM_BROKER_TOKEN"]
-    # The profiler server imports the Slurm adapter from the read-only libs mount.
-    libs = tmp_path / "framework" / "libs"
-    assert str(libs / "vs-slurm" / "src") in profiler_env["PYTHONPATH"].split(os.pathsep)
-    assert (
-        HostResource(libs, HostResourceAccess.READ_ONLY, "Slurm adapter libraries")
-        in session.view.profiler_mcp_resources
-    )
+    # The import roots are the container launcher's, not the environment's.
+    assert "PYTHONPATH" not in profiler_env
     evaluation = read_slurm_evaluation_plan(tmp_path / "logs/slurm-evaluation-plan.json")
     capture = read_slurm_capture_plan(tmp_path / "logs/slurm-capture-plan.json")
     cluster_state_root = tmp_path / "logs/slurm-cluster"

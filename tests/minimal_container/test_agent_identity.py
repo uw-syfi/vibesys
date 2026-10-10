@@ -13,7 +13,6 @@ import os
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.minimal_container.conftest import expect_failure_for
 
 if TYPE_CHECKING:
     from tests.minimal_container.editor import Editor
@@ -24,11 +23,7 @@ pytestmark = pytest.mark.minimal_container
 INCLUDE_STAND_INS = True
 
 
-def test_the_agent_user_has_a_group_of_its_own_name(
-    editor: Editor, request: pytest.FixtureRequest
-) -> None:
-    expect_failure_for(request, editor, ("cuda", "rocm", "ubuntu-uid-1000"), 1589)
-
+def test_the_agent_user_has_a_group_of_its_own_name(editor: Editor) -> None:
     status, output = editor.run("id -un; id -gn; getent group agent | cut -d: -f1")
 
     assert status == 0, output

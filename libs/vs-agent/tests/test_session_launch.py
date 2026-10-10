@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import os
 import sys
 import threading
 import time
@@ -49,6 +50,7 @@ from vibesys.orchestration.multi.contracts import ImplementerResponse, JudgeResp
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent import session_launch as subject
 from vs_agent.api import (
+    CONTAINER_PYTHON,
     NULL_AGENT_EVENT_SINK,
     AgentClient,
     AgentEvent,
@@ -59,6 +61,7 @@ from vs_agent.api import (
     MCPServerSpec,
     SessionResumeError,
     SessionScope,
+    container_import_roots,
 )
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
@@ -649,8 +652,10 @@ def test_a_non_python_mcp_command_is_left_alone(tmp_path: Path) -> None:
     assert installed[0]["other"]["command"] == "node"
 
 
-def test_a_container_mcp_command_is_left_for_the_image_to_resolve(tmp_path: Path) -> None:
-    """The container image resolves its own interpreter, so nothing is pinned."""
+def test_a_container_mcp_server_runs_on_the_images_interpreter_and_import_roots(
+    tmp_path: Path,
+) -> None:
+    """A container never resolves ``python`` itself: the agent image's own interpreter runs it."""
     server = MCPServerSpec(name="issues", command="python", args=("-m", "issues"))
     installed: list[dict[str, dict[str, Any]]] = []
 
@@ -674,8 +679,9 @@ def test_a_container_mcp_command_is_left_for_the_image_to_resolve(tmp_path: Path
     # installed[0] is the binary health check's own scripted run (it runs
     # through the same confined executor); the turn is the last snapshot.
     entry = installed[-1]["issues"]
-    assert entry["command"] == "python"
+    assert entry["command"] == CONTAINER_PYTHON
     assert entry["args"] == ["-m", "issues"]
+    assert entry["env"] == {"PYTHONPATH": os.pathsep.join(container_import_roots())}
 
 
 # ---------------------------------------------------------------------------
@@ -808,7 +814,7 @@ def test_container_session_mcp_servers_are_installed_on_the_host_workspace(
     session.run_turn(AgentTurnRequest(message="review"))
 
     entry = installed[-1]["issues"]
-    assert entry["command"] == "python"
+    assert entry["command"] == CONTAINER_PYTHON
     assert entry["args"] == ["-m", "issues"]
 
     if agentshim.get_provider(provider).profile.mcp is not agentshim.McpMechanism.CONFIG_FILE:
