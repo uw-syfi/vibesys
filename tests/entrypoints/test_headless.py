@@ -179,6 +179,56 @@ def test_cli_selects_slurm_with_external_operator_config(tmp_path: Path) -> None
     assert spec.options == {"config_path": str(config_path)}
 
 
+def test_cli_agent_image_build_timeout_reaches_every_building_environment(
+    tmp_path: Path,
+) -> None:
+    project = _write_input_project(tmp_path)
+    config_path = tmp_path / "operator-slurm.toml"
+
+    slurm = run_environment_spec_from_args(
+        parse_cli_invocation(
+            [
+                "--input",
+                str(project),
+                "--slurm-config",
+                str(config_path),
+                "--agent-image-build-timeout",
+                "5400",
+            ]
+        ).args
+    )
+    docker = run_environment_spec_from_args(
+        parse_cli_invocation(
+            ["--input", str(project), "--agent-image-build-timeout", "7200.5"]
+        ).args
+    )
+
+    assert slurm.options == {"config_path": str(config_path), "build_timeout_seconds": 5400.0}
+    assert docker.options["build_timeout_seconds"] == 7200.5
+    # Not passing the flag leaves the library default in force.
+    unset = run_environment_spec_from_args(parse_cli_invocation(["--input", str(project)]).args)
+    assert "build_timeout_seconds" not in unset.options
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "inf", "nan", "soon"])
+def test_cli_rejects_an_agent_image_build_timeout_that_cannot_finish_a_build(
+    tmp_path: Path, value: str
+) -> None:
+    project = _write_input_project(tmp_path)
+    with pytest.raises(ConfigurationError, match="agent-image-build-timeout"):
+        parse_cli_invocation(["--input", str(project), "--agent-image-build-timeout", value])
+
+
+def test_cli_rejects_an_agent_image_build_timeout_for_an_environment_that_does_not_build(
+    tmp_path: Path,
+) -> None:
+    project = _write_input_project(tmp_path)
+    with pytest.raises(ValueError, match="agent-image-build-timeout"):
+        parse_cli_invocation(
+            ["--input", str(project), "--modal", "--agent-image-build-timeout", "60"]
+        )
+
+
 def test_cli_rejects_slurm_config_with_another_environment(tmp_path: Path) -> None:
     project = _write_input_project(tmp_path)
     with pytest.raises(ValueError, match="slurm-config cannot be combined"):

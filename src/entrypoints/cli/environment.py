@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,6 +31,13 @@ class RunEnvironmentSelectionError(ValueError):
         """Describe a Slurm config paired with a compatibility selector."""
         return cls("--slurm-config cannot be combined with --modal or --skypilot")
 
+    @classmethod
+    def build_timeout_unsupported(cls, environment: str) -> RunEnvironmentSelectionError:
+        """Describe an image build limit for an environment that does not build locally."""
+        return cls(
+            f"--agent-image-build-timeout is not supported by the {environment} run environment"
+        )
+
 
 def _requested_environment(
     args: argparse.Namespace, selected: str | None, slurm_config: Path | None
@@ -41,6 +49,15 @@ def _requested_environment(
         or ("slurm" if slurm_config is not None else None)
         or "docker"
     )
+
+
+def _build_timeout_options(build_timeout: float | None, environment: str) -> dict[str, object]:
+    """Return the spec option for the operator's image build limit, if one was given."""
+    if build_timeout is None:
+        return {}
+    if environment in {"modal", "skypilot"}:
+        raise RunEnvironmentSelectionError.build_timeout_unsupported(environment)
+    return {"build_timeout_seconds": build_timeout}
 
 
 def _task_docker_conflicts(
@@ -56,6 +73,30 @@ def _task_docker_conflicts(
     if "docker_image" in explicit:
         conflicts.append("--docker-image")
     return conflicts
+
+
+def _built_task_image(
+    args: argparse.Namespace,
+    dockerfile_path: Path | None,
+    requested_environment: str,
+    build_timeout: float | None,
+    *,
+    build_task_docker_image: bool,
+) -> str | None:
+    """Build the task's own image when this launch owns it, or return ``None``."""
+    # A resumed run with no recorded image (such as one migrated from the retired
+    # host environment) keeps it: building one would contradict the record.
+    keeps_recorded_image = getattr(args, "resume", None) is not None and args.docker_image is None
+    if (
+        dockerfile_path is None
+        or requested_environment != "docker"
+        or not build_task_docker_image
+        or keeps_recorded_image
+    ):
+        return None
+    if build_timeout is None:
+        return build_task_image(dockerfile_path)
+    return build_task_image(dockerfile_path, timeout=build_timeout)
 
 
 def run_environment_spec_from_args(
@@ -99,17 +140,16 @@ def run_environment_spec_from_args(
             _exception_message_2 = f"{declared} cannot be combined with {joined}"
             raise ValueError(_exception_message_2)
 
-    task_image = None
-    # A resumed run with no recorded image (such as one migrated from the retired
-    # host environment) keeps it: building one would contradict the record.
-    keeps_recorded_image = resuming and args.docker_image is None
-    if (
-        dockerfile_path is not None
-        and requested_environment == "docker"
-        and build_task_docker_image
-        and not keeps_recorded_image
-    ):
-        task_image = build_task_image(dockerfile_path)
+    build_timeout = getattr(args, "agent_image_build_timeout", None)
+    timeout_options = _build_timeout_options(build_timeout, requested_environment)
+
+    task_image = _built_task_image(
+        args,
+        dockerfile_path,
+        requested_environment,
+        build_timeout,
+        build_task_docker_image=build_task_docker_image,
+    )
 
     if requested_environment == "slurm-gpu":
         return RunEnvironmentSpec(
@@ -117,7 +157,8 @@ def run_environment_spec_from_args(
             options={
                 "config_path": str(
                     slurm_config or Path("~/.config/vibesys/slurm-gpu.toml").expanduser()
-                )
+                ),
+                **timeout_options,
             },
             resources=bundle.manifest.resources if bundle is not None else None,
         )
@@ -127,11 +168,12 @@ def run_environment_spec_from_args(
             options={
                 "config_path": str(
                     slurm_config or Path("~/.config/vibesys/slurm.toml").expanduser()
-                )
+                ),
+                **timeout_options,
             },
         )
 
-    return make_run_environment_spec(
+    spec = make_run_environment_spec(
         docker_image=task_image or args.docker_image,
         use_modal=requested_environment == "modal",
         modal_gpu=args.modal_gpu,
@@ -144,6 +186,9 @@ def run_environment_spec_from_args(
         skypilot_executable=getattr(args, "skypilot_executable", "sky"),
         resources=bundle.manifest.resources if bundle is not None else None,
     )
+    if timeout_options:
+        spec = replace(spec, options={**spec.options, **timeout_options})
+    return spec
 
 
 def _validate_run_environment_profiler(args: argparse.Namespace) -> None:

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal
 from vs_project.api import RunEnvironmentRecord, RunResourceRequest
 from vs_runtime._run_environment import (
     DockerEnvironment,
+    DockerEnvironmentConfig,
     HostEnvironment,
     ModalEnvironment,
     RunEnvironment,
@@ -118,7 +119,11 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
     if spec.name == "slurm":
         return SlurmEnvironment.from_options(spec.options)
     if spec.name == "slurm-gpu":
-        return SlurmGpuEnvironment(Path(str(spec.options["config_path"])), spec.resources)
+        return SlurmGpuEnvironment(
+            Path(str(spec.options["config_path"])),
+            spec.resources,
+            docker=DockerEnvironmentConfig.from_options(spec.options),
+        )
     message = f"unknown run environment: {spec.name!r}"
     raise ValueError(message)
 

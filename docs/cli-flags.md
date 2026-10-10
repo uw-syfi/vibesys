@@ -456,6 +456,13 @@ legacy bundles remain candidate files and are not auto-detected.
 `--docker-image` overrides the backend's default agent container image, including
 the local CPU editor image for Modal and SkyPilot.
 
+`--agent-image-build-timeout SECONDS` limits each Docker build of the task and
+agent images for the Docker, Slurm, and Slurm-GPU environments (Modal and
+SkyPilot reject it). The default is 3600 s, about twice the 29 minutes a cold
+agent-image build over `rocm/pytorch` took; the run log states the limit in
+force. It is an operator setting, not part of the recorded run configuration,
+so pass it again on resume.
+
 The selected environment and its options (`--docker-image`, `--modal-gpu`,
 `--modal-model-volume`, `--modal-app`) are recorded in the run configuration.
 `--modal` is a boolean flag, so an omitted flag cannot be told
