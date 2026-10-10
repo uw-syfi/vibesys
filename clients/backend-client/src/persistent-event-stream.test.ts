@@ -119,6 +119,7 @@ class StubTransport implements StreamTransport {
   #disconnect: ((error: Error) => void) | null = null;
   #armed: {events: RunEvent[]; historyAfterSequence: number} | null = null;
   #deferNext = false;
+  #deferredFailure: Error | null = null;
   #release: (() => void) | null = null;
 
   /** Arm the next subscribe to deliver this batch before its promise resolves. */
@@ -129,6 +130,11 @@ class StubTransport implements StreamTransport {
   /** Hold the next subscribe pending until `releasePendingSubscribe`. */
   deferNextSubscribe(): void {
     this.#deferNext = true;
+  }
+
+  /** Hold one failed subscribe until `releasePendingSubscribe`. */
+  deferNextSubscribeFailure(error: Error): void {
+    this.#deferredFailure = error;
   }
 
   releasePendingSubscribe(): void {
@@ -146,6 +152,13 @@ class StubTransport implements StreamTransport {
     const call = {afterSequence, tail: options?.tail, storeId: options?.storeId};
     this.subscribeCalls.push(call);
     this.#subscribeWaiters.shift()?.(call);
+    const deferredFailure = this.#deferredFailure;
+    this.#deferredFailure = null;
+    if (deferredFailure !== null) {
+      return new Promise<EventSubscription>((_resolve, reject) => {
+        this.#release = () => reject(deferredFailure);
+      });
+    }
     const scripted = this.scriptedDialFailures.shift();
     if (scripted !== undefined) return Promise.reject(scripted);
     if (this.refuseSubscribes > 0) {
@@ -551,6 +564,120 @@ describe('PersistentEventStream', () => {
       {afterSequence: 0, tail: 1_000, storeId: undefined},
     ]);
     await stream.close();
+  });
+
+  it('queues one explicit re-bootstrap behind an in-flight resume', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 0, reconnect: true};
+    const {callbacks, messages, states} = harness(env);
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    env.cursor = 1;
+
+    transport.deferNextSubscribe();
+    transport.sever();
+    await stream.settle();
+    expect(transport.subscribeCalls).toEqual([
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+      {afterSequence: 1, tail: undefined, storeId: undefined},
+    ]);
+
+    // The resume owns the dial slot, but a later explicit request is stronger:
+    // retain it once, let the owned dial settle, then retire that handle and
+    // replace it with one fresh bootstrap.
+    stream.rebootstrap();
+    stream.rebootstrap();
+    transport.emitBatch([event(2, 'agent_output_chunk', 'superseded\n')]);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.resumed).toBe(false);
+    transport.releasePendingSubscribe();
+    await stream.settle();
+    await stream.settle();
+
+    expect(transport.subscribeCalls).toEqual([
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+      {afterSequence: 1, tail: undefined, storeId: undefined},
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+    ]);
+    expect(transport.subscriptions[1]?.closed).toBe(true);
+    expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+    await stream.close();
+  });
+
+  it('does not downgrade a superseded named resume before the fresh pass', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 0, reconnect: true, storeId: ''};
+    const {callbacks, nextState} = harness(env);
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    env.cursor = 1;
+    env.storeId = 'run-store';
+
+    transport.deferNextSubscribeFailure(new ServerError('Extra inputs are not permitted'));
+    transport.sever();
+    await stream.settle();
+    stream.rebootstrap();
+
+    const recovered = nextState();
+    transport.releasePendingSubscribe();
+    await expect(recovered).resolves.toMatchObject({status: 'connected'});
+    expect(transport.subscribeCalls).toEqual([
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+      {afterSequence: 1, tail: undefined, storeId: 'run-store'},
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+    ]);
+    await stream.close();
+  });
+
+  it('coalesces re-bootstrap with a recovery that is already fresh', async () => {
+    const transport = new StubTransport();
+    const {callbacks, nextState, states} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+
+    // No bootstrap batch landed, so recovering this drop already requires a
+    // sequence-zero dial. An explicit fresh request cannot make it fresher.
+    transport.deferNextSubscribe();
+    transport.sever();
+    await stream.settle();
+    expect(transport.subscribeCalls).toEqual([
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+    ]);
+
+    const recovered = nextState();
+    stream.rebootstrap();
+    stream.rebootstrap();
+    transport.releasePendingSubscribe();
+    await expect(recovered).resolves.toMatchObject({status: 'connected'});
+
+    expect(transport.subscribeCalls).toHaveLength(2);
+    expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+    await stream.close();
+  });
+
+  it('keeps recovery requests behind the initial bootstrap handshake', async () => {
+    const transport = new StubTransport();
+    const {callbacks, states} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    transport.deferNextSubscribe();
+
+    const subscribing = stream.subscribe(callbacks);
+    expect(transport.subscribeCalls).toEqual([{afterSequence: 0, tail: 1_000, storeId: undefined}]);
+
+    // The pending attempt is already a fresh bootstrap. Neither the stronger
+    // public recovery verb nor a lifecycle retry may open a competing socket.
+    stream.rebootstrap();
+    stream.retry();
+    expect(transport.subscribeCalls).toHaveLength(1);
+
+    transport.releasePendingSubscribe();
+    await subscribing;
+    await stream.close();
+    expect(transport.subscriptions.every(subscription => subscription.closed)).toBe(true);
+    expect(states).toEqual([]);
   });
 
   it('does not reconnect once closed', async () => {

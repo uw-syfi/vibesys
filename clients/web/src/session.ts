@@ -111,6 +111,7 @@ export class WebSession {
   #started = false;
   #closed = false;
   #wakeInFlight: Promise<void> | null = null;
+  #recoveryIntent: StreamRecovery = 'retry';
 
   constructor(options: WebSessionOptions = {}) {
     this.store = createCoreStateStore();
@@ -299,9 +300,14 @@ export class WebSession {
     if (this.#closed || this.#lifecycle.visibilityState === 'hidden' || !this.#lifecycle.online) {
       return;
     }
+    // Recovery is single-flight, but its intent is monotone while that flight
+    // owns the control redial and snapshot. A lifecycle retry cannot weaken a
+    // user-requested fresh bootstrap that overlaps it.
+    if (mode === 'rebootstrap') this.#recoveryIntent = mode;
     if (this.#wakeInFlight !== null) return;
-    this.#wakeInFlight = this.#resume(mode).finally(() => {
+    this.#wakeInFlight = this.#resume().finally(() => {
       this.#wakeInFlight = null;
+      this.#recoveryIntent = 'retry';
     });
   }
 
@@ -316,7 +322,7 @@ export class WebSession {
     }
   };
 
-  async #resume(mode: StreamRecovery): Promise<void> {
+  async #resume(): Promise<void> {
     // A browser wake is stronger evidence than either reconnect timer: a
     // background tab may have had both callbacks coalesced indefinitely.
     // `reconnect()` is inert on a healthy or already-dialing control channel,
@@ -326,11 +332,10 @@ export class WebSession {
     this.#transport.reconnect();
     try {
       await this.#loadSnapshot();
-      this.#recoverStream(mode);
     } catch (error) {
       this.#setState('stale', toError(error));
-      this.#recoverStream(mode);
     }
+    this.#recoverStream(this.#recoveryIntent);
   }
 
   #recoverStream(mode: StreamRecovery): void {

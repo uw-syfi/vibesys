@@ -24,6 +24,9 @@ export type StreamConnectionState =
   | {readonly status: 'connected'}
   | {readonly status: 'disconnected'; readonly error: Error};
 
+type StreamRecovery = 'idle' | 'bootstrap' | 'retry' | 'rebootstrap';
+type ActiveStreamRecovery = Exclude<StreamRecovery, 'idle'>;
+
 export interface PersistentEventStreamCallbacks {
   /**
    * The sequence to resume after: the last event the caller has folded. Read
@@ -136,8 +139,10 @@ export class PersistentEventStream {
    * reconnect recovers, so the next outage reports again.
    */
   #disconnectedReported = false;
-  /** Guards `#reconnectNow` so a manual `retry()` cannot stack a second dial. */
-  #reconnecting = false;
+  /** The one reconnect operation that currently owns the stream's dial slot. */
+  #recovery: StreamRecovery = 'idle';
+  /** Stronger intent retained until an in-flight cursor retry releases that slot. */
+  #rebootstrapQueued = false;
 
   constructor(transport: StreamTransport, options: PersistentEventStreamOptions = {}) {
     this.#transport = transport;
@@ -154,7 +159,16 @@ export class PersistentEventStream {
   async subscribe(callbacks: PersistentEventStreamCallbacks): Promise<void> {
     if (this.#callbacks !== null) throw new Error('PersistentEventStream is already subscribed');
     this.#callbacks = callbacks;
-    await this.#bootstrapDial();
+    // The initial bootstrap owns the same dial slot as every later recovery.
+    // A wake or explicit reattach can arrive while its handshake is pending;
+    // both are already satisfied by this sequence-zero attempt and must not
+    // create a second socket whose handle can race the first one home.
+    this.#recovery = 'bootstrap';
+    try {
+      await this.#bootstrapDial();
+    } finally {
+      this.#recovery = 'idle';
+    }
   }
 
   /**
@@ -174,6 +188,7 @@ export class PersistentEventStream {
    */
   async close(): Promise<void> {
     this.#closed = true;
+    this.#rebootstrapQueued = false;
     if (this.#cancelReconnect !== null) {
       this.#cancelReconnect();
       this.#cancelReconnect = null;
@@ -197,6 +212,7 @@ export class PersistentEventStream {
       try {
         return await this.#dial(0, false, {tail: this.#tail});
       } catch (error) {
+        if (this.#recoverySuperseded()) return false;
         if (!isServerRejection(error)) {
           this.#reportDisconnected(toError(error));
           return false;
@@ -207,6 +223,7 @@ export class PersistentEventStream {
     try {
       return await this.#dial(0, false);
     } catch (error) {
+      if (this.#closed) return false;
       this.#emit({status: 'disconnected', error: toError(error)});
       return false;
     }
@@ -231,7 +248,7 @@ export class PersistentEventStream {
       try {
         return await this.#dial(cursor, true, {storeId});
       } catch (error) {
-        if (!isServerRejection(error)) return false;
+        if (this.#recoverySuperseded() || !isServerRejection(error)) return false;
         // The server refused `store_id`; fall through to a cursor-only resume.
       }
     }
@@ -246,8 +263,11 @@ export class PersistentEventStream {
    * One subscribe attempt. Binds the resume flag and the connection identity
    * into the message and disconnect handlers before dialing, so a batch the
    * server delivers inside `subscribe` (before the promise resolves) is tagged
-   * and attributed correctly. A later `event_batch.rebootstrap` is the one
-   * server-declared exception: it is fresh despite this dial having resumed.
+   * and attributed correctly. A returned handle is adopted only while its
+   * token is still current; a superseded handle closes itself instead of
+   * replacing the subscription that superseded it. A later
+   * `event_batch.rebootstrap` is the one server-declared exception: it is fresh
+   * despite this dial having resumed.
    */
   async #dial(
     afterSequence: number,
@@ -261,7 +281,7 @@ export class PersistentEventStream {
       error => this.#handleDisconnect(error, token),
       options,
     );
-    if (this.#closed) {
+    if (this.#closed || token !== this.#connectionSeq) {
       await subscription.close();
       return false;
     }
@@ -318,9 +338,14 @@ export class PersistentEventStream {
   }
 
   async #reconnectNow(rebootstrap = false): Promise<void> {
-    if (this.#reconnecting) return;
-    if (this.#closed || (!rebootstrap && !this.#active().shouldReconnect())) return;
-    this.#reconnecting = true;
+    if (this.#recovery !== 'idle') return;
+    if (!this.#canStartRecovery(rebootstrap)) return;
+    const recovery = this.#recoveryMode(rebootstrap);
+    this.#recovery = recovery;
+    // The recovery owns delivery now, before closing the old handle. A close
+    // may settle asynchronously, and no message from the retired token may
+    // enter the fold while the next dial waits for it.
+    this.#connectionSeq += 1;
     try {
       const stale = this.#subscription;
       this.#subscription = null;
@@ -329,20 +354,44 @@ export class PersistentEventStream {
       } catch {
         // The subscription is already dead; closing it owes nothing.
       }
-      if (rebootstrap) this.#bootstrapped = false;
+      // An explicit fresh intent can arrive while the cursor retry is still
+      // retiring its old handle. Skip a dial it has already superseded.
+      if (this.#recoverySuperseded()) return;
+      if (recovery === 'rebootstrap') this.#bootstrapped = false;
       const recovered =
-        !rebootstrap && this.#bootstrapped ? await this.#resumeDial() : await this.#bootstrapDial();
-      if (this.#closed) return;
+        recovery === 'retry' ? await this.#resumeDial() : await this.#bootstrapDial();
+      // The cursor attempt has settled, but it is not the requested terminal
+      // recovery anymore. Its handle is retired by the queued fresh pass; do
+      // not briefly report recovery or arm another retry in between.
+      if (this.#recoverySuperseded()) return;
       if (recovered) {
         this.#backoff.reset();
         this.#disconnectedReported = false;
         this.#emit({status: 'connected'});
-      } else if (!rebootstrap || this.#active().shouldReconnect()) {
+      } else if (recovery !== 'rebootstrap' || this.#active().shouldReconnect()) {
         this.#scheduleReconnect();
       }
     } finally {
-      this.#reconnecting = false;
+      this.#recovery = 'idle';
+      if (this.#rebootstrapQueued) {
+        this.#rebootstrapQueued = false;
+        this.rebootstrap();
+      }
     }
+  }
+
+  #canStartRecovery(rebootstrap: boolean): boolean {
+    return !this.#closed && (rebootstrap || this.#active().shouldReconnect());
+  }
+
+  #recoveryMode(rebootstrap: boolean): ActiveStreamRecovery {
+    if (rebootstrap) return 'rebootstrap';
+    return this.#bootstrapped ? 'retry' : 'bootstrap';
+  }
+
+  /** Whether teardown or a stronger queued intent superseded this recovery. */
+  #recoverySuperseded(): boolean {
+    return this.#closed || this.#rebootstrapQueued;
   }
 
   /**
@@ -351,11 +400,26 @@ export class PersistentEventStream {
    * fault on an ended run: run lifecycle still keeps ordinary closes quiet and
    * prevents automatic dialing, while an operator can ask the peer for one new
    * complete view. The current subscription and pending timer are retired so
-   * the recovery owns exactly one dial; a live run retains its normal schedule
-   * if that dial fails.
+   * the recovery owns exactly one fresh dial; a live run retains its normal
+   * schedule if that dial fails. A cursor dial already in flight cannot be
+   * cancelled through the transport contract, so one fresh intent is queued:
+   * its returned handle is retired before the sequence-zero dial begins.
    */
   rebootstrap(): void {
-    if (this.#closed || this.#callbacks === null || this.#reconnecting) return;
+    if (this.#closed || this.#callbacks === null) return;
+    if (this.#recovery !== 'idle') {
+      // A fresh bootstrap is stronger than a cursor retry. Retain one request
+      // until that retry settles, but coalesce duplicates while either intent
+      // already owns the dial slot.
+      if (this.#recovery === 'retry' && !this.#rebootstrapQueued) {
+        this.#rebootstrapQueued = true;
+        // The pending cursor dial cannot be cancelled through StreamTransport,
+        // but its callbacks can be fenced immediately. When its handle arrives,
+        // #dial observes the retired token and closes it before the fresh pass.
+        this.#connectionSeq += 1;
+      }
+      return;
+    }
     if (this.#cancelReconnect !== null) {
       this.#cancelReconnect();
       this.#cancelReconnect = null;
@@ -377,7 +441,7 @@ export class PersistentEventStream {
    */
   retry(): void {
     if (this.#closed || this.#callbacks === null) return;
-    if (this.#reconnecting) return;
+    if (this.#recovery !== 'idle') return;
     if (!this.#active().shouldReconnect()) return;
     if (this.#cancelReconnect !== null) {
       this.#cancelReconnect();
