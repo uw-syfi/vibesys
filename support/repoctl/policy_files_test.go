@@ -95,3 +95,43 @@ func TestSplitPolicyRejectsInvalidFiles(t *testing.T) {
 		})
 	}
 }
+
+// A declared component path that is absent from the repository would never
+// match a changed file, so loading must name the component, key, and path.
+func TestPolicyRejectsMissingComponentPaths(t *testing.T) {
+	for _, class := range []string{"", "manual", "python_support"} {
+		for _, key := range []string{"roots", "files"} {
+			for _, shape := range []string{"only", "after_existing"} {
+				name := class + "/" + key + "/" + shape
+				t.Run(name, func(t *testing.T) {
+					root := fixtureRepo(t)
+					paths := `"gone/path"`
+					if shape == "after_existing" {
+						if err := os.WriteFile(filepath.Join(root, "present.txt"), nil, 0600); err != nil {
+							t.Fatal(err)
+						}
+						paths = `"present.txt", "gone/path"`
+					}
+					classLine := ""
+					if class != "" {
+						classLine = "class = \"" + class + "\"\n"
+					}
+					component := "\n[[components]]\nid = \"stale\"\n" + classLine + key + " = [" + paths + "]\n"
+					path := filepath.Join(root, "repoctl.toml")
+					data, err := os.ReadFile(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, append(data, component...), 0600); err != nil {
+						t.Fatal(err)
+					}
+					_, err = readPolicy(root, "repoctl.toml")
+					want := `component "stale" ` + key + `: path "gone/path" does not exist`
+					if err == nil || !strings.Contains(err.Error(), want) {
+						t.Fatalf("readPolicy() error = %v; want %q", err, want)
+					}
+				})
+			}
+		}
+	}
+}

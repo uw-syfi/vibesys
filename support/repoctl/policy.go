@@ -55,6 +55,9 @@ func readPolicy(root, configPath string) (graph, error) {
 		if err := g.add(c); err != nil {
 			return g, err
 		}
+		if err := requireExisting(root, g.Components[c.ID]); err != nil {
+			return g, err
+		}
 	}
 	for _, spec := range p.Discoveries {
 		adapter, ok := discoveryAdapters[spec.Adapter]
@@ -209,6 +212,23 @@ func (g *graph) add(c component) error {
 	}
 	g.Components[c.ID] = c
 	g.Order = append(g.Order, c.ID)
+	return nil
+}
+
+// requireExisting rejects a declared component root or file that is absent from
+// the repository. A path that no longer exists never matches a changed file, so
+// a stale entry silently stops the component from selecting its jobs.
+func requireExisting(repoRoot string, c component) error {
+	for _, entry := range []struct {
+		key   string
+		paths []string
+	}{{"roots", c.Roots}, {"files", c.Files}} {
+		for _, rel := range entry.paths {
+			if _, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(rel))); err != nil {
+				return fmt.Errorf("component %q %s: path %q does not exist in the repository", c.ID, entry.key, rel)
+			}
+		}
+	}
 	return nil
 }
 
