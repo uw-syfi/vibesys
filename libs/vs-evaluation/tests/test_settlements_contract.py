@@ -9,6 +9,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.support.started_operation import arrival
 
 from vs_evaluation.api import (
     EVALUATION_ACCESS_STATE_PATH,
@@ -114,7 +115,7 @@ async def test_cancel_observer_preserves_owned_job(settlements: SettlementsFixtu
     handle = await submit(fake)
     dependencies = OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
     waiter = asyncio.create_task(implementation.wait_any(dependencies))
-    await fake.executor.wait_started.wait()
+    await arrival(fake.executor.wait_started.wait(), waiter)
     waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
         await waiter
@@ -135,7 +136,7 @@ async def test_wait_any_returns_one_settlement_without_waiting_for_all(
         scope_id="scope", generation=0, handles=(first, second)
     )
     waiter = asyncio.create_task(implementation.wait_any(dependencies))
-    await fake.executor.wait_started.wait()
+    await arrival(fake.executor.wait_started.wait(), waiter)
     fake.executor.set_state(second, EvaluationState.CANCELED)
     result = await waiter
     assert [item.handle_id for item in result] == [second]
@@ -328,7 +329,7 @@ async def test_reopen_during_observation_cannot_return_old_generation(
             OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
         )
     )
-    await fake.backend.record_read_started.wait()
+    await arrival(fake.backend.record_read_started.wait(), observation)
     scopes = ScopeLifecycleStore(fake.namespace)
     scopes.begin("scope")
     scopes.complete("scope")
@@ -351,7 +352,7 @@ async def test_withdrawal_during_observation_cannot_return_detached_dependency(
             OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
         )
     )
-    await fake.backend.record_read_started.wait()
+    await arrival(fake.backend.record_read_started.wait(), observation)
     # The public pure transition is the same durable intent CancelCall commits,
     # before physical cancellation. Keep generation unchanged to test withdrawal.
     state = fake.namespace.load(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)

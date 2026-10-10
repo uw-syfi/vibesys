@@ -15,6 +15,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
+from tests.support.started_operation import arrival
 from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
@@ -1199,7 +1200,7 @@ async def test_cancelled_profile_wait_keeps_capture_owned_until_release(
             await candidate.snapshot("capture"), "Decode profile", member_id="capture"
         )
     )
-    await harness.executor.wait_started.wait()
+    await arrival(harness.executor.wait_started.wait(), profile)
     (capture,) = harness.executor.submissions
     profile.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -1513,7 +1514,7 @@ async def test_release_owns_submission_cancelled_after_remote_acceptance(tmp_pat
     harness = _release_harness(tmp_path, run, executor=executor)
     harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "accepted", str))
     submission = asyncio.create_task(harness.submit(candidate.id, EvidenceKind.ACCURACY))
-    handle_id = await executor.accepted.get()
+    handle_id = await arrival(executor.accepted.get(), submission)
     submission.cancel()
     with pytest.raises(asyncio.CancelledError):
         await submission
@@ -1648,9 +1649,9 @@ async def test_release_drains_claimed_submission_before_closed_without_dispatch(
             own=own,
         )
     )
-    await claimed.wait()
+    await arrival(claimed.wait(), submit)
     release = asyncio.create_task(harness.service.cancel_scope(candidate.id))
-    await namespace.closing.wait()
+    await arrival(namespace.closing.wait(), release)
     assert not release.done()
     assert not harness.executor.submissions
     acknowledgement.set()
@@ -1707,9 +1708,9 @@ async def test_stop_drains_admitted_claim_and_refuses_later_dispatch() -> None:
             own=own,
         )
     )
-    await claimed.wait()
+    await arrival(claimed.wait(), submit)
     stop = asyncio.create_task(service.cancel_outstanding())
-    await backend.stop_entered.wait()
+    await arrival(backend.stop_entered.wait(), stop)
     assert not stop.done()
     assert not harness.executor.submissions
     acknowledgement.set()

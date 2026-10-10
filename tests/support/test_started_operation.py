@@ -9,7 +9,11 @@ from enum import StrEnum
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.started_operation import wait_until_executor_started, wait_until_started
+from tests.support.started_operation import (
+    arrival,
+    wait_until_executor_started,
+    wait_until_started,
+)
 
 from vs_evaluation.api import EvaluationState
 from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor
@@ -132,3 +136,58 @@ def test_a_started_step_returns_while_the_evaluation_stays_live(
     state: EvaluationState, yields: int
 ) -> None:
     _executor_run(state, yields=yields, starts=True)
+
+
+@given(
+    ending=st.sampled_from(_Ending),
+    yields=st.integers(min_value=0, max_value=5),
+    queue=st.booleans(),
+)
+def test_an_arrival_wait_ends_with_the_producers_outcome(
+    ending: _Ending, yields: int, *, queue: bool
+) -> None:
+    async def scenario() -> object:
+        event = asyncio.Event()
+        items: asyncio.Queue[int] = asyncio.Queue()
+        hold = asyncio.Event()
+
+        async def producer() -> None:
+            for _ in range(yields):
+                await asyncio.sleep(0)
+            if ending is _Ending.RAISES:
+                raise _FailureError
+            if ending is _Ending.STARTS_THEN_HOLDS:
+                items.put_nowait(7)
+                event.set()
+                await hold.wait()
+
+        task = asyncio.ensure_future(producer())
+        try:
+            return await arrival(items.get() if queue else event.wait(), task)
+        finally:
+            hold.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    if ending is _Ending.STARTS_THEN_HOLDS:
+        assert asyncio.run(scenario()) == (7 if queue else True)
+    elif ending is _Ending.RAISES:
+        with pytest.raises(_FailureError):
+            asyncio.run(scenario())
+    else:
+        with pytest.raises(AssertionError, match="without the arrival"):
+            asyncio.run(scenario())
+
+
+def test_an_arrival_that_is_already_there_wins_over_a_finished_producer() -> None:
+    async def scenario() -> None:
+        event = asyncio.Event()
+        event.set()
+
+        async def producer() -> None:
+            return None
+
+        task = asyncio.ensure_future(producer())
+        await task
+        await arrival(event.wait(), task)
+
+    asyncio.run(scenario())

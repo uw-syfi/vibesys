@@ -6,6 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.started_operation import arrival
 
 from vs_runtime.api import CandidateProfile, CandidateProfileStatus, complete_profile
 
@@ -49,11 +50,11 @@ async def test_capture_does_not_hold_the_lock_and_commit_keeps_it() -> None:
         return commit()
 
     task = asyncio.create_task(complete_profile(capture, lock, record))
-    await capture_started.wait()
+    await arrival(capture_started.wait(), task)
     async with lock:
         assert not recorded
     release_capture.set()
-    await commit_started.wait()
+    await arrival(commit_started.wait(), task)
     assert recorded == [observed]
     assert lock.locked()
     release_commit.set()

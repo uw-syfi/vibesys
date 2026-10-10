@@ -10,6 +10,7 @@ from vs_evaluation.api import EvaluationState
 
 if TYPE_CHECKING:
     import threading
+    from collections.abc import Awaitable
 
     from vs_evaluation.api import EvaluationExecutor
 
@@ -83,3 +84,34 @@ async def wait_until_executor_started(
         watcher.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await watcher
+
+
+async def arrival[T](awaited: Awaitable[T], *operations: asyncio.Future[Any]) -> T:
+    """Await *awaited* (an event wait or queue get) unless an operation ends first.
+
+    For a test body that waits for something a task it started must produce
+    (``await session.started.wait()``, ``await queue.get()``). If an operation
+    in *operations* ends before *awaited* completes, the producer can no longer
+    deliver, so this raises that operation's own error, or an assertion when it
+    returned. An arrival that is already there wins over an operation that has
+    also ended, so a producer that arrives and then finishes is not an error.
+
+    Raises:
+        AssertionError: an operation returned without the awaited arrival.
+        BaseException: whatever an operation raised before the arrival.
+    """
+    waiter = asyncio.ensure_future(awaited)
+    try:
+        await asyncio.wait({waiter, *operations}, return_when=asyncio.FIRST_COMPLETED)
+        if waiter.done():
+            return waiter.result()
+        for operation in operations:
+            if operation.done():
+                operation.result()
+        message = "an operation finished without the arrival the test waits for"
+        raise AssertionError(message)
+    finally:
+        if not waiter.done():
+            waiter.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await waiter

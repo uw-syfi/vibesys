@@ -11,6 +11,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 from pydantic import BaseModel, ConfigDict
+from tests.support.started_operation import arrival
 
 from vs_runtime.api.testing import FakeRuns
 from vs_runtime.api.wiring import InProcessRuns, TaskRunHandle
@@ -219,7 +220,7 @@ async def test_result_waiter_cancellation_does_not_stop_execution(launch: Launch
         return await handle.result()
 
     waiter = asyncio.create_task(wait())
-    await waiter_entered.wait()
+    await arrival(waiter_entered.wait(), waiter)
     waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
         await waiter
@@ -424,7 +425,7 @@ async def test_cancelled_pending_event_consumer_does_not_stop_execution(launch: 
         return await anext(stream)
 
     consumer = asyncio.create_task(next_event())
-    await consumer_entered.wait()
+    await arrival(consumer_entered.wait(), consumer)
     consumer.cancel()
     with pytest.raises(asyncio.CancelledError):
         await consumer

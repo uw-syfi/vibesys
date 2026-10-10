@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
+from tests.support.started_operation import arrival
 from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, PROFILER
@@ -742,7 +743,7 @@ async def test_capture_registry_read_never_dispatches_or_polls_a_provisional_cap
             )
         )
         try:
-            await entered.wait()
+            await arrival(entered.wait(), task)
             (claim,) = claims
             before = (
                 len(executor.submissions),

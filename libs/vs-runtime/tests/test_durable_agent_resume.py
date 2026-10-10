@@ -17,7 +17,7 @@ from hypothesis import strategies as st
 from pydantic import BaseModel
 from tests.support.run_execution import run_execution_record
 from tests.support.runtime_agent_sessions import _OpenedSessionContract, _resume_transport
-from tests.support.started_operation import wait_until_started
+from tests.support.started_operation import arrival, wait_until_started
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
@@ -675,9 +675,9 @@ async def test_parallel_fake_member_initial_turns_preserve_both_completions() ->
     two = await owner.create_session(role, workspace=FakeWorkspace(), member_id="two")
     tasks = [asyncio.create_task(one.turn("one", invocation_id="one"))]
     try:
-        await entered["one"].wait()
+        await arrival(entered["one"].wait(), *tasks)
         tasks.append(asyncio.create_task(two.turn("two", invocation_id="two")))
-        await entered["two"].wait()
+        await arrival(entered["two"].wait(), *tasks)
         assert isinstance(one.inspect("one"), Pending)
         assert isinstance(two.inspect("two"), Pending)
         observer = FakeWorkspaceAgentSessions(

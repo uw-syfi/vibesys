@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.started_operation import arrival
 
 from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity
 from vibesys.run.profiler_agent import ProfilerEvaluationAccess, RuntimeProfilerTurnProvision
@@ -337,7 +338,7 @@ async def test_profiler_exit_withdraws_only_its_requester_association(
         )
     )
     try:
-        await submitted.wait()
+        await arrival(submitted.wait(), operation)
         child = workspaces.candidates[-1]
         assert child.id is not None
         (handle,) = handles

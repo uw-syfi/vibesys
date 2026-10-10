@@ -9,6 +9,7 @@ from io import StringIO
 from typing import cast
 
 import pytest
+from tests.support.started_operation import arrival
 
 from entrypoints.run import supervise
 from headless import HeadlessRenderer, run
@@ -56,7 +57,7 @@ async def test_one_interrupt_stops_and_drains_the_run_before_headless_exits() ->
     handle.bind(cast("RunSession", session))
     handle.start()
     headless = asyncio.create_task(run(handle))
-    await session.started.wait()
+    await arrival(session.started.wait(), headless)
 
     headless.cancel()
 
@@ -191,9 +192,9 @@ async def test_broken_pipe_during_cancellation_does_not_interrupt_async_cleanup(
             handle_signals=False,
         )
     )
-    await session.started.wait()
+    await arrival(session.started.wait(), supervision)
     handle.cancel()
-    await session.cleanup_entered.wait()
+    await arrival(session.cleanup_entered.wait(), supervision)
 
     handle.publish(
         CoreEvent(
@@ -202,7 +203,7 @@ async def test_broken_pipe_during_cancellation_does_not_interrupt_async_cleanup(
             data=AgentOutputChunkData(channel="assistant", content="render during cleanup"),
         )
     )
-    await handle.repeated_cancel.wait()
+    await arrival(handle.repeated_cancel.wait(), supervision)
     session.cleanup_release.set()
 
     with pytest.raises(BrokenPipeError):

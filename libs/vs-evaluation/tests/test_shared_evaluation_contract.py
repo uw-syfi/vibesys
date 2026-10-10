@@ -15,6 +15,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue, RootModel
 from tests.support.evaluation_scenarios import ScenarioSpec, build_scenario
+from tests.support.started_operation import arrival
 from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.run.evaluation_backend import (
@@ -252,9 +253,9 @@ async def test_join_reselects_when_canonical_cancellation_wins_admission(
             return capture.handle_id
 
         joining = asyncio.create_task(join())
-        await inspection_started.wait()
+        await arrival(inspection_started.wait(), joining)
         cancelling = asyncio.create_task(harness.cancel(owner, original))
-        await namespace.cancellation_committed.wait()
+        await arrival(namespace.cancellation_committed.wait(), cancelling)
         release.set()
         fresh, _ = await asyncio.gather(joining, cancelling)
         assert fresh != original
