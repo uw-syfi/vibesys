@@ -1,5 +1,5 @@
 import type {ControlChannelState} from '@vibesys/backend-client';
-import {type CoreState, hasRunEnded} from '@vibesys/core-state';
+import {activeRunFocus, type CoreState, hasRunEnded, phaseText} from '@vibesys/core-state';
 import type {WebSessionState} from './session.js';
 
 /** The control-channel outage a banner describes, once there is one to show. */
@@ -40,21 +40,44 @@ interface ControlsBanner {
   readonly retrying: boolean;
 }
 
+/** What the whole page says when neither gateway channel is usable. */
+interface PageConnectionBanner {
+  readonly message: string;
+}
+
+/** The heading and chip rendered above the run summary. */
+export interface PageHeader {
+  readonly heading: string;
+  readonly status: {
+    readonly className: string;
+    readonly label: string;
+  };
+}
+
 /**
  * Which connectivity banners a render puts on screen, and what they carry. One
  * value rather than a handful of loose predicates, so the whole decision has
  * one site and a render reads it instead of re-deciding any part of it.
  *
- * Both fields carry their copy and their affordance rather than a flag, so the
+ * Each channel field carries its copy and affordance rather than a flag, so the
  * text is decided somewhere a unit test can read it instead of only inside JSX,
- * and a button cannot be rendered without the banner that explains it.
+ * and a button cannot be rendered without the banner that explains it. The page
+ * field is a separate summary, not a relabeling of either channel.
  *
- * The two describe different failures and a finished run treats them
- * differently, which is the whole reason they are separate fields: a transcript
- * that stopped short stays wrong after the run ends, while a command path that
- * cannot be reached stops mattering.
+ * The channel fields describe different failures and a finished run treats
+ * them differently, which is why they stay separate: a transcript that stopped
+ * short stays wrong after the run ends, while an unreachable command path stops
+ * mattering.
  */
 export interface ConnectionBanners {
+  /**
+   * The page-level gateway diagnostic, separate from the two channel-specific
+   * banners below. On cold start, either channel's first failure is enough to
+   * show it because no run snapshot has ever loaded. After a snapshot, both
+   * independent channels must be down before the page says the gateway itself
+   * is unreachable.
+   */
+  readonly page: PageConnectionBanner | null;
   /**
    * The stream banner to render, or `null` for no banner. Set whenever the
    * event stream is stale, on an ended run too: the transcript on screen is
@@ -127,6 +150,18 @@ export const CONTROLS_BANNER_COPY = {
   cold: 'Controls have not reached the run. Its state cannot be refreshed until they connect.',
 } as const;
 
+/** Page-level copy for never reaching the gateway and losing it later. */
+export const PAGE_CONNECTION_BANNER_COPY = {
+  cold: 'The gateway is unreachable, so this page could not load the run.',
+  lost: 'The gateway is unreachable, so this page may no longer be current.',
+} as const;
+
+/** Header copy used before a live session has loaded its first snapshot. */
+export const LIVE_SESSION_HEADER_COPY = {
+  connecting: {heading: 'Connecting to gateway', status: 'connecting to gateway'},
+  unreachable: {heading: 'Gateway unreachable', status: 'gateway unreachable'},
+} as const;
+
 function describeOutage(outage: ControlOutage): string {
   return CONTROLS_BANNER_COPY[outage.everConnected ? 'lost' : 'cold'];
 }
@@ -144,7 +179,9 @@ function describeOutage(outage: ControlOutage): string {
 export function connectionBanners(run: CoreState, session: WebSessionState): ConnectionBanners {
   const ended = hasRunEnded(run);
   const outage = session.controls.status === 'disconnected' ? session.controls : null;
+  const gatewayOutage = pageGatewayOutage(session);
   return {
+    page: gatewayOutage === null ? null : {message: PAGE_CONNECTION_BANNER_COPY[gatewayOutage]},
     stream:
       session.status === 'stale'
         ? {message: STREAM_BANNER_COPY[ended ? 'ended' : 'live'], reattach: true}
@@ -154,6 +191,50 @@ export function connectionBanners(run: CoreState, session: WebSessionState): Con
         ? null
         : {message: describeOutage(outage), retrying: outage.retrying},
   };
+}
+
+/**
+ * Decide the page header without presenting core-state's initial value as a
+ * fact about a live run. Replay mode keeps its existing loading heading; a live
+ * session names gateway connectivity until a snapshot establishes run state.
+ */
+export function pageHeader(run: CoreState, session: WebSessionState | null): PageHeader {
+  if (session !== null && !session.hasSnapshot) {
+    const unreachable = pageGatewayOutage(session) !== null;
+    const copy = !unreachable
+      ? LIVE_SESSION_HEADER_COPY.connecting
+      : LIVE_SESSION_HEADER_COPY.unreachable;
+    return {
+      heading: copy.heading,
+      status: {
+        className: unreachable ? 'status-unreachable' : 'status-connecting',
+        label: copy.status,
+      },
+    };
+  }
+  const active = activeRunFocus(run);
+  const heading =
+    active.length > 1
+      ? `${active.length} agents active`
+      : (phaseText(active[0]?.description ?? null) ??
+        (run.status === 'connecting' && session === null ? 'Replay is loading' : 'Run overview'));
+  return {
+    heading,
+    status: {className: `status-${run.status}`, label: run.status},
+  };
+}
+
+/** Whether the whole page has evidence that the gateway is unreachable. */
+function pageGatewayOutage(
+  session: WebSessionState,
+): keyof typeof PAGE_CONNECTION_BANNER_COPY | null {
+  const controls = session.controls.status === 'disconnected' ? session.controls : null;
+  if (!session.hasSnapshot) {
+    if (session.status !== 'stale' && controls === null) return null;
+    return controls?.everConnected ? 'lost' : 'cold';
+  }
+  if (session.status !== 'stale' || controls === null) return null;
+  return 'lost';
 }
 
 /**

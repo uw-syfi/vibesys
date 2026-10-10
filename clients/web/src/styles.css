@@ -9,6 +9,7 @@ h2 { font-size: 16px; margin: 0; }
 .status { border: 1px solid #348e68; border-radius: 999px; color: #70e0ae; padding: 7px 12px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
 .status-completed { border-color: #4c7ab1; color: #8ebeff; }
 .status-failed { border-color: #a04f5e; color: #ff99a8; }
+.status-unreachable { border-color: #a04f5e; color: #ff99a8; }
 .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 22px 0; }
 .summary div, .panel { background: #131a26; border: 1px solid #283142; border-radius: 12px; }
 .summary div { display: grid; gap: 8px; padding: 18px; }

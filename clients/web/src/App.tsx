@@ -1,12 +1,12 @@
-import {activeRunFocus, phaseText} from '@vibesys/core-state';
 import {type FormEvent, type JSX, useEffect, useState, useSyncExternalStore} from 'react';
-import {connectionBanners, emptyTranscriptCopy} from './banners.js';
+import {connectionBanners, emptyTranscriptCopy, pageHeader} from './banners.js';
 import {bootstrapGateway, GatewaySessionStore, targetFromCapability} from './gateway-session.js';
 import {DEFAULT_REPLAY_FIXTURE_URL, loadReplayFixture} from './replay.js';
 import type {WebSession} from './session.js';
 import {type CoreStateStore, createCoreStateStore} from './store.js';
 
 const EMPTY_SESSION_STATE = {
+  hasSnapshot: true,
   status: 'connected' as const,
   error: null,
   controls: {status: 'connected' as const},
@@ -28,12 +28,7 @@ export function App({
   );
   const banners = connectionBanners(state, sessionState);
   const emptyTranscript = emptyTranscriptCopy(state, banners);
-  const active = activeRunFocus(state);
-  const focus =
-    active.length > 1
-      ? `${active.length} agents active`
-      : (phaseText(active[0]?.description ?? null) ??
-        (state.status === 'connecting' ? 'Replay is loading' : 'Run overview'));
+  const header = pageHeader(state, session === undefined ? null : sessionState);
   const [replayError, setReplayError] = useState<Error | null>(null);
   const [replayAttempt, setReplayAttempt] = useState(0);
   useEffect(() => {
@@ -54,9 +49,9 @@ export function App({
       <header className="header">
         <div>
           <p className="eyebrow">VIBESYS / RUN VIEWER</p>
-          <h1>{focus}</h1>
+          <h1>{header.heading}</h1>
         </div>
-        <span className={`status status-${state.status}`}>{state.status}</span>
+        <span className={`status ${header.status.className}`}>{header.status.label}</span>
       </header>
       {/*
         Each banner carries an `aria-label` as well as a `data-testid`. They are
@@ -67,6 +62,16 @@ export function App({
         `role="alert"` implies `aria-live="assertive"`, so two that are live at
         once interrupt each other unnamed.
       */}
+      {banners.page !== null && (
+        <div
+          className="stale-banner"
+          role="alert"
+          aria-label="Page connection status"
+          data-testid="page-connection-banner"
+        >
+          <span>{banners.page.message}</span>
+        </div>
+      )}
       {banners.stream !== null && (
         <div
           className="stale-banner"

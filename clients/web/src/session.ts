@@ -27,6 +27,16 @@ export interface BrowserLifecycle {
 }
 
 export interface WebSessionState {
+  /**
+   * Whether a valid run snapshot has been applied to the store. Monotone for
+   * the session's lifetime: a later refresh failure does not make the run state
+   * already on screen unknown again.
+   *
+   * The render uses this boundary to distinguish its own connection state from
+   * the run's lifecycle. Before the first snapshot, core-state's `connecting`
+   * is only its initial value and must not be presented as a run status.
+   */
+  readonly hasSnapshot: boolean;
   /** The event stream: whether the transcript on screen is still growing. */
   readonly status: WebSessionStatus;
   readonly error: Error | null;
@@ -91,7 +101,13 @@ export class WebSession {
   #status: WebSessionStatus = 'connecting';
   #error: Error | null = null;
   #controls: ControlChannelState = {status: 'connected'};
-  #state: WebSessionState = {status: 'connecting', error: null, controls: {status: 'connected'}};
+  #hasSnapshot = false;
+  #state: WebSessionState = {
+    hasSnapshot: false,
+    status: 'connecting',
+    error: null,
+    controls: {status: 'connected'},
+  };
   #started = false;
   #closed = false;
   #wakeInFlight: Promise<void> | null = null;
@@ -204,6 +220,10 @@ export class WebSession {
       throw new Error(response.error ?? 'Server did not return a run snapshot');
     }
     this.store.applySnapshot(response.snapshot);
+    if (!this.#hasSnapshot) {
+      this.#hasSnapshot = true;
+      this.#publish();
+    }
   };
 
   #onMessage = (message: ServerMessage, resumed: boolean): void => {
@@ -331,7 +351,12 @@ export class WebSession {
    * fields.
    */
   #publish(): void {
-    this.#state = {status: this.#status, error: this.#error, controls: this.#controls};
+    this.#state = {
+      hasSnapshot: this.#hasSnapshot,
+      status: this.#status,
+      error: this.#error,
+      controls: this.#controls,
+    };
     for (const listener of this.#listeners) listener();
   }
 }
