@@ -1,12 +1,16 @@
 import type {RunEvent} from '@vibesys/backend-client';
-import {ownProjectionInput, publishProjectionValue} from './publication.js';
 import {
-  type RoundKey,
-  roundKeyFor,
-  roundKeyToken,
-  roundNumberFor,
-  sameRoundKey,
-} from './round-key.js';
+  appendPersistentArrayEntry,
+  materializePersistentArray,
+  type PersistentArray,
+  persistentArrayAt,
+  persistentArrayFrom,
+  rehydratePersistentArray,
+  replacePersistentArrayEntry,
+  setPersistentArrayIndex,
+} from './persistent-array.js';
+import {ownProjectionInput, publishProjectionValue} from './publication.js';
+import {type RoundKey, roundKeyFor, roundNumberFor, sameRoundKey} from './round-key.js';
 import {
   activeTimingElapsedMs,
   closeActiveAgentTimings,
@@ -15,13 +19,6 @@ import {
   type RoundTimingState,
   startAgentTiming,
 } from './round-timing.js';
-import {
-  appendRunMapArrayEntry,
-  ensureRunMapArray,
-  replaceRunMapArrayEntry,
-  runMapArrayAt,
-  runMapArrayFrom,
-} from './run-map-array.js';
 
 export type AgentPhaseStatus =
   | 'pending'
@@ -89,53 +86,68 @@ export interface RunMapProjection {
 export interface RunMapState extends RunMapProjection {
   readonly rounds: RoundState[];
   readonly phases: AgentPhase[];
+  /** Present on reducer-produced states; omitted only on legacy caller inputs. */
+  readonly provenance?: RunMapProvenance;
 }
 
 interface PhaseSlot {
   readonly indices: readonly number[];
   readonly placeholderIndex: number | null;
   readonly activeIndices: readonly number[];
-  readonly executions: ReadonlyMap<string, number>;
+  readonly executions: Readonly<Record<string, number>>;
 }
 
-type PhaseRoleIndex = ReadonlyMap<string, PhaseSlot>;
+type PhaseRoleIndex = Readonly<Record<string, PhaseSlot>>;
 
 interface PhaseIndex {
-  readonly rounds: ReadonlyMap<string, PhaseRoleIndex>;
+  readonly numbered: PersistentArray<PhaseRoleIndex>;
+  readonly labeled: Readonly<Record<string, PhaseRoleIndex>>;
   readonly unscoped: PhaseRoleIndex;
 }
 
-const phaseIndexes = new WeakMap<AgentPhase[], PhaseIndex>();
-const publishedArrays = new WeakMap<readonly unknown[], readonly unknown[]>();
-const publishedInternals = new WeakMap<readonly unknown[], unknown[]>();
-const RUN_MAP_INTERNAL = Symbol('runMapInternal');
-
-interface RunMapInternal {
-  readonly rounds: RoundState[];
-  readonly phases: AgentPhase[];
+export interface RunMapProvenance {
+  readonly version: 1;
+  readonly rounds: PersistentArray<RoundState>;
+  readonly phases: PersistentArray<AgentPhase>;
+  readonly phaseIndex: PhaseIndex;
 }
 
-type IndexedRunMapState = RunMapProjection & {[RUN_MAP_INTERNAL]?: RunMapInternal};
+interface RunMapWorkingState {
+  readonly outerLoop: string | null;
+  readonly expectedRoles: readonly string[] | null;
+  readonly rounds: PersistentArray<RoundState>;
+  readonly phases: PersistentArray<AgentPhase>;
+  readonly phaseIndex: PhaseIndex;
+  readonly lastEventTimestamp: string | null;
+}
+
+interface IndexedPhases {
+  readonly values: PersistentArray<AgentPhase>;
+  readonly index: PhaseIndex;
+}
 
 export function applyRunMapEvent(
   state: RunMapProjection,
   event: RunEvent,
   abandonedAt: string | null = null,
+  provenance?: RunMapProvenance,
 ): RunMapState {
-  return publishRunMapState(applyIndexedRunMapEvent(state, event, abandonedAt));
+  return publishRunMapState(applyIndexedRunMapEvent(state, event, abandonedAt, provenance));
 }
 
 function applyIndexedRunMapEvent(
   state: RunMapProjection,
   event: RunEvent,
   abandonedAt: string | null,
-): RunMapState {
-  const internal = runMapInternal(state);
-  const seen: RunMapState = {
+  provenance: RunMapProvenance | undefined,
+): RunMapWorkingState {
+  const internal = runMapInternal(state, provenance);
+  const seen: RunMapWorkingState = {
     outerLoop: state.outerLoop,
     expectedRoles: state.expectedRoles,
     rounds: internal.rounds,
     phases: internal.phases,
+    phaseIndex: internal.phaseIndex,
     lastEventTimestamp: event.timestamp,
   };
   // Run-ending events say the run ended, not which agent ended it, so they
@@ -158,13 +170,14 @@ function applyIndexedRunMapEvent(
     started?.expected_roles !== undefined && started.expected_roles.length > 0
       ? ownProjectionInput(started.expected_roles)
       : base.expectedRoles;
-  const rounds = applyRoundEvent(base.rounds, base.phases, event);
+  const rounds = applyRoundEvent(base.rounds, {values: base.phases, index: base.phaseIndex}, event);
   const phases = applyPhaseEvent({...base, outerLoop, expectedRoles, rounds}, event);
   return {
     outerLoop,
     expectedRoles,
     rounds,
-    phases,
+    phases: phases.values,
+    phaseIndex: phases.index,
     lastEventTimestamp: event.timestamp,
   };
 }
@@ -195,65 +208,83 @@ function runClosingStatus(event: RunEvent): 'failed' | 'interrupted' | null {
   return data?.kind === 'run_status_changed' && data.status === 'stopped' ? 'interrupted' : null;
 }
 
-/** Copies lazy run-map array publication from `source` onto a folded core state. */
+/** Installs lazy public arrays from explicit serializable run-map provenance. */
 export function adoptRunMapArrays(target: object, source: RunMapProjection): void {
-  for (const property of ['rounds', 'phases'] as const) {
-    const descriptor = Object.getOwnPropertyDescriptor(source, property);
-    if (descriptor !== undefined) Object.defineProperty(target, property, descriptor);
+  const provenance = (source as RunMapState).provenance;
+  if (provenance === undefined) throw new Error('Run-map state has no serializable provenance');
+  installRunMapArrays(target, provenance);
+}
+
+export function initialRunMapProvenance(): RunMapProvenance {
+  return {
+    version: 1,
+    rounds: persistentArrayFrom([]),
+    phases: persistentArrayFrom([]),
+    phaseIndex: emptyPhaseIndex(),
+  };
+}
+
+/** Restores non-serialized array materializers after a clone boundary. */
+export function rehydrateRunMapProvenance(provenance: RunMapProvenance): RunMapProvenance {
+  const version = (provenance as {version?: unknown}).version;
+  if (version !== 1) {
+    throw new Error(`Unsupported run-map provenance version: ${String(version)}`);
   }
-  const internal = (source as IndexedRunMapState)[RUN_MAP_INTERNAL];
-  if (internal !== undefined) {
-    Object.defineProperty(target, RUN_MAP_INTERNAL, {configurable: true, value: internal});
-  }
+  return {
+    version: 1,
+    rounds: rehydratePersistentArray(provenance.rounds),
+    phases: rehydratePersistentArray(provenance.phases),
+    phaseIndex: {
+      ...provenance.phaseIndex,
+      numbered: rehydratePersistentArray(provenance.phaseIndex.numbered),
+    },
+  };
 }
 
-function runMapInternal(state: RunMapProjection): RunMapInternal {
-  const existing = (state as IndexedRunMapState)[RUN_MAP_INTERNAL];
-  if (existing !== undefined) return existing;
-  const rounds = internalRunMapArray(state.rounds);
-  const phases = internalRunMapArray(state.phases);
-  if (!phaseIndexes.has(phases)) phaseIndexes.set(phases, buildPhaseIndex(phases));
-  return {rounds, phases};
-}
-
-function internalRunMapArray<T>(published: readonly T[]): T[] {
-  return (publishedInternals.get(published) as T[] | undefined) ?? runMapArrayFrom(published);
-}
-
-function publishRunMapState(state: RunMapState): RunMapState {
-  let publishedRounds: RoundState[] | undefined;
-  let publishedPhases: AgentPhase[] | undefined;
-  const rounds = ensureRunMapArray(state.rounds);
-  const phases = ensureRunMapArray(state.phases);
-  if (!phaseIndexes.has(phases)) phaseIndexes.set(phases, buildPhaseIndex(phases));
-  const internal: RunMapInternal = {rounds, phases};
-  const published = {
-    outerLoop: state.outerLoop,
-    expectedRoles: state.expectedRoles,
-    lastEventTimestamp: state.lastEventTimestamp,
-  } as RunMapState;
-  Object.defineProperties(published, {
+export function installRunMapArrays(target: object, provenance: RunMapProvenance): void {
+  let rounds: RoundState[] | undefined;
+  let phases: AgentPhase[] | undefined;
+  Object.defineProperties(target, {
     rounds: {
       configurable: true,
       enumerable: true,
-      get: () => (publishedRounds ??= materializeRunMapArray(internal.rounds)),
+      get: () => (rounds ??= publishProjectionValue(materializePersistentArray(provenance.rounds))),
     },
     phases: {
       configurable: true,
       enumerable: true,
-      get: () => (publishedPhases ??= materializeRunMapArray(internal.phases)),
+      get: () => (phases ??= publishProjectionValue(materializePersistentArray(provenance.phases))),
     },
-    [RUN_MAP_INTERNAL]: {configurable: true, value: internal},
   });
-  return published;
 }
 
-function materializeRunMapArray<T>(internal: T[]): T[] {
-  const existing = publishedArrays.get(internal) as T[] | undefined;
-  if (existing !== undefined) return existing;
-  const published = publishProjectionValue([...internal]);
-  publishedArrays.set(internal, published);
-  publishedInternals.set(published, internal);
+function runMapInternal(
+  state: RunMapProjection,
+  provenance: RunMapProvenance | undefined,
+): RunMapProvenance {
+  const retained = provenance ?? (state as RunMapState).provenance;
+  if (retained !== undefined) {
+    return rehydrateRunMapProvenance(retained);
+  }
+  const rounds = persistentArrayFrom(state.rounds);
+  const phases = persistentArrayFrom(state.phases);
+  return {version: 1, rounds, phases, phaseIndex: buildPhaseIndex(phases)};
+}
+
+function publishRunMapState(state: RunMapWorkingState): RunMapState {
+  const provenance: RunMapProvenance = {
+    version: 1,
+    rounds: state.rounds,
+    phases: state.phases,
+    phaseIndex: state.phaseIndex,
+  };
+  const published = {
+    outerLoop: state.outerLoop,
+    expectedRoles: state.expectedRoles,
+    lastEventTimestamp: state.lastEventTimestamp,
+    provenance,
+  } as RunMapState;
+  installRunMapArrays(published, provenance);
   return published;
 }
 
@@ -272,15 +303,23 @@ function materializeRunMapArray<T>(internal: T[]): T[] {
  * one ticks forever after the process it was measuring is gone.
  */
 function closeOpenRunState(
-  state: RunMapState,
+  state: RunMapWorkingState,
   activeStatus: Extract<AgentPhaseStatus, 'failed' | 'interrupted'>,
   timestamp: string,
   sequence: number | null = null,
-): RunMapState {
+): RunMapWorkingState {
+  const phases = persistentArrayFrom(
+    materializePersistentArray(state.phases).map(phase =>
+      closePhase(phase, activeStatus, timestamp),
+    ),
+  );
   return {
     ...state,
-    rounds: state.rounds.map(round => closeRound(round, timestamp, sequence)),
-    phases: state.phases.map(phase => closePhase(phase, activeStatus, timestamp)),
+    rounds: persistentArrayFrom(
+      materializePersistentArray(state.rounds).map(round => closeRound(round, timestamp, sequence)),
+    ),
+    phases,
+    phaseIndex: buildPhaseIndex(phases),
   };
 }
 
@@ -296,15 +335,19 @@ function closeOpenRunState(
  * resume, so the downtime in between is not charged to the round. The first
  * `run_started` of a run has nothing open and leaves the state untouched.
  */
-function closeAbandonedRunState(state: RunMapState, timestamp: string): RunMapState {
+function closeAbandonedRunState(state: RunMapWorkingState, timestamp: string): RunMapWorkingState {
   if (!hasOpenRunState(state)) return state;
   return closeOpenRunState(state, 'interrupted', timestamp);
 }
 
-function hasOpenRunState(state: RunMapState): boolean {
+function hasOpenRunState(state: RunMapWorkingState): boolean {
   return (
-    state.phases.some(phase => phase.status === 'active' || phase.status === 'pending') ||
-    state.rounds.some(round => !isRoundClosed(round.status) || hasActiveAgentTiming(round))
+    materializePersistentArray(state.phases).some(
+      phase => phase.status === 'active' || phase.status === 'pending',
+    ) ||
+    materializePersistentArray(state.rounds).some(
+      round => !isRoundClosed(round.status) || hasActiveAgentTiming(round),
+    )
   );
 }
 
@@ -348,16 +391,12 @@ export function phasesForRound(
   return phases.filter(phase => phase.roundNumber === roundNumber);
 }
 
-function phaseIndexFor(phases: AgentPhase[]): PhaseIndex {
-  const existing = phaseIndexes.get(phases);
-  if (existing !== undefined) return existing;
-  const built = buildPhaseIndex(phases);
-  phaseIndexes.set(phases, built);
-  return built;
+function emptyPhaseIndex(): PhaseIndex {
+  return {numbered: persistentArrayFrom([]), labeled: {}, unscoped: {}};
 }
 
-function buildPhaseIndex(phases: AgentPhase[]): PhaseIndex {
-  let index: PhaseIndex = {rounds: new Map(), unscoped: new Map()};
+function buildPhaseIndex(phases: PersistentArray<AgentPhase>): PhaseIndex {
+  let index = emptyPhaseIndex();
   for (let position = 0; position < phases.length; position += 1) {
     index = updatePhaseSlot(index, phases, position, true);
   }
@@ -368,19 +407,27 @@ function phaseSlotFor(
   index: PhaseIndex,
   phase: Pick<AgentPhase, 'kind' | 'roundKey'>,
 ): PhaseSlot | undefined {
-  const roles =
-    phase.roundKey === null ? index.unscoped : index.rounds.get(roundKeyToken(phase.roundKey));
-  return roles?.get(phase.kind);
+  const roles = phaseRolesFor(index, phase.roundKey);
+  return roles?.[phaseRoleToken(phase.kind)];
 }
 
-function appendPhase(phases: AgentPhase[], phase: AgentPhase): AgentPhase[] {
-  const next = appendRunMapArrayEntry(phases, phase);
-  phaseIndexes.set(next, updatePhaseSlot(phaseIndexFor(phases), next, phases.length, true));
-  return next;
+function phaseRolesFor(index: PhaseIndex, key: RoundKey | null): PhaseRoleIndex | undefined {
+  if (key === null) return index.unscoped;
+  return key.kind === 'number'
+    ? (persistentArrayAt(index.numbered, key.number) ?? undefined)
+    : index.labeled[roundLabelToken(key.label)];
 }
 
-function replacePhase(phases: AgentPhase[], position: number, phase: AgentPhase): AgentPhase[] {
-  const previous = runMapArrayAt(phases, position);
+function appendPhase(phases: IndexedPhases, phase: AgentPhase): IndexedPhases {
+  const values = appendPersistentArrayEntry(phases.values, phase);
+  return {
+    values,
+    index: updatePhaseSlot(phases.index, values, phases.values.length, true),
+  };
+}
+
+function replacePhase(phases: IndexedPhases, position: number, phase: AgentPhase): IndexedPhases {
+  const previous = persistentArrayAt(phases.values, position);
   if (
     previous === undefined ||
     previous.kind !== phase.kind ||
@@ -388,59 +435,79 @@ function replacePhase(phases: AgentPhase[], position: number, phase: AgentPhase)
   ) {
     throw new Error(`Run-map phase replacement changed slot at index ${position}`);
   }
-  const next = replaceRunMapArrayEntry(phases, position, phase);
-  phaseIndexes.set(next, updatePhaseSlot(phaseIndexFor(phases), next, position, false));
-  return next;
+  const values = replacePersistentArrayEntry(phases.values, position, phase);
+  return {values, index: updatePhaseSlot(phases.index, values, position, false)};
 }
 
 function updatePhaseSlot(
   index: PhaseIndex,
-  phases: AgentPhase[],
+  phases: PersistentArray<AgentPhase>,
   position: number,
   append: boolean,
 ): PhaseIndex {
-  const phase = runMapArrayAt(phases, position);
+  const phase = persistentArrayAt(phases, position);
   if (phase === undefined) return index;
   const current = phaseSlotFor(index, phase);
   const indices = append
     ? [...(current?.indices ?? []), position]
     : (current?.indices ?? [position]);
   const slot = summarizePhaseSlot(phases, indices);
-  const roles =
-    phase.roundKey === null
-      ? new Map(index.unscoped)
-      : new Map(index.rounds.get(roundKeyToken(phase.roundKey)) ?? []);
-  roles.set(phase.kind, slot);
+  const roles = {
+    ...phaseRolesFor(index, phase.roundKey),
+    [phaseRoleToken(phase.kind)]: slot,
+  };
   if (phase.roundKey === null) return {...index, unscoped: roles};
-  const rounds = new Map(index.rounds);
-  rounds.set(roundKeyToken(phase.roundKey), roles);
-  return {...index, rounds};
+  if (phase.roundKey.kind === 'label') {
+    return {
+      ...index,
+      labeled: {...index.labeled, [roundLabelToken(phase.roundKey.label)]: roles},
+    };
+  }
+  return {
+    ...index,
+    numbered: setPersistentArrayIndex(index.numbered, phase.roundKey.number, roles),
+  };
 }
 
-function summarizePhaseSlot(phases: AgentPhase[], indices: readonly number[]): PhaseSlot {
+function summarizePhaseSlot(
+  phases: PersistentArray<AgentPhase>,
+  indices: readonly number[],
+): PhaseSlot {
   let placeholderIndex: number | null = null;
   const activeIndices: number[] = [];
-  const executions = new Map<string, number>();
+  const executions: Record<string, number> = {};
   for (const position of indices) {
-    const phase = runMapArrayAt(phases, position);
+    const phase = persistentArrayAt(phases, position);
     if (phase === undefined) continue;
     if (phase.executionId === undefined) placeholderIndex ??= position;
-    else if (!executions.has(phase.executionId)) executions.set(phase.executionId, position);
+    else executions[executionToken(phase.executionId)] ??= position;
     if (phase.status === 'active') activeIndices.push(position);
   }
   return {indices, placeholderIndex, activeIndices, executions};
+}
+
+function phaseRoleToken(kind: string): string {
+  return JSON.stringify(kind);
+}
+
+function roundLabelToken(label: string): string {
+  return JSON.stringify(label);
+}
+
+function executionToken(executionId: string): string {
+  return JSON.stringify(executionId);
 }
 
 export function roundAgentElapsedMs(round: RoundState, now: Date): number {
   return activeTimingElapsedMs(round, now);
 }
 
-function applyPhaseEvent(state: RunMapState, event: RunEvent): AgentPhase[] {
+function applyPhaseEvent(state: RunMapWorkingState, event: RunEvent): IndexedPhases {
+  let phases: IndexedPhases = {values: state.phases, index: state.phaseIndex};
   const kind = event.agent_kind;
-  if (!kind) return state.phases;
+  if (!kind) return phases;
   const roundKey = roundKeyFor(event);
   const roundNumber = roundNumberFor(roundKey);
-  let phases = state.phases;
   const roles = expectedRolesForSeeding(state);
   if (roundKey !== null && roles !== null) {
     phases = seedExpectedPhases(roles, phases, roundKey);
@@ -482,15 +549,15 @@ function terminalPhaseStatus(status: RunEvent['status']): AgentPhaseStatus {
 }
 
 function applyRoundEvent(
-  rounds: RoundState[],
-  phases: AgentPhase[],
+  rounds: PersistentArray<RoundState>,
+  phases: IndexedPhases,
   event: RunEvent,
-): RoundState[] {
+): PersistentArray<RoundState> {
   const key = roundKeyFor(event);
   if (key === null || event.type === 'run_finished') return rounds;
   const number = roundNumberFor(key);
   const existingIndex = roundIndex(rounds, key);
-  const existing = runMapArrayAt(rounds, existingIndex);
+  const existing = persistentArrayAt(rounds, existingIndex);
   // Run-scoped terminal events never reach here: `applyRunMapEvent` closes every
   // round for them, because the round a label names is not the only one open.
   const status =
@@ -521,9 +588,9 @@ function applyRoundEvent(
 
 function seedExpectedPhases(
   roles: readonly string[],
-  current: AgentPhase[],
+  current: IndexedPhases,
   roundKey: RoundKey,
-): AgentPhase[] {
+): IndexedPhases {
   let phases = current;
   for (const kind of roles) {
     phases = ensurePhase(phases, kind, roundKey);
@@ -539,7 +606,7 @@ function seedExpectedPhases(
  * events actually carry (`ensurePhase` still creates each observed role).
  */
 export function expectedRolesForSeeding(
-  state: Pick<RunMapState, 'outerLoop' | 'expectedRoles'>,
+  state: Pick<RunMapWorkingState, 'outerLoop' | 'expectedRoles'>,
 ): readonly string[] | null {
   if (state.expectedRoles !== null) return state.expectedRoles;
   if (state.outerLoop === null) return null;
@@ -558,7 +625,11 @@ function legacyExpectedRoles(outerLoop: string): readonly string[] | null {
   return null;
 }
 
-function ensurePhase(phases: AgentPhase[], kind: string, roundKey: RoundKey | null): AgentPhase[] {
+function ensurePhase(
+  phases: IndexedPhases,
+  kind: string,
+  roundKey: RoundKey | null,
+): IndexedPhases {
   const patch: AgentPhase = {
     kind,
     status: 'pending',
@@ -566,14 +637,16 @@ function ensurePhase(phases: AgentPhase[], kind: string, roundKey: RoundKey | nu
     roundNumber: roundNumberFor(roundKey),
     roundLabel: roundKey?.kind === 'label' ? roundKey.label : null,
   };
-  if (phaseSlotFor(phaseIndexFor(phases), patch) !== undefined) return phases;
+  if (phaseSlotFor(phases.index, patch) !== undefined) return phases;
   return appendPhase(phases, patch);
 }
 
-function upsertPhase(phases: AgentPhase[], patch: AgentPhase): AgentPhase[] {
-  const slot = phaseSlotFor(phaseIndexFor(phases), patch);
+function upsertPhase(phases: IndexedPhases, patch: AgentPhase): IndexedPhases {
+  const slot = phaseSlotFor(phases.index, patch);
   let existing =
-    patch.executionId === undefined ? -1 : (slot?.executions.get(patch.executionId) ?? -1);
+    patch.executionId === undefined
+      ? -1
+      : (slot?.executions[executionToken(patch.executionId)] ?? -1);
   if (existing === -1 && patch.status === 'active') {
     existing = slot?.placeholderIndex ?? -1;
   }
@@ -581,7 +654,7 @@ function upsertPhase(phases: AgentPhase[], patch: AgentPhase): AgentPhase[] {
     existing = slot?.activeIndices[0] ?? -1;
   }
   if (existing === -1) return appendPhase(phases, patch);
-  const phase = runMapArrayAt(phases, existing);
+  const phase = persistentArrayAt(phases.values, existing);
   return phase === undefined
     ? appendPhase(phases, patch)
     : replacePhase(phases, existing, mergePhase(phase, patch));
@@ -604,35 +677,50 @@ function mergePhase(phase: AgentPhase, patch: AgentPhase): AgentPhase {
   };
 }
 
-function replaceRound(rounds: RoundState[], existing: number, round: RoundState): RoundState[] {
-  if (existing !== -1) return replaceRunMapArrayEntry(rounds, existing, round);
-  if (round.key.kind === 'label') return appendRunMapArrayEntry(rounds, round);
+function replaceRound(
+  rounds: PersistentArray<RoundState>,
+  existing: number,
+  round: RoundState,
+): PersistentArray<RoundState> {
+  if (existing !== -1) return replacePersistentArrayEntry(rounds, existing, round);
+  if (round.key.kind === 'label') return appendPersistentArrayEntry(rounds, round);
   const number = round.key.number;
-  const insertion = rounds.findIndex(
+  const materialized = materializePersistentArray(rounds);
+  const insertion = materialized.findIndex(
     candidate =>
       candidate.key.kind === 'label' ||
       (candidate.key.kind === 'number' && candidate.key.number > number),
   );
-  if (insertion === -1) return appendRunMapArrayEntry(rounds, round);
-  return runMapArrayFrom([...rounds.slice(0, insertion), round, ...rounds.slice(insertion)]);
+  if (insertion === -1) return appendPersistentArrayEntry(rounds, round);
+  return persistentArrayFrom([
+    ...materialized.slice(0, insertion),
+    round,
+    ...materialized.slice(insertion),
+  ]);
 }
 
 /** Returns the round's stable sorted position, or -1 when it has not been observed. */
-function roundIndex(rounds: RoundState[], key: RoundKey): number {
-  if (key.kind === 'label') {
-    return rounds.findIndex(round => sameRoundKey(round.key, key));
-  }
+function roundIndex(rounds: PersistentArray<RoundState>, key: RoundKey): number {
+  if (key.kind === 'label') return labeledRoundIndex(rounds, key);
   // Numbered rounds stay sorted before fallback rows, so the hot path keeps
   // the logarithmic lookup used before tagged identities were introduced.
   let low = 0;
   let high = rounds.length - 1;
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
-    const candidate = runMapArrayAt(rounds, middle);
+    const candidate = persistentArrayAt(rounds, middle);
     if (candidate === undefined) return -1;
     if (candidate.key.kind === 'label' || candidate.key.number > key.number) high = middle - 1;
     else if (candidate.key.number < key.number) low = middle + 1;
     else return middle;
+  }
+  return -1;
+}
+
+function labeledRoundIndex(rounds: PersistentArray<RoundState>, key: RoundKey): number {
+  for (let index = 0; index < rounds.length; index += 1) {
+    const round = persistentArrayAt(rounds, index);
+    if (round !== undefined && sameRoundKey(round.key, key)) return index;
   }
   return -1;
 }
@@ -675,7 +763,7 @@ function earliestTimestamp(
 
 function updateRoundAgentElapsed(
   round: RoundState,
-  phases: AgentPhase[],
+  phases: IndexedPhases,
   event: RunEvent,
 ): RoundState {
   const started = event.type === 'agent_execution_started' || event.type === 'phase_started';
@@ -688,16 +776,17 @@ function updateRoundAgentElapsed(
   return started ? startAgentTiming(round, event) : finishAgentTiming(round, event);
 }
 
-function compatibilityPhaseTimingAlreadyApplied(phases: AgentPhase[], event: RunEvent): boolean {
+function compatibilityPhaseTimingAlreadyApplied(phases: IndexedPhases, event: RunEvent): boolean {
   if (event.type !== 'phase_started' && event.type !== 'phase_finished') return false;
   const executionId = event.execution_id ?? event.invocation_id;
   if (executionId == null) return false;
-  const slot = phaseSlotFor(phaseIndexFor(phases), {
+  const slot = phaseSlotFor(phases.index, {
     kind: event.agent_kind ?? '',
     roundKey: roundKeyFor(event),
   });
-  const existingIndex = slot?.executions.get(executionId);
-  const existing = existingIndex === undefined ? undefined : runMapArrayAt(phases, existingIndex);
+  const existingIndex = slot?.executions[executionToken(executionId)];
+  const existing =
+    existingIndex === undefined ? undefined : persistentArrayAt(phases.values, existingIndex);
   if (event.type === 'phase_started') return existing?.status === 'active';
   return existing !== undefined && existing.status !== 'active';
 }

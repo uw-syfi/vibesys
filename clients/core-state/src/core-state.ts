@@ -7,12 +7,30 @@ import {
   removeExecutionStatus,
 } from './execution-status.js';
 import {
+  appendPersistentArrayEntry,
+  materializePersistentArray,
+  type PersistentArray,
+  persistentArrayAt,
+  persistentArrayFrom,
+  rehydratePersistentArray,
+  replacePersistentArrayEntry,
+} from './persistent-array.js';
+import {
   ownProjectionInput,
   publishProjectionFields,
   type ReadonlyProjection,
 } from './publication.js';
 import {type RoundKey, roundKeyFor, roundNumberFor, sameRoundKey} from './round-key.js';
-import {type AgentPhase, adoptRunMapArrays, applyRunMapEvent, type RoundState} from './run-map.js';
+import {
+  type AgentPhase,
+  adoptRunMapArrays,
+  applyRunMapEvent,
+  initialRunMapProvenance,
+  installRunMapArrays,
+  type RoundState,
+  type RunMapProvenance,
+  rehydrateRunMapProvenance,
+} from './run-map.js';
 
 export type AgentExecutionMode = 'thinking' | 'responding' | 'tool' | 'waiting';
 
@@ -170,6 +188,12 @@ export interface RunLifetimeBoundary {
   readonly closeout: Readonly<{sequence: number; timestamp: string}> | null;
 }
 
+interface CoreStateProvenance {
+  readonly version: 1;
+  readonly replay: ReplayProvenance;
+  readonly runMap: RunMapProvenance;
+}
+
 function isRunLifetimeBoundary(event: RunEvent): boolean {
   switch (event.type) {
     case 'run_started':
@@ -199,6 +223,8 @@ export type EndedRunStatus = Extract<
 >;
 
 export interface CoreState {
+  /** Versioned reducer provenance retained across JSON and structured clone. */
+  readonly provenance: CoreStateProvenance;
   /**
    * The first non-empty backend run identity folded into this projection.
    * Foreign data is diagnosed and rejected; only `reduceEventRebootstrap` may
@@ -282,7 +308,9 @@ export interface CoreState {
 type MutableCoreState = {-readonly [Key in keyof CoreState]: CoreState[Key]};
 
 export function initialCoreState(): CoreState {
+  const runMap = initialRunMapProvenance();
   return publishCoreState({
+    provenance: {version: 1, replay: emptyReplayProvenance(), runMap},
     runId: null,
     sequence: 0,
     foldedOutOfBand: [],
@@ -323,6 +351,22 @@ function publishCoreState(state: CoreState): CoreState {
   // projection reference is frozen here; projection sites own any protocol
   // references first, so neither caller values nor the hidden index are frozen.
   return publishProjectionFields(state);
+}
+
+/** Restores reducer-owned lazy views after a JSON or structured-clone boundary. */
+export function rehydrateCoreState(state: CoreState): CoreState {
+  const provenance = coreStateProvenance(state);
+  const clone = cloneCoreState(state);
+  (clone as MutableCoreState).provenance = {
+    version: 1,
+    replay: {
+      deliveries: rehydratePersistentArray(provenance.replay.deliveries),
+      responses: provenance.replay.responses,
+    },
+    runMap: rehydrateRunMapProvenance(provenance.runMap),
+  };
+  installRunMapArrays(clone, coreStateProvenance(clone).runMap);
+  return publishCoreState(clone);
 }
 
 /**
@@ -526,7 +570,7 @@ export function reduceEventPrefix(
     ),
     historyAfterSequence: prefixAcceptsMetadata ? historyAfterSequence : state.historyAfterSequence,
   });
-  replaceReplayEvents(reduced, deliveries);
+  replaceReplayEvents(reduced, replay.retainedDeliveries);
   return publishCoreState(reduced);
 }
 
@@ -642,17 +686,15 @@ interface ReplayDelivery {
   readonly route: DeliveryRoute;
 }
 
-interface ReplayChunk {
-  readonly previous: ReplayChunk | null;
-  readonly deliveries: readonly ReplayDelivery[];
+interface ReplayProvenance {
+  readonly deliveries: PersistentArray<ReplayDelivery>;
+  /** Pending response-route entries, normally empty and bounded by one RPC tail. */
+  readonly responses: Readonly<Record<string, number>>;
 }
 
-/**
- * Event provenance retained behind the published projection until #875 makes
- * the remaining reducer internals serializable. Immutable chunks keep a live
- * one-event fold O(1); prefix replay compacts them into one ordered chunk.
- */
-const replayChunks = new WeakMap<object, ReplayChunk>();
+function emptyReplayProvenance(): ReplayProvenance {
+  return {deliveries: persistentArrayFrom([]), responses: {}};
+}
 
 function retainReplayDeliveries(
   source: CoreState,
@@ -660,11 +702,38 @@ function retainReplayDeliveries(
   deliveries: readonly ReplayDelivery[],
 ): CoreState {
   if (deliveries.length === 0 || target === source) return target;
-  replayChunks.set(target, {
-    previous: replayChunks.get(source) ?? null,
-    deliveries,
-  });
+  let replay = coreStateProvenance(source).replay;
+  for (const delivery of deliveries) replay = retainReplayDelivery(replay, delivery);
+  const mutable = target as MutableCoreState;
+  mutable.provenance = {...coreStateProvenance(target), replay};
   return target;
+}
+
+function retainReplayDelivery(
+  replay: ReplayProvenance,
+  delivery: ReplayDelivery,
+): ReplayProvenance {
+  const sequence = delivery.event.sequence ?? 0;
+  const token = sequence > 0 ? String(sequence) : null;
+  const existingIndex = token === null ? undefined : replay.responses[token];
+  if (existingIndex !== undefined) {
+    const existing = persistentArrayAt(replay.deliveries, existingIndex);
+    if (existing?.route !== 'response' || delivery.route !== 'stream') return replay;
+    const responses = {...replay.responses};
+    delete responses[String(sequence)];
+    return {
+      deliveries: replacePersistentArrayEntry(replay.deliveries, existingIndex, delivery),
+      responses,
+    };
+  }
+  const index = replay.deliveries.length;
+  return {
+    deliveries: appendPersistentArrayEntry(replay.deliveries, delivery),
+    responses:
+      token !== null && delivery.route === 'response'
+        ? {...replay.responses, [token]: index}
+        : replay.responses,
+  };
 }
 
 function ownedReplayEvents(events: readonly RunEvent[], route: DeliveryRoute): ReplayDelivery[] {
@@ -672,24 +741,16 @@ function ownedReplayEvents(events: readonly RunEvent[], route: DeliveryRoute): R
 }
 
 function retainedReplayEvents(state: CoreState): ReplayDelivery[] {
-  const chunks: ReplayChunk[] = [];
-  for (
-    let chunk = replayChunks.get(state);
-    chunk !== undefined;
-    chunk = chunk.previous ?? undefined
-  ) {
-    chunks.push(chunk);
-  }
-  const deliveries: ReplayDelivery[] = [];
-  for (let index = chunks.length - 1; index >= 0; index -= 1) {
-    deliveries.push(...(chunks[index]?.deliveries ?? []));
-  }
-  return deliveries;
+  return materializePersistentArray(coreStateProvenance(state).replay.deliveries);
 }
 
 function replaceReplayEvents(state: CoreState, deliveries: readonly ReplayDelivery[]): void {
-  if (deliveries.length === 0) return;
-  replayChunks.set(state, {previous: null, deliveries});
+  let replay = emptyReplayProvenance();
+  for (const delivery of deliveries) replay = retainReplayDelivery(replay, delivery);
+  (state as MutableCoreState).provenance = {
+    ...coreStateProvenance(state),
+    replay,
+  };
 }
 
 function compareReplayDeliveries(left: ReplayDelivery, right: ReplayDelivery): number {
@@ -883,10 +944,20 @@ function applyRunMapProjection(
       : isRunLifetimeBoundary(event)
         ? {event: ownProjectionInput(event), closeout: null}
         : null;
-  const runMap = applyRunMapEvent(next, event, boundary?.closeout?.timestamp ?? null);
+  const provenance = coreStateProvenance(next);
+  const runMap = applyRunMapEvent(
+    next,
+    event,
+    boundary?.closeout?.timestamp ?? null,
+    provenance.runMap,
+  );
   mutable.outerLoop = runMap.outerLoop;
   mutable.expectedRoles = runMap.expectedRoles;
   adoptRunMapArrays(next, runMap);
+  if (runMap.provenance === undefined) {
+    throw new Error('Folded run-map state has no serializable provenance');
+  }
+  mutable.provenance = {...provenance, runMap: runMap.provenance};
   mutable.lastEventTimestamp = runMap.lastEventTimestamp;
   mutable.lastRunMapSequence = sequence;
   if (boundary !== null) {
@@ -1173,13 +1244,23 @@ function applyRunLifecycle(state: CoreState, event: RunEvent): CoreState {
 }
 
 function cloneCoreState(state: CoreState): CoreState {
-  const clone = Object.create(
-    Object.getPrototypeOf(state),
-    Object.getOwnPropertyDescriptors(state),
-  ) as CoreState;
-  const replay = replayChunks.get(state);
-  if (replay !== undefined) replayChunks.set(clone, replay);
+  const clone = {} as CoreState;
+  const record = clone as unknown as Record<string, unknown>;
+  for (const property of Object.keys(state) as Array<keyof CoreState>) {
+    if (property === 'rounds' || property === 'phases') continue;
+    record[property] = state[property];
+  }
+  installRunMapArrays(clone, coreStateProvenance(state).runMap);
   return clone;
+}
+
+function coreStateProvenance(state: CoreState): CoreStateProvenance {
+  const provenance = (state as Partial<CoreState>).provenance;
+  if (provenance?.version !== 1) {
+    const version = provenance === undefined ? 'missing' : String(provenance.version);
+    throw new Error(`Unsupported CoreState provenance version: ${version}`);
+  }
+  return provenance;
 }
 
 function cloneCoreStateWith(state: CoreState, patch: Partial<CoreState>): CoreState {

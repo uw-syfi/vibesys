@@ -13,7 +13,20 @@ import {
   reduceEventBatch,
   reduceEventPrefix,
   reduceSnapshot,
+  rehydrateCoreState,
 } from './index.js';
+
+const cloneBoundaries = [
+  {
+    name: 'JSON',
+    copy: (state: CoreState): CoreState =>
+      rehydrateCoreState(JSON.parse(JSON.stringify(state)) as CoreState),
+  },
+  {
+    name: 'structuredClone',
+    copy: (state: CoreState): CoreState => rehydrateCoreState(structuredClone(state)),
+  },
+] as const;
 
 /**
  * Equivalence harness for the tail bootstrap.
@@ -93,6 +106,74 @@ describe('prefix backfill equivalence', () => {
     expect(bootstrapped.historyAfterSequence).toBe(40);
     expect(extended.historyAfterSequence).toBe(40);
   });
+});
+
+describe('serialized reducer resume', () => {
+  it('rejects an unsupported provenance version at the rehydration boundary', () => {
+    const state = initialCoreState();
+    const unsupported = {
+      ...state,
+      provenance: {...state.provenance, version: 2},
+    } as unknown as CoreState;
+
+    expect(() => rehydrateCoreState(unsupported)).toThrow(
+      'Unsupported CoreState provenance version: 2',
+    );
+  });
+
+  it('retains prefix timing provenance across a JSON round trip', () => {
+    const events = [
+      executionStartedEvent(1, 'serialized'),
+      executionFinishedEvent(2, 'serialized'),
+    ];
+    const tail = reduceEventBatch(initialCoreState(), events.slice(1), undefined, undefined, 1);
+    const resumed = cloneBoundaries[0].copy(tail);
+
+    const merged = reduceEventPrefix(resumed, events.slice(0, 1), 0);
+    const full = reduceEventBatch(initialCoreState(), events);
+
+    expect(merged).toEqual(full);
+    expect(merged.rounds[0]?.agentIntervals).toEqual([
+      {startedAt: timestamp(1), finishedAt: timestamp(2)},
+    ]);
+  });
+
+  it('retains prefix usage provenance across a structuredClone round trip', () => {
+    const events = [
+      executionStartedEvent(1, 'serialized'),
+      executionStatusEvent(2, 'serialized', 'agent_output_chunk', {
+        context_window: 200_000,
+      }),
+      executionStatusEvent(3, 'serialized', 'tool_call', {input_tokens: 9_000}),
+      executionFinishedEvent(4, 'serialized'),
+    ];
+    const tail = reduceEventBatch(initialCoreState(), events.slice(2), undefined, undefined, 2);
+    const resumed = cloneBoundaries[1].copy(tail);
+
+    const merged = reduceEventPrefix(resumed, events.slice(0, 2), 0);
+    const full = reduceEventBatch(initialCoreState(), events);
+
+    expect(merged).toEqual(full);
+    expect(merged.usage).toEqual({inputTokens: 9_000, contextWindow: 200_000, model: null});
+  });
+
+  for (const boundary of cloneBoundaries) {
+    for (const seed of [1, 7, 42, 1234]) {
+      it(`continues a randomized fold after ${boundary.name} (seed ${seed})`, () => {
+        const events = generateRunEvents(seed, {typedTools: seed % 2 === 0}, 3);
+        const full = reduceEventBatch(initialCoreState(), events);
+        const splits = [1, Math.floor(events.length / 3), Math.floor((events.length * 2) / 3)];
+
+        for (const split of splits) {
+          const before = reduceEventBatch(initialCoreState(), events.slice(0, split));
+          const resumed = boundary.copy(before);
+          const continued = reduceEventBatch(resumed, events.slice(split));
+
+          expect(continued).toEqual(full);
+        }
+      });
+    }
+  }
 });
 
 describe('prefix merges across the chunk boundary', () => {
