@@ -111,7 +111,6 @@ class RunLogger:
         emit: Callable[[str, TextIO], None] | None = None,
     ) -> None:
         self.log_dir = log_dir
-        self._tee_stderr = tee_stderr
         self._emit = emit if emit is not None else _default_emit
         self._lock = threading.RLock()
         run_started = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")

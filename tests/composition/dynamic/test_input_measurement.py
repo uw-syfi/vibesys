@@ -21,7 +21,7 @@ from tests.composition.dynamic._harness import (
 )
 
 from vibesys.api import RunStatus
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
+from vibesys.dynamic_roles import IMPLEMENTER, ORCHESTRATOR
 from vs_sim.api.testing import HostCrashedError
 
 if TYPE_CHECKING:

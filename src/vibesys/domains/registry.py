@@ -25,11 +25,6 @@ DOMAINS: dict[DomainName, DomainDefinition] = {
 }
 
 
-def registered_domains() -> list[str]:
-    """Names of domains registered in this repo."""
-    return sorted(domain.value for domain in DOMAINS)
-
-
 def resolve_domain(name: DomainName) -> DomainDefinition:
     """Resolve a registered domain enum to its definition."""
     if not isinstance(name, DomainName):

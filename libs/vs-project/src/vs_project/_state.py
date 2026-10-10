@@ -589,24 +589,6 @@ class StateNamespace:
             raise ProjectStateError.local_state_not_agent_visible()
         return self._project_relative_path(relative_path).as_posix()
 
-    def equivalent_external_file(
-        self,
-        project_root: Path | str,
-        relative_path: str | PurePosixPath,
-    ) -> Path:
-        """Resolve the equivalent state file inside another project worktree."""
-        if not self._portable:
-            raise ProjectStateError.local_state_has_no_worktree_equivalent()
-        root = Path(project_root).resolve()
-        if not root.is_dir():
-            raise ProjectStateError.project_root_not_directory(root)
-        relative = self._project_relative_path(relative_path)
-        return _contained_without_symlinks(
-            root,
-            root.joinpath(*relative.parts),
-            kind="equivalent external state file",
-        )
-
     def _project_relative_path(
         self,
         relative_path: str | PurePosixPath | None = None,
@@ -1302,10 +1284,6 @@ class ProjectState:
             containment_root=self._state_home,
             namespace_root=(_STATE_DIRECTORY_POSIX / "local" / "runs" / run_id / namespace),
         )
-
-    def _round_transaction_path(self, run_id: str) -> Path:
-        """Return the machine-local round commit transaction path."""
-        return self._contained_local_run_dir(run_id) / "round-transaction.json"
 
     def _worktrees_dir(self, run_id: str) -> Path:
         """Return the machine-local directory reserved for candidate worktrees."""

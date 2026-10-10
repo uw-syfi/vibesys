@@ -132,9 +132,6 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/signal_relay.py", "rule": "signal", "count": 4}
 {"path": "libs/vs-sandbox/src/vs_sandbox/signal_relay.py", "rule": "socket", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py", "rule": "fs_sync", "count": 1}
-{"path": "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py", "rule": "socket", "count": 4}
-{"path": "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py", "rule": "socket_io", "count": 2}
-{"path": "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py", "rule": "threading", "count": 15}
 {"path": "libs/vs-sandbox/src/vs_sandbox/skypilot_evaluator.py", "rule": "fs_sync", "count": 3}
 {"path": "libs/vs-sandbox/src/vs_sandbox/skypilot_evaluator.py", "rule": "socket", "count": 4}
 {"path": "libs/vs-sandbox/src/vs_sandbox/skypilot_runner.py", "rule": "subprocess", "count": 5}
@@ -219,13 +216,12 @@
 {"path": "src/entrypoints/server.py", "rule": "threading", "count": 1}
 {"path": "src/entrypoints/web.py", "rule": "process", "count": 1}
 {"path": "src/entrypoints/web.py", "rule": "socket_io", "count": 1}
-{"path": "src/entrypoints/web.py", "rule": "subprocess", "count": 4}
 {"path": "src/server/api/protocol.py", "rule": "wall_clock", "count": 2}
 {"path": "src/server/chat/manager.py", "rule": "threading", "count": 1}
 {"path": "src/server/event_index.py", "rule": "fs_sync", "count": 2}
 {"path": "src/server/events.py", "rule": "wall_clock", "count": 1}
 {"path": "src/server/execution.py", "rule": "threading", "count": 2}
-{"path": "src/server/transport/discovery.py", "rule": "fs_sync", "count": 6}
+{"path": "src/server/transport/discovery.py", "rule": "fs_sync", "count": 2}
 {"path": "src/server/transport/discovery.py", "rule": "process", "count": 1}
 {"path": "src/server/transport/discovery.py", "rule": "socket_io", "count": 1}
 {"path": "src/server/transport/unix_jsonl.py", "rule": "socket", "count": 2}
@@ -257,7 +253,7 @@
 {"path": "tests/entrypoints/test_server.py", "rule": "subprocess", "count": 4}
 {"path": "tests/entrypoints/test_web.py", "rule": "fs_sync", "count": 2}
 {"path": "tests/entrypoints/test_web.py", "rule": "process", "count": 1}
-{"path": "tests/entrypoints/test_web.py", "rule": "subprocess", "count": 11}
+{"path": "tests/entrypoints/test_web.py", "rule": "subprocess", "count": 4}
 {"path": "tests/entrypoints/test_web_script.py", "rule": "subprocess", "count": 1}
 {"path": "tests/evaluators/test_request_factory_evaluator.py", "rule": "process", "count": 4}
 {"path": "tests/evaluators/test_request_factory_evaluator.py", "rule": "subprocess", "count": 1}

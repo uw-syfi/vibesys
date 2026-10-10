@@ -305,21 +305,9 @@ class HypothesisSearch:
         """
         transitions.apply_strategy_updates(state.clone(), updates)
 
-    def resolve_rollback(
-        self, target: RoundRecord, records: Sequence[RoundRecord]
-    ) -> tuple[str | None, int | None]:
-        """Resolve the Git revision (and any failed child round) for a rollback to *target*."""
-        return RoundHistory(records=list(records)).resolve_rollback_commit(
-            target, FAILED_HYPOTHESIS_OUTCOMES
-        )
-
     def update_active(self, state: HypothesisState, hypothesis: Hypothesis) -> HypothesisState:
         """Replace the active hypothesis with an updated checkpoint."""
         return transitions.update_active_hypothesis(state, hypothesis)
-
-    def provisional_since_official(self, records: Sequence[RoundRecord]) -> int:
-        """Count provisional candidates recorded since the last official evaluation."""
-        return transitions.provisional_candidates_since_official(records)
 
     def archive_view(
         self, records: Sequence[RoundRecord], *, space: MetricSpace

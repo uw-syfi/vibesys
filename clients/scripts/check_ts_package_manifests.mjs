@@ -12,9 +12,12 @@ const POLICY = {
     runtimeWorkspaceDependencies: [],
     forbiddenDependencyPrefixes: [],
   },
+  // The main process frames the server's byte stream with backend-client's Node pieces. The web UI
+  // is consumed only as built assets (`@vibesys/web`'s `build:desktop`), never imported, so the
+  // renderer bundle and the main process stay separate programs.
   '@vibesys/desktop': {
-    runtimeWorkspaceDependencies: [],
-    forbiddenDependencyPrefixes: ['@vibesys/'],
+    runtimeWorkspaceDependencies: ['@vibesys/backend-client'],
+    forbiddenDependencyPrefixes: ['@vibesys/web', '@vibesys/core-state', '@vibesys/tui'],
   },
   '@vibesys/core-state': {
     runtimeWorkspaceDependencies: ['@vibesys/backend-client'],

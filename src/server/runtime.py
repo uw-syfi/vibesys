@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import ExitStack, suppress
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from server.api.service import RunApi
 from server.chat.manager import ChatManager
@@ -71,7 +71,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from server.settings import InteractiveSetupDefaults
-    from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
+    from vibesys.api import RunHandle, RunReady, RunRequest, RunResult, Runs, RunSession
     from vs_sim.api import Threads
 
 
@@ -81,8 +81,27 @@ _TERMINAL_EVENT_TYPES = frozenset(
 )
 
 
+class ServerLifecycleObserver(Protocol):
+    """Told when a server reaches the milestones a registry advertises."""
+
+    def listening(self) -> None:
+        """The control socket accepts connections."""
+        ...
+
+    def run_ready(self, run_id: str) -> None:
+        """The run acquired its resources and has its durable id."""
+        ...
+
+
 class ServerRuntime:
-    """Compose and run one frontend-facing JSONL server."""
+    """Compose and run one frontend-facing JSONL server.
+
+    Lifetime: an attached server (no ``detach``) waits for its first client and
+    ends with it. A detached web server outlives the run until ``shutdown``, so
+    a browser can keep reading it. A detached server without the web gateway
+    exits when the run ends: nothing it serves outlives the run, and the run is
+    reopened read-only from stored state.
+    """
 
     def __init__(  # noqa: PLR0913  # lint-waiver: LW-101040 [PLR0913]; the composition root accepts one explicit option per transport and lifetime concern
         self,
@@ -98,6 +117,7 @@ class ServerRuntime:
         instance_path: Path | None = None,
         detach: bool = False,
         read_only_log: Path | None = None,
+        observer: ServerLifecycleObserver | None = None,
         threads: Threads | None = None,
     ) -> None:
         """Compose all server components around one shared condition.
@@ -116,6 +136,7 @@ class ServerRuntime:
         self.instance_path = instance_path
         self.detach = detach
         self.read_only_log = read_only_log
+        self.observer = observer
         self._shutdown = self.threads.event()
         # Set once the Unix socket accepts connections: how a same-process
         # client learns it can dial without polling the filesystem.
@@ -167,7 +188,13 @@ class ServerRuntime:
             )
             session = handle.session
             session.on_committed_view(self.api.observe_committed_state)
-            session.on_ready(lambda ready: self.integration.handle_run_ready(session, ready))
+
+            def on_ready(ready: RunReady) -> None:
+                self.integration.handle_run_ready(session, ready)
+                if self.observer is not None:
+                    self.observer.run_ready(ready.record.run_id)
+
+            session.on_ready(on_ready)
             with self.condition:
                 self.handle = handle
                 self.session = session
@@ -207,6 +234,8 @@ class ServerRuntime:
                     UnixJsonlServer(self.socket_path, self.api, subscriptions, self.threads)
                 )
                 self.transport_listening.set()
+                if self.observer is not None:
+                    self.observer.listening()
                 web_transport = (
                     transports.enter_context(
                         WebSocketGateway(
@@ -263,6 +292,8 @@ class ServerRuntime:
     def _wait_for_detached_shutdown(self, transport: UnixJsonlServer) -> None:
         if not self._detachable_mode:
             transport.wait_for_subscriber_disconnect()
+            return
+        if not self.web and self.read_only_log is None:
             return
         while not self._shutdown.wait(timeout=0.1):
             pass

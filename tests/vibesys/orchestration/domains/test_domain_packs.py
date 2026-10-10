@@ -16,7 +16,6 @@ from vibesys.constants import DomainName
 from vibesys.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
 from vibesys.domains.registry import (
     DOMAINS,
-    registered_domains,
     resolve_domain,
 )
 from vibesys.domains.rendering import render_domain_section
@@ -39,7 +38,7 @@ def _temporary_domain(prompt_dir: Path) -> DomainDefinition:
 # resolver
 # --------------------------------------------------------------------------- #
 def test_registered_domains_present() -> None:
-    names = registered_domains()
+    names = sorted(domain.value for domain in DOMAINS)
     assert "llm-serving" in names
     assert "generic" in names
     assert "microservices" in names

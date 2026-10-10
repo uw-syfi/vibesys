@@ -140,6 +140,7 @@ def test_skips_gpu_less_process(tmp_path: Path) -> None:
     fake_torch = write_fake_torch(tmp_path / "fake_torch")
     out_dir = tmp_path / "out"
     call_log = tmp_path / "calls.log"
+    control_dir = tmp_path / "control"
     env = base_env(
         out_dir=out_dir,
         fake_torch_root=fake_torch,
@@ -147,8 +148,19 @@ def test_skips_gpu_less_process(tmp_path: Path) -> None:
         VIBESYS_TORCH_PROFILE="1",
         VIBESYS_TORCH_PROFILE_DELAY_S="0",
         FAKE_TORCH_GPU="0",
+        VIBESYS_TORCH_PROFILE_CONTROL_DIR=str(control_dir),
     )
-    result = run_python("import torch\n" + _WAIT + "wait_for_event('cuda.is_available')", env=env)
+    # Exit only once the injector has reported its verdict. Exiting on the fake
+    # torch's own ``cuda.is_available`` event let the interpreter finalize while
+    # the injector's daemon watcher thread was still writing its diagnostic to
+    # stderr, which aborts the child ("could not acquire lock ... at interpreter
+    # shutdown", rc -6). The marker is written after that diagnostic line.
+    child = (
+        "import torch\nimport time\nfrom pathlib import Path\n"
+        f"marker = Path({str(control_dir / 'unavailable')!r})\n"
+        "while not marker.is_file():\n    time.sleep(0.01)\n"
+    )
+    result = run_python(child, env=env, timeout=_CHILD_TIMEOUT_S)
     assert result.returncode == 0, result.stderr
     assert not _trace_files(out_dir)
     events = [name for _ts, name in parse_call_log(call_log)]

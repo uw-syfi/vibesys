@@ -15,9 +15,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
-from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER
+from vibesys.dynamic_roles import IMPLEMENTER
+from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.run.evaluation_backend import (
     EvidenceReusingEvaluation,
     SemanticEvaluationBackend,
@@ -685,7 +685,7 @@ async def test_submission_deadline_is_immutable_through_join_and_restart() -> No
         run.evaluation, reopened, run_id=run.run_id, scopes=service
     )
     assert await recovered.submitted_deadline(submitted.handle_id) == 1210.0
-    await recovered.cancel_physical(submitted.handle_id)
+    await reopened.cancel(submitted.handle_id)
     assert await reopened.status(submitted.handle_id) is EvaluationState.CANCELED
 
 

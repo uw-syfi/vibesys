@@ -523,7 +523,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        # Each shard pays ~50 s of setup and pytest startup before its first test, so
+        # the shard count trades summed runner time against wall time: 8 keeps the
+        # slowest shard near three minutes (#1724).
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

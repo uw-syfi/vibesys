@@ -71,11 +71,6 @@ class ProfilerDefinition:
         return f"{self.kind.value}_profiler"
 
     @property
-    def server_path(self) -> str:
-        """Return the profiler server path relative to its support package."""
-        return f"{self.support_name}/server.py"
-
-    @property
     def prompt_template(self) -> str:
         """Return the prompt template path for this profiler."""
         return f"profilers/{self.kind.value}.j2"

@@ -19,7 +19,7 @@ from tests.composition.dynamic._harness import (
 )
 
 from vibesys.api import RunStatus
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.run.host import STOP_GRACE_S
 from vs_runtime.api.testing import FakeStopTimer
 

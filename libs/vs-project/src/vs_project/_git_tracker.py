@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._git_backend import open_git_repository
-from vs_project.api.git_repository import GitCommandError, GitError, PatchStyle, StagingError
+from vs_project.api.git_repository import GitError, PatchStyle, StagingError
 from vs_project.project import Project
 
 if TYPE_CHECKING:
@@ -227,18 +227,6 @@ class GitTracker:
         except GitError:
             return None
         return next((entry.sha for entry in subjects if entry.subject == label), None)
-
-    def retain_worktree(self, worktree_dir: Path, candidate_id: str) -> str:
-        """Retain the current commit from a caller-created local worktree."""
-        destination = self._validate_local_worktree_path(worktree_dir)
-        try:
-            head = self._git.worktree_head(destination)
-        except GitCommandError as error:
-            message = (
-                f"Git command failed in candidate worktree (git rev-parse HEAD): {error.stderr}"
-            )
-            raise RuntimeError(message) from error
-        return self.retain_candidate(candidate_id, head)
 
     def _validate_local_worktree_path(self, worktree_dir: Path) -> Path:
         """Resolve a candidate worktree path within machine-local state."""

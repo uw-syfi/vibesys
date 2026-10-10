@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 from pydantic import BaseModel, RootModel
 
+from vibesys import dynamic_roles as dynamic
 from vibesys.hypothesis import OrchestratorPlan
-from vibesys.orchestration.dynamic import agents as dynamic
 from vibesys.orchestration.dynamic.models import (
     ImplementerReply,
     JudgeReply,

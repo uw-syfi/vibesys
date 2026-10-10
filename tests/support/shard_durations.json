@@ -542,7 +542,6 @@
  "tests/server/test_runtime.py": 6.52,
  "tests/server/test_sim_threads_wiring.py": 0.43,
  "tests/server/test_subscription_tracker.py": 0.01,
- "tests/server/test_tool_payloads.py": 0.02,
  "tests/server/test_transport_subscription.py": 5.97,
  "tests/server/test_tui_defaults.py": 0.07,
  "tests/server/test_tui_dev_harness.py": 0.27,

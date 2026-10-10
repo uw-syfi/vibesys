@@ -1,6 +1,6 @@
 ---
 name: create-issue
-description: Investigate, draft, and file well-scoped VibeSys GitHub issues using the repository issue forms and project conventions. Use when a user asks to create, open, or file a bug report, engineering change, expansion scenario or harness, research experiment, or roadmap issue, roadmap, or asks to turn findings, TODOs, or proposed work into GitHub issues.
+description: Investigate, draft, and file well-scoped VibeSys GitHub issues using the repository issue forms and project conventions. Use when a user asks to create, open, or file a bug report, engineering change, expansion scenario or harness, research experiment, or roadmap issue, or asks to turn findings, TODOs, or proposed work into GitHub issues.
 ---
 
 # Create Issue
@@ -45,8 +45,8 @@ maintainers.
     membership, and parent relationship. Return its URL and any metadata that
     remains for triage.
 
-When creating an approved roadmap, also create its planned sub-issues in
-dependency order, each with a native parent link to the roadmap.
+Create sub-issues for the work about to start, each with a native parent link
+to its roadmap; add later ones as they come up.
 
 ## Authoring Rules
 
