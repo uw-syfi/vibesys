@@ -1,6 +1,34 @@
 import {describe, expect, it} from 'bun:test';
 import type {ProtocolResponse, RunEvent} from '@vibesys/backend-client';
-import {PLOT_WIDTH, renderPerformanceCurve} from './performance-chart.js';
+import {type PerformanceDirection, projectPerformance} from '@vibesys/core-state';
+import {PLOT_WIDTH, renderPerformanceCurve as renderProjection} from './performance-chart.js';
+
+function renderPerformanceCurve(
+  performance: ProtocolResponse['performance'] | undefined,
+  events: RunEvent[] = [],
+  performanceContext?: ProtocolResponse['performance_context'],
+  recordedDirection?: PerformanceDirection,
+): string {
+  return renderProjection(
+    projectPerformance({
+      performance,
+      events,
+      experiments:
+        recordedDirection === undefined
+          ? []
+          : [
+              {
+                hypothesis_id: 'H-chart',
+                first_round: 1,
+                last_round: 1,
+                perf_direction: recordedDirection,
+              },
+            ],
+      objectiveDirection: performanceContext?.objective_direction,
+    }),
+    performanceContext,
+  );
+}
 
 describe('renderPerformanceCurve', () => {
   it('plots persisted performance records by round', () => {
@@ -95,6 +123,7 @@ describe('renderPerformanceCurve', () => {
         objective_baseline_commit: 'e17fce8123abc',
         objective_description: 'Throughput of the MPMC queue benchmark.',
       }),
+      'max',
     );
 
     expect(chart).toContain('Metric    total_ops_per_sec (ops/s) · maximize ↑');
@@ -107,6 +136,7 @@ describe('renderPerformanceCurve', () => {
       [performance(1, 1000)],
       [],
       context({objective_metric: 'p99_latency_us', objective_direction: 'min'}),
+      'min',
     );
 
     expect(chart).toContain('Metric    p99_latency_us · minimize ↓');
@@ -117,6 +147,7 @@ describe('renderPerformanceCurve', () => {
       [performance(1, 1000), performance(2, 2000), performance(3, 1500)],
       [],
       context({objective_metric: 'p99_latency_us', objective_direction: 'min'}),
+      'min',
     );
 
     expect(chart).toContain('best r1 1k total_ops_per_sec');
@@ -128,6 +159,7 @@ describe('renderPerformanceCurve', () => {
       [performance(1, 1000), performance(2, 2000), performance(3, 1500)],
       [],
       context({objective_direction: 'max'}),
+      'max',
     );
 
     expect(chart).toContain('best r2 2k total_ops_per_sec');
@@ -168,12 +200,26 @@ describe('renderPerformanceCurve', () => {
       [],
       [],
       context({objective_direction: 'max', objective_description: 'Ops per second.'}),
+      'max',
     );
 
     expect(chart).toContain('Metric    total_ops_per_sec · maximize ↑');
     expect(chart).toContain('Measures  Ops per second.');
     expect(chart.endsWith('No performance data yet.')).toBe(true);
     expect(chart).not.toContain('●');
+  });
+
+  it('uses the official objective direction when stale hypothesis metadata disagrees', () => {
+    const chart = renderPerformanceCurve(
+      [performance(1, 1000), performance(2, 2000)],
+      [],
+      context({objective_direction: 'min'}),
+      'max',
+    );
+
+    expect(chart).toContain('minimize ↓');
+    expect(chart).not.toContain('maximize ↑');
+    expect(chart).toContain('best r1 1k total_ops_per_sec');
   });
 });
 

@@ -3,9 +3,6 @@ import type {QuotaPause} from '@vibesys/core-state';
 /** The error banner id a quota pause is shown under, so it can retire with the pause. */
 export const QUOTA_BANNER_ID = 'quota_paused';
 
-/** The banner title for a run parked on a provider capacity stop. */
-export const QUOTA_BANNER_TITLE = 'Paused on provider quota';
-
 /** The slash command text that resumes on the configured fallback. */
 export const RESUME_FALLBACK_ARGUMENT = 'fallback';
 

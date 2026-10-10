@@ -20,6 +20,12 @@ import {fuzzyMatchCommands} from './commands.js';
 import {readNote, writeNote} from './notes-store.js';
 import {SocketSessionController} from './session-controller.js';
 import {chatPaneFocused, chatPaneVisible, experimentLogVisible} from './session-model.js';
+import {rightPaneContent, rightPaneTitle} from './ui/right-pane.js';
+
+function paneContent(controller: SocketSessionController): string | null {
+  const pane = controller.state.layout.right;
+  return pane === null ? null : rightPaneContent(controller.state, pane);
+}
 
 /** The command-bar palette's current matches, by name, for asserting on what `/help` offers. */
 function paletteNames(controller: SocketSessionController): string[] {
@@ -98,8 +104,8 @@ describe('session controller', () => {
     expect(chatPaneVisible(controller.state)).toBe(true);
     expect(experimentLogVisible(controller.state)).toBe(true);
     expect(controller.state.chatConversation).toMatchObject([
-      {kind: 'user', label: 'You', content: 'what is happening?'},
-      {kind: 'assistant', label: 'Answer', content: 'The implementer is running.'},
+      {kind: 'user', labelKind: 'user', content: 'what is happening?'},
+      {kind: 'assistant', labelKind: 'answer', content: 'The implementer is running.'},
     ]);
   });
 
@@ -452,9 +458,10 @@ describe('session controller', () => {
     // The chart lands beside the transcript, not over it.
     expect(controller.state.overlay).toBeNull();
     expect(controller.state.layout.right?.view).toBe('perf');
-    expect(controller.state.layout.right?.title).toBe('Performance');
-    expect(controller.state.layout.right?.content).toContain('Performance · total_ops_per_sec');
-    expect(controller.state.layout.right?.content).toContain('best r2 2.4k total_ops_per_sec');
+    const pane = controller.state.layout.right;
+    expect(pane === null ? null : rightPaneTitle(pane)).toBe('Performance');
+    expect(paneContent(controller)).toContain('Performance · total_ops_per_sec');
+    expect(paneContent(controller)).toContain('best r2 2.4k total_ops_per_sec');
     expect(controller.state.layout.focus).toBe('right');
   });
 
@@ -672,9 +679,9 @@ describe('session controller', () => {
 
     expect(transport.requests).toEqual([{type: 'query.chat', text: 'first question'}]);
     expect(controller.state.chatConversation).toMatchObject([
-      {kind: 'user', label: 'You', content: 'first question'},
-      {kind: 'user', label: 'You · queued', content: 'follow-up question'},
-      {kind: 'user', label: 'You · queued', content: 'one more detail'},
+      {kind: 'user', labelKind: 'user', content: 'first question'},
+      {kind: 'user', labelKind: 'user_queued', content: 'follow-up question'},
+      {kind: 'user', labelKind: 'user_queued', content: 'one more detail'},
     ]);
 
     transport.resolveNext('first answer');
@@ -685,8 +692,8 @@ describe('session controller', () => {
       {type: 'query.chat', text: 'first question'},
       {type: 'query.chat', text: 'follow-up question\n\none more detail'},
     ]);
-    expect(controller.state.chatConversation[1]?.label).toBe('You');
-    expect(controller.state.chatConversation[2]?.label).toBe('You');
+    expect(controller.state.chatConversation[1]?.labelKind).toBe('user');
+    expect(controller.state.chatConversation[2]?.labelKind).toBe('user');
 
     transport.resolveNext('follow-up answer');
     await Promise.all([first, second, third]);
@@ -735,7 +742,7 @@ describe('session controller', () => {
     expect(controller.state.chatPending).toBe(false);
     expect(controller.state.chatConversation.at(-1)).toMatchObject({
       kind: 'result',
-      label: 'Chat failed',
+      labelKind: 'chat_failed',
       tone: 'failure',
       content: 'Codex exited with code 1',
     });
@@ -1150,12 +1157,11 @@ describe('session controller', () => {
 
     expect(controller.state.overlay).toBeNull();
     expect(controller.state.layout.right?.view).toBe('design');
-    expect(controller.state.layout.right?.title).toBe('Design changes');
-    expect(controller.state.layout.right?.content).toContain('Design changes by round');
-    expect(controller.state.layout.right?.content).toContain(
-      'Round 1 · H-01 · Pad the ring indices',
-    );
-    expect(controller.state.layout.right?.content).toContain('src/ring.rs, src/lib.rs');
+    const pane = controller.state.layout.right;
+    expect(pane === null ? null : rightPaneTitle(pane)).toBe('Design changes');
+    expect(paneContent(controller)).toContain('Design changes by round');
+    expect(paneContent(controller)).toContain('Round 1 · H-01 · Pad the ring indices');
+    expect(paneContent(controller)).toContain('src/ring.rs, src/lib.rs');
     expect(controller.state.designLog).toEqual(transport.design);
   });
 
@@ -1166,9 +1172,7 @@ describe('session controller', () => {
 
     await controller.submitCommand('/design');
 
-    expect(controller.state.layout.right?.content).toContain(
-      'not available until a run is attached',
-    );
+    expect(paneContent(controller)).toContain('not available until a run is attached');
     expect(controller.state.designLog).toBeNull();
   });
 
@@ -1546,7 +1550,7 @@ describe('session controller', () => {
     expect(controller.state.hypothesisScope).toMatchObject({id: 'H-01'});
   });
 
-  it('keeps the open pane current as rounds land', async () => {
+  it('keeps the open pane current as benchmark measurements land', async () => {
     const transport = new FakeTransport(
       [],
       [{round: 1, perf_metric: 1200, perf_unit: 'ops', passed: true, profile_skipped: false}],
@@ -1556,7 +1560,7 @@ describe('session controller', () => {
     await controller.submitCommand('/perf');
     const before = perfRequests(transport);
 
-    transport.emit({type: 'event', event: event(9, 'round_finished')});
+    transport.emit({type: 'event', event: benchmark(9, 1300)});
     await Promise.resolve();
     await Promise.resolve();
 
@@ -1572,7 +1576,7 @@ describe('session controller', () => {
     controller.closePane();
     const before = perfRequests(transport);
 
-    transport.emit({type: 'event', event: event(9, 'round_finished')});
+    transport.emit({type: 'event', event: benchmark(9, 1300)});
     await Promise.resolve();
 
     expect(perfRequests(transport)).toBe(before);
@@ -1604,7 +1608,7 @@ describe('session controller', () => {
     );
     expect(controller.state.layout.right?.view).toBe('perf');
     expect(controller.state.layout.right?.pending).toBe(false);
-    expect(controller.state.layout.right?.content).toContain('Performance · total_ops_per_sec');
+    expect(paneContent(controller)).toContain('Performance · total_ops_per_sec');
   });
 
   it('drops the superseded design answer rather than painting it over the perf pane', async () => {
@@ -1620,8 +1624,8 @@ describe('session controller', () => {
     await new Promise<void>(resolve => setTimeout(resolve, 0));
 
     expect(controller.state.layout.right?.view).toBe('perf');
-    expect(controller.state.layout.right?.content).toContain('Performance · total_ops_per_sec');
-    expect(controller.state.layout.right?.content).not.toContain('Design changes by round');
+    expect(paneContent(controller)).toContain('Performance · total_ops_per_sec');
+    expect(paneContent(controller)).not.toContain('Design changes by round');
   });
 
   it('coalesces same-view refreshes during a fetch into one follow-up', async () => {
@@ -1633,8 +1637,8 @@ describe('session controller', () => {
     const designOpen = controller.openPane('design');
     // Two rounds finish while the query is still running. The in-flight
     // answer predates both, so one refetch follows, not one per event.
-    transport.emit(event(9, 'round_finished'));
-    transport.emit(event(10, 'round_finished'));
+    transport.emit(benchmark(9, 1300));
+    transport.emit(benchmark(10, 1400));
     const before = designQueries(transport);
 
     transport.releaseDesign();
@@ -1702,7 +1706,7 @@ describe('session controller', () => {
 
     expect(controller.state.chatConversation.at(-1)?.content).toBe('The sampler reorder.');
     expect(controller.state.layout.right?.view).toBe('perf');
-    expect(controller.state.layout.right?.content).toBe(pane?.content);
+    expect(controller.state.layout.right).toBe(pane);
   });
 
   it('surfaces a failed experiment query without closing the view', async () => {
@@ -1728,7 +1732,7 @@ describe('session controller', () => {
     // Handled as a command, not forwarded to the chat agent.
     expect(transport.requests.slice(before)).toEqual([{type: 'query.performance'}]);
     expect(controller.state.layout.right?.view).toBe('perf');
-    expect(controller.state.layout.right?.content).toContain('No performance data yet.');
+    expect(paneContent(controller)).toContain('No performance data yet.');
     expect(controller.state.chatConversation).toHaveLength(0);
   });
 

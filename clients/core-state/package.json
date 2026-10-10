@@ -21,6 +21,7 @@
     "check": "tsc -p tsconfig.check.json",
     "pretest": "pnpm --filter @vibesys/core-state^... build",
     "test": "node ../scripts/run_bun_tests.mjs ./src",
+    "bench:performance": "bun bench/performance-projection.ts",
     "bench:run-map": "bun bench/run-map.ts"
   },
   "dependencies": {

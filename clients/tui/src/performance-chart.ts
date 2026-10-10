@@ -1,12 +1,5 @@
-import type {ProtocolResponse, RunEvent} from '@vibesys/backend-client';
-import {roundKeyFor} from '@vibesys/core-state';
-
-interface PerfPoint {
-  round: number;
-  metric: string;
-  value: number;
-  unit: string;
-}
+import type {ProtocolResponse} from '@vibesys/backend-client';
+import type {PerformanceDirection, PerformanceProjection} from '@vibesys/core-state';
 
 type PerformanceContext = NonNullable<ProtocolResponse['performance_context']>;
 
@@ -19,12 +12,11 @@ export const PLOT_WIDTH = 48;
 const CONTEXT_LABEL_WIDTH = 10;
 
 export function renderPerformanceCurve(
-  performance: ProtocolResponse['performance'] | undefined,
-  events?: RunEvent[],
+  projection: PerformanceProjection,
   context?: ProtocolResponse['performance_context'],
 ): string {
-  const points = performancePoints(performance, events);
-  const contextLines = contextSection(context ?? null);
+  const points = projection.points;
+  const contextLines = contextSection(context ?? null, projection.direction);
   if (points.length === 0) {
     return [...contextLines, 'No performance data yet.'].join('\n');
   }
@@ -67,7 +59,7 @@ export function renderPerformanceCurve(
   // "best" follows the objective direction: for a minimizing objective the
   // lowest value wins. Without a recorded direction the historical
   // higher-is-better reading stands.
-  const minimize = context?.objective_direction === 'min';
+  const minimize = projection.direction === 'min';
   const best = visible.reduce((current, point) =>
     (minimize ? point.value < current.value : point.value > current.value) ? point : current,
   );
@@ -80,59 +72,7 @@ export function renderPerformanceCurve(
   return lines.join('\n');
 }
 
-function performancePoints(
-  performance: ProtocolResponse['performance'] | undefined,
-  events: RunEvent[] | undefined,
-): PerfPoint[] {
-  const byRound = new Map<number, PerfPoint>();
-  for (const round of performance ?? []) {
-    byRound.set(round.round, {
-      round: round.round,
-      metric: round.perf_unit,
-      value: round.perf_metric,
-      unit: round.perf_unit,
-    });
-  }
-  for (const event of events ?? []) {
-    const key = roundKeyFor(event);
-    if (key?.kind !== 'number') continue;
-    const round = key.number;
-    const point = performancePointFromEvent(event, round);
-    if (point !== null) byRound.set(round, point);
-  }
-  return [...byRound.values()].sort((a, b) => a.round - b.round);
-}
-
-function performancePointFromEvent(event: RunEvent, round: number): PerfPoint | null {
-  const data = event.data;
-  if (data?.kind === 'benchmark_result') {
-    return {round, metric: data.metric, value: data.value, unit: data.unit};
-  }
-  // The measurement `benchmark_result` used to carry rides a completed
-  // benchmark gate on new journals (#692). The caller's map keyed by round
-  // keeps a journal carrying both kinds from double-counting.
-  if (
-    data?.kind === 'gate_finished' &&
-    data.gate === 'benchmark' &&
-    event.status !== 'failed' &&
-    data.metric != null &&
-    data.value != null
-  ) {
-    return {
-      round,
-      metric: data.metric,
-      value: data.value,
-      unit: data.unit ?? data.metric,
-    };
-  }
-  if (data?.kind === 'round_finished' && typeof data.perf_metric === 'number') {
-    const unit = data.perf_unit ?? 'performance';
-    return {round, metric: unit, value: data.perf_metric, unit};
-  }
-  return null;
-}
-
-function latestMetric(points: PerfPoint[]): string {
+function latestMetric(points: PerformanceProjection['points']): string {
   return points.at(-1)?.metric ?? 'performance';
 }
 
@@ -141,11 +81,14 @@ function latestMetric(points: PerfPoint[]): string {
  * how the benchmark measures. Direction is words plus a glyph, never color,
  * and absent facts drop their line rather than render a placeholder.
  */
-function contextSection(context: PerformanceContext | null): string[] {
+function contextSection(
+  context: PerformanceContext | null,
+  direction: PerformanceDirection | null,
+): string[] {
   if (context === null) return [];
   const lines: string[] = [];
   if (context.objective_metric) {
-    lines.push(contextLine('Metric', metricSummary(context.objective_metric, context)));
+    lines.push(contextLine('Metric', metricSummary(context.objective_metric, context, direction)));
   }
   const baseline = baselineSummary(context);
   if (baseline !== null) lines.push(contextLine('Baseline', baseline));
@@ -161,7 +104,11 @@ function contextLine(label: string, value: string): string {
   return `${label.padEnd(CONTEXT_LABEL_WIDTH)}${value}`;
 }
 
-function metricSummary(metric: string, context: PerformanceContext): string {
+function metricSummary(
+  metric: string,
+  context: PerformanceContext,
+  direction: PerformanceDirection | null,
+): string {
   const parts = [metric];
   // Legacy rounds record the metric name in the unit slot; repeating it as a
   // parenthesized unit would read as noise.
@@ -169,8 +116,8 @@ function metricSummary(metric: string, context: PerformanceContext): string {
     parts.push(`(${context.objective_unit})`);
   }
   const summary = parts.join(' ');
-  if (context.objective_direction === 'max') return `${summary} · maximize ↑`;
-  if (context.objective_direction === 'min') return `${summary} · minimize ↓`;
+  if (direction === 'max') return `${summary} · maximize ↑`;
+  if (direction === 'min') return `${summary} · minimize ↓`;
   return summary;
 }
 

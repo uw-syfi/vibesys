@@ -18,7 +18,6 @@ import {
   formatRounds,
   headerRow,
   hypothesisMetadata,
-  measuredDirection,
   outcomeColor,
   outcomeLabel,
   resolveColumns,
@@ -190,14 +189,6 @@ describe('experiment log rows', () => {
     expect(headerRow(columns, 'max')).toContain('Measured ↑');
     expect(headerRow(columns, 'min')).toContain('Measured ↓');
     expect(headerRow(columns)).not.toContain('↑');
-  });
-
-  it('finds the direction shared by every measured entry', () => {
-    expect(measuredDirection([entry(), entry({perf_direction: 'max'})])).toBe('max');
-    expect(measuredDirection([entry()])).toBe(null);
-    expect(
-      measuredDirection([entry({perf_direction: 'max'}), entry({perf_direction: 'min'})]),
-    ).toBe(null);
   });
 
   it('spells out the measurement in the drill-down metadata', () => {

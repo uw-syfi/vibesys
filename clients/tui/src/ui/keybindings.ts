@@ -47,6 +47,8 @@ export interface KeybindingActions {
   setGraphWidthOverride(width: number | null): void;
   /** `<`/`>`: the docked chat pane's explicit column width, already clamped; `=`: null. */
   setChatWidthOverride(width: number | null): void;
+  graphWidthOverride(): number | null;
+  chatWidthOverride(): number | null;
   scrollRightPane(delta: number): void;
   scrollChatPane(delta: number): void;
   scrollExperimentDetail(delta: number): void;
@@ -388,7 +390,7 @@ export function bindKeybindings(
         const current = chatPaneWidthWithOverride(
           terminalWidth,
           rightWidth,
-          controller.state.chatWidthOverride,
+          actions.chatWidthOverride(),
         );
         const step = key.name === '>' ? PANE_WIDTH_STEP : -PANE_WIDTH_STEP;
         const next = clampChatWidthOverride(current + step, terminalWidth, rightWidth);
@@ -587,7 +589,7 @@ export function bindKeybindings(
         const current = agentPaneWidthWithOverride(
           terminalWidth,
           phases,
-          controller.state.graphWidthOverride,
+          actions.graphWidthOverride(),
         );
         // `null` is the stacked list, which is both what the pane is drawn at
         // and the narrowest it goes. The gap up to a graph is 26 columns at

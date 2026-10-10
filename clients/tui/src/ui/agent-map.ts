@@ -378,12 +378,13 @@ export class AgentMapView {
     widthOverride?: number,
     railWidth = 0,
     rows = Number.POSITIVE_INFINITY,
+    graphWidthOverride: number | null = null,
   ): void {
     const phases = visiblePhases(state);
     // The pane's width follows the terminal, so a resize has to redraw even
     // when the state is unchanged. A zoom hands the pane the whole terminal
     // (`widthOverride`, this method's own parameter for that, distinct from
-    // `state.graphWidthOverride` below), and one narrower than the graph needs
+    // the TUI-local `graphWidthOverride` below), and one narrower than the graph needs
     // stacks the agents rather than cut a name.
     // Null either way means the stacked list: the pane is drawn at `paneWidth`
     // whatever that decides.
@@ -395,7 +396,7 @@ export class AgentMapView {
       phases,
       widthOverride,
       rows,
-      state.graphWidthOverride,
+      graphWidthOverride,
     );
     // A stale `rounds` focus lands here once the rail goes off screen, so the
     // border follows the keys rather than the raw field: `keybindings` drives

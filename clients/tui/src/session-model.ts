@@ -3,6 +3,7 @@ import type {
   DesignRound,
   Diagnostic,
   HypothesisEntry,
+  ProtocolResponse,
   RunEvent,
   RunSnapshot,
 } from '@vibesys/backend-client';
@@ -11,7 +12,6 @@ import {
   type ActiveExecutionCheckpoint,
   type AgentPhase,
   type CoreDiagnostic,
-  type CoreRunStatus,
   type CoreState,
   DEFAULT_CHAT_THREAD_ID,
   type ExecutionTodos,
@@ -72,27 +72,6 @@ export interface SessionState {
   /** Non-null while the composer's inline command menu is open. */
   chatMenu: ChatMenu | null;
   todosExpanded: boolean;
-  /**
-   * Explicit column width for the Agents pane, set and stepped by `<`/`>` and
-   * cleared by `=`. `null` means automatic: `agent-map.ts#agentPaneWidth`
-   * decides, exactly as it always has, including its no-truncation floor and
-   * the stacked-list fallback on a narrow terminal. Once set it is sticky, so
-   * the pane stops following the terminal and stops growing with longer agent
-   * names until `=` hands it back; an explicit width that drifted would not be
-   * one, and `=` is what keeps that from being a trap. Session-only view state:
-   * it carries no `agent.toml` key and does not persist past this process.
-   */
-  graphWidthOverride: number | null;
-  /**
-   * Explicit column width for the docked chat pane on the home page, set and
-   * stepped by `<`/`>` and cleared by `=`. `null` means automatic:
-   * `chat-pane.ts#chatPaneWidth` decides, exactly as it always has. Mirrors
-   * `graphWidthOverride` above in shape and in the reason it exists: an
-   * explicit width is sticky, and `=` is what keeps that from being a trap.
-   * Session-only view state: it carries no `agent.toml` key and does not
-   * persist past this process.
-   */
-  chatWidthOverride: number | null;
   themeName: ThemeName;
   experimentLog: ExperimentLogState | null;
   /**
@@ -146,7 +125,7 @@ type ErrorScope =
   | 'input';
 
 export interface ErrorBannerState {
-  title: string;
+  titleKind: ErrorTitleKind;
   /** Human-facing summary, shown before structured detail and hint. */
   message: string;
   detail: string | null;
@@ -160,6 +139,8 @@ export interface ErrorBannerState {
   /** Equivalent reports are folded into one banner. */
   count: number;
 }
+
+export type ErrorTitleKind = ErrorScope | 'run_interruption' | 'quota_pause';
 
 /** The rounds rail (a selector, reported as `agents` by `focusedPane`), the graph, or the transcript. */
 export type RoundFocus = 'rounds' | 'agents' | 'transcript';
@@ -226,20 +207,28 @@ export interface HypothesisScope {
   source?: 'hypothesis' | 'round';
 }
 
-/**
- * A visualization command's output, rendered beside the transcript rather than
- * over it. Content is pre-rendered text so the pane stays agnostic about which
- * command produced it and a new command needs no new layout code.
- */
+/** A visualization command's semantic output, rendered by the active frontend. */
 export type PaneView = 'perf' | 'design';
 
-export interface RightPane {
-  view: PaneView;
-  title: string;
-  content: string;
-  pending: boolean;
-  error: string | null;
+interface RightPaneStatus {
+  readonly pending: boolean;
+  readonly error: string | null;
 }
+
+export type RightPane =
+  | (RightPaneStatus & {
+      readonly view: 'perf';
+      /** Query-owned measurements. Experiment annotations remain authoritative in `experimentLog`. */
+      readonly data: {
+        readonly performance: ProtocolResponse['performance'];
+        readonly events: readonly RunEvent[];
+      } | null;
+      readonly context: ProtocolResponse['performance_context'];
+    })
+  | (RightPaneStatus & {
+      readonly view: 'design';
+      readonly available: boolean;
+    });
 
 /**
  * Which column the pane keys act on. ``left`` is whatever holds the middle of
@@ -372,6 +361,9 @@ export interface ConversationEntry {
     | 'status'
     | 'result';
   content: string;
+  /** TUI-owned label semantics for entries created locally by the controller. */
+  labelKind?: 'chat_commands' | 'user' | 'user_queued' | 'answer' | 'chat_failed';
+  /** Producer-provided label retained for replayed backend transcript entries. */
   label?: string;
   tone?: 'normal' | 'success' | 'failure';
   agentKind?: string;
@@ -416,8 +408,6 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     chatPendingThreads: {},
     chatMenu: null,
     todosExpanded: false,
-    graphWidthOverride: null,
-    chatWidthOverride: null,
     themeName,
     // The experiment log is the landing view: a run's history reads as a short
     // list of claims before it reads as a long list of rounds.
@@ -586,11 +576,6 @@ export function setChatThreadPending(
   });
 }
 
-const PANE_TITLES: Record<PaneView, string> = {
-  perf: 'Performance',
-  design: 'Design changes',
-};
-
 /**
  * Opens or retargets the right pane. A second visualization command replaces
  * the pane's contents rather than stacking, which is why the view is set here
@@ -598,34 +583,61 @@ const PANE_TITLES: Record<PaneView, string> = {
  */
 export function openPane(state: SessionState, view: PaneView): SessionState {
   const existing = state.layout.right;
+  const right: RightPane =
+    existing?.view === view
+      ? {...existing, pending: true, error: null}
+      : view === 'perf'
+        ? {view, data: null, context: null, pending: true, error: null}
+        : {view, available: true, pending: true, error: null};
   return {
     ...state,
     overlay: null,
     layout: {
-      right: {
-        view,
-        title: PANE_TITLES[view],
-        // Keep the old content while the new query is in flight only when the
-        // pane is not changing view, so the pane never shows one command's
-        // output under another command's title.
-        content: existing !== null && existing.view === view ? existing.content : '',
-        pending: true,
-        error: null,
-      },
+      // Keep the old structured projection while the same query refreshes;
+      // changing view starts empty so one visualization cannot render under
+      // another view's identity.
+      right,
       focus: 'right',
       zoomedPane: state.layout.zoomedPane,
     },
   };
 }
 
-export function setPaneContent(state: SessionState, view: PaneView, content: string): SessionState {
+export function setPerformancePane(
+  state: SessionState,
+  data: {
+    readonly performance: ProtocolResponse['performance'];
+    readonly events: readonly RunEvent[];
+  },
+  context: ProtocolResponse['performance_context'],
+): SessionState {
   const right = state.layout.right;
   // A slower response for a pane the operator has since replaced or closed
   // must not overwrite what is on screen now.
-  if (right === null || right.view !== view) return state;
+  if (right?.view !== 'perf') return state;
   return {
     ...state,
-    layout: {...state.layout, right: {...right, content, pending: false, error: null}},
+    layout: {
+      ...state.layout,
+      right: {...right, data, context, pending: false, error: null},
+    },
+  };
+}
+
+export function setDesignPane(
+  state: SessionState,
+  rounds: readonly DesignRound[],
+  available: boolean,
+): SessionState {
+  const right = state.layout.right;
+  if (right?.view !== 'design') return state;
+  return {
+    ...state,
+    ...(available ? {designLog: [...rounds]} : {}),
+    layout: {
+      ...state.layout,
+      right: {...right, available, pending: false, error: null},
+    },
   };
 }
 
@@ -956,7 +968,7 @@ function projectQuota(previous: CoreState, state: SessionState): SessionState {
   return {
     ...state,
     errorBanner: {
-      title: quotaProjection.QUOTA_BANNER_TITLE,
+      titleKind: 'quota_pause',
       message: quotaProjection.quotaSummary(pause),
       detail: quotaProjection.quotaDetail(pause),
       hint: quotaProjection.quotaChoices(pause),
@@ -1076,8 +1088,6 @@ function resetRunLocalState(state: SessionState): SessionState {
   return {
     ...initialSessionState(state.themeName),
     eventStreamAvailable: state.eventStreamAvailable,
-    graphWidthOverride: state.graphWidthOverride,
-    chatWidthOverride: state.chatWidthOverride,
     chatDockFits: state.chatDockFits,
   };
 }
@@ -1230,7 +1240,7 @@ export function selectNextTodo(state: SessionState, delta: number): SessionState
 export interface ErrorReport {
   scope: ErrorScope;
   severity?: ErrorSeverity;
-  title?: string;
+  titleKind?: ErrorTitleKind;
   diagnostic?: Diagnostic | null;
   diagnosticId?: string | null;
   detail?: string | null;
@@ -1290,7 +1300,7 @@ function errorBannerFromReport(message: string, report: ErrorReport): ErrorBanne
   const scope = diagnostic?.scope ?? report.scope;
   const severity = diagnosticSeverity(diagnostic?.severity) ?? report.severity ?? 'recoverable';
   return {
-    title: report.title ?? errorTitle(scope),
+    titleKind: report.titleKind ?? scope,
     message: diagnostic?.summary || message || 'An unknown error occurred.',
     detail: diagnostic?.detail ?? report.detail ?? null,
     hint: diagnostic?.hint ?? report.hint ?? null,
@@ -1317,7 +1327,7 @@ function mergeEquivalentError(
     detail: moreInformativeMessage(existing.detail ?? '', incoming.detail ?? '') || null,
     hint: moreInformativeMessage(existing.hint ?? '', incoming.hint ?? '') || null,
     severity: promoted,
-    title: promoted === 'fatal' ? incoming.title : existing.title,
+    titleKind: promoted === 'fatal' ? incoming.titleKind : existing.titleKind,
     scope: promoted === 'fatal' ? incoming.scope : existing.scope,
     diagnosticId: existing.diagnosticId ?? incoming.diagnosticId,
     agentKind: existing.agentKind ?? incoming.agentKind,
@@ -1334,7 +1344,7 @@ function reportProjectedDiagnostic(state: SessionState, diagnostic: CoreDiagnost
   return reportError(state, diagnostic.summary, {
     scope: diagnostic.scope,
     severity: diagnostic.severity === 'fatal' ? 'fatal' : 'recoverable',
-    title: projectedDiagnosticTitle(diagnostic.failureKind),
+    titleKind: diagnostic.failureKind,
     diagnosticId: diagnostic.id,
     detail: diagnostic.detail,
     hint: diagnostic.hint,
@@ -1342,11 +1352,6 @@ function reportProjectedDiagnostic(state: SessionState, diagnostic: CoreDiagnost
     roundLabel: diagnostic.roundLabel,
     invocationId: diagnostic.invocationId,
   });
-}
-
-function projectedDiagnosticTitle(kind: CoreDiagnostic['failureKind']): string {
-  if (kind === 'run_interruption') return 'Run interrupted';
-  return errorTitle(kind);
 }
 
 /** Keep a terminal wrapper's extra context when it repeats an invocation error. */
@@ -1369,20 +1374,6 @@ function equivalentError(left: ErrorBannerState, right: ErrorBannerState): boole
     Math.min(leftMessage.length, rightMessage.length) >= 24 &&
     (leftMessage.includes(rightMessage) || rightMessage.includes(leftMessage))
   );
-}
-
-function errorTitle(scope: ErrorScope): string {
-  const titles: Record<ErrorScope, string> = {
-    configuration: 'Configuration failed',
-    invocation: 'Invocation failed',
-    phase: 'Phase failed',
-    run: 'Run failed',
-    protocol: 'Protocol error',
-    request: 'Request failed',
-    transport: 'Connection lost',
-    input: 'Input error',
-  };
-  return titles[scope];
 }
 
 function diagnosticSeverity(
@@ -1431,30 +1422,6 @@ export function showDetail(
  * owns the run's lifecycle, so there is no second flag to prefix. The switch is
  * exhaustive, making a new status a compile error rather than a raw token.
  */
-export function runStatusLabel(status: CoreRunStatus): string {
-  switch (status) {
-    case 'pausing':
-      // Requested, but the call already in flight has to finish first.
-      return 'pausing…';
-    case 'stopping':
-      // Same shape as pausing: the stop lands at the next boundary.
-      return 'stopping…';
-    case 'connecting':
-    case 'starting':
-    case 'running':
-    case 'paused':
-    case 'stopped':
-    case 'completed':
-    case 'failed':
-    case 'interrupted':
-      return status;
-    default: {
-      const unhandled: never = status;
-      return unhandled;
-    }
-  }
-}
-
 export function visibleConversation(state: SessionState): ConversationEntry[] {
   const roundNumber = visibleRoundNumber(state);
   return state.core.transcript.filter(entry => {
@@ -1472,26 +1439,6 @@ export function visiblePhases(state: SessionState): AgentPhase[] {
 
 export function toggleTodos(state: SessionState): SessionState {
   return {...state, todosExpanded: !state.todosExpanded};
-}
-
-/**
- * `<`/`>`: sets the Agents pane's explicit column width. `=`: clears it back
- * to automatic (`null`). The value handed in is already clamped by the caller
- * (`agent-map.ts#clampGraphWidthOverride`), which needs the terminal width and
- * the visible phases to do that; this reducer only applies it.
- */
-export function setGraphWidthOverride(state: SessionState, width: number | null): SessionState {
-  return state.graphWidthOverride === width ? state : {...state, graphWidthOverride: width};
-}
-
-/**
- * `<`/`>`: sets the docked chat pane's explicit column width. `=`: clears it
- * back to automatic (`null`). The value handed in is already clamped by the
- * caller (`chat-pane.ts#clampChatWidthOverride`), which needs the terminal
- * width and the right pane's width to do that; this reducer only applies it.
- */
-export function setChatWidthOverride(state: SessionState, width: number | null): SessionState {
-  return state.chatWidthOverride === width ? state : {...state, chatWidthOverride: width};
 }
 
 /**

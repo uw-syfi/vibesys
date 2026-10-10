@@ -1,10 +1,23 @@
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
-import type {ErrorBannerState, SessionState} from '../session-model.js';
+import type {ErrorBannerState, ErrorTitleKind, SessionState} from '../session-model.js';
 import type {Theme} from '../theme.js';
 import {fillLayer} from './box-fill.js';
 
 /** Enough rows to read a useful diagnostic without pushing the run off screen. */
 const ERROR_HEIGHT = 10;
+
+const ERROR_TITLES: Record<ErrorTitleKind, string> = {
+  configuration: 'Configuration failed',
+  invocation: 'Invocation failed',
+  phase: 'Phase failed',
+  run: 'Run failed',
+  protocol: 'Protocol error',
+  request: 'Request failed',
+  transport: 'Connection lost',
+  input: 'Input error',
+  run_interruption: 'Run interrupted',
+  quota_pause: 'Paused on provider quota',
+};
 
 function context(banner: ErrorBannerState): string {
   return [banner.agentKind, banner.roundLabel]
@@ -87,7 +100,7 @@ export class ErrorBannerView {
   #renderContent(banner: ErrorBannerState): void {
     const where = context(banner);
     const count = banner.count > 1 ? ` · ${banner.count} reports` : '';
-    this.output.title = ` ${banner.title}${where ? ` · ${where}` : ''}${count} `;
+    this.output.title = ` ${ERROR_TITLES[banner.titleKind]}${where ? ` · ${where}` : ''}${count} `;
     this.output.add(this.#scroll);
     this.#scroll.add(
       new TextRenderable(this.renderer, {

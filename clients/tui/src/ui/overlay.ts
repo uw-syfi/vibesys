@@ -13,6 +13,7 @@ import {
 } from '../session-model.js';
 import {scrim, type Theme} from '../theme.js';
 import {applyPaneFocus} from './focus.js';
+import {rightPaneContent, rightPaneTitle} from './right-pane.js';
 
 type OverlayKind = NonNullable<SessionState['overlay']>['kind'];
 
@@ -81,6 +82,8 @@ export class OverlayView {
   #renderedKind: OverlayKind | null = null;
   #renderedContent = '';
   #renderedPane: RightPane | null = null;
+  #renderedExperiments: SessionState['experimentLog'] = null;
+  #renderedDesignLog: SessionState['designLog'] = null;
   #renderedDiff: DiffViewerState | null = null;
 
   constructor(
@@ -162,6 +165,8 @@ export class OverlayView {
     this.#renderedKind = null;
     this.#renderedContent = '';
     this.#renderedPane = null;
+    this.#renderedExperiments = null;
+    this.#renderedDesignLog = null;
     this.#renderedDiff = null;
   }
 
@@ -187,6 +192,8 @@ export class OverlayView {
       return;
     }
     this.#renderedPane = null;
+    this.#renderedExperiments = null;
+    this.#renderedDesignLog = null;
     const overlay = state.overlay;
     if (overlay === null) {
       this.output.visible = false;
@@ -215,24 +222,38 @@ export class OverlayView {
     this.output.visible = true;
     this.#applyGeometry();
     // Outside the cache below: focus moves without the content changing.
-    applyPaneFocus(this.output, this.#theme, pane.title, focusedPane(state) === 'performance');
+    applyPaneFocus(
+      this.output,
+      this.#theme,
+      rightPaneTitle(pane),
+      focusedPane(state) === 'performance',
+    );
     // `applyPaneFocus` also stamps the pane frame, which is rounded. This box
     // is an overlay in both of its roles, so it keeps the outer fill and with
     // it the square corner (tui/conventions.md), and takes only the title and
     // the border colour from the pane treatment. Frame weight was never one of
     // the focus channels anyway; `PANE_BORDER` says why.
     this.output.borderStyle = 'single';
-    if (pane === this.#renderedPane) return;
+    if (
+      pane === this.#renderedPane &&
+      state.experimentLog === this.#renderedExperiments &&
+      state.designLog === this.#renderedDesignLog
+    ) {
+      return;
+    }
     this.#renderedPane = pane;
+    this.#renderedExperiments = state.experimentLog;
+    this.#renderedDesignLog = state.designLog;
     // The next ordinary overlay repaints its own title and border rather than
     // inheriting the pane's.
     this.#renderedKind = null;
     this.#renderedContent = '';
     this.#clear();
+    const content = rightPaneContent(state, pane);
     if (pane.error !== null) this.#body(pane.error, this.#theme.conversation.failure.content);
-    else if (pane.pending && pane.content === '') {
+    else if (pane.pending && content === null) {
       this.#body('Loading...', this.#theme.textSubtle);
-    } else this.#body(pane.content, this.#theme.textPrimary);
+    } else this.#body(content ?? '', this.#theme.textPrimary);
   }
 
   /**

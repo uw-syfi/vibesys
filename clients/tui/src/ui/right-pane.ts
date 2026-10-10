@@ -1,5 +1,8 @@
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
-import {PLOT_WIDTH} from '../performance-chart.js';
+import {projectPerformance} from '@vibesys/core-state';
+import {renderDesignSummary} from '../design-log.js';
+import {designRoundViews} from '../experiments.js';
+import {PLOT_WIDTH, renderPerformanceCurve} from '../performance-chart.js';
 import {focusedPane, type RightPane, type SessionState} from '../session-model.js';
 import type {Theme} from '../theme.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
@@ -30,6 +33,31 @@ const RIGHT_PANE_SHARE = 0.45;
 /** Columns the transcript needs to stay worth reading beside the pane. */
 const LEFT_PANE_MIN = 38;
 
+/** English presentation for semantic pane kinds stays in the TUI renderer. */
+export function rightPaneTitle(pane: RightPane): string {
+  return pane.view === 'perf' ? 'Performance' : 'Design changes';
+}
+
+/** Render one structured pane projection, or null until its first response lands. */
+export function rightPaneContent(state: SessionState, pane: RightPane): string | null {
+  if (pane.view === 'perf') {
+    return pane.data === null
+      ? null
+      : renderPerformanceCurve(
+          projectPerformance({
+            ...pane.data,
+            experiments: state.experimentLog?.entries,
+            objectiveDirection: pane.context?.objective_direction,
+          }),
+          pane.context ?? undefined,
+        );
+  }
+  if (!pane.available) return 'The design log is not available until a run is attached.';
+  return state.designLog === null
+    ? null
+    : renderDesignSummary(designRoundViews(state.designLog, state.experimentLog?.entries ?? []));
+}
+
 /** True when the terminal has room for the transcript and a visualization. */
 export function splitFits(terminalWidth: number): boolean {
   return terminalWidth >= MIN_SPLIT_WIDTH;
@@ -51,6 +79,8 @@ export class RightPaneView {
   readonly #scroll: ScrollBoxRenderable;
   #theme: Theme;
   #renderedPane: RightPane | null = null;
+  #renderedExperiments: SessionState['experimentLog'] = null;
+  #renderedDesignLog: SessionState['designLog'] = null;
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -87,6 +117,8 @@ export class RightPaneView {
   applyTheme(theme: Theme): void {
     this.#theme = theme;
     this.#renderedPane = null;
+    this.#renderedExperiments = null;
+    this.#renderedDesignLog = null;
   }
 
   /** Scrolled by Page Up/Page Down while this pane holds focus. */
@@ -110,20 +142,29 @@ export class RightPaneView {
     // marker, its frame, and its border colour. Every pane asks `focusedPane`,
     // so exactly one of them can answer yes.
     const focused = focusedPane(state) === 'performance';
-    applyPaneFocus(this.output, this.#theme, right.title, focused);
-    if (right === this.#renderedPane) return;
+    applyPaneFocus(this.output, this.#theme, rightPaneTitle(right), focused);
+    if (
+      right === this.#renderedPane &&
+      state.experimentLog === this.#renderedExperiments &&
+      state.designLog === this.#renderedDesignLog
+    ) {
+      return;
+    }
     this.#renderedPane = right;
+    this.#renderedExperiments = state.experimentLog;
+    this.#renderedDesignLog = state.designLog;
     this.#clear();
 
     if (right.error !== null) {
       this.#line(right.error, this.#theme.conversation.failure.content);
       return;
     }
-    if (right.pending && right.content === '') {
+    const content = rightPaneContent(state, right);
+    if (right.pending && content === null) {
       this.#line('Loading...', this.#theme.textSubtle);
       return;
     }
-    for (const line of right.content.split('\n')) {
+    for (const line of (content ?? '').split('\n')) {
       this.#line(line, this.#theme.textPrimary);
     }
     this.#scroll.scrollTo(0);

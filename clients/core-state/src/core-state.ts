@@ -6,6 +6,7 @@ import {
   reconcileExecutionStatuses,
   removeExecutionStatus,
 } from './execution-status.js';
+import {type BenchmarkRecord, benchmarkRecordFromEvent} from './performance-projection.js';
 import {
   appendPersistentArrayEntry,
   materializePersistentArray,
@@ -95,15 +96,6 @@ export interface QuotaPause {
 export interface QuotaState {
   readonly sequence: number;
   readonly pause: QuotaPause | null;
-}
-
-export interface BenchmarkRecord {
-  readonly sequence: number;
-  readonly roundNumber: number | null;
-  readonly roundKey: RoundKey | null;
-  readonly metric: string;
-  readonly value: number;
-  readonly unit: string;
 }
 
 type RunEventData = NonNullable<RunEvent['data']>;
@@ -1108,7 +1100,7 @@ function applyQuotaData(state: CoreState, event: RunEvent, sequence: number): Co
 }
 
 function applyBenchmarkData(state: CoreState, event: RunEvent, sequence: number): CoreState {
-  const benchmark = benchmarkFromEvent(event, sequence);
+  const benchmark = benchmarkRecordFromEvent(event, sequence);
   return benchmark === null
     ? state
     : cloneCoreStateWith(state, {benchmarks: [...state.benchmarks, benchmark]});
@@ -1157,59 +1149,6 @@ function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): Q
     default:
       return quota;
   }
-}
-
-/**
- * Whether `event` contributes a measurement to the benchmark series.
- *
- * Exported because a consumer that caches a projection of `state.benchmarks`
- * needs to know which events can change it, and re-deriving that from event
- * types misses the gate-shaped form (#692). One predicate, so the fold and
- * its consumers cannot disagree about what a measurement is.
- */
-export function recordsBenchmark(event: RunEvent): boolean {
-  return benchmarkFromEvent(event, event.sequence ?? 0) !== null;
-}
-
-function benchmarkFromEvent(event: RunEvent, sequence: number): BenchmarkRecord | null {
-  const data = event.data;
-  const roundKey = roundKeyFor(event);
-  if (data?.kind === 'benchmark_result') {
-    return {
-      sequence,
-      roundNumber: roundNumberFor(roundKey),
-      roundKey,
-      metric: data.metric,
-      value: data.value,
-      unit: data.unit,
-    };
-  }
-  // A completed benchmark gate carries the measurement `benchmark_result`
-  // used to, so it feeds the same fold; old journals have only the legacy
-  // kind and new journals only this one (#692).
-  //
-  // A reused gate is a cache hit: it re-reports the number an earlier round
-  // measured, so folding it would append a phantom round to the series and
-  // flatten it. `gateFinishedEntry` in `transcript.ts` draws the same line,
-  // rendering a reused gate as a PASS rather than a Benchmark card.
-  if (
-    data?.kind !== 'gate_finished' ||
-    data.gate !== 'benchmark' ||
-    event.status === 'failed' ||
-    data.reused === true ||
-    data.metric == null ||
-    data.value == null
-  ) {
-    return null;
-  }
-  return {
-    sequence,
-    roundNumber: roundNumberFor(roundKey),
-    roundKey,
-    metric: data.metric,
-    value: data.value,
-    unit: data.unit ?? data.metric,
-  };
 }
 
 function applyRunTranscript(

@@ -1,4 +1,5 @@
 import type {DesignFileChange} from '@vibesys/backend-client';
+import {formatPerformanceDelta} from '@vibesys/core-state';
 import type {DesignRoundView} from './experiments.js';
 
 /**
@@ -61,10 +62,7 @@ function measuredLabel(view: DesignRoundView): string | null {
     : record.perf_metric.toFixed(2).replace(/\.?0+$/, '');
   const unit = record.perf_unit ? ` ${record.perf_unit}` : '';
   const delta = record.perf_delta_pct;
-  const deltaLabel =
-    typeof delta === 'number'
-      ? ` (${delta > 0 ? '+' : ''}${delta.toFixed(Math.abs(delta) >= 10 ? 0 : 1)}%)`
-      : '';
+  const deltaLabel = typeof delta === 'number' ? ` (${formatPerformanceDelta(delta)})` : '';
   return `${value}${unit}${deltaLabel}`;
 }
 

@@ -22,8 +22,14 @@
  *   gives each role a tone: the run state carries a verdict, the phase and the
  *   title are content, the metadata recedes.
  */
-import {activeRunFocus, agentKindText, hasRunEnded, phaseText} from '@vibesys/core-state';
-import {runStatusLabel, type SessionState} from '../session-model.js';
+import {
+  activeRunFocus,
+  agentKindText,
+  type CoreRunStatus,
+  hasRunEnded,
+  phaseText,
+} from '@vibesys/core-state';
+import type {SessionState} from '../session-model.js';
 import type {Theme} from '../theme.js';
 import {displayWidth, truncateToWidth} from './text-width.js';
 
@@ -117,6 +123,29 @@ const DISCONNECTED = 'disconnected';
 
 /** The widest word `runStateText` produces; every status label is shorter. */
 const WIDEST_STATE = DISCONNECTED;
+
+/** How one semantic backend lifecycle status reads in the TUI header. */
+export function runStatusLabel(status: CoreRunStatus): string {
+  switch (status) {
+    case 'pausing':
+      return 'pausing…';
+    case 'stopping':
+      return 'stopping…';
+    case 'connecting':
+    case 'starting':
+    case 'running':
+    case 'paused':
+    case 'stopped':
+    case 'completed':
+    case 'failed':
+    case 'interrupted':
+      return status;
+    default: {
+      const unhandled: never = status;
+      return unhandled;
+    }
+  }
+}
 
 /**
  * The narrowest terminal this header supports, in cells.
