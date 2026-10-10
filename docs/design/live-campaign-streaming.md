@@ -750,8 +750,10 @@ to a first-class, documented envelope concern (rather than a payload-specific
 convention only this event happens to follow) is named as the next step in
 "Backend path," not an optional polish.
 
-Commit: `ac119aa13` (plus a one-line formatting fixup, `5aee31bb3`) on
-`feat/web-live-campaign-streaming`.
+Commits: `ac119aa13` (the fix), `5aee31bb3` (a one-line formatting
+fixup), and `0bbb9ae28` (review caught a fabricated justification for
+weakening `operation_id`'s wire-side validation; corrected to mirror
+core exactly) on `feat/web-live-campaign-streaming`.
 
 ## Backend path (future, not in this PR)
 
