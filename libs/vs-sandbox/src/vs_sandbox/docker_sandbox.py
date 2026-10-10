@@ -31,6 +31,7 @@ from vs_sandbox.docker_cli import (
 from vs_sandbox.host_resources import HostResourceAccess
 from vs_sandbox.host_sandbox import WorkspaceSandbox
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
+from vs_sandbox.process_execution import PopenProcess
 
 if TYPE_CHECKING:
     import signal
@@ -937,7 +938,7 @@ class DockerSandbox(WorkspaceSandbox):
             default_timeout=self._default_timeout,
             cancel=cancel,
             max_output_chars=self._max_output_bytes,
-            launch=lambda: self._docker.spawn(exec_cmd),
+            launch=lambda: PopenProcess(self._docker.spawn(exec_cmd)),
             signal_remote=lambda number: self._signal_exec(container_id, exec_id, number),
         )
         self._log_cmd(

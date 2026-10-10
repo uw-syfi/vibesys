@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vs_sandbox.command_execution import execute_command
-from vs_sandbox.process_execution import start_process_group
+from vs_sandbox.process_execution import PopenProcess, start_process_group
 
 if TYPE_CHECKING:
     import threading
@@ -79,7 +79,7 @@ class LocalShellRunner:
             default_timeout=self._default_timeout,
             cancel=cancel,
             max_output_chars=self._max_output_chars,
-            launch=lambda: start_process_group(
-                (_SHELL, "-c", command), env=self.env, cwd=str(self.root_dir)
+            launch=lambda: PopenProcess(
+                start_process_group((_SHELL, "-c", command), env=self.env, cwd=str(self.root_dir))
             ),
         )

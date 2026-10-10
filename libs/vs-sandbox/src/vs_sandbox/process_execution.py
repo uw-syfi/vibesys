@@ -13,15 +13,23 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
-import time
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
+
+from vs_sim.api import OsThreads, Threads
 
 if TYPE_CHECKING:
-    import threading
     from collections.abc import Callable, Mapping, Sequence
+
+
+#: The signals a stop sends, named here so only this adapter module refers to ``signal``.
+type StopSignal = signal.Signals
+TERMINATE: StopSignal = signal.SIGTERM
+KILL: StopSignal = signal.SIGKILL
+#: Delivers a signal to the processes of a command that live outside the launched process group.
+type SignalSender = Callable[[StopSignal], None]
 
 #: Default time a stopped command gets between ``SIGTERM`` and ``SIGKILL``.
 DEFAULT_TERMINATION_GRACE_SECONDS = 30.0
@@ -63,6 +71,69 @@ def shell_exit_status(returncode: int) -> int:
     return 128 - returncode if returncode < 0 else returncode
 
 
+class CancelSignal(Protocol):
+    """What a stoppable wait reads from its caller's cancel event (``vs_sim.api.Event`` has it)."""
+
+    def is_set(self) -> bool:
+        """Whether the caller asked to stop."""
+        ...
+
+
+class StoppableProcess(Protocol):
+    """A started process group leader that :func:`wait_stoppable` can wait for and stop.
+
+    :class:`PopenProcess` is the real one; ``FakeStoppableProcess`` in
+    ``vs_sandbox.api.testing`` runs on a simulated clock. Both pass the cases in
+    :class:`~vs_sandbox.process_contracts.StoppableProcessContract`.
+    """
+
+    @property
+    def returncode(self) -> int:
+        """The ``subprocess`` return code (``-N`` for signal ``N``) once the wait has returned output."""
+        ...
+
+    def wait(self, timeout: float | None) -> tuple[str, str] | None:
+        """Wait up to *timeout* seconds; ``(stdout, stderr)`` once it exited, else ``None``.
+
+        Output accumulates across calls, so a later call returns everything the
+        process wrote.
+        """
+        ...
+
+    def signal_group(self, signal_number: StopSignal) -> None:
+        """Send *signal_number* to the process group; a no-op once nothing is left in it."""
+        ...
+
+
+class PopenProcess:
+    """A ``subprocess.Popen`` started with :func:`start_process_group`."""
+
+    def __init__(self, process: subprocess.Popen[str]) -> None:
+        """Wrap *process*, the leader of its own process group."""
+        self._process = process
+
+    @property
+    def returncode(self) -> int:
+        """The return code of the exited leader."""
+        code = self._process.returncode
+        if code is None:
+            message = "the process has not exited"
+            raise RuntimeError(message)
+        return code
+
+    def wait(self, timeout: float | None) -> tuple[str, str] | None:
+        """Wait with ``communicate``, which keeps what was read when the wait times out."""
+        try:
+            return self._process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None
+
+    def signal_group(self, signal_number: StopSignal) -> None:
+        """Signal the group; it outlives its leader while any descendant remains in it."""
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(self._process.pid, signal_number)
+
+
 def start_process_group(
     argv: Sequence[str],
     *,
@@ -87,13 +158,14 @@ def start_process_group(
     )
 
 
-def wait_stoppable(
-    process: subprocess.Popen[str],
+def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the stop policy is five independent keywords (timeout, cancel, grace, remote signal, clock) and bundling them would only rename them.
+    process: StoppableProcess,
     *,
     timeout: float | None,
-    cancel: threading.Event | None,
+    cancel: CancelSignal | None,
     grace_seconds: float = DEFAULT_TERMINATION_GRACE_SECONDS,
-    signal_remote: Callable[[signal.Signals], None] | None = None,
+    signal_remote: SignalSender | None = None,
+    threads: Threads | None = None,
 ) -> ProcessOutcome:
     """Wait for a process group leader until it exits, times out, or is cancelled.
 
@@ -104,66 +176,59 @@ def wait_stoppable(
     outcome keeps the output written so far and names the stop reason. If the
     waiting thread is interrupted (``KeyboardInterrupt``), the command is
     killed before the interruption propagates, so nothing outlives the call.
+    *threads* supplies the clock the timeout is measured on.
     """
-    deadline = None if timeout is None else time.monotonic() + timeout
+    clock = (threads or OsThreads()).now
+    deadline = None if timeout is None else clock() + timeout
     try:
         while True:
-            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            remaining = None if deadline is None else max(0.0, deadline - clock())
             wait = remaining if cancel is None else _min_wait(remaining)
-            try:
-                stdout, stderr = process.communicate(timeout=wait)
-            except subprocess.TimeoutExpired:
-                if cancel is not None and cancel.is_set():
-                    stop = ProcessStop.CANCELLED
-                elif deadline is not None and time.monotonic() >= deadline:
-                    stop = ProcessStop.TIMEOUT
-                else:
-                    continue
-                break
-            return ProcessOutcome(stdout, stderr, shell_exit_status(process.returncode))
-        return _stop(process, stop, grace_seconds, signal_remote)
+            finished = process.wait(wait)
+            if finished is not None:
+                return ProcessOutcome(*finished, shell_exit_status(process.returncode))
+            if cancel is not None and cancel.is_set():
+                stop = ProcessStop.CANCELLED
+            elif deadline is not None and clock() >= deadline:
+                stop = ProcessStop.TIMEOUT
+            else:
+                continue
+            return _stop(process, stop, grace_seconds, signal_remote)
     except BaseException:
         _kill(process, signal_remote)
         raise
 
 
 def _stop(
-    process: subprocess.Popen[str],
+    process: StoppableProcess,
     stop: ProcessStop,
     grace_seconds: float,
-    signal_remote: Callable[[signal.Signals], None] | None,
+    signal_remote: SignalSender | None,
 ) -> ProcessOutcome:
-    stop_signal = signal.SIGTERM
+    stop_signal = TERMINATE
     if signal_remote is not None:
         signal_remote(stop_signal)
-    _signal_group(process, stop_signal)
-    try:
-        stdout, stderr = process.communicate(timeout=grace_seconds)
-    except subprocess.TimeoutExpired:
+    process.signal_group(stop_signal)
+    finished = process.wait(grace_seconds)
+    if finished is None:
         _kill(process, signal_remote)
-        stdout, stderr = process.communicate()
-    else:
+        finished = process.wait(None)
+    elif signal_remote is not None:
         # The local client is gone. A command whose remote process started after the
         # first request found nothing to signal (its client was killed before it
         # existed there) is reachable only now, and nothing else would stop it.
-        if signal_remote is not None:
-            signal_remote(stop_signal)
-    return ProcessOutcome(stdout, stderr, shell_exit_status(process.returncode), stop)
+        signal_remote(stop_signal)
+    if finished is None:
+        message = "a killed process did not exit"
+        raise RuntimeError(message)
+    return ProcessOutcome(*finished, shell_exit_status(process.returncode), stop)
 
 
-def _kill(
-    process: subprocess.Popen[str], signal_remote: Callable[[signal.Signals], None] | None
-) -> None:
+def _kill(process: StoppableProcess, signal_remote: SignalSender | None) -> None:
     if signal_remote is not None:
-        signal_remote(signal.SIGKILL)
-    _signal_group(process, signal.SIGKILL)
+        signal_remote(KILL)
+    process.signal_group(KILL)
 
 
 def _min_wait(remaining: float | None) -> float:
     return _CANCEL_POLL_SECONDS if remaining is None else min(_CANCEL_POLL_SECONDS, remaining)
-
-
-def _signal_group(process: subprocess.Popen[str], signal_number: signal.Signals) -> None:
-    # The group outlives its leader while any descendant remains in it.
-    with suppress(ProcessLookupError, PermissionError):
-        os.killpg(process.pid, signal_number)
