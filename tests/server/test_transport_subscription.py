@@ -13,7 +13,7 @@ from typing import Never, TypedDict, Unpack
 
 import pytest
 from tests.server.support import ServerParts, build_server_parts
-from tests.support.bounded_waits import join_or_fail
+from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 
 from server.api.protocol import EventsQuery, SnapshotQuery, SubscribeRequest
 from server.api.service import RunApi
@@ -152,6 +152,7 @@ def _subscribed_client(
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         # No read timeout: the server closes the connection when its handler ends,
         # so a reader never waits on an absent reply, only on a slow one.
+        client.settimeout(HANG_GUARD_S)
         client.connect(str(socket_path))
         with client.makefile("rwb") as stream:
             stream.write(request.model_dump_json().encode() + b"\n")

@@ -7,6 +7,7 @@ from typing import Any, Never
 
 import pytest
 from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
+from tests.support.bounded_waits import HANG_GUARD_S
 
 from server.api.protocol import (
     ChatQuery,
@@ -29,6 +30,7 @@ from server.transport.unix_jsonl import (
 
 def _request(socket_path: Path, request: Request) -> dict[str, Any]:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(HANG_GUARD_S)
         client.connect(str(socket_path))
         stream = client.makefile("rwb")
         stream.write(request.model_dump_json().encode() + b"\n")
@@ -219,12 +221,12 @@ def test_socket_path_limit_matches_kernel(socket_dir: Path) -> None:
 
     assert validate_socket_path(longest) is longest
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as accepted:
+        accepted.settimeout(HANG_GUARD_S)
         accepted.bind(str(longest))
-    with (
-        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as rejected,
-        pytest.raises(OSError, match="too long"),
-    ):
-        rejected.bind(f"{longest}a")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as rejected:
+        rejected.settimeout(HANG_GUARD_S)
+        with pytest.raises(OSError, match="too long"):
+            rejected.bind(f"{longest}a")
 
 
 def test_transport_rejects_overlong_path_before_binding(tmp_path: Path) -> None:

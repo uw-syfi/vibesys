@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from tests.support import run_test_command
+from tests.support.bounded_waits import HANG_GUARD_S
 
 import vs_sandbox.skypilot_bridge as bridge_module  # test-isolation: durable restart-offset behavior belongs to the bridge's private spool state machine.
 from vs_project.api import MAX_SOCKET_PATH_BYTES, SocketPathTooLongError, StateNamespace
@@ -380,6 +381,7 @@ def test_framework_setup_wraps_new_job_argv_and_runs_first_in_workdir(
     bridge.start()
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(HANG_GUARD_S)
             client.connect(str(bridge.socket_path))
             invocation_id = "4" * 32
             client.sendall(
@@ -572,6 +574,7 @@ def test_bridge_stages_allowlisted_command_streams_and_cleans_up(
     bridge.start()
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(HANG_GUARD_S)
             client.connect(str(bridge.socket_path))
             remote_result = str(
                 Path(tempfile.gettempdir()) / "vibesys-framework-benchmark-1-1.json"
@@ -723,6 +726,7 @@ def test_bridge_rejects_special_workspace_file(tmp_path: Path, socket_dir: Path)
     bridge.start()
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(HANG_GUARD_S)
             client.connect(str(bridge.socket_path))
             client.sendall(
                 encode_message(EvaluationRequest(kind="accuracy", invocation_id="2" * 32))
@@ -763,6 +767,7 @@ def test_bridge_rejects_workspace_symlink_escape(tmp_path: Path, socket_dir: Pat
     bridge.start()
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(HANG_GUARD_S)
             client.connect(str(bridge.socket_path))
             client.sendall(
                 encode_message(EvaluationRequest(kind="accuracy", invocation_id="3" * 32))

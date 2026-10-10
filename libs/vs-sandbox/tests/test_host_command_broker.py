@@ -162,6 +162,7 @@ def _point_at(monkeypatch: pytest.MonkeyPatch, broker: HostCommandBroker) -> Non
 
 def _raw_request(broker: HostCommandBroker, request: Mapping[str, object]) -> dict[str, object]:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(HANG_GUARD_S)
         client.connect(str(broker.socket_path))
         client.sendall(json.dumps(request).encode() + b"\n")
         with client.makefile("rb") as frames:
@@ -274,6 +275,7 @@ class TestGpuOperation:
         launcher = _RecordingLauncher(block=True)
         with _serving(tmp_path, workspace, gpu=_gpu(launcher)) as broker:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(HANG_GUARD_S)
                 client.connect(str(broker.socket_path))
                 client.sendall(json.dumps(_gpu_call(broker, str(workspace))).encode() + b"\n")
                 with client.makefile("rb") as frames:
@@ -292,6 +294,7 @@ class TestGpuOperation:
             _serving(tmp_path, workspace, gpu=_gpu(launcher)) as broker,
             socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client,
         ):
+            client.settimeout(HANG_GUARD_S)
             client.connect(str(broker.socket_path))
             client.sendall(json.dumps(_gpu_call(broker, str(workspace))).encode() + b"\n")
             with client.makefile("rb") as frames:
@@ -450,6 +453,7 @@ class TestGateOperation:
         gates = _RecordingGates(block=True)
         with _serving(tmp_path, workspace, gates=_gates(gates)) as broker:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(HANG_GUARD_S)
                 client.connect(str(broker.socket_path))
                 client.sendall(json.dumps(_gate_call(broker, str(workspace))).encode() + b"\n")
                 with client.makefile("rb") as frames:
@@ -462,6 +466,7 @@ class TestGateOperation:
 
 def _frames(broker: HostCommandBroker, request: Mapping[str, object]) -> list[dict[str, Any]]:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(HANG_GUARD_S)
         client.connect(str(broker.socket_path))
         client.sendall(json.dumps(request).encode() + b"\n")
         with client.makefile("rb") as stream:

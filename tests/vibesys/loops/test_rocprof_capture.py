@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.bounded_waits import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -409,6 +410,7 @@ def _install_fake_rocprof_compute(
 
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(HANG_GUARD_S)
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
 
