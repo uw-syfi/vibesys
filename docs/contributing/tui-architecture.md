@@ -158,6 +158,33 @@ the renderer starts and applies the answer before the first frame, falling back 
 if the backend does not answer in time. `--theme` skips the query and reaches the frontend as
 `VIBESYS_THEME`.
 
+### Headless detached runs and the live-instance registry
+
+`vibesys --detach` without `--web` starts a run that outlives the shell or SSH session that started
+it. The launcher validates the run arguments, spawns `entrypoints.server` in a new session (no
+controlling terminal, stdin from `/dev/null`), waits until the child's control socket accepts
+connections, and prints the child's `LiveInstanceRecord` as one JSON line on stdout. The server
+keeps running with or without clients and exits when the run ends; a finished run is reopened
+read-only from its stored events with `--web-reopen`.
+
+Each detached server registers in a per-user, node-local registry owned by `server.instances`:
+
+```text
+$XDG_RUNTIME_DIR/vibesys/            (else /tmp/vibesys-<uid>/), mode 0700
+  instances/<id>.lock                lifetime lock, published only once held
+  instances/<id>.json                LiveInstanceRecord, mode 0600
+  runs/<id>/control.sock             the server's Unix control socket
+  runs/<id>/server.log               the server's stdout and stderr
+```
+
+The root is never under `$HOME`, which may be on NFS. Liveness is proven, not read from the record:
+the server holds an exclusive `flock` on its lock file for its lifetime, and the kernel releases it
+on any exit, `kill -9` included. `vibesys instances list [--json]` reports a record only while its
+lock is held and removes the files of every id whose lock is free. `vibesys instances stop <id>
+[--json]` sends `SIGTERM` through a stable process reference only while the lock is still held,
+then waits, bounded, for the lock to drop. The web gateway's project-local record keeps its own
+format; its claim and startup-log hold use the same lock primitives (`server.transport.discovery`).
+
 ### Boot trace
 
 Boot timings are always recorded and never narrated. The backend times its boot in spans

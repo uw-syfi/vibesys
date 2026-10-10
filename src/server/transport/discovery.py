@@ -1,4 +1,13 @@
-"""Crash-safe discovery for one project-local web gateway."""
+"""Crash-safe discovery for local VibeSys servers.
+
+Two mechanisms live here. The project-local web gateway record, claim and
+startup-log hold identify one gateway per project. ``LifetimeLock`` and
+``probe_lock`` are the general form of the claim's liveness proof: an exclusive
+BSD ``flock`` that its owner holds for its whole lifetime and that the kernel
+releases on any exit, ``kill -9`` included. The gateway's claim and hold and
+the per-user live-instance registry (``server.instances``) all take, probe and
+release their locks through the same three primitives below.
+"""
 
 from __future__ import annotations
 
@@ -291,13 +300,7 @@ class WebInstanceHold:
     @staticmethod
     def take(descriptor: int) -> bool:
         """Lock ``descriptor`` exclusively, or report that something else holds it."""
-        if fcntl is None:  # pragma: no cover - defensive for non-Unix packaging.
-            return True
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return False
-        return True
+        return _try_lock(descriptor)
 
     @classmethod
     def observe(cls, instance_path: Path) -> WebInstanceHold:
@@ -330,12 +333,7 @@ class WebInstanceClaim:
         """Acquire the non-blocking claim, or report that another launch owns it."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         stream = self.path.open("a+")
-        if fcntl is None:  # pragma: no cover - defensive for non-Unix packaging.
-            self._stream = stream
-            return True
-        try:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+        if not _try_lock(stream.fileno()):
             stream.close()
             return False
         self._stream = stream
@@ -351,11 +349,9 @@ class WebInstanceClaim:
         except OSError:
             return False
         try:
-            try:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
+            if not _try_lock(stream.fileno()):
                 return True
-            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            _unlock(stream.fileno())
             return False
         finally:
             stream.close()
@@ -366,13 +362,37 @@ class WebInstanceClaim:
         self._stream = None
         if stream is None:
             return
-        if fcntl is not None:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        _unlock(stream.fileno())
         stream.close()
 
 
 def _log_lock_state(log_path: Path) -> bool | None:
     """Report whether something holds the startup log's exclusive lock.
+
+    A missing log means nothing holds it; see ``probe_lock`` for why asking
+    does not make the asker a holder.
+    """
+    state = probe_lock(log_path)
+    if state is LockState.UNKNOWN:
+        return None
+    return state is LockState.HELD
+
+
+class LockState(StrEnum):
+    """What one probe observed about a lifetime lock file."""
+
+    HELD = "held"
+    """A live process holds the exclusive lock."""
+    FREE = "free"
+    """The file exists and nothing holds it: every holder has exited."""
+    ABSENT = "absent"
+    """No file exists at the path."""
+    UNKNOWN = "unknown"
+    """The file could not be opened or the filesystem refused the lock."""
+
+
+def probe_lock(path: Path) -> LockState:
+    """Observe ``path``'s exclusive lock without becoming a holder.
 
     The probe takes a *shared* lock. That is enough to detect an exclusive one,
     because the two conflict, and it does not exclude another reader, so asking
@@ -381,27 +401,119 @@ def _log_lock_state(log_path: Path) -> bool | None:
     exclusive POSIX record lock (what an NFS client without ``local_lock`` uses
     to emulate ``flock``) would refuse on a read-only descriptor.
 
-    The residual is that a launcher's ``take`` can still lose to a probe that
-    holds the shared lock at that instant. The probe holds it for the duration
-    of two syscalls, so the window is microseconds per observation.
+    The residual is that an owner's exclusive lock can still lose to a probe
+    that holds the shared lock at that instant. The probe holds it for the
+    duration of two syscalls, so the window is microseconds per observation.
     """
     if fcntl is None:  # pragma: no cover - defensive for non-Unix packaging.
-        return None
+        return LockState.UNKNOWN
     try:
-        descriptor = os.open(log_path, os.O_RDONLY)
+        descriptor = os.open(path, os.O_RDONLY)
     except FileNotFoundError:
-        return False
+        return LockState.ABSENT
     except OSError:
-        return None
+        return LockState.UNKNOWN
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)
-    except BlockingIOError:
-        return True
+        return LockState.FREE if _try_lock(descriptor, shared=True) else LockState.HELD
     except OSError:
-        return None
+        return LockState.UNKNOWN
     finally:
         os.close(descriptor)
-    return False
+
+
+class LifetimeLock:
+    """An exclusive ``flock`` that its owner holds for its whole lifetime.
+
+    ``publish`` takes the lock on a fresh private file and only then renames it
+    into place, so no observer ever sees the published path unlocked while its
+    owner lives. The kernel drops the lock on every exit, ``kill -9`` included,
+    so a ``probe_lock`` answer of ``FREE`` proves the owner is gone and, because
+    a published path is never locked again, stays true. ``reap`` acts on that.
+
+    The guarantee needs a BSD ``flock`` on a node-local filesystem; see
+    ``WebInstanceHold`` for why an NFS mount without ``local_lock`` breaks it.
+    """
+
+    def __init__(self, path: Path, descriptor: int) -> None:
+        """Wrap an already-held lock; use ``publish`` to create one."""
+        self.path = path
+        self._descriptor: int | None = descriptor
+
+    @classmethod
+    def publish(cls, path: Path) -> LifetimeLock:
+        """Create, lock, and then publish ``path``; fail if it already exists."""
+        temporary = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
+        descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+        try:
+            _lock(descriptor)
+            # `link` fails rather than replacing a published lock, so two
+            # owners can never both believe they hold one path.
+            os.link(temporary, path)
+        except BaseException:
+            os.close(descriptor)
+            raise
+        finally:
+            temporary.unlink(missing_ok=True)
+        return cls(path, descriptor)
+
+    def release(self) -> None:
+        """Unpublish ``path`` and drop the lock; idempotent."""
+        descriptor = self._descriptor
+        self._descriptor = None
+        if descriptor is None:
+            return
+        try:
+            self.path.unlink(missing_ok=True)
+        finally:
+            _unlock(descriptor)
+            os.close(descriptor)
+
+    @staticmethod
+    def reap(path: Path, companions: tuple[Path, ...]) -> bool:
+        """Remove ``companions`` and then ``path`` iff no live owner holds ``path``.
+
+        Removal happens while this caller holds the lock, so it cannot race the
+        owner (who would still hold it) or another reaper (who waits on the same
+        file and then finds the companions gone). A missing ``path`` has no
+        owner, so its companions are removed too. Returns whether the owner was
+        proven gone.
+        """
+        try:
+            descriptor = os.open(path, os.O_RDWR)
+        except FileNotFoundError:
+            for companion in companions:
+                companion.unlink(missing_ok=True)
+            return True
+        try:
+            if not _try_lock(descriptor):
+                return False
+            for companion in companions:
+                companion.unlink(missing_ok=True)
+            path.unlink(missing_ok=True)
+            return True
+        finally:
+            os.close(descriptor)
+
+
+def _lock(descriptor: int, *, shared: bool = False) -> None:
+    """Take a non-blocking ``flock``; ``BlockingIOError`` when another holds it."""
+    if fcntl is None:  # pragma: no cover - defensive for non-Unix packaging.
+        return
+    fcntl.flock(descriptor, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+
+
+def _try_lock(descriptor: int, *, shared: bool = False) -> bool:
+    """Take a non-blocking ``flock`` on ``descriptor``; False when another holds it."""
+    try:
+        _lock(descriptor, shared=shared)
+    except BlockingIOError:
+        return False
+    return True
+
+
+def _unlock(descriptor: int) -> None:
+    if fcntl is not None:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
 
 
 def _processes_with_files_under(directory: Path) -> tuple[int, ...] | None:

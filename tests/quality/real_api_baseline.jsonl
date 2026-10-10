@@ -222,7 +222,7 @@
 {"path": "src/server/event_index.py", "rule": "fs_sync", "count": 2}
 {"path": "src/server/events.py", "rule": "wall_clock", "count": 1}
 {"path": "src/server/execution.py", "rule": "threading", "count": 2}
-{"path": "src/server/transport/discovery.py", "rule": "fs_sync", "count": 6}
+{"path": "src/server/transport/discovery.py", "rule": "fs_sync", "count": 2}
 {"path": "src/server/transport/discovery.py", "rule": "process", "count": 1}
 {"path": "src/server/transport/discovery.py", "rule": "socket_io", "count": 1}
 {"path": "src/server/transport/unix_jsonl.py", "rule": "socket", "count": 2}
