@@ -105,6 +105,11 @@ class SharedRuns:
             self._opened.append(manager)
         return self._runs[kind]
 
+    def reset_modes(self) -> None:
+        """Reset the steered gate modes of every opened run (see ``OpenRun.reset_modes``)."""
+        for run in self._runs.values():
+            run.reset_modes()
+
     def close(self) -> None:
         """Close every opened run, all at once so their slow container stops overlap."""
         with ThreadPoolExecutor() as pool:
@@ -155,6 +160,14 @@ def _no_jobs_survive_a_test(request: pytest.FixtureRequest) -> Iterator[None]:
     ):
         cluster: SlurmCluster = request.getfixturevalue("slurm_cluster")
         cluster.cancel_all()
+
+
+@pytest.fixture(autouse=True)
+def _no_steered_mode_survives_a_test(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Unset the gate modes a test steered, so a shared run starts every test on ``pass``."""
+    yield
+    if "shared_runs" in request.fixturenames:
+        request.getfixturevalue("shared_runs").reset_modes()
 
 
 def expect_failure_for(request: pytest.FixtureRequest, run: OpenRun, kind: str, issue: int) -> None:

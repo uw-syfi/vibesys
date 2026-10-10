@@ -141,6 +141,15 @@ class OpenRun:
         """Steer the next *gate* (``accuracy`` or ``benchmark``) run: ``pass``, ``hold``, ``env`` or ``exit:N``."""
         (self.workspace / f"{gate}_mode").write_text(mode, encoding="utf-8")
 
+    def reset_modes(self) -> None:
+        """Forget every steered gate mode, so the next gate takes the default (``pass``).
+
+        A run is shared by many tests; a mode one test set (``hold`` above all)
+        would otherwise make a later test's gate block until the hang guard.
+        """
+        for gate in ("accuracy", "benchmark"):
+            (self.workspace / f"{gate}_mode").unlink(missing_ok=True)
+
     @property
     def container_id(self) -> str:
         """The id of the agent container."""

@@ -125,3 +125,20 @@ def test_a_gate_the_task_did_not_plan_is_not_offered_and_not_runnable(
         assert gate.exit_code != 0, gate.output
         assert "accuracy ok" not in gate.output
         assert slurm_cluster.queue() == []
+
+
+def test_steering_a_gate_mode_for_the_next_test_to_trip_over(run: OpenRun) -> None:
+    """Leaves `hold` behind on purpose; the next test proves it does not survive."""
+    run.set_mode("accuracy", "hold")
+    run.set_mode("benchmark", "exit:3")
+
+
+def test_a_mode_steered_by_an_earlier_test_does_not_reach_this_ones_gate(run: OpenRun) -> None:
+    """Regression: `hold` set by a cancellation test made the next test's gate block forever.
+
+    The run is shared and its mode files lived on in the workspace; the isolation
+    fixture removes them after every test.
+    """
+    gate = run.gate("accuracy")
+
+    assert gate.exit_code == 0, gate.output
