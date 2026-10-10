@@ -63,6 +63,7 @@ from vs_runtime.api.infrastructure import (
     create_state,
     create_workspace_runtime,
     open_run_host,
+    release_all,
     stop_gated_evaluation,
 )
 from vs_runtime.api.infrastructure_skills import create_installed_skills
@@ -110,6 +111,7 @@ type _AgentToolResolver = Callable[
     [object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]
 ]
 _EVALUATION_CLEANUP_FAILURE = "evaluation agent cleanup failed"
+_SERVICES_CLEANUP_FAILURE = "evaluation and profiler services did not close"
 
 STOP_GRACE_S = 60.0
 """Seconds in-flight agent turns get to end on their own after a stop request.
@@ -705,29 +707,25 @@ class _ProductHostFactory:
             await self.evaluation_service.cancel_outstanding()
 
     async def close_evaluation_service(self) -> None:
-        """Release the service before its workspaces and evaluator dependencies."""
-        errors: list[BaseException] = []
-        errors.extend(
-            await close_evaluation_services(self.evaluation_service, self.profiler_service)
-        )
+        """Release the service before its workspaces and evaluator dependencies.
+
+        Every release runs to its end even when the run is cancelled meanwhile
+        (a second interrupt arrives during cleanup); the run then ends cancelled
+        instead of reporting the interrupted cleanup as a failure.
+        """
+        releases: list[Callable[[], Awaitable[None]]] = [self._close_evaluation_services]
         if self.profiler_provision is not None:
-            await _collect_close_error(errors, self.profiler_provision.close)
+            releases.append(self.profiler_provision.close)
         if self.evaluation_backend is not None:
-            await _collect_close_error(errors, self.evaluation_backend.close)
+            releases.append(self.evaluation_backend.close)
         if self.core_services is not None:
-            await _collect_close_error(errors, self.core_services.close)
+            releases.append(self.core_services.close)
+        await release_all(releases, failure=_EVALUATION_CLEANUP_FAILURE)
+
+    async def _close_evaluation_services(self) -> None:
+        errors = await close_evaluation_services(self.evaluation_service, self.profiler_service)
         if errors:
-            raise RunCleanupError(_EVALUATION_CLEANUP_FAILURE, tuple(errors))
-
-
-async def _collect_close_error(
-    errors: list[BaseException], close: Callable[[], Awaitable[None]]
-) -> None:
-    """Run one resource's ``close``; record its failure so the next resource still closes."""
-    try:
-        await close()
-    except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930074 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-        errors.append(error)
+            raise RunCleanupError(_SERVICES_CLEANUP_FAILURE, tuple(errors))
 
 
 async def close_evaluation_services(
