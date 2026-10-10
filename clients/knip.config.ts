@@ -44,6 +44,8 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       // The package's public surface (`@vibesys/web`), which the browser bundle and the
       // end-to-end specs import; `vite.config.ts` and `index.html` supply the app entries.
       'src/index.ts',
+      // The desktop app's page, built by `vite.desktop.config.ts` from `desktop.html`.
+      'src/desktop-main.tsx',
       'src/**/*.test.ts',
       'src/**/*.test.tsx',
       // Playwright specs, run by `pnpm --filter @vibesys/web test:e2e`.
