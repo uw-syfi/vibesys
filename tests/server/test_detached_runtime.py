@@ -8,7 +8,7 @@ import socket
 import subprocess
 import sys
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
@@ -26,48 +26,44 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_detached_runtime_runs_without_a_subscriber_and_accepts_reattach(
+def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
     tmp_path: Path,
 ) -> None:
+    """A headless detached server serves clients mid-run and ends with its run.
+
+    Nothing it serves outlives the run (there is no web gateway to keep a page
+    open), so it exits without a ``shutdown`` request; a finished run is
+    reopened read-only from stored state instead.
+    """
     socket_path = tmp_path / "control.sock"
     runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path, detach=True)
-    completed = threading.Event()
+    started = threading.Event()
+    finish = runtime.threads.event()
     holder: dict[str, object] = {}
 
     def run() -> str:
-        completed.set()
+        started.set()
+        assert finish.wait(timeout=DEADLOCK_GUARD_S)
         return "done"
 
     thread = threading.Thread(target=lambda: holder.setdefault("result", runtime.run(run)))
     thread.start()
     # A detached run's callback starts only once the transport accepts clients.
-    assert completed.wait(timeout=DEADLOCK_GUARD_S)
+    assert started.wait(timeout=DEADLOCK_GUARD_S)
     assert runtime.transport_listening.is_set()
-    assert thread.is_alive(), "detached runtime must outlive its run callback"
 
-    # A late subscriber receives the already-recorded terminal event through
-    # the same bootstrap path used by reconnecting clients.
+    # A client that attaches mid-run is served through the reconnect bootstrap.
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(DEADLOCK_GUARD_S)
         client.connect(str(socket_path))
         with client.makefile("rwb") as stream:
             stream.write(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
             stream.flush()
-            messages: list[dict[str, Any]] = []
-            for _ in range(4):
-                message = json.loads(stream.readline())
-                messages.append(message)
-                if any(event["type"] == "run_finished" for event in message.get("events", [])):
-                    break
-    assert any(
-        event["type"] == "run_finished"
-        for message in messages
-        for event in message.get("events", [])
-    )
+            assert json.loads(stream.readline())["type"] == "subscribed"
 
-    runtime.shutdown()
+    finish.set()
     thread.join(timeout=DEADLOCK_GUARD_S)
-    assert not thread.is_alive()
+    assert not thread.is_alive(), "a headless detached server must exit when its run ends"
     assert holder["result"] == "done"
     assert not socket_path.exists()
 

@@ -971,17 +971,6 @@ def test_a_run_argument_diagnostic_reaches_stderr_before_any_transport_binds(
     assert streams.out == ""
 
 
-def test_detach_without_web_reports_the_flag_it_requires(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with pytest.raises(SystemExit) as exit_info:
-        main(["--detach", "--control-socket", str(tmp_path / "control.sock")])
-
-    assert exit_info.value.code == 2
-    assert capsys.readouterr().err == "vibesys: --detach requires --web\n"
-
-
 def test_a_web_launch_reports_the_launcher_flag_it_rejects(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
