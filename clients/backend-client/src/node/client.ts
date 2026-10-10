@@ -98,13 +98,15 @@ export class ServerClient {
   readonly #clock: ClientClock;
   /**
    * Every secondary socket the client has opened (subscriptions and dedicated
-   * requests), mapped to a hook that suppresses its own disconnect handling.
-   * `close()` calls the hook before destroying, so tearing a socket down as
-   * part of a client-wide close does not surface as a spurious stream
-   * disconnect, whatever order the caller closes the stream and the client in.
+   * requests), mapped to a hook that settles its own operation. `close()` calls
+   * the hook before destroying, so a pending operation fails while tearing a
+   * live subscription down does not surface as a spurious stream disconnect,
+   * whatever order the caller closes the stream and the client in.
    */
   readonly #secondarySockets = new Map<Socket, () => void>();
   readonly #channel: ControlChannel;
+
+  #closed = false;
 
   private constructor(socket: Socket, path: string, options: ServerClientOptions) {
     this.#path = path;
@@ -193,6 +195,9 @@ export class ServerClient {
     onDisconnect: (error: Error) => void,
     options: SubscribeOptions = {},
   ): Promise<EventSubscription> {
+    if (this.#closed) {
+      return Promise.reject(new BackendClientError('disconnected', 'Client is closed'));
+    }
     return new Promise((resolve, reject) => {
       const socket = createConnection(this.#path);
       const frames = new NewlineFramer();
@@ -257,10 +262,15 @@ export class ServerClient {
           return false;
         }
       };
-      // Track the socket so close() tears it down, flipping `closing` first.
+      // Track the socket so close() can settle a pending handshake or suppress
+      // the disconnect callback of a subscription that is already live.
       this.#secondarySockets.set(socket, () => {
-        closing = true;
         cancelHandshakeTimeout();
+        if (subscribed) {
+          closing = true;
+          return;
+        }
+        disconnect(new BackendClientError('disconnected', 'Client closed during subscription'));
       });
       socket.setEncoding('utf8');
       socket.once('connect', () => this.#writeSubscribe(socket, afterSequence, options));
@@ -331,13 +341,13 @@ export class ServerClient {
    * the grace window, so an unresponsive server cannot hang shutdown.
    */
   close(): Promise<void> {
-    // Closing the channel is the first thing that happens: it marks the client
-    // closed and fails what it owes before any socket teardown can be mistaken
-    // for an outage.
+    // Mark the whole client closed before failing channel work or settling
+    // secondary operations, so no reentrant caller can allocate another socket.
+    this.#closed = true;
     const channelClosed = this.#channel.close();
     const secondaries = [...this.#secondarySockets];
     this.#secondarySockets.clear();
-    for (const [, suppress] of secondaries) suppress();
+    for (const [, settle] of secondaries) settle();
     return Promise.all([
       channelClosed,
       ...secondaries.map(([socket]) =>
