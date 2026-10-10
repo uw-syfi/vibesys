@@ -6,9 +6,13 @@ import json
 import os
 import stat
 from contextlib import ExitStack
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from entrypoints.instances import main as instances_main
 from entrypoints.instances import run
@@ -16,11 +20,15 @@ from entrypoints.launcher import _headless_requested
 from entrypoints.server import (
     _DetachedGatewayEffects,
     _headless_argv,
+    _launch_detached_instance,
     _register_detached_instance,
     _spawn_detached_instance,
     main,
 )
 from server.instances import (
+    ControlSocketStopRequester,
+    DetachedLaunchErrorCode,
+    DetachedLaunchFailure,
     FakeInstanceStore,
     FileInstanceStore,
     InstanceHold,
@@ -29,13 +37,17 @@ from server.instances import (
     InstanceStopResult,
     LiveInstanceRecord,
     LiveRegistry,
+    StopEffects,
     StopOutcome,
+    driving,
     instance_root,
 )
-from vs_sim.api.testing import FakeProcessSignaller, ManualClock
+from vibesys.orchestration.dynamic import DynamicOptions
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api.testing import run_execution_record
+from vs_sim.api.testing import FakeProcessSignaller, ManualClock, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from typing import BinaryIO
 
 INSTANCE = "0123456789ab"
@@ -161,7 +173,145 @@ def test_a_detached_launch_chooses_its_own_control_socket(
         main(["--detach", "--control-socket", str(tmp_path / "control.sock")])
 
     assert exit_info.value.code == 2
-    assert "drop --control-socket" in capsys.readouterr().err
+    output = capsys.readouterr()
+    assert "drop --control-socket" in output.err
+    failure = DetachedLaunchFailure.model_validate_json(output.out)
+    assert (failure.code, failure.exit_code) == ("invalid_arguments", 2)
+
+
+# --- vibesys --detach --resume ---------------------------------------------------
+
+_RUN_ID = "20261010-120000-11111111-dynamic"
+_RESUME = ["--detach", "--outer-loop", "dynamic", "--resume", _RUN_ID]
+
+
+def _project_with_run(root: Path) -> Path:
+    """A project holding one recorded, stopped run that ``--resume`` resolves."""
+    root.mkdir()
+    (root / "OBJECTIVE.md").write_text("Make the queue faster.\n")
+    (root / "vibesys.input.toml").write_text(
+        'version = 1\n[agent]\ndomain = "generic"\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+    )
+    project = Project.open(root)
+    project.state.create_project(root.name)
+    manifest = project.state.new_run_manifest(
+        root.name,
+        run_id=_RUN_ID,
+        branch=f"vibesys-runs/{_RUN_ID}",
+        vibesys_version="0.2.0-test",
+        run_environment=RunEnvironmentRecord(name="docker"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(
+            id="dynamic",
+            config_version=1,
+            options=DynamicOptions(
+                interface="service",
+                max_rounds=2,
+                max_retries_per_round=2,
+                judge_every=2,
+                official_eval_every=2,
+            ).model_dump(mode="json"),
+        ),
+        trusted_input_baseline="0" * 40,
+        now=datetime(2026, 10, 10, 12, tzinfo=UTC),
+    )
+    project.state.create_run(manifest, make_current=True)
+    return root
+
+
+@pytest.fixture
+def resumable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Run from a project holding a stopped run; return this user's registry root."""
+    monkeypatch.chdir(_project_with_run(tmp_path / "project"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    return instance_root(os.environ, os.getuid())
+
+
+def test_a_detached_resume_prints_the_new_servers_record(
+    resumable: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    effects = _ChildEffects(resumable, serves=True)
+
+    _launch_detached_instance(_RESUME, effects)
+
+    record = LiveInstanceRecord.model_validate_json(capsys.readouterr().out)
+    assert record.status is InstanceStatus.SERVING
+    # The child runs this process's interpreter, so it resumes on the invoked code.
+    assert effects.command[1:3] == ["-m", "entrypoints.server"]
+    assert effects.command[3 : 3 + len(_RESUME)] == _RESUME
+    effects.holds[0].release()
+
+
+def test_a_detached_resume_refuses_a_run_another_server_is_driving(
+    resumable: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    live = FileInstanceStore(resumable).hold(INSTANCE)
+    live.publish(
+        _record(INSTANCE, "/run/s.sock", InstanceStatus.SERVING).model_copy(
+            update={"run_id": _RUN_ID}
+        )
+    )
+    effects = _ChildEffects(resumable, serves=True)
+
+    with pytest.raises(SystemExit) as exit_info:
+        _launch_detached_instance(_RESUME, effects)
+
+    failure = DetachedLaunchFailure.model_validate_json(capsys.readouterr().out)
+    assert exit_info.value.code == failure.exit_code == 1
+    assert failure.code == DetachedLaunchErrorCode.RUN_ALREADY_LIVE
+    assert failure.live_instance is not None
+    assert failure.live_instance.id == INSTANCE
+    assert effects.command == []
+    live.release()
+
+
+def test_a_detached_resume_whose_server_dies_names_its_log(
+    resumable: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    effects = _ChildEffects(resumable, serves=False, exit_status=3)
+
+    with pytest.raises(SystemExit) as exit_info:
+        _launch_detached_instance(_RESUME, effects)
+
+    failure = DetachedLaunchFailure.model_validate_json(capsys.readouterr().out)
+    assert exit_info.value.code == failure.exit_code == 1
+    assert failure.code == DetachedLaunchErrorCode.SERVER_START_FAILED
+    assert failure.log_path is not None
+    assert Path(failure.log_path).read_text() == "child output\n"
+    effects.holds[0].release()
+
+
+def test_a_detached_resume_of_an_unknown_run_starts_nothing(
+    resumable: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    effects = _ChildEffects(resumable, serves=True)
+
+    with pytest.raises(SystemExit) as exit_info:
+        _launch_detached_instance(["--detach", "--resume", "no-such-run"], effects)
+
+    failure = DetachedLaunchFailure.model_validate_json(capsys.readouterr().out)
+    assert (failure.code, failure.stage) == ("resume_not_found", "resume_resolution")
+    assert exit_info.value.code == failure.exit_code
+    assert effects.command == []
+
+
+@given(
+    run_ids=st.lists(st.one_of(st.none(), st.sampled_from(["a", "b", "c"])), max_size=5),
+    wanted=st.sampled_from(["a", "b", "c"]),
+)
+def test_driving_finds_exactly_a_live_server_with_that_run(
+    run_ids: list[str | None], wanted: str
+) -> None:
+    records = tuple(
+        _record(f"{index:012x}", "/s", InstanceStatus.SERVING).model_copy(update={"run_id": run_id})
+        for index, run_id in enumerate(run_ids)
+    )
+
+    found = driving(InstanceList(instances=records), wanted)
+
+    assert (found is not None) == (wanted in run_ids)
+    assert found is None or found.run_id == wanted
 
 
 def test_the_launcher_routes_detached_runs_and_instances_to_python() -> None:
@@ -184,9 +334,14 @@ def _run(argv: list[str], store: FakeInstanceStore) -> tuple[int, str]:
     return run(
         argv,
         registry=LiveRegistry(store),
-        signaller=FakeProcessSignaller(set()),
-        clock=clock,
-        pause=clock.advance,
+        # Nothing listens on the simulated network, so every stop falls back
+        # to the signal path, as it does for a server that does not answer.
+        effects=StopEffects(
+            ControlSocketStopRequester(SimNetwork(SimThreads())),
+            FakeProcessSignaller(set()),
+            clock,
+            clock.advance,
+        ),
     )
 
 
