@@ -5,21 +5,26 @@
  * agent, certificates, and Kerberos working unchanged. The app owns one master connection per host
  * (`ControlMaster`/`ControlPath`/`ControlPersist`), and only the master authenticates: it is the
  * one ssh started with an askpass helper, so a password or 2FA prompt appears once, as a dialog.
- * The master carries `ServerAliveInterval`, so a half-open link ends it instead of hanging. Every
- * other ssh run is a channel over that master with `BatchMode=yes`: it never prompts, and when the
- * master is gone it fails with ssh's status 255, which this host reports as `link`.
+ * The master carries `ServerAliveInterval`, so a half-open link ends it instead of hanging, and
+ * `ControlPersist=30m`, so a master an app crash left behind ends on its own. Every other ssh run is
+ * a channel over that master with `BatchMode=yes`: it never prompts. When the master is gone, ssh
+ * connects directly with keys and the agent only, and fails with its status 255 when that cannot
+ * log in; this host reports that as `auth` (a refusal, or a host key not yet trusted) or `link`.
  *
  * - `invoke(argv)` runs `<vibesys command> argv` on the host.
  * - `startServer(args)` runs `<vibesys command> --detach args` and returns the record's socket.
  * - `dial(endpoint)` opens one channel per connection running the stdio bridge
  *   (`<python> -m entrypoints.stdio_bridge --socket PATH`), whose stdin and stdout are the stream.
  *
- * Remote commands are fixed `sh -c` scripts whose data (paths, the configured command, argv) are
- * positional arguments, each single-quoted: nothing from a page or a record is ever spliced into
- * script text. The configured vibesys command is the one thing the remote shell evaluates, because
- * it is a command line the user typed in the app's settings (`uv run --project ~/src/vibesys
- * vibesys`). Non-interactive ssh sessions often lack `~/.local/bin` on PATH, so its first word is
- * probed there and in a few common places, and a failure names every place tried.
+ * Remote commands must mean the same under any login shell (sh, bash, zsh, tcsh, fish), since ssh
+ * hands them to that shell. Each is `sh -c '<fixed one-line script>' <role> <data>...`: the script
+ * contains no single quote, `!`, newline, or backslash pair, so every one of those shells passes it
+ * to `sh` unchanged, and each datum (paths, the configured command, argv) is hex-encoded (`x6869`),
+ * which no shell alters; the script decodes them back into `"$@"`. Nothing from a page or a record
+ * is ever spliced into script text. The configured vibesys command is the one thing `sh` evaluates,
+ * because it is a command line the user typed in the app's settings (`uv run --project
+ * ~/src/vibesys vibesys`). Non-interactive ssh sessions often lack `~/.local/bin` on PATH, so its
+ * first word is probed there and in a few common places, and a failure names every place tried.
  */
 import {spawn} from 'node:child_process';
 import {Duplex} from 'node:stream';
@@ -55,30 +60,44 @@ export const PROBED_DIRECTORIES = [
 ] as const;
 
 /**
+ * Decodes the hex-encoded arguments back into `"$@"`, and defines `d HEX` for the scripts' own
+ * constants. `\134` (a backslash) is the one backslash in any script: a backslash before a digit is
+ * literal inside single quotes in every login shell, fish included.
+ */
+// Lines with shell `${...}` expansions are template literals that escape them as `\${`.
+const DECODE = [
+  'b=$(printf "\\134");',
+  `d() { h=\${1#x}; r=; while [ -n "$h" ]; do t=\${h#??}; p=\${h%"$t"}; v=$((0x$p));`,
+  `r="$r\${b}0$((v / 64))$((v / 8 % 8))$((v % 8))"; h=$t; done; printf %b "$r"; };`,
+  'n=$#; while [ "$n" -gt 0 ]; do set -- "$@" "$(d "$1")"; shift; n=$((n - 1)); done;',
+].join(' ');
+
+/** `"$@"` and `"$2"`, for the scripts that hand data to `eval`. */
+const QUOTED_ALL = hex('"$@"');
+const QUOTED_SECOND = hex('"$2"');
+
+/**
  * Resolve the configured command's first word: on PATH, then in each probed directory. Prints
- * `found PATH` and `shebang INTERPRETER` (the resolved file's `#!` line), or `missing`.
+ * `found PATH` and `first LINE` (the resolved file's first line, its `#!` line for a script), or
+ * `missing`.
  */
 const PROBE_SCRIPT = [
-  'set -f',
-  'set -- $1',
-  'first=$1',
-  'eval "w=$first"',
-  'found=',
-  'case $w in */*) [ -x "$w" ] && found=$w ;; *) found=$(command -v "$w" 2>/dev/null) || found= ;; esac',
-  `if [ -z "$found" ]; then case $w in */*) ;; *) for d in ${PROBED_DIRECTORIES.map(d => `"${d}"`).join(' ')}; do if [ -x "$d/$w" ]; then found=$d/$w; break; fi; done ;; esac; fi`,
-  'if [ -z "$found" ]; then echo missing; exit 0; fi',
-  'echo "found $found"',
-  `echo "shebang $(sed -n '1s/^#![[:space:]]*//p' "$found" 2>/dev/null)"`,
-].join('\n');
+  DECODE,
+  'set -f; set -- $1; w=$1; eval "w=$w"; found=;',
+  'case $w in */*) if [ -x "$w" ]; then found=$w; fi ;; *) found=$(command -v "$w" 2>/dev/null) || found= ;; esac;',
+  `if [ -z "$found" ]; then case $w in */*) ;; *) for x in ${PROBED_DIRECTORIES.map(d => `"${d}"`).join(' ')}; do if [ -x "$x/$w" ]; then found=$x/$w; break; fi; done ;; esac; fi;`,
+  'if [ -z "$found" ]; then echo missing; exit 0; fi;',
+  'printf "found %s" "$found"; echo;',
+  'l=$(dd if="$found" bs=256 count=1 2>/dev/null | head -n 1);',
+  'printf "first %s" "$l"; echo',
+].join(' ');
 
 /** Run the resolved command (`$2`) with the remaining arguments, in directory `$1` when given. */
 const RUN_SCRIPT = [
-  'case $1 in "") ;; "~/"*) cd "$HOME/$(printf %s "$1" | cut -c3-)" || exit 1 ;; *) cd "$1" || exit 1 ;; esac',
-  'shift',
-  'c=$1',
-  'shift',
-  'eval "exec $c \\"\\$@\\""',
-].join('\n');
+  DECODE,
+  `case $1 in "") ;; "~/"*) cd -- "$HOME/\${1#??}" || exit 1 ;; *) cd -- "$1" || exit 1 ;; esac;`,
+  `shift; c=$1; shift; e=$(d ${QUOTED_ALL}); eval "exec $c $e"`,
+].join(' ');
 
 /**
  * Open one bridge connection to socket `$2` with Python command `$1`. Prints one `R` once the
@@ -86,10 +105,10 @@ const RUN_SCRIPT = [
  * connection that is up.
  */
 const BRIDGE_SCRIPT = [
-  '[ -S "$2" ] || exit 4',
-  'printf R',
-  'eval "exec $1 -m entrypoints.stdio_bridge --socket \\"\\$2\\""',
-].join('\n');
+  DECODE,
+  '[ -S "$2" ] || exit 4; printf R;',
+  `e=$(d ${QUOTED_SECOND}); eval "exec $1 -m entrypoints.stdio_bridge --socket $e"`,
+].join(' ');
 
 /** The marker `BRIDGE_SCRIPT` prints before the bridge's own bytes. */
 const BRIDGE_READY = 0x52;
@@ -113,20 +132,42 @@ const BRIDGE_EXITS: ReadonlyMap<number, HostErrorKind | null> = new Map([
   [SSH_FAILED, 'link'],
 ]);
 
-/** Single-quote `word` for a POSIX shell. */
+/** Single-quote `word` for `sh` (never for a login shell: those see only `remoteCommand`). */
 function shellQuote(word: string): string {
   return `'${word.replaceAll("'", `'\\''`)}'`;
 }
 
-/** The remote command line that runs fixed `script` as `sh -c` with `role` and `args`. */
-function remoteScript(script: string, role: string, args: readonly string[]): string {
-  return ['sh', '-c', script, role, ...args].map(shellQuote).join(' ');
+/** `word` as a token every shell leaves alone: `x` and its UTF-8 bytes in hex. */
+function hex(word: string): string {
+  return `x${Buffer.from(word, 'utf8').toString('hex')}`;
 }
+
+/**
+ * The remote command line that runs fixed `script` as `sh -c` with `role` and data `args`. Rejects
+ * a datum with a newline or NUL: no command line this app runs needs one, and `sh` cannot carry it
+ * through a command substitution intact.
+ */
+export function remoteCommand(script: string, role: string, args: readonly string[]): string {
+  for (const arg of args) {
+    if (/[\n\r\0]/.test(arg)) {
+      throw new HostError('failed', `an argument contains a line break: ${JSON.stringify(arg)}`);
+    }
+  }
+  return ['sh', '-c', `'${script}'`, role, ...args.map(hex)].join(' ');
+}
+
+/** The fixed scripts, exported for the test that checks every login shell passes them through. */
+export const REMOTE_SCRIPTS = {
+  'vibesys-probe': PROBE_SCRIPT,
+  'vibesys-run': RUN_SCRIPT,
+  'vibesys-bridge': BRIDGE_SCRIPT,
+} as const;
 
 interface Resolved {
   /** The vibesys command with its first word replaced by the path found. */
   readonly vibesys: string;
-  readonly python: string;
+  /** The Python the bridge runs on, or why it is unknown (commands still run without it). */
+  readonly python: {readonly command: string} | {readonly problem: string};
 }
 
 export class SshHost extends DetachedHost {
@@ -179,14 +220,15 @@ class SshAccess implements HostAccess {
     const output = await finish(
       this.#channel(RUN_SCRIPT, 'vibesys-run', [cwd ?? '', vibesys, ...argv]),
     );
-    if (output.code === SSH_FAILED) throw this.#linkError(output.stderr);
+    if (output.code === SSH_FAILED) throw this.#sshError(output.stderr);
     return output;
   }
 
   async connect(socketPath: string): Promise<Duplex> {
     await this.#ensure(false);
     const {python} = await this.#resolve();
-    const process = this.#channel(BRIDGE_SCRIPT, 'vibesys-bridge', [python, socketPath]);
+    if ('problem' in python) throw new HostError('failed', python.problem);
+    const process = this.#channel(BRIDGE_SCRIPT, 'vibesys-bridge', [python.command, socketPath]);
     const stderr = new Tail();
     process.stderr.setEncoding('utf8');
     process.stderr.on('data', (chunk: string) => stderr.push(chunk));
@@ -227,7 +269,7 @@ class SshAccess implements HostAccess {
           '-o',
           'ControlMaster=auto',
           '-o',
-          'ControlPersist=yes',
+          'ControlPersist=30m',
           '-o',
           'ConnectTimeout=20',
           '--',
@@ -238,8 +280,7 @@ class SshAccess implements HostAccess {
       ),
     );
     if (master.code === 0) return;
-    const kind = AUTH_FAILURE.test(master.stderr) ? 'auth' : 'link';
-    throw new HostError(kind, `ssh ${this.#options.alias}: ${lastLine(master.stderr)}`);
+    throw this.#sshError(master.stderr);
   }
 
   #resolve(): Promise<Resolved> {
@@ -253,7 +294,7 @@ class SshAccess implements HostAccess {
   async #probe(): Promise<Resolved> {
     const command = this.#options.vibesysCommand;
     const output = await finish(this.#channel(PROBE_SCRIPT, 'vibesys-probe', [command]));
-    if (output.code === SSH_FAILED) throw this.#linkError(output.stderr);
+    if (output.code === SSH_FAILED) throw this.#sshError(output.stderr);
     const lines = output.stdout.split('\n');
     const found = lines.find(line => line.startsWith('found '))?.slice('found '.length);
     const first = command.split(' ')[0] ?? command;
@@ -270,16 +311,17 @@ class SshAccess implements HostAccess {
     }
     const rest = command.slice(first.length);
     const vibesys = `${shellQuote(found)}${rest}`;
-    const shebang = lines.find(line => line.startsWith('shebang '))?.slice('shebang '.length);
-    const python = this.#options.pythonCommand ?? derivePython(vibesys, rest, shebang ?? '');
+    const head = lines.find(line => line.startsWith('first '))?.slice('first '.length) ?? '';
+    const shebang = head.startsWith('#!') ? head.slice(2) : '';
+    const python = this.#options.pythonCommand ?? derivePython(vibesys, rest, shebang);
     if (python === null) {
-      throw new HostError(
-        'failed',
-        `cannot tell which Python runs "${command}" on ${this.#options.alias}; ` +
-          "set the host's Python command.",
-      );
+      const problem =
+        `cannot tell which Python runs "${command}" on ${this.#options.alias}` +
+        (shebang === '' ? '' : ` (its first line is "#!${shebang.trim()}")`) +
+        "; set the host's Python command in the picker.";
+      return {vibesys, python: {problem}};
     }
-    return {vibesys, python};
+    return {vibesys, python: {command: python}};
   }
 
   #channel(script: string, role: string, args: readonly string[]): SpawnedProcess {
@@ -293,7 +335,7 @@ class SshAccess implements HostAccess {
         'BatchMode=yes',
         '--',
         this.#options.alias,
-        remoteScript(script, role, args),
+        remoteCommand(script, role, args),
       ],
       {},
     );
@@ -308,6 +350,17 @@ class SshAccess implements HostAccess {
       '-o',
       'ServerAliveCountMax=3',
     ];
+  }
+
+  /**
+   * What an ssh status 255 means: the host refused the user, or does not yet have a trusted host
+   * key (both `auth`, which only an interactive sign-in can answer), or the link is down.
+   */
+  #sshError(stderr: string): HostError {
+    if (AUTH_FAILURE.test(stderr)) {
+      return new HostError('auth', `ssh ${this.#options.alias}: ${lastLine(stderr)}`);
+    }
+    return this.#linkError(stderr);
   }
 
   #linkError(stderr: string): HostError {
@@ -329,7 +382,8 @@ class SshAccess implements HostAccess {
         `nothing is listening at ${socketPath}${report === null ? '' : ` (${report})`}`,
       );
     }
-    if (kind === 'link' && (code === null || code === SSH_FAILED)) return this.#linkError(stderr);
+    if (code === SSH_FAILED) return this.#sshError(stderr);
+    if (kind === 'link' && code === null) return this.#linkError(stderr);
     return new HostError(
       kind,
       `the bridge to ${socketPath} on ${this.#options.alias} ended: ` +
@@ -338,19 +392,27 @@ class SshAccess implements HostAccess {
   }
 }
 
-const AUTH_FAILURE = /Permission denied|Too many authentication failures|Authentication failed/;
+/**
+ * ssh failures only the user can answer: refused credentials, or a host key that is not trusted yet
+ * (BatchMode cannot ask; an interactive sign-in asks through the askpass dialog, never silently).
+ */
+const AUTH_FAILURE =
+  /Permission denied|Too many authentication failures|Authentication failed|Host key verification failed/;
 
 /**
  * The Python for a vibesys command: a launcher like `uv run ... vibesys` runs `uv run ... python`;
- * an installed script runs the interpreter of its `#!` line. Null when neither applies.
+ * an installed script runs the interpreter of its `#!` line when that is a Python (directly or
+ * through `env`). Null otherwise: a `#!/bin/sh` launcher (uv's polyglot scripts) names no Python.
  */
 function derivePython(vibesys: string, rest: string, shebang: string): string | null {
   const words = rest.trim().split(/\s+/);
   if (rest.trim() !== '' && words.at(-1) === 'vibesys') {
     return `${vibesys.slice(0, vibesys.length - 'vibesys'.length)}python`;
   }
-  const interpreter = shebang.trim();
-  return interpreter === '' ? null : interpreter;
+  const interpreter = shebang.trim().split(/\s+/);
+  const program = interpreter[0]?.endsWith('/env') ? interpreter[1] : interpreter[0];
+  const name = program?.split('/').at(-1) ?? '';
+  return /^python[0-9.]*$/.test(name) ? interpreter.map(shellQuote).join(' ') : null;
 }
 
 /**
@@ -436,13 +498,17 @@ class ChannelStream extends Duplex {
     process.stdout.on('data', (chunk: Buffer) => {
       if (!this.push(chunk)) process.stdout.pause();
     });
-    process.stdout.once('end', () => {
+    const ended = (): void => {
       void process.exit.then(code => {
         const error = endError(code);
         if (error === null) this.push(null);
         else this.destroy(error);
       });
-    });
+    };
+    // A channel whose whole output was its first chunk may have ended already (`firstChunk`
+    // pauses after that chunk, but the end is still emitted), and would otherwise never end.
+    if (process.stdout.readableEnded) ended();
+    else process.stdout.once('end', ended);
     process.stdout.resume();
   }
 

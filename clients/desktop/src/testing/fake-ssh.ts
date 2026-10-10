@@ -4,9 +4,11 @@
  *
  * It reads ssh's argv the way OpenSSH does for the options `SshHost` uses: `-O check|exit` talk to
  * the master; `ControlMaster=auto` establishes it (asking for a password through the askpass
- * environment); `ControlMaster=no` runs a channel, which fails with status 255 when the master is
- * down. A channel's remote command is `sh -c SCRIPT ROLE ARGS...`, single-quoted; the role says
- * which of `SshHost`'s fixed scripts it is, and the machine is a `FakeVibesysNode`.
+ * environment); `ControlMaster=no` runs a channel over the master or, with the master down, over a
+ * direct BatchMode connection, which fails with status 255 when the network or keys do. A
+ * channel's remote command is `sh -c 'SCRIPT' ROLE xHEX...`; the role says which of `SshHost`'s
+ * fixed scripts it is, and the machine is a `FakeVibesysNode`. The scripts themselves run under real
+ * shells in `ssh-host.shells.test.ts`; here each role's effect is modelled directly.
  */
 import type {Duplex} from 'node:stream';
 import type {SpawnedProcess} from '../process.js';
@@ -30,13 +32,23 @@ export class FakeSsh implements SshRunner {
   keyLogin = true;
   /** Whether the host accepts what the user types into the askpass dialog. */
   acceptsCredentials = true;
+  /** Whether the host's key is in `known_hosts` already. */
+  hostKeyKnown = true;
+  /** Whether the user answers "yes" when asked to trust the host's key. */
+  acceptsHostKey = true;
   /** Whether `vibesys` is installed where the probe finds it. */
   installed = true;
-  /** When set, every bridge exits at once with this outcome, as `stdio_bridge` reports it. */
+  /** The first line of the installed `vibesys`. */
+  firstLine = `#!${FAKE_VIBESYS_PYTHON}`;
+  /**
+   * When set, every bridge exits at once with this outcome, as `stdio_bridge` reports it: before
+   * the ready marker (the socket check failed) or, with `afterReady`, right after it.
+   */
   bridgeRefusal: {
     readonly status: number;
     readonly outcome: string;
     readonly detail: string;
+    readonly afterReady?: boolean;
   } | null = null;
   readonly calls: FakeSshCall[] = [];
   /** How many times a master connection could have prompted the user. */
@@ -87,27 +99,19 @@ export class FakeSsh implements SshRunner {
       throw new Error(`FakeSsh: a channel must never authenticate: ${args.join(' ')}`);
     }
     if (!this.#masterUp) {
-      return finishedProcess(
-        255,
-        '',
-        'Control socket connect(/tmp/cm): No such file or directory\nuser@host: Permission denied (publickey).\n',
-      );
+      // OpenSSH falls back to a direct connection, which BatchMode limits to keys and the agent.
+      const direct = this.#login(false, env);
+      if (direct !== null) return direct;
     }
-    return this.#remote(parseWords(args[separator + 2] ?? ''));
+    return this.#remote(parseRemote(args[separator + 2] ?? ''));
   }
 
-  /** Run one channel's remote command, `sh -c SCRIPT ROLE ARGS...`, on the fake machine. */
-  #remote(words: readonly string[]): SpawnedProcess {
-    const [sh, flag, , role, ...rest] = words;
-    if (sh !== 'sh' || flag !== '-c') {
-      throw new Error(`FakeSsh: unexpected remote command ${words.join(' ')}`);
-    }
+  /** Run one channel's remote command on the fake machine. */
+  #remote({role, rest}: {readonly role: string; readonly rest: readonly string[]}): SpawnedProcess {
     if (role === 'vibesys-probe') {
       return finishedProcess(
         0,
-        this.installed
-          ? `found ${FAKE_VIBESYS_PATH}\nshebang ${FAKE_VIBESYS_PYTHON}\n`
-          : 'missing\n',
+        this.installed ? `found ${FAKE_VIBESYS_PATH}\nfirst ${this.firstLine}\n` : 'missing\n',
       );
     }
     if (role === 'vibesys-run') return this.#run(rest);
@@ -116,6 +120,14 @@ export class FakeSsh implements SshRunner {
   }
 
   #establish(options: readonly string[], env: Readonly<Record<string, string>>): SpawnedProcess {
+    const refused = this.#login(!options.includes('BatchMode=yes'), env);
+    if (refused !== null) return refused;
+    this.#masterUp = true;
+    return finishedProcess(0);
+  }
+
+  /** Log in to the host; null on success, else ssh's failed process. */
+  #login(prompts: boolean, env: Readonly<Record<string, string>>): SpawnedProcess | null {
     if (!this.reachable) {
       return finishedProcess(
         255,
@@ -123,15 +135,24 @@ export class FakeSsh implements SshRunner {
         'ssh: connect to host node-1 port 22: Network is unreachable\n',
       );
     }
-    const prompts = !options.includes('BatchMode=yes');
     if (prompts) this.prompts += 1;
     const answered =
       prompts && env['SSH_ASKPASS'] !== undefined && env['SSH_ASKPASS_REQUIRE'] === 'force';
+    if (!this.hostKeyKnown) {
+      // StrictHostKeyChecking=ask: BatchMode cannot ask; an interactive login asks through askpass.
+      if (!answered || !this.acceptsHostKey) {
+        return finishedProcess(
+          255,
+          '',
+          'No ED25519 host key is known for node-1 and you have requested strict checking.\nHost key verification failed.\n',
+        );
+      }
+      this.hostKeyKnown = true;
+    }
     if (!this.keyLogin && (!answered || !this.acceptsCredentials)) {
       return finishedProcess(255, '', 'user@node-1: Permission denied (keyboard-interactive).\n');
     }
-    this.#masterUp = true;
-    return finishedProcess(0);
+    return null;
   }
 
   #run([cwd, command, ...argv]: readonly string[]): SpawnedProcess {
@@ -150,7 +171,7 @@ export class FakeSsh implements SshRunner {
       const {status, outcome, detail} = refusal;
       return finishedProcess(
         status,
-        '',
+        refusal.afterReady === true ? 'R' : '',
         `${JSON.stringify({outcome, exit_status: status, detail})}\n`,
       );
     }
@@ -187,33 +208,20 @@ export class FakeSsh implements SshRunner {
   }
 }
 
-/** Split a POSIX command line made only of single-quoted words (as `shellQuote` writes them). */
-function parseWords(line: string): string[] {
-  const words: string[] = [];
-  let word = '';
-  let inWord = false;
-  let quoted = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index] as string;
-    if (quoted) {
-      if (char === "'") quoted = false;
-      else word += char;
-    } else if (char === "'") {
-      quoted = true;
-      inWord = true;
-    } else if (char === '\\') {
-      index += 1;
-      word += line[index] ?? '';
-      inWord = true;
-    } else if (char === ' ') {
-      if (inWord) words.push(word);
-      word = '';
-      inWord = false;
-    } else {
-      word += char;
-      inWord = true;
-    }
+/**
+ * Read `sh -c 'SCRIPT' ROLE xHEX...`, the only remote command shape `SshHost` sends: a script with no
+ * single quote in it, a role, and hex-encoded data.
+ */
+function parseRemote(line: string): {readonly role: string; readonly rest: readonly string[]} {
+  const prefix = "sh -c '";
+  const close = line.indexOf("'", prefix.length);
+  if (!line.startsWith(prefix) || close < 0) {
+    throw new Error(`FakeSsh: unexpected remote command ${line}`);
   }
-  if (inWord) words.push(word);
-  return words;
+  const [role = '', ...data] = line.slice(close + 2).split(' ');
+  const rest = data.map(word => {
+    if (!/^x(?:[0-9a-f]{2})*$/.test(word)) throw new Error(`FakeSsh: undecodable datum ${word}`);
+    return Buffer.from(word.slice(1), 'hex').toString('utf8');
+  });
+  return {role, rest};
 }

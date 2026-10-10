@@ -91,6 +91,84 @@ describe('SshHost', () => {
     await host.close();
   });
 
+  test('a host key not yet trusted needs sign-in, which asks through askpass and never accepts silently', async () => {
+    const {ssh, host} = world();
+    ssh.hostKeyKnown = false;
+    expect(await kindOf(host.invoke(['x']))).toBe('auth');
+    expect(ssh.prompts).toBe(0);
+    expect(ssh.hostKeyKnown).toBe(false);
+    ssh.acceptsHostKey = false;
+    expect(await kindOf(host.ensureLink())).toBe('auth');
+    expect(ssh.hostKeyKnown).toBe(false);
+    ssh.acceptsHostKey = true;
+    await host.ensureLink();
+    expect(ssh.hostKeyKnown).toBe(true);
+    await host.invoke(['x']);
+    await host.close();
+  });
+
+  test('the master persists for a bounded time, so one a crashed app left ends on its own', async () => {
+    const {ssh, host} = world();
+    await host.ensureLink();
+    const master = ssh.calls.find(call => call.args.includes('ControlMaster=auto'));
+    expect(master?.args).toContain('ControlPersist=30m');
+    await host.close();
+  });
+
+  test('every remote command is one fixed single-quoted script and hex data, whatever the data', async () => {
+    const random = generator(4_242);
+    const {ssh, host} = world();
+    for (let round = 0; round < 50; round += 1) {
+      const argv = Array.from({length: Math.floor(random() * 4)}, () => awkwardWord(random));
+      await host.invoke(argv);
+      await host.startServer(argv, {cwd: `~/${awkwardWord(random)}`}).catch(() => {});
+    }
+    const commands = ssh.calls
+      .filter(call => call.args.includes('ControlMaster=no'))
+      .map(call => call.args.at(-1) ?? '');
+    expect(commands.length).toBeGreaterThan(50);
+    for (const command of commands) {
+      // No quote, `!`, or line break inside the script; a backslash only before a digit (literal
+      // in single quotes under sh, bash, zsh, csh, tcsh, and fish alike).
+      expect(command).toMatch(/^sh -c '[^'!\n\r]*' vibesys-[a-z]+( x(?:[0-9a-f]{2})*)*$/);
+      expect(command).not.toMatch(/\\[^0-9]/);
+    }
+    await host.close();
+  });
+
+  test('the bridge Python comes from a Python shebang only; any other needs the setting', async () => {
+    for (const [firstLine, python] of [
+      ['#!/usr/bin/env python3', "'/usr/bin/env' 'python3'"],
+      ['#!/opt/py/bin/python3.12', "'/opt/py/bin/python3.12'"],
+      ['#!/bin/sh', null],
+      ['#!/usr/bin/env bash', null],
+      ['\u007fELF', null],
+    ] as const) {
+      const {ssh, host} = world();
+      ssh.firstLine = firstLine;
+      const server = await host.startServer([]);
+      if (python === null) {
+        expect(await kindOf(host.dial(server.endpoint))).toBe('failed');
+      } else {
+        (await host.dial(server.endpoint)).destroy();
+        expect(ssh.ran).toContain(python);
+      }
+      await host.close();
+    }
+    const configured = world();
+    configured.ssh.firstLine = '#!/bin/sh';
+    const set = new SshHost({
+      alias: 'node-1',
+      vibesysCommand: 'vibesys',
+      pythonCommand: '/srv/venv/bin/python',
+      controlPath: '/tmp/vsd/%C',
+      runner: configured.ssh,
+    });
+    (await set.dial((await set.startServer([])).endpoint)).destroy();
+    expect(configured.ssh.ran).toContain('/srv/venv/bin/python');
+    await set.close();
+  });
+
   test('refused credentials are auth and an unreachable network is link', async () => {
     const refused = world();
     refused.ssh.keyLogin = false;
@@ -150,6 +228,26 @@ describe('SshHost', () => {
     await host.close();
   });
 
+  test('a bridge that ends right after it is ready still ends its stream, with its report', async () => {
+    const {ssh, host} = world();
+    const server = await host.startServer([]);
+    const cases = [
+      {status: 0, outcome: 'client_closed', detail: '', kind: 'none'},
+      {status: 3, outcome: 'server_closed', detail: '', kind: 'none'},
+      {status: 5, outcome: 'connect_denied', detail: 'Permission denied', kind: 'failed'},
+      {status: 6, outcome: 'connect_failed', detail: 'timed out', kind: 'link'},
+      {status: 7, outcome: 'server_stalled', detail: 'no progress', kind: 'link'},
+    ] as const;
+    for (const {kind, ...refusal} of cases) {
+      ssh.bridgeRefusal = {...refusal, afterReady: true};
+      const stream = await host.dial(server.endpoint);
+      const ended = streamError(stream);
+      stream.resume();
+      expect(await ended).toBe(kind);
+    }
+    await host.close();
+  });
+
   test('a missing vibesys command names every place tried', async () => {
     const {ssh, host} = world();
     ssh.installed = false;
@@ -167,7 +265,7 @@ describe('SshHost', () => {
   test('the bridge runs on the Python of the resolved command', async () => {
     const installed = world();
     await installed.host.dial((await installed.host.startServer([])).endpoint);
-    expect(installed.ssh.ran).toContain(FAKE_VIBESYS_PYTHON);
+    expect(installed.ssh.ran).toContain(`'${FAKE_VIBESYS_PYTHON}'`);
     expect(installed.ssh.ran[0]).toBe(`'${FAKE_VIBESYS_PATH}'`);
     await installed.host.close();
 
