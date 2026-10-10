@@ -2,6 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {parseInstanceRecord} from './instances.js';
 import {
   EMPTY_RECENT,
+  launchedRunId,
   parseRecent,
   RECENT_LIMIT,
   type RecentRun,
@@ -79,6 +80,25 @@ describe('remember', () => {
   test('a resumed run (same run id, new server) replaces its old entry', () => {
     const file = remember(remember(EMPTY_RECENT, run()), run({instanceId: 'ba9876543210'}));
     expect(file.runs.map(entry => entry.instanceId)).toEqual(['ba9876543210']);
+  });
+
+  test('regression: resuming a run records it under its run id before its server reports one', () => {
+    const resumed = run({
+      instanceId: 'ba9876543210',
+      task: null,
+      runId: launchedRunId({kind: 'resume', run: 'run-1'}, null),
+      attachedAt: 2,
+    });
+    const file = remember(remember(EMPTY_RECENT, run()), resumed);
+    expect(file.runs).toEqual([run({instanceId: 'ba9876543210', attachedAt: 2})]);
+  });
+
+  test('a launch names a run only when its server reported one or it resumes a named run', () => {
+    for (const reported of RUNS) {
+      expect(launchedRunId({kind: 'start'}, reported)).toBe(reported);
+      expect(launchedRunId({kind: 'resume', run: ''}, reported)).toBe(reported);
+      expect(launchedRunId({kind: 'resume', run: 'run-9'}, reported)).toBe(reported ?? 'run-9');
+    }
   });
 
   test('keeps RECENT_LIMIT runs by default', () => {

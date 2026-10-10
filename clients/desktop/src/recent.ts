@@ -126,6 +126,19 @@ export function remember(file: RecentFile, run: RecentRun, limit = RECENT_LIMIT)
   return {version: 1, runs: [merged, ...rest].slice(0, Math.max(0, limit))};
 }
 
+/** What the app asked a host to launch: a new run, or a resume of `run` (empty: the latest). */
+export type RunLaunch = {readonly kind: 'start'} | {readonly kind: 'resume'; readonly run: string};
+
+/**
+ * The run id to record for a run the app just launched. A server reports its run's id only once
+ * the run is ready, which can take minutes; a resume of a named run already knows it, and
+ * recording it keeps the resumed run on its earlier entry (with that entry's task).
+ */
+export function launchedRunId(launch: RunLaunch, reported: string | null): string | null {
+  if (reported !== null || launch.kind === 'start' || launch.run === '') return reported;
+  return launch.run;
+}
+
 /** What the welcome view says about a recent run after asking its host. */
 export type RecentStatus =
   /** A live server drives it; attach to `instanceId`. */

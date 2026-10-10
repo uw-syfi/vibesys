@@ -63,7 +63,7 @@ import {type InstanceRecord, versionSkewMessage} from './instances.js';
 import {type LaunchPlan, parseLaunch} from './launch-args.js';
 import {isAllowedRequest, isAppUrl, type LaunchTarget, originOf} from './launch-url.js';
 import {QuitGate} from './quit-gate.js';
-import {recentStatus} from './recent.js';
+import {launchedRunId, type RunLaunch, recentStatus} from './recent.js';
 import {type RelayPort, relay} from './relay.js';
 import {shellWords} from './shell-words.js';
 import {StopController} from './stop-controller.js';
@@ -479,18 +479,25 @@ class DesktopApp {
     task: string | null,
     args: readonly string[],
   ): Promise<void> {
-    await this.#launch(id, project, task, [...(task === null ? [] : ['--task', task]), ...args]);
+    await this.#launch(id, project, task, {kind: 'start'}, [
+      ...(task === null ? [] : ['--task', task]),
+      ...args,
+    ]);
   }
 
   /** Resume stopped run `run` (the latest when empty) of `project` on `id`, detached, and attach. */
   async resumeRun(id: HostId, project: string, run: string): Promise<void> {
-    await this.#launch(id, project, null, ['--resume', ...(run === '' ? [] : [run])]);
+    await this.#launch(id, project, null, {kind: 'resume', run}, [
+      '--resume',
+      ...(run === '' ? [] : [run]),
+    ]);
   }
 
   async #launch(
     id: HostId,
     project: string,
     task: string | null,
+    launch: RunLaunch,
     args: readonly string[],
   ): Promise<void> {
     const host = await this.#pool.host(id);
@@ -511,14 +518,9 @@ class DesktopApp {
         ? `the run is already live as ${instance.id}; attaching to it`
         : `started run ${instance.id}; stop it with: vibesys instances stop ${instance.id}`,
     );
-    await this.#remember(id, instance.projectRoot, task, instance.id, instance.runId);
-    await this.openRun(
-      id,
-      server.endpoint.socketPath,
-      instance.id,
-      instance.projectRoot,
-      instance.runId,
-    );
+    const runId = launchedRunId(launch, instance.runId);
+    await this.#remember(id, instance.projectRoot, task, instance.id, runId);
+    await this.openRun(id, server.endpoint.socketPath, instance.id, instance.projectRoot, runId);
   }
 
   async #remember(
