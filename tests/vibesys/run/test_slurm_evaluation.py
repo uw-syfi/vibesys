@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
+from tests.support.started_operation import wait_until_executor_started
 from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.orchestration.dynamic.agents import PROFILER
@@ -970,7 +971,7 @@ async def test_close_drains_provider_before_discarding_candidate(tmp_path: Path)
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     await executor.submit(_request(snapshot), handle_id="close-running")
-    await asyncio.to_thread(runner.wait_started.wait)
+    await wait_until_executor_started(runner.wait_started, executor, "close-running")
 
     await executor.close()
 
@@ -1074,7 +1075,7 @@ async def test_close_discards_workspace_when_provider_cleanup_fails(tmp_path: Pa
         cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     await executor.submit(_request(snapshot), handle_id="provider-cleanup-error")
-    await asyncio.to_thread(runner.wait_started.wait)
+    await wait_until_executor_started(runner.wait_started, executor, "provider-cleanup-error")
 
     with pytest.raises(RunCleanupError, match="cleanup failed"):
         await executor.close()

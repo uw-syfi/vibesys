@@ -16,6 +16,7 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.started_operation import wait_until_executor_started
 
 import vs_evaluation.api.testing as evaluation_testing
 from vs_evaluation.api import (
@@ -97,7 +98,7 @@ async def test_a_stop_during_sbatch_reply_cancels_the_submitted_job_once(tmp_pat
     )
     try:
         evaluation = await coordinator.submit(_request())
-        await asyncio.to_thread(connector.submitted.wait)
+        await wait_until_executor_started(connector.submitted, executor, evaluation.id)
         stopping = asyncio.create_task(evaluation.cancel())
         connector.release_reply.set()
         record = await stopping
