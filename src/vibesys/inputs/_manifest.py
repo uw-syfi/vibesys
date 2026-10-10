@@ -509,6 +509,8 @@ def _append_benchmark(lines: list[str], manifest: InputManifest) -> None:
         )
     if manifest.benchmark.timeout_seconds is not None:
         lines.append(f"timeout_seconds = {manifest.benchmark.timeout_seconds}")
+    if manifest.benchmark.result_protocol is not None:
+        lines.append(f"result_protocol = {manifest.benchmark.result_protocol}")
     if manifest.benchmark.result is not None:
         lines.extend(
             [

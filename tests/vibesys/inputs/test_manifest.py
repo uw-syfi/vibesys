@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import tomllib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vibesys.inputs import (
@@ -22,6 +24,23 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _COMMIT = "0123456789abcdef"
+_BENCHMARK_CONTRACTS = st.one_of(
+    st.none(),
+    st.builds(
+        BenchmarkResult,
+        json_argument=st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyz0123456789-_",
+            min_size=1,
+            max_size=20,
+        ).map(lambda suffix: f"--{suffix}"),
+        metric=st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyz0123456789-_",
+            min_size=1,
+            max_size=20,
+        ),
+    ),
+    st.just(2),
+)
 
 
 def _source(**overrides: str) -> dict[str, str]:
@@ -111,6 +130,65 @@ def test_evaluator_input_accepts_source_and_none() -> None:
 def test_benchmark_result_rejects_invalid_fields(fields: dict[str, str], message: str) -> None:
     with pytest.raises(ValidationError, match=message):
         BenchmarkResult(**fields)
+
+
+def test_benchmark_result_protocol_round_trips_at_the_benchmark_table() -> None:
+    manifest = InputManifest.model_validate(
+        {
+            "version": 1,
+            "agent": {"domain": "generic"},
+            "accuracy": {"command": ["python", "acc.py"]},
+            "benchmark": {
+                "command": ["python", "bench.py"],
+                "timeout_seconds": 30,
+                "result_protocol": 2,
+            },
+        }
+    )
+
+    rendered = render_input_manifest(manifest)
+
+    assert (
+        rendered
+        == """\
+version = 1
+
+[agent]
+domain = "generic"
+
+[accuracy]
+command = ["python", "acc.py"]
+
+[benchmark]
+command = ["python", "bench.py"]
+timeout_seconds = 30
+result_protocol = 2
+"""
+    )
+    assert InputManifest.model_validate(tomllib.loads(rendered)) == manifest
+
+
+@given(contract=_BENCHMARK_CONTRACTS)
+def test_benchmark_contract_alternatives_round_trip_through_manifest_toml(
+    contract: BenchmarkResult | Literal[2] | None,
+) -> None:
+    benchmark: dict[str, object] = {"command": ["python", "bench.py"]}
+    if isinstance(contract, BenchmarkResult):
+        benchmark["result"] = contract
+    elif contract is not None:
+        benchmark["result_protocol"] = contract
+    manifest = InputManifest.model_validate(
+        {
+            "version": 1,
+            "agent": {"domain": "generic"},
+            "accuracy": {"command": ["python", "acc.py"]},
+            "benchmark": benchmark,
+        }
+    )
+
+    reparsed = InputManifest.model_validate(tomllib.loads(render_input_manifest(manifest)))
+
+    assert reparsed == manifest
 
 
 def _manifest(overrides: dict[str, Any]) -> dict[str, Any]:
