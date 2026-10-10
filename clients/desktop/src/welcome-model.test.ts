@@ -1,8 +1,8 @@
 import {describe, expect, test} from 'bun:test';
 import {parseInstanceRecord} from './instances.js';
+import {type StopView, stopKey} from './stop-run.js';
 import {parseTaskList} from './task-list.js';
 import {fakeRecord} from './testing/fake-record.js';
-import {type StopView, stopKey} from './stop-run.js';
 import {
   filterHosts,
   moveSelection,
