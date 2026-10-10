@@ -38,6 +38,7 @@ CONTAINER_SERVER_PACKAGES: tuple[str, ...] = (
     "vs-project",
     "vs-runtime",
     "vs-sandbox",
+    "vs-sim",
     "vs-slurm",
 )
 """The framework packages a tool server in the container may import, by directory under ``libs``.
