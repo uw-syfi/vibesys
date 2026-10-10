@@ -260,3 +260,56 @@ def test_resuming_with_the_fallback_releases_a_parked_run_like_a_resume() -> Non
 
     assert not control.pause_requested()
     assert events.transitions[-1].kind is RunControlTransitionKind.RESUMED
+
+
+@pytest.mark.parametrize(
+    ("request_control", "requested", "boundary", "landed"),
+    [
+        pytest.param(
+            "request_stop",
+            RunControlTransitionKind.STOP_REQUESTED,
+            "raise_if_stopped",
+            RunControlTransitionKind.STOPPED,
+            id="stop",
+        ),
+        pytest.param(
+            "request_pause",
+            RunControlTransitionKind.PAUSE_REQUESTED,
+            "pause_requested",
+            RunControlTransitionKind.PAUSED,
+            id="pause",
+        ),
+    ],
+)
+def test_a_boundary_reached_while_a_request_is_published_does_not_land_it(
+    request_control: str,
+    requested: RunControlTransitionKind,
+    boundary: str,
+    landed: RunControlTransitionKind,
+) -> None:
+    """A request is published before any boundary can observe it.
+
+    The run thread may reach a boundary at any moment, including while the
+    requesting thread is still publishing the request. The sink stands in for
+    that boundary: it checks the channel the instant the request is published.
+    A boundary that already saw the request would land it first, so a consumer
+    folding the events would see the landing ahead of the request.
+    """
+    seen: list[RunControlTransitionKind] = []
+    observed: list[object] = []
+
+    def sink(transition: RunControlTransition) -> None:
+        seen.append(transition.kind)
+        if transition.kind is requested:
+            try:
+                observed.append(getattr(control, boundary)())
+            except RunStopped:
+                observed.append(RunStopped)
+
+    control = create_run_control_channel(sink)
+
+    getattr(control, request_control)()
+
+    assert observed in ([None], [False])
+    assert seen == [requested]
+    assert landed not in seen

@@ -237,10 +237,14 @@ class RuntimeRunControlChannel:
             )
 
     def request_pause(self) -> None:
-        """Request that the run park at its next cooperative boundary."""
+        """Request that the run park at its next cooperative boundary.
+
+        The request is published before a boundary can see it, so a run that
+        parks concurrently never reports ``PAUSED`` ahead of the request.
+        """
+        self._emit(RunControlTransitionKind.PAUSE_REQUESTED)
         with self._lock:
             self._paused = True
-        self._emit(RunControlTransitionKind.PAUSE_REQUESTED)
 
     def resume(self) -> None:
         """Cancel a pending pause or stop and release a parked run."""
@@ -265,12 +269,18 @@ class RuntimeRunControlChannel:
         return requested
 
     def request_stop(self) -> None:
-        """Request that the run unwind at its next cooperative boundary."""
+        """Request that the run unwind at its next cooperative boundary.
+
+        The request is published before a boundary can see it, so a run that
+        reaches a boundary concurrently never reports ``STOPPED`` ahead of the
+        request: a consumer folding the events would otherwise see a stop land
+        on a run that was never stopping.
+        """
+        self._emit(RunControlTransitionKind.STOP_REQUESTED)
         with self._lock:
             self._stop_requested = True
             self._lock.notify_all()
             listeners = tuple(self._stop_listeners)
-        self._emit(RunControlTransitionKind.STOP_REQUESTED)
         for listener in listeners:
             listener()
 
