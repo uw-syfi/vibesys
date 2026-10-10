@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.slurm_cluster.cluster import HANG_GUARD_SECONDS, docker
-from tests.slurm_cluster.harness import in_background, open_run, run_container_ids
+from tests.slurm_cluster.harness import ALL_KINDS, in_background, open_run, run_container_ids
 
 if TYPE_CHECKING:
     from tests.slurm_cluster.cluster import SlurmCluster
@@ -18,7 +18,8 @@ pytestmark = pytest.mark.slurm_cluster
 
 
 def _hold(run: OpenRun) -> str:
-    if run.session.view.env_kind == "slurm-gpu":
+    """The agent command that starts a job which runs until it is cancelled."""
+    if run.has_gpu_commands:
         return '"$VIBESYS_GPU" -- sleep 600'
     run.set_mode("accuracy", "hold")
     return f"{run.launcher()} --gate accuracy"
@@ -35,7 +36,7 @@ def _broker_sockets(run: OpenRun) -> list[Path]:
     return sockets
 
 
-@pytest.mark.parametrize("kind", ["slurm", "slurm-local", "slurm-gpu"])
+@pytest.mark.parametrize("kind", ALL_KINDS)
 def test_stopping_the_agent_container_cancels_its_running_job(
     kind: str, slurm_cluster: SlurmCluster, workdir: Path, agent_image_id: str
 ) -> None:
@@ -58,14 +59,14 @@ def _broker_sockets_after_kill(run: OpenRun) -> list[Path]:
     return _broker_sockets(run)
 
 
-@pytest.mark.parametrize("kind", ["slurm", "slurm-local", "slurm-gpu"])
+@pytest.mark.parametrize("kind", ALL_KINDS)
 def test_closing_the_session_cancels_jobs_and_removes_brokers_sockets_and_containers(
     kind: str, slurm_cluster: SlurmCluster, workdir: Path, agent_image_id: str
 ) -> None:
     with open_run(kind, slurm_cluster, workdir, agent_image_id) as run:
         sockets = _broker_sockets(run)
         # The transport broker exists only for SSH: the local transport has none.
-        assert len(sockets) == {"slurm": 2, "slurm-local": 1, "slurm-gpu": 1}[kind]
+        assert len(sockets) == {"slurm": 2}.get(kind, 1)
         assert all(socket.exists() for socket in sockets)
         assert run_container_ids(run.run_id)
         pending = in_background(lambda: run.agent(_hold(run)))

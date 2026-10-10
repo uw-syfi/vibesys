@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run the real-Slurm integration tier: the `slurm` and `slurm-gpu` run environments
+# Run the real-Slurm integration tier: the `slurm` run environment (SSH transport, local
+# transport, local transport with agent GPU commands, and the deprecated `slurm-gpu` alias)
 # against a Slurm cluster (munge, slurmctld, slurmdbd, one slurmd) started in Docker.
 # No LLM agents are involved; the agent side is a Docker container running scripted
 # commands. See "Real-cluster tier" in docs/contributing/development.md.

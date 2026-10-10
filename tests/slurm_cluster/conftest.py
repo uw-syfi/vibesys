@@ -132,7 +132,7 @@ def shared_runs(
         patch.undo()
 
 
-@pytest.fixture(scope="session", params=["slurm", "slurm-local", "slurm-gpu"])
+@pytest.fixture(scope="session", params=["slurm", "slurm-local", "slurm-local-gpu"])
 def run(request: pytest.FixtureRequest, shared_runs: SharedRuns) -> OpenRun:
     """A shared open run of each environment kind in turn."""
     return shared_runs.get(request.param)
@@ -140,8 +140,14 @@ def run(request: pytest.FixtureRequest, shared_runs: SharedRuns) -> OpenRun:
 
 @pytest.fixture(scope="session")
 def gpu_run(shared_runs: SharedRuns) -> OpenRun:
-    """The shared open ``slurm-gpu`` run."""
-    return shared_runs.get("slurm-gpu")
+    """The shared open ``slurm-local-gpu`` run: the agent runs its own GPU commands."""
+    return shared_runs.get("slurm-local-gpu")
+
+
+@pytest.fixture(scope="session")
+def alias_run(shared_runs: SharedRuns) -> OpenRun:
+    """The shared open run of the deprecated ``slurm-gpu`` selection."""
+    return shared_runs.get("slurm-gpu-alias")
 
 
 @pytest.fixture
@@ -168,15 +174,3 @@ def _no_steered_mode_survives_a_test(request: pytest.FixtureRequest) -> Iterator
     yield
     if "shared_runs" in request.fixturenames:
         request.getfixturevalue("shared_runs").reset_modes()
-
-
-def expect_failure_for(request: pytest.FixtureRequest, run: OpenRun, kind: str, issue: int) -> None:
-    """Mark the running test as a strict known failure for *kind* runs, tracked by *issue*.
-
-    Strict: when the bug is fixed the test passes unexpectedly and fails the tier
-    until this call is removed, so the marker cannot outlive the bug.
-    """
-    if run.session.view.env_kind == kind:
-        request.applymarker(
-            pytest.mark.xfail(strict=True, reason=f"known bug: uw-syfi/vibesys#{issue}")
-        )

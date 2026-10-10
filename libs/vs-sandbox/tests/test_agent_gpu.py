@@ -105,7 +105,7 @@ def slurm_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 class TestConfig:
-    def test_requests_above_the_limits_are_rejected_not_clamped(self, tmp_path: Path) -> None:
+    def test_requests_above_the_limits_are_rejected_not_clamped(self) -> None:
         config = _config(max_gpus=4, max_time_minutes=30)
         assert config.request(None, None) == GpuJobRequest(gpus=1, time_minutes=30)
         with pytest.raises(AgentGpuRequestError, match="limit of 4"):
@@ -124,26 +124,26 @@ class TestPartition:
         ],
     )
     def test_prefers_a_partition_that_starts_now(
-        self, tmp_path: Path, gpus: int, minutes: int, expected: str
+        self, gpus: int, minutes: int, expected: str
     ) -> None:
         request = GpuJobRequest(gpus=gpus, time_minutes=minutes)
         assert choose_partition(_config(), request, WINDOWS) == expected
 
-    def test_uses_priority_for_a_short_job_main_cannot_start(self, tmp_path: Path) -> None:
+    def test_uses_priority_for_a_short_job_main_cannot_start(self) -> None:
         config = _config()
         request = GpuJobRequest(gpus=2, time_minutes=20)
         busy = json.loads(json.dumps(WINDOWS))
         busy["partitions"][0]["groups"][0]["options"][0]["start"] = "2026-10-08T23:31"
         assert choose_partition(config, request, busy) == "priority"
 
-    def test_never_picks_a_partition_whose_limit_is_too_short(self, tmp_path: Path) -> None:
+    def test_never_picks_a_partition_whose_limit_is_too_short(self) -> None:
         config = _config(partitions=("priority", "main"))
         request = GpuJobRequest(gpus=8, time_minutes=60)
         assert choose_partition(config, request, WINDOWS) == "main"
 
     @pytest.mark.parametrize("windows", [None, {"partitions": "garbled"}, {}])
     def test_without_a_usable_report_uses_the_first_partition(
-        self, tmp_path: Path, windows: Mapping[str, object] | None
+        self, windows: Mapping[str, object] | None
     ) -> None:
         request = GpuJobRequest(gpus=1, time_minutes=5)
         assert choose_partition(_config(), request, windows) == "main"

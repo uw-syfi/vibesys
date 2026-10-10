@@ -161,8 +161,8 @@ nondeterministic.
 
 ### Real-cluster tier
 
-`./scripts/run_slurm_cluster_tests.sh` runs the `slurm` and `slurm-gpu` run
-environments against a real Slurm cluster started in Docker: munge, slurmctld,
+`./scripts/run_slurm_cluster_tests.sh` runs the `slurm` run environment, in four
+configurations, against a real Slurm cluster started in Docker: munge, slurmctld,
 slurmdbd (so `sacct` works), sshd and a login node in a `head` container, and one
 slurmd with four fake GPUs (GRES backed by character devices, no real hardware)
 in a `node` container. No LLM agents run. The agent is a real Docker container
@@ -172,10 +172,17 @@ scripted commands (`vibesys-gpu`, `vibesys-gate`) through the session's sandbox.
 The test's run directory is mounted into both cluster containers at the same
 absolute path and stands in for the shared filesystem. `slurm` reaches the head
 over SSH with a per-session key and `ssh_command` options, so nothing in
-`~/.ssh` is read or changed. `slurm-gpu` needs a Slurm client on the host; the
-tier points its existing `srun_command` and `scancel_command` at a small shim
-that runs them in the head container (the login node) with the caller's working
-directory and exactly the caller's environment, so the host installs nothing.
+`~/.ssh` is read or changed. The local transport needs a Slurm client on the host;
+the tier points its `shell_command` at a small shim that runs the command line in
+the head container (the login node) with the caller's working directory and
+exactly the caller's environment, so the host installs nothing.
+
+| Kind | Configuration | Tests |
+|---|---|---|
+| `slurm` | SSH transport | gates, cancellation, session close, paths, job environment |
+| `slurm-local` | local transport, no agent GPU commands | the same |
+| `slurm-local-gpu` | local transport plus `[vibesys.agent_gpu]` | the same, plus GPU scheduling, confinement and `vibesys-gpu` |
+| `slurm-gpu-alias` | the deprecated `--run-environment slurm-gpu` file | smoke: its deprecation notice, gates and one GPU command |
 
 The tier is marked `slurm_cluster` and skipped unless `VIBESYS_SLURM_CLUSTER=1`
 and Docker are available. CI runs it as the `real-tiers-slurm` job when the `real_tiers` change filter selects it, on every merge-queue entry, and nightly. The script sets the variable,

@@ -72,9 +72,9 @@ a local Docker container, so Docker Engine must be reachable without `sudo` (add
 your user to the `docker` group). Tasks whose candidate is a container topology,
 such as the `microservices` examples, declare `docker_in_docker = true`: their
 container gets a Docker daemon of its own and needs the
-[Sysbox](https://github.com/nestybox/sysbox) runtime installed. The `slurm-gpu`
-environment also needs `bubblewrap` on Linux (see the [CLI reference](docs/cli-flags.md)): it
-confines the GPU jobs its agent starts on compute nodes.
+[Sysbox](https://github.com/nestybox/sysbox) runtime installed. The `slurm` environment
+with `[vibesys.agent_gpu]` also needs `bubblewrap` on Linux and on the compute nodes (see the
+[CLI reference](docs/cli-flags.md)): it confines the GPU jobs its agent starts there.
 Then install VibeSys:
 
 ```bash

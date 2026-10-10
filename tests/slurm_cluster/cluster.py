@@ -208,12 +208,11 @@ class SlurmCluster:
         """Write a program that runs a command as it would run on a login node.
 
         ``shim PROGRAM ARGS`` runs ``PROGRAM ARGS`` on the head container, which is
-        the login node, with this process's working directory (for srun) and exactly
-        this process's environment (``env -i``), as the Slurm user. It is the
-        ``srun_command`` and ``scancel_command`` of the ``slurm-gpu`` operator
-        configuration, and, as ``[shim, "bash", "-c"]``, the ``shell_command`` of
-        the local transport, so the host-side client needs no Slurm installation.
-        Standard streams and the exit status pass through ``docker exec``.
+        the login node, as the Slurm user, with exactly this process's environment
+        (``env -i``) and, when the caller is in the shared directory (mounted on the
+        head at the same path), its working directory. As ``[shim, "bash", "-c"]`` it
+        is the ``shell_command`` of the local transport, so the host-side client needs no
+        Slurm installation. Standard streams and the exit status pass through ``docker exec``.
         """
         shim = directory / "login-node"
         shim.write_text(
@@ -223,10 +222,11 @@ class SlurmCluster:
                 import os, sys
                 program, *arguments = sys.argv[1:]
                 environment = [f"{{key}}={{value}}" for key, value in os.environ.items()]
-                # Only srun starts something in the caller's directory (the workspace,
-                # which is mounted at this path on the head). scancel runs wherever
-                # the caller happens to be, and that path need not exist there.
-                directory = ["-w", os.getcwd()] if program == "srun" else []
+                # A job starts in the caller's directory (the workspace), which the head
+                # mounts at this same path. Anywhere else need not exist there.
+                cwd = os.getcwd()
+                shared = cwd == {str(self.root)!r} or cwd.startswith({str(self.root) + os.sep!r})
+                directory = ["-w", cwd] if shared else []
                 os.execv(
                     {shutil.which("docker")!r},
                     ["docker", "exec", "-i", "-u", "{self.uid}", *directory,

@@ -8,8 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.slurm_cluster.conftest import expect_failure_for
-from tests.slurm_cluster.harness import CONTAINER_TMP, open_run
+from tests.slurm_cluster.harness import ALL_KINDS, CONTAINER_TMP, open_run
 
 if TYPE_CHECKING:
     from tests.slurm_cluster.cluster import SlurmCluster
@@ -36,10 +35,7 @@ def test_the_agent_finds_its_gate_client_by_name_in_any_shell_and_runs_it(run: O
     assert "accuracy ok" in gate.output
 
 
-def test_a_benchmark_result_written_under_tmp_is_relayed_to_the_agents_tmp(
-    run: OpenRun, request: pytest.FixtureRequest
-) -> None:
-    expect_failure_for(request, run, "slurm-gpu", 1601)
+def test_a_benchmark_result_written_under_tmp_is_relayed_to_the_agents_tmp(run: OpenRun) -> None:
     run.set_mode("benchmark", "pass")
     result_path = _framework_result()
 
@@ -52,10 +48,7 @@ def test_a_benchmark_result_written_under_tmp_is_relayed_to_the_agents_tmp(
     assert relayed["score"] == 42
 
 
-def test_a_failed_benchmark_still_relays_the_result_it_wrote(
-    run: OpenRun, request: pytest.FixtureRequest
-) -> None:
-    expect_failure_for(request, run, "slurm-gpu", 1601)
+def test_a_failed_benchmark_still_relays_the_result_it_wrote(run: OpenRun) -> None:
     run.set_mode("benchmark", "exit:3")
     result_path = _framework_result()
 
@@ -112,7 +105,7 @@ def test_a_gate_kind_the_client_does_not_know_is_refused(run: OpenRun) -> None:
     assert gate.exit_code == 2, gate.output
 
 
-@pytest.mark.parametrize("kind", ["slurm", "slurm-local", "slurm-gpu"])
+@pytest.mark.parametrize("kind", ALL_KINDS)
 def test_a_gate_the_task_did_not_plan_is_not_offered_and_not_runnable(
     kind: str, slurm_cluster: SlurmCluster, workdir: Path, agent_image_id: str
 ) -> None:
