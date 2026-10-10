@@ -42,8 +42,8 @@
 {"path": "libs/vs-project/src/vs_project/_logger.py", "rule": "wall_clock", "count": 2}
 {"path": "libs/vs-project/src/vs_project/_state.py", "rule": "fs_sync", "count": 1}
 {"path": "libs/vs-project/src/vs_project/_state.py", "rule": "wall_clock", "count": 2}
-{"path": "libs/vs-project/src/vs_project/_state_io.py", "rule": "fs_sync", "count": 2}
-{"path": "libs/vs-project/src/vs_project/_state_store.py", "rule": "fs_sync", "count": 2}
+{"path": "libs/vs-project/src/vs_project/_state_io.py", "rule": "fs_sync", "count": 3}
+{"path": "libs/vs-project/src/vs_project/_state_store.py", "rule": "fs_sync", "count": 1}
 {"path": "libs/vs-project/src/vs_project/_state_store.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-project/src/vs_project/project.py", "rule": "subprocess", "count": 1}
 {"path": "libs/vs-project/tests/test_git_tracker_head.py", "rule": "subprocess", "count": 1}

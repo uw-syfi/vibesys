@@ -21,7 +21,7 @@ from vs_project._state_store import LocalStateStore
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from vs_project._state_io import AtomicWriteEffects
+    from vs_project._state_io import StoreDurabilityEffects
     from vs_project.api.state_store import (
         CommitFault,
         ObservationFault,
@@ -81,7 +81,7 @@ class Project:
         fault_plan: Iterable[CommitFault] = (),
         lease_fault_plan: Iterable[CommitFault | None] = (),
         observation_fault_plan: Iterable[ObservationFault | None] = (),
-        effects: AtomicWriteEffects | None = None,
+        effects: StoreDurabilityEffects | None = None,
     ) -> StateStore:
         """Open the shared atomic record and host fence for one validated run.
 

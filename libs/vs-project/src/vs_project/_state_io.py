@@ -84,10 +84,6 @@ class AtomicWriteEffects(Protocol):
         """Persist the flushed stream before publishing its name."""
         ...
 
-    def sync_existing_file(self, path: Path) -> None:
-        """Persist the current bytes of an already published file."""
-        ...
-
     def replace(self, temporary: Path, destination: Path) -> None:
         """Atomically publish a complete temporary file."""
         ...
@@ -98,6 +94,14 @@ class AtomicWriteEffects(Protocol):
 
     def remove_temporary(self, temporary: Path) -> None:
         """Remove staging residue; a published temporary is already absent."""
+        ...
+
+
+class StoreDurabilityEffects(AtomicWriteEffects, Protocol):
+    """Atomic publication plus synchronizing a file this process did not just write."""
+
+    def sync_existing_file(self, path: Path) -> None:
+        """Persist the current bytes of an already published file."""
         ...
 
 

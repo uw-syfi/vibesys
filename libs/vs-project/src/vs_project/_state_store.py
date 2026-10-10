@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
     from pathlib import Path
 
-    from vs_project._state_io import AtomicWriteEffects, AtomicWriteStream
+    from vs_project._state_io import AtomicWriteEffects, AtomicWriteStream, StoreDurabilityEffects
     from vs_project.project import Project
 
 
@@ -146,7 +146,7 @@ class LocalStateStore(StoreOperations):
         fault_plan: Iterable[CommitFault] = (),
         lease_fault_plan: Iterable[CommitFault | None] = (),
         observation_fault_plan: Iterable[ObservationFault | None] = (),
-        effects: AtomicWriteEffects | None = None,
+        effects: StoreDurabilityEffects | None = None,
     ) -> None:
         """Bind a validated Project run namespace, without decoding payloads."""
         # > The three fault plans are the store contract's public injection points and

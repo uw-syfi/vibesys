@@ -75,6 +75,7 @@ from vs_project._state_io import (
     AtomicWriteEffects,
     AtomicWriteStream,
     LocalAtomicWriteEffects,
+    StoreDurabilityEffects,
     atomic_write_bytes,
     decode_state_document,
 )
@@ -197,6 +198,7 @@ __all__ = [
     "StateStoreFactory",
     "StateStoreWriteError",
     "StateTransition",
+    "StoreDurabilityEffects",
     "StoreFence",
     "StoreRecord",
     "StoredEnvelope",
