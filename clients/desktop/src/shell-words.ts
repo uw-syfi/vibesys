@@ -2,7 +2,7 @@
  * Split a line of run arguments the way a POSIX shell splits words, without expanding anything:
  * blanks separate words, single quotes keep everything literally, double quotes keep everything but
  * `\"`, `\\`, `\$`, and `` \` ``, and a backslash outside quotes keeps the next character. The
- * picker's run-arguments field uses it, so `--goal "make it fast"` is two arguments, not four.
+ * welcome view's run-arguments field uses it, so `--goal "make it fast"` is two arguments, not four.
  */
 export class ShellWordsError extends Error {
   override name = 'ShellWordsError';

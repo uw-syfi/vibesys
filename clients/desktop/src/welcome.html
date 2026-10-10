@@ -20,6 +20,7 @@
         }
       }
       * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
       html, body { margin: 0; height: 100%; background: var(--page); color: var(--text); }
       header { position: fixed; inset: 0 0 auto 0; height: var(--titlebar); display: flex; align-items: center; gap: 8px; padding: 0 12px 0 84px; background: var(--page); border-bottom: 1px solid var(--line); -webkit-app-region: drag; z-index: 5; }
       html[data-platform="win32"] header, html[data-platform="linux"] header { padding-left: 12px; padding-right: 148px; }

@@ -32,7 +32,7 @@ describe('parseLaunch', () => {
     });
   });
 
-  test('opens the picker, on a host when one is named', () => {
+  test('opens the welcome view, on a host when one is named', () => {
     expect(parseLaunch([], undefined, CWD)).toEqual({kind: 'welcome', host: null});
     expect(parseLaunch(['--'], undefined, CWD)).toEqual({kind: 'welcome', host: null});
     expect(parseLaunch(['--host', 'gpu-box'], undefined, CWD)).toEqual({
