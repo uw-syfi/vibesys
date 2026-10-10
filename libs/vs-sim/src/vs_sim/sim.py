@@ -68,11 +68,13 @@ class Sim:
     clock: VirtualClock = field(default_factory=VirtualClock)
     worlds: WorldRegistry = field(default_factory=lambda: WORLDS)
     trace: EventTrace | None = None
+    schedule_seed: int | None = None
+    """When set, ties between ready work are broken in an order drawn from this seed."""
     _built: dict[str, object] = field(default_factory=dict, init=False, repr=False)
 
     def run[T](self, main: Coroutine[object, object, T]) -> T:
         """Run ``main`` to completion on this simulation's virtual clock."""
-        return run_virtual(self.clock, main, trace=self.trace)
+        return run_virtual(self.clock, main, trace=self.trace, schedule_seed=self.schedule_seed)
 
     def random(self, label: str = "") -> SeededRandom:
         """The random stream ``label`` draws from; independent of every other label."""

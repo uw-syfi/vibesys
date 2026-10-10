@@ -603,6 +603,45 @@ jobs:
         if: github.event_name == 'pull_request'
         run: ./support/repoctl/repoctl run-checks --group patch_coverage
 
+  # Reruns the tests a pull request adds or changes across many seeds and schedule
+  # orderings (issue #1640), so a test that only passes in one scheduling order fails its
+  # own PR. A job of its own, beside the shards: it adds no time to the critical path, and
+  # a PR that touches no test pays for the checkout and a stdlib-only diff scan only (no
+  # environment setup). Pull requests only; the merge queue has already seen the result.
+  seed-exploration:
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Select the tests this pull request adds or changes
+        id: select
+        run: python3 scripts/explore_changed_tests.py select --base "origin/${{ github.base_ref }}" --ids-file "$RUNNER_TEMP/changed-tests.txt"
+
+      - name: Install uv
+        if: steps.select.outputs.selected == 'true'
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        if: steps.select.outputs.selected == 'true'
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        if: steps.select.outputs.selected == 'true'
+        run: uv sync --dev
+
+      - name: Explore the changed tests across seeds and schedules
+        if: steps.select.outputs.selected == 'true'
+        run: uv run --no-sync python scripts/explore_changed_tests.py run --ids-file "$RUNNER_TEMP/changed-tests.txt"
+
   # Exercises the real Linux workspace-confinement boundary (issue #149). The
   # main `test` job skips these (no bubblewrap), so this job installs it and
   # forces the tests to run — VIBESYS_REQUIRE_SANDBOX_TESTS=1 turns a missing or
@@ -703,6 +742,7 @@ jobs:
       - test
       - record-durations
       - coverage
+      - seed-exploration
       - sandbox-linux
       - sandbox-macos
     if: always()

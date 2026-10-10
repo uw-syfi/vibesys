@@ -13,6 +13,13 @@ jump, because the thread's result may change what the loop does at the current t
 time passes only once the workers are done. A loop that is idle with nothing scheduled
 and no worker in flight cannot ever wake, so it raises instead of hanging; a worker that
 does not finish within ``WORKER_GUARD_S`` is reported the same way.
+
+By default ties are broken in the order the work was started, which is what makes a run
+repeatable but also hides tests that only pass in that one order. ``run_virtual`` takes a
+``schedule_seed`` that breaks every tie differently instead: callbacks that are ready at the
+same time run in a random order, and timers due at the same instant fire in a random order.
+The order is a pure function of the seed (so a failure replays), no callback is dropped or
+delayed past its due time, and the clock still moves only when the loop is idle.
 """
 
 from __future__ import annotations
@@ -22,6 +29,8 @@ import collections.abc
 import math
 import selectors
 from typing import TYPE_CHECKING, Any, overload
+
+from vs_sim.randomness import SeededRandom
 
 if TYPE_CHECKING:
     import concurrent.futures
@@ -43,6 +52,9 @@ class VirtualDeadlockError(RuntimeError):
 class VirtualTimeLimitError(RuntimeError):
     """A run slept past ``VirtualClock.limit``: it is stuck, not slow, because virtual time is free."""
 
+
+_TIE_BREAK_STEPS = 1 << 16
+"""Float steps a seeded schedule may add to a timer's due time; far below any real delay."""
 
 _DUE_MEMORY = 4096
 """Due instants remembered before the ones already past are forgotten."""
@@ -138,11 +150,15 @@ class _RecordedCoroutine(collections.abc.Coroutine[object, object, object]):
 
 
 class _VirtualLoop(asyncio.SelectorEventLoop):
-    def __init__(self, clock: VirtualClock, trace: EventTrace | None) -> None:
+    def __init__(
+        self, clock: VirtualClock, trace: EventTrace | None, schedule_seed: int | None
+    ) -> None:
         selector = _VirtualSelector(clock, trace)
         super().__init__(selector)
         selector.loop = self
         self._clock = clock
+        self._schedule = None if schedule_seed is None else SeededRandom(schedule_seed)
+        self._taken: set[float] = set()
         self.clock = clock
         self._due: dict[float, float] = {}
         self.workers_in_flight = 0
@@ -166,12 +182,45 @@ class _VirtualLoop(asyncio.SelectorEventLoop):
         # the same due time. Nudge each later timer for an instant by one float step so
         # equal sleeps wake in the order they started. The clock itself still jumps to
         # the first due time, and the nudge is far inside the loop's timer resolution.
+        if self._schedule is not None:
+            due = self._seeded_due(self._schedule, when)
+            return super().call_at(due, callback, *args, context=context)
         if len(self._due) > _DUE_MEMORY:
             self._due = {at: last for at, last in self._due.items() if at > self._clock.at}
         last = self._due.get(when)
         due = when if last is None else math.nextafter(last, math.inf)
         self._due[when] = due
         return super().call_at(due, callback, *args, context=context)
+
+    def _seeded_due(self, schedule: SeededRandom, when: float) -> float:
+        # Under a schedule seed every timer gets its own due time a random few float steps
+        # after the requested one, so timers meant for one instant fire in a seeded order.
+        if not math.isfinite(when):
+            return when
+        if len(self._taken) > _DUE_MEMORY:
+            self._taken = {at for at in self._taken if at > self._clock.at}
+        step = math.ulp(when)
+        while True:
+            due = when + step * schedule.randint(0, _TIE_BREAK_STEPS - 1)
+            if due not in self._taken:
+                self._taken.add(due)
+                return due
+
+    def call_soon(
+        self,
+        callback: Callable[..., object],
+        *args: object,
+        context: contextvars.Context | None = None,
+    ) -> asyncio.Handle:
+        handle = super().call_soon(callback, *args, context=context)
+        if self._schedule is not None:
+            # Ready callbacks run in queue order; put the new one at a seeded position
+            # instead of the back. `_ready` is asyncio's own queue, which this loop subclasses.
+            # The standard library's queue is not in the type stubs.
+            ready = self._ready  # ty: ignore[unresolved-attribute]
+            ready.pop()
+            ready.insert(self._schedule.randint(0, len(ready)), handle)
+        return handle
 
     def run_in_executor[*Ts, T](
         self,
@@ -255,13 +304,19 @@ def current_virtual_clock() -> VirtualClock:
 
 
 def run_virtual[T](
-    clock: VirtualClock, main: Coroutine[object, object, T], *, trace: EventTrace | None = None
+    clock: VirtualClock,
+    main: Coroutine[object, object, T],
+    *,
+    trace: EventTrace | None = None,
+    schedule_seed: int | None = None,
 ) -> T:
     """Run ``main`` to completion on a loop whose time is ``clock``.
 
     Tasks still pending when ``main`` returns are cancelled and awaited, as
     ``asyncio.run`` does. When ``trace`` is given, the clock advances and the
-    scheduling order of every task are recorded in it.
+    scheduling order of every task are recorded in it. With ``schedule_seed`` set, work that
+    is ready at the same time runs in an order drawn from that seed (the same seed always
+    gives the same order); without it, ties run in the order they were started.
     """
-    with asyncio.Runner(loop_factory=lambda: _VirtualLoop(clock, trace)) as runner:
+    with asyncio.Runner(loop_factory=lambda: _VirtualLoop(clock, trace, schedule_seed)) as runner:
         return runner.run(main)

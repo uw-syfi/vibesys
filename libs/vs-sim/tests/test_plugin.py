@@ -314,3 +314,81 @@ def test_a_sim_gate_deadlocks_instead_of_hanging() -> None:
 
     with pytest.raises(VirtualDeadlockError):
         sim.run(main())
+
+
+ORDER_DEPENDENT_SUITE = """
+import asyncio
+
+async def test_two_tasks_race_for_a_shared_slot():
+    winner = []
+
+    async def claim(name):
+        await asyncio.sleep(1)
+        winner.append(name)
+
+    await asyncio.gather(claim("a"), claim("b"))
+    assert winner == ["a", "b"], "the test assumes a always claims first"
+"""
+
+
+def test_explore_fails_an_order_dependent_test_and_prints_the_replay_options(
+    suite: pytest.Pytester,
+) -> None:
+    suite.makepyfile(ORDER_DEPENDENT_SUITE)
+    suite.runpytest_subprocess().assert_outcomes(passed=1)  # the default order hides the bug
+    result = suite.runpytest_subprocess("--sim-explore=24")
+    result.assert_outcomes(failed=1)
+    match = re.search(
+        r"replay with --sim-seed=(\d+) --sim-schedule-seed=(\d+)", result.stdout.str()
+    )
+    assert match is not None
+    assert match.group(1) == match.group(2)
+    replay = suite.runpytest_subprocess(
+        f"--sim-seed={match.group(1)}", f"--sim-schedule-seed={match.group(2)}"
+    )
+    replay.assert_outcomes(failed=1)
+
+
+def test_explore_runs_each_test_the_requested_number_of_times(suite: pytest.Pytester) -> None:
+    suite.makepyfile(
+        """
+        import asyncio
+        from pathlib import Path
+
+        async def test_sim():
+            await asyncio.sleep(1)
+            with Path("sim_runs").open("a") as out:
+                out.write("x")
+
+        def test_plain():
+            with Path("plain_runs").open("a") as out:
+                out.write("x")
+        """
+    )
+    result = suite.runpytest_subprocess("--sim-explore=5", "--sim-repeat=3")
+    result.assert_outcomes(passed=2)
+    assert (suite.path / "sim_runs").read_text() == "x" * 5
+    assert (suite.path / "plain_runs").read_text() == "x" * 3
+    result.stdout.fnmatch_lines(["vs-sim exploration: 8 of 8 planned runs in *"])
+
+
+def test_explore_deselects_real_tiers_and_other_tests_unless_repeated(
+    suite: pytest.Pytester,
+) -> None:
+    suite.makeini(
+        "[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider\nsim_real_tiers =\n    real\n"
+    )
+    suite.makepyfile(test_top="def test_plain():\n    pass\n\nasync def test_sim():\n    pass\n")
+    (suite.path / "real").mkdir()
+    (suite.path / "real" / "test_real.py").write_text("def test_real():\n    pass\n")
+    suite.runpytest_subprocess("--sim-explore=2").assert_outcomes(passed=1, deselected=2)
+    suite.runpytest_subprocess("--sim-explore=2", "--sim-repeat=2").assert_outcomes(
+        passed=2, deselected=1
+    )
+
+
+def test_explore_budget_stops_extra_runs_but_never_the_first(suite: pytest.Pytester) -> None:
+    suite.makepyfile("async def test_sim():\n    pass\n")
+    result = suite.runpytest_subprocess("--sim-explore=50", "--sim-explore-budget=0")
+    result.assert_outcomes(passed=1)
+    result.stdout.fnmatch_lines(["vs-sim exploration: 1 of 50 planned runs in *"])

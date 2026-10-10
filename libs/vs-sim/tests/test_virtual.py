@@ -257,3 +257,72 @@ def test_a_real_loop_has_no_virtual_clock() -> None:
 
     with pytest.raises(RuntimeError, match="not running on a virtual loop"):
         asyncio.run(main())
+
+
+def _wake_order(count: int, seconds: float, schedule_seed: int | None) -> list[int]:
+    """The order `count` tasks that sleep the same time, then record themselves, finish in."""
+    clock = VirtualClock()
+    woke: list[int] = []
+
+    async def sleeper(index: int) -> None:
+        await clock.sleep(seconds)
+        woke.append(index)
+
+    async def main() -> None:
+        await asyncio.gather(*(sleeper(i) for i in range(count)))
+
+    run_virtual(clock, main(), schedule_seed=schedule_seed)
+    return woke
+
+
+@given(st.integers(0, 2**32), st.integers(1, 20), st.floats(min_value=0.0, max_value=100.0))
+def test_a_schedule_seed_replays_and_loses_no_work(seed: int, count: int, seconds: float) -> None:
+    first = _wake_order(count, seconds, seed)
+    assert first == _wake_order(count, seconds, seed)
+    assert sorted(first) == list(range(count))
+
+
+@given(st.integers(0, 2**32), st.integers(1, 20), st.floats(min_value=0.0, max_value=100.0))
+def test_a_schedule_seed_keeps_distinct_due_times_in_order(
+    seed: int, count: int, seconds: float
+) -> None:
+    """Perturbing ties never reorders sleeps that are really different lengths."""
+    clock = VirtualClock()
+    woke: list[int] = []
+
+    async def sleeper(index: int) -> None:
+        await clock.sleep(seconds + index)
+        woke.append(index)
+
+    async def main() -> None:
+        await asyncio.gather(*(sleeper(i) for i in range(count)))
+
+    run_virtual(clock, main(), schedule_seed=seed)
+    assert woke == list(range(count))
+
+
+def test_different_schedule_seeds_reach_different_orders() -> None:
+    orders = {tuple(_wake_order(6, 1.0, seed)) for seed in range(40)}
+    assert len(orders) > 10
+    assert _wake_order(6, 1.0, None) == list(range(6))
+
+
+@given(st.integers(0, 2**32), st.integers(1, 12))
+def test_ready_callbacks_run_in_a_seeded_order_and_all_run(seed: int, count: int) -> None:
+    def order(schedule_seed: int | None) -> list[int]:
+        ran: list[int] = []
+
+        async def main() -> None:
+            loop = asyncio.get_running_loop()
+            for i in range(count):
+                loop.call_soon(ran.append, i)
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+        run_virtual(VirtualClock(), main(), schedule_seed=schedule_seed)
+        return ran
+
+    assert order(None) == list(range(count))
+    seeded = order(seed)
+    assert seeded == order(seed)
+    assert sorted(seeded) == list(range(count))
