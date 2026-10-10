@@ -144,10 +144,6 @@ path = "server.settings"
 depends_on = ["vibesys.api"]
 
 [[modules]]
-path = "server.tool_payloads"
-depends_on = ["vibesys.api"]
-
-[[modules]]
 path = "vibesys"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_runtime", "vs_sandbox", "vibesys.errors", "vibesys.run.evaluation_backend"]

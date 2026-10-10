@@ -1451,11 +1451,6 @@ class EvidenceReusingEvaluation:
         await self._backend.recorded_submission(handle_id)
         await self._scopes.cancel_association(handle_id, scope_id)
 
-    async def cancel_physical(self, handle_id: str) -> None:
-        """Cancel a physical capture with explicit host authority over every requester."""
-        await self._backend.recorded_submission(handle_id)
-        await self._backend.cancel(handle_id)
-
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
         """Project backend-accepted evidence without attributing later WIP to it."""
         return (await self._backend.operation_snapshot(handle_id)).evidence_ids

@@ -8,7 +8,7 @@ one another.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -216,24 +216,6 @@ def _agent_run_projection(
             for hypothesis in state.hypotheses
         ],
         rounds=[_round_view(record) for record in state.rounds],
-    )
-
-
-def project_committed_run_view(state: BaseModel, *, run_id: str, loop: str) -> RunView:
-    """Project a just-committed agent state into a `RunView`, entirely in memory.
-
-    *state* is the exact typed value published by a completed host checkpoint.
-    The registered strategy projector supplies its own namespace and identity;
-    this function reshapes the value without a disk read. Active publication
-    uses `RunStatus.ACTIVE` and the state's experiment revision.
-    """
-    agent_state = cast("HypothesisState", state)
-    return project_run_view(
-        agent_state,
-        run_id=run_id,
-        status=RunStatus.ACTIVE,
-        experiment_revision=agent_state.experiment_revision,
-        loop=loop,
     )
 
 

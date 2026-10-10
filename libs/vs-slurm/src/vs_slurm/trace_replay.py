@@ -117,11 +117,6 @@ class SchedulerTrace(BaseModel):
         )
 
     @property
-    def ends_on_its_own(self) -> bool:
-        """Whether the timeline reaches a terminal accounting state with no cancel."""
-        return self.steps[-1].ended
-
-    @property
     def ended_at_seconds(self) -> float:
         """When accounting first reports a terminal state, or infinity."""
         return next((step.at_seconds for step in self.steps if step.ended), float("inf"))

@@ -104,11 +104,6 @@ class WorkerAwaitingEvaluation(BaseModel):
     continuation: EvaluationContinuation
 
 
-def dependency_wait(continuation: DependencyContinuation) -> WorkerAwaitingEvaluation:
-    """Build the product wait event from a validated typed dependency continuation."""
-    return WorkerAwaitingEvaluation(continuation=continuation)
-
-
 class EvaluationSettled(BaseModel):
     """Trusted observation, attributed to its immutable evidence identity."""
 

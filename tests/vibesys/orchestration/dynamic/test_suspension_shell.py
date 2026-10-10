@@ -42,7 +42,7 @@ from vibesys.orchestration.dynamic.models import (
     WorkstreamPhase,
     WorkstreamPlan,
 )
-from vibesys.orchestration.dynamic.transitions import dependency_wait
+from vibesys.orchestration.dynamic.transitions import WorkerAwaitingEvaluation
 from vibesys.run.dynamic_suspension import (
     EvaluationSuspension,
     EvaluationSuspensionInvariantError,
@@ -1319,7 +1319,7 @@ async def test_profiler_wait_suspends_once_and_resumes_once(
         )
         continuation = next(iter(scenario.state.lifecycle.continuations.values()))
         # Replaying the same durable yield is one logical profiler wait.
-        await shell.apply(dependency_wait(continuation))
+        await shell.apply(WorkerAwaitingEvaluation(continuation=continuation))
         initial_calls = len(scenario.calls)
         budget = scenario.state.workstreams[0].budget
         task = asyncio.create_task(shell.run_wait(0, scenario.workspace, scenario.session))

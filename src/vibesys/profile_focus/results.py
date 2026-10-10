@@ -41,7 +41,3 @@ class FocusView:
     active_component: str = ""
     ledger: FocusLedger = field(default_factory=FocusLedger)
     ranked_bottlenecks: tuple[ProfileBottleneck, ...] = ()
-
-    def implementer_prompt_context(self) -> dict[str, object]:
-        """Return variables consumed by the implementer template."""
-        return {"active_component": self.active_component}
