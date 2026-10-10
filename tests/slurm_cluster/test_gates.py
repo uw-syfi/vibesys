@@ -22,6 +22,20 @@ def _framework_result() -> str:
     return f"{CONTAINER_TMP}/vibesys-framework-benchmark-{secrets.token_hex(8)}.json"
 
 
+def test_the_agent_finds_its_gate_client_by_name_in_any_shell_and_runs_it(run: OpenRun) -> None:
+    """Regression for #1646: `which vibesys-gate` was empty; only the absolute path worked."""
+    name = Path(run.launcher()).name
+
+    for shell in ("sh -c", "bash -lc"):
+        found = run.agent(f"{shell} 'command -v {name}'")
+        assert found.exit_code == 0, found.output
+        assert found.output.strip() == f"/usr/local/bin/{name}"
+
+    gate = run.agent(f"{name} --gate accuracy")
+    assert gate.exit_code == 0, gate.output
+    assert "accuracy ok" in gate.output
+
+
 def test_a_benchmark_result_written_under_tmp_is_relayed_to_the_agents_tmp(
     run: OpenRun, request: pytest.FixtureRequest
 ) -> None:

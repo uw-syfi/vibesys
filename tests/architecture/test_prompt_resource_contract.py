@@ -179,6 +179,7 @@ def representative_context() -> dict[str, object]:
         "exhaustion_entry",
         "feedback",
         "framework_revert_commit",
+        "gate_client",
         "gate_approved_evaluation_artifact",
         "gate_approved_perf_unit",
         "gpu",
@@ -282,6 +283,7 @@ def representative_context() -> dict[str, object]:
         context[name] = False
     for name in [
         "failed_lessons",
+        "gates",
         "inspirations",
         "notes",
         "prior_attempt_artifact_locations",
@@ -748,6 +750,7 @@ def rich_path_context(workspace: Path) -> dict[str, object]:
             progress_location=files.progress_location, evidence_location=files.profiler_location(1)
         ),
         "read_only_paths": ("reference",),
+        "gates": ("accuracy", "benchmark"),
         "seeded_workspace_paths": ("reference/model.py",),
         "history_root": files.progress_location,
         "notes": (

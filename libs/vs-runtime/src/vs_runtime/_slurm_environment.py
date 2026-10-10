@@ -15,6 +15,7 @@ from vs_runtime._container_runtime_policy import reject_docker_in_docker
 from vs_runtime._host_command_bridge import (
     bridge_editor_extras,
     new_broker_socket_path,
+    planned_gates,
     write_client_launcher,
 )
 from vs_runtime._run_environment import (
@@ -151,7 +152,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         config = load_slurm_config(self.config_path)
         policy = load_slurm_policy(self.config_path)
         return _PreparedRunEnvironment(
-            SlurmEnvironmentFacts(service_command=_slurm_service_command(policy)),
+            SlurmEnvironmentFacts(
+                service_command=_slurm_service_command(policy),
+                gate_client=_GATE_LAUNCHER,
+                gates=planned_gates(request.accuracy_command, request.benchmark_command),
+            ),
             partial(self._open, request, config, policy),
         )
 

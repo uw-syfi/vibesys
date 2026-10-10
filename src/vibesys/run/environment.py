@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from pathlib import PurePosixPath
 
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_project.api import Project
@@ -49,6 +50,8 @@ def open_run_environment(
                 "slurm/prompt_notes.j2",
                 template_dir=_TEMPLATE_DIR,
                 service_command=shlex.join(facts.service_command),
+                gate_client=facts.gate_client,
+                gates=facts.gates,
                 read_only_paths=[
                     path.as_posix() for path in request.project_path_policy.read_only_paths
                 ],
@@ -60,6 +63,8 @@ def open_run_environment(
                 "slurm_gpu/prompt_notes.j2",
                 template_dir=_TEMPLATE_DIR,
                 launcher=facts.launcher,
+                gate_client=PurePosixPath(facts.launcher).name,
+                gates=facts.gates,
                 max_gpus=facts.max_gpus,
                 max_time_minutes=facts.max_time_minutes,
                 gate_gpus=facts.gate_gpus,

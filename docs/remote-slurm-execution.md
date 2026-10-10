@@ -16,7 +16,10 @@ its host path.
 The container cannot hold the cluster's tools or credentials, so the host owns a
 broker and the container reaches it over a bind-mounted Unix socket with a
 per-run token. The agent runs a gate as `vibesys-gate --gate accuracy` or
-`vibesys-gate --gate benchmark`; the broker runs the planned gate with the
+`vibesys-gate --gate benchmark`. The client is mounted at
+`/usr/local/bin/vibesys-gate`, so the bare name resolves in any shell, and the
+environment notes in the agent's prompts name it and the gates the task plans. The
+broker runs the planned gate with the
 cluster wrapper (`vs_sandbox.slurm_command`), which stages the workspace, runs
 the job, and copies the result back. The agent names only the gate and, for a
 benchmark, a result path; it cannot supply a command. Interrupting the client or
