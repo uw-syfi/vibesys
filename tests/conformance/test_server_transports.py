@@ -6,11 +6,11 @@ import json
 import socket
 import threading
 from contextlib import contextmanager
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from tests.conformance.frame_matching import assert_frame_matches
+from tests.conformance.replay import ScenarioConnection, load_scenario, run_steps, runner_group
 from tests.server.support import (
     DEADLOCK_GUARD_S,
     FakeSettleWindow,
@@ -25,25 +25,16 @@ from server.transport.websocket import WebSocketGateway
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable, Mapping
+    from pathlib import Path
 
     from websockets.typing import Origin
 
-_SCENARIOS = Path(__file__).parent / "scenarios"
-_RUNNER = Path(__file__).parent / "runners" / "server.json"
 _HISTORY_EVENTS = 100
 # A burst large enough that one batch per event would be unmistakable, split
 # into chunks so the coalescing bound is a ratio rather than a timing guess.
 _BURST_CHUNKS = 10
 _BURST_CHUNK_EVENTS = 10
 _BURST_EVENTS = _BURST_CHUNKS * _BURST_CHUNK_EVENTS
-
-
-class _Connection(Protocol):
-    def send(self, frame: Mapping[str, Any]) -> None: ...
-
-    def receive(self) -> dict[str, Any]: ...
-
-    def close(self) -> None: ...
 
 
 class _UnixConnection:
@@ -97,16 +88,6 @@ class _WebSocketConnection:
         self._connection.close()
 
 
-def _scenario(name: str) -> dict[str, Any]:
-    return cast("dict[str, Any]", json.loads((_SCENARIOS / f"{name}.json").read_text()))
-
-
-def _runner_group(name: str) -> tuple[str, ...]:
-    """Return the scenario ids this runner executes through one setup path."""
-    inventory = cast("dict[str, Any]", json.loads(_RUNNER.read_text()))
-    return tuple(cast("list[str]", inventory["groups"][name]))
-
-
 def _parts_with_history(tmp_path: Path) -> ServerParts:
     parts = build_server_parts(tmp_path / "logs")
     for index in range(_HISTORY_EVENTS):
@@ -117,23 +98,10 @@ def _parts_with_history(tmp_path: Path) -> ServerParts:
 def _declared_runs(scenario_names: Iterable[str]) -> list[tuple[str, str]]:
     """Pair each scenario with every transport it declares it must reproduce."""
     return [
-        (name, transport) for name in scenario_names for transport in _scenario(name)["transports"]
+        (name, transport)
+        for name in scenario_names
+        for transport in load_scenario(name)["transports"]
     ]
-
-
-def _run_steps(
-    connection: _Connection,
-    scenario: Mapping[str, Any],
-) -> list[dict[str, Any]]:
-    received: list[dict[str, Any]] = []
-    for step in scenario["steps"]:
-        if step["dir"] == "c2s":
-            connection.send(step["frame"])
-        else:
-            message = connection.receive()
-            assert_frame_matches(message, step["expect"])
-            received.append(message)
-    return received
 
 
 @contextmanager
@@ -141,7 +109,7 @@ def _running_connection(
     transport: str,
     parts: ServerParts,
     socket_path: Path,
-) -> Generator[_Connection]:
+) -> Generator[ScenarioConnection]:
     if transport == "unix":
         with UnixJsonlServer(socket_path, parts.api):
             connection = _UnixConnection(socket_path)
@@ -159,7 +127,7 @@ def _running_connection(
             connection.close()
 
 
-@pytest.mark.parametrize("scenario_name", _runner_group("bootstrap"))
+@pytest.mark.parametrize("scenario_name", runner_group("server", "bootstrap"))
 @pytest.mark.parametrize("transport", ["unix", "websocket"])
 def test_shared_bootstrap_scenarios_run_against_each_transport(
     tmp_path: Path,
@@ -167,12 +135,12 @@ def test_shared_bootstrap_scenarios_run_against_each_transport(
     scenario_name: str,
     transport: str,
 ) -> None:
-    scenario = _scenario(scenario_name)
+    scenario = load_scenario(scenario_name)
     assert transport in scenario["transports"]
     parts = _parts_with_history(tmp_path)
     try:
         with _running_connection(transport, parts, socket_dir / "conformance.sock") as connection:
-            received = _run_steps(connection, scenario)
+            received = run_steps(connection, scenario)
         batch = received[-1]
         if scenario_name == "tail-bootstrap-spine-prepend":
             assert batch["history_after_sequence"] == parts.api.latest_sequence - 50
@@ -182,7 +150,7 @@ def test_shared_bootstrap_scenarios_run_against_each_transport(
         parts.close()
 
 
-@pytest.mark.parametrize("scenario_name", _runner_group("tail-overflow"))
+@pytest.mark.parametrize("scenario_name", runner_group("server", "tail-overflow"))
 @pytest.mark.parametrize("transport", ["unix", "websocket"])
 def test_tail_overflow_rebootstrap_scenario_marks_only_the_second_bootstrap(
     tmp_path: Path,
@@ -191,7 +159,7 @@ def test_tail_overflow_rebootstrap_scenario_marks_only_the_second_bootstrap(
     transport: str,
 ) -> None:
     """Exercise the corpus's dynamic tail-overflow setup against both servers."""
-    scenario = _scenario(scenario_name)
+    scenario = load_scenario(scenario_name)
     assert transport in scenario["transports"]
     parts = build_server_parts(tmp_path / "logs")
     try:
@@ -234,7 +202,7 @@ _CONTROL_PATH_CALLBACKS = {
 
 @pytest.mark.parametrize(
     ("scenario_name", "transport"),
-    _declared_runs(_runner_group("control")),
+    _declared_runs(runner_group("server", "control")),
 )
 def test_control_path_scenarios_run_against_each_declared_transport(
     tmp_path: Path,
@@ -253,7 +221,7 @@ def test_control_path_scenarios_run_against_each_declared_transport(
     parts = build_server_parts(tmp_path / "logs")
     try:
         with _running_connection(transport, parts, socket_dir / "control.sock") as connection:
-            received = _run_steps(connection, _scenario(scenario_name))
+            received = run_steps(connection, load_scenario(scenario_name))
         assert len(received) == 1
         callback = _CONTROL_PATH_CALLBACKS.get(scenario_name)
         if callback is not None:
@@ -336,13 +304,13 @@ def _disconnect_waiter(tracker: SubscriptionTracker) -> tuple[threading.Thread, 
     return threading.Thread(target=wait_for_disconnect, daemon=True), settled
 
 
-@pytest.mark.parametrize("scenario_name", _runner_group("dual-client"))
+@pytest.mark.parametrize("scenario_name", runner_group("server", "dual-client"))
 def test_dual_transport_subscriptions_have_independent_floors_and_teardown(
     tmp_path: Path,
     socket_dir: Path,
     scenario_name: str,
 ) -> None:
-    scenario = _scenario(scenario_name)
+    scenario = load_scenario(scenario_name)
     parts = _parts_with_history(tmp_path)
     settle = FakeSettleWindow()
     tracker = SubscriptionTracker(settle)
@@ -354,7 +322,7 @@ def test_dual_transport_subscriptions_have_independent_floors_and_teardown(
             UnixJsonlServer(socket_path, parts.api, tracker),
             WebSocketGateway(parts.api, subscriptions=tracker) as gateway,
         ):
-            connections: dict[str, _Connection] = {
+            connections: dict[str, ScenarioConnection] = {
                 "terminal": _UnixConnection(socket_path),
                 "browser": _WebSocketConnection(gateway),
             }
