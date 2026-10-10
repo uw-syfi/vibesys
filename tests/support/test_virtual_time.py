@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from tests.support.fake_run_clock import FakeRunClock
 from tests.support.virtual_time import VirtualClock, VirtualDeadlockError, run_virtual
 
 
+@example(durations=[0.010000000000000002, 0.01])
 @given(st.lists(st.floats(min_value=0.01, max_value=500.0), min_size=1, max_size=8))
 def test_concurrent_sleeps_overlap_and_wake_in_due_order(durations: list[float]) -> None:
     clock = VirtualClock(1.0)
@@ -26,7 +27,9 @@ def test_concurrent_sleeps_overlap_and_wake_in_due_order(durations: list[float])
     run_virtual(clock, main())
     # Sleeps overlap: the run lasts as long as the longest one, not the sum.
     assert clock.now() == pytest.approx(1.0 + max(durations), abs=1e-6)
-    assert [seconds for seconds, _ in woke] == sorted(durations)
+    # Durations that differ by one ulp can land on the same due time (1.0 + 0.01 ==
+    # 1.0 + 0.010000000000000002), and ties wake in start order, so order by due time.
+    assert [seconds for seconds, _ in woke] == sorted(durations, key=lambda seconds: 1.0 + seconds)
     assert all(at == pytest.approx(1.0 + seconds, abs=1e-6) for seconds, at in woke)
 
 
