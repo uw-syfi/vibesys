@@ -2,7 +2,9 @@
 
 Status: draft for discussion. Owner: web + orchestration. Companion to the
 campaign dashboard in PR #1304 (`feat/web-trajectory-replay-fixtures`), which
-this builds on.
+this builds on. Citations below were rechecked against a fresh
+`upstream/main` pass (commit `cbca56e46`, 2026-10-10); "The gap" and "Backend
+path" carry what that pass corrected or sharpened from the first draft.
 
 ## Problem
 
@@ -39,24 +41,65 @@ Non-goals (named here, deferred to the backend path in the last section):
 - Emitting these events from the real orchestrator. That needs a projection of
   `DynamicState.workstreams` and new wire-protocol event types; it is sketched
   but not built here.
-- Running a real `dynamic` campaign locally. It cannot be done: `dynamic`
-  orchestration raises at startup unless the run environment supports parallel
-  candidate workspaces, which is true only on Slurm and Modal
-  (`orchestration/dynamic/orchestration.py:1240`,
-  `vs_runtime/_workspace_resources.py:95`,
-  `vs_runtime/_run_environment.py:759,1399`). So any local demo is necessarily
+- Running a real `dynamic` campaign locally. `dynamic` orchestration raises
+  at startup unless the run environment supports parallel candidate
+  workspaces (`_require_candidate_sandboxes`, `dynamic_core.py:143-162`,
+  called from `orchestration/dynamic/orchestration.py:1248-1260`). As of
+  `372be9840` (#1556, landed the same day as this research pass), that now
+  includes Docker alongside Slurm and Modal, so a real `dynamic` run may be
+  possible locally in principle. That was not verified end to end here, and
+  the GPU-bound serving example this doc otherwise refers to still needs real
+  hardware (no local MI300A/B200) regardless. So the prototype below is still
   replay-driven; see "Prototype".
 
 ## Background: what already exists
 
-**Telemetry already flows through one chokepoint, not prints.** Backend events
-are emitted at a single point (`WireJournal.record`), persisted append-only
-(`EventStore`, JSONL), and served to the browser over a chunked websocket
-(1 MiB frame cap). The event envelope carries `execution_id`, `round_label`,
-`agent_kind`, and `run_id`. The frontend folds events into state with pure
-reducers (`@vibesys/core-state`), and the web client already has a durable,
+**A terminology note for readers arriving from the "no more outer/inner
+loop" framing.** That framing names a direction, not yet a rename.
+`--outer-loop` and `--inner-loop` are still the live CLI flags today
+(`entrypoints/cli/args.py:108-125,622-631`; `docs/cli-flags.md:140` still
+headers its section "Outer Loops"). `single-agent`/`multi-agent` are
+`--inner-loop` values layered on top of an `--outer-loop` choice, one of 7
+registered strategies (`single`, `multi`, `issue_queue`/`plain`, `evolve`,
+`dynamic`, plus two profile-guided variants). "Orchestrator" is an
+`AgentRole` id shared by every one of them (`Role.PLANNER = "orchestrator"`,
+`orchestration/dynamic/strategy/_state.py:55-61`), not a new controller
+class. None of this changes the design below (frames key off
+`workstream_id`/`phase`, not off which outer-loop strategy produced them),
+but it is worth knowing before reading backend code that still says "outer
+loop."
+
+**Telemetry already flows through named chokepoints, not prints.** There are
+two, one per layer, not a single one. Core-side, every producer emits
+through `EventJournal.emit()` (`run/event_journal.py:36-45`), which appends
+to `core-events.jsonl` via the generic `DurableEventJournal.record()`
+(`vs_runtime/_event_journal.py:102-113`). A single bridge, `project_event()`
+(`server/integration.py:360`), turns each `CoreEvent` into a `RunEvent` and
+hands it to the server-side `WireJournal.append()`
+(`server/journal.py:125,207,227`), which persists to `run-events.jsonl`
+(`EventStore`) and fans out over a chunked websocket (1 MiB frame cap,
+`server/transport/websocket.py`). Every envelope carries `sequence`,
+`run_id`, `timestamp`, and `type`, plus `execution_id`, `round_label`, and
+`agent_kind`. The frontend folds events into state with pure reducers
+(`@vibesys/core-state`), and the web client already has a durable,
 reconnecting stream (`PersistentEventStream`, `WebSession`). The design below
 reuses that shape rather than inventing a parallel path.
+
+**Roles are a run-level roster, not a per-workstream team.** Every
+orchestration strategy declares a fixed set of `AgentRole`s once per run
+(`Role` StrEnum: `orchestrator`, `implementer`, `judge`, `profiler`,
+`orchestration/dynamic/strategy/_state.py:55-61`). No backend field maps one
+agent to the specific workstreams it touched; that has to be derived from
+event history (which role emitted which event, under which hypothesis_id),
+not read off a stored list. Two real, already-merged capabilities sit on top
+of this roster worth knowing even though this design does not surface them as
+frames: the `implementer` role can delegate to the dedicated `profiler`
+teammate mid-turn via a `dispatch_profiler` tool, and separately can request
+accuracy and benchmark evidence via `submit_evaluation`/`accepted_evidence`
+(`vs_evaluation/agent_mcp.py:206-249`; PR #1024, #1291). A later pass could
+turn each into its own frame kind ("implementer dispatched the profiler",
+"implementer requested evaluation"); projecting workstream phase and
+measurements does not need it.
 
 **The dashboard is a pure function of `(CampaignRecord, cursor)`.** This is the
 key property of #1304 and the reason live streaming is tractable. `CampaignView`
@@ -82,25 +125,58 @@ its first frame, so a live chart can label its axes from the start.
 PR #1304's fixture footer names it precisely: the measurement points and their
 values are recovered from a real campaign, but "workstream windows, role
 assignments, and turn text are curated reconstructions from available evidence,
-not backend events." Three concrete things are missing between the current
-backend and a live `CampaignRecord`:
+not backend events." Four concrete things are missing between the current
+backend and a live `CampaignRecord` (the first three were in the first draft;
+the fourth surfaced on recheck):
 
 1. **Workstream state is never projected.** `dynamic` holds the full lifecycle
    in `DynamicState.workstreams` (phase, attempts, candidate, review,
-   evaluation), but `dynamic/plugin.py`'s `_project()` exports only the embedded
-   `HypothesisState` and discards `workstreams`. No external consumer can see
-   "N workstreams in flight, in these phases" today.
-2. **The event envelope has no workstream identity.** There is `round_label`
-   and `execution_id`, but no `workstream_id` and no per-workstream phase/status
-   event, so even the events that do flow cannot be grouped into the workstream
-   lanes the UI draws.
-3. **There is no token-spend field.** Token usage is tracked per invocation
-   (`usage.jsonl`) but never reaches this schema; the dashboard's token column
-   is permanently disabled.
+   evaluation), but `dynamic/plugin.py`'s `_project()` exports only the
+   embedded `HypothesisState` and discards `workstreams`. Settlement makes
+   this worse, not just absent: once a workstream finishes, `Rounds.record()`
+   (`orchestration/dynamic/rounds.py:78,384,494`) flattens it into a
+   `RoundRecord` on the shared `HypothesisState`, the same aggregate `single`
+   and `multi` write to directly. `DynamicWorkstream` itself never crosses
+   `vibesys.api`; the in-flight phase detail only exists while the run is
+   live. No external consumer can see "N workstreams in flight, in these
+   phases" today.
+2. **The event envelope has almost no workstream identity.** There is
+   `round_label` and `execution_id`, but no `workstream_id` and no
+   per-workstream phase/status event, so even the events that do flow cannot
+   be grouped into workstream lanes. One existing event comes close:
+   `AsyncOperationLifecycleData.scope_id` is already populated with the
+   `hypothesis_id` (`run/host.py:676-694`), but
+   `CoreEventType.ASYNC_OPERATION_LIFECYCLE` has no case in the server's
+   `EventType`/`EventData` union or in `project_event()`'s control-event
+   special cases, so `project_event()`'s `EventType(event.type.value)`
+   (`server/integration.py:365`) would raise on it, uncaught. That is a real
+   gap independent of this design: the closest thing to a workstream id
+   already emitted core-side cannot reach the server today. It is also a
+   cheaper place to start than inventing a field from nothing.
+3. **There is no token-spend field, and the placeholder that exists is
+   unwired.** Token usage is tracked per invocation (`usage.jsonl`) but
+   never reaches this schema. There is also a schema-level seed,
+   `AgentLoopState.input_tokens`/`output_tokens`
+   (`orchestration/dynamic/models.py:887-888`), but it is run-level only
+   (not per-workstream), has zero reads or writes anywhere else in
+   `src/vibesys`, and is not re-exported through `vibesys.api`. It arrived
+   with the same migration (`DynamicState` schema v7, PR #1239,
+   "orchestrator agent step 1") that this gap's eventual fix should probably
+   extend, rather than inventing a parallel counter next to it.
+4. **No wall-clock timestamp survives in the core model.** `Hypothesis`,
+   `RoundRecord`, and `DynamicWorkstream` order entirely by `round_number` /
+   `sequence`; none stores a `started_at`/`finished_at`. The dashboard needs
+   real ISO timestamps (to drive "active iff cursor time is before
+   finishedAt" and the timer bar's axis), so a live projection has to derive
+   them from the event envelope's own `timestamp` field (the first and last
+   event touching a given workstream), not from any backend-stored start or
+   end field. Worth settling now so step 1 below does not have to
+   rediscover it.
 
 Everything else the dashboard needs (measurements with values and gates,
 objective and metric catalog, benchmark-version boundary) already exists as
-data; it is the workstream layer and token spend that are unprojected.
+data; it is the workstream layer, its timing, and token spend that are
+unprojected.
 
 ## Design
 
@@ -193,9 +269,11 @@ Two behaviors are new and specific to live:
 
 ## Prototype: replay-as-live
 
-Because `dynamic` cannot run locally, the prototype proves the design by
-streaming the **existing** campaign over the contract above, as if live. It adds
-no backend, core, or wire-protocol code, and no new dependency.
+Because a real `dynamic` campaign against this doc's GPU-bound serving
+example cannot be driven locally (no local MI300A/B200; see "Non-goals" for
+what Docker now changes and does not), the prototype proves the design by
+streaming the **existing** campaign over the contract above, as if live. It
+adds no backend, core, or wire-protocol code, and no new dependency.
 
 - A vite dev plugin (`campaignStreamPlugin`) serves Server-Sent Events at
   `/__vibesys/campaign/stream`. On connect it reads the campaign record, builds
@@ -233,26 +311,51 @@ exercised (it cannot be, locally).
 
 ## Backend path (future, not in this PR)
 
-The prototype's frame schema is the proposed contract. Making it real is three
-changes, in expand-migrate-contract order, each behind the existing single
-emission chokepoint so no print statements are added:
+The prototype's frame schema is the proposed contract. Making it real is
+four changes, in expand-migrate-contract order, each behind the existing
+emission chokepoints (core `EventJournal`, bridged by `project_event()` into
+the server `WireJournal`) so no print statements are added:
 
-1. **Project workstream state.** Extend `dynamic/plugin.py`'s `_project()` to
-   emit a typed workstream-lifecycle event when a `DynamicWorkstream` changes
-   phase, sourced from the state the plugin already holds. One owner, one event
-   per transition.
-2. **Add workstream identity to the envelope.** Add `workstream_id` to the event
-   envelope so existing per-turn events group into lanes. One source of truth
-   for the id (the `hypothesis_id` the plugin already keys on), generated into
-   the client protocol types via `pnpm generate:protocol`, with the conformance
+1. **Project workstream state, including its timing.** Extend
+   `dynamic/plugin.py`'s `_project()` to emit a typed workstream-lifecycle
+   event whenever a `DynamicWorkstream` changes phase, sourced from the
+   state the plugin already holds. Populate `startedAt`/`finishedAt` from
+   the emitting event's own `timestamp` (first and last event per
+   workstream), since no core type stores wall-clock time (gap 4): derive it
+   at the projection boundary, the same way the live fold in this prototype
+   already does, rather than adding a parallel field to `DynamicWorkstream`.
+2. **Add workstream identity to the envelope.** The cheapest start is making
+   `project_event()` carry `AsyncOperationLifecycleData.scope_id` through (it
+   is already `hypothesis_id`, gap 2) instead of inventing a new field
+   first, then extending the same id to the rest of the per-turn events so
+   they group into lanes. One source of truth for the id, generated into the
+   client protocol types via `pnpm generate:protocol`, with the conformance
    corpus extended rather than per-client snapshots.
-3. **Surface token spend.** Fold the per-invocation `usage.jsonl` into a
-   per-workstream token total and emit it as the `tokens` frame.
+3. **Surface token spend.** `AgentLoopState.input_tokens`/`output_tokens`
+   (gap 3) is the natural seed, but it is run-level and unwired today;
+   making it per-workstream is part of the same "orchestrator agent"
+   migration (`DynamicState` v7 to v9, PR #1239) already in flight, not a
+   new counter built beside it. Coordinate with that work rather than
+   duplicate it.
+4. **Derive the agent roster's `workstreamIds`; do not store it.** Roles are
+   a run-level set (`orchestrator`/`implementer`/`judge`/`profiler`); no
+   backend aggregate maps an agent to the workstreams it touched. Build
+   `agent-upsert`'s `workstreamIds` by aggregating (role, workstream_id)
+   pairs observed in the event stream itself, once step 2 makes that id
+   available.
 
-The server-side campaign projection then replaces `framesFromRecord`: the same
-frames, sourced from live state instead of a finished record, consumed by the
-same client fold and view. The round-trip property is what guarantees the client
-does not need to change when the source does.
+Explicitly out of scope for this path, named so it is not foreclosed by
+accident: the implementer's `dispatch_profiler` and evaluation/evidence tool
+calls (PR #1024, #1291) are real signal a later pass could turn into their
+own frame kinds. RFC #937's proposal for agents to dynamically form
+subteams is design-stage only and would change the "one agent, one role,
+many workstreams" shape assumed above if it ships. Neither blocks the four
+steps here.
+
+The server-side campaign projection then replaces `framesFromRecord`: the
+same frames, sourced from live state instead of a finished record, consumed
+by the same client fold and view. The round-trip property is what guarantees
+the client does not need to change when the source does.
 
 ## Design checkpoint
 
