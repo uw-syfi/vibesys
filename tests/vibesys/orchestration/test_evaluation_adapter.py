@@ -12,6 +12,7 @@ from tests.support.docker_environment import (
     fake_docker_environment,
     host_container_backend,
 )
+from tests.support.started_operation import wait_until_started
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
@@ -449,7 +450,7 @@ def test_gate_starts_before_execution_and_finishes_on_cancellation(
                 else ctx.evaluation.benchmark(ctx.workspaces.root)
             )
             evaluation = asyncio.create_task(operation)
-            await asyncio.to_thread(sandbox.started.wait)
+            await wait_until_started(sandbox.started, evaluation)
             try:
                 gate_events = [
                     event
