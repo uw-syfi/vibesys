@@ -1,4 +1,3 @@
-{"path": "['src/entrypoints/run.py", "rule": "signal", "count": 10}
 {"path": "libs/vs-agent/src/vs_agent/fake_docker_build_runner.py", "rule": "subprocess", "count": 4}
 {"path": "libs/vs-agent/src/vs_agent/host_resource_declarations.py", "rule": "process", "count": 1}
 {"path": "libs/vs-agent/src/vs_agent/host_resource_declarations.py", "rule": "subprocess", "count": 3}
