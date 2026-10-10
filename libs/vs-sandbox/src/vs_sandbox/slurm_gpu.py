@@ -17,7 +17,7 @@ import subprocess
 import threading
 import tomllib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Protocol, cast
+from typing import TYPE_CHECKING, Annotated, Protocol, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -57,8 +57,8 @@ class SlurmGpuRequestError(ValueError):
     """A GPU command request outside the operator's limits."""
 
 
-class SlurmGpuConfig(BaseModel):
-    """Operator limits and commands for GPU jobs submitted from this host.
+class AgentGpuConfig(BaseModel):
+    """Operator limits and commands for the agent's GPU jobs, submitted from this host.
 
     ``partitions`` is a preference order. With ``windows_command`` set, the
     first partition whose reported window starts the job now is chosen;
@@ -72,8 +72,6 @@ class SlurmGpuConfig(BaseModel):
     max_gpus: Annotated[int, Field(gt=0)]
     max_time_minutes: Annotated[int, Field(gt=0)]
     default_time_minutes: Annotated[int, Field(gt=0)] = 30
-    gate_gpus: Annotated[int, Field(gt=0)] = 1
-    gate_time_minutes: Annotated[int, Field(gt=0)] = 60
     srun_command: tuple[str, ...] = ("srun",)
     scancel_command: tuple[str, ...] = ("scancel",)
     windows_command: tuple[str, ...] | None = None
@@ -111,15 +109,9 @@ class SlurmGpuConfig(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _defaults_within_limits(self) -> SlurmGpuConfig:
+    def _default_within_limit(self) -> Self:
         if self.default_time_minutes > self.max_time_minutes:
             message = "default_time_minutes exceeds max_time_minutes"
-            raise ValueError(message)
-        if self.gate_gpus > self.max_gpus:
-            message = "gate_gpus exceeds max_gpus"
-            raise ValueError(message)
-        if self.gate_time_minutes > self.max_time_minutes:
-            message = "gate_time_minutes exceeds max_time_minutes"
             raise ValueError(message)
         return self
 
@@ -139,6 +131,27 @@ class SlurmGpuConfig(BaseModel):
             )
             raise SlurmGpuRequestError(message)
         return request
+
+
+class SlurmGpuConfig(AgentGpuConfig):
+    """The ``slurm-gpu`` environment's table: the agent's limits plus its gates' size.
+
+    The ``slurm`` environment sizes its gate jobs by sbatch arguments, so these
+    two fields exist only here.
+    """
+
+    gate_gpus: Annotated[int, Field(gt=0)] = 1
+    gate_time_minutes: Annotated[int, Field(gt=0)] = 60
+
+    @model_validator(mode="after")
+    def _gate_within_limits(self) -> Self:
+        if self.gate_gpus > self.max_gpus:
+            message = "gate_gpus exceeds max_gpus"
+            raise ValueError(message)
+        if self.gate_time_minutes > self.max_time_minutes:
+            message = "gate_time_minutes exceeds max_time_minutes"
+            raise ValueError(message)
+        return self
 
 
 class GpuJobRequest(BaseModel):
@@ -202,7 +215,7 @@ def _starts_now(partition: Mapping[str, object], request: GpuJobRequest) -> bool
 
 
 def choose_partition(
-    config: SlurmGpuConfig,
+    config: AgentGpuConfig,
     request: GpuJobRequest,
     windows: Mapping[str, object] | None,
 ) -> str:
@@ -233,7 +246,7 @@ def choose_partition(
 
 
 def read_windows(
-    config: SlurmGpuConfig, probe: CommandProbe | None = None
+    config: AgentGpuConfig, probe: CommandProbe | None = None
 ) -> Mapping[str, object] | None:
     """Run the operator's window report command, or return ``None`` if unavailable."""
     if config.windows_command is None:
@@ -251,7 +264,7 @@ def read_windows(
 
 
 def srun_argv(
-    config: SlurmGpuConfig,
+    config: AgentGpuConfig,
     request: GpuJobRequest,
     *,
     partition: str,
@@ -273,7 +286,7 @@ def srun_argv(
     )
 
 
-def new_job_name(config: SlurmGpuConfig) -> str:
+def new_job_name(config: AgentGpuConfig) -> str:
     """Return a job name unique enough to cancel exactly this command's job."""
     return f"{config.job_name_prefix}-{secrets.token_hex(6)}"
 
@@ -302,7 +315,7 @@ class SlurmGpuLauncher:
 
     def __init__(
         self,
-        config: SlurmGpuConfig,
+        config: AgentGpuConfig,
         *,
         popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
         probe: CommandProbe | None = None,
@@ -398,6 +411,7 @@ def resolve_executable(command: tuple[str, ...]) -> tuple[str, ...]:
 
 
 __all__ = [
+    "AgentGpuConfig",
     "GpuCommand",
     "GpuJobRequest",
     "GpuLauncher",

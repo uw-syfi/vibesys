@@ -1,14 +1,20 @@
 # GPU commands through Slurm
 
-`--run-environment slurm-gpu` runs the agent in a local Docker container on the
-Slurm submit host and sends only GPU processes to Slurm. The agent holds no
-GPUs while it reads, edits, or thinks. Each GPU command gets its own job, sized and timed for that
-command.
+The agent can run its own GPU commands as Slurm jobs. It runs in a local Docker
+container on the Slurm submit host and holds no GPUs while it reads, edits, or
+thinks. Each GPU command gets its own job, sized and timed for that command.
 
-Use it on a host that is also a Slurm submit node with a shared view of the
-project, for example a single-node cluster whose controller runs on the GPU
-host. For remote clusters, use `--run-environment skypilot` (see
-[Remote Slurm execution](remote-slurm-execution.md)).
+This is an optional capability of `--run-environment slurm`: add a
+`[vibesys.agent_gpu]` table to the operator file (see
+[Operator configuration](#operator-configuration)). It needs a host that is also
+a Slurm submit node with a shared view of the project, so the file must set
+`[slurm.transport] kind = "local"`; any other transport is rejected with an
+error naming `vibesys.agent_gpu`. For remote clusters, use `--run-environment
+skypilot` (see [Remote Slurm execution](remote-slurm-execution.md)).
+
+`--run-environment slurm-gpu` is the older spelling of the same capability with
+its own `[slurm_gpu]` table, which also sizes the gates (`srun` jobs). It runs
+the same launcher, broker, confinement, and limits code.
 
 ## Agent view
 
@@ -46,16 +52,45 @@ compute nodes. A host-owned broker therefore sits between them:
 
 The trusted accuracy and benchmark gates are host commands that the framework
 planned. The agent runs them as `vibesys-gpu --gate accuracy` or
-`vibesys-gpu --gate benchmark`; the broker runs the planned command unconfined
-through the same `srun` launcher. Each uses the task's `[resources]` accelerator
+`vibesys-gpu --gate benchmark`. In the `slurm` environment the gates stay on the
+`sbatch` path (`vs_sandbox.slurm_command`) whether or not the agent may run GPU
+commands, and are sized by the sbatch arguments and the task's resources. In
+`slurm-gpu` the broker runs the planned command unconfined through the same
+`srun` launcher; each uses the task's `[resources]` accelerator
 count, or `gate_gpus` when the task declares none, and the time limit
 `gate_time_minutes`. A benchmark's result file under `/tmp` is written on the
 host, so the broker relays it back into the container.
 
 ## Operator configuration
 
-The configuration is machine-local. The default path is
-`~/.config/vibesys/slurm-gpu.toml`; `--slurm-config PATH` overrides it.
+The configuration is machine-local. For `--run-environment slurm` the table is
+`[vibesys.agent_gpu]` in `~/.config/vibesys/slurm.toml`, beside `[slurm]`:
+
+```toml
+[slurm]
+name = "local-cluster"
+remote_workspace_root = "/shared/vibesys"   # shared with the compute nodes
+
+[slurm.transport]
+kind = "local"
+
+[vibesys.agent_gpu]
+# Preference order. With windows_command set, the first partition whose window
+# starts the job now is used; otherwise the first whose time limit fits.
+partitions = ["main", "priority"]
+max_gpus = 8
+max_time_minutes = 120
+default_time_minutes = 30   # when the agent omits --time
+windows_command = ["slurm-windows", "--json"]
+srun_arguments = []         # extra site arguments, for example ["--account=lab"]
+```
+
+Unknown keys and out-of-range limits are rejected at launch, naming the key.
+`gate_gpus` and `gate_time_minutes` are not accepted here.
+
+For `--run-environment slurm-gpu` the table is `[slurm_gpu]` in
+`~/.config/vibesys/slurm-gpu.toml`; `--slurm-config PATH` overrides it. It takes
+the keys above and the two gate keys:
 
 ```toml
 [slurm_gpu]
@@ -74,6 +109,13 @@ srun_arguments = []         # extra site arguments, for example ["--account=lab"
 Every job carries `--partition`, `--gres=gpu:N`, `--time`, and a
 `vibesys-gpu-*` job name. A misconfigured or missing `windows_command` falls
 back to the first configured partition.
+
+## Profiling
+
+With the capability on, the agent profiles through `vibesys-gpu` (`nsys` by
+default; `ncu` or `rocprof` as the backend dictates), and the run does not
+plan a remote ROCprof capture. Without it, the `slurm` environment keeps its
+remote ROCprof capture.
 
 ## Launch
 

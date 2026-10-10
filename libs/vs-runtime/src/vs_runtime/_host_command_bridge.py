@@ -1,8 +1,8 @@
 """What an editor container needs to reach a run's host command broker.
 
 Both Slurm run environments keep the agent in a Docker container and answer its
-requests on the host: GPU jobs and trusted gates for ``slurm-gpu``, trusted
-gates for ``slurm``. The container receives the broker's Unix socket, the
+requests on the host: trusted gates, and, when the operator enables it, the
+agent's own GPU jobs. The container receives the broker's Unix socket, the
 single-file client, and the variables the client reads. The broker, its token
 and the planned commands stay on the host.
 """
@@ -10,11 +10,18 @@ and the planned commands stay on the host.
 from __future__ import annotations
 
 import secrets
+import shlex
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from vs_runtime._run_environment import EditorExtras
+from vs_runtime._run_environment import (
+    AgentPaths,
+    EditorExtras,
+    RunEnvironmentRequest,
+    _AgentPathSandbox,
+    _materialize_effective_objective,
+)
 from vs_sandbox.api import HostResource, HostResourceAccess
 from vs_sandbox.api.slurm import (
     COMMAND_BROKER_SOCKET_ENV,
@@ -86,4 +93,33 @@ def bridge_editor_extras(
         },
         same_path_workspace=True,
         attach_accelerator=False,
+    )
+
+
+def bridged_agent_paths(
+    sandbox: object,
+    request: RunEnvironmentRequest,
+    launcher: Path,
+    *,
+    accuracy: bool,
+    benchmark: bool,
+) -> AgentPaths:
+    """Return the agent's paths and gate commands for a container bridged to a broker.
+
+    A gate is offered (``launcher --gate KIND``) only when the task *planned* it.
+    """
+    objective = _materialize_effective_objective(request)
+    return AgentPaths(
+        objective=(
+            cast("_AgentPathSandbox", sandbox).agent_path(objective)
+            if objective is not None
+            else "OBJECTIVE.md"
+        ),
+        accuracy_command=(
+            shlex.join((str(launcher), "--gate", GateKind.ACCURACY.value)) if accuracy else None
+        ),
+        benchmark_command=(
+            shlex.join((str(launcher), "--gate", GateKind.BENCHMARK.value)) if benchmark else None
+        ),
+        profiler_support=(request.profiler_support_name if request.profiler_support_path else None),
     )

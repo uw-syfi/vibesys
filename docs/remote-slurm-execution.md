@@ -33,9 +33,18 @@ requires. When the submit host is itself the machine that runs VibeSys, the
 configuration can use the `local` transport (`[slurm.transport] kind = "local"`,
 see the `vs-slurm` README) instead of SSH: gates run through the same
 sbatch, poll and collect path. The second broker exists only for the SSH
-transport, so a local-transport run offers the gates but not the agent's ad hoc
-ROCprof capture. The GPU-side variant for a single-node cluster is described in
-[GPU commands through Slurm](slurm-gpu-commands.md).
+transport, so a local-transport run without agent GPU commands offers the gates
+but not the agent's ad hoc ROCprof capture.
+
+### Agent GPU commands (optional)
+
+On a host that is itself a Slurm submit node (`[slurm.transport] kind = "local"`),
+the operator can also let the agent run its own GPU commands as Slurm jobs, by
+adding a `[vibesys.agent_gpu]` table to the same operator file. The same host
+broker then offers `vibesys-gpu` beside the gates, and the agent profiles
+through its own commands instead of through the remote ROCprof capture. The
+table is rejected with any other transport. See
+[GPU commands through Slurm](slurm-gpu-commands.md) for the table and the agent's view.
 
 ## SkyPilot configuration ownership
 

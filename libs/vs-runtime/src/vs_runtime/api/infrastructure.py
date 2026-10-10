@@ -193,7 +193,6 @@ from vs_runtime._run_environment import (
     SkyPilotEnvironment,
     SkyPilotEnvironmentFacts,
     SlurmEnvironmentFacts,
-    SlurmGpuEnvironmentFacts,
     open_run_environment_resources,
     open_workspace_environment_resources,
 )
@@ -587,7 +586,6 @@ __all__ = [
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
     "SlurmGpuEnvironment",
-    "SlurmGpuEnvironmentFacts",
     "StageFailureText",
     "SteerTarget",
     "StopGraceError",

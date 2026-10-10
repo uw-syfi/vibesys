@@ -58,7 +58,7 @@ Never rely on a provider flag for isolation. See
    entrypoint, a SkyPilot job, or a Slurm job, not through a command runner.
    The Slurm environments cannot give the container the cluster tools and
    credentials, so a host-owned command broker runs the trusted gates (and, for
-   slurm-gpu, the agent's GPU jobs) and the container reaches it over a
+   the agent's GPU jobs, when the operator enables `[vibesys.agent_gpu]` or selects slurm-gpu) and the container reaches it over a
    bind-mounted Unix socket; the workspace is mounted at its host path so
    directories mean the same thing on both sides. The ephemeral evaluator-tool
    builder also uses `attach_accelerator=False`.
@@ -97,7 +97,7 @@ allowlist (`session_env_allowlist`).
 | --- | --- | --- | --- |
 | Default (`docker`) | `DockerSandbox` | enforced (read-only re-mount) | enforced (empty mask mount) |
 | `--modal`, `--run-environment skypilot` | `DockerSandbox` editor container | enforced | enforced |
-| `--run-environment slurm` | `DockerSandbox` editor container | enforced | enforced |
+| `--run-environment slurm` | `DockerSandbox` editor container; with `[vibesys.agent_gpu]`, each brokered GPU job runs on a compute node under host confinement, as in slurm-gpu | enforced in the container; per host for jobs | enforced in the container; per host for jobs |
 | Host-only backend (Metal), macOS | `SeatbeltSandbox` | enforced | enforced |
 | `--run-environment slurm-gpu` | `DockerSandbox` editor container; each brokered GPU job runs on a compute node under host confinement (bubblewrap on Linux, Seatbelt on macOS) | enforced in the container; per host for jobs | enforced in the container; per host for jobs |
 

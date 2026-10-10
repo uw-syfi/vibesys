@@ -233,6 +233,14 @@ class DockerEnvironmentFacts:
 
 
 @dataclass(frozen=True)
+class AgentGpuFacts:
+    """The limits of the agent's own GPU jobs, as the agent is told them."""
+
+    max_gpus: int
+    max_time_minutes: int
+
+
+@dataclass(frozen=True)
 class SlurmEnvironmentFacts:
     """Presentation facts for a local editor with remote trusted execution.
 
@@ -241,12 +249,14 @@ class SlurmEnvironmentFacts:
     from the candidate root, or empty when the operator configured none.
     ``gate_client`` is the name the agent runs, on its ``PATH``, to request a
     trusted gate (``gate_client --gate KIND``), and ``gates`` the kinds the
-    task plans.
+    task plans. ``agent_gpu`` is set when the agent may also run its own GPU
+    commands as Slurm jobs through that same client.
     """
 
     service_command: tuple[str, ...] = ()
     gate_client: str = ""
     gates: tuple[str, ...] = ()
+    agent_gpu: AgentGpuFacts | None = None
 
 
 @dataclass(frozen=True)
@@ -267,22 +277,10 @@ class ModalEnvironmentFacts:
     runtime_container_path: str = "/opt/vibesys-runtime/environment.md"
 
 
-@dataclass(frozen=True)
-class SlurmGpuEnvironmentFacts:
-    """Presentation facts for an agent whose GPU processes run as Slurm jobs."""
-
-    launcher: str
-    max_gpus: int
-    max_time_minutes: int
-    gate_gpus: int
-    gates: tuple[str, ...] = ()
-
-
 RunEnvironmentPresentationFacts = (
     HostEnvironmentFacts
     | DockerEnvironmentFacts
     | SlurmEnvironmentFacts
-    | SlurmGpuEnvironmentFacts
     | SkyPilotEnvironmentFacts
     | ModalEnvironmentFacts
 )
@@ -483,12 +481,38 @@ class _PreparedRunEnvironment:
 class RunEnvironment(Protocol):
     """Environment policy for run execution and candidate evaluation."""
 
-    isolated: bool
-    materialize_local_model_weights: bool
-    default_profiler_id: str
-    supported_profiler_ids: frozenset[str] | None
-    backend_image: str | None
-    requires_local_profiler_preflight: bool
+    # Read-only members: an environment may fix them or derive them from its
+    # operator configuration.
+
+    @property
+    def isolated(self) -> bool:
+        """Whether candidates run in isolated worktrees of their own."""
+        ...
+
+    @property
+    def materialize_local_model_weights(self) -> bool:
+        """Whether external model-weight symlinks are copied into the workspace."""
+        ...
+
+    @property
+    def default_profiler_id(self) -> str:
+        """The profiler a run uses when none is requested."""
+        ...
+
+    @property
+    def supported_profiler_ids(self) -> frozenset[str] | None:
+        """The profilers a run may select, or ``None`` when any is allowed."""
+        ...
+
+    @property
+    def backend_image(self) -> str | None:
+        """The image the environment pins for the compute backend, if any."""
+        ...
+
+    @property
+    def requires_local_profiler_preflight(self) -> bool:
+        """Whether the profiler's tool must exist on this host."""
+        ...
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve environment facts without starting owned resources."""
