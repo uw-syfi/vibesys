@@ -10,7 +10,6 @@ ended up. Type conversions live in :mod:`vs_agent.shim_translation`.
 
 from __future__ import annotations
 
-import threading
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,6 +20,7 @@ from vs_agent import shim_translation
 from vs_agent.cli_common import build_schema_hint
 from vs_agent.contracts import AgentTurnResult, SteerOutcome
 from vs_agent.session_errors import SessionResumeError
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         AgentSessionSpec,
         AgentTurnRequest,
     )
+    from vs_sim.api import Threads
 
 _SCHEMA_DIR = Path(".cache/vibesys/response-schemas")
 
@@ -46,9 +47,9 @@ class SteerLedger:
     caller's thread, the library's events on the turn's.
     """
 
-    def __init__(self) -> None:
-        """Start with nothing outstanding."""
-        self._lock = threading.Lock()
+    def __init__(self, threads: Threads | None = None) -> None:
+        """Start with nothing outstanding; locks come from ``threads`` (OS threads by default)."""
+        self._lock = (threads or OsThreads()).lock()
         self._waiting: dict[str, deque[Callable[[], None]]] = {}
 
     def expect(self, text: str, on_rejected: Callable[[], None]) -> None:

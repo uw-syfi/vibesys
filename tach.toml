@@ -439,7 +439,7 @@ depends_on = ["vs_agent", "vs_project"]
 [[modules]]
 path = "vs_agent"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sandbox", "vs_project", "vs_prompts", "vs_mcp"]
+depends_on = ["vs_sandbox", "vs_project", "vs_prompts", "vs_mcp", "vs_sim.api"]
 
 [[modules]]
 path = "vs_project"

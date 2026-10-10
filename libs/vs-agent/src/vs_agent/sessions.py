@@ -11,7 +11,6 @@ import hashlib
 import json
 from contextlib import contextmanager
 from dataclasses import replace
-from threading import RLock
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -33,12 +32,14 @@ from vs_agent.session_errors import (
 from vs_agent.session_key import AgentSessionKey
 from vs_project.api import ProjectError
 from vs_prompts.api import RenderedPrompt
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from contextlib import AbstractContextManager
 
     from vs_agent.contracts import AgentCapabilities, AgentObserver
+    from vs_sim.api import Threads
 
 
 class _SessionObservation(BaseModel):
@@ -350,7 +351,13 @@ class ClientAgentSessions:
     provider checkpoints, and must survive reconstruction of this instance.
     """
 
-    def __init__(self, client: AgentTurnExecutor, slot: AgentInvocationStore) -> None:
+    def __init__(
+        self,
+        client: AgentTurnExecutor,
+        slot: AgentInvocationStore,
+        *,
+        threads: Threads | None = None,
+    ) -> None:
         """Preflight durable-resume capability and bind the exclusively owned ledger."""
         if not client.capabilities.provider_session_resume:
             message = "provider_session_resume is required for AgentSessions"
@@ -361,7 +368,7 @@ class ClientAgentSessions:
         self._active: set[str] = set()
         self._schema_rejections: set[str] = set()
         self._active_keys: set[AgentSessionKey] = set()
-        self._lock = RLock()
+        self._lock = (threads or OsThreads()).rlock()
 
     @contextmanager
     def invocation_transaction(self) -> Iterator[AgentInvocationStore]:

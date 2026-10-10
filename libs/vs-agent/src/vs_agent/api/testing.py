@@ -21,7 +21,12 @@ from agentshim.testing import (
 
 from vs_agent import fake_profiles
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
-from vs_agent.fake_docker_build_runner import FakeDockerBuildRunner
+from vs_agent.fake_docker_build_runner import (
+    DockerResult,
+    FakeDockerBuildRunner,
+    docker_result,
+    docker_timed_out,
+)
 from vs_agent.fault_injection import (
     KILLED_STATUS,
     MALFORMED_LINE,
@@ -70,6 +75,7 @@ __all__ = [
     "CommandExecutor",
     "CommandRequest",
     "ConversationFaultKind",
+    "DockerResult",
     "FakeAgentClient",
     "FakeAgentInvocationStore",
     "FakeAgentSessions",
@@ -89,6 +95,8 @@ __all__ = [
     "Transport",
     "answering_with",
     "assistant_text",
+    "docker_result",
+    "docker_timed_out",
     "fake_agentshim_launcher",
     "fake_profiles",
     "fake_stream_launcher",

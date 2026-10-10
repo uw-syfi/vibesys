@@ -25,15 +25,18 @@ reply the caller loses: that is the case a recovery must not replay blindly.
 
 from __future__ import annotations
 
-import threading
 from dataclasses import replace
 from typing import TYPE_CHECKING, Literal
 
 import agentshim
 from agentshim import ProcessExited, StdoutLine
 
+from vs_sim.api import OsThreads
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+
+    from vs_sim.api import Threads
 
 
 #: What a faulted line of a long-lived agent process's output does instead of
@@ -87,12 +90,13 @@ class FaultingExecutor:
         next_fault: Callable[[], ProcessFaultKind | None],
         *,
         on_container_replaced: Callable[[], None] | None = None,
+        threads: Threads | None = None,
     ) -> None:
         """Wrap ``inner``; ``next_fault`` decides each line's fate."""
         self._inner = inner
         self._next_fault = next_fault
         self._on_replaced = on_container_replaced
-        self._lock = threading.Lock()
+        self._lock = (threads or OsThreads()).lock()
         self._live: list[_FaultyProcess] = []
         self.replacements = 0
 

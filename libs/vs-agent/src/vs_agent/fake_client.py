@@ -14,7 +14,6 @@ constructed response objects, and this module never runs an external agent.
 from __future__ import annotations
 
 import functools
-import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Concatenate, Literal, Self, TypeVar
@@ -43,6 +42,7 @@ from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.usage_records import append_usage_record
 from vs_mcp.api import StdioServerDescriptor
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from vs_agent.session_key import AgentSessionKey
     from vs_agent.skills import SkillSelection
     from vs_mcp.api import ToolServerDescriptor
+    from vs_sim.api import Threads
 T = TypeVar("T", bound=BaseModel)
 
 #: Default answer :meth:`FakeAgentClient.invoke_text` returns when nothing is
@@ -180,6 +181,7 @@ class FakeAgentClient:
         session_store: SessionStore | None = None,
         skill_selection: SkillSelection = NULL_SKILL_SELECTION,
         log_dir: Path | None = None,
+        threads: Threads | None = None,
     ) -> None:
         """Create a fake client; see the class docstring for defaults.
 
@@ -233,14 +235,15 @@ class FakeAgentClient:
         self._refuses_accepted_steers = False
         self._refusals: list[Callable[[], None]] = []
         self._turns_in_flight = 0
-        self._steer_lock = threading.Lock()
+        threads = threads or OsThreads()
+        self._steer_lock = threads.lock()
 
         self._capacity_gate: CapacityGate | None = None
         self._closed = False
         self.cancel_count = 0
         self.cancelled_sessions: list[AgentSessionKey] = []
         self.released_sessions: list[AgentSessionKey] = []
-        self._cancelled = threading.Event()
+        self._cancelled = threads.event()
 
     # -- AgentClientProtocol: attribution ---------------------------------
 

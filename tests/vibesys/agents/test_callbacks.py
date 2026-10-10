@@ -7,15 +7,13 @@ import pytest
 from headless.render import HeadlessRenderer
 from vibesys.api import CoreAgentEventSink
 from vibesys.events import AgentOutputChunkData, CoreEvent, ToolCallData, ToolResultData
-from vs_agent import (
-    callbacks,
-)
 from vs_agent.api import NULL_AGENT_EVENT_SINK, AgentEvent, AgentEventKind, RoundProgress
 from vs_agent.callbacks import (
     AgentLogger,
     _default_context_window_lookup,
 )
 from vs_agent.client import _LoggerObserver
+from vs_sim.api.testing import ManualClock
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 _DIM = "\033[2m"
@@ -414,17 +412,16 @@ class TestPrefixFormat:
         out = _strip_ansi(capsys.readouterr().out)
         assert "0/1.1M" in out
 
-    def test_elapsed_time_advances(
-        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # Fake time.monotonic so we can verify the elapsed value reaches the prefix
-
-        ticks = iter([1000.0, 1308.2])
-        monkeypatch.setattr(callbacks.time, "monotonic", lambda: next(ticks))
+    def test_elapsed_time_advances(self, capsys: pytest.CaptureFixture[str]) -> None:
+        # The logger reads the injected clock, so the elapsed value in the prefix is exact.
+        clock = ManualClock(1000.0)
         logger = AgentLogger(
-            agent_label="Implementer", model_name="claude-sonnet-4-6", event_sink=_rendering_sink()
+            agent_label="Implementer",
+            model_name="claude-sonnet-4-6",
+            event_sink=_rendering_sink(),
+            clock=clock,
         )
-        # First tick consumed in __init__; second tick consumed by _format_prefix
+        clock.advance(308.2)
         logger.log_text("hi")
         out = _strip_ansi(capsys.readouterr().out)
         assert "308.2s" in out, out

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import TYPE_CHECKING, TypeVar
@@ -40,6 +39,7 @@ from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.usage_records import USAGE_FILE, append_usage_record, usage_dict
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from vs_agent.skills import SkillSelection
     from vs_mcp.api import ToolServerDescriptor
     from vs_sandbox.api import HostResource, ProjectPathPolicy
+    from vs_sim.api import Clock, Threads
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -220,6 +221,8 @@ class AgentClient:
         session_store: SessionStore | None = None,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
         check_readiness: bool = False,
+        threads: Threads | None = None,
+        clock: Clock | None = None,
     ) -> None:
         """Create a client that owns ``launcher`` and every session it opens.
 
@@ -257,7 +260,9 @@ class AgentClient:
         self._ready_roles: set[str] = set()
         self._closed = False
         self._cancelled = False
-        self._active_lock = threading.Lock()
+        self._threads = threads or OsThreads()
+        self._clock = clock
+        self._active_lock = self._threads.lock()
         self._active_sessions: list[LaunchedSession] = []
         self._capacity_gate: CapacityGate | None = None
 
@@ -466,6 +471,7 @@ class AgentClient:
             round_label=turn.label,
             invocation_id=turn.invocation_id,
             event_sink=self._sink,
+            clock=self._clock,
         )
         _emit_and_log(
             self._sink, f"\n=== {label} ROUND START: {turn.label} ===", self._run_log_file
