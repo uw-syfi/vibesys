@@ -22,9 +22,9 @@ from contextlib import suppress
 from pathlib import Path
 
 import pytest
-from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 
 from entrypoints.launcher import call_child
+from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
 
 _SOURCE = Path(__file__).resolve().parents[2] / "src"
 _ENGINE_STATUS = 7

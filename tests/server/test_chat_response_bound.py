@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.server.support import build_server_parts
-from tests.support.started_operation import wait_until_started_sync
 
 from server.api.protocol import ChatQuery
 from server.chat.manager import ChatAnswer
 from server.events import EventType
+from vs_sim.api.testing import wait_until_started_sync
 
 if TYPE_CHECKING:
     from pathlib import Path

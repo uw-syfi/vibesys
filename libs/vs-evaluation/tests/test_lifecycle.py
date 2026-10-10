@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.started_operation import arrival
 
 from vs_evaluation.api import (
     AvailabilityState,
@@ -38,6 +37,7 @@ from vs_evaluation.api.testing import (
     FakeEvaluationExecutor,
     InMemoryEvaluationStore,
 )
+from vs_sim.api.testing import arrival
 
 if TYPE_CHECKING:
     from pathlib import Path

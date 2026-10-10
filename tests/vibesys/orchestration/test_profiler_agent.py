@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.started_operation import arrival
 
 from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity
 from vibesys.run.profiler_agent import ProfilerEvaluationAccess, RuntimeProfilerTurnProvision
@@ -41,6 +40,7 @@ from vs_runtime.api.testing import (
     FakeWorkspaces,
     TurnResponder,
 )
+from vs_sim.api.testing import arrival
 
 if TYPE_CHECKING:
     from pydantic import BaseModel

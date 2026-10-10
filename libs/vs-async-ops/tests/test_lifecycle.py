@@ -6,7 +6,6 @@ import asyncio
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from tests.support.started_operation import arrival
 
 from vs_async_ops.api import (
     OperationCancellationTimeoutError,
@@ -27,6 +26,7 @@ from vs_async_ops.api.testing import (
     InMemoryOperationStore,
     ObservingWaiter,
 )
+from vs_sim.api.testing import arrival
 
 if TYPE_CHECKING:
     from pydantic import JsonValue

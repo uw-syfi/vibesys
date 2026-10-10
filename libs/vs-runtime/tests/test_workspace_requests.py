@@ -19,7 +19,6 @@ from tests.support.executor_context import RevocableLease
 from tests.support.observation_contract import assert_core_accepts
 from tests.support.run_execution import run_execution_record
 from tests.support.session_world import RunningRunInvocations, SettledRunInvocations
-from tests.support.started_operation import wait_until_started
 
 from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
 from vs_core.api import (
@@ -92,6 +91,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink, FakeRunControlEventSink
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator

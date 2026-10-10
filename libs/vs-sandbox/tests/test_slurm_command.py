@@ -11,13 +11,13 @@ import threading
 from typing import TYPE_CHECKING, TypedDict
 
 import pytest
-from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 from tests.support.thread_signals import non_main_thread_ids, requires_tgkill, send_to_thread
 
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, write_slurm_evaluation_plan
 
 # test-isolation: main is the CLI entry point and is intentionally absent from the library API.
 from vs_sandbox.slurm_command import main
+from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
 from vs_slurm.api import (
     ClusterObservation,
     ClusterSubmitted,

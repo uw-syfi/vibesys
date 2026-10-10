@@ -27,7 +27,6 @@ import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
-from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError, InvalidStatus
@@ -53,6 +52,7 @@ from server.transport.websocket import (
     _connection_closed,
     _content_type,
 )
+from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

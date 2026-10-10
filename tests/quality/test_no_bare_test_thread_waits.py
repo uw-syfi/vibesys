@@ -2,7 +2,7 @@
 
 A bare ``started.wait()`` in a test function hangs forever when the worker that
 should set the event fails or returns first. Use
-``tests.support.started_operation.wait_until_started_sync`` with the worker's
+``vs_sim.api.testing.wait_until_started_sync`` with the worker's
 future (``start_thread`` or a pool), which ends with it.
 
 The check is syntactic: a zero-argument, non-awaited ``.wait()`` called directly
@@ -106,5 +106,5 @@ def test_no_test_parks_its_own_thread_on_an_event() -> None:
     allowed = {path: count for path, (count, _reason) in ALLOWED.items()}
     assert found == allowed, (
         "a test-thread <event>.wait() hangs when its worker ends first; use "
-        "tests.support.started_operation.wait_until_started_sync with the worker's future"
+        "vs_sim.api.testing.wait_until_started_sync with the worker's future"
     )

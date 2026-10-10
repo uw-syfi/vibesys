@@ -53,6 +53,7 @@ source_roots = [
     "libs/vs-slurm/src",
     "libs/vs-mcp/src",
     "libs/vs-faults/src",
+    "libs/vs-sim/src",
 ]
 exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "build", "dist", ".venv"]
 # Also freeze imports that exist only under TYPE_CHECKING.
@@ -647,6 +648,107 @@ path = "vs_faults"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_agent", "vs_mcp"]
 
+# Deterministic simulation kit: a standard-library-only leaf with no outgoing VibeSys edges.
+[[modules]]
+path = "vs_sim"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.api"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals"]
+
+[[modules]]
+path = "vs_sim.api.testing"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.child", "vs_sim.contracts", "vs_sim.crash", "vs_sim.fakes", "vs_sim.gate", "vs_sim.manual", "vs_sim.seeds", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
+
+[[modules]]
+path = "vs_sim.blocking"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.clock"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.processes"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.randomness"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.signals"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.child"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.waits"]
+
+[[modules]]
+path = "vs_sim.contracts"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.blocking", "vs_sim.child", "vs_sim.clock", "vs_sim.gate", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals"]
+
+[[modules]]
+path = "vs_sim.crash"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.fakes"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.clock", "vs_sim.processes"]
+
+[[modules]]
+path = "vs_sim.gate"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.manual"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.seeds"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.randomness"]
+
+[[modules]]
+path = "vs_sim.states"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.threads"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.trace"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.virtual"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.trace"]
+
+[[modules]]
+path = "vs_sim.waits"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
 # Each library exposes only its `api` subpackage and its submodules. External
 # modules must import through that surface, never from the package root or
 # internal modules. Tests are outside tach scope.
@@ -715,6 +817,10 @@ visibility = ["vs_slurm.wiring"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_faults"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_sim"]
 
 [[interfaces]]
 expose = ["PluginProjection", "ProfilerKind", "ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]

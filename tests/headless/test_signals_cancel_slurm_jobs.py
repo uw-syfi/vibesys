@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from tests.support.bounded_waits import HANG_GUARD_S
 
+from vs_sim.api.testing import HANG_GUARD_S
 from vs_slurm.fake_connector import JOB_ID, POLLED_FILE, SUBMITTED_FILE, recorded_commands
 
 _REPOSITORY = Path(__file__).resolve().parents[2]

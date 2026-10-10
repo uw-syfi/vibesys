@@ -60,6 +60,7 @@ from vs_slurm.api import SlurmConfig, SlurmSshTransport, load_slurm_config
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from vs_agent.api.images import DockerBuildRunner
 
 #: The framework's packages a profiler server imports, in the container, from
 #: the read-only ``libs`` mount: the Slurm adapter and what it needs.
@@ -139,11 +140,16 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
     def from_options(cls, options: Mapping[str, object]) -> SlurmEnvironment:
         """Resolve the operator configuration path.
 
-        The editor container's keys are those of :meth:`DockerEnvironmentConfig.from_options`
-        (the agent image build seam and limit).
+        ``build_runner`` is the unrecorded injection seam for the agent image build.
         """
         value = options.get("config_path", "~/.config/vibesys/slurm.toml")
-        return cls(Path(str(value)), docker=DockerEnvironmentConfig.from_options(options))
+        build_runner = options.get("build_runner")
+        return cls(
+            Path(str(value)),
+            docker=DockerEnvironmentConfig(
+                build_runner=cast("DockerBuildRunner | None", build_runner)
+            ),
+        )
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Validate external policy before opening the editor container."""

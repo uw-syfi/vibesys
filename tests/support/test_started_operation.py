@@ -9,16 +9,11 @@ from enum import StrEnum
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.started_operation import (
-    arrival,
-    start_thread,
-    wait_until_executor_started,
-    wait_until_started,
-    wait_until_started_sync,
-)
+from tests.support.started_operation import wait_until_executor_started
 
 from vs_evaluation.api import EvaluationState
 from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor
+from vs_sim.api.testing import arrival, start_thread, wait_until_started, wait_until_started_sync
 
 
 class _Ending(StrEnum):

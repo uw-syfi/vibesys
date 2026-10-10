@@ -18,8 +18,9 @@ if TYPE_CHECKING:
 import pytest
 import yaml
 from pydantic import ValidationError
-from tests.support.bounded_waits import HANG_GUARD_S
 from tests.support.example_registry import require_external_repo_checkout
+
+from vs_sim.api.testing import HANG_GUARD_S
 
 EVALUATOR_ROOT = Path(__file__).parents[2] / "resources/evaluators/microservice"
 EXAMPLES_ROOT = Path(__file__).parents[2] / "examples/microservices"

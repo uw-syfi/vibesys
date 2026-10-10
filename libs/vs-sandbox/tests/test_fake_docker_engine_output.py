@@ -12,9 +12,8 @@ import os
 import signal
 from typing import TYPE_CHECKING
 
-from tests.support.bounded_waits import HANG_GUARD_S
-
 from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from pathlib import Path

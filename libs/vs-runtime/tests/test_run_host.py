@@ -7,7 +7,6 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.started_operation import wait_until_started
 
 from vs_evaluation.api import ExecutorCancellationUnknownError
 from vs_runtime.api import RunCleanupError, RunFacts
@@ -23,6 +22,7 @@ from vs_runtime.api.testing import (
     FakeWorkspaceAgentSessions,
     FakeWorkspaces,
 )
+from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
     from contextlib import ExitStack

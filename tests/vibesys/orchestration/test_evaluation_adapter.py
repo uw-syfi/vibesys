@@ -12,7 +12,6 @@ from tests.support.docker_environment import (
     fake_docker_environment,
     host_container_backend,
 )
-from tests.support.started_operation import wait_until_started
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
@@ -44,6 +43,7 @@ from vs_runtime.api import (
 from vs_runtime.api.testing import FakeWorkspace
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
+from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable

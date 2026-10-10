@@ -13,8 +13,8 @@ hung test fails alone instead of stalling its shard. It is a backstop, not a
 synchronization tool: a test must pass without ever reaching it.
 
 A wait on a thread, process or socket the test does not control carries a hang
-guard from `tests/support/bounded_waits.py` (`join_or_fail`, `stop_process`,
-`HANG_GUARD_S`) or a `timeout=` argument, so a stuck peer fails that test with a
+guard from `vs_sim.api.testing` (`join_or_fail`, `wait_or_fail`,
+`get_or_fail`, `accept_or_fail`, `stop_process`, `HANG_GUARD_S`) or a `timeout=` argument, so a stuck peer fails that test with a
 message. The guard sits far above any passing run and is never what a test
 synchronizes on. `tests/quality/test_no_unbounded_blocking_waits.py` enforces it.
 

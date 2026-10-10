@@ -31,7 +31,8 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
-from tests.support.bounded_waits import join_or_fail
+
+from vs_sim.api.testing import join_or_fail
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

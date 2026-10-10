@@ -12,7 +12,6 @@ from typing import cast
 
 import pytest
 from tests.entrypoints.support import IDLE_DIRECTORY, INSTANCE_PATH, FakeDetachedGateway
-from tests.support.bounded_waits import HANG_GUARD_S
 
 from entrypoints import web
 from entrypoints.server import GATEWAY_STOP_TIMEOUT_SECONDS, GatewayStopOutcome, GatewayStopResult
@@ -34,6 +33,7 @@ from entrypoints.web import (
     _wait_for_record,
 )
 from server.runtime import WebInstanceHold
+from vs_sim.api.testing import HANG_GUARD_S
 
 
 def _record() -> web.WebInstanceRecord:

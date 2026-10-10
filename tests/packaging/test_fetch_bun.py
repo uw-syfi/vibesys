@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fetch_bun import BunFetchError, _download, fetch_bun
-from tests.support.bounded_waits import join_or_fail
 from wheel_targets import TARGETS
+
+from vs_sim.api.testing import join_or_fail
 
 if TYPE_CHECKING:
     from pathlib import Path

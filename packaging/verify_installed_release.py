@@ -51,6 +51,7 @@ FRAMEWORK_PACKAGES = (
     "vs_slurm",
     "vs_mcp",
     "vs_faults",
+    "vs_sim",
 )
 REQUIRED_SYSTEM_TOOLS = ("git",)
 SYSTEM_JAVASCRIPT_TOOLS = ("bun", "node", "npm", "pnpm")

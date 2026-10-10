@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from tests.support.run_execution import run_execution_record
-from tests.support.started_operation import wait_until_started
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
@@ -59,6 +58,7 @@ from vs_runtime.api.testing import (
     FakeWorkspaceAgentSessions,
 )
 from vs_sandbox.api import CommandResult, ProjectPathPolicy
+from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Callable

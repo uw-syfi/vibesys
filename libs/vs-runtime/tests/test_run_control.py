@@ -7,8 +7,6 @@ import threading
 
 import pytest
 from pydantic import ValidationError
-from tests.support.bounded_waits import HANG_GUARD_S
-from tests.support.started_operation import start_thread, wait_until_started_sync
 
 from vs_runtime.api.infrastructure import (
     BlockingOperations,
@@ -19,6 +17,7 @@ from vs_runtime.api.infrastructure import (
     create_runtime_control,
 )
 from vs_runtime.api.testing import FakeRunControlEventSink
+from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_until_started_sync
 
 
 def test_steering_is_ordered_and_drained_exactly_once() -> None:

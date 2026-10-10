@@ -45,11 +45,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 import pytest
-from tests.support.bounded_waits import join_or_fail
 
 from vs_agent.api.images import agent_image
 from vs_sandbox.api import CommandResult, CommandRunner, DockerSandbox, LocalShellRunner
 from vs_sandbox.api.testing import FakeCommandRunner, FakeDockerEngine
+from vs_sim.api.testing import join_or_fail
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator

@@ -22,9 +22,9 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from tests.support import run_test_command
-from tests.support.bounded_waits import join_or_fail
 
 from vs_evaluator_protocol.api import Hello, check_objectives, parse_records, read_measurement
+from vs_sim.api.testing import join_or_fail
 
 _ROOT = Path(__file__).resolve().parents[2]
 _TOKENIZER = Path(__file__).with_name("fixtures") / "request_factory_tokenizer.json"

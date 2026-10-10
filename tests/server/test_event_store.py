@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
 import pytest
 from pydantic import ValidationError
-from tests.support.started_operation import wait_until_started_sync
 
 from server.events import EventStore, EventType, RunEvent, ToolCallData, make_event
+from vs_sim.api.testing import wait_until_started_sync
 
 if TYPE_CHECKING:
     from types import TracebackType

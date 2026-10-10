@@ -30,6 +30,7 @@ members = [
     "vs-prompts",
     "vs-runtime",
     "vs-sandbox",
+    "vs-sim",
     "vs-slurm",
 ]
 
@@ -3216,6 +3217,11 @@ requires-dist = [
     { name = "vs-project", editable = "libs/vs-project" },
     { name = "vs-slurm", editable = "libs/vs-slurm" },
 ]
+
+[[package]]
+name = "vs-sim"
+version = "0.1.0"
+source = { editable = "libs/vs-sim" }
 
 [[package]]
 name = "vs-slurm"

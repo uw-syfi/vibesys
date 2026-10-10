@@ -9,7 +9,6 @@ from io import StringIO
 from typing import cast
 
 import pytest
-from tests.support.started_operation import arrival
 
 from entrypoints.run import supervise
 from headless import HeadlessRenderer, run
@@ -23,6 +22,7 @@ from vibesys.api import (
     RunStopped,
 )
 from vibesys.api.testing import FakeRunHandle
+from vs_sim.api.testing import arrival
 
 
 class _InterruptibleSession:

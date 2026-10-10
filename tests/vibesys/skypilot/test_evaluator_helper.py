@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 
 import vs_sandbox.skypilot_evaluator as helper_module  # test-isolation: failure injection exercises the private remote helper process boundary.
 from vs_sandbox.api.skypilot import (
@@ -28,6 +27,7 @@ from vs_sandbox.api.skypilot import (
 from vs_sandbox.skypilot_evaluator import (
     run_evaluator,
 )  # test-isolation: remote helper execution is tested directly.
+from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
 
 type _Frame = ArtifactFrame | ErrorFrame | OutputFrame | ResultFrame
 

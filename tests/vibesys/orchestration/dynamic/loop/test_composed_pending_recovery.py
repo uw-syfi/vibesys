@@ -11,7 +11,6 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 import pytest
-from tests.support.bounded_waits import join_or_fail
 from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from launch import LaunchSettings, create_session
@@ -24,6 +23,7 @@ from vs_agent.api import AgentInvocationState, AgentSessionKey, Completed
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_sandbox.api import create_compute_backend
+from vs_sim.api.testing import join_or_fail
 from vs_slurm.fake_connector import SUBMITTED_FILE, active_jobs, pending_jobs, release_jobs
 
 from ._harness import (

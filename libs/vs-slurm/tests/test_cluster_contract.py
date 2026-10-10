@@ -15,8 +15,8 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, initialize, precondition, rule
-from tests.support.started_operation import wait_until_started_sync
 
+from vs_sim.api.testing import wait_until_started_sync
 from vs_slurm.api import (
     Cluster,
     ClusterCancelRequested,

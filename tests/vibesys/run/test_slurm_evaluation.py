@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
-from tests.support.started_operation import arrival, wait_until_executor_started
+from tests.support.started_operation import wait_until_executor_started
 from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.orchestration.dynamic.agents import PROFILER
@@ -54,6 +54,7 @@ from vs_runtime.api import (
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeRun, FakeWorkspace
 from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
+from vs_sim.api.testing import arrival
 from vs_slurm.api import (
     FakeCluster,
     FakeConnector,

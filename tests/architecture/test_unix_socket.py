@@ -6,13 +6,13 @@ import socket
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.bounded_waits import HANG_GUARD_S
 
 from vs_project.api import (
     MAX_SOCKET_PATH_BYTES,
     SocketPathTooLongError,
     validate_socket_path,
 )
+from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from pathlib import Path

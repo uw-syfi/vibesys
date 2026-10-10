@@ -1,46 +1,23 @@
-"""Wait for a held operation to start without hanging when it never does."""
+"""Wait for a held operation to start without hanging when it never does.
+
+The generic waits (``wait_until_started``, ``arrival``, ``wait_until_started_sync``,
+``start_thread``) live in ``vs_sim.api.testing``; this module adds the one that knows about
+evaluation executors.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import contextlib
-import threading
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from vs_evaluation.api import EvaluationState
+from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    import threading
 
     from vs_evaluation.api import EvaluationExecutor
-
-
-async def wait_until_started(
-    started: threading.Event | asyncio.Event, operation: asyncio.Future[Any]
-) -> None:
-    """Return once *started* is set; surface the outcome of *operation* if it ends first.
-
-    A test that parks a worker on ``started.wait`` hangs forever when the
-    operation fails or returns before it reaches the point that sets *started*,
-    and ``asyncio.run`` then waits on that worker at shutdown. Ending
-    *operation* releases the waiter here, so the test fails with the
-    operation's own error instead. *started* is set on that path, so callers
-    must not treat it as proof of a start without this function's return.
-
-    Raises:
-        AssertionError: *operation* returned without ever starting.
-        BaseException: whatever *operation* raised before it started.
-    """
-    operation.add_done_callback(lambda _done: started.set())
-    if isinstance(started, asyncio.Event):
-        await started.wait()
-    else:
-        await asyncio.to_thread(started.wait)
-    if operation.done():
-        operation.result()
-        message = "the operation finished without reaching its held step"
-        raise AssertionError(message)
 
 
 _ENDED = frozenset(
@@ -85,78 +62,3 @@ async def wait_until_executor_started(
         watcher.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await watcher
-
-
-async def arrival[T](awaited: Awaitable[T], *operations: asyncio.Future[Any]) -> T:
-    """Await *awaited* (an event wait or queue get) unless an operation ends first.
-
-    For a test body that waits for something a task it started must produce
-    (``await session.started.wait()``, ``await queue.get()``). If an operation
-    in *operations* ends before *awaited* completes, the producer can no longer
-    deliver, so this raises that operation's own error, or an assertion when it
-    returned. An arrival that is already there wins over an operation that has
-    also ended, so a producer that arrives and then finishes is not an error.
-
-    Raises:
-        AssertionError: an operation returned without the awaited arrival.
-        BaseException: whatever an operation raised before the arrival.
-    """
-    waiter = asyncio.ensure_future(awaited)
-    try:
-        await asyncio.wait({waiter, *operations}, return_when=asyncio.FIRST_COMPLETED)
-        if waiter.done():
-            return waiter.result()
-        for operation in operations:
-            if operation.done():
-                operation.result()
-        message = "an operation finished without the arrival the test waits for"
-        raise AssertionError(message)
-    finally:
-        if not waiter.done():
-            waiter.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await waiter
-
-
-def wait_until_started_sync(
-    started: threading.Event, operation: concurrent.futures.Future[Any]
-) -> None:
-    """Return once *started* is set; surface the outcome of *operation* if it ends first.
-
-    The test-thread form of ``wait_until_started``: a bare ``started.wait()``
-    parks the test forever when the worker running *operation* fails or returns
-    before it reaches the point that sets *started*. Ending *operation* releases
-    the wait, so *started* is set on that path and a return from here, not the
-    event, is the proof of a start.
-
-    Raises:
-        AssertionError: *operation* returned without ever starting.
-        BaseException: whatever *operation* raised before it started.
-    """
-    operation.add_done_callback(lambda _done: started.set())
-    started.wait()
-    if operation.done():
-        operation.result()
-        message = "the operation finished without reaching its held step"
-        raise AssertionError(message)
-
-
-def start_thread[T](target: Callable[[], T]) -> concurrent.futures.Future[T]:
-    """Run *target* on its own thread and return a future for its outcome.
-
-    For a test that waits on a worker's progress with ``wait_until_started_sync``
-    and has no pool to submit to. The thread is a daemon so that a stuck target
-    never keeps the interpreter alive.
-    """
-    future: concurrent.futures.Future[T] = concurrent.futures.Future()
-
-    def run() -> None:
-        if not future.set_running_or_notify_cancel():
-            return
-        try:
-            future.set_result(target())
-        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-159901 [BLE001]; relayed to the waiter through the future.
-            future.set_exception(error)
-
-    threading.Thread(target=run, daemon=True).start()
-    return future
