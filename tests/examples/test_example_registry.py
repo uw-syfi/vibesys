@@ -135,6 +135,26 @@ def test_ci_fetches_external_repos_and_runs_this_module() -> None:
     assert group["env"]["VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS"] == "1"
 
 
+def test_ci_shards_the_cpu_check_and_requires_every_shard() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "test.yml").read_text()
+    job = workflow.split("\n  validate-examples-cpu-check:", 1)[1].split("\n  # ", 1)[0]
+    assert "repoctl run-checks --group examples_cpu_check_shard" in job
+    assert "CPU_CHECK_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}" in job
+    # Every shard index 1..N must be a matrix leg, or some tests would never run.
+    legs = re.search(r"shard: \[([\d, ]+)\]", job)
+    assert legs is not None
+    shards = [int(leg) for leg in legs[1].split(",")]
+    assert shards == list(range(1, len(shards) + 1))
+    # The aggregate and the budget report must wait for the sharded job.
+    for needing in ("required-pr-ci", "ci-budget"):
+        needs = workflow.split(f"\n  {needing}:", 1)[1].split("\n    if:", 1)[0]
+        assert "- validate-examples-cpu-check" in needs
+
+    policy = tomllib.loads((REPO_ROOT / ".repoctl" / "checks.toml").read_text())
+    group = next(g for g in policy["check_groups"] if g["name"] == "examples_cpu_check_shard")
+    assert any("cpu_check" in command for command in group["commands"])
+
+
 # --- validation through the CLI entry point ---------------------------------
 
 
