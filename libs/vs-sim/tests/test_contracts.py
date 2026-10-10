@@ -169,6 +169,26 @@ class TestPidfdProcessSignaller(ProcessSignallerContract):
         )
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux system calls")
+class TestPidfdProcessSignallerThroughDirectSyscalls(ProcessSignallerContract):
+    """The fallback for interpreters built without pidfd wrappers (uv's standalone builds)."""
+
+    def process_signaller_under_test(self) -> ProcessSignallerUnderTest:
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import signal; signal.pause()"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return ProcessSignallerUnderTest(
+            PidfdProcessSignaller(direct_syscalls=True),
+            process.pid,
+            lambda: _assert_running(process),
+            lambda: _assert_terminated(process),
+            lambda: stop_process(process),
+        )
+
+
 class TestFakeProcessSignaller(ProcessSignallerContract):
     def process_signaller_under_test(self) -> ProcessSignallerUnderTest:
         pid = 1234
