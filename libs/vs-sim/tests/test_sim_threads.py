@@ -312,3 +312,69 @@ def test_a_simulated_server_and_its_clients_replay_from_the_seed(seed: int, clie
     assert sorted(entry for entry in first if entry.startswith("client")) == [
         f"client{i}:C{i}" for i in range(clients)
     ]
+
+
+type Tree = list[tuple[float, "Tree"]]
+"""A thread's work: ``(seconds to sleep, children it spawns after sleeping)``, per child."""
+
+TREES: st.SearchStrategy[Tree] = st.recursive(
+    st.just([]),
+    lambda children: st.lists(st.tuples(st.sampled_from([0.0, 0.5, 2.0]), children), max_size=3),
+    max_leaves=8,
+)
+
+
+def _count_threads(tree: Tree) -> int:
+    return sum(1 + _count_threads(children) for _, children in tree)
+
+
+def _run_tree(
+    tree: Tree, seed: int | None, *, join: bool
+) -> tuple[dict[str, tuple[int, int]], EventTrace]:
+    """Run ``tree``; per thread name the (starts, finishes) counts, and the schedule trace."""
+    trace = EventTrace()
+    sim = SimThreads(schedule_seed=seed, trace=trace)
+    counts: dict[str, list[int]] = {"main": [0, 0]}
+
+    def body(name: str, seconds: float, children: Tree) -> None:
+        counts[name][0] += 1
+        sim.sleep(seconds)
+        spawned = []
+        for index, (child_seconds, grandchildren) in enumerate(children):
+            child = f"{name}.{index}"
+            counts[child] = [0, 0]
+            spawned.append(
+                sim.spawn(
+                    lambda c=child, s=child_seconds, g=grandchildren: body(c, s, g),
+                    name=child,
+                    daemon=False,
+                )
+            )
+        if join:
+            for worker in spawned:
+                worker.join(None)
+        counts[name][1] += 1
+
+    sim.run(lambda: body("main", 0.0, tree))
+    return {name: (started, finished) for name, (started, finished) in counts.items()}, trace
+
+
+@settings(deadline=None, max_examples=60)
+@given(tree=TREES, seed=st.one_of(st.none(), SEEDS), join=st.booleans())
+def test_every_spawned_thread_runs_to_completion_exactly_once(
+    *, tree: Tree, seed: int | None, join: bool
+) -> None:
+    counts, _ = _run_tree(tree, seed, join=join)
+    assert len(counts) == 1 + _count_threads(tree)
+    assert all(pair == (1, 1) for pair in counts.values())
+
+
+@settings(deadline=None, max_examples=60)
+@given(tree=TREES, seed=SEEDS, join=st.booleans())
+def test_one_seed_gives_the_same_trace_for_any_thread_tree(
+    *, tree: Tree, seed: int, join: bool
+) -> None:
+    first_counts, first_trace = _run_tree(tree, seed, join=join)
+    second_counts, second_trace = _run_tree(tree, seed, join=join)
+    assert first_counts == second_counts
+    assert first_trace.first_difference(second_trace) is None
