@@ -722,7 +722,7 @@ depends_on = []
 [[modules]]
 path = "vs_sim.fakes"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.clock", "vs_sim.gate", "vs_sim.processes"]
+depends_on = ["vs_sim.clock", "vs_sim.gate", "vs_sim.processes", "vs_sim.states"]
 
 [[modules]]
 path = "vs_sim.gate"

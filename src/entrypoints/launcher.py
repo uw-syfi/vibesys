@@ -28,6 +28,7 @@ which never kills the child: the child owns its run's teardown.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -39,11 +40,16 @@ import threading
 import time
 import tomllib
 from dataclasses import dataclass
+from functools import partial
 from importlib.resources import files
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 from vibesys.api import boot_trace
+from vs_sim.api import InheritedStdioLauncher, LoopSignalSource
+
+if TYPE_CHECKING:
+    from vs_sim.api import ForegroundChild, ForegroundLauncher, SignalSource
 
 _MIN_NODE_MAJOR = 20
 
@@ -154,7 +160,13 @@ def _run_headless(args: list[str]) -> int:
 _FORWARDED_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
 
 
-def call_child(argv: list[str], *, env: dict[str, str] | None = None) -> int:
+def call_child(
+    argv: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    children: ForegroundLauncher | None = None,
+    signals: SignalSource | None = None,
+) -> int:
     """Run *argv* until it exits and return its exit status.
 
     The child owns everything a run started, including Slurm jobs that only its
@@ -164,35 +176,49 @@ def call_child(argv: list[str], *, env: dict[str, str] | None = None) -> int:
     would instead SIGKILL the child 0.25 seconds later, skipping its teardown.
     SIGTERM and SIGHUP are forwarded to the child. A child killed by a signal
     reports ``128 + signal``, as a shell does.
+
+    *children* starts the child (one that shares this terminal by default) and
+    *signals* is where this process's signals arrive (its own, on the main
+    thread, by default); a test passes Fakes of both and delivers by hand.
     """
-    started: list[subprocess.Popen[bytes]] = []
+    return asyncio.run(run_child(argv, env=env, children=children, signals=signals))
 
-    def forward(signum: int, _frame: object) -> None:
+
+async def run_child(
+    argv: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    children: ForegroundLauncher | None = None,
+    signals: SignalSource | None = None,
+) -> int:
+    """:func:`call_child` on the running event loop, for a caller that drives the loop."""
+    launcher = InheritedStdioLauncher() if children is None else children
+    started: list[ForegroundChild] = []
+
+    def forward(number: signal.Signals) -> None:
         for child in started:
-            if child.returncode is None:
-                child.send_signal(signum)
+            child.send_signal(number)
 
-    def wait_for_child(_signum: int, _frame: object) -> None:
+    def wait_for_child() -> None:
         """The terminal already delivered SIGINT to the child; keep waiting."""
 
-    on_main_thread = threading.current_thread() is threading.main_thread()
-    previous = (
-        {
-            signal.SIGINT: signal.signal(signal.SIGINT, wait_for_child),
-            **{number: signal.signal(number, forward) for number in _FORWARDED_SIGNALS},
-        }
-        if on_main_thread
-        else {}
-    )
+    source = LoopSignalSource() if signals is None else signals
+    # Only the main thread can take the process's own signals.
+    installable = signals is not None or threading.current_thread() is threading.main_thread()
+    installed: list[signal.Signals] = []
     try:
-        # lint-waiver: LW-010226 [S603]; this forwards the user's CLI arguments
-        # > to VibeSys's fixed Python entry module or the verified JS launcher.
-        child = subprocess.Popen(argv, env=env)  # noqa: S603
+        if installable:
+            source.add_handler(signal.SIGINT, wait_for_child)
+            installed.append(signal.SIGINT)
+            for number in _FORWARDED_SIGNALS:
+                source.add_handler(number, partial(forward, number))
+                installed.append(number)
+        child = await launcher.start(argv, env)
         started.append(child)
-        returncode = child.wait()
+        returncode = await child.wait()
     finally:
-        for number, handler in previous.items():
-            signal.signal(number, handler)
+        for number in installed:
+            source.remove_handler(number)
     return 128 - returncode if returncode < 0 else returncode
 
 

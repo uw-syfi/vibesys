@@ -9,6 +9,9 @@ from vs_sim.clock import Clock, MonotonicClock, Sleeper, SleepingClock, SystemCl
 from vs_sim.concurrency import Condition, Event, Lock, OsThreads, Threads, Worker
 from vs_sim.network import Connection, Listener, Network, UnixNetwork
 from vs_sim.processes import (
+    ForegroundChild,
+    ForegroundLauncher,
+    InheritedStdioLauncher,
     ProcessLauncher,
     ProcessOutcome,
     ProcessSpec,
@@ -24,6 +27,9 @@ __all__ = [
     "Condition",
     "Connection",
     "Event",
+    "ForegroundChild",
+    "ForegroundLauncher",
+    "InheritedStdioLauncher",
     "Listener",
     "Lock",
     "LoopSignalSource",

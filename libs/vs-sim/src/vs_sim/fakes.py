@@ -8,10 +8,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from vs_sim.gate import arrival
-from vs_sim.processes import ProcessOutcome, ProcessSpec, RunningProcess
+from vs_sim.processes import (
+    ForegroundChild,
+    ProcessOutcome,
+    ProcessSpec,
+    RunningProcess,
+)
+from vs_sim.states import Changes, wait_for_state
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping, Sequence
 
     from vs_sim.clock import Sleeper
 
@@ -225,3 +231,79 @@ class FakeProcessLauncher:
         """Record ``spec`` and start the process the script describes for it."""
         self.started.append(spec)
         return _ScriptedProcess(spec, self.script(spec), self.clock)
+
+
+@dataclass(frozen=True)
+class ForegroundScript:
+    """What a scripted foreground child does."""
+
+    returncode: int = 0
+    exits_immediately: bool = False
+    """End with ``returncode`` as soon as it is waited for; otherwise run until signalled or exited."""
+    ignored_signals: frozenset[signal.Signals] = frozenset()
+    """Signals it records but survives (a handler); any other signal ends it, as the default action does."""
+
+
+class FakeForegroundChild:
+    """A scripted child a test inspects and ends by hand."""
+
+    def __init__(
+        self, argv: tuple[str, ...], env: Mapping[str, str] | None, script: ForegroundScript
+    ) -> None:
+        """Record how it was started; it runs until the script or a signal ends it."""
+        self.argv = argv
+        self.env = env
+        self.received: list[signal.Signals] = []
+        """Every signal delivered to it while it ran, in order."""
+        self._script = script
+        self._ended = asyncio.Event()
+        self._returncode: int | None = script.returncode if script.exits_immediately else None
+        if self._returncode is not None:
+            self._ended.set()
+
+    @property
+    def running(self) -> bool:
+        """Whether it has not ended."""
+        return self._returncode is None
+
+    def exit(self, returncode: int) -> None:
+        """End it with ``returncode``; a no-op once it has ended."""
+        if self._returncode is None:
+            self._returncode = returncode
+            self._ended.set()
+
+    async def wait(self) -> int:
+        """Wait for it to end."""
+        await self._ended.wait()
+        return self._returncode if self._returncode is not None else 0
+
+    def send_signal(self, number: signal.Signals) -> None:
+        """Record ``number``; end it with ``-number`` unless the script ignores it."""
+        if self._returncode is not None:
+            return
+        self.received.append(number)
+        if number not in self._script.ignored_signals:
+            self.exit(-number)
+
+
+@dataclass
+class FakeForegroundLauncher:
+    """Starts scripted foreground children and keeps them for the test to drive."""
+
+    script: Callable[[tuple[str, ...]], ForegroundScript]
+    children: list[FakeForegroundChild] = field(default_factory=list)
+    _started: Changes = field(default_factory=Changes, init=False, repr=False)
+
+    async def child(self, index: int = 0) -> FakeForegroundChild:
+        """The ``index``-th child, once the code under test has started it."""
+        await wait_for_state(lambda: len(self.children), lambda count: count > index, self._started)
+        return self.children[index]
+
+    async def start(
+        self, argv: Sequence[str], env: Mapping[str, str] | None = None
+    ) -> ForegroundChild:
+        """Start the child the script describes for ``argv``."""
+        child = FakeForegroundChild(tuple(argv), env, self.script(tuple(argv)))
+        self.children.append(child)
+        self._started.notify()
+        return child

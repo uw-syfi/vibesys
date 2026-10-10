@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
     from vs_sim.blocking import BlockingRunner
     from vs_sim.clock import Clock, Sleeper
-    from vs_sim.processes import ProcessLauncher, ProcessOutcome
+    from vs_sim.processes import ForegroundLauncher, ProcessLauncher, ProcessOutcome
     from vs_sim.signals import ProcessSignaller, SignalSource
 
 type Run = Callable[[Coroutine[Any, Any, Any]], Any]
@@ -501,6 +501,80 @@ class ProcessLauncherContract:
 
         async def main() -> None:
             await subject.launcher.start(ProcessSpec(subject.missing_program))
+
+        try:
+            subject.run(main())
+        except OSError:
+            return
+        message = "starting a missing program did not raise OSError"
+        raise AssertionError(message)
+
+
+@dataclass(frozen=True)
+class ForegroundUnderTest:
+    """A foreground launcher and the commands it can be asked to run."""
+
+    launcher: ForegroundLauncher
+    run: Run
+    exit_with: Callable[[int], tuple[str, ...]]
+    """A command that exits with the status."""
+    blocks_until_signalled: tuple[str, ...]
+    """A command that never ends by itself and has no signal handlers."""
+    missing_program: tuple[str, ...]
+    """A command whose program does not exist."""
+
+
+class ForegroundLauncherContract:
+    """Cases for :class:`~vs_sim.processes.ForegroundLauncher`. Implement :meth:`foreground_under_test`."""
+
+    def foreground_under_test(self) -> ForegroundUnderTest:
+        """A fresh launcher with its harness."""
+        raise NotImplementedError
+
+    def test_the_exit_status_comes_back(self) -> None:
+        """``wait`` returns the status the child exited with."""
+        for seed in range(_CASES):
+            status = SeededRandom(seed).randint(0, 100)
+            subject = self.foreground_under_test()
+
+            async def main(subject: ForegroundUnderTest = subject, status: int = status) -> int:
+                child = await subject.launcher.start(subject.exit_with(status))
+                return await child.wait()
+
+            assert subject.run(main()) == status, seed
+
+    def test_a_signal_ends_a_child_without_a_handler_with_a_signal_status(self) -> None:
+        """A child that never ends by itself ends when signalled, with ``-signal`` as its status."""
+        for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGKILL):
+            subject = self.foreground_under_test()
+
+            async def main(
+                subject: ForegroundUnderTest = subject, number: signal.Signals = number
+            ) -> int:
+                child = await subject.launcher.start(subject.blocks_until_signalled)
+                child.send_signal(number)
+                return await child.wait()
+
+            assert subject.run(main()) == -number, number
+
+    def test_signalling_a_finished_child_changes_nothing(self) -> None:
+        """``send_signal`` after the child ended leaves its status as it was."""
+        subject = self.foreground_under_test()
+
+        async def main() -> tuple[int, int]:
+            child = await subject.launcher.start(subject.exit_with(3))
+            first = await child.wait()
+            child.send_signal(signal.SIGTERM)
+            return first, await child.wait()
+
+        assert subject.run(main()) == (3, 3)
+
+    def test_a_missing_program_fails_to_start(self) -> None:
+        """Starting a program that does not exist raises ``OSError`` instead of returning a child."""
+        subject = self.foreground_under_test()
+
+        async def main() -> None:
+            await subject.launcher.start(subject.missing_program)
 
         try:
             subject.run(main())

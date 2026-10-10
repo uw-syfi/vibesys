@@ -211,8 +211,8 @@
 {"path": "sdk/vs-bench/tests/test_transport.py", "rule": "socket_io", "count": 7}
 {"path": "src/entrypoints/cli/remote.py", "rule": "subprocess", "count": 2}
 {"path": "src/entrypoints/launcher.py", "rule": "process", "count": 3}
-{"path": "src/entrypoints/launcher.py", "rule": "signal", "count": 7}
-{"path": "src/entrypoints/launcher.py", "rule": "subprocess", "count": 6}
+{"path": "src/entrypoints/launcher.py", "rule": "signal", "count": 6}
+{"path": "src/entrypoints/launcher.py", "rule": "subprocess", "count": 4}
 {"path": "src/entrypoints/launcher.py", "rule": "threading", "count": 2}
 {"path": "src/entrypoints/launcher.py", "rule": "time", "count": 4}
 {"path": "src/entrypoints/run.py", "rule": "signal", "count": 10}
@@ -270,11 +270,7 @@
 {"path": "tests/entrypoints/foreground_run_child.py", "rule": "threading", "count": 3}
 {"path": "tests/entrypoints/test_launcher.py", "rule": "process", "count": 7}
 {"path": "tests/entrypoints/test_launcher.py", "rule": "time", "count": 2}
-{"path": "tests/entrypoints/test_launcher_signals.py", "rule": "process", "count": 8}
 {"path": "tests/entrypoints/test_launcher_signals.py", "rule": "signal", "count": 11}
-{"path": "tests/entrypoints/test_launcher_signals.py", "rule": "socket_io", "count": 1}
-{"path": "tests/entrypoints/test_launcher_signals.py", "rule": "subprocess", "count": 1}
-{"path": "tests/entrypoints/test_launcher_signals.py", "rule": "threading", "count": 1}
 {"path": "tests/entrypoints/test_server.py", "rule": "process", "count": 3}
 {"path": "tests/entrypoints/test_server.py", "rule": "signal", "count": 1}
 {"path": "tests/entrypoints/test_server.py", "rule": "subprocess", "count": 7}
