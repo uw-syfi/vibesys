@@ -98,11 +98,10 @@ class _PlannedGateRunner:
         cancel: Event,
     ) -> int:
         del cancel
-        done = subprocess.run(  # noqa: S603  # lint-waiver: LW-954376 [S603]; a test fake running its own fixed planned argv.
+        done = run_test_command(
             [*self._planned[kind], *arguments],
-            cwd=cwd,
             capture_output=True,
-            check=False,
+            cwd=cwd,
         )
         write(done.stdout + done.stderr)
         return done.returncode

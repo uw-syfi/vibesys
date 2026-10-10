@@ -327,7 +327,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                     host_device_reselect=False,
                     env_kind="slurm",
                     profile_execution="remote" if remote_profiling else "local",
-                    # Never exercised with one GPU broker per candidate.
+                    # Gates run on the sbatch path whichever way the agent runs, and that
+                    # path serves one candidate per session as the plain slurm environment
+                    # does, so only the agent GPU broker needs a blocker: its launcher and
+                    # worktree-root checks have never run with one broker per candidate
+                    # (#1624 made the blocker a computed, quoted reason).
                     parallel_candidate_blocker=(
                         None
                         if gpu is None

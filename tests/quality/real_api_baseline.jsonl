@@ -154,7 +154,7 @@
 {"path": "libs/vs-sandbox/tests/test_docker_sandbox_import.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_docker_workspace.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_gate_runners.py", "rule": "process", "count": 3}
-{"path": "libs/vs-sandbox/tests/test_gate_runners.py", "rule": "threading", "count": 6}
+{"path": "libs/vs-sandbox/tests/test_gate_runners.py", "rule": "threading", "count": 3}
 {"path": "libs/vs-sandbox/tests/test_host_command_bridge_e2e.py", "rule": "process", "count": 3}
 {"path": "libs/vs-sandbox/tests/test_host_command_bridge_e2e.py", "rule": "subprocess", "count": 3}
 {"path": "libs/vs-sandbox/tests/test_host_command_bridge_e2e.py", "rule": "threading", "count": 1}
@@ -349,7 +349,6 @@
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "process", "count": 2}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "subprocess", "count": 2}
 {"path": "tests/vibesys/sandbox/test_slurm_environment.py", "rule": "process", "count": 1}
-{"path": "tests/vibesys/sandbox/test_slurm_gpu_environment.py", "rule": "process", "count": 3}
 {"path": "tests/vibesys/skypilot/test_bridge.py", "rule": "socket", "count": 21}
 {"path": "tests/vibesys/skypilot/test_bridge.py", "rule": "threading", "count": 2}
 {"path": "tests/vibesys/skypilot/test_evaluator_helper.py", "rule": "fs_sync", "count": 1}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 from hypothesis import given, settings
@@ -24,11 +25,11 @@ _prefixes = st.lists(st.from_regex(r"[a-z][a-z0-9/]{0,6}", fullmatch=True), max_
 
 
 @st.composite
-def _tables(draw: st.DrawFn) -> dict[str, object]:
+def _tables(draw: st.DrawFn) -> dict[str, Any]:
     max_gpus = draw(st.integers(1, 8))
     max_time = draw(st.integers(1, 600))
     prefix = list(draw(_prefixes))
-    table: dict[str, object] = {
+    table: dict[str, Any] = {
         "partitions": draw(st.lists(_name, min_size=1, max_size=3, unique=True)),
         "max_gpus": max_gpus,
         "max_time_minutes": max_time,
@@ -46,10 +47,9 @@ def _tables(draw: st.DrawFn) -> dict[str, object]:
 
 @given(table=_tables(), task_gpus=st.none() | st.integers(1, 8))
 def test_the_translation_keeps_the_limits_and_sizes_the_gates(
-    table: dict[str, object], task_gpus: int | None
+    table: dict[str, Any], task_gpus: int | None
 ) -> None:
     max_gpus = table["max_gpus"]
-    assert isinstance(max_gpus, int)
     if task_gpus is not None and task_gpus > max_gpus:
         with pytest.raises(SlurmGpuAliasError, match=r"slurm_gpu\.max_gpus"):
             translate_slurm_gpu(table, task_gpus=task_gpus, stage_root=_STAGE)
@@ -59,22 +59,22 @@ def test_the_translation_keeps_the_limits_and_sizes_the_gates(
 
     agent = result.agent_gpu
     assert agent is not None
-    assert agent.partitions == tuple(table["partitions"])  # type: ignore[arg-type]
+    assert agent.partitions == tuple(table["partitions"])
     assert (agent.max_gpus, agent.max_time_minutes) == (max_gpus, table["max_time_minutes"])
     assert agent.default_time_minutes == table["default_time_minutes"]
-    assert agent.srun_command == tuple(table["srun_command"])  # type: ignore[arg-type]
+    assert agent.srun_command == tuple(table["srun_command"])
     assert agent.windows_command == (
-        tuple(table["windows_command"]) if "windows_command" in table else None  # type: ignore[arg-type]
+        tuple(table["windows_command"]) if "windows_command" in table else None
     )
     gates = result.config.sbatch_arguments
     gpus = table["gate_gpus"] if task_gpus is None else task_gpus
     assert f"--gres=gpu:{gpus}" in gates
     assert f"--time={table['gate_time_minutes']}" in gates
-    assert f"--partition={','.join(table['partitions'])}" in gates  # type: ignore[arg-type]
-    assert set(table["srun_arguments"]) <= set(gates)  # type: ignore[arg-type]
+    assert f"--partition={','.join(table['partitions'])}" in gates
+    assert set(table["srun_arguments"]) <= set(gates)
     transport = result.config.transport
     assert isinstance(transport, SlurmLocalTransport)
-    wrapper = tuple(table["srun_command"][:-1])  # type: ignore[index]
+    wrapper = tuple(table["srun_command"][:-1])
     assert transport.shell_command == (*wrapper, "bash", "-c")
     assert result.config.remote_workspace_root == _STAGE
 
@@ -82,7 +82,7 @@ def test_the_translation_keeps_the_limits_and_sizes_the_gates(
 @settings(max_examples=25, deadline=None)
 @given(table=_tables())
 def test_a_translated_file_round_trips_through_the_operator_file_format(
-    table: dict[str, object],
+    table: dict[str, Any],
 ) -> None:
     result = translate_slurm_gpu(table, task_gpus=None, stage_root=_STAGE)
     with tempfile.TemporaryDirectory() as directory:
@@ -93,7 +93,7 @@ def test_a_translated_file_round_trips_through_the_operator_file_format(
 
 @settings(max_examples=25, deadline=None)
 @given(table=_tables(), key=st.from_regex(r"x[a-z]{2,8}", fullmatch=True))
-def test_an_unknown_key_is_rejected_naming_it(table: dict[str, object], key: str) -> None:
+def test_an_unknown_key_is_rejected_naming_it(table: dict[str, Any], key: str) -> None:
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "slurm-gpu.toml"
         lines = ["[slurm_gpu]"]
@@ -109,7 +109,7 @@ def test_an_unknown_key_is_rejected_naming_it(table: dict[str, object], key: str
             load_slurm_gpu_alias_settings(path, task_gpus=None, stage_root=_STAGE)
 
 
-_BASE: dict[str, object] = {"partitions": ["main"], "max_gpus": 4, "max_time_minutes": 60}
+_BASE: dict[str, Any] = {"partitions": ["main"], "max_gpus": 4, "max_time_minutes": 60}
 
 
 @pytest.mark.parametrize(
@@ -121,7 +121,7 @@ _BASE: dict[str, object] = {"partitions": ["main"], "max_gpus": 4, "max_time_min
     ],
 )
 def test_a_wrapper_that_cannot_be_carried_over_is_rejected_naming_the_key(
-    override: dict[str, object], key: str
+    override: dict[str, Any], key: str
 ) -> None:
     with pytest.raises(SlurmGpuAliasError, match=rf"slurm_gpu\.{key}"):
         translate_slurm_gpu({**_BASE, **override}, task_gpus=None, stage_root=_STAGE)

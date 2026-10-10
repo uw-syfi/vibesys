@@ -19,13 +19,13 @@ if TYPE_CHECKING:
 
 def render_slurm_operator_toml(settings: SlurmOperatorSettings) -> str:
     """Return TOML that ``load_slurm_operator_settings`` parses back to *settings*."""
-    document: dict[str, object] = {
+    document: dict[str, Mapping[str, object]] = {
         "slurm": settings.config.model_dump(mode="json", exclude_none=True),
         "vibesys": settings.policy.model_dump(mode="json", exclude_none=True),
     }
     lines: list[str] = []
     for name, table in document.items():
-        _emit_table((name,), table, lines)  # type: ignore[arg-type]
+        _emit_table((name,), table, lines)
     return "\n".join(lines) + "\n"
 
 
