@@ -24,7 +24,7 @@ from vs_sandbox.docker_cli import EXEC_MARKER_ENV, SIGNAL_EXEC_SCRIPT
 from vs_sandbox.process_execution import shell_exit_status, start_process_group
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
 # The container program's parent, standing in for the ``docker exec`` client.
 # It starts the program in a session of its own (the daemon's side), records
@@ -118,6 +118,8 @@ class FakeContainer:
     name: str
     labels: dict[str, str]
     running: bool
+    mounts: Mapping[str, Path] = field(default_factory=dict)
+    """Each bind mount as ``container path -> host path``."""
 
 
 @dataclass(slots=True)
@@ -244,7 +246,13 @@ class FakeDockerEngine:
     def containers(self) -> tuple[FakeContainer, ...]:
         """Every container the daemon still holds, stopped ones included."""
         return tuple(
-            FakeContainer(identifier, container.name, dict(container.labels), container.running)
+            FakeContainer(
+                identifier,
+                container.name,
+                dict(container.labels),
+                container.running,
+                dict(container.mounts),
+            )
             for identifier, container in self._containers.items()
         )
 

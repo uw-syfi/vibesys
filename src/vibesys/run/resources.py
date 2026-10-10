@@ -1,6 +1,7 @@
 """Explicit product composition for one canonical VibeSys run."""
 
 import shlex
+import shutil
 import sys
 import time
 from collections.abc import Callable, Mapping
@@ -39,6 +40,7 @@ from vibesys.orchestration.skill_selection import (
 from vibesys.run.contracts import RunRequest
 from vibesys.run.environment import open_run_environment
 from vibesys.run.evaluation import trusted_evaluation_plan
+from vibesys.run.evaluation_socket import evaluation_socket_mount
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
@@ -545,6 +547,13 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 evaluator_source=evaluator_source,
             )
 
+            evaluation_socket_mounts = ()
+            if resolved_backend == AgentBackend.CLI:
+                # Agents run in containers that must reach the in-turn evaluation service.
+                socket_mount = evaluation_socket_mount(project_root, run_id)
+                ownership.callback(shutil.rmtree, socket_mount.host_path, ignore_errors=True)
+                evaluation_socket_mounts = (socket_mount,)
+
             experiment_repository = ExperimentRepository(project_root, logger.lprint)
             experiment_repository.configure(
                 remote_repo,
@@ -581,7 +590,10 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 profiler_support_extra=profiler_support_extra,
                 git_history_root=git.history_root,
                 run_owned_roots=(candidate_worktrees_root,),
-                environment_bind_mounts=model_artifacts.bind_mounts,
+                environment_bind_mounts=(
+                    *model_artifacts.bind_mounts,
+                    *evaluation_socket_mounts,
+                ),
                 log=logger.lprint,
                 framework_root=PROJECT_ROOT,
                 project_path_policy=project_path_policy,
