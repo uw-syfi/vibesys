@@ -19,13 +19,16 @@ from vs_sandbox.compute_backends import (
 from vs_sandbox.gpu_monitor import (
     GpuContentionMonitor,
     GpuInfo,
+    GpuTelemetry,
+    NvidiaSmiTelemetry,
     pick_gpu,
-    query_gpu_info,
 )
+from vs_sim.api import OsThreads, Threads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from vs_sandbox.docker_cli import DockerCli
     from vs_sandbox.docker_sandbox import DockerSandbox as DockerSandboxType
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
@@ -46,14 +49,20 @@ class CudaBackend:
 
     name = ComputeBackend.CUDA
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692102 [PLR0913]; the backend's three collaborators (GPU telemetry, threads, Docker CLI) are keyword-only seams on top of its three settings; bundling them in a holder object would only rename the same parameters.
         self,
         log_dir: Path,
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
+        gpu_telemetry: GpuTelemetry | None = None,
+        threads: Threads | None = None,
+        docker: DockerCli | None = None,
     ) -> None:
-        """Configure CUDA execution with its log directory and image override."""
+        """Configure CUDA execution with its log directory, image override and GPU telemetry."""
+        self._telemetry: GpuTelemetry = gpu_telemetry or NvidiaSmiTelemetry()
+        self._threads: Threads = threads or OsThreads()
+        self._docker = docker
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image or _DEFAULT_IMAGE
@@ -126,6 +135,7 @@ class CudaBackend:
                 log_path=log_path,
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
+                docker=self._docker,
                 docker_in_docker=docker_in_docker,
                 same_path_workspace=same_path_workspace,
                 run_id=run_id,
@@ -145,6 +155,8 @@ class CudaBackend:
         self._monitor = GpuContentionMonitor(
             log_dir=log_dir,
             gpu_uuid=self.selected_device.uuid,
+            telemetry=self._telemetry,
+            threads=self._threads,
         )
         return self._monitor
 
@@ -157,7 +169,7 @@ class CudaBackend:
         if os.environ.get("CUDA_VISIBLE_DEVICES"):
             return  # user pinned GPU — respect it
 
-        new_gpu = pick_gpu()
+        new_gpu = pick_gpu(self._telemetry.gpus())
         if new_gpu is None:
             return
         if self.selected_device and new_gpu.index == self.selected_device.index:
@@ -196,6 +208,8 @@ class CudaBackend:
         self._monitor = GpuContentionMonitor(
             log_dir=self.log_dir,
             gpu_uuid=new_gpu.uuid,
+            telemetry=self._telemetry,
+            threads=self._threads,
         )
         self._monitor.start()
 
@@ -206,7 +220,7 @@ class CudaBackend:
         if cuda_visible:
             self._lprint(f"[gpu] CUDA_VISIBLE_DEVICES={cuda_visible} set — skipping auto-selection")
             return None
-        gpu = pick_gpu()
+        gpu = pick_gpu(self._telemetry.gpus())
         if gpu is None:
             self._lprint("[gpu] No GPUs detected — skipping GPU selection")
             return None
@@ -293,7 +307,7 @@ class CudaBackend:
 
     def _save_gpu_metadata(self, gpu: GpuInfo) -> None:
         """Write GPU selection info to ``log_dir/gpu.json``."""
-        all_gpus = query_gpu_info()
+        all_gpus = self._telemetry.gpus()
         data = {
             "selected_gpu": _gpu_to_dict(gpu),
             "all_gpus_at_selection": [_gpu_to_dict(g) for g in all_gpus],

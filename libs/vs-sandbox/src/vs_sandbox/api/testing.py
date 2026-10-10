@@ -29,8 +29,10 @@ from vs_sandbox.fake_docker_command import (
     docker_timed_out,
 )
 from vs_sandbox.fake_docker_engine import FakeContainer, FakeDockerEngine
+from vs_sandbox.fake_gpu_telemetry import FakeGpuTelemetry
 from vs_sandbox.fake_host_container import HostExecutedContainer, HostExecutedContainerBackend
 from vs_sandbox.fake_stoppable_process import FakeStoppableProcess, StoppableScript
+from vs_sandbox.gpu_telemetry_contracts import GpuTelemetryContract, TelemetryHarness
 from vs_sandbox.process_contracts import ProcessHarness, StoppableProcessContract
 
 __all__ = [
@@ -46,15 +48,18 @@ __all__ = [
     "FakeDockerCommandRunner",
     "FakeDockerEngine",
     "FakeExecution",
+    "FakeGpuTelemetry",
     "FakeLifecycleRunner",
     "FakeRunnerCreation",
     "FakeStoppableProcess",
+    "GpuTelemetryContract",
     "HostExecutedContainer",
     "HostExecutedContainerBackend",
     "ProcessHarness",
     "ScriptedDockerCli",
     "StoppableProcessContract",
     "StoppableScript",
+    "TelemetryHarness",
     "docker_missing",
     "docker_result",
     "docker_timed_out",

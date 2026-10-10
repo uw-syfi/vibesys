@@ -69,7 +69,7 @@ def test_ephemeral_setup_sandbox_is_not_restarted_on_reselection(
     monitor = MagicMock()
     monkeypatch.setattr(
         "vs_sandbox.cuda_backend.pick_gpu",
-        lambda: GpuInfo(1, "GPU-bbbb", "H100", 0, 100, 0),
+        lambda _gpus: GpuInfo(1, "GPU-bbbb", "H100", 0, 100, 0),
     )
     monkeypatch.setattr("vs_sandbox.cuda_backend.GpuContentionMonitor", lambda **_kwargs: monitor)
     backend.reselect_device()
