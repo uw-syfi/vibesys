@@ -8,6 +8,10 @@ Never: add retries or reruns, skip on failure, lengthen a timeout or sleep "to
 make it pass", mark it as an expected failure to hide it, or tolerate it
 "because it usually passes".
 
+The suite has a hard per-test bound (`timeout` in `pyproject.toml`, 300 s) so a
+hung test fails alone instead of stalling its shard. It is a backstop, not a
+synchronization tool: a test must pass without ever reaching it.
+
 ## Sources and fixes
 
 Clock and async injection below apply to the shell and I/O implementations.
