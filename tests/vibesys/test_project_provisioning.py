@@ -9,7 +9,7 @@ import pytest
 from tests.support import run_test_command
 
 from vibesys.inputs import InputManifest, WorkspaceSource, load_input_bundle
-from vibesys.run.project import (
+from vibesys.run import (
     ProjectProvisioningError,
     ProjectProvisioningSpec,
     provision_project,
@@ -109,6 +109,39 @@ def test_provision_project_places_source_at_root_and_removes_private_files(
     assert normalized.benchmark.result.metric == "throughput"
     assert Project.is_state_initialized(input_root)
     assert (input_root / "agent.toml").is_file()
+
+
+def test_provision_project_preserves_benchmark_result_protocol(tmp_path: Path) -> None:
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    (input_root / "OBJECTIVE.md").write_text("Make the candidate faster.\n")
+    (input_root / "candidate.py").write_text("VALUE = 1\n")
+    (input_root / "vibesys.input.toml").write_text(
+        """\
+version = 1
+
+[agent]
+domain = "generic"
+
+[accuracy]
+command = ["python", "check.py"]
+
+[benchmark]
+command = ["python", "benchmark.py"]
+result_protocol = 2
+"""
+    )
+    destination = tmp_path / "runs" / "copy"
+
+    provision_project(
+        input_root,
+        destination,
+        spec=ProjectProvisioningSpec(materializer=_materializer(destination)),
+    )
+    bundle = load_input_bundle(destination)
+
+    assert bundle.benchmark_result_protocol == 2
+    assert bundle.benchmark_output_argument == "--vs-output"
 
 
 def test_provision_project_preserves_modal_entrypoint(tmp_path: Path) -> None:
