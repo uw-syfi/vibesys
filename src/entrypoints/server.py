@@ -772,12 +772,10 @@ def _serve(arguments: list[str]) -> None:  # noqa: C901, PLR0912, PLR0915  # lin
                 raise SystemExit(1) from None
             return
     control_socket = _control_socket_from_argv(arguments)
-    temp_socket_dir: tempfile.TemporaryDirectory[str] | None = None
-    if control_socket is None and web:
-        temp_socket_dir = tempfile.TemporaryDirectory(prefix="vibesys-web-")
-        control_socket = Path(temp_socket_dir.name) / "control.sock"
-    if control_socket is None:
+    if control_socket is None and not web:
         _missing_control_socket()
+    # Validate launcher-only values before allocating the ephemeral socket, so
+    # every rejected invocation remains free of resources that need cleanup.
     try:
         web_port = _web_port_from_argv(arguments)
         web_assets = _web_assets_from_argv(arguments)
@@ -789,8 +787,12 @@ def _serve(arguments: list[str]) -> None:  # noqa: C901, PLR0912, PLR0915  # lin
             code="invalid_arguments",
             stage="argument_parsing",
         )
-    server_runtime = import_module("server.runtime").ServerRuntime
+    temp_socket_dir: tempfile.TemporaryDirectory[str] | None = None
+    if control_socket is None:
+        temp_socket_dir = tempfile.TemporaryDirectory(prefix="vibesys-web-")
+        control_socket = Path(temp_socket_dir.name) / "control.sock"
     try:
+        server_runtime = import_module("server.runtime").ServerRuntime
         if web:
             runtime = server_runtime(
                 socket_path=control_socket,
