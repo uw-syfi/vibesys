@@ -1,6 +1,7 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {createDemoApp, createLiveApp} from './App.js';
+import {markDesktopShell} from './desktop-shell.js';
 import {
   bootstrapGateway,
   GatewaySessionStore,
@@ -17,6 +18,8 @@ import './styles.css';
 const launchUrl = window.location.href;
 const cleanUrl = scrubLaunchCapability(launchUrl);
 if (cleanUrl !== launchUrl) window.history.replaceState(null, '', cleanUrl);
+
+markDesktopShell(document.documentElement, window.vibesysDesktop);
 
 const root = document.querySelector('#root');
 if (root === null) throw new Error('Web viewer root is missing');
