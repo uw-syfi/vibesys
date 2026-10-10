@@ -476,6 +476,7 @@ describe('WebSession', () => {
 
     await session.start();
     expect(session.getState().status).toBe('stale');
+    expect(session.getState().hasSnapshot).toBe(false);
     expect(transport.subscriptions).toHaveLength(1);
 
     session.reattach();
@@ -608,6 +609,7 @@ describe('WebSession', () => {
     transport.subscriptions[0]?.onDisconnect(parseFailure);
 
     expect(session.getState()).toEqual({
+      hasSnapshot: true,
       status: 'stale',
       error: parseFailure,
       controls: {status: 'connected'},
@@ -615,6 +617,7 @@ describe('WebSession', () => {
     // The page says the transcript is short and offers the explicit recovery
     // that can reload an ended run. The command path itself is still fine.
     expect(connectionBanners(session.store.getState(), session.getState())).toEqual({
+      page: null,
       stream: {message: STREAM_BANNER_COPY.ended, reattach: true},
       controls: null,
     });
@@ -667,6 +670,7 @@ describe('WebSession', () => {
       },
     });
     expect(connectionBanners(session.store.getState(), session.getState())).toEqual({
+      page: null,
       stream: {message: STREAM_BANNER_COPY.ended, reattach: true},
       controls: null,
     });
@@ -704,6 +708,7 @@ describe('WebSession', () => {
     // and a different statement, because this gap can still close, and the
     // affordance that asks for it sooner rides inside the banner.
     expect(connectionBanners(session.store.getState(), session.getState())).toEqual({
+      page: null,
       stream: {message: STREAM_BANNER_COPY.live, reattach: true},
       controls: null,
     });
@@ -734,6 +739,7 @@ describe('WebSession', () => {
     transport.subscriptions[0]?.onDisconnect(parseFailure);
 
     expect(connectionBanners(session.store.getState(), session.getState())).toEqual({
+      page: null,
       stream: {message: STREAM_BANNER_COPY.live, reattach: true},
       controls: null,
     });
@@ -795,7 +801,7 @@ function lost(message: string, retrying = false): ControlChannelState {
 
 /** The state of a session whose stream and control channel are both healthy. */
 function healthy(): ReturnType<WebSession['getState']> {
-  return {status: 'connected', error: null, controls: {status: 'connected'}};
+  return {hasSnapshot: true, status: 'connected', error: null, controls: {status: 'connected'}};
 }
 
 /**

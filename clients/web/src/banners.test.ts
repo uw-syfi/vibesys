@@ -6,6 +6,9 @@ import {
   connectionBanners,
   EMPTY_TRANSCRIPT_COPY,
   emptyTranscriptCopy,
+  LIVE_SESSION_HEADER_COPY,
+  PAGE_CONNECTION_BANNER_COPY,
+  pageHeader,
   STREAM_BANNER_COPY,
 } from './banners.js';
 import type {WebSessionState, WebSessionStatus} from './session.js';
@@ -40,8 +43,10 @@ const {waiting: WAITING, unavailable: UNAVAILABLE, complete: COMPLETE} = EMPTY_T
 function sessionState(
   status: WebSessionStatus,
   controls: 'up' | 'lost' | 'lost-retrying' | 'cold',
+  hasSnapshot = true,
 ): WebSessionState {
   return {
+    hasSnapshot,
     status,
     error: status === 'stale' ? outage : null,
     controls:
@@ -83,6 +88,64 @@ const RUN_FINISHED: RunEvent = {
 };
 
 describe('connectionBanners', () => {
+  test('names a cold unreachable gateway whichever session channel reports first', () => {
+    const run = initialCoreState();
+    const controlFirst = sessionState('connecting', 'cold', false);
+    const streamFirst = sessionState('stale', 'up', false);
+
+    for (const session of [controlFirst, streamFirst]) {
+      expect(connectionBanners(run, session).page).toEqual({
+        message: PAGE_CONNECTION_BANNER_COPY.cold,
+      });
+      expect(pageHeader(run, session)).toEqual({
+        heading: LIVE_SESSION_HEADER_COPY.unreachable.heading,
+        status: {
+          className: 'status-unreachable',
+          label: LIVE_SESSION_HEADER_COPY.unreachable.status,
+        },
+      });
+    }
+
+    const beforeEitherFailure = sessionState('connecting', 'up', false);
+    expect(connectionBanners(run, beforeEitherFailure).page).toBeNull();
+    expect(pageHeader(run, beforeEitherFailure)).toEqual({
+      heading: LIVE_SESSION_HEADER_COPY.connecting.heading,
+      status: {
+        className: 'status-connecting',
+        label: LIVE_SESSION_HEADER_COPY.connecting.status,
+      },
+    });
+  });
+
+  test('keeps the control-channel diagnostic separate from the page diagnostic', () => {
+    const run = initialCoreState();
+    const cold = connectionBanners(run, sessionState('connecting', 'cold', false));
+    const pageRecovered = connectionBanners(run, sessionState('connected', 'cold', true));
+
+    expect(cold.page).not.toBeNull();
+    expect(pageRecovered.page).toBeNull();
+    expect(cold.controls).toEqual({message: COLD, retrying: false});
+    expect(pageRecovered.controls).toEqual(cold.controls);
+  });
+
+  test('reports a lost gateway only after both established channels are down', () => {
+    const run = runWith('running');
+    expect(connectionBanners(run, sessionState('stale', 'up', true)).page).toBeNull();
+    expect(connectionBanners(run, sessionState('connected', 'lost', true)).page).toBeNull();
+    expect(connectionBanners(run, sessionState('stale', 'lost', true)).page).toEqual({
+      message: PAGE_CONNECTION_BANNER_COPY.lost,
+    });
+    expect(connectionBanners(run, sessionState('stale', 'cold', true)).page).toEqual({
+      message: PAGE_CONNECTION_BANNER_COPY.lost,
+    });
+  });
+
+  test('reserves replay loading copy for replay-driven pages', () => {
+    const run = initialCoreState();
+    expect(pageHeader(run, null).heading).toBe('Replay is loading');
+    expect(pageHeader(run, sessionState('connected', 'up', true)).heading).toBe('Run overview');
+  });
+
   test('takes the banner down on the run-ending event itself, folded by the real reducer', () => {
     // The property below builds its `CoreState` by assigning `status`, so it
     // asserts that the decision is right about a status without asserting that
@@ -119,10 +182,12 @@ describe('connectionBanners', () => {
 
   test('names losing a connection and never having one as the different failures they are', () => {
     expect(connectionBanners(runWith('running'), sessionState('connected', 'lost'))).toEqual({
+      page: null,
       stream: null,
       controls: {message: LOST, retrying: false},
     });
     expect(connectionBanners(runWith('running'), sessionState('connected', 'cold'))).toEqual({
+      page: null,
       stream: null,
       controls: {message: COLD, retrying: false},
     });
@@ -149,6 +214,7 @@ describe('connectionBanners', () => {
 
   test('withholds the controls banner once the run has ended', () => {
     expect(connectionBanners(runWith('completed'), sessionState('connected', 'lost'))).toEqual({
+      page: null,
       stream: null,
       controls: null,
     });
@@ -177,16 +243,19 @@ describe('connectionBanners', () => {
    */
   test('keeps the stream banner and reload affordance on an ended run', () => {
     expect(connectionBanners(runWith('completed'), sessionState('stale', 'up'))).toEqual({
+      page: null,
       stream: {message: GAP_FINAL, reattach: true},
       controls: null,
     });
     expect(connectionBanners(runWith('running'), sessionState('stale', 'up'))).toEqual({
+      page: null,
       stream: {message: GAP_OPEN, reattach: true},
       controls: null,
     });
     // The same ended run, with the control channel down instead of the stream:
     // the opposite verdict, from the same `hasRunEnded`.
     expect(connectionBanners(runWith('completed'), sessionState('stale', 'lost'))).toEqual({
+      page: {message: PAGE_CONNECTION_BANNER_COPY.lost},
       stream: {message: GAP_FINAL, reattach: true},
       controls: null,
     });
@@ -194,6 +263,7 @@ describe('connectionBanners', () => {
 
   test('reports the two failures independently', () => {
     expect(connectionBanners(runWith('running'), sessionState('stale', 'lost'))).toEqual({
+      page: {message: PAGE_CONNECTION_BANNER_COPY.lost},
       stream: {message: GAP_OPEN, reattach: true},
       controls: {message: LOST, retrying: false},
     });
@@ -213,14 +283,16 @@ describe('connectionBanners', () => {
 
   /**
    * Exhaustive over the closed input space (10 run statuses x 3 session
-   * statuses x 4 channel states), so the properties hold for every combination
-   * rather than the handful named above.
+   * statuses x 4 channel states x 2 snapshot states), so the properties hold
+   * for every combination rather than the handful named above.
    */
-  test('holds its properties for every run, stream, and channel combination', () => {
+  test('holds its properties for every run, stream, channel, and snapshot combination', () => {
     for (const runStatus of RUN_STATUSES) {
       for (const sessionStatus of SESSION_STATUSES) {
         for (const controls of CHANNEL_STATES) {
-          checkCombination(runStatus, sessionStatus, controls);
+          for (const hasSnapshot of [false, true]) {
+            checkCombination(runStatus, sessionStatus, controls, hasSnapshot);
+          }
         }
       }
     }
@@ -234,13 +306,17 @@ function checkCombination(
   runStatus: CoreRunStatus,
   sessionStatus: WebSessionStatus,
   controls: (typeof CHANNEL_STATES)[number],
+  hasSnapshot: boolean,
 ): void {
   const run = runWith(runStatus);
   const ended = hasRunEnded(run);
-  const banners = connectionBanners(run, sessionState(sessionStatus, controls));
+  const session = sessionState(sessionStatus, controls, hasSnapshot);
+  const banners = connectionBanners(run, session);
+  const header = pageHeader(run, session);
   const empty = emptyTranscriptCopy(run, banners);
-  const where = {runStatus, sessionStatus, controls};
+  const where = {runStatus, sessionStatus, controls, hasSnapshot};
   const down = controls !== 'up';
+  checkPagePresentation(where, banners, header);
 
   // A banner appears exactly when the failure it names is being reported.
   // Whether the stream's appears is independent of the run's status (only what
@@ -303,5 +379,43 @@ function checkCombination(
   expect({...where, retrying: banners.controls.retrying}).toEqual({
     ...where,
     retrying: controls === 'lost-retrying',
+  });
+}
+
+type Combination = Readonly<{
+  runStatus: CoreRunStatus;
+  sessionStatus: WebSessionStatus;
+  controls: (typeof CHANNEL_STATES)[number];
+  hasSnapshot: boolean;
+}>;
+
+function checkPagePresentation(
+  where: Combination,
+  banners: ReturnType<typeof connectionBanners>,
+  header: ReturnType<typeof pageHeader>,
+): void {
+  const controlsDown = where.controls !== 'up';
+  const gatewayDown = where.hasSnapshot
+    ? where.sessionStatus === 'stale' && controlsDown
+    : where.sessionStatus === 'stale' || controlsDown;
+  const gatewayFailure =
+    where.hasSnapshot || where.controls === 'lost' || where.controls === 'lost-retrying'
+      ? 'lost'
+      : 'cold';
+  expect({...where, shown: banners.page !== null}).toEqual({...where, shown: gatewayDown});
+  expect({...where, message: banners.page?.message ?? null}).toEqual({
+    ...where,
+    message: gatewayDown ? PAGE_CONNECTION_BANNER_COPY[gatewayFailure] : null,
+  });
+  const connectionHeader = gatewayDown
+    ? LIVE_SESSION_HEADER_COPY.unreachable
+    : LIVE_SESSION_HEADER_COPY.connecting;
+  expect({...where, heading: header.heading}).toEqual({
+    ...where,
+    heading: where.hasSnapshot ? 'Run overview' : connectionHeader.heading,
+  });
+  expect({...where, chip: header.status.label}).toEqual({
+    ...where,
+    chip: where.hasSnapshot ? where.runStatus : connectionHeader.status,
   });
 }
