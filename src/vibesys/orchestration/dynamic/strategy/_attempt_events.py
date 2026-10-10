@@ -638,9 +638,14 @@ def _decode(
 ) -> ImplementerResult | ReviewResult | WaitingForEvaluation | str:
     adapter = _JUDGE_REPLY if role is Role.JUDGE else _IMPLEMENTER_REPLY
     try:
-        return adapter.validate_json(payload)
+        reply = adapter.validate_json(payload)
     except ValidationError as error:
         return str(error)
+    if isinstance(reply, ImplementerResult | ReviewResult | WaitingForEvaluation):
+        return reply
+    # The reply schema also admits a wait on the profiler, a kind only the retired
+    # loop's prompts offered: no run answers it, so it is a reply to correct.
+    return f"a {reply.kind!r} reply is not one this run accepts"
 
 
 def _unfinished(

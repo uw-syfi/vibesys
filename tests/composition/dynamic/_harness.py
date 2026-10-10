@@ -28,7 +28,7 @@ import threading
 from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import RunRecords, check, terminal_event
@@ -45,7 +45,7 @@ from vibesys.api import (
     RunStatus,
     RunStopped,
 )
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.strategy.api import (
     DynamicStrategyState,
     dynamic_operation_registry,
@@ -554,13 +554,29 @@ class LoopRun:
         ]
 
 
+class AgentsSource(Protocol):
+    """What a run needs of its agents: a factory for the Fake client behind each turn."""
+
+    def client(
+        self,
+        *,
+        session_store: SessionStore | None,
+        skill_selection: SkillSelection,
+        **kwargs: object,
+    ) -> AgentClientProtocol:
+        """Build the client one agent execution talks to."""
+        ...
+
+
 # lint-waiver: LW-136101 [PLR0913]; one entry point whose keywords are independent optional test seams.
 # > Bundling them in a settings object adds a wrapper type every scenario must build,
 # > and splitting the function duplicates the host composition below.
 def run_request(  # noqa: PLR0913
     request: RunRequest,
-    agents: ScriptedAgents,
+    agents: AgentsSource,
     *,
+    verify: bool = True,
+    budget_s: float = SIMULATED_BUDGET_S,
     on_handle: Callable[[RunHandle], None] | None = None,
     stop_timer: StopTimer | None = None,
     client_factory: Callable[..., AgentClientProtocol] | None = None,
@@ -579,7 +595,7 @@ def run_request(  # noqa: PLR0913
     so scenarios that depend on a turn finishing within one poll still use the wall clock.
     """
     if clock is not None:
-        clock.limit = clock.at + SIMULATED_BUDGET_S
+        clock.limit = clock.at + budget_s
     runs = launch.default_runs(
         LaunchSettings(
             agent_client_factory=client_factory or agents.client,
@@ -616,7 +632,7 @@ def run_request(  # noqa: PLR0913
         return LoopRun(result.run_id, result, None, events, clock)
 
     finished = asyncio.run(run()) if clock is None else run_virtual(clock, run())
-    if finished.error is None:
+    if verify and finished.error is None:
         _assert_invariants(request, finished, state_stores)
     return finished
 

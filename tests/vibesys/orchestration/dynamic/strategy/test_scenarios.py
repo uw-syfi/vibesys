@@ -6,8 +6,10 @@ only the executors scripted, so what core is handed is what production hands it.
 
 from __future__ import annotations
 
+import json
 from collections import deque
 
+import pytest
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
@@ -104,3 +106,24 @@ def test_a_correction_turn_speaks_in_its_predecessors_session() -> None:
     for turn in turns:
         same_session = {t.session for t in turns if t.session.session_id == turn.session.session_id}
         assert same_session == {turn.session}
+
+
+def _wait_on(kind: str) -> str:
+    return json.dumps({"kind": kind, "handles": ["eval_1"]})
+
+
+@pytest.mark.parametrize("role", ["implementer", "judge"])
+@pytest.mark.parametrize("kind", ["waiting_for_profiler", "waiting_for_evaluation", "unknown_wait"])
+def test_a_wait_the_run_never_recorded_ends_its_turn_whichever_wait_it_names(
+    role: str, kind: str
+) -> None:
+    """Regression: a `waiting_for_profiler` reply, valid under the implementer schema, crashed the run.
+
+    The strategy read every reply it had no branch for as a verdict and failed on a missing
+    attribute. A wait the run recorded none for (these scripted turns never submitted anything),
+    or a kind the schema rejects outright, ends its turn as a bad reply and the run still ends.
+    """
+    executors = _one_hypothesis()
+    getattr(executors, role).appendleft(_wait_on(kind))
+    trace = run_shell(executors)
+    assert isinstance(trace.decisions[-1], Stop)
