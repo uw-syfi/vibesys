@@ -4,13 +4,28 @@ from __future__ import annotations
 
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic._support import dynamic_options
 
 from vibesys.dynamic_core import dynamic_core_registration
 from vibesys.dynamic_roles import CORE_ROLES
+from vibesys.orchestration.dynamic import DynamicOptions
 from vibesys.orchestration.dynamic.strategy.api import Role, role_id
 from vs_runtime.api import AgentCapability, AgentTool
 from vs_runtime.api.core import EVALUATION_TOOL_ID
+
+
+def dynamic_options(**changes: object) -> DynamicOptions:
+    return DynamicOptions.model_validate(
+        {
+            "interface": "service",
+            "max_rounds": 1,
+            "max_retries_per_round": 1,
+            "judge_every": 3,
+            "official_eval_every": 2,
+            "max_in_flight": 2,
+            "metric_space": {"objectives": [{"name": "throughput", "direction": "max"}]},
+            **changes,
+        }
+    )
 
 
 def test_every_strategy_role_is_declared_once_and_the_plugin_serves_them() -> None:
