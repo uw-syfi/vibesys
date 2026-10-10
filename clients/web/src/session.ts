@@ -2,6 +2,7 @@ import {
   type ControlChannelState,
   type ControlTransport,
   type ScheduleTimeout,
+  ServerError,
   type ServerMessage,
   StreamReconciler,
   sameControlChannelState,
@@ -16,6 +17,7 @@ import {
 import {type CoreStateStore, createCoreStateStore} from './store.js';
 
 export type WebSessionStatus = 'connecting' | 'connected' | 'stale';
+type StreamRecovery = 'retry' | 'rebootstrap';
 
 export interface BrowserLifecycle {
   readonly visibilityState: DocumentVisibilityState;
@@ -164,10 +166,16 @@ export class WebSession {
     await this.#transport.close();
   }
 
-  /** One-click recovery after a visible stale state. */
+  /**
+   * One-click stream recovery. Refreshes the snapshot and requests a fresh
+   * bootstrap even when the snapshot says the run ended and the stream is
+   * stale: the fault is evidence that the transcript is incomplete, while run
+   * lifecycle only decides whether background redials are useful. A healthy
+   * ended stream remains inert, preserving terminal cleanup as the final word.
+   */
   reattach(): void {
-    if (this.#closed || hasRunEnded(this.store.getState())) return;
-    void this.#wake();
+    if (this.#closed || (this.#status !== 'stale' && hasRunEnded(this.store.getState()))) return;
+    this.#startRecovery('rebootstrap');
   }
 
   /**
@@ -180,10 +188,10 @@ export class WebSession {
    * mean. It touches the event stream not at all: a dead command path with a
    * live transcript is exactly the case this exists for.
    *
-   * No `hasRunEnded` guard, unlike `reattach()`, because this does not decide
-   * when it is offered: `connectionBanners` does, and it withholds the banner
-   * on an ended run. The verb stays unconditional so the one place that judges
-   * an ended run is the one place that renders the affordance.
+   * No `hasRunEnded` guard, because this does not decide when it is offered:
+   * `connectionBanners` does, and it withholds the control banner on an ended
+   * run. The verb stays unconditional so the one place that judges an ended
+   * run is the one place that renders the affordance.
    */
   reconnectControls(): void {
     if (this.#closed) return;
@@ -199,8 +207,15 @@ export class WebSession {
   };
 
   #onMessage = (message: ServerMessage, resumed: boolean): void => {
-    if (message.type !== 'event_batch') return;
-    this.store.applyBatch(message, this.#reconciler.reconcileBatch(message, {resumed}));
+    if (message.type === 'event_batch') {
+      this.store.applyBatch(message, this.#reconciler.reconcileBatch(message, {resumed}));
+    } else if (message.type === 'protocol_error') {
+      // The transports deliberately suppress the close after this in-band
+      // frame, because it is the frame's consequence rather than a second
+      // outage. The session must therefore publish the fault itself and leave
+      // the explicit fresh-bootstrap recovery reachable.
+      this.#setState('stale', new ServerError(message.message, message.diagnostic ?? null));
+    }
   };
 
   /**
@@ -258,15 +273,17 @@ export class WebSession {
     });
   }
 
-  #wake = (): void => {
+  #wake = (): void => this.#startRecovery('retry');
+
+  #startRecovery(mode: StreamRecovery): void {
     if (this.#closed || this.#lifecycle.visibilityState === 'hidden' || !this.#lifecycle.online) {
       return;
     }
     if (this.#wakeInFlight !== null) return;
-    this.#wakeInFlight = this.#resume().finally(() => {
+    this.#wakeInFlight = this.#resume(mode).finally(() => {
       this.#wakeInFlight = null;
     });
-  };
+  }
 
   #offline = (): void => {
     // Offline only reports this browser's current reachability. Once the run
@@ -279,20 +296,26 @@ export class WebSession {
     }
   };
 
-  async #resume(): Promise<void> {
+  async #resume(mode: StreamRecovery): Promise<void> {
     // A browser wake is stronger evidence than either reconnect timer: a
     // background tab may have had both callbacks coalesced indefinitely.
     // `reconnect()` is inert on a healthy or already-dialing control channel,
     // and otherwise cancels its timer and dials before the snapshot request is
-    // queued. The stream's corresponding override runs after the snapshot.
+    // queued. The stream recovery runs after the snapshot: lifecycle wakes
+    // retry normally, while an explicit Reattach asks for a fresh bootstrap.
     this.#transport.reconnect();
     try {
       await this.#loadSnapshot();
-      this.#stream.retry();
+      this.#recoverStream(mode);
     } catch (error) {
       this.#setState('stale', toError(error));
-      this.#stream.retry();
+      this.#recoverStream(mode);
     }
+  }
+
+  #recoverStream(mode: StreamRecovery): void {
+    if (mode === 'rebootstrap') this.#stream.rebootstrap();
+    else this.#stream.retry();
   }
 
   #setState(status: WebSessionStatus, error: Error | null): void {

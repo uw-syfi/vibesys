@@ -15,11 +15,11 @@ interface StreamBanner {
    */
   readonly message: string;
   /**
-   * Whether to offer `Reattach` inside this banner. Only a run that can still
-   * produce an event can be resubscribed, and `WebSession.reattach` declines an
-   * ended one, so offering it there would be offering a no-op. Inside the
-   * banner rather than beside it, so an affordance cannot be offered without
-   * the statement it recovers from.
+   * Whether to offer `Reattach` inside this banner. A stale stream can always
+   * request a fresh bootstrap, including when run lifecycle has ended; clean
+   * terminal closes never produce this banner. Inside the banner rather than
+   * beside it, so an affordance cannot be offered without the statement it
+   * recovers from.
    */
   readonly reattach: boolean;
 }
@@ -78,10 +78,10 @@ export interface ConnectionBanners {
  *
  * Two cases, because the reader's options differ: a live run's missing tail
  * arrives on its own once the stream is back, and `Reattach` asks for that
- * sooner. An ended run's does not arrive at all. Saying "stale" for both would
- * promise the second reader a recovery that is not coming, and saying nothing,
- * which is what an ended run used to get, left the transcript reading as
- * complete (#1044).
+ * sooner. An ended run has no background redial, so its copy names the explicit
+ * reload instead. Saying "stale" for both would promise automatic recovery to
+ * the second reader, and saying nothing, which is what an ended run used to
+ * get, left the transcript reading as complete (#1044).
  *
  * Exported for the same reason `CONTROLS_BANNER_COPY` is: `banners.test.ts`
  * asserts which of the two a given state selects and imports the strings rather
@@ -91,7 +91,7 @@ export interface ConnectionBanners {
 export const STREAM_BANNER_COPY = {
   live: 'The event stream dropped, so this transcript may be missing its tail.',
   ended:
-    'The event stream dropped before the run finished streaming, so this transcript may be missing its tail. The run has ended, so it will not fill in.',
+    'The event stream dropped before the run finished streaming, so this transcript may be missing its tail. Reattach to reload it.',
 } as const;
 
 /** What an empty transcript says for each state visible beside it. */
@@ -147,7 +147,7 @@ export function connectionBanners(run: CoreState, session: WebSessionState): Con
   return {
     stream:
       session.status === 'stale'
-        ? {message: STREAM_BANNER_COPY[ended ? 'ended' : 'live'], reattach: !ended}
+        ? {message: STREAM_BANNER_COPY[ended ? 'ended' : 'live'], reattach: true}
         : null,
     controls:
       ended || outage === null

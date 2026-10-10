@@ -6,6 +6,7 @@ import {
   type ProtocolResponse,
   type RequestInput,
   type ScheduleTimeout,
+  ServerError,
   type ServerMessage,
   type SubscribeOptions,
   sameControlChannelState,
@@ -604,26 +605,83 @@ describe('WebSession', () => {
     // already-subscribed socket.
     const parseFailure = new BackendClientError('parse', 'Invalid event batch message');
     transport.subscriptions[0]?.onDisconnect(parseFailure);
-    await settle();
 
     expect(session.getState()).toEqual({
       status: 'stale',
       error: parseFailure,
       controls: {status: 'connected'},
     });
-    // The page says the transcript is short and does not promise it will fill
-    // in, and it offers neither affordance: the run cannot be resubscribed and
-    // the command path is fine.
+    // The page says the transcript is short and offers the explicit recovery
+    // that can reload an ended run. The command path itself is still fine.
     expect(connectionBanners(session.store.getState(), session.getState())).toEqual({
-      stream: {message: STREAM_BANNER_COPY.ended, reattach: false},
+      stream: {message: STREAM_BANNER_COPY.ended, reattach: true},
       controls: null,
     });
 
-    // The redial policy for an ended run is unchanged: nothing was dialed
-    // again, and the withheld `Reattach` would have been a no-op anyway.
-    session.reattach();
-    await settle();
+    // Automatic redial policy for an ended run is unchanged. The user action
+    // is different: refresh the snapshot, then force a fresh bootstrap instead
+    // of asking the terminal-status predicate for permission to resume.
     expect(transport.subscriptions).toHaveLength(1);
+    transport.snapshots.push(snapshotResponse({status: 'completed'}));
+    const recovered = waitForSession(session, () => {
+      return (
+        session.getState().status === 'connected' &&
+        session.store.getState().sequence === 1 &&
+        transport.subscriptions.length > 1
+      );
+    });
+    session.reattach();
+    await recovered;
+    expect(transport.subscriptions).toHaveLength(2);
+    expect(session.store.getState().status).toBe('completed');
+
+    await session.close();
+  });
+
+  test('surfaces a stream protocol error and re-bootstraps an ended run on request', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.snapshots.push(snapshotResponse({status: 'completed'}));
+    transport.silentDials = 1;
+
+    await session.start();
+    transport.subscriptions[0]?.onMessage({
+      type: 'protocol_error',
+      code: 'stream_failed',
+      message: 'Replay failed',
+      diagnostic: {
+        id: 'stream-1',
+        code: 'stream_failed',
+        summary: 'The replay stream failed.',
+        scope: 'protocol',
+      },
+    });
+
+    expect(session.getState().error).toBeInstanceOf(ServerError);
+    expect(session.getState()).toMatchObject({
+      status: 'stale',
+      error: {
+        message: 'Replay failed',
+        diagnostic: {id: 'stream-1', code: 'stream_failed', scope: 'protocol'},
+      },
+    });
+    expect(connectionBanners(session.store.getState(), session.getState())).toEqual({
+      stream: {message: STREAM_BANNER_COPY.ended, reattach: true},
+      controls: null,
+    });
+
+    transport.snapshots.push(snapshotResponse({status: 'completed'}));
+    const recovered = waitForSession(session, () => {
+      return (
+        session.getState().status === 'connected' &&
+        session.store.getState().sequence === 1 &&
+        transport.subscriptions.length > 1
+      );
+    });
+    session.reattach();
+    await recovered;
+    expect(transport.subscriptions).toHaveLength(2);
+    expect(session.store.getState().status).toBe('completed');
 
     await session.close();
   });

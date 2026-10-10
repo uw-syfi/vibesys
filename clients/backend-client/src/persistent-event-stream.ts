@@ -1,6 +1,6 @@
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 import {defaultScheduleTimeout, type ScheduleTimeout} from './control-channel.js';
-import {isServerRejection} from './errors.js';
+import {BackendClientError, isServerRejection} from './errors.js';
 import type {ServerMessage} from './protocol.js';
 import type {EventSubscription, SubscribeOptions} from './transport.js';
 
@@ -92,6 +92,11 @@ export interface PersistentEventStreamOptions {
 
 function toError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
+}
+
+/** A frame the client could not interpret, independent of socket lifecycle. */
+function isProtocolFault(error: Error): boolean {
+  return error instanceof BackendClientError && error.kind === 'parse';
 }
 
 /**
@@ -284,15 +289,21 @@ export class PersistentEventStream {
    * A finished run reached through a snapshot is exactly that case, and it
    * rendered a terminal status over a blank transcript (#1044).
    *
-   * After the bootstrap, a drop the caller declines to redial is the socket
-   * closing behind history the caller already has, with nothing more coming:
-   * silent, as before.
+   * After the bootstrap, a transport drop the caller declines to redial is the
+   * socket closing behind history the caller already has, with nothing more
+   * coming: silent, as before. A parse failure is different evidence. It says
+   * the peer sent a frame this client cannot consume, so it is always reported
+   * even when run lifecycle declines an automatic redial. The caller can then
+   * offer the explicit fresh-bootstrap recovery below without turning every
+   * clean terminal close into an outage.
    */
   #handleDisconnect(error: Error, token: number): void {
     // A stale subscription's late close is not this stream's outage.
     if (this.#closed || token !== this.#connectionSeq) return;
     const redialing = this.#active().shouldReconnect();
-    if (redialing || !this.#bootstrapped) this.#reportDisconnected(error);
+    if (isProtocolFault(error) || redialing || !this.#bootstrapped) {
+      this.#reportDisconnected(error);
+    }
     if (redialing) this.#scheduleReconnect();
   }
 
@@ -306,9 +317,9 @@ export class PersistentEventStream {
     }, delay);
   }
 
-  async #reconnectNow(): Promise<void> {
+  async #reconnectNow(rebootstrap = false): Promise<void> {
     if (this.#reconnecting) return;
-    if (this.#closed || !this.#active().shouldReconnect()) return;
+    if (this.#closed || (!rebootstrap && !this.#active().shouldReconnect())) return;
     this.#reconnecting = true;
     try {
       const stale = this.#subscription;
@@ -318,18 +329,39 @@ export class PersistentEventStream {
       } catch {
         // The subscription is already dead; closing it owes nothing.
       }
-      const recovered = this.#bootstrapped ? await this.#resumeDial() : await this.#bootstrapDial();
+      if (rebootstrap) this.#bootstrapped = false;
+      const recovered =
+        !rebootstrap && this.#bootstrapped ? await this.#resumeDial() : await this.#bootstrapDial();
       if (this.#closed) return;
       if (recovered) {
         this.#backoff.reset();
         this.#disconnectedReported = false;
         this.#emit({status: 'connected'});
-      } else {
+      } else if (!rebootstrap || this.#active().shouldReconnect()) {
         this.#scheduleReconnect();
       }
     } finally {
       this.#reconnecting = false;
     }
+  }
+
+  /**
+   * Reload the stream from a fresh bootstrap, whatever automatic-redial policy
+   * currently says. This is the explicit recovery for a reported protocol
+   * fault on an ended run: run lifecycle still keeps ordinary closes quiet and
+   * prevents automatic dialing, while an operator can ask the peer for one new
+   * complete view. The current subscription and pending timer are retired so
+   * the recovery owns exactly one dial; a live run retains its normal schedule
+   * if that dial fails.
+   */
+  rebootstrap(): void {
+    if (this.#closed || this.#callbacks === null || this.#reconnecting) return;
+    if (this.#cancelReconnect !== null) {
+      this.#cancelReconnect();
+      this.#cancelReconnect = null;
+    }
+    this.#backoff.reset();
+    void this.#reconnectNow(true);
   }
 
   /**

@@ -41,17 +41,21 @@ class TestEventStream extends PersistentEventStream {
  * What one severed stream must report, by whether the bootstrap batch had
  * landed and whether the caller accepts a redial. A table rather than the
  * predicate restated: the point is which points of the space are silent, and
- * only one of the four is.
+ * only one of the eight is.
  */
 const EXPECTED_REPORTS = {
   // Nothing folded and nothing coming: the fault is the whole transcript, so
   // saying nothing leaves an empty view reading as a complete one (#1044).
-  'false/false': ['disconnected'],
-  'false/true': ['disconnected', 'connected'],
+  'false/false/false': ['disconnected'],
+  'false/false/true': ['disconnected'],
+  'false/true/false': ['disconnected', 'connected'],
+  'false/true/true': ['disconnected', 'connected'],
   // The caller has the bootstrap and wants no redial, so the close took
-  // nothing from it.
-  'true/false': [],
-  'true/true': ['disconnected', 'connected'],
+  // nothing from it unless the close carries a protocol fault of its own.
+  'true/false/false': [],
+  'true/false/true': ['disconnected'],
+  'true/true/false': ['disconnected', 'connected'],
+  'true/true/true': ['disconnected', 'connected'],
 } as const satisfies Record<string, readonly StreamConnectionState['status'][]>;
 
 /** Mutable answers to the stream's `cursor`/`storeId`/`shouldReconnect` questions. */
@@ -193,9 +197,47 @@ class StubTransport implements StreamTransport {
     });
   }
 
-  sever(message = 'Server event stream disconnected'): void {
-    this.#disconnect?.(new Error(message));
+  sever(error: Error | string = 'Server event stream disconnected'): void {
+    this.#disconnect?.(typeof error === 'string' ? new Error(error) : error);
   }
+}
+
+/** Check one point in the report/redial/cause state space. */
+async function checkDisconnectCase(
+  bootstrapped: boolean,
+  reconnect: boolean,
+  protocolFault: boolean,
+): Promise<void> {
+  const where = {bootstrapped, reconnect, protocolFault};
+  const transport = new StubTransport();
+  const env = {cursor: 0, reconnect};
+  const {callbacks, states} = harness(env);
+  const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+  await stream.subscribe(callbacks);
+  if (bootstrapped) {
+    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    env.cursor = 1;
+  }
+
+  transport.sever(
+    new BackendClientError(
+      protocolFault ? 'parse' : 'disconnected',
+      protocolFault ? 'Invalid event batch message' : 'Server event stream disconnected',
+    ),
+  );
+  await stream.settle();
+
+  expect({...where, states: states.map(state => state.status)}).toEqual({
+    ...where,
+    states: [...EXPECTED_REPORTS[`${bootstrapped}/${reconnect}/${protocolFault}`]],
+  });
+  // Cause changes whether an ended drop is reported, never whether it redials
+  // on its own. A protocol fault waits for an explicit fresh bootstrap.
+  expect({...where, dials: transport.subscribeCalls.length}).toEqual({
+    ...where,
+    dials: reconnect ? 2 : 1,
+  });
+  await stream.close();
 }
 
 describe('PersistentEventStream', () => {
@@ -472,7 +514,7 @@ describe('PersistentEventStream', () => {
     await stream.close();
   });
 
-  it('reports every drop that cost the caller something, and redials separately', async () => {
+  it('reports every missing-history or protocol fault, and redials separately', async () => {
     // The disconnect path decides two things, so the property is their cross
     // product. The redial is the caller's call. The report is not: it is
     // withheld only where the caller has the bootstrap and wants no redial,
@@ -481,36 +523,34 @@ describe('PersistentEventStream', () => {
     // and cost the whole transcript (#1044).
     for (const bootstrapped of [false, true]) {
       for (const reconnect of [false, true]) {
-        const where = {bootstrapped, reconnect};
-        const transport = new StubTransport();
-        const env = {cursor: 0, reconnect};
-        const {callbacks, states} = harness(env);
-        const stream = new TestEventStream(transport, {
-          tail: 1_000,
-          reconnectDelaysMs: [0],
-        });
-        await stream.subscribe(callbacks);
-        if (bootstrapped) {
-          transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
-          env.cursor = 1;
+        for (const protocolFault of [false, true]) {
+          await checkDisconnectCase(bootstrapped, reconnect, protocolFault);
         }
-
-        transport.sever();
-        await stream.settle();
-
-        expect({...where, states: states.map(state => state.status)}).toEqual({
-          ...where,
-          states: [...EXPECTED_REPORTS[`${bootstrapped}/${reconnect}`]],
-        });
-        // One dial per accepted redial, and none for a declined one. The
-        // bootstrapped case resumes; the other re-bootstraps.
-        expect({...where, dials: transport.subscribeCalls.length}).toEqual({
-          ...where,
-          dials: reconnect ? 2 : 1,
-        });
-        await stream.close();
       }
     }
+  });
+
+  it('re-bootstraps explicitly after an ended run reports a protocol fault', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 0, reconnect: false};
+    const {callbacks, nextState, states} = harness(env);
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(1, 'run_finished')]);
+    env.cursor = 1;
+
+    transport.sever(new BackendClientError('parse', 'Invalid event batch message'));
+    expect(states.map(state => state.status)).toEqual(['disconnected']);
+    expect(transport.subscribeCalls).toHaveLength(1);
+
+    const recovered = nextState();
+    stream.rebootstrap();
+    await expect(recovered).resolves.toMatchObject({status: 'connected'});
+    expect(transport.subscribeCalls).toEqual([
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+    ]);
+    await stream.close();
   });
 
   it('does not reconnect once closed', async () => {
