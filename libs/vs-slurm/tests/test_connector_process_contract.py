@@ -38,10 +38,15 @@ if TYPE_CHECKING:
 _JOB_NAME = re.compile(r"--job-name=\S+")
 
 
+def _connector_program(state: Path) -> tuple[str, ...]:
+    """The executable connector, which answers the connector protocol and the local programs."""
+    return (sys.executable, "-m", "vs_slurm.fake_connector", str(state))
+
+
 def _real_runner(root: Path, remote: Path) -> SlurmJobRunner:
     """Run the connector as the production runner does: one process per request."""
     state = executing_cluster(root / "cluster")
-    command = (sys.executable, "-m", "vs_slurm.fake_connector", str(state))
+    command = _connector_program(state)
     return SlurmJobRunner(
         _config(remote, SlurmConnectorTransport(kind="connector", command=command)),
         scratch_root=root / "scratch",
@@ -52,7 +57,7 @@ def _real_runner(root: Path, remote: Path) -> SlurmJobRunner:
 def _local_runner(root: Path, remote: Path) -> SlurmJobRunner:
     """Run the local transport's shell and rsync as processes, as a submit host does."""
     state = executing_cluster(root / "cluster")
-    program = (sys.executable, "-m", "vs_slurm.fake_connector", str(state))
+    program = _connector_program(state)
     transport = SlurmLocalTransport(
         kind="local", shell_command=(*program, "shell"), rsync_command=(*program, "rsync")
     )
@@ -74,9 +79,7 @@ def _fake_runner(root: Path, remote: Path) -> SlurmJobRunner:
     )
 
 
-def _config(
-    remote: Path, transport: SlurmConnectorTransport | SlurmLocalTransport
-) -> SlurmConfig:
+def _config(remote: Path, transport: SlurmConnectorTransport | SlurmLocalTransport) -> SlurmConfig:
     return SlurmConfig(name="fake", remote_workspace_root=str(remote), transport=transport)
 
 

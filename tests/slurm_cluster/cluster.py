@@ -205,13 +205,14 @@ class SlurmCluster:
         return f"{self.user}@127.0.0.1"
 
     def write_login_shim(self, directory: Path) -> Path:
-        """Write a program that runs a Slurm client as it would run on a login node.
+        """Write a program that runs a command as it would run on a login node.
 
-        ``shim srun ARGS`` runs ``srun ARGS`` on the head container, which is the
-        login node, with this process's working directory (for srun) and exactly this
-        process's environment (``env -i``), as the Slurm user. It is the
+        ``shim PROGRAM ARGS`` runs ``PROGRAM ARGS`` on the head container, which is
+        the login node, with this process's working directory (for srun) and exactly
+        this process's environment (``env -i``), as the Slurm user. It is the
         ``srun_command`` and ``scancel_command`` of the ``slurm-gpu`` operator
-        configuration, so the host-side client needs no Slurm installation.
+        configuration, and, as ``[shim, "bash", "-c"]``, the ``shell_command`` of
+        the local transport, so the host-side client needs no Slurm installation.
         Standard streams and the exit status pass through ``docker exec``.
         """
         shim = directory / "login-node"

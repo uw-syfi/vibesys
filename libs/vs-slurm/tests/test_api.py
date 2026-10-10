@@ -387,18 +387,18 @@ def test_runner_uses_versioned_connector_protocol_and_collects_artifacts(tmp_pat
 
 
 class _FakeSshProcess:
-    """Answer a transport's processes; *shell* is the program that executes remote commands."""
+    """Answer a transport's processes; *program* is what executes remote commands."""
 
-    def __init__(self, shell: str = "ssh") -> None:
+    def __init__(self, program: str = "ssh") -> None:
         self.calls: list[tuple[tuple[str, ...], str | None, float]] = []
-        self._shell = shell
+        self._program = program
 
     def __call__(
         self, argv: Sequence[str], *, stdin: str | None, timeout: float
     ) -> subprocess.CompletedProcess[str]:
         command = tuple(argv)
         self.calls.append((command, stdin, timeout))
-        if command[0] == self._shell:
+        if command[0] == self._program:
             remote_command = command[-1]
             if "sbatch" in remote_command:
                 stdout = "Submitted batch job 4567\n"
@@ -467,7 +467,7 @@ def test_runner_uses_builtin_ssh_and_rsync_transport(tmp_path: Path) -> None:
 def test_local_transport_runs_commands_and_copies_on_this_host(tmp_path: Path) -> None:
     workspace = tmp_path / "candidate"
     workspace.mkdir()
-    process = _FakeSshProcess(shell="/operator/bin/login-shell")
+    process = _FakeSshProcess(program="/operator/bin/login-shell")
     config = _config(
         transport={
             "kind": "local",
@@ -497,9 +497,33 @@ def test_local_transport_runs_commands_and_copies_on_this_host(tmp_path: Path) -
         assert source.startswith("/")
         assert destination.startswith("/")
     assert all(
-        call[0][0] in {"/operator/bin/login-shell", "/operator/bin/rsync"}
-        for call in process.calls
+        call[0][0] in {"/operator/bin/login-shell", "/operator/bin/rsync"} for call in process.calls
     )
+
+
+@pytest.mark.parametrize("kind", ["ssh", "local"])
+def test_a_job_is_submitted_without_the_submitting_process_environment(
+    tmp_path: Path, kind: str
+) -> None:
+    """The host's environment holds credentials; the job must get the cluster's own."""
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    process = _FakeSshProcess(program="ssh" if kind == "ssh" else "bash")
+    transport: dict[str, object] = (
+        {"kind": "ssh", "host": "login.example"}
+        if kind == "ssh"
+        else {"kind": "local", "shell_command": ["bash", "-c"]}
+    )
+    config = _config(transport=transport)
+
+    SlurmJobRunner(config, process=process, invocation_id=lambda: "env_01").run(
+        SlurmJobRequest(workspace=workspace, command=("true",))
+    )
+
+    submit = next(shlex.split(call[0][-1]) for call in process.calls if "sbatch-rr" in call[0][-1])
+    options = submit[submit.index("/operator/bin/sbatch-rr") + 1 :]
+    # Before the operator's arguments, so an operator can still override it.
+    assert options.index("--export=NONE") < options.index("-p")
 
 
 def test_builtin_ssh_does_not_consume_embedding_process_stdin(tmp_path: Path) -> None:
