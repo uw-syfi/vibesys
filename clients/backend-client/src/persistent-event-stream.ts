@@ -298,7 +298,8 @@ export class PersistentEventStream {
   }
 
   /**
-   * A live subscription dropped: two decisions, taken in that order.
+   * A live subscription dropped: decide and own any retry before reporting the
+   * completed transition to external code.
    *
    * Whether to redial is the caller's, and unchanged. Whether to report is not,
    * and used to be the same answer, which is the defect: silence is only right
@@ -321,10 +322,13 @@ export class PersistentEventStream {
     // A stale subscription's late close is not this stream's outage.
     if (this.#closed || token !== this.#connectionSeq) return;
     const redialing = this.#active().shouldReconnect();
+    // Arm the retry before the external state callback. A callback may request
+    // an explicit re-bootstrap synchronously; that stronger recovery must see
+    // and cancel this timer rather than leave it to replace the fresh stream.
+    if (redialing) this.#scheduleReconnect();
     if (isProtocolFault(error) || redialing || !this.#bootstrapped) {
       this.#reportDisconnected(error);
     }
-    if (redialing) this.#scheduleReconnect();
   }
 
   #scheduleReconnect(): void {

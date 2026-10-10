@@ -109,6 +109,7 @@ class FakeTransport implements ControlTransport {
   readonly subscriptions: SubscriptionRecord[] = [];
   readonly snapshots: Array<ProtocolResponse | Error | Promise<ProtocolResponse>> = [];
   readonly #subscriptionWaiters: Array<(subscription: SubscriptionRecord) => void> = [];
+  readonly #subscriptionCloseWaiters: Array<(subscription: SubscriptionRecord) => void> = [];
   #deferNextSubscription = false;
   #releaseSubscription: (() => void) | null = null;
   /**
@@ -120,6 +121,7 @@ class FakeTransport implements ControlTransport {
   silentDials = 0;
   closeCalls = 0;
   reconnectCalls = 0;
+  readonly reconnectFailures: Error[] = [];
   readonly #hooks: WebSessionTransportHooks;
   #controls: ControlChannelState = {status: 'connected'};
 
@@ -157,6 +159,8 @@ class FakeTransport implements ControlTransport {
    */
   reconnect(): void {
     this.reconnectCalls += 1;
+    const failure = this.reconnectFailures.shift();
+    if (failure !== undefined) throw failure;
     this.recoverControlChannel();
   }
 
@@ -192,7 +196,9 @@ class FakeTransport implements ControlTransport {
     else onMessage(streamBatch(`store-${this.subscriptions.length}`, afterSequence + 1));
     const subscription = {
       close: async () => {
+        if (record.closed) return;
         record.closed = true;
+        this.#subscriptionCloseWaiters.shift()?.(record);
       },
     };
     if (this.#deferNextSubscription) {
@@ -211,6 +217,11 @@ class FakeTransport implements ControlTransport {
   /** Resolves when the stream makes its next dial. */
   nextSubscription(): Promise<SubscriptionRecord> {
     return new Promise(resolve => this.#subscriptionWaiters.push(resolve));
+  }
+
+  /** Resolves when the stream retires its next owned subscription. */
+  nextSubscriptionClose(): Promise<SubscriptionRecord> {
+    return new Promise(resolve => this.#subscriptionCloseWaiters.push(resolve));
   }
 
   /** Hold the next subscription handle until the test releases its handshake. */
@@ -393,6 +404,23 @@ describe('WebSession', () => {
     await session.close();
   });
 
+  test('releases recovery ownership when control reconnect throws synchronously', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    await session.start();
+
+    const failure = new Error('control reconnect failed');
+    transport.reconnectFailures.push(failure);
+    lifecycle.emit('online');
+    expect(session.getState()).toMatchObject({status: 'stale', error: failure});
+
+    const recovered = transport.nextSubscription();
+    session.reattach();
+    expect(transport.reconnectCalls).toBe(2);
+    await expect(recovered).resolves.toMatchObject({afterSequence: 0, options: undefined});
+    await session.close();
+  });
+
   test('promotes an overlapping lifecycle retry to an explicit reattach', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
@@ -436,24 +464,35 @@ describe('WebSession', () => {
     transport.silentDials = 1;
     transport.deferNextSubscribe();
     const retrying = transport.nextSubscription();
+    const retiring = transport.nextSubscriptionClose();
     transport.subscriptions[0]?.onDisconnect(disconnect('gateway restarted'));
     lifecycle.emit('online');
+    await retiring;
+
+    // The retry has taken ownership and begun retiring the stale handle, but
+    // the session's flight must already be reusable when its public caller can
+    // observe that transition. Otherwise this stronger intent is dropped in a
+    // Promise.finally tail after the retry has already been dispatched.
+    transport.snapshots.push(new Error('reattach snapshot failed'));
+    const refreshed = waitForSession(
+      session,
+      () => session.getState().error?.message === 'reattach snapshot failed',
+    );
+    session.reattach();
+    session.reattach();
+    expect(transport.requests).toHaveLength(3);
+    await refreshed;
+
     const resumed = await retrying;
     expect(resumed).toMatchObject({afterSequence: 1, options: {storeId: 'store-1'}});
-    await drainMicrotasks();
-
-    // The session-level wake is complete, but its stream retry still owns the
-    // dial slot. Reattach must survive that second single-flight boundary.
-    session.reattach();
-    session.reattach();
-    await drainMicrotasks();
 
     resumed.onMessage(outputBatch('store-1', 2, 'superseded retry\n'));
     expect(session.store.getState().sequence).toBe(1);
     expect(session.store.getState().transcript).toEqual([]);
 
+    const fresh = transport.nextSubscription();
     transport.releasePendingSubscribe();
-    await drainMicrotasks();
+    await expect(fresh).resolves.toMatchObject({afterSequence: 0, options: undefined});
 
     expect(
       transport.subscriptions.slice(1).map(({afterSequence, options}) => ({
@@ -486,7 +525,6 @@ describe('WebSession', () => {
 
     session.reattach();
     session.reattach();
-    await drainMicrotasks();
     expect(transport.subscriptions).toHaveLength(2);
 
     const recovered = waitForSession(session, () => session.getState().status === 'connected');
@@ -510,7 +548,6 @@ describe('WebSession', () => {
     // second socket whose handle could later be orphaned by the first one.
     session.reattach();
     session.reattach();
-    await drainMicrotasks();
     expect(transport.subscriptions).toHaveLength(1);
 
     transport.releasePendingSubscribe();
@@ -1014,10 +1051,6 @@ function waitForSession(session: WebSession, predicate: () => boolean): Promise<
 async function settle(): Promise<void> {
   await new Promise<void>(resolve => setTimeout(resolve, 0));
   await Promise.resolve();
-}
-
-async function drainMicrotasks(): Promise<void> {
-  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 }
 
 function deferred<T>(): {readonly promise: Promise<T>; readonly resolve: (value: T) => void} {

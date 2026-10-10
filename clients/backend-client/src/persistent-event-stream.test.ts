@@ -605,6 +605,44 @@ describe('PersistentEventStream', () => {
     await stream.close();
   });
 
+  it('cancels the automatic retry before a disconnected callback re-bootstraps', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 0, reconnect: true};
+    const {callbacks, nextState, states} = harness(env);
+    let stream!: TestEventStream;
+    stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [10]});
+    const reentrantCallbacks: PersistentEventStreamCallbacks = {
+      ...callbacks,
+      onConnectionState: state => {
+        callbacks.onConnectionState(state);
+        if (state.status === 'disconnected') stream.rebootstrap();
+      },
+    };
+    await stream.subscribe(reentrantCallbacks);
+    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    env.cursor = 1;
+
+    const disconnected = nextState();
+    const recovered = nextState();
+    const fresh = transport.nextSubscribe();
+    transport.sever();
+
+    await expect(disconnected).resolves.toMatchObject({status: 'disconnected'});
+    await expect(fresh).resolves.toEqual({
+      afterSequence: 0,
+      tail: 1_000,
+      storeId: undefined,
+    });
+    await expect(recovered).resolves.toMatchObject({status: 'connected'});
+    expect(stream.pendingDelays()).toEqual([]);
+    expect(transport.subscribeCalls).toEqual([
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+    ]);
+    expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+    await stream.close();
+  });
+
   it('does not downgrade a superseded named resume before the fresh pass', async () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true, storeId: ''};
