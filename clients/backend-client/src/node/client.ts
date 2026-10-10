@@ -104,9 +104,12 @@ export class ServerClient {
    * whatever order the caller closes the stream and the client in.
    */
   readonly #secondarySockets = new Map<Socket, () => void>();
+  /** Control dials created by a reconnect but not yet handed to the channel. */
+  readonly #openingControlDials = new Map<Socket, SocketDial>();
   readonly #channel: ControlChannel;
 
   #closed = false;
+  #closing: Promise<void> | null = null;
 
   private constructor(socket: Socket, path: string, options: ServerClientOptions) {
     this.#path = path;
@@ -176,7 +179,7 @@ export class ServerClient {
       Math.max(0, deadline - clock.now()),
       `Timed out connecting to server after ${configured}ms`,
       clock.scheduleTimeout,
-    ).then(socket => new ServerClient(socket, path, options));
+    ).connected.then(socket => new ServerClient(socket, path, options));
   }
 
   /**
@@ -335,21 +338,32 @@ export class ServerClient {
 
   /**
    * Close every socket the client owns: the control connection and every live
-   * secondary (subscription or dedicated request). Cancels a pending redial,
-   * fails every request still owed an answer (in flight or held for resend),
-   * and ends each socket gracefully, destroying it if it does not close within
-   * the grace window, so an unresponsive server cannot hang shutdown.
+   * or opening control socket, plus every live secondary (subscription or
+   * dedicated request). Cancels a pending redial, fails every request still
+   * owed an answer (in flight or held for resend), and ends each live socket
+   * gracefully, destroying it if it does not close within the grace window,
+   * so an unresponsive server cannot hang shutdown.
    */
   close(): Promise<void> {
+    if (this.#closing !== null) return this.#closing;
     // Mark the whole client closed before failing channel work or settling
     // secondary operations, so no reentrant caller can allocate another socket.
     this.#closed = true;
+    this.#closing = this.#closeOwnedSockets();
+    return this.#closing;
+  }
+
+  /** Perform the one terminal teardown every close caller joins. */
+  #closeOwnedSockets(): Promise<void> {
     const channelClosed = this.#channel.close();
+    const openingControls = [...this.#openingControlDials.values()];
+    this.#openingControlDials.clear();
     const secondaries = [...this.#secondarySockets];
     this.#secondarySockets.clear();
     for (const [, settle] of secondaries) settle();
     return Promise.all([
       channelClosed,
+      ...openingControls.map(dial => dial.close()),
       ...secondaries.map(([socket]) =>
         closeSocketWithin(socket, this.#closeGraceMs, this.#clock.scheduleTimeout),
       ),
@@ -358,12 +372,28 @@ export class ServerClient {
 
   /** Dial one control socket for the channel. */
   async #dialControl(handlers: ControlConnectionHandlers): Promise<ControlConnection> {
-    const socket = await dialSocket(
+    const dial = dialSocket(
       this.#path,
       this.#connectTimeoutMs,
       `Timed out connecting to server after ${this.#connectTimeoutMs}ms`,
       this.#clock.scheduleTimeout,
     );
+    // Registration is synchronous with socket creation, before the first
+    // await, so close() cannot miss a connection attempt already in progress.
+    this.#openingControlDials.set(dial.socket, dial);
+    let socket: Socket;
+    try {
+      socket = await dial.connected;
+    } catch (error) {
+      this.#openingControlDials.delete(dial.socket);
+      throw error;
+    }
+    // Exactly one owner claims the connected socket. If close() cleared the
+    // set first, it also destroyed and joined the socket, so the channel must
+    // not adopt it afterward.
+    if (!this.#openingControlDials.delete(socket)) {
+      throw new BackendClientError('disconnected', 'Client closed during control connection');
+    }
     return this.#controlConnection(socket, handlers);
   }
 
@@ -512,34 +542,77 @@ export class ServerClient {
   }
 }
 
+/** One socket attempt, synchronously ownable before its connection settles. */
+interface SocketDial {
+  readonly socket: Socket;
+  readonly connected: Promise<Socket>;
+  /** Cancel its deadline, reject the attempt, destroy the socket, and join it. */
+  close(): Promise<void>;
+}
+
 /**
- * Dial the server socket once, resolving with the connected socket or rejecting
- * with a typed dial failure. The one boundary that knows Node errnos, so
- * everything downstream branches on `kind`/`retryable`, never on the code.
+ * Start one server-socket dial and return its ownership handle immediately.
+ * This is the one boundary that knows Node errnos, so everything downstream
+ * branches on `kind`/`retryable`, never on the code.
  */
 function dialSocket(
   path: string,
   timeoutMs: number,
   timeoutMessage: string,
   scheduleTimeout: ScheduleTimeout,
-): Promise<Socket> {
-  return new Promise((resolve, reject) => {
-    const socket = createConnection(path);
-    const onError = (error: Error): void => {
-      cancelTimeout();
-      reject(dialFailure(error));
-    };
+): SocketDial {
+  const socket = createConnection(path);
+  let cancel = (_error: BackendClientError): void => undefined;
+  const connected = new Promise<Socket>((resolve, reject) => {
+    let settled = false;
     let cancelTimeout = (): void => {};
-    cancelTimeout = scheduleTimeout(() => {
-      socket.destroy();
-      reject(new BackendClientError('timeout', timeoutMessage));
-    }, timeoutMs);
-    socket.once('connect', () => {
+    const cleanup = (): void => {
       cancelTimeout();
+      socket.off('connect', onConnect);
       socket.off('error', onError);
+    };
+    const fail = (error: BackendClientError): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onError = (error: Error): void => {
+      fail(dialFailure(error));
+    };
+    const onConnect = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       resolve(socket);
-    });
+    };
+    cancelTimeout = scheduleTimeout(() => {
+      fail(new BackendClientError('timeout', timeoutMessage));
+      socket.destroy();
+    }, timeoutMs);
+    cancel = fail;
+    socket.once('connect', onConnect);
     socket.once('error', onError);
+  });
+  return {
+    socket,
+    connected,
+    close: () => {
+      cancel(new BackendClientError('disconnected', 'Client closed during control connection'));
+      return destroySocket(socket);
+    },
+  };
+}
+
+/** Destroy a not-yet-claimed socket and join its actual close event. */
+function destroySocket(socket: Socket): Promise<void> {
+  return new Promise(resolve => {
+    if (socket.readyState === 'closed') {
+      resolve();
+      return;
+    }
+    socket.once('close', resolve);
+    socket.destroy();
   });
 }
 

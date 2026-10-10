@@ -248,6 +248,8 @@ export class ControlChannel {
    * not be repeated never waits out an outage; it fails at the drop instead.
    */
   readonly #held: ControlRequest[] = [];
+  /** Connection teardowns that a terminal close must join. */
+  readonly #retiringConnections = new Set<Promise<void>>();
 
   #phase: ControlPhase = {kind: 'down'};
   /**
@@ -386,7 +388,24 @@ export class ControlChannel {
     this.#cancelRedial?.();
     this.#cancelRedial = null;
     this.#failOwed(disconnectedError('Client closed'));
-    if (phase.kind === 'connected') await phase.connection.close();
+    if (phase.kind === 'connected') this.#retireConnection(phase.connection);
+    await Promise.all([...this.#retiringConnections]);
+  }
+
+  /**
+   * Start releasing a connection and retain ownership until it is actually
+   * closed. A disconnect callback can close the whole channel reentrantly, so
+   * the promise must be registered before that callback is invoked.
+   */
+  #retireConnection(connection: ControlConnection): void {
+    // Defer the call by one microtask so ownership is recorded even if a
+    // transport's close path synchronously re-enters this channel.
+    const retiring = Promise.resolve().then(() => connection.close());
+    this.#retiringConnections.add(retiring);
+    void retiring.then(
+      () => this.#retiringConnections.delete(retiring),
+      () => this.#retiringConnections.delete(retiring),
+    );
   }
 
   /**
@@ -506,8 +525,8 @@ export class ControlChannel {
 
   /**
    * A live connection dropped. Transition once (a stale connection's late event
-   * or a shutdown is ignored), report the disconnect, dispose what was in
-   * flight by policy, and start the backoff loop.
+   * or a shutdown is ignored), own its teardown, dispose what was in flight by
+   * policy, start the backoff loop, then report the completed transition.
    */
   #onDrop(error: BackendClientError): void {
     const phase = this.#phase;
@@ -517,11 +536,13 @@ export class ControlChannel {
     }
     this.#phase = {kind: 'down'};
     this.#lastError = error;
-    this.#reportState();
-    void phase.connection.close();
+    this.#retireConnection(phase.connection);
     this.#disposeForOutage();
     this.#backoff.reset();
     this.#scheduleRedial();
+    // Report only after the transition owns its teardown and retry timer, so a
+    // reentrant close can await/cancel both and no work is installed afterward.
+    this.#reportState();
   }
 
   /**
@@ -552,9 +573,9 @@ export class ControlChannel {
     }
     this.#phase = {kind: 'down'};
     this.#lastError = error;
-    this.#reportState();
-    void phase.connection.close();
+    this.#retireConnection(phase.connection);
     this.#failOwed(error);
+    this.#reportState();
   }
 
   /**
@@ -613,7 +634,16 @@ export class ControlChannel {
     // the channel is down: before that nothing has been claimed, so a cold
     // start stays silent until its first dial settles rather than announcing
     // an outage it has not observed.
-    if (this.#toldDisconnected) this.#reportState();
+    if (this.#toldDisconnected) {
+      this.#reportState();
+      // Reporting is an external callback. It may close the channel in
+      // response to the retrying state, so re-check ownership before creating
+      // a resource that close() could no longer await.
+      if (this.#phase.kind !== 'down') {
+        this.#dialing = false;
+        return;
+      }
+    }
     let connection: ControlConnection;
     const handlers = this.#bindHandlers();
     try {
@@ -630,7 +660,7 @@ export class ControlChannel {
     this.#dialing = false;
     if (this.#phase.kind !== 'down') {
       // close() raced the dial: this connection is not wanted.
-      void connection.close();
+      this.#retireConnection(connection);
       return;
     }
     const reported = this.#takeDialReport();
@@ -641,7 +671,7 @@ export class ControlChannel {
       // every later request to wait out its response deadline. So the attempt
       // takes the failure it was handed, and each disposition is the one that
       // failure gets on an installed connection.
-      void connection.close();
+      this.#retireConnection(connection);
       if (reported.fault) this.#onDialFault(reported.error);
       else this.#onDialFailure(reported.error);
       return;
@@ -667,15 +697,16 @@ export class ControlChannel {
 
   /**
    * This attempt failed. The channel is demonstrably not deliverable now, so
-   * the outage is reported and whatever was waiting is disposed by the same
-   * rule a drop uses, then the schedule decides whether to try again.
+   * whatever was waiting is disposed by the same rule a drop uses and the
+   * schedule decides whether to try again before the completed transition is
+   * reported.
    */
   #onDialFailure(error: BackendClientError): void {
     if (this.#phase.kind !== 'down') return;
     this.#lastError = error;
-    this.#reportState();
     this.#disposeForOutage();
     this.#scheduleRedial();
+    this.#reportState();
   }
 
   /**
@@ -687,8 +718,8 @@ export class ControlChannel {
   #onDialFault(error: BackendClientError): void {
     if (this.#phase.kind !== 'down') return;
     this.#lastError = error;
-    this.#reportState();
     this.#failOwed(error);
+    this.#reportState();
   }
 
   /**
@@ -708,7 +739,7 @@ export class ControlChannel {
   }
 
   #scheduleRedial(): void {
-    if (this.#cancelRedial !== null) return;
+    if (this.#phase.kind !== 'down' || this.#dialing || this.#cancelRedial !== null) return;
     const delayMs = this.#backoff.next();
     if (delayMs === undefined) {
       this.#exhaust();
