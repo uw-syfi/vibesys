@@ -20,29 +20,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import tempfile
-from collections import deque
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from tests.support.virtual_time import VirtualClock, run_virtual
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors, _lease
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
-    implement,
-    implemented,
-    plan_reply,
-    reviewed,
-)
-from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, LIMITS, config
-from tests.vibesys.orchestration.dynamic.strategy._shell import ScriptedExecutors, _executors
+from tests.support.liveness import Journal
+from tests.vibesys.orchestration.dynamic.strategy._executors import Executors, lease_for
+from tests.vibesys.orchestration.dynamic.strategy._shell import ScriptedExecutors
 
-from vibesys.orchestration.dynamic.core_policy.api import reply_schemas, requirements_for
-from vibesys.orchestration.dynamic.strategy.api import (
-    DynamicStrategy,
-    DynamicStrategyState,
-    dynamic_operation_registry,
-)
 from vs_core.api import (
     CancelTurn,
     DispatchTurn,
@@ -52,28 +36,16 @@ from vs_core.api import (
     ObserveOwnedJob,
     ResourceId,
     ResumeSessionTurn,
-    RunEnvelope,
-    RunResultProposal,
     RunStatus,
     SubmitMeasurement,
     TurnObserved,
 )
-from vs_core.testing.drive import Answer, Harness, Running, Succeeded, new_run
+from vs_core.testing.drive import Answer, Running, Succeeded
 from vs_project.api import FakeStateStore, StoreFence
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS as LEASE_SECONDS
 from vs_runtime.api.core import (
-    CoreRunHost,
-    CoreRuntime,
-    CoreRuntimeBindings,
     ExecutionResult,
-    RunControlBridge,
-    RunLoopConfig,
-    RunOutcome,
-    drive_core,
-    start_core,
 )
-from vs_runtime.api.infrastructure import RuntimeRunControlChannel
-from vs_runtime.api.testing import FakePublicationDelivery
 from vs_slurm.api import (
     ClusterObservation,
     ClusterSubmitted,
@@ -86,8 +58,10 @@ from vs_slurm.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from pathlib import Path
 
     from pydantic import BaseModel
+    from tests.support.virtual_time import VirtualClock
 
     from vs_core.api import CoreState, OperationRegistry, Request, SchemaRef
     from vs_runtime.api.core import ExecutionContext, RuntimeRecord
@@ -188,7 +162,7 @@ class TimedCluster:
         }
 
 
-class _TimedScript:
+class TimedScript:
     """The scripted answers, except that a job is running until the cluster finishes it."""
 
     def __init__(self, inner: Executors, cluster: TimedCluster) -> None:
@@ -203,27 +177,28 @@ class _TimedScript:
 
 
 @dataclass(frozen=True)
-class _World:
+class World:
     """The timeline the executors act on and the records they leave on it."""
 
     clock: VirtualClock
     profile: TimingProfile
     turns: list[TurnSpan]
     cluster: TimedCluster
+    journal: Journal = field(default_factory=Journal)
 
 
-class _TimedExecutors(ScriptedExecutors):
+class TimedExecutors(ScriptedExecutors):
     """Agent turns take drawn virtual time; every other request is answered at once."""
 
     def __init__(
         self,
-        script: _TimedScript,
+        script: TimedScript,
         core: Callable[[], CoreState],
         registry: OperationRegistry,
         schemas: Mapping[SchemaRef, type[BaseModel]],
-        world: _World,
+        world: World,
     ) -> None:
-        super().__init__(script, core, registry, schemas)
+        super().__init__(script, core, registry, schemas, world.journal)
         self._cluster = world.cluster
         self._clock = world.clock
         self._profile = world.profile
@@ -269,7 +244,9 @@ class _TimedExecutors(ScriptedExecutors):
             if isinstance(request, CancelTurn)
             else request.turn.session.session_id
         )
-        observed = self._observed(request, Succeeded(resource_id=_lease(session)), context.now_at)
+        observed = self._observed(
+            request, Succeeded(resource_id=lease_for(session)), context.now_at
+        )
         view = observed.observation.model_copy(update={"status": ObservationStatus.CANCELLED})
         events = (
             (
@@ -329,175 +306,38 @@ class _TimedExecutors(ScriptedExecutors):
         return result.model_copy(update={"owner_events": events})
 
 
-class _PauseClock:
-    """Notes the virtual time of the first commit that leaves the run paused."""
+class CommitCapExceededError(RuntimeError):
+    """The run committed more often than the scenario allows: it is spinning, not settling."""
 
-    def __init__(self, clock: VirtualClock, paused: list[float]) -> None:
+
+class PauseClock:
+    """Notes the virtual time of the first commit that leaves the run paused.
+
+    With ``max_commits`` it also fails a run that keeps committing without settling: a loop
+    that spins on a rejected decision commits forever and never reaches a dispatch cap.
+    """
+
+    def __init__(
+        self, clock: VirtualClock, paused: list[float], max_commits: int | None = None
+    ) -> None:
         self._clock = clock
         self._paused = paused
+        self._left = max_commits
 
     def committed(self, previous: object, current: RuntimeRecord[Any]) -> None:
         del previous
+        if self._left is not None:
+            self._left -= 1
+            if self._left < 0:
+                raise CommitCapExceededError
         if current.envelope.core.run.status == RunStatus.PAUSED and not self._paused:
             self._paused.append(self._clock.now())
 
 
-class _Steers:
+class Steers:
     def put(self, ref: object, text: str) -> None:
         del ref, text
 
 
-def _ignore(transition: object) -> None:
+def ignore_publication(transition: object) -> None:
     del transition
-
-
-@dataclass
-class TimedRun:
-    """What one run did on the virtual timeline."""
-
-    core: CoreState
-    started_at: float
-    ended_at: float
-    outcome: RunOutcome | None
-    error: BaseException | None
-    turns: list[TurnSpan]
-    lease_events: list[LeaseEvent]
-    jobs: list[tuple[str, float]]
-    stopped_at: float | None = None
-    pause_requested_at: float | None = None
-    paused_at: float | None = None
-    """Virtual time of the first commit that left the run paused."""
-
-    @property
-    def wall_s(self) -> float:
-        """Virtual seconds from the loop start to its end."""
-        return self.ended_at - self.started_at
-
-    def max_overlap(self, role: str) -> int:
-        """The most turns of ``role`` in flight at once."""
-        edges = sorted(
-            [(span.start, 1) for span in self.turns if span.role == role]
-            + [(span.end, -1) for span in self.turns if span.role == role],
-            key=lambda edge: (edge[0], edge[1]),
-        )
-        live = peak = 0
-        for _, change in edges:
-            live += change
-            peak = max(peak, live)
-        return peak
-
-
-def run_timed(
-    profile: TimingProfile, *, stop_after: float | None = None, pause_after: float | None = None
-) -> TimedRun:
-    """Run one round of two workstreams on the production shell and loop, on virtual time.
-
-    ``stop_after`` asks the run to stop that many virtual seconds after the loop starts
-    (the operator's stop, through the run-control channel).
-    """
-    with tempfile.TemporaryDirectory() as directory:
-        return _run(profile, Path(directory), stop_after, pause_after)
-
-
-def _run(
-    profile: TimingProfile, workspace: Path, stop_after: float | None, pause_after: float | None
-) -> TimedRun:
-    clock = VirtualClock(1.0)
-    cluster = TimedCluster(
-        FakeCluster(clock=clock, timing=profile.slurm, seed=profile.seed), workspace
-    )
-    script = Executors(
-        planner=deque([plan_reply(*(implement(f"h{n}") for n in range(IMPLEMENTERS)))]),
-        implementer=deque(implemented() for _ in range(IMPLEMENTERS)),
-        judge=deque(reviewed() for _ in range(IMPLEMENTERS)),
-        submit=cluster.submit,
-    )
-    selected = config(max_in_flight=IMPLEMENTERS)
-    harness = Harness(
-        registry=dynamic_operation_registry(),
-        facts=FACTS,
-        limits=LIMITS.model_copy(update={"observe_interval": OBSERVE_INTERVAL_S}),
-        envelope_type=RunEnvelope[DynamicStrategyState],
-        requirements=requirements_for(selected),
-    )
-    strategy = DynamicStrategy(config=selected)
-    store = LeaseRecordingStore()
-    paused: list[float] = []
-    turns: list[TurnSpan] = []
-    shell: CoreRuntime[DynamicStrategyState] = CoreRuntime(
-        store,
-        strategy,
-        new_run(strategy, harness),
-        bindings=CoreRuntimeBindings(
-            registry=harness.registry,
-            commits=_PauseClock(clock, paused),
-            executors=_executors(
-                _TimedExecutors(
-                    _TimedScript(script, cluster),
-                    lambda: shell.record.envelope.core,
-                    harness.registry,
-                    reply_schemas(selected),
-                    _World(clock, profile, turns, cluster),
-                )
-            ),
-        ),
-    )
-    channel = RuntimeRunControlChannel(_ignore)
-    controls = RunControlBridge(
-        channel, _Steers(), stop_result=RunResultProposal(outcome="cancelled", reason="operator")
-    )
-    host = CoreRunHost(shell, FakePublicationDelivery(store), clock, controls)
-    # Production polls controls every second of run time. A stop does not wait for the
-    # poll (the loop watches the channel), so a coarser poll does not change what the
-    # properties observe.
-    loop_config = RunLoopConfig(
-        host_id="timed",
-        lease_duration=LEASE_SECONDS,
-        control_poll_interval=_CONTROL_POLL_S,
-        max_dispatches=400,
-    )
-    start_core(host, loop_config)
-    started = clock.now()
-    stopped: list[float] = []
-    pause_requested: list[float] = []
-
-    async def pause_later(seconds: float) -> None:
-        await clock.sleep(seconds)
-        pause_requested.append(clock.now())
-        channel.request_pause()
-
-    async def stop_later(seconds: float) -> None:
-        await clock.sleep(seconds)
-        stopped.append(clock.now())
-        channel.request_stop()
-
-    async def main() -> tuple[RunOutcome | None, BaseException | None]:
-        timer = asyncio.ensure_future(stop_later(stop_after)) if stop_after is not None else None
-        pauser = (
-            asyncio.ensure_future(pause_later(pause_after)) if pause_after is not None else None
-        )
-        try:
-            return await drive_core(host, loop_config), None
-        # lint-waiver: LW-990101 [BLE001]; the run's own failure is the observation: a test
-        # > asserts its type (a lapsed lease, a stop) and the virtual time it happened at.
-        except BaseException as error:  # noqa: BLE001
-            return None, error
-        finally:
-            for task in (timer, pauser):
-                if task is not None:
-                    task.cancel()
-
-    outcome, error = run_virtual(clock, main())
-    return TimedRun(
-        core=shell.record.envelope.core,
-        started_at=started,
-        ended_at=clock.now(),
-        outcome=outcome,
-        error=error,
-        turns=turns,
-        lease_events=store.lease_events,
-        jobs=cluster.jobs,
-        stopped_at=stopped[0] if stopped else None,
-        pause_requested_at=pause_requested[0] if pause_requested else None,
-        paused_at=paused[0] if paused else None,
-    )
