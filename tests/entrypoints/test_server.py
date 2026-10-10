@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
@@ -14,7 +15,7 @@ from string import ascii_lowercase
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis.strategies import integers, one_of, text
 from tests.entrypoints.support import (
     BUDGET_POLLS,
@@ -25,6 +26,7 @@ from tests.entrypoints.support import (
     FakeDetachedGateway,
     gateway_record,
 )
+from tests.support.thread_signals import non_main_thread_ids, requires_tgkill, send_to_thread
 
 import entrypoints.server as server_entrypoint
 import server.runtime as runtime_module
@@ -886,3 +888,37 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     assert options["web_assets"] == tmp_path.resolve()
     assert callable(options["tui_defaults"])
     assert observed["request"] is request
+
+
+@requires_tgkill
+@example(transports=1, target=1)
+@settings(max_examples=8, deadline=None)
+@given(transports=integers(min_value=1, max_value=3), target=integers(min_value=0, max_value=3))
+def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
+    transports: int, target: int
+) -> None:
+    # The kernel may hand a process SIGTERM to any thread while CPython runs
+    # handlers on the main thread, which is blocked driving the run. Aim it at
+    # the main thread or at any transport thread to force each interleaving.
+    child = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-155502 [S603]; the test runs its own fixed child module.
+        # > A real signal needs a real child process.
+        [sys.executable, "-m", "tests.entrypoints.foreground_run_child", str(transports)],
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline().strip() == "driving"
+        threads = [child.pid, *non_main_thread_ids(child.pid)]
+        send_to_thread(child.pid, threads[target % len(threads)], signal.SIGTERM)
+        # The deadline only guards a hang; a stop that is delivered returns at once.
+        output, _ = child.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.communicate()
+        pytest.fail("SIGTERM did not interrupt the foreground run")
+    finally:
+        child.kill()
+    assert "cleanup shutdown=True" in output
+    assert child.returncode != 0

@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from vs_sandbox.local_shell import LocalShellRunner
     from vs_sandbox.modal_model_setup import ensure_model_volume
     from vs_sandbox.rocm_backend import RocmBackend
+    from vs_sandbox.signal_relay import relay_signals
     from vs_sandbox.trainium_backend import TrainiumBackend
 
 __all__ = [
@@ -141,6 +142,7 @@ __all__ = [
     "pick_gpu",
     "query_gpu_info",
     "register_compute_backend",
+    "relay_signals",
     "require_sysbox_runtime",
     "start_sandbox",
     "stop_sandbox",
@@ -197,6 +199,7 @@ _LAZY_EXPORTS = {
     "HostSandbox": ("host_sandbox", "HostSandbox"),
     "LandlockSandbox": ("host_sandbox", "LandlockSandbox"),
     "LinuxBackend": ("host_sandbox", "LinuxBackend"),
+    "relay_signals": ("signal_relay", "relay_signals"),
     "SANDBOX_DISABLE_ENV": ("host_sandbox", "DISABLE_ENV"),
     "SANDBOX_GPU_DEVICES_ENV": ("host_sandbox", "GPU_DEVICES_ENV"),
     "SandboxUnavailableError": ("host_sandbox", "SandboxUnavailableError"),
