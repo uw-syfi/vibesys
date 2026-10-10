@@ -56,7 +56,7 @@ export function validCommand(value: unknown, path: string): string {
 }
 
 /** Validate one host's settings, rejecting unknown keys. */
-export function parseHostSettings(value: unknown, path: string): HostSettings {
+function parseHostSettings(value: unknown, path: string): HostSettings {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new SettingsError(`${path} must be an object`);
   }

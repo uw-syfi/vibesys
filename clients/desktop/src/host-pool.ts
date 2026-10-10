@@ -33,7 +33,7 @@ export interface HostPoolOptions {
   readonly log: (message: string) => void;
 }
 
-export const LOCAL_KEY: HostKey = 'local';
+const LOCAL_KEY: HostKey = 'local';
 
 export function hostKey(id: HostId): HostKey {
   return id.kind === 'local' ? LOCAL_KEY : `ssh:${id.alias}`;

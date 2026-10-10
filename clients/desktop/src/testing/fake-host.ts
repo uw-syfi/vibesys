@@ -10,7 +10,7 @@ import type {Duplex} from 'node:stream';
 import {type Endpoint, type Host, HostError, type ServerExit, type ServerHandle} from '../host.js';
 import {parseInstanceRecord} from '../instances.js';
 import {type ConnectionHandler, FakeNetwork} from './fake-network.js';
-import {fakeRecord} from './fake-vibesys-node.js';
+import {fakeRecord} from './fake-record.js';
 
 /** What a scripted command prints and how it exits. */
 export interface CommandResult {

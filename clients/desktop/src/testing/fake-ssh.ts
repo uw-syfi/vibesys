@@ -173,7 +173,7 @@ export class FakeSsh implements SshRunner {
 }
 
 /** Split a POSIX command line made only of single-quoted words (as `shellQuote` writes them). */
-export function parseWords(line: string): string[] {
+function parseWords(line: string): string[] {
   const words: string[] = [];
   let word = '';
   let inWord = false;

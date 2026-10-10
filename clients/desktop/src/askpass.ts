@@ -11,7 +11,7 @@
 import {chmod, mkdir, stat, writeFile} from 'node:fs/promises';
 import {dirname} from 'node:path';
 
-export const ASKPASS_SCRIPT = `#!/bin/sh
+const ASKPASS_SCRIPT = `#!/bin/sh
 # VibeSys askpass helper: shows ssh's prompt in a dialog; the answer goes to ssh only.
 prompt=$1
 hidden="with hidden answer"

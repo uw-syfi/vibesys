@@ -11,7 +11,7 @@
 import {PROTOCOL_VERSION} from '@vibesys/backend-client';
 
 /** A live detached server this client can talk to. */
-export interface LiveInstance {
+interface LiveInstance {
   readonly id: string;
   readonly status: 'starting' | 'serving';
   readonly socketPath: string;

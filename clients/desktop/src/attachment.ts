@@ -81,7 +81,7 @@ function failureOf(error: unknown): CheckFailure {
 }
 
 /** How a dial attempt or an open stream ended, for the supervisor. */
-export function streamEndOf(error: unknown): StreamEnd {
+function streamEndOf(error: unknown): StreamEnd {
   if (!(error instanceof HostError)) return 'normal';
   switch (error.kind) {
     case 'link':

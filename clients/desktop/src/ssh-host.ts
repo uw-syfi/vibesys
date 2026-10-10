@@ -100,7 +100,7 @@ const SSH_FAILED = 255;
  * The stdio bridge's exit statuses (`BridgeOutcome` in `src/server/stdio_bridge.py`) and the host
  * error each means for a stream; null is an ordinary end.
  */
-export const BRIDGE_EXITS: ReadonlyMap<number, HostErrorKind | null> = new Map([
+const BRIDGE_EXITS: ReadonlyMap<number, HostErrorKind | null> = new Map([
   [0, null], // client_closed
   [3, null], // server_closed
   [4, 'unreachable'], // run_gone
@@ -114,7 +114,7 @@ export const BRIDGE_EXITS: ReadonlyMap<number, HostErrorKind | null> = new Map([
 ]);
 
 /** Single-quote `word` for a POSIX shell. */
-export function shellQuote(word: string): string {
+function shellQuote(word: string): string {
   return `'${word.replaceAll("'", `'\\''`)}'`;
 }
 

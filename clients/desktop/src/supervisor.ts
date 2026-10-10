@@ -88,7 +88,7 @@ export interface SupervisorConfig {
   readonly checkTimeoutMs: number;
 }
 
-export const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
+const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
   delaysMs: DEFAULT_RECONNECT_DELAYS_MS,
   checkTimeoutMs: 45_000,
 };

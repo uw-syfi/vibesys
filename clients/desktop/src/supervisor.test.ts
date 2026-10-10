@@ -14,8 +14,9 @@ import {
   step,
 } from './supervisor.js';
 import {FakeClock} from './testing/fake-clock.js';
+import {fakeRecord} from './testing/fake-record.js';
 import {FakeSsh} from './testing/fake-ssh.js';
-import {FakeVibesysNode, fakeRecord} from './testing/fake-vibesys-node.js';
+import {FakeVibesysNode} from './testing/fake-vibesys-node.js';
 
 const CONFIG: SupervisorConfig = {
   delaysMs: [500, 1_000, 2_000, 4_000, 8_000],
