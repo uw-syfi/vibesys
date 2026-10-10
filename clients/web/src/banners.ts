@@ -150,16 +150,19 @@ export const CONTROLS_BANNER_COPY = {
   cold: 'Controls have not reached the run. Its state cannot be refreshed until they connect.',
 } as const;
 
-/** Page-level copy for never reaching the gateway and losing it later. */
+/**
+ * Page-level copy for never reaching the server and losing it later. It names no route: the page
+ * may reach its server through a web gateway, the desktop app's local socket, or an SSH host.
+ */
 export const PAGE_CONNECTION_BANNER_COPY = {
-  cold: 'The gateway is unreachable, so this page could not load the run.',
-  lost: 'The gateway is unreachable, so this page may no longer be current.',
+  cold: 'The VibeSys server is unreachable, so this page could not load the run.',
+  lost: 'The VibeSys server is unreachable, so this page may no longer be current.',
 } as const;
 
 /** Header copy used before a live session has loaded its first snapshot. */
 export const LIVE_SESSION_HEADER_COPY = {
-  connecting: {heading: 'Connecting to gateway', status: 'connecting to gateway'},
-  unreachable: {heading: 'Gateway unreachable', status: 'gateway unreachable'},
+  connecting: {heading: 'Connecting to the server', status: 'connecting'},
+  unreachable: {heading: 'Server unreachable', status: 'server unreachable'},
 } as const;
 
 function describeOutage(outage: ControlOutage): string {
