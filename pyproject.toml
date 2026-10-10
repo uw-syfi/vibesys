@@ -77,6 +77,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
+    "pytest-timeout",
     "pytest-xdist",
     "respx",
     "vs-bench",
@@ -109,6 +110,17 @@ pythonpath = [".", "packaging"]
 # log). It never kills or fails the test, so it is a diagnostic and not a
 # wall-clock assertion. It sits far above the slowest legitimate test.
 faulthandler_timeout = 300
+# Hard backstop for a hung test, not a test condition: no test may rely on it to
+# pass (a test synchronizes on the thing it waits for). CI's slowest legitimate
+# test takes about 93 s, so 600 s is more than six times that. `thread` dumps all
+# stacks and exits the worker process, which xdist reports as a failure of that
+# one test and replaces; `signal` would raise in a main thread that a hung
+# `asyncio.run` shutdown can keep blocked. Under xdist the plugin's own dump is
+# lost with the worker, so the stack in the log is faulthandler's, from 300 s.
+# Tests marked e2e, real_contract or slow get a higher bound from the root
+# conftest.py.
+timeout = 600
+timeout_method = "thread"
 markers = [
     # Applied by `pytest_collection_modifyitems` in the root conftest.py, which
     # maps it onto an xdist scheduling group so CI's `-n auto --dist loadgroup`

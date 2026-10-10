@@ -72,6 +72,13 @@ settings.load_profile(
 #: xdist scheduling group for tests that cannot run beside one another.
 _SERIAL_GROUP = "serial"
 
+# Markers whose tests drive real processes, images or an exhaustive sweep and
+# carry their own, longer deadlines (the largest is a 1800 s image build). They
+# get a higher hard backstop than the 600 s default in pyproject.toml; a test
+# that sets `@pytest.mark.timeout` itself keeps its own value.
+_LONG_RUNNING_MARKERS = ("e2e", "real_contract", "slow")
+_LONG_RUNNING_TIMEOUT_S = 3600
+
 #: Fixtures that compile a real binary once per ``scope="session"`` and are
 #: consumed by more than one test. "Session" only means "this xdist worker's
 #: session": with ``-n auto``, a fixture's consumers can land on different
@@ -118,6 +125,10 @@ def pytest_collection_modifyitems(items: Iterable[pytest.Item]) -> None:
     despite carrying the same group; with it, both landed on the same worker.
     """
     for item in items:
+        if item.get_closest_marker("timeout") is None and any(
+            item.get_closest_marker(name) is not None for name in _LONG_RUNNING_MARKERS
+        ):
+            item.add_marker(pytest.mark.timeout(_LONG_RUNNING_TIMEOUT_S))
         if item.get_closest_marker(_SERIAL_GROUP) is not None:
             item.add_marker(pytest.mark.xdist_group(_SERIAL_GROUP))
             continue
