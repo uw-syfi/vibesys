@@ -16,6 +16,10 @@ not otherwise touched. Citations below were rechecked against a fresh
 including two places the first draft cited a legacy, dead orchestration
 engine instead of the live one (flagged inline).
 
+The three architecture diagrams below sit inline with the section each one
+illustrates, rather than collected into one dedicated section, so every
+diagram stays next to the prose that explains it.
+
 ## Problem
 
 A VibeSys serving-system campaign is a long run: a portfolio of concurrent
@@ -216,19 +220,19 @@ persisted but not streamed, and not computed anywhere.
   shell-style tools.
 - **Agent status snapshots**: elapsed seconds, in-flight input tokens,
   context-window usage (`AgentStatusData`), and current-context token/model
-  readings (`UsageUpdateData`) — both point-in-time, not cumulative.
+  readings (`UsageUpdateData`), both point-in-time, not cumulative.
 - **Rate limits and quota lifecycle**: `RateLimitUpdateData`,
   `QuotaPausedData`/`QuotaResumedData`/`QuotaAbandonedData`,
   `ProviderSwitchedData`.
 - **Gate lifecycle**: `GateStartedData`/`GateFinishedData` (gate, recipe,
-  reused, metric, value, unit, output tail) — no duration field.
+  reused, metric, value, unit, output tail). No duration field.
 - **Round outcomes**: `RoundFinishedData` (attempts, judge verdict,
-  `perf_metric`/`perf_unit`, whether profiling was skipped) — this is also
+  `perf_metric`/`perf_unit`, whether profiling was skipped). This is also
   where a profiler's headline metric surfaces; see the profiler bullet
   below.
 - **Judge and benchmark results**: `JudgeResultData`, `BenchmarkResultData`.
 - **Run failure, in aggregate**: `RunFailure` (kind, reason,
-  `workstreams_started`, `workstream_budget`, `candidates_kept`) — a real
+  `workstreams_started`, `workstream_budget`, `candidates_kept`), a real
   cross-workstream count, but terminal-only, built once when a run fails.
 - **Envelope metadata on every event**: `sequence`, `timestamp`, `run_id`,
   `type`, `text`, plus the optional `status`, `execution_id`, `round_label`,
@@ -240,8 +244,8 @@ persisted but not streamed, and not computed anywhere.
   `AgentUsage` (`vs_agent/contracts.py`) itself carries input/output/cache
   tokens, `total_cost_usd`, `duration_ms`; the per-agent-kind label
   ("dynamic-implementer", "dynamic-judge", and so on) is not a field of
-  `AgentUsage` but a separate `kind` parameter `append_usage_record()`
-  (`vs_agent/usage_records.py`) adds when it assembles each `usage.jsonl`
+  `AgentUsage` but a separate `kind` parameter `_write_usage_record()`
+  (`vs_agent/client.py:526`) adds when it assembles each `usage.jsonl`
   row. This is the richest disconnected source in the repo. It is write-only
   today: nothing reads it back into an event.
 - **Portfolio concurrency.** `active()`/`capacity()` (`strategy/_context.py`)
@@ -315,9 +319,9 @@ persisted but not streamed, and not computed anywhere.
   polling exists anywhere in `vs_sandbox`/`vs_agent`/`src/vibesys`.
 - **Retry/backoff as an event: a dead sink, not a missing feature.** A real
   retry policy exists (`TRANSIENT_RETRY_DELAYS_S`,
-  `vs_agent/session_launch.py`) and the wait loop runs inside agentshim, but
-  its log callback, `AgentDiagnosticLog`, is constructed with no event sink
-  (`factory.py:91`, defaults to `NULL_AGENT_EVENT_SINK`). The retry notice
+  `vs_agent/drivers/agentshim.py:108`) and the wait loop runs inside agentshim,
+  but its log callback, `AgentDiagnosticLog`, is constructed with no event sink
+  (`factory.py:97`, defaults to `NULL_AGENT_EVENT_SINK`). The retry notice
   reaches the plain-text run log only. One line of wiring would fix this; it
   is listed under "Backend path" rather than fixed in this PR, to keep the
   proof of concept to one change.
@@ -631,7 +635,11 @@ validates; the fold and the view operate on typed values only. This mirrors
 `foldCampaignFrame(state, frame): FoldState` is a pure reducer: `state + event
 -> new state`, no I/O, no clock, no React. `FoldState` holds the growing
 `CampaignRecord`, the run status, the per-workstream token spend, and the last
-applied `seq`. Properties the reducer guarantees, and the tests assert:
+applied `seq`.
+
+### Correctness properties
+
+The reducer guarantees these properties, and the tests assert them:
 
 - Measurements are kept sorted by `sequence`, regardless of arrival order. This
   matters because `dynamic` assigns sequence numbers at planning time but
@@ -704,7 +712,7 @@ adds no backend, core, or wire-protocol code, and no new dependency.
 - `main.tsx` mounts the live path on `?campaign-live`, wiring
   `useLiveCampaign` + `CampaignDashboard`.
 
-Run it:
+### Run instructions
 
 ```bash
 cd clients && pnpm --filter @vibesys/web dev
@@ -892,6 +900,8 @@ the client does not need to change when the source does.
   `FakeCampaignStream` are its implementations.
 
 ## Verification
+
+### Testing
 
 - `campaign-frames.test.ts`: `parseCampaignFrame` accepts every valid frame kind
   and rejects an unknown kind, an unknown key, and a wrong type on every frame
