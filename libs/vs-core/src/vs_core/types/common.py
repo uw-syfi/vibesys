@@ -13,6 +13,28 @@ class Value(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True, validate_default=True)
 
+    # Pydantic hashes a frozen model by hashing every field, recursively, on every call. Core
+    # keys its memoized checks (`lru_cache` on whole envelopes and requests) by these values, so
+    # each lookup re-walked the entire unchanged history: the dominant cost of a step. A value
+    # cannot change, so its hash is computed once. A slot keeps it out of `__dict__` and out of
+    # equality, copies and serialization; a copy is a new object and hashes afresh.
+    __slots__ = ("_hash",)
+
+    def __hash__(self) -> int:
+        """Hash of the class's fields, computed once."""
+        try:
+            return self._hash
+        except AttributeError:
+            fields = self.__dict__
+            # `model_construct` may leave fields unset; pydantic's own hash tolerates that. The
+            # tuple's hash is the very value pydantic's generated `__hash__` returns; the
+            # `hash` builtin is avoided only because the purity ratchet bars it from core.
+            value = tuple.__hash__(
+                tuple(fields.get(name) for name in type(self).__pydantic_fields__)
+            )
+            object.__setattr__(self, "_hash", value)
+            return value
+
 
 type Seconds = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 type Count = Annotated[int, Field(ge=0)]

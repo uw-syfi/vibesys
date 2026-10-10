@@ -156,7 +156,25 @@ def _walk_immutable(values: Iterable[object]) -> bool:
 
 
 def canonical_json(value: BaseModel) -> str:
-    """Keep ordered sequences and canonically sort every unordered collection."""
+    """Keep ordered sequences and canonically sort every unordered collection.
+
+    A frozen value's text depends only on its class and fields, so it is remembered by value:
+    recovery proves the same recorded requests against their digests on every step.
+    """
+    if value.model_config.get("frozen"):
+        try:
+            return _frozen_canonical_json(value)
+        except TypeError:
+            pass  # unhashable: a field holds a list, dict or set; computed below, uncached
+    return _canonical_json(value)
+
+
+@lru_cache(maxsize=_REMEMBERED_MODELS)
+def _frozen_canonical_json(value: BaseModel) -> str:
+    return _canonical_json(value)
+
+
+def _canonical_json(value: BaseModel) -> str:
     serialized = value.model_dump(mode="json", serialize_as_any=True)
     return json.dumps(
         _canonical(value, serialized), sort_keys=True, separators=(",", ":"), ensure_ascii=False
