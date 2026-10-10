@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from agentshim.testing import ClaudePeerTurn, ClaudeStreamPeers, FakeExecutor
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.fake_run_clock import FakeRunClock
@@ -27,7 +26,13 @@ from vibesys.api.request import RunEnvironmentSpec
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import AgentCapabilities, build_agent_client
-from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDockerBuildRunner
+from vs_agent.api.testing import (
+    FakeAgentClient,
+    FakeAgentInvocationStore,
+    FakeDockerBuildRunner,
+    FakeExecutor,
+    stream_peers,
+)
 from vs_runtime.api.core import RunTiming
 from vs_sandbox.api.testing import FakeDockerEngine
 
@@ -141,7 +146,7 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
     engine = FakeDockerEngine(root / "engine")
     executor = FakeExecutor(
         [],
-        peers=ClaudeStreamPeers([ClaudePeerTurn(text="ok") for _ in range(candidates + 1)]).build,
+        peers=stream_peers("claude", *(["ok"] * (candidates + 1))).build,
     )
     clients: list[AgentClientProtocol] = []
 
