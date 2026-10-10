@@ -108,26 +108,15 @@ def _non_secret_env(env: dict[str, str]) -> dict[str, str]:
     return {name: value for name, value in env.items() if not _is_secret_env_name(name)}
 
 
-def _cleanup_containers() -> None:
-    """Stop and remove all tracked containers."""
+def _cleanup_containers(docker: DockerCli | None = None) -> None:
+    """Stop and remove all tracked containers through *docker* (the real CLI by default)."""
+    docker = docker if docker is not None else SubprocessDockerCli()
     for container_id, _name in list(_live_containers.items()):
         with suppress(OSError, subprocess.TimeoutExpired):
-            subprocess.run(  # noqa: S603  # lint-waiver: LW-007110 [S603]; fixed docker stop argv is issued without a shell during process cleanup.
-                ["docker", "stop", container_id],  # noqa: S607  # lint-waiver: LW-007119 [S607]; Docker is a PATH-resolved runtime dependency.
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=30,
-            )
+            docker.run(["docker", "stop", container_id], timeout_seconds=30)
         removed = None
         with suppress(OSError, subprocess.TimeoutExpired):
-            removed = subprocess.run(  # noqa: S603  # lint-waiver: LW-007111 [S603]; fixed docker rm argv is issued without a shell during process cleanup.
-                ["docker", "rm", "-f", container_id],  # noqa: S607  # lint-waiver: LW-007120 [S607]; Docker is a PATH-resolved runtime dependency.
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=10,
-            )
+            removed = docker.run(["docker", "rm", "-f", container_id], timeout_seconds=10)
         if removed is None:
             continue
         if removed.returncode == 0 or "No such container" in (removed.stderr or ""):

@@ -105,14 +105,14 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/device_lease.py", "rule": "wall_clock", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/docker_cli.py", "rule": "subprocess", "count": 5}
 {"path": "libs/vs-sandbox/src/vs_sandbox/docker_sandbox.py", "rule": "signal", "count": 1}
-{"path": "libs/vs-sandbox/src/vs_sandbox/docker_sandbox.py", "rule": "subprocess", "count": 9}
+{"path": "libs/vs-sandbox/src/vs_sandbox/docker_sandbox.py", "rule": "subprocess", "count": 7}
 {"path": "libs/vs-sandbox/src/vs_sandbox/docker_sandbox.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/docker_workspace.py", "rule": "subprocess", "count": 4}
 {"path": "libs/vs-sandbox/src/vs_sandbox/evaluator_tools.py", "rule": "fs_sync", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/evaluator_tools.py", "rule": "subprocess", "count": 9}
 {"path": "libs/vs-sandbox/src/vs_sandbox/execution.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/fake_command_runner.py", "rule": "threading", "count": 3}
-{"path": "libs/vs-sandbox/src/vs_sandbox/fake_docker_command.py", "rule": "subprocess", "count": 3}
+{"path": "libs/vs-sandbox/src/vs_sandbox/fake_docker_command.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/fake_docker_engine.py", "rule": "process", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/fake_docker_engine.py", "rule": "signal", "count": 3}
 {"path": "libs/vs-sandbox/src/vs_sandbox/fake_docker_engine.py", "rule": "subprocess", "count": 24}
@@ -169,8 +169,6 @@
 {"path": "libs/vs-sandbox/tests/test_atomic_metadata.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_command_execution.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "rule": "subprocess", "count": 1}
-{"path": "libs/vs-sandbox/tests/test_docker_image_resolution.py", "rule": "subprocess", "count": 8}
-{"path": "libs/vs-sandbox/tests/test_docker_sandbox.py", "rule": "subprocess", "count": 95}
 {"path": "libs/vs-sandbox/tests/test_docker_sandbox_exit_paths.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_docker_sandbox_exit_paths.py", "rule": "subprocess", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_docker_sandbox_import.py", "rule": "process", "count": 1}
