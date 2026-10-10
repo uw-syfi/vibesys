@@ -25,6 +25,17 @@ import {
 } from './index.js';
 
 describe('core state projection', () => {
+  it('carries a server truncation marker into the public transcript', () => {
+    const state = reduceEvent(initialCoreState(), {
+      ...outputEvent(1, 'kept prefix'),
+      truncated: true,
+    });
+
+    expect(state.transcript).toEqual([
+      expect.objectContaining({content: 'kept prefix', truncated: true}),
+    ]);
+  });
+
   it('latches the first non-empty run identity before stale-event checks', () => {
     const current = {...initialCoreState(), sequence: 9};
 
@@ -653,6 +664,15 @@ describe('core state projection', () => {
     expect(state.transcript.map(entry => entry.content)).toEqual(['hello world', 'separate']);
   });
 
+  it('keeps a truncation marker when a cut stream chunk coalesces', () => {
+    let state = reduceEvent(initialCoreState(), outputEvent(1, 'kept ', 'turn-1'));
+    state = reduceEvent(state, {...outputEvent(2, 'prefix', 'turn-1'), truncated: true});
+
+    expect(state.transcript).toEqual([
+      expect.objectContaining({content: 'kept prefix', truncated: true}),
+    ]);
+  });
+
   it('correlates parallel tool results by call id', () => {
     let state = initialCoreState();
     state = reduceEvent(state, toolEvent(1, 'tool_call', 'call-a', 'first'));
@@ -663,6 +683,21 @@ describe('core state projection', () => {
     expect(state.transcript).toHaveLength(2);
     expect(state.transcript[0]?.toolResult?.content).toBe('first result');
     expect(state.transcript[1]?.toolResult?.content).toBe('second result');
+  });
+
+  it('keeps a truncation marker when a cut tool result merges into its call', () => {
+    let state = reduceEvent(initialCoreState(), toolEvent(1, 'tool_call', 'call-a', 'first'));
+    state = reduceEvent(state, {
+      ...toolEvent(2, 'tool_result', 'call-a', 'kept result prefix'),
+      truncated: true,
+    });
+
+    expect(state.transcript).toEqual([
+      expect.objectContaining({
+        truncated: true,
+        toolResult: expect.objectContaining({content: 'kept result prefix'}),
+      }),
+    ]);
   });
 
   it('retains typed tool arguments and results without presentation loss', () => {

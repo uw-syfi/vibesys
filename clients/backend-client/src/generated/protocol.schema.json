@@ -3813,6 +3813,12 @@
           ],
           "default": null,
           "title": "Data"
+        },
+        "truncated": {
+          "default": false,
+          "description": "True when the recording boundary cut variable-size payload fields to keep this event within MAX_SERIALIZED_RUN_EVENT_BYTES.",
+          "title": "Truncated",
+          "type": "boolean"
         }
       },
       "required": [

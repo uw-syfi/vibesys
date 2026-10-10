@@ -39,6 +39,7 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       // end-to-end specs import; `vite.config.ts` and `index.html` supply the app entries.
       'src/index.ts',
       'src/**/*.test.ts',
+      'src/**/*.test.tsx',
       // Playwright specs, run by `pnpm --filter @vibesys/web test:e2e`.
       'e2e/**/*.spec.ts',
     ],

@@ -71,6 +71,7 @@ const CONVERSATION_WINDOW_THRESHOLD = 2_000;
 
 /** How many entries a windowed paint materializes, and grows by on demand. */
 const CONVERSATION_WINDOW = 200;
+const EVENT_TRUNCATION_NOTICE = "Event payload truncated at the server's size bound.";
 
 type ConversationPatch =
   | {kind: 'same'}
@@ -475,17 +476,27 @@ export class ConversationView {
   #renderBody(card: BoxRenderable, entry: ConversationEntry, palette: EntryPalette): void {
     if (this.#markdownKinds.has(entry.kind)) {
       this.#renderMarkdownEntry(card, entry);
-      return;
-    }
-    if (
+    } else if (
       entry.kind === 'tool' &&
       (entry.toolCall !== undefined ||
         (entry.toolName !== undefined && entry.toolArguments !== undefined))
     ) {
       this.#renderToolTurn(card, entry);
-      return;
+    } else {
+      this.#renderPlainEntry(card, entry, palette);
     }
-    this.#renderPlainEntry(card, entry, palette);
+    if (entry.truncated === true) this.#renderTruncationNotice(card);
+  }
+
+  #renderTruncationNotice(card: BoxRenderable): void {
+    card.add(
+      new TextRenderable(this.renderer, {
+        content: EVENT_TRUNCATION_NOTICE,
+        fg: this.#theme.info,
+        width: '100%',
+        wrapMode: 'word',
+      }),
+    );
   }
 
   #renderPlainEntry(card: BoxRenderable, entry: ConversationEntry, palette: EntryPalette): void {

@@ -39,6 +39,9 @@ from server.api.protocol import (
     SteerCommand,
     SubscribeRequest,
 )
+from server.events import (
+    MAX_SERIALIZED_RUN_EVENT_BYTES,
+)
 from server.transport.discovery import (
     CAPABILITY_ROTATION_HEADER,
     WebInstanceClaim,
@@ -213,6 +216,19 @@ def test_the_frame_caps_default_to_the_websockets_value_they_state() -> None:
     limits = WebSocketLimits()
     assert signature(serve).parameters["max_size"].default == limits.receive_frame_bytes
     assert signature(connect).parameters["max_size"].default == limits.send_frame_bytes
+
+
+def test_the_recorded_event_bound_leaves_room_for_the_batch_envelope() -> None:
+    """The payload and transport bounds cannot drift into an oversized frame."""
+    envelope = EventBatchMessage(
+        events=[],
+        through_sequence=2**63 - 1,
+        store_id="f" * 32,
+    )
+    # Replacing ``[]`` with ``[<event>]`` adds exactly the event's bytes.
+    envelope_bytes = len(envelope.model_dump_json().encode())
+
+    assert MAX_SERIALIZED_RUN_EVENT_BYTES + envelope_bytes <= WebSocketLimits().send_frame_bytes
 
 
 def test_gateway_serves_assets_and_round_trips_protocol_frames(tmp_path: Path) -> None:

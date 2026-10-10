@@ -513,6 +513,10 @@ export type Detail4 = string | null;
  */
 export type FrameworkSource4 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel2 = string | null;
+/**
+ * True when the recording boundary cut variable-size payload fields to keep this event within MAX_SERIALIZED_RUN_EVENT_BYTES.
+ */
+export type Truncated = boolean;
 export type Events = RunEvent[];
 export type Round = number;
 export type PerfMetric1 = number;
@@ -617,7 +621,7 @@ export type Head1 = string;
 export type Path2 = string;
 export type RenamedFrom1 = string | null;
 export type Patch = string | null;
-export type Truncated = boolean;
+export type Truncated1 = boolean;
 export type ServerMessage = SubscribedMessage | EventMessage | EventBatchMessage | ProtocolErrorMessage;
 export type Type16 = "subscribed";
 export type RequestId17 = string;
@@ -1017,6 +1021,7 @@ export interface RunEvent {
   execution_id?: ExecutionId1;
   chat_thread_id?: ChatThreadId;
   data?: Data;
+  truncated?: Truncated;
 }
 /**
  * Completed answer and optional thread-turn identity.
@@ -1636,7 +1641,7 @@ export interface DesignPatch {
   path: Path2;
   renamed_from?: RenamedFrom1;
   patch?: Patch;
-  truncated?: Truncated;
+  truncated?: Truncated1;
 }
 /**
  * Initial acknowledgment for an event subscription.

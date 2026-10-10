@@ -9,7 +9,7 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError, model_validator
 
@@ -37,6 +37,17 @@ from vibesys.api import (
 
 CommandResultPayload = _CommandResultPayload
 JsonResultPayload = _JsonResultPayload
+
+
+MAX_SERIALIZED_RUN_EVENT_BYTES = 1_000_000
+"""Maximum UTF-8 bytes in one recorded ``RunEvent`` JSON object.
+
+The WebSocket transport's supported-peer frame cap is 1 MiB. Keeping one
+event at or below this smaller payload bound leaves room for the
+``event_batch`` envelope without making the transport interpret or discard an
+event. ``EventStore.append`` is the single enforcement point, so durable
+replay and live delivery observe the same cut payload.
+"""
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -615,6 +626,17 @@ class RunEvent(BaseModel):
     # default thread, preserving events written before threads existed.
     chat_thread_id: str | None = None
     data: EventData | None = None
+    # Absent on ordinary and legacy events so adding the marker does not change
+    # their serialized bytes. True means the recording boundary cut variable
+    # payload fields on Unicode code-point and collection-entry boundaries.
+    truncated: bool = Field(
+        default=False,
+        exclude_if=lambda value: not value,
+        description=(
+            "True when the recording boundary cut variable-size payload fields to keep this "
+            "event within MAX_SERIALIZED_RUN_EVENT_BYTES."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -632,6 +654,151 @@ class RunEvent(BaseModel):
             # presentation clients can still correlate streamed output.
             result["invocation_id"] = execution_id
         return result
+
+
+def _bounded_recorded_event(event: RunEvent) -> RunEvent:
+    """Return *event* unchanged when it fits, otherwise cut its payload.
+
+    The envelope (identity, cursor, timestamp, kind, status, and routing
+    fields) remains exact. Variable-size values under ``text``, ``diagnostic``,
+    and ``data`` retain prefixes on Unicode code-point boundaries; sequences
+    and mappings retain prefixes on entry boundaries. One common limit is
+    chosen by measured compact-JSON bytes, so nested or structured payloads
+    obey the same bound without event-kind branches.
+    """
+    if _serialized_event_bytes(event) <= MAX_SERIALIZED_RUN_EVENT_BYTES:
+        return event
+    marked = event.model_copy(update={"truncated": True})
+    extent = max(
+        _payload_extent(marked.text),
+        _payload_extent(marked.diagnostic),
+        _payload_extent(marked.data),
+    )
+    smallest = _event_payload_prefix(marked, 0)
+    if _serialized_event_bytes(smallest) > MAX_SERIALIZED_RUN_EVENT_BYTES:
+        message = (
+            "RunEvent envelope exceeds the serialized event bound of "
+            f"{MAX_SERIALIZED_RUN_EVENT_BYTES} bytes"
+        )
+        raise ValueError(message)
+
+    low = 0
+    high = min(extent, MAX_SERIALIZED_RUN_EVENT_BYTES)
+    best = smallest
+    while low <= high:
+        limit = (low + high) // 2
+        candidate = _event_payload_prefix(marked, limit)
+        if _serialized_event_bytes(candidate) <= MAX_SERIALIZED_RUN_EVENT_BYTES:
+            best = candidate
+            low = limit + 1
+        else:
+            high = limit - 1
+    # The prefix transform retains every Pydantic model and required field.
+    # Validate the cut wire object once so a future constrained payload field
+    # cannot turn a record into JSON that replay would reject.
+    return RunEvent.model_validate(best.model_dump(mode="python"))
+
+
+def _event_payload_prefix(event: RunEvent, limit: int) -> RunEvent:
+    """Cut every variable-size payload value to one common prefix limit."""
+    return event.model_copy(
+        update={
+            "text": _payload_prefix(event.text, str, limit),
+            "diagnostic": _payload_prefix(event.diagnostic, Diagnostic | None, limit),
+            "data": _payload_prefix(event.data, EventData | None, limit),
+        }
+    )
+
+
+def _payload_prefix(value: object, annotation: object, limit: int) -> object:
+    """Cut a JSON-compatible Pydantic value without breaking its shape."""
+    if isinstance(value, BaseModel):
+        fields = type(value).model_fields
+        return value.model_copy(
+            update={
+                name: _payload_prefix(getattr(value, name), field.annotation, limit)
+                for name, field in fields.items()
+            }
+        )
+    if type(value) is str:
+        return value if _annotation_contains_literal(annotation) else value[:limit]
+    if isinstance(value, list):
+        item_annotation = _collection_item_annotation(annotation, list)
+        return [_payload_prefix(item, item_annotation, limit) for item in value[:limit]]
+    if isinstance(value, tuple):
+        return tuple(
+            _payload_prefix(
+                item,
+                _tuple_item_annotation(annotation, index),
+                limit,
+            )
+            for index, item in enumerate(value[:limit])
+        )
+    if isinstance(value, dict):
+        item_annotation = _mapping_value_annotation(annotation)
+        return {
+            key: _payload_prefix(item, item_annotation, limit)
+            for key, item in list(value.items())[:limit]
+        }
+    return value
+
+
+def _collection_item_annotation(annotation: object, container: type[object]) -> object:
+    matched = _annotation_with_origin(annotation, container)
+    arguments = get_args(matched) if matched is not None else ()
+    return arguments[0] if arguments else Any
+
+
+def _tuple_item_annotation(annotation: object, index: int) -> object:
+    matched = _annotation_with_origin(annotation, tuple)
+    arguments = get_args(matched) if matched is not None else ()
+    if arguments and arguments[-1] is Ellipsis:
+        return arguments[0]
+    return arguments[index] if index < len(arguments) else Any
+
+
+def _mapping_value_annotation(annotation: object) -> object:
+    matched = _annotation_with_origin(annotation, dict)
+    arguments = get_args(matched) if matched is not None else ()
+    return arguments[-1] if arguments else Any
+
+
+def _annotation_with_origin(annotation: object, expected: type[object]) -> object | None:
+    if get_origin(annotation) is expected:
+        return annotation
+    return next(
+        (
+            matched
+            for argument in get_args(annotation)
+            if (matched := _annotation_with_origin(argument, expected)) is not None
+        ),
+        None,
+    )
+
+
+def _annotation_contains_literal(annotation: object) -> bool:
+    origin = get_origin(annotation)
+    if origin is Literal:
+        return True
+    return any(_annotation_contains_literal(argument) for argument in get_args(annotation))
+
+
+def _payload_extent(value: object) -> int:
+    """Return the largest string or collection prefix available in *value*."""
+    if isinstance(value, BaseModel):
+        return max(
+            (_payload_extent(getattr(value, name)) for name in type(value).model_fields), default=0
+        )
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, list | tuple | dict):
+        nested = value.values() if isinstance(value, dict) else value
+        return max(len(value), max((_payload_extent(item) for item in nested), default=0))
+    return 0
+
+
+def _serialized_event_bytes(event: RunEvent) -> int:
+    return len(event.model_dump_json().encode())
 
 
 _EAGER_TAIL_RECORDS = 1024
@@ -744,6 +911,7 @@ class EventStore:
             event = event.model_copy(
                 update={"sequence": self._next_sequence, "run_id": self.run_id}
             )
+            event = _bounded_recorded_event(event)
             with self.path.open("a", encoding="utf-8") as stream:
                 stream.write(event.model_dump_json() + "\n")
             self._next_sequence += 1

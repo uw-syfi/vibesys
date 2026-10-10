@@ -1285,11 +1285,9 @@ def _event_batch_chunks(batch: EventBatchMessage, budget: int) -> Iterator[Event
     asserts the real frame bytes over generated batches and fails if it ever
     stops holding.
 
-    The one case *budget* cannot bound is a single event whose own
-    serialization exceeds it: a chunk always carries at least one event, so it
-    is emitted oversized rather than dropped or truncated. Nothing bounds an
-    individual event's size today, so that is a payload-level gap this
-    transport cannot close.
+    A chunk always carries at least one whole event. The recording boundary's
+    per-event serialized-size contract keeps that case below the supported-peer
+    cap; this transport neither truncates nor special-cases event payloads.
     """
     if not batch.events:
         # One frame, so an empty checkpoint still reports its watermark.

@@ -142,6 +142,8 @@ export interface TranscriptEntry {
   readonly toolCallId?: string;
   readonly toolArguments?: ReadonlyProjection<Record<string, unknown>>;
   readonly toolResult?: TypedToolResult;
+  /** The server cut this event's payload at its recorded-size bound. */
+  readonly truncated?: true;
 }
 
 /** Backend diagnostic facts. Visibility and dismissal belong to the UI. */

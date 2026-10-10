@@ -50,6 +50,15 @@ it('returns a fully valid known member through the public package interface', ()
   expect(validateRunEvent(value)).toBe(value);
 });
 
+it('accepts only a boolean event-payload truncation marker', () => {
+  const value = {...event(null), truncated: true};
+
+  expect(validateRunEvent(value)).toBe(value);
+  expect(() => validateRunEvent({...event(null), truncated: 'true'})).toThrow(
+    'Invalid server run event.truncated: must be a boolean',
+  );
+});
+
 it('keeps unknown tagged-union members and fields forward compatible', () => {
   const value = {
     ...event({kind: 'future-data-kind', shape: {nested: true}}),
