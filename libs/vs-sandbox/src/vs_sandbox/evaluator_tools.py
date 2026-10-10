@@ -19,7 +19,21 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from vs_sandbox.lifecycle import BeforeReadyContext, SandboxLifecycleHooks
 
-ToolCommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
+#: What one tool command returns: captured text streams and an exit status.
+ToolResult = subprocess.CompletedProcess[str]
+ToolCommandRunner = Callable[[Sequence[str]], ToolResult]
+
+
+def tool_result(
+    argv: Sequence[str], returncode: int = 0, stdout: str = "", stderr: str = ""
+) -> ToolResult:
+    """Build the result a tool command runner returns for *argv* (a Fake runner's answer)."""
+    return subprocess.CompletedProcess(list(argv), returncode, stdout, stderr)
+
+
+def tool_timed_out(argv: Sequence[str], seconds: float) -> Exception:
+    """Build the error a tool command runner raises when *argv* outlives *seconds*."""
+    return subprocess.TimeoutExpired(list(argv), seconds)
 
 
 class _DockerCommandRunner(Protocol):
@@ -30,7 +44,7 @@ class _DockerCommandRunner(Protocol):
         arguments: tuple[str, ...],
         *,
         timeout_seconds: int,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> ToolResult:
         """Return captured text streams or raise an OS/process timeout error."""
         ...
 
@@ -473,7 +487,7 @@ def _run_docker_command(
     arguments: tuple[str, ...],
     *,
     timeout_seconds: int,
-) -> subprocess.CompletedProcess[str]:
+) -> ToolResult:
     return subprocess.run(  # noqa: S603  # lint-waiver: LW-009091 [S603]; fixed Docker argv is executed shell-free and the image remains one argument.
         arguments,
         capture_output=True,
@@ -716,7 +730,7 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _run_cargo(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
+def _run_cargo(arguments: Sequence[str]) -> ToolResult:
     with (
         tempfile.TemporaryDirectory(prefix="vibesys-cargo-home-") as cargo_home,
         tempfile.TemporaryDirectory(prefix="vibesys-cargo-work-") as cargo_work,
