@@ -18,7 +18,6 @@ from hypothesis.strategies import integers
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     TGKILL_SUPPORTED,
-    non_main_thread_ids,
     send_to_thread,
 )
 
@@ -46,8 +45,12 @@ def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
     )
     try:
         assert child.stdout is not None
-        assert child.stdout.readline().strip() == "driving"
-        threads = [child.pid, *non_main_thread_ids(child.pid)]
+        announcement = child.stdout.readline().split()
+        assert announcement[0] == "driving"
+        # Only threads the run owns: a library's native thread (BLAS workers, ...) may
+        # block SIGTERM or exit, and a signal aimed at it is then lost.
+        threads = [int(thread) for thread in announcement[1:]]
+        assert threads[0] == child.pid
         send_to_thread(child.pid, threads[target % len(threads)], signal.SIGTERM)
         # test-isolation: the deadline only guards a hang; a delivered stop returns at once
         output, _ = child.communicate(timeout=20)
