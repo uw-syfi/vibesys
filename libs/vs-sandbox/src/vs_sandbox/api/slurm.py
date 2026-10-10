@@ -44,6 +44,7 @@ from vs_sandbox.slurm_executor import (
     SlurmTargetLifecycle,
 )
 from vs_sandbox.slurm_gpu import (
+    AgentGpuConfig,
     GpuCommand,
     GpuJobRequest,
     SlurmGpuConfig,
@@ -56,6 +57,7 @@ from vs_sandbox.slurm_gpu import (
 from vs_sandbox.slurm_policy import (
     SlurmExecutionPolicy,
     SlurmPolicyError,
+    agent_gpu_capability,
     load_slurm_policy,
 )
 from vs_sandbox.slurm_profile import (
@@ -76,6 +78,7 @@ __all__ = [
     "DEFAULT_WRAPPER",
     "HOST_COMMAND_CLIENT",
     "PROFILE_OUTPUT_ROOT",
+    "AgentGpuConfig",
     "BenchmarkOutputKind",
     "BrokerTransport",
     "GateKind",
@@ -110,6 +113,7 @@ __all__ = [
     "SlurmStagePayload",
     "SlurmTargetLifecycle",
     "SrunGateRunner",
+    "agent_gpu_capability",
     "choose_partition",
     "classify_benchmark_output",
     "configured_capture_lifecycle",

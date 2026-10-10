@@ -233,6 +233,14 @@ class DockerEnvironmentFacts:
 
 
 @dataclass(frozen=True)
+class AgentGpuFacts:
+    """The limits of the agent's own GPU jobs, as the agent is told them."""
+
+    max_gpus: int
+    max_time_minutes: int
+
+
+@dataclass(frozen=True)
 class SlurmEnvironmentFacts:
     """Presentation facts for a local editor with remote trusted execution.
 
@@ -241,12 +249,14 @@ class SlurmEnvironmentFacts:
     from the candidate root, or empty when the operator configured none.
     ``gate_client`` is the name the agent runs, on its ``PATH``, to request a
     trusted gate (``gate_client --gate KIND``), and ``gates`` the kinds the
-    task plans.
+    task plans. ``agent_gpu`` is set when the agent may also run its own GPU
+    commands as Slurm jobs through that same client.
     """
 
     service_command: tuple[str, ...] = ()
     gate_client: str = ""
     gates: tuple[str, ...] = ()
+    agent_gpu: AgentGpuFacts | None = None
 
 
 @dataclass(frozen=True)
@@ -267,22 +277,10 @@ class ModalEnvironmentFacts:
     runtime_container_path: str = "/opt/vibesys-runtime/environment.md"
 
 
-@dataclass(frozen=True)
-class SlurmGpuEnvironmentFacts:
-    """Presentation facts for an agent whose GPU processes run as Slurm jobs."""
-
-    launcher: str
-    max_gpus: int
-    max_time_minutes: int
-    gate_gpus: int
-    gates: tuple[str, ...] = ()
-
-
 RunEnvironmentPresentationFacts = (
     HostEnvironmentFacts
     | DockerEnvironmentFacts
     | SlurmEnvironmentFacts
-    | SlurmGpuEnvironmentFacts
     | SkyPilotEnvironmentFacts
     | ModalEnvironmentFacts
 )

@@ -24,8 +24,6 @@ from vs_runtime._run_environment import (
 from vs_runtime._slurm_environment import SlurmEnvironment
 from vs_runtime._slurm_gpu_environment import SlurmGpuEnvironment
 from vs_sandbox.api import backend_is_host_only
-from vs_sandbox.api.slurm import configured_capture_lifecycle, load_slurm_policy
-from vs_slurm.api import load_slurm_config
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -133,11 +131,7 @@ def validate_run_environment_profile(
     Invalid operator policy or workload requirements raise ``ValueError``.
     """
     if isinstance(environment, SlurmEnvironment):
-        configured_capture_lifecycle(
-            load_slurm_config(environment.config_path),
-            load_slurm_policy(environment.config_path),
-            profile_command,
-        )
+        environment.validate_profile(profile_command)
 
 
 def make_run_environment_spec(  # noqa: PLR0913  # lint-waiver: LW-009086 [PLR0913]; the compatibility builder accepts each independent CLI environment option.

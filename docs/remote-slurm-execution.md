@@ -29,8 +29,17 @@ The ROCprof server runs in the container and reaches the cluster through a
 second host broker. It imports the Slurm adapter from the framework's `libs`
 directory, mounted read-only at its host path, so the agent image needs only a
 `python3` (3.11 or newer) with `pydantic`, which its MCP library already
-requires. The GPU-side variant for a single-node cluster is described in
-[GPU commands through Slurm](slurm-gpu-commands.md).
+requires.
+
+### Agent GPU commands (optional)
+
+On a host that is itself a Slurm submit node (`[slurm.transport] kind = "local"`),
+the operator can also let the agent run its own GPU commands as Slurm jobs, by
+adding a `[vibesys.agent_gpu]` table to the same operator file. The same host
+broker then offers `vibesys-gpu` beside the gates, and the agent profiles
+through its own commands instead of through the remote ROCprof capture. The
+table is rejected with any other transport. See
+[GPU commands through Slurm](slurm-gpu-commands.md) for the table and the agent's view.
 
 ## SkyPilot configuration ownership
 

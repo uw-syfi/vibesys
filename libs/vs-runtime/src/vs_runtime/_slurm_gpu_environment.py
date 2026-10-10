@@ -3,24 +3,23 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
+from vs_runtime._agent_gpu_commands import AGENT_GPU_LAUNCHER
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession
 from vs_runtime._container_runtime_policy import reject_docker_in_docker
-from vs_runtime._host_command_bridge import planned_gates
+from vs_runtime._host_command_bridge import bridged_agent_paths, planned_gates
 from vs_runtime._run_environment import (
-    AgentPaths,
+    AgentGpuFacts,
     DockerEnvironment,
     DockerEnvironmentConfig,
     RunEnvironmentPresentation,
     RunEnvironmentRequest,
     RunEnvironmentSession,
     RunEnvironmentView,
-    SlurmGpuEnvironmentFacts,
-    _AgentPathSandbox,
+    SlurmEnvironmentFacts,
     _host_evaluation_plan,
     _make_host_sandbox,
-    _materialize_effective_objective,
     _NoopWorkspaceRecovery,
     _PreparedRunEnvironment,
 )
@@ -75,12 +74,10 @@ class SlurmGpuEnvironment(_NoopWorkspaceRecovery):
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="slurm-gpu")
         config = load_slurm_gpu_config(self.config_path)
         gpus = gate_gpus(config, self.resources)
-        facts = SlurmGpuEnvironmentFacts(
-            str(request.log_dir / "slurm-gpu" / "vibesys-gpu"),
-            config.max_gpus,
-            config.max_time_minutes,
-            gpus,
-            planned_gates(request.accuracy_command, request.benchmark_command),
+        facts = SlurmEnvironmentFacts(
+            gate_client=AGENT_GPU_LAUNCHER,
+            gates=planned_gates(request.accuracy_command, request.benchmark_command),
+            agent_gpu=AgentGpuFacts(config.max_gpus, config.max_time_minutes),
         )
         return _PreparedRunEnvironment(facts, partial(self._open, request, config, gpus))
 
@@ -111,18 +108,12 @@ class SlurmGpuEnvironment(_NoopWorkspaceRecovery):
         )
         try:
             sandbox = self._docker.build_editor(request, commands.editor)
-            objective = _materialize_effective_objective(request)
-            paths = AgentPaths(
-                objective=(
-                    cast("_AgentPathSandbox", sandbox).agent_path(objective)
-                    if objective is not None
-                    else "OBJECTIVE.md"
-                ),
-                accuracy_command=commands.gate_command(GateKind.ACCURACY, plan.accuracy_command),
-                benchmark_command=commands.gate_command(GateKind.BENCHMARK, plan.benchmark_command),
-                profiler_support=(
-                    request.profiler_support_name if request.profiler_support_path else None
-                ),
+            paths = bridged_agent_paths(
+                sandbox,
+                request,
+                commands.launcher,
+                accuracy=plan.accuracy_command is not None,
+                benchmark=plan.benchmark_command is not None,
             )
             session = SandboxSession.start(
                 sandbox,

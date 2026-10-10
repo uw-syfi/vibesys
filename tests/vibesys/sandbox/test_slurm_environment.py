@@ -25,6 +25,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api import DockerSandbox, SandboxKind
+from vs_sandbox.api.slurm import SlurmPolicyError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -42,6 +43,29 @@ host = "test-cluster"
 [vibesys]
 remote_python = "/remote/venv/bin/python"
 """
+# The slurm environment with the agent's own GPU commands: local transport only.
+_SLURM_AGENT_GPU_CONFIG = """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/shared/vibesys"
+
+[slurm.transport]
+kind = "local"
+
+[vibesys.agent_gpu]
+partitions = ["main"]
+max_gpus = 4
+max_time_minutes = 90
+srun_command = [{srun}]
+scancel_command = [{srun}]
+"""
+# Stands in for srun: records its argv, then runs what follows ``--``.
+_FAKE_SRUN = """\
+import os, sys
+with open({log!r}, "a") as log:
+    log.write(" ".join(sys.argv[1:]) + "\\n")
+command = sys.argv[sys.argv.index("--") + 1 :]
+os.execvp(command[0], command)
+"""
 _SLURM_GPU_CONFIG = """[slurm_gpu]
 partitions = ["main"]
 max_gpus = 8
@@ -55,14 +79,35 @@ sys.exit(7 if "benchmark" in sys.argv else 0)
 """
 
 
+_ENVIRONMENTS = ["slurm", "slurm-gpu", "slurm+gpu"]
+
+
 class _PassThroughConfinement:
     def wrap(self, workspace: Path, argv: Sequence[str]) -> list[str]:
         del workspace
         return list(argv)
 
 
+def _write_agent_gpu_slurm_config(tmp_path: Path, srun_log: Path) -> Path:
+    fake = tmp_path / "fake_srun.py"
+    fake.write_text(_FAKE_SRUN.format(log=str(srun_log)), encoding="utf-8")
+    config = tmp_path / "slurm-agent-gpu.toml"
+    program = f'"{sys.executable}", "{fake}"'
+    config.write_text(_SLURM_AGENT_GPU_CONFIG.format(srun=program), encoding="utf-8")
+    return config
+
+
 def _environment(tmp_path: Path, name: str, backend: DaemonBackend) -> RunEnvironment:
     docker = daemon_docker_config(backend.engine)
+    if name == "slurm+gpu":
+        gate = tmp_path / "fake_gate.py"
+        gate.write_text(_FAKE_GATE, encoding="utf-8")
+        return SlurmEnvironment(
+            _write_agent_gpu_slurm_config(tmp_path, tmp_path / "srun.log"),
+            docker=docker,
+            gate_wrapper=(sys.executable, str(gate)),
+            job_confinement=_PassThroughConfinement(),
+        )
     if name == "slurm":
         config = tmp_path / "slurm.toml"
         config.write_text(_SLURM_CONFIG, encoding="utf-8")
@@ -116,7 +161,7 @@ def _open(
     return backend, request, open_run_environment(_environment(tmp_path, name, backend), request)
 
 
-@pytest.mark.parametrize("name", ["slurm", "slurm-gpu"])
+@pytest.mark.parametrize("name", _ENVIRONMENTS)
 def test_the_agent_never_runs_on_the_host_for_either_slurm_environment(
     tmp_path: Path, name: str
 ) -> None:
@@ -166,7 +211,7 @@ def test_a_slurm_gate_the_task_does_not_plan_is_not_offered(tmp_path: Path) -> N
         session.close()
 
 
-@pytest.mark.parametrize("name", ["slurm", "slurm-gpu"])
+@pytest.mark.parametrize("name", _ENVIRONMENTS)
 def test_closing_the_session_removes_every_host_socket(tmp_path: Path, name: str) -> None:
     backend, _, session = _open(tmp_path, name)
     run = next(call for call in backend.engine.calls if call[1] == "run")
@@ -189,10 +234,10 @@ def test_closing_the_session_removes_every_host_socket(tmp_path: Path, name: str
 
 
 # What the agent types to reach the host broker's gates, per environment.
-_GATE_CLIENTS = {"slurm": "vibesys-gate", "slurm-gpu": "vibesys-gpu"}
+_GATE_CLIENTS = {"slurm": "vibesys-gate", "slurm-gpu": "vibesys-gpu", "slurm+gpu": "vibesys-gpu"}
 
 
-@pytest.mark.parametrize("name", ["slurm", "slurm-gpu"])
+@pytest.mark.parametrize("name", _ENVIRONMENTS)
 def test_the_gate_client_is_mounted_where_the_agents_path_finds_it(
     tmp_path: Path, name: str
 ) -> None:
@@ -214,7 +259,7 @@ def test_the_gate_client_is_mounted_where_the_agents_path_finds_it(
         session.close()
 
 
-@pytest.mark.parametrize("name", ["slurm", "slurm-gpu"])
+@pytest.mark.parametrize("name", _ENVIRONMENTS)
 @pytest.mark.parametrize("accuracy", [None, "python accuracy.py"])
 @pytest.mark.parametrize("benchmark", [None, "python benchmark.py"])
 def test_the_environment_notes_name_the_gate_client_and_exactly_the_planned_gates(
@@ -234,3 +279,114 @@ def test_the_environment_notes_name_the_gate_client_and_exactly_the_planned_gate
         assert (session.view.paths.benchmark_command is not None) is (benchmark is not None)
     finally:
         session.close()
+
+
+def _run_tokens(backend: DaemonBackend) -> list[str]:
+    return next(call for call in backend.engine.calls if call[1] == "run")
+
+
+@pytest.mark.parametrize("name", _ENVIRONMENTS)
+def test_the_container_gets_the_gpu_launcher_exactly_when_the_agent_may_run_gpu_commands(
+    tmp_path: Path, name: str
+) -> None:
+    backend, _, session = _open(tmp_path, name)
+    try:
+        run = _run_tokens(backend)
+        mounts = [run[i + 1] for i, flag in enumerate(run) if flag == "-v"]
+        has_gpu = name != "slurm"
+        assert any(token.startswith("VIBESYS_GPU=") for token in run) is has_gpu
+        assert ("CUDA_VISIBLE_DEVICES=" in run) is has_gpu
+        assert any(mount.endswith(":/usr/local/bin/vibesys-gpu:ro") for mount in mounts) is has_gpu
+        assert any(mount.endswith(":/usr/local/bin/vibesys-gate:ro") for mount in mounts) is (
+            not has_gpu
+        )
+        assert ("GPU process runs as a Slurm job" in session.view.prompt_notes) is has_gpu
+    finally:
+        session.close()
+
+
+def test_a_gpu_command_from_the_container_runs_in_a_slurm_job_within_the_operator_limits(
+    tmp_path: Path,
+) -> None:
+    _backend, _, session = _open(tmp_path, "slurm+gpu")
+    try:
+        gate = session.view.paths.accuracy_command
+        assert gate is not None
+        # The fake daemon runs programs on the host, where the bare name is not on PATH.
+        client = shlex.split(gate)[0]
+        ran = session.sandbox.execute(f"{client} --gpus 3 --time 45 -- echo from-the-job")
+        refused = session.sandbox.execute(f"{client} --gpus 5 -- echo too-many")
+        too_long = session.sandbox.execute(f"{client} --time 91 -- echo too-long")
+
+        assert ran.exit_code == 0, ran.output
+        assert "from-the-job" in ran.output
+        recorded = (tmp_path / "srun.log").read_text(encoding="utf-8")
+        assert "--gres=gpu:3" in recorded
+        assert "--time=45" in recorded
+        # A request above the operator's limits never reaches srun.
+        assert "too-many" not in recorded
+        assert "too-long" not in recorded
+        assert refused.exit_code != 0
+        assert "limit of 4" in refused.output
+        assert too_long.exit_code != 0
+        assert "limit of 90" in too_long.output
+    finally:
+        session.close()
+
+
+def test_the_gates_still_run_through_the_sbatch_wrapper_when_the_agent_may_run_gpu_commands(
+    tmp_path: Path,
+) -> None:
+    _backend, request, session = _open(tmp_path, "slurm+gpu")
+    try:
+        accuracy = session.view.paths.accuracy_command
+        assert accuracy is not None
+        passed = session.sandbox.execute(accuracy)
+        plan = tmp_path / "logs" / "slurm-evaluation-plan.json"
+        assert f"gate --plan {plan} accuracy cwd={request.workspace}" in passed.output
+        assert not (tmp_path / "srun.log").exists()
+    finally:
+        session.close()
+
+
+def test_the_profiler_follows_the_capability_not_the_environment_name(tmp_path: Path) -> None:
+    backend = DaemonBackend(daemon_engine(tmp_path))
+    plain = _environment(tmp_path, "slurm", backend)
+    gpu = _environment(tmp_path, "slurm+gpu", backend)
+
+    assert (plain.default_profiler_id, plain.supported_profiler_ids) == (
+        "rocprof",
+        frozenset({"auto", "none", "rocprof"}),
+    )
+    assert plain.requires_local_profiler_preflight is False
+    assert (gpu.default_profiler_id, gpu.supported_profiler_ids) == ("nsys", None)
+    assert gpu.requires_local_profiler_preflight is True
+
+    request = _request(tmp_path, backend)
+    for name, remote in (("slurm", True), ("slurm+gpu", False)):
+        session = open_run_environment(_environment(tmp_path, name, backend), request)
+        try:
+            assert (session.view.profile_execution == "remote") is remote
+            assert bool(session.view.profiler_mcp_env) is remote
+            assert (tmp_path / "logs" / "slurm-capture-plan.json").exists() is remote
+        finally:
+            session.close()
+        (tmp_path / "logs" / "slurm-capture-plan.json").unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize("transport", ["ssh", "connector"])
+def test_agent_gpu_commands_are_rejected_without_the_local_transport(
+    tmp_path: Path, transport: str
+) -> None:
+    backend = DaemonBackend(daemon_engine(tmp_path))
+    config = _write_agent_gpu_slurm_config(tmp_path, tmp_path / "srun.log")
+    replacement = {
+        "ssh": 'kind = "ssh"\nhost = "login"',
+        "connector": 'kind = "connector"\ncommand = ["c"]',
+    }[transport]
+    text = config.read_text(encoding="utf-8").replace('kind = "local"', replacement)
+    config.write_text(text, encoding="utf-8")
+    environment = SlurmEnvironment(config, docker=daemon_docker_config(backend.engine))
+
+    with pytest.raises(SlurmPolicyError, match=rf"vibesys\.agent_gpu.*{transport}"):
+        open_run_environment(environment, _request(tmp_path, backend))

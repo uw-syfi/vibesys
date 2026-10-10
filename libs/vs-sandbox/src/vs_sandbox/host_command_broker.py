@@ -42,9 +42,9 @@ from vs_sandbox.benchmark_output import (
 )
 from vs_sandbox.host_command_client import SOCKET_ENV, TOKEN_ENV
 from vs_sandbox.slurm_gpu import (
+    AgentGpuConfig,
     GpuCommand,
     GpuLauncher,
-    SlurmGpuConfig,
     SlurmGpuLauncher,
 )
 from vs_sim.api import Network, OsThreads, Threads, UnixNetwork
@@ -224,7 +224,7 @@ class GpuCommands:
     confinement policy.
     """
 
-    config: SlurmGpuConfig
+    config: AgentGpuConfig
     confinement: JobConfinement
     host_env: Mapping[str, str]
     launcher: GpuLauncher | None = None
