@@ -67,12 +67,10 @@ class _Session:
 
 @pytest.fixture
 def root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    # A short runtime directory: pytest's temporary paths can exceed the
-    # 103-byte Unix socket limit on macOS.
-    runtime = Path(
-        tempfile.mkdtemp(prefix="vs-", dir="/tmp")
-    )  # lint-waiver: LW-179603 [S108]; the socket path must fit the macOS 103-byte limit, which `tempfile.gettempdir()` (a long `$TMPDIR`) does not guarantee
-    # > A fixed path under `/tmp` is what production's fallback root uses for the same reason.
+    # A short runtime directory under `/tmp`, as production's fallback root
+    # uses: pytest's temporary paths and macOS's `$TMPDIR` can push a socket
+    # path past the 103-byte Unix limit.
+    runtime = Path(tempfile.mkdtemp(prefix="vs-", dir="/tmp"))
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
     try:
         yield instance_root(os.environ, os.getuid())
