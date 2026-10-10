@@ -23,7 +23,6 @@ one-line summary of wall time, tokens, and cost.
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 import json
 import os
 import pwd
@@ -32,13 +31,13 @@ import signal
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
+from tests.composition.dynamic._harness import LoopInput
 from tests.support import run_test_command
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import (
@@ -50,19 +49,6 @@ from tests.support.loop_invariants import (
     terminal_event,
 )
 from tests.support.slurm_environment import with_fake_image_build
-from tests.vibesys.orchestration.dynamic.loop._harness import (
-    CAPTURE_RUNTIME_PYTHON,
-    PASS,
-    LoopInput,
-    ScriptedAgents,
-    Turn,
-    implemented,
-    load_state,
-    portfolio,
-    run_request,
-    workstream,
-)
-from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
@@ -73,6 +59,7 @@ from launch import LaunchSettings
 from vibesys.api import ComputeBackend, ProfilerKind, RunStatus
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.events import CoreEventType
+from vibesys.orchestration.dynamic import PLUGIN
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import (
     FakeProvider,
@@ -89,9 +76,7 @@ from vs_project.api import Project, StoredEnvelope
 from vs_slurm.fake_connector import active_jobs, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping
-
-    from pydantic import BaseModel
+    from collections.abc import Callable, Mapping
 
     from vibesys.api import CoreEvent, RunRequest, RunResult, Runs
     from vs_agent.api import AgentEventSink, AgentSpec, SessionStore
@@ -120,11 +105,39 @@ _RUN_DEADLINE_S = 1200.0
 _STOP_BOUND_S = 90.0
 _POLL_S = 0.5
 
+_CAPTURE_RUNTIME_PYTHON = """\
+#!{python}
+import json
+import os
+import pathlib
+import sys
+
+if sys.argv[1] == "rocprof_profiler/remote_capture.py":
+    sys.path.insert(0, "profilers_common")
+    import capture_runtime
+
+    request = json.loads(sys.argv[sys.argv.index("--request-json") + 1])
+    profiles = pathlib.Path(sys.argv[sys.argv.index("--profiles") + 1])
+    lifecycle = capture_runtime.Lifecycle(**request["lifecycle"])
+    captured = capture_runtime.run_capture(
+        [], lifecycle, kind="timeline", out_dir=profiles / "timeline-1", meta={{}}
+    )
+    failure = capture_runtime.workload_failure(profiles, [captured.capture_id])
+    if failure is not None:
+        print(captured.load_log_tail)
+        print(failure)
+        raise SystemExit(1)
+    (captured.out_dir / "stats.csv").write_text("kernel,share\\nqueue_step,0.75\\n")
+    print("Timeline: queue_step holds 75% of device time.")
+    raise SystemExit(0)
+os.execv("{python}", ["{python}", *sys.argv[1:]])
+"""
+
 # The GPU node's profiler, faked like the cluster: the remote interpreter runs
 # every command with this host's Python, except rocprof's trusted capture,
 # which it answers as ``remote_capture.py --print-output`` does: one trace
 # directory under the requested profile store and the capture summary.
-_REMOTE_PYTHON = CAPTURE_RUNTIME_PYTHON.replace("queue_step", "count_primes")
+_REMOTE_PYTHON = _CAPTURE_RUNTIME_PYTHON.replace("queue_step", "count_primes")
 
 
 def _provider() -> str:
@@ -356,24 +369,6 @@ def test_a_dynamic_run_keeps_the_loop_invariants(tmp_path: Path) -> None:
     assert process.returncode == 0
 
 
-def _require_successful_legacy_search(raw_state: BaseModel | Mapping[str, object]) -> None:
-    """A successful legacy-loop scenario must measure its input and finish a trusted candidate."""
-    assert PLUGIN.state is not None
-    state = PLUGIN.state.model_validate(raw_state).model_dump(mode="python")
-    assert state["baseline"] is not None
-    assert state["baseline"]["benchmark_passed"] is True
-    evaluated = [
-        item for item in state["workstreams"] if item["phase"] is type(item["phase"]).EVALUATED
-    ]
-    assert evaluated
-    assert any(
-        item["evaluation"] is not None
-        and item["evaluation"]["accuracy_passed"] is True
-        and item["evaluation"]["benchmark_passed"] is True
-        for item in evaluated
-    )
-
-
 def _require_successful_search(envelope: Mapping[str, object]) -> None:
     """A successful smoke measures its input and adopts a candidate the trusted gates passed."""
     core = envelope["core"]
@@ -429,96 +424,6 @@ def test_serving_smoke_fixture_builds_a_profiled_cli_request(tmp_path: Path) -> 
     assert request.backend is ComputeBackend.ROCM
 
 
-@pytest.mark.usefixtures("container_cli_credentials")
-def test_cli_built_dynamic_request_completes_a_trusted_search_without_provider_cli(
-    tmp_path: Path,
-) -> None:
-    """Default CI connects CLI request building to a suspended production worker."""
-    loop_input = LoopInput.create(tmp_path)
-    skill = tmp_path / "skills" / "smoke-policy"
-    skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text(
-        "---\nname: smoke-policy\ndescription: Preserve accuracy.\n---\n# Preserve accuracy\n",
-        encoding="utf-8",
-    )
-    (skill / "floor.md").write_text("Preserve accuracy.\n", encoding="utf-8")
-    objective = "Raise queue throughput. Follow `resources/skills/smoke-policy/floor.md`.\n"
-    (loop_input.root / "OBJECTIVE.md").write_text(objective, encoding="utf-8")
-    request = build_run_request(
-        parse_cli_invocation(
-            [
-                "--outer-loop",
-                "dynamic",
-                "--input",
-                str(loop_input.root),
-                "--run-environment",
-                "slurm",
-                "--slurm-config",
-                str(loop_input.slurm_config),
-                "--profiler",
-                "none",
-                "--backend",
-                "cpu",
-                "--skills-dir",
-                str(skill),
-                "--max-rounds",
-                "1",
-                "--max-in-flight",
-                "1",
-            ]
-        )
-    )
-    assert request.objective == objective
-
-    observed: dict[str, object] = {}
-
-    def submit_candidate(agent: Turn) -> dict[str, object]:
-        observed["floor_exists"] = (
-            agent.workspace / ".agents/skills/smoke-policy/floor.md"
-        ).is_file()
-        agent.set_value(2)
-        return {
-            "kind": "waiting_for_evaluation",
-            "handles": [agent.submit("accuracy", "benchmark")],
-        }
-
-    def finish_candidate(agent: Turn) -> dict[str, object]:
-        assert agent.value() == 2
-        assert agent.accepted_evidence("accuracy", "benchmark")
-        return implemented("smoke")
-
-    agents = (
-        ScriptedAgents()
-        .plan(portfolio(workstream("smoke")))
-        .implement("smoke", submit_candidate, finish_candidate)
-        .judge("smoke", PASS)
-    )
-    run = run_request(request, agents)
-
-    assert run.error is None, (run.error, observed)
-    assert observed["floor_exists"] is True
-    assert run.succeeded is True
-    assert run.status is RunStatus.COMPLETED
-    assert agents.unscripted == []
-    assert active_jobs(loop_input.cluster) == ()
-    state = load_state(loop_input, run.run_id)
-    _require_successful_legacy_search(state)
-    assert state.baseline is not None
-    assert state.baseline.metric_value == 1.0
-    (member,) = state.workstreams
-    assert member.evaluation is not None
-    assert member.evaluation.metric_value == 2.0
-    first, resumed = agents.invocations(IMPLEMENTER.id, "smoke")
-    assert first.session_key == resumed.session_key
-    assert first.workspace == resumed.workspace
-    runtime = Project.open(loop_input.root).state.portable_namespace(run.run_id, "runtime")
-    effective = runtime.external_directory() / "effective-objective.md"
-    assert effective.read_text(encoding="utf-8") == objective.replace(
-        "resources/skills/", ".agents/skills/"
-    )
-    assert (loop_input.root / "OBJECTIVE.md").read_text(encoding="utf-8") == objective
-
-
 def _evaluation_submitted(events: list[dict[str, object]]) -> bool:
     return any(
         event.get("type") == "async_operation_lifecycle"
@@ -542,68 +447,6 @@ def test_ctrl_c_mid_run_stops_within_the_grace_and_leaves_no_job(tmp_path: Path)
     smoke.watch(process)
 
     assert smoke.verdict(stop_grace_s=_STOP_BOUND_S) == []
-
-
-# The legacy dynamic loop: modules that must never run on the core path. A module is
-# listed by its import name; a package stands for every file under it.
-_LEGACY_LOOP_MODULES = (
-    "vibesys.orchestration.dynamic.orchestration",
-    "vibesys.orchestration.dynamic.workstream",
-    "vibesys.orchestration.dynamic.agent_loop",
-    "vibesys.orchestration.dynamic.lifecycle",
-    "vibesys.orchestration.dynamic.transitions",
-    "vibesys.orchestration.dynamic.planner_driver",
-    "vibesys.orchestration.dynamic.control",
-    "vibesys.orchestration.dynamic.rounds",
-    "vibesys.orchestration.dynamic.profiles",
-    "vibesys.orchestration.dynamic.input_gate",
-    "vibesys.orchestration.dynamic.steers",
-    "vibesys.run.dynamic_suspension",
-)
-
-
-def _legacy_loop_files() -> frozenset[str]:
-    files: set[str] = set()
-    for name in _LEGACY_LOOP_MODULES:
-        spec = importlib.util.find_spec(name)
-        assert spec is not None
-        if spec.submodule_search_locations is not None:
-            for location in spec.submodule_search_locations:
-                files.update(str(path) for path in Path(location).rglob("*.py"))
-        elif spec.origin is not None:
-            files.add(spec.origin)
-    return frozenset(files)
-
-
-@contextmanager
-def _executed_legacy_files() -> Iterator[set[str]]:
-    """Collect the legacy loop files whose code runs inside the block.
-
-    Importing the built-in catalog loads these modules, so "loaded" proves nothing.
-    ``sys.monitoring`` reports the first call of every code object; a call from a
-    legacy file is the loop running.
-    """
-    legacy = _legacy_loop_files()
-    executed: set[str] = set()
-    monitoring = sys.monitoring
-    tool = monitoring.PROFILER_ID
-
-    def on_start(code: object, offset: int) -> object:
-        del offset
-        filename = getattr(code, "co_filename", "")
-        if filename in legacy:
-            executed.add(filename)
-        return monitoring.DISABLE
-
-    monitoring.use_tool_id(tool, "core-path-smoke")
-    monitoring.register_callback(tool, monitoring.events.PY_START, on_start)
-    monitoring.set_events(tool, monitoring.events.PY_START)
-    try:
-        yield executed
-    finally:
-        monitoring.set_events(tool, 0)
-        monitoring.register_callback(tool, monitoring.events.PY_START, None)
-        monitoring.free_tool_id(tool)
 
 
 _PLAN = {
@@ -875,17 +718,32 @@ def _run_headless_recording(
     return asyncio.run(execute())
 
 
+def _executing_cluster_input(base: Path) -> LoopInput:
+    """An input whose Slurm config reaches the Fake cluster through its connector process.
+
+    The composition tier calls the Fake in process; this tier runs the product's transport,
+    which starts the connector command once per request.
+    """
+    loop_input = LoopInput.create(base)
+    config = loop_input.slurm_config.read_text(encoding="utf-8")
+    command = [sys.executable, "-m", "vs_slurm.fake_connector", str(loop_input.cluster)]
+    loop_input.slurm_config.write_text(
+        config.replace('["fake-connector"]', json.dumps(command)), encoding="utf-8"
+    )
+    return loop_input
+
+
 @pytest.mark.usefixtures("container_cli_credentials")
-def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
+def test_core_path_runs_the_fake_slurm_search(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The product launcher drives a dynamic run on the core path, and no legacy loop code runs.
+    """The product launcher drives a dynamic run on the core path.
 
     Nothing is substituted but the agents' scripted replies: the built-in catalog, the
     CLI-built request, the launcher, the host composition, the runtime loop, the executing
     Fake Slurm cluster and the trusted evaluation scripts.
     """
-    loop_input = LoopInput.create(tmp_path)
+    loop_input = _executing_cluster_input(tmp_path)
     (tmp_path / "agent.toml").write_text(
         '[model]\nname = "scripted"\n[evaluation]\n'
         "observe_interval_seconds = 1\nobserve_backoff_cap_seconds = 1\n",
@@ -921,12 +779,10 @@ def test_core_path_runs_the_fake_slurm_search_with_zero_legacy_execution(
     )
 
     renderer = _RecordingRenderer()
-    with _executed_legacy_files() as executed:
-        result = _run_headless_recording(request, runs, renderer)
+    result = _run_headless_recording(request, runs, renderer)
 
     assert result.succeeded is True
     assert result.status is RunStatus.COMPLETED
-    assert sorted(executed) == [], "the legacy dynamic loop executed on the core path"
     run = Project.open(loop_input.root)
     stored = run.state_store(result.run_id).load()
     assert isinstance(stored, StoredEnvelope)

@@ -230,7 +230,6 @@
 {"path": "src/server/transport/websocket.py", "rule": "socket_io", "count": 1}
 {"path": "src/server/transport/websocket.py", "rule": "threading", "count": 19}
 {"path": "src/vibesys/events.py", "rule": "wall_clock", "count": 1}
-{"path": "src/vibesys/orchestration/dynamic/orchestration.py", "rule": "time", "count": 2}
 {"path": "src/vibesys/repository.py", "rule": "wall_clock", "count": 1}
 {"path": "tests/architecture/test_delegated_merge.py", "rule": "subprocess", "count": 13}
 {"path": "tests/architecture/test_ordered_map_evaluator.py", "rule": "subprocess", "count": 10}
@@ -338,9 +337,6 @@
 {"path": "tests/vibesys/loops/torch_inject_fixtures.py", "rule": "process", "count": 1}
 {"path": "tests/vibesys/loops/torch_inject_fixtures.py", "rule": "subprocess", "count": 2}
 {"path": "tests/vibesys/loops/torch_inject_fixtures.py", "rule": "threading", "count": 2}
-{"path": "tests/vibesys/orchestration/dynamic/loop/_chaos.py", "rule": "threading", "count": 2}
-{"path": "tests/vibesys/orchestration/dynamic/loop/_harness.py", "rule": "process", "count": 2}
-{"path": "tests/vibesys/orchestration/dynamic/loop/test_composed_pending_recovery.py", "rule": "process", "count": 3}
 {"path": "tests/vibesys/orchestration/multi/test_persistence.py", "rule": "subprocess", "count": 1}
 {"path": "tests/vibesys/orchestration/single/test_persistence.py", "rule": "subprocess", "count": 1}
 {"path": "tests/vibesys/run/test_core_agent_candidate_sandbox.py", "rule": "executor", "count": 1}

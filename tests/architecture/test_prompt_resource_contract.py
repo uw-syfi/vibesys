@@ -28,13 +28,6 @@ from vibesys.hypothesis import (
     TerminalWorkspaceEdits,
 )
 from vibesys.metrics import Objective
-from vibesys.orchestration.dynamic.models import PortfolioView, SteerNote
-from vibesys.orchestration.dynamic.prompts import (
-    EvaluationLine,
-    EvaluationResumeLine,
-    FailureTail,
-    RepeatedFailureLine,
-)
 from vibesys.orchestration.dynamic.strategy.api import PlannerPrompt, ReviewEvaluation
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.orchestration.multi.contracts import (
@@ -327,15 +320,9 @@ def representative_context() -> dict[str, object]:
             evidence_ids=("a" * 64,),
         ),
         decision=PreRoundDecision(need_profile=True, profile_focus="queue", reasoning="Measure."),
-        evaluations=(
-            EvaluationLine(
-                "revision", ("accuracy",), "failed", FailureTail("failure", truncated=False)
-            ),
-        ),
         evaluation_suspension=True,
         exhaustion_info=ExhaustionNotice(round_number=1, attempts=2, feedback="Retry."),
         facts=RunFacts(domain_id="generic", objective="Improve throughput."),
-        failure=FailureTail("failed at engine.py:1", truncated=True),
         filenames={1: "issue-1.md"},
         groups=((IssueStatus.OPEN, (issue,)),),
         gate_approved_perf_metric=1.0,
@@ -367,13 +354,6 @@ def representative_context() -> dict[str, object]:
         profile_execution="remote",
         provisional_candidates=1,
         rejected=(),
-        repeated=RepeatedFailureLine(
-            kind="measurement",
-            stage="benchmark",
-            signature="measurement failed",
-            count=2,
-            instruction="Inspect the measurement failure before retrying.",
-        ),
         regression_info=TerminalWorkspaceEdits(
             hypothesis_id="queue",
             outcome="falsified",
@@ -390,7 +370,6 @@ def representative_context() -> dict[str, object]:
         position=0,
         required_fields=tuple(ProfileField),
         missing_fields=tuple(ProfileField),
-        portfolio_view=PortfolioView(),
     )
     return context
 
@@ -753,25 +732,6 @@ def rich_path_context(workspace: Path) -> dict[str, object]:
         "gates": ("accuracy", "benchmark"),
         "seeded_workspace_paths": ("reference/model.py",),
         "history_root": files.progress_location,
-        "notes": (
-            SteerNote(
-                note_sha256="0" * 64,
-                text="Inspect artifacts/evaluation.json.",
-                sent_at_s=1.0,
-                interrupt=False,
-            ),
-        ),
-        "results": (
-            EvaluationResumeLine(
-                handle_id="evaluation-1",
-                status="failed",
-                candidate_revision="candidate",
-                evaluator_revision="evaluator",
-                evidence_ids=("evidence-1",),
-                artifact_refs=("artifacts/evaluation.json",),
-                detail="Failed accuracy.",
-            ),
-        ),
         "recommended_skills": (
             ResolvedSkillResources(
                 name="serving-systems",

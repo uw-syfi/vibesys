@@ -73,7 +73,7 @@ def session_id(role: str, subject: str) -> SessionId:
 
 
 def role_id(role: str) -> RoleId:
-    """Agent role identity, matching the role ids in `dynamic.agents`."""
+    """Agent role identity, matching the role ids in `vibesys.dynamic_roles`."""
     return RoleId(root=f"dynamic-{role}")
 
 
