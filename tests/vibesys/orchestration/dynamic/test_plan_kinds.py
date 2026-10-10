@@ -54,11 +54,12 @@ from vs_evaluation.api import (
     ResourceRequirements,
     TrustedEvidence,
 )
-from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor, FakeProfilerTurnProvision
+from vs_evaluation.api.testing import FakeEvaluationExecutor, FakeProfilerTurnProvision
 from vs_project.api import StateNamespace
 from vs_runtime.api import CandidateProfile, CandidateProfileStatus, ProfileField
 from vs_runtime.api.testing import FakeRun
 from vs_sandbox.api.slurm import profile_capture_descriptor
+from vs_sim.api.testing import ManualClock
 
 # Canonical IDs only: test_plan_ids covers the spelling rules.
 _IDS = st.text(
@@ -437,7 +438,7 @@ async def test_descriptor_support_cross_capture_outcome_never_blacklists_support
     run = FakeRun(PLUGIN, project_root=root, supports_parallel_candidates=True)
     revision = await run.workspaces.root.snapshot("failed-revision")
     executor = _ProfileExecutor(
-        clock=FakeClock(),
+        clock=ManualClock(),
         supported_evidence_kinds=(EvidenceKind.PROFILE.value,),
         root=root / "producer",
         command=command,
@@ -450,7 +451,7 @@ async def test_descriptor_support_cross_capture_outcome_never_blacklists_support
         _namespace(root, "evaluation"),
         SemanticEvaluationIdentity(evaluator=digest, workload=digest, environment=digest),
         executor=executor,
-        submitted_time=executor.clock.monotonic,
+        submitted_time=executor.clock.now,
     )
     provision = _ImmediateProfiler()
     profiler = ProfilerAgentService(

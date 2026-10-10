@@ -36,12 +36,12 @@ if TYPE_CHECKING:
 
     from vs_evaluation.models import AvailabilitySnapshot, ResourceRequirements
     from vs_evaluation.ports import (
-        Clock,
         DeadlineScope,
         EvaluationEventSink,
         EvaluationExecutor,
         EvaluationStore,
     )
+    from vs_sim.api import Clock
 
 
 class EvaluationLifecycleError(RuntimeError):
@@ -190,7 +190,7 @@ class EvaluationCoordinator:
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         """Return the executor's typed, timestamped resource observation."""
         snapshot = await self._executor.availability(requirements)
-        if snapshot.observed_at > self._clock.monotonic():
+        if snapshot.observed_at > self._clock.now():
             raise EvaluationLifecycleError(LifecycleErrorCode.AVAILABILITY_FROM_FUTURE)
         return snapshot
 
@@ -419,7 +419,7 @@ class EvaluationCoordinator:
             raise EvaluationTimeoutError
         if timeout_s > self._max_await_timeout_s:
             raise EvaluationTimeoutError(maximum=self._max_await_timeout_s)
-        deadline = self._clock.monotonic() + timeout_s
+        deadline = self._clock.now() + timeout_s
         last_status: EvaluationStatus | None = None
         last_revision: int | None = None
         hard_deadline = self._deadline_factory(timeout_s)
@@ -439,7 +439,7 @@ class EvaluationCoordinator:
                     terminal = self._terminal_result(record)
                     if terminal is not None:
                         return terminal
-                    remaining = deadline - self._clock.monotonic()
+                    remaining = deadline - self._clock.now()
                     if remaining <= 0:
                         result = EvaluationTimedOut(handle_id=handle_id, status=last_status)
                         self._publish_timeout(handle_id, last_status, last_revision)

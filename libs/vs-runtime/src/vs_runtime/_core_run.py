@@ -1,7 +1,7 @@
 """The production run loop over ``CoreRuntime``.
 
 The loop owns time and nothing else. Core is pure: it never sleeps and learns time only
-through ``ClockAdvanced``. This loop reads an injected ``RunClock``, delivers the time to
+through ``ClockAdvanced``. This loop reads an injected ``SleepingClock``, delivers the time to
 core, drains the shell, and sleeps when a drain made no progress.
 
 Pacing. A job that is running but not finished is polled by a request that core issues
@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
@@ -47,6 +46,7 @@ from vs_core.api import (
 )
 from vs_runtime._core_loop import LeaseUnavailableError
 from vs_runtime._run_control import RunStopped
+from vs_sim.api import SleepingClock, SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -60,35 +60,11 @@ if TYPE_CHECKING:
 type ControlAction = Literal["pause", "resume", "stop", "steer"]
 
 
-class RunClock(Protocol):
-    """Time source and waiting, injected so tests run without real sleeps."""
-
-    def now(self) -> float:
-        """Seconds on a timeline all hosts share."""
-        ...
-
-    async def sleep(self, seconds: float) -> None:
-        """Wait about this long (the loop re-reads ``now`` afterwards)."""
-        ...
-
-
 #: Name of the task that renews the lease while a drain is in flight; fakes recognize it.
 HEARTBEAT_TASK = "lease-heartbeat"
 
 #: Name of the task that sleeps while requests run; the sleep ends early when one finishes.
 WAIT_TASK = "loop-wait"
-
-
-class WallRunClock:
-    """Production clock: seconds since the epoch, real sleeping."""
-
-    def now(self) -> float:
-        """Seconds since the epoch."""
-        return time.time()
-
-    async def sleep(self, seconds: float) -> None:
-        """Sleep on the event loop."""
-        await asyncio.sleep(seconds)
 
 
 # How long a run's state-store lease stays valid without renewal. The loop renews it every
@@ -101,7 +77,7 @@ PRODUCTION_LEASE_SECONDS = 60.0
 class RunTiming:
     """The time source and lease length one run is composed with."""
 
-    clock: RunClock
+    clock: SleepingClock
     lease_seconds: float
 
     def __post_init__(self) -> None:
@@ -113,7 +89,7 @@ class RunTiming:
     @classmethod
     def production(cls) -> RunTiming:
         """Wall time and the production lease."""
-        return cls(WallRunClock(), PRODUCTION_LEASE_SECONDS)
+        return cls(SystemClock(), PRODUCTION_LEASE_SECONDS)
 
 
 class NextWake(Protocol):
@@ -273,7 +249,7 @@ class CoreRunHost:
 
     shell: CoreRuntime
     delivery: PublicationDelivery
-    clock: RunClock
+    clock: SleepingClock
     controls: RunControlBridge | None = None
 
 

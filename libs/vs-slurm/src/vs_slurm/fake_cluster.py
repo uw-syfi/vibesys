@@ -5,9 +5,11 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, replace
 from threading import RLock
-from typing import TYPE_CHECKING, Protocol, TypeAlias, TypedDict, Unpack
+from typing import TYPE_CHECKING, TypeAlias, TypedDict, Unpack
 
 from pydantic import BaseModel, ConfigDict, model_validator
+
+from vs_sim.api.testing import ManualClock
 
 from .cluster import job_handle, payload_digest
 from .cluster_types import (
@@ -49,39 +51,12 @@ from .staging import _ContentStageError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vs_sim.api import Clock
+
 Request: TypeAlias = SlurmJobRequest | SlurmBatchRequest
 
 
 _MULTI_STAGE = 2
-
-
-class Clock(Protocol):
-    """The time source a Fake cluster reads. Tests advance it; nothing sleeps."""
-
-    def now(self) -> float:
-        """Seconds on the Fake's own timeline."""
-        ...
-
-
-class ManualClock:
-    """A clock that moves only when told to, so scheduler time is deterministic."""
-
-    def __init__(self, start: float = 0.0) -> None:
-        """Start the timeline at ``start`` seconds."""
-        self._now = start
-        self._lock = RLock()
-
-    def now(self) -> float:
-        """Current time on the timeline."""
-        with self._lock:
-            return self._now
-
-    def advance(self, seconds: float) -> None:
-        """Move the timeline forward."""
-        if seconds < 0:
-            raise SlurmError.invalid_script_states()
-        with self._lock:
-            self._now += seconds
 
 
 class SecondsRange(BaseModel):

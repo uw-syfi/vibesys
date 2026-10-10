@@ -100,6 +100,7 @@ if TYPE_CHECKING:
     from vs_runtime._workspace_receipts import WorkspaceReceipts
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
     from vs_runtime.contracts import AgentRole
+    from vs_sim.api import Clock
 
 EVALUATION_TOOL_ID = "evaluation"
 """The ``AgentRole.extra_tools`` id that asks for this bridge's tools."""
@@ -261,14 +262,6 @@ class AdmissionShell(Protocol):
 
     def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
         """Run core's step on the event and queue it; ``ContractError`` queues nothing."""
-        ...
-
-
-class Clock(Protocol):
-    """The run's time source."""
-
-    def now(self) -> float:
-        """Seconds on the run's timeline."""
         ...
 
 

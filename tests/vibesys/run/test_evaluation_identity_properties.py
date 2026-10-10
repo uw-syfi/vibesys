@@ -11,8 +11,9 @@ from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as P
 
 from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity
 from vs_evaluation.api import ContentDigest, EvidenceKind
-from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor, InMemoryEvaluationNamespace
+from vs_evaluation.api.testing import FakeEvaluationExecutor, InMemoryEvaluationNamespace
 from vs_runtime.api.testing import FakeRun
+from vs_sim.api.testing import ManualClock
 
 
 class _OwnedFakeExecutor(FakeEvaluationExecutor):
@@ -46,7 +47,7 @@ async def test_identical_measurements_join_across_generated_requester_scopes(
 ) -> None:
     run = FakeRun(PLUGIN, supports_parallel_candidates=True)
     executor = _OwnedFakeExecutor(
-        clock=FakeClock(), supported_evidence_kinds=tuple(kind.value for kind in EvidenceKind)
+        clock=ManualClock(), supported_evidence_kinds=tuple(kind.value for kind in EvidenceKind)
     )
     identity = ContentDigest.sha256(b"same evaluator, workload and environment")
     backend = SemanticEvaluationBackend(

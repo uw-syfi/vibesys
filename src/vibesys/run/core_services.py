@@ -63,7 +63,6 @@ if TYPE_CHECKING:
         CoreRuntimeBindings,
         MeasurementObserver,
         OperationCatalog,
-        RunClock,
         SessionSpecFactory,
     )
     from vs_runtime.api.infrastructure import (
@@ -74,6 +73,7 @@ if TYPE_CHECKING:
         RuntimeWorkspaces,
         TrustedEvaluationPlan,
     )
+    from vs_sim.api import SleepingClock
 
 
 class CoreCompositionError(RuntimeError):
@@ -135,7 +135,7 @@ class CoreResources:
     invocation_slot: AgentInvocationStore
     configuration: AgentConfigurationResolver
     session_spec: SessionSpecFactory
-    clock: RunClock
+    clock: SleepingClock
     """The run's clock: it places the deadline and later paces the loop on one timeline."""
     measurement_observer: MeasurementObserver = field(default_factory=IgnoreMeasurement)
     """Hears each measurement stage start and end, for the host's event stream."""
@@ -168,7 +168,7 @@ class CoreServices:
     receipts: StateNamespace
     evaluation: ClosableEvaluation
     artifacts: ArtifactStore
-    clock: RunClock
+    clock: SleepingClock
     agent_evaluation: AgentEvaluationBridge | None = None
     """The in-turn evaluation tool service, when the plan offers one; the run loop serves it."""
 

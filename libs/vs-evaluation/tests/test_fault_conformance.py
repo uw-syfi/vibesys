@@ -21,11 +21,11 @@ from vs_evaluation.api import (
     stable_handle_id,
 )
 from vs_evaluation.api.testing import (
-    FakeClock,
     FakeEvaluationBackend,
     FakeEvaluationExecutor,
     InMemoryEvaluationStore,
 )
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,7 +61,7 @@ def _coordinator(
 
 @pytest.mark.asyncio
 async def test_remote_accept_then_local_error_reconciles_without_duplicate_submission() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     backend = FakeEvaluationBackend()
     executor = FakeEvaluationExecutor(clock, backend=backend, fail_after_accept_once=True)
     service = _coordinator(executor, InMemoryEvaluationStore())
@@ -77,7 +77,7 @@ async def test_remote_accept_then_local_error_reconciles_without_duplicate_submi
 
 @pytest.mark.asyncio
 async def test_repeated_provider_observation_timeouts_do_not_poison_later_completion() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     handle = await _coordinator(executor, InMemoryEvaluationStore()).submit(
         _request("transient-observation-timeout")
@@ -95,7 +95,7 @@ async def test_repeated_provider_observation_timeouts_do_not_poison_later_comple
 
 @pytest.mark.asyncio
 async def test_repeated_nonterminal_change_waits_can_finish_within_one_await_budget() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     handle = await _coordinator(executor, InMemoryEvaluationStore()).submit(
         _request("repeated-nonterminal-waits")
@@ -106,13 +106,13 @@ async def test_repeated_nonterminal_change_waits_can_finish_within_one_await_bud
     result = await handle.await_result(10)
 
     assert isinstance(result, EvaluationCompleted)
-    assert clock.monotonic() == 3
+    assert clock.now() == 3
     assert len(executor.wait_calls) == 4
 
 
 @pytest.mark.asyncio
 async def test_caller_await_timeout_preserves_work_for_later_completion() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     handle = await _coordinator(executor, InMemoryEvaluationStore()).submit(
         _request("caller-timeout")
@@ -130,7 +130,7 @@ async def test_caller_await_timeout_preserves_work_for_later_completion() -> Non
 
 @pytest.mark.asyncio
 async def test_duplicate_observation_is_idempotent_and_stale_observation_is_rejected() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     handle = await _coordinator(executor, InMemoryEvaluationStore()).submit(
         _request("stale-observation")
@@ -160,7 +160,7 @@ async def test_duplicate_observation_is_idempotent_and_stale_observation_is_reje
 
 @pytest.mark.asyncio
 async def test_cancellation_and_failure_release_executor_capacity() -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     service = _coordinator(executor, InMemoryEvaluationStore())
     requirements = ResourceRequirements()
@@ -194,7 +194,7 @@ async def test_cancellation_and_failure_release_executor_capacity() -> None:
 async def test_restart_inspects_shared_remote_state_without_duplicate_submission(
     tmp_path: Path,
 ) -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     backend = FakeEvaluationBackend()
     first = _coordinator(
         FakeEvaluationExecutor(clock, backend=backend),
@@ -215,7 +215,7 @@ async def test_restart_inspects_shared_remote_state_without_duplicate_submission
 
 @pytest.mark.asyncio
 async def test_restart_retries_durable_cancellation_before_submission(tmp_path: Path) -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     backend = FakeEvaluationBackend()
     store = FilesystemEvaluationStore(tmp_path)
     first_executor = FakeEvaluationExecutor(
@@ -248,7 +248,7 @@ async def test_restart_retries_pending_submission_despite_orphan_queued_observat
     *,
     provider_accepted: bool,
 ) -> None:
-    clock = FakeClock()
+    clock = ManualClock()
     store = FilesystemEvaluationStore(tmp_path)
     pending = _request("restart-orphan-queued")
     handle_id = stable_handle_id(pending.key)

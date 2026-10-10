@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING, Unpack
 from hypothesis import given
 from hypothesis import strategies as st
 
+from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     ClusterObservation,
     ClusterSubmitted,
     FakeCluster,
-    ManualClock,
     SecondsRange,
     SlurmBatchRequest,
     SlurmBatchStage,

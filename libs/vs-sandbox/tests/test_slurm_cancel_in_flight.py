@@ -25,8 +25,8 @@ from vs_evaluation.api import (
     EvaluationState,
     EvaluationStep,
 )
-from vs_evaluation.api.testing import FakeClock
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
+from vs_sim.api.testing import ManualClock
 from vs_slurm.api import SlurmCluster, SlurmConfig, SlurmConnectorTransport, SlurmJobRunner
 from vs_slurm.fake_connector import HOLD_FILE, executing_cluster, handle, recorded_commands
 
@@ -94,7 +94,7 @@ async def test_a_stop_during_sbatch_reply_cancels_the_submitted_job_once(tmp_pat
         ),
     )
     coordinator = EvaluationCoordinator(
-        executor, evaluation_testing.InMemoryEvaluationStore(), FakeClock()
+        executor, evaluation_testing.InMemoryEvaluationStore(), ManualClock()
     )
     try:
         evaluation = await coordinator.submit(_request())

@@ -7,10 +7,16 @@ name = "vs-slurm"
 version = "0.1.0"
 description = "Run a staged workspace command in a remote Slurm job"
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2"]
+dependencies = [
+    "pydantic>=2",
+    "vs-sim",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 vs_slurm = ["py.typed"]
+
+[tool.uv.sources]
+vs-sim = { workspace = true }

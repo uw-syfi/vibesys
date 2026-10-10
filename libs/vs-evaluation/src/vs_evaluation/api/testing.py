@@ -2,7 +2,6 @@
 
 from vs_evaluation.profiler_testing import FakeProfilerTurn, FakeProfilerTurnProvision
 from vs_evaluation.testing import (
-    FakeClock,
     FakeDeadlineFactory,
     FakeDeadlineScope,
     FakeEvaluationBackend,
@@ -14,7 +13,6 @@ from vs_evaluation.testing import (
 )
 
 __all__ = [
-    "FakeClock",
     "FakeDeadlineFactory",
     "FakeDeadlineScope",
     "FakeEvaluationBackend",

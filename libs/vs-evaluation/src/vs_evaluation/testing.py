@@ -52,28 +52,12 @@ from vs_evaluation.settlements import (
     SettlementErrorCode,
 )
 from vs_project.api import ProjectStateError, StateModelNotFoundError
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from types import TracebackType
 
     from vs_evaluation.state_namespace import EvaluationStateNamespace
-
-
-@dataclass
-class FakeClock:
-    """Manually advanced monotonic clock for deterministic timeout tests."""
-
-    value: float = 0.0
-
-    def monotonic(self) -> float:
-        """Return the current fake time."""
-        return self.value
-
-    def advance(self, seconds: float) -> None:
-        """Advance fake time without waiting on wall time."""
-        if seconds < 0:
-            raise ValueError("negative advance")  # noqa: TRY003  # lint-waiver: LW-930030 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
-        self.value += seconds
 
 
 @dataclass
@@ -261,7 +245,7 @@ class _WaitAction:
 class FakeEvaluationExecutor:
     """Controllable execution port with event-driven waits and no sleeps."""
 
-    clock: FakeClock
+    clock: ManualClock
     availability_state: AvailabilityState = AvailabilityState.IMMEDIATE
     capacity: int | None = 1
     in_flight: int = 0
@@ -305,7 +289,7 @@ class FakeEvaluationExecutor:
             estimated_runtime_s=self.estimated_runtime_s,
             reuse_status=self.reuse_status,
             cost_class=self.cost_class,
-            observed_at=self.clock.monotonic(),
+            observed_at=self.clock.now(),
             fresh_for_s=self.fresh_for_s,
             supported_evidence_kinds=self.supported_evidence_kinds,
             supported_profile_fields=self.supported_profile_fields,
@@ -489,7 +473,6 @@ class InMemoryEvaluationNamespace:
 
 
 __all__ = [
-    "FakeClock",
     "FakeDeadlineFactory",
     "FakeDeadlineScope",
     "FakeEvaluationBackend",
@@ -517,7 +500,7 @@ class FakeEvaluationSettlements:
         """Create isolated durable state and externally observable fake jobs."""
         self.namespace = InMemoryEvaluationNamespace()
         self.store = InMemoryEvaluationStore()
-        self.executor = FakeEvaluationExecutor(FakeClock(), advance_clock_on_timeout=False)
+        self.executor = FakeEvaluationExecutor(ManualClock(), advance_clock_on_timeout=False)
         self.coordinator = EvaluationCoordinator(
             self.executor, self.store, self.executor.clock, deadline_factory=FakeDeadlineFactory()
         )

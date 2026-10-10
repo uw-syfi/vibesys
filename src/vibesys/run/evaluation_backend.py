@@ -95,6 +95,7 @@ from vs_runtime.api import (
     render_rejected_evidence,
 )
 from vs_runtime.api.infrastructure import RunStopped, TrustedEvaluationPlan
+from vs_sim.api import MonotonicClock
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -109,11 +110,6 @@ _RETRYABLE_STATES = frozenset(
 )
 _TERMINAL_EVALUATION_STATES = frozenset({EvaluationState.SUCCEEDED, *_RETRYABLE_STATES})
 _INDEX_PATH = f"{_STATE_DIRECTORY}/index.json"
-
-
-class _Clock:
-    def monotonic(self) -> float:
-        return time.monotonic()
 
 
 class _EvaluationIndex(BaseModel):
@@ -290,7 +286,7 @@ class SemanticEvaluationBackend:
         self._coordinator = EvaluationCoordinator(
             self._executor,
             self._store,
-            _Clock(),
+            MonotonicClock(),
             events=events or (lambda _event: None),
         )
 

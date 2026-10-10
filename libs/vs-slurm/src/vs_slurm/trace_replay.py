@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from .fake_cluster import ManualClock
+    from vs_sim.api.testing import ManualClock
 
 _SQUEUE_FORMAT = "%T|%r|%S"
 _ACCOUNTING_ACTIVE = frozenset({"PENDING", "RUNNING", "REQUEUED", "SUSPENDED"})

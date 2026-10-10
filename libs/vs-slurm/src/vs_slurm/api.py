@@ -37,7 +37,7 @@ from .config import (
     load_slurm_config,
     shell_join_with_port,
 )
-from .fake_cluster import FakeCluster, ManualClock, SecondsRange, SlurmTimingProfile
+from .fake_cluster import FakeCluster, SecondsRange, SlurmTimingProfile
 from .fake_connector import REQUESTS_FILE, FakeConnector
 from .identity import runtime_content_identity
 from .phase_register import MergedPhase, PhaseAnomaly, PhaseRegister
@@ -98,7 +98,6 @@ __all__ = [
     "FakeCluster",
     "FakeConnector",
     "IssuedCommand",
-    "ManualClock",
     "MergedPhase",
     "PhaseAnomaly",
     "PhaseRegister",

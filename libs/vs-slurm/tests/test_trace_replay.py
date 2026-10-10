@@ -11,13 +11,13 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     CANCEL_REACTIONS,
     LIFETIMES,
     ClusterCancelRequested,
     ClusterObservation,
     ClusterUnknown,
-    ManualClock,
     SchedulerTrace,
     SlurmBatchRequest,
     SlurmBatchStage,

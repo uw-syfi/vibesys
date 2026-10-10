@@ -118,7 +118,6 @@ from vs_evaluation.models import (
     StoredEvaluation,
 )
 from vs_evaluation.ports import (
-    Clock,
     DeadlineScope,
     EvaluationEventSink,
     EvaluationExecutor,
@@ -230,7 +229,6 @@ __all__ = [
     "CancelCall",
     "CancelProfilerCall",
     "CanceledReply",
-    "Clock",
     "CompletedProfilerOperation",
     "ContentDigest",
     "CostClass",

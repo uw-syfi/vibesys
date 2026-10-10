@@ -26,7 +26,6 @@ from vs_evaluation.api import (
     PollPhase,
     StageState,
 )
-from vs_evaluation.api.testing import FakeClock
 from vs_sandbox.api.slurm import (
     SharedSlurmAdmission,
     SlurmCommandResult,
@@ -34,7 +33,7 @@ from vs_sandbox.api.slurm import (
     SlurmStagePayload,
     SlurmTargetLifecycle,
 )
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api.testing import ManualClock, wait_until_started
 from vs_slurm.api import (
     ClusterCancelOutcome,
     ClusterCancelRequested,
@@ -733,7 +732,7 @@ async def test_executor_preserves_both_stages_through_durable_coordinator_failur
         cluster=runner,
     )
     coordinator = EvaluationCoordinator(
-        executor, FilesystemEvaluationStore(tmp_path / "coordinator"), FakeClock()
+        executor, FilesystemEvaluationStore(tmp_path / "coordinator"), ManualClock()
     )
     try:
         handle = await coordinator.submit(_request())
@@ -1212,7 +1211,7 @@ async def test_missing_external_identity_keeps_dispatched_cancellation_unresolve
         cluster=runner,
     )
     store = evaluation_testing.InMemoryEvaluationStore()
-    coordinator = EvaluationCoordinator(executor, store, FakeClock())
+    coordinator = EvaluationCoordinator(executor, store, ManualClock())
     handle = await coordinator.submit(_request())
     await wait_until_executor_started(runner.accepted, executor, handle.id)
     with pytest.raises(ExecutorCancellationUnknownError, match="unknown external identity"):
@@ -1236,7 +1235,7 @@ async def test_missing_external_identity_keeps_dispatched_cancellation_unresolve
         handle_root=tmp_path / "handles",
         cluster=runner,
     )
-    restored = EvaluationCoordinator(resumed, store, FakeClock())
+    restored = EvaluationCoordinator(resumed, store, ManualClock())
     with pytest.raises(ExecutorCancellationUnknownError, match="unknown external identity"):
         await restored.cancel(handle.id)
     remaining = await store.get(handle.id)
@@ -1270,7 +1269,7 @@ async def test_known_staging_rejection_is_failed_and_cleanup_needs_no_external_i
         cluster=runner,
     )
     coordinator = EvaluationCoordinator(
-        executor, evaluation_testing.InMemoryEvaluationStore(), FakeClock()
+        executor, evaluation_testing.InMemoryEvaluationStore(), ManualClock()
     )
     handle = await coordinator.submit(_request())
     observed = await _terminal(executor, handle.id)
@@ -1621,7 +1620,7 @@ async def test_read_only_pending_scheduler_does_not_regress_active_evaluation(
         cluster=runner,
     )
     coordinator = EvaluationCoordinator(
-        executor, FilesystemEvaluationStore(tmp_path / "records"), FakeClock()
+        executor, FilesystemEvaluationStore(tmp_path / "records"), ManualClock()
     )
     handle = await coordinator.submit(_request())
     await wait_until_executor_started(runner.wait_started, executor, handle.id)
