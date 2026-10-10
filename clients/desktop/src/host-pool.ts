@@ -159,13 +159,19 @@ export class HostPool {
     return root;
   }
 
-  /** A checkout to suggest for `id`, from the `vibesys_root` its live servers report. */
+  /**
+   * A checkout to suggest for `id`, from the `vibesys_root` its live servers report. Asking also
+   * connects, so a host that cannot be reached (`link`) or refuses the user (`auth`) rejects here,
+   * before the user is asked for a checkout there; any other failure only means no suggestion.
+   */
   async suggestedCheckout(id: HostId): Promise<string | null> {
     if (id.kind === 'local') return null;
     try {
       const probe = await this.#options.factory(id, '/');
       return (await probe.registryRoots())[0] ?? null;
-    } catch {
+    } catch (error) {
+      if (error instanceof HostError && (error.kind === 'link' || error.kind === 'auth'))
+        throw error;
       return null;
     }
   }

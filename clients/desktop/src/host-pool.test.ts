@@ -16,7 +16,11 @@ interface Built {
 function pool(
   sshConfig: string,
   settings: string | null,
-  options: {readonly broken?: ReadonlySet<string>; readonly roots?: readonly string[]} = {},
+  options: {
+    readonly broken?: ReadonlySet<string>;
+    readonly roots?: readonly string[];
+    readonly rootsError?: HostError;
+  } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), 'vsd-pool-'));
   writeFileSync(join(directory, 'config'), sshConfig);
@@ -58,7 +62,10 @@ function pool(
           }
           return checkout.replace('~', '/home/me');
         },
-        registryRoots: async () => [...(options.roots ?? [])],
+        registryRoots: async () => {
+          if (options.rootsError !== undefined) throw options.rootsError;
+          return [...(options.roots ?? [])];
+        },
       }) satisfies CheckedHost;
     },
     log: message => logged.push(message),
@@ -107,6 +114,18 @@ describe('HostPool', () => {
   test('suggests a checkout from the live records of a host without one', async () => {
     const {hosts} = pool('Host gpu-box\n', null, {roots: ['/home/me/src/vibesys']});
     expect(await hosts.suggestedCheckout(GPU)).toBe('/home/me/src/vibesys');
+  });
+
+  test('regression: a host that cannot be reached or refuses the user says so instead of asking for a checkout', async () => {
+    for (const kind of ['link', 'auth'] as const) {
+      const error = new HostError(kind, `ssh: ${kind}`);
+      const {hosts} = pool('Host gpu-box\n', null, {rootsError: error});
+      await expect(hosts.suggestedCheckout(GPU)).rejects.toBe(error);
+    }
+    const {hosts} = pool('Host gpu-box\n', null, {
+      rootsError: new HostError('failed', 'no registry'),
+    });
+    expect(await hosts.suggestedCheckout(GPU)).toBeNull();
   });
 
   test("lists a project's tasks and validates the project path first", async () => {
