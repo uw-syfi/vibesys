@@ -657,12 +657,12 @@ depends_on = []
 [[modules]]
 path = "vs_sim.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals"]
+depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.network", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals"]
 
 [[modules]]
 path = "vs_sim.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.child", "vs_sim.contracts", "vs_sim.crash", "vs_sim.fakes", "vs_sim.gate", "vs_sim.manual", "vs_sim.seeds", "vs_sim.sim", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
+depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.fakes", "vs_sim.gate", "vs_sim.manual", "vs_sim.seeds", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
 
 [[modules]]
 path = "vs_sim.blocking"
@@ -671,6 +671,16 @@ depends_on = []
 
 [[modules]]
 path = "vs_sim.clock"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.concurrency"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.network"
 layer = "prompts_and_lower_libs"
 depends_on = []
 
@@ -693,6 +703,11 @@ depends_on = []
 path = "vs_sim.child"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_sim.waits"]
+
+[[modules]]
+path = "vs_sim.concurrency_contracts"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.concurrency", "vs_sim.network", "vs_sim.randomness", "vs_sim.waits"]
 
 [[modules]]
 path = "vs_sim.contracts"
@@ -727,7 +742,17 @@ depends_on = ["vs_sim.randomness"]
 [[modules]]
 path = "vs_sim.sim"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.child", "vs_sim.gate", "vs_sim.randomness", "vs_sim.trace", "vs_sim.virtual"]
+depends_on = ["vs_sim.child", "vs_sim.gate", "vs_sim.randomness", "vs_sim.sim_threads", "vs_sim.trace", "vs_sim.virtual"]
+
+[[modules]]
+path = "vs_sim.sim_network"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.concurrency", "vs_sim.network"]
+
+[[modules]]
+path = "vs_sim.sim_threads"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.concurrency", "vs_sim.randomness", "vs_sim.trace", "vs_sim.virtual"]
 
 [[modules]]
 path = "vs_sim.states"
@@ -752,7 +777,7 @@ depends_on = ["vs_sim.randomness", "vs_sim.trace"]
 [[modules]]
 path = "vs_sim.waits"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_sim.concurrency"]
 
 # Each library exposes only its `api` subpackage and its submodules. External
 # modules must import through that surface, never from the package root or

@@ -291,6 +291,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.Outco
 # The contract suites are test code shipped in the library so every implementation runs them:
 # their assertions are the output, as in a test module.
 "libs/vs-sim/src/vs_sim/contracts.py" = ["S101", "PLR2004"]
+"libs/vs-sim/src/vs_sim/concurrency_contracts.py" = ["S101", "PLR2004"]
 # scripts/ holds standalone CI helper tools whose job is to report diagnostics
 # on stdout, so `print` is the intended output mechanism rather than a stray
 # debug statement. Same categorical treatment as S101 in tests/.

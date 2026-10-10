@@ -16,6 +16,8 @@ if TYPE_CHECKING:
     import socket
     import threading
 
+    from vs_sim.concurrency import Event
+
 HANG_GUARD_S = 60.0
 
 
@@ -27,7 +29,7 @@ def join_or_fail(worker: threading.Thread | multiprocessing.process.BaseProcess)
         raise AssertionError(message)
 
 
-def wait_or_fail(event: threading.Event, what: str = "the event") -> None:
+def wait_or_fail(event: Event, what: str = "the event") -> None:
     """Wait for *event*, failing the test if *what* is still not set after the guard bound."""
     if not event.wait(HANG_GUARD_S):
         message = f"{what} was not set after {HANG_GUARD_S:g} s"

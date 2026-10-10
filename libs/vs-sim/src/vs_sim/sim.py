@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from vs_sim.child import run_in_child
 from vs_sim.gate import Gate
 from vs_sim.randomness import SeededRandom, derive_seed
+from vs_sim.sim_threads import SimThreads
 from vs_sim.virtual import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -72,9 +73,18 @@ class Sim:
     """When set, ties between ready work are broken in an order drawn from this seed."""
     _built: dict[str, object] = field(default_factory=dict, init=False, repr=False)
 
-    def run[T](self, main: Coroutine[object, object, T]) -> T:
-        """Run ``main`` to completion on this simulation's virtual clock."""
-        return run_virtual(self.clock, main, trace=self.trace, schedule_seed=self.schedule_seed)
+    def run[T](self, main: Coroutine[object, object, T], *, threads: SimThreads | None = None) -> T:
+        """Run ``main`` to completion on this simulation's virtual clock.
+
+        Simulated ``threads`` (from :meth:`threads`) run whenever the loop is idle.
+        """
+        return run_virtual(
+            self.clock, main, trace=self.trace, schedule_seed=self.schedule_seed, driver=threads
+        )
+
+    def threads(self) -> SimThreads:
+        """Simulated threads on this simulation's clock, schedule seed and trace."""
+        return SimThreads(self.clock, schedule_seed=self.schedule_seed, trace=self.trace)
 
     def random(self, label: str = "") -> SeededRandom:
         """The random stream ``label`` draws from; independent of every other label."""
