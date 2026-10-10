@@ -25,6 +25,7 @@ from tests.support.session_world import (
     run_snapshot,
     turn_output,
 )
+from tests.support.started_operation import wait_until_started
 
 from vs_core.api import (
     ObservationStatus,
@@ -417,7 +418,7 @@ async def test_cancelling_a_dispatch_cancels_the_hung_provider_turn_exactly_once
         await host.run(ensure_request(), store)
         dispatch = asyncio.ensure_future(host.run(dispatch_request(), store))
         # The turn is running in the provider and would never return on its own.
-        assert await asyncio.to_thread(host.turn_started.wait, 30.0)
+        await wait_until_started(host.turn_started, dispatch)
         dispatch.cancel()
         with pytest.raises(asyncio.CancelledError):
             await dispatch

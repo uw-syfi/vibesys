@@ -9,6 +9,8 @@ from queue import SimpleQueue
 from threading import Event, get_ident
 from typing import TYPE_CHECKING, Literal
 
+from tests.support.started_operation import wait_until_started
+
 from vs_agent.api import (
     AgentCapabilities,
     AgentExecutionPolicy,
@@ -103,7 +105,7 @@ def test_concurrent_initial_and_unknown_resume_preserve_both_journal_entries(
         two = await owner.create_session(role, workspace=FakeWorkspace(), member_id="two")
         resume = asyncio.create_task(one.resume(message, "resume"))
         try:
-            await asyncio.to_thread(store.saving_unknown.wait)
+            await wait_until_started(store.saving_unknown, resume)
             with ThreadPoolExecutor(max_workers=1) as workers:
                 initial = workers.submit(_initial_turn, two, store)
                 access = await asyncio.to_thread(store.initial_access.get)

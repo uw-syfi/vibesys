@@ -7,6 +7,7 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.started_operation import wait_until_started
 
 from vs_evaluation.api import ExecutorCancellationUnknownError
 from vs_runtime.api import RunCleanupError, RunFacts
@@ -301,7 +302,7 @@ def test_cancellation_during_prepare_closes_the_prepared_host(tmp_path: Path) ->
                 pytest.fail("cancelled preparation yielded a host")
 
         task = asyncio.create_task(use_host())
-        await asyncio.to_thread(started.wait)
+        await wait_until_started(started, task)
         task.cancel()
         release.set()
         with pytest.raises(asyncio.CancelledError):
@@ -328,7 +329,7 @@ def test_prepare_failure_during_cancellation_keeps_cancellation_primary() -> Non
                 pytest.fail("failed preparation yielded a host")
 
         task = asyncio.create_task(use_host())
-        await asyncio.to_thread(started.wait)
+        await wait_until_started(started, task)
         task.cancel()
         release.set()
         with pytest.raises(asyncio.CancelledError) as caught:
@@ -380,7 +381,7 @@ def test_cancellation_during_close_waits_for_cleanup_then_propagates(tmp_path: P
                 pass
 
         task = asyncio.create_task(use_host())
-        await asyncio.to_thread(close_started.wait)
+        await wait_until_started(close_started, task)
         task.cancel()
         close_release.set()
         with pytest.raises(asyncio.CancelledError):
@@ -412,7 +413,7 @@ def test_close_drains_blocking_work_before_capabilities_and_resources(tmp_path: 
             lambda ownership: _prepare(ownership, components, resources)
         ) as host:
             operation_task = asyncio.create_task(blocking.run(operation))
-            await asyncio.to_thread(operation_started.wait)
+            await wait_until_started(operation_started, operation_task)
             close_task = asyncio.create_task(host.close())
             await close_started.wait()
             assert resources.close_count == 0

@@ -8,10 +8,11 @@ from collections import deque
 from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from tests.support.run_execution import run_execution_record
+from tests.support.started_operation import wait_until_started
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
@@ -209,8 +210,8 @@ class _SnapshotGate:
             self.entered.set()
             self.release.wait()
 
-    async def wait_entered(self) -> None:
-        await asyncio.to_thread(self.entered.wait)
+    async def wait_entered(self, operation: asyncio.Future[Any]) -> None:
+        await wait_until_started(self.entered, operation)
 
     def open(self) -> None:
         self.release.set()
@@ -228,8 +229,8 @@ class _AsyncSnapshotGate:
             self.entered.set()
             await self.release.wait()
 
-    async def wait_entered(self) -> None:
-        await self.entered.wait()
+    async def wait_entered(self, operation: asyncio.Future[Any]) -> None:
+        await wait_until_started(self.entered, operation)
 
     def open(self) -> None:
         self.release.set()

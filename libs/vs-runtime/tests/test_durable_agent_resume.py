@@ -17,6 +17,7 @@ from hypothesis import strategies as st
 from pydantic import BaseModel
 from tests.support.run_execution import run_execution_record
 from tests.support.runtime_agent_sessions import _OpenedSessionContract, _resume_transport
+from tests.support.started_operation import wait_until_started
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
@@ -416,7 +417,7 @@ def test_in_flight_resume_is_inspectable_without_waiting_for_the_agent(tmp_path:
         )
         await session.turn("initial", response=Reply)
         resume = asyncio.create_task(session.resume(message, "resume-1", response=Reply))
-        await asyncio.to_thread(entered.wait)
+        await wait_until_started(entered, resume)
         try:
             observed = session.inspect("resume-1")
             assert isinstance(observed, Pending)
@@ -497,7 +498,7 @@ def test_key_ownership_is_held_until_pending_close_acknowledges(
         session = await owner.create_session(ROLE, workspace=workspace, member_id="member")
         turn = asyncio.create_task(session.turn("initial"))
         if implementation == "runtime":
-            await asyncio.to_thread(worker_entered.wait)
+            await wait_until_started(worker_entered, turn)
         else:
             await fake_entered.wait()
         close_started = asyncio.Event()
