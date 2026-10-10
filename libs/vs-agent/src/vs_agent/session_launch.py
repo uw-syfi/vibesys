@@ -306,6 +306,7 @@ class ConfinedSessionLauncher:
         provider: str,
         timeout: int | None = None,
         docker_sandboxes: dict[str, DockerSandbox] | None = None,
+        workspace_sandboxes: Callable[[Path], DockerSandbox | None] | None = None,
         log: Callable[[str], None] | None = None,
         executor_factory: ExecutorFactory | None = None,
         check_timeout: float | None = None,
@@ -336,6 +337,12 @@ class ConfinedSessionLauncher:
         allowlisted part of it plus ``env_passthrough`` names (see
         :mod:`vs_agent.session_environment`).
 
+        ``workspace_sandboxes`` answers, for a session's workspace, the sandbox
+        that mounts it, or ``None`` when the role's sandbox serves it. A client
+        shared by turns in several workspaces needs it: each workspace has its
+        own container, and ``docker exec`` into another one cannot reach the
+        workspace's directory.
+
         ``docker_sandboxes`` maps a session's role to an already-started
         :class:`~vs_sandbox.DockerSandbox` (built and started by the run
         environment, not by this launcher). Its presence is what selects
@@ -363,6 +370,7 @@ class ConfinedSessionLauncher:
         self._provider = provider
         self._timeout = timeout
         self._docker_sandboxes = docker_sandboxes
+        self._workspace_sandboxes = workspace_sandboxes
         self._log = log or _ignore_log
         self._executor_factory: ExecutorFactory = executor_factory or agentshim.HostCommandExecutor
         self._check_timeout = (
@@ -669,6 +677,10 @@ class ConfinedSessionLauncher:
         if self._docker_sandboxes is None:
             message = "container execution has no Docker sandbox registry"
             raise AssertionError(message)
+        if self._workspace_sandboxes is not None:
+            workspace_sandbox = self._workspace_sandboxes(spec.workspace)
+            if workspace_sandbox is not None:
+                return workspace_sandbox
         sandbox = self._docker_sandboxes.get(spec.role)
         if sandbox is None:
             message = f"no AgentShim Docker sandbox configured for role {spec.role!r}"

@@ -10,16 +10,18 @@ from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.spec import AgentBackend
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
     from typing import TextIO
+
+    from agentshim import CommandExecutor
 
     from vs_agent.contracts import AgentClientProtocol
     from vs_agent.session_store import SessionStore
     from vs_agent.sink import AgentEventSink
     from vs_agent.skills import SkillSelection
     from vs_agent.spec import AgentSpec
-    from vs_sandbox.api import HostResource, ProjectPathPolicy
+    from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
 
 
 def agent_supports_tool_servers(spec: AgentSpec) -> bool | None:
@@ -43,6 +45,8 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     *,
     spec: AgentSpec,
     backends: dict[str, Any] | None,
+    workspace_sandboxes: Callable[[Path], DockerSandbox | None] | None = None,
+    executor_factory: Callable[[], CommandExecutor] | None = None,
     skill_source_dirs: list[Path],
     skill_selection: SkillSelection = NULL_SKILL_SELECTION,
     run_log_file: TextIO | None,
@@ -107,6 +111,8 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
         provider=provider,
         timeout=timeout,
         docker_sandboxes=docker_sandboxes,
+        workspace_sandboxes=workspace_sandboxes if use_docker else None,
+        executor_factory=executor_factory,
         log=diagnostic_log,
         agent_homes=agent_homes_dir,
         env_passthrough=spec.env_passthrough,

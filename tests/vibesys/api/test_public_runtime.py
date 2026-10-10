@@ -137,9 +137,7 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
             await root.restore(changed)
             assert (root.path / "queue.py").read_text() == "VALUE = 2\n"
             assert await root.retain(changed, label="public-probe") is None
-            assert not ctx.workspaces.supports_parallel_candidates
-            with pytest.raises(RuntimeError, match="cannot open isolated candidate sandboxes"):
-                await ctx.workspaces.create_candidate()
+            assert ctx.workspaces.supports_parallel_candidates
 
     try:
         asyncio.run(exercise())

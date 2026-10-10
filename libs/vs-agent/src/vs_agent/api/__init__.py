@@ -128,16 +128,18 @@ from vs_agent.spec import AgentBackend, AgentSpec
 from vs_agent.todos import todos_from_tool_call
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
     from typing import TextIO
+
+    from agentshim import CommandExecutor
 
     from vs_agent.cli_common import materialize_skills
     from vs_agent.client import AgentClient
     from vs_agent.factory import agent_supports_tool_servers
     from vs_agent.orphans import OrphanReapError, reap_orphaned_agents
     from vs_agent.shim_turns import native_schema_problems
-    from vs_sandbox.api import HostResource, ProjectPathPolicy
+    from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
 
 __all__ = [
     "BASE_ENV_ALLOWLIST",
@@ -300,6 +302,8 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
     *,
     spec: AgentSpec,
     backends: dict[str, Any] | None,
+    workspace_sandboxes: Callable[[Path], DockerSandbox | None] | None = None,
+    executor_factory: Callable[[], CommandExecutor] | None = None,
     skill_source_dirs: list[Path],
     skill_selection: SkillSelection = NULL_SKILL_SELECTION,
     run_log_file: TextIO | None,
@@ -320,6 +324,8 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
     return build(
         spec=spec,
         backends=backends,
+        workspace_sandboxes=workspace_sandboxes,
+        executor_factory=executor_factory,
         skill_source_dirs=skill_source_dirs,
         skill_selection=skill_selection,
         run_log_file=run_log_file,

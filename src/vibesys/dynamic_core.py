@@ -155,7 +155,7 @@ def _require_candidate_sandboxes(environment: RunEnvironmentView) -> None:
                     f"the dynamic loop cannot run on the {environment.env_kind!r} run "
                     "environment: it cannot open isolated candidate sandboxes (parallel "
                     "candidate evaluation); choose a run environment that can, such as "
-                    "slurm, docker, modal or skypilot"
+                    "docker, slurm or modal"
                 ),
             )
         )
