@@ -29,7 +29,8 @@ from server.events import (
 )
 from server.journal import _BOOTSTRAP_SPINE_TYPES
 from server.transport.unix_jsonl import UnixJsonlServer
-from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import HANG_GUARD_S, join_or_fail, wait_or_fail
 
 _TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 _ROUND_EVERY = 25
@@ -619,3 +620,33 @@ def test_wait_for_change_does_not_parse_events(
     assert parts.api.wait_for_change(0, timeout=0.5) is True
     assert parts.api.wait_for_change(parts.api.latest_sequence, timeout=0.01) is False
     assert parsed_count() == parsed
+
+
+class _PacedThreads(OsThreads):
+    """Real threads whose ``sleep`` records the pause and returns at once."""
+
+    def __init__(self) -> None:
+        self.paused = self.event()
+        self.pauses: list[float] = []
+
+    def sleep(self, seconds: float) -> None:
+        self.pauses.append(seconds)
+        self.paused.set()
+
+
+def test_an_idle_stream_paces_itself_through_the_injected_threads(tmp_path: Path) -> None:
+    parts = _attach(tmp_path, _round_log(10))
+    threads = _PacedThreads()
+    socket_path = Path(tempfile.gettempdir()) / f"vibesys-test-{uuid.uuid4().hex}.sock"
+    request = SubscribeRequest(after_sequence=0, tail=None)
+
+    with (
+        UnixJsonlServer(socket_path, parts.api, threads=threads),
+        _subscribed_client(socket_path, request) as read,
+    ):
+        read()
+        read()
+        wait_or_fail(threads.paused, "the idle stream pausing")
+
+    assert threads.pauses
+    assert all(seconds > 0 for seconds in threads.pauses)
