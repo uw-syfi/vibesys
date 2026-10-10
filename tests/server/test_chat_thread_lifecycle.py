@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import concurrent.futures
-import threading
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from tests.server.support import (
-    DEADLOCK_GUARD_S,
     ServerParts,
+    Task,
     auxiliary_agent_providers,
     build_server_parts,
 )
@@ -24,9 +23,12 @@ from server.chat.manager import ChatAnswer, ChatThreadHandle
 from server.chat.options import ChatRunSettings
 from server.events import ChatThreadCreatedData, EventType, make_event
 from server.run_attachment import AgentSelection, RunAttachment
+from vs_sim.api.testing import SimThreads, wait_or_fail
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+_TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _remember_thread(parts: ServerParts, thread_id: str = "thread-1") -> ChatThreadCreatedData:
@@ -34,7 +36,7 @@ def _remember_thread(parts: ServerParts, thread_id: str = "thread-1") -> ChatThr
         thread_id=thread_id,
         provider="codex",
         model="gpt-test",
-        created_at=datetime.now(UTC),
+        created_at=_TIMESTAMP,
     )
     parts.chat.apply_replayed_event(
         make_event(
@@ -56,10 +58,11 @@ def _wait_for_active_calls(parts: ServerParts, count: int) -> None:
 
 
 def test_concurrent_restore_is_single_flight(tmp_path: Path) -> None:
-    parts = build_server_parts(tmp_path)
+    threads = SimThreads()
+    parts = build_server_parts(tmp_path, threads=threads)
     spec = _remember_thread(parts)
-    construction_started = threading.Event()
-    release_construction = threading.Event()
+    construction_started = threads.event()
+    release_construction = threads.event()
     calls: list[str] = []
 
     def factory(
@@ -69,7 +72,7 @@ def test_concurrent_restore_is_single_flight(tmp_path: Path) -> None:
     ) -> ChatThreadHandle:
         calls.append(thread_id)
         construction_started.set()
-        assert release_construction.wait(timeout=DEADLOCK_GUARD_S)
+        wait_or_fail(release_construction, "release construction")
         return ChatThreadHandle(
             spec=spec,
             handler=lambda question: ChatAnswer(
@@ -78,15 +81,18 @@ def test_concurrent_restore_is_single_flight(tmp_path: Path) -> None:
         )
 
     parts.chat.set_thread_factory(factory)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(parts.chat.chat, "first", spec.thread_id)
-        assert construction_started.wait(timeout=DEADLOCK_GUARD_S)
-        second = pool.submit(parts.chat.chat, "second", spec.thread_id)
+
+    def scenario() -> None:
+        first = Task(threads, partial(parts.chat.chat, "first", spec.thread_id))
+        wait_or_fail(construction_started, "construction started")
+        second = Task(threads, partial(parts.chat.chat, "second", spec.thread_id))
         _wait_for_active_calls(parts, 2)
         release_construction.set()
 
-        assert first.result(timeout=DEADLOCK_GUARD_S) == "answer: first"
-        assert second.result(timeout=DEADLOCK_GUARD_S) == "answer: second"
+        assert first.result() == "answer: first"
+        assert second.result() == "answer: second"
+
+    threads.run(scenario)
 
     assert calls == [spec.thread_id]
 
@@ -99,10 +105,11 @@ class _RestoreFailureError(ValueError):
 
 
 def test_concurrent_restore_shares_factory_failure(tmp_path: Path) -> None:
-    parts = build_server_parts(tmp_path)
+    threads = SimThreads()
+    parts = build_server_parts(tmp_path, threads=threads)
     spec = _remember_thread(parts)
-    construction_started = threading.Event()
-    release_construction = threading.Event()
+    construction_started = threads.event()
+    release_construction = threads.event()
     calls = 0
 
     def factory(
@@ -113,18 +120,20 @@ def test_concurrent_restore_shares_factory_failure(tmp_path: Path) -> None:
         nonlocal calls
         calls += 1
         construction_started.set()
-        assert release_construction.wait(timeout=DEADLOCK_GUARD_S)
+        wait_or_fail(release_construction, "release construction")
         raise _RestoreFailureError
 
     parts.chat.set_thread_factory(factory)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(parts.chat.chat, "first", spec.thread_id)
-        assert construction_started.wait(timeout=DEADLOCK_GUARD_S)
-        second = pool.submit(parts.chat.chat, "second", spec.thread_id)
+
+    def scenario() -> tuple[str, str]:
+        first = Task(threads, partial(parts.chat.chat, "first", spec.thread_id))
+        wait_or_fail(construction_started, "construction started")
+        second = Task(threads, partial(parts.chat.chat, "second", spec.thread_id))
         _wait_for_active_calls(parts, 2)
         release_construction.set()
-        first_answer = first.result(timeout=DEADLOCK_GUARD_S)
-        second_answer = second.result(timeout=DEADLOCK_GUARD_S)
+        return first.result(), second.result()
+
+    first_answer, second_answer = threads.run(scenario)
 
     assert first_answer == second_answer
     assert "_RestoreFailureError: restore failed" in first_answer
@@ -136,10 +145,11 @@ class _RestoreCancelled(BaseException):
 
 
 def test_restore_cancellation_wakes_every_waiter(tmp_path: Path) -> None:
-    parts = build_server_parts(tmp_path)
+    threads = SimThreads()
+    parts = build_server_parts(tmp_path, threads=threads)
     spec = _remember_thread(parts)
-    construction_started = threading.Event()
-    release_construction = threading.Event()
+    construction_started = threads.event()
+    release_construction = threads.event()
     calls = 0
 
     def factory(
@@ -150,30 +160,34 @@ def test_restore_cancellation_wakes_every_waiter(tmp_path: Path) -> None:
         nonlocal calls
         calls += 1
         construction_started.set()
-        assert release_construction.wait(timeout=DEADLOCK_GUARD_S)
+        wait_or_fail(release_construction, "release construction")
         raise _RestoreCancelled
 
     parts.chat.set_thread_factory(factory)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(parts.chat.chat, "first", spec.thread_id)
-        assert construction_started.wait(timeout=DEADLOCK_GUARD_S)
-        second = pool.submit(parts.chat.chat, "second", spec.thread_id)
+
+    def scenario() -> None:
+        first = Task(threads, partial(parts.chat.chat, "first", spec.thread_id))
+        wait_or_fail(construction_started, "construction started")
+        second = Task(threads, partial(parts.chat.chat, "second", spec.thread_id))
         _wait_for_active_calls(parts, 2)
         release_construction.set()
         with pytest.raises(_RestoreCancelled):
-            first.result(timeout=DEADLOCK_GUARD_S)
+            first.result()
         with pytest.raises(_RestoreCancelled):
-            second.result(timeout=DEADLOCK_GUARD_S)
+            second.result()
+
+    threads.run(scenario)
 
     _wait_for_active_calls(parts, 0)
     assert calls == 1
 
 
 def test_thread_turns_serialize_and_shutdown_drains_queued_borrowers(tmp_path: Path) -> None:
-    parts = build_server_parts(tmp_path)
-    first_started = threading.Event()
-    release_first = threading.Event()
-    resource_closed = threading.Event()
+    threads = SimThreads()
+    parts = build_server_parts(tmp_path, threads=threads)
+    first_started = threads.event()
+    release_first = threads.event()
+    resource_closed = threads.event()
     invocations: list[str] = []
 
     def handler(question: str) -> ChatAnswer:
@@ -181,7 +195,7 @@ def test_thread_turns_serialize_and_shutdown_drains_queued_borrowers(tmp_path: P
         invocations.append(question)
         if question == "first":
             first_started.set()
-            assert release_first.wait(timeout=DEADLOCK_GUARD_S)
+            wait_or_fail(release_first, "release first")
         assert not resource_closed.is_set()
         return ChatAnswer(text=f"answer: {question}", invocation_id=f"exec-{question}")
 
@@ -195,7 +209,7 @@ def test_thread_turns_serialize_and_shutdown_drains_queued_borrowers(tmp_path: P
                 thread_id=thread_id,
                 provider=provider or "codex",
                 model=model or "gpt-test",
-                created_at=datetime.now(UTC),
+                created_at=_TIMESTAMP,
             ),
             handler=handler,
             close=resource_closed.set,
@@ -208,12 +222,12 @@ def test_thread_turns_serialize_and_shutdown_drains_queued_borrowers(tmp_path: P
         parts.chat.clear_threads_and_drain()
         resource_closed.set()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        first = pool.submit(parts.chat.chat, "first", spec.thread_id)
-        assert first_started.wait(timeout=DEADLOCK_GUARD_S)
-        second = pool.submit(parts.chat.chat, "second", spec.thread_id)
+    def scenario() -> None:
+        first = Task(threads, partial(parts.chat.chat, "first", spec.thread_id))
+        wait_or_fail(first_started, "first started")
+        second = Task(threads, partial(parts.chat.chat, "second", spec.thread_id))
         _wait_for_active_calls(parts, 2)
-        closing = pool.submit(shutdown)
+        closing = Task(threads, shutdown)
 
         # The second turn is queued behind the first, which is still running.
         assert invocations == ["first"]
@@ -221,9 +235,11 @@ def test_thread_turns_serialize_and_shutdown_drains_queued_borrowers(tmp_path: P
         # that the resource is still open, so no timed negative wait is needed.
         release_first.set()
 
-        assert first.result(timeout=DEADLOCK_GUARD_S) == "answer: first"
-        assert second.result(timeout=DEADLOCK_GUARD_S) == "answer: second"
-        closing.result(timeout=DEADLOCK_GUARD_S)
+        assert first.result() == "answer: first"
+        assert second.result() == "answer: second"
+        closing.result()
+
+    threads.run(scenario)
 
     assert invocations == ["first", "second"]
     assert resource_closed.is_set()
@@ -232,10 +248,11 @@ def test_thread_turns_serialize_and_shutdown_drains_queued_borrowers(tmp_path: P
 def test_restoration_finishing_during_shutdown_is_closed_without_invocation(
     tmp_path: Path,
 ) -> None:
-    parts = build_server_parts(tmp_path)
+    threads = SimThreads()
+    parts = build_server_parts(tmp_path, threads=threads)
     spec = _remember_thread(parts)
-    construction_started = threading.Event()
-    release_construction = threading.Event()
+    construction_started = threads.event()
+    release_construction = threads.event()
     resource_closed = 0
     invocations = 0
 
@@ -254,14 +271,15 @@ def test_restoration_finishing_during_shutdown_is_closed_without_invocation(
         _model: str | None,
     ) -> ChatThreadHandle:
         construction_started.set()
-        assert release_construction.wait(timeout=DEADLOCK_GUARD_S)
+        wait_or_fail(release_construction, "release construction")
         return ChatThreadHandle(spec=spec, handler=handler, close=close)
 
     parts.chat.set_thread_factory(factory)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        answer = pool.submit(parts.chat.chat, "question", spec.thread_id)
-        assert construction_started.wait(timeout=DEADLOCK_GUARD_S)
-        closing = pool.submit(parts.chat.clear_threads_and_drain)
+
+    def scenario() -> None:
+        answer = Task(threads, partial(parts.chat.chat, "question", spec.thread_id))
+        wait_or_fail(construction_started, "construction started")
+        closing = Task(threads, parts.chat.clear_threads_and_drain)
         with parts.condition:
             assert parts.condition.wait_for(
                 lambda: vars(parts.chat)["_thread_factory"] is None,
@@ -269,8 +287,10 @@ def test_restoration_finishing_during_shutdown_is_closed_without_invocation(
             )
         release_construction.set()
 
-        assert "cannot answer right now" in answer.result(timeout=DEADLOCK_GUARD_S)
-        closing.result(timeout=DEADLOCK_GUARD_S)
+        assert "cannot answer right now" in answer.result()
+        closing.result()
+
+    threads.run(scenario)
 
     assert invocations == 0
     assert resource_closed == 1
@@ -279,9 +299,10 @@ def test_restoration_finishing_during_shutdown_is_closed_without_invocation(
 def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
     tmp_path: Path,
 ) -> None:
-    parts = build_server_parts(tmp_path)
-    construction_started = threading.Event()
-    release_construction = threading.Event()
+    threads = SimThreads()
+    parts = build_server_parts(tmp_path, threads=threads)
+    construction_started = threads.event()
+    release_construction = threads.event()
     resource_closed = 0
 
     def close() -> None:
@@ -294,23 +315,24 @@ def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
         model: str | None,
     ) -> ChatThreadHandle:
         construction_started.set()
-        assert release_construction.wait(timeout=DEADLOCK_GUARD_S)
+        wait_or_fail(release_construction, "release construction")
         return ChatThreadHandle(
             spec=ChatThreadCreatedData(
                 thread_id=thread_id,
                 provider=provider or "codex",
                 model=model or "gpt-test",
-                created_at=datetime.now(UTC),
+                created_at=_TIMESTAMP,
             ),
             handler=lambda _question: ChatAnswer(text="unused", invocation_id="exec-unused"),
             close=close,
         )
 
     parts.chat.set_thread_factory(factory)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        creation = pool.submit(parts.chat.create_thread)
-        assert construction_started.wait(timeout=DEADLOCK_GUARD_S)
-        closing = pool.submit(parts.chat.clear_threads_and_drain)
+
+    def scenario() -> None:
+        creation = Task(threads, parts.chat.create_thread)
+        wait_or_fail(construction_started, "construction started")
+        closing = Task(threads, parts.chat.clear_threads_and_drain)
         with parts.condition:
             assert parts.condition.wait_for(
                 lambda: vars(parts.chat)["_thread_factory"] is None,
@@ -319,8 +341,10 @@ def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
         release_construction.set()
 
         with pytest.raises(RuntimeError, match="cannot answer right now"):
-            creation.result(timeout=DEADLOCK_GUARD_S)
-        closing.result(timeout=DEADLOCK_GUARD_S)
+            creation.result()
+        closing.result()
+
+    threads.run(scenario)
 
     assert parts.chat.threads() == []
     assert resource_closed == 1
@@ -356,9 +380,10 @@ def _factory_for_test(
 
 
 def test_factory_closes_session_finishing_after_close_once(tmp_path: Path) -> None:
-    parts = build_server_parts(tmp_path)
-    construction_started = threading.Event()
-    release_construction = threading.Event()
+    threads = SimThreads()
+    parts = build_server_parts(tmp_path, threads=threads)
+    construction_started = threads.event()
+    release_construction = threads.event()
     close_calls = 0
 
     def close() -> None:
@@ -376,18 +401,21 @@ def test_factory_closes_session_finishing_after_close_once(tmp_path: Path) -> No
 
     def build_agent(request: ChatAgentBuildRequest) -> FakeManagedAgent:
         construction_started.set()
-        assert release_construction.wait(timeout=DEADLOCK_GUARD_S)
+        wait_or_fail(release_construction, "release construction")
         del request
         return FakeManagedAgent()
 
     factory = _factory_for_test(parts, tmp_path, build_agent)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        construction = pool.submit(factory.start)
-        assert construction_started.wait(timeout=DEADLOCK_GUARD_S)
-        pool.submit(factory.close).result(timeout=DEADLOCK_GUARD_S)
+
+    def scenario() -> None:
+        construction = Task(threads, factory.start)
+        wait_or_fail(construction_started, "construction started")
+        Task(threads, factory.close).result()
         release_construction.set()
         with pytest.raises(RuntimeError, match="factory is closed"):
-            construction.result(timeout=DEADLOCK_GUARD_S)
+            construction.result()
+
+    threads.run(scenario)
 
     factory.close()
     with pytest.raises(RuntimeError, match="factory is closed"):

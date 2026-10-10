@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, TypedDict, Unpack
@@ -17,6 +16,7 @@ import server.events as events_module
 from server.event_index import event_index_path, load_event_index
 from server.events import EventStore, EventType, RunEvent, make_event
 from server.journal import WireJournal
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -24,6 +24,12 @@ if TYPE_CHECKING:
 
 type _ScannedHeader = tuple[int, EventType, str | None, str | None, str]
 type _SidecarMutation = Callable[[dict[str, object], list[list[object]]], None]
+
+
+def _journal() -> WireJournal:
+    """A journal whose locks and event store run on simulated threads."""
+    threads = SimThreads()
+    return WireJournal(threads.condition(), threads=threads)
 
 
 class _OpenOptions(TypedDict, total=False):
@@ -136,7 +142,7 @@ def test_read_only_journal_rejects_ambiguous_identity(
     )
 
     with pytest.raises(ValueError, match=message):
-        WireJournal(threading.Condition()).attach(log_dir, run_id=explicit_id, read_only=True)
+        _journal().attach(log_dir, run_id=explicit_id, read_only=True)
 
 
 def test_explicit_identity_opens_a_legacy_identity_less_journal(tmp_path: Path) -> None:
@@ -150,7 +156,7 @@ def test_explicit_identity_opens_a_legacy_identity_less_journal(tmp_path: Path) 
             for index in range(1, 3)
         )
     )
-    journal = WireJournal(threading.Condition())
+    journal = _journal()
 
     journal.attach(log_dir, run_id="legacy-run", read_only=True)
 
@@ -341,7 +347,7 @@ def test_journal_attach_reuses_the_index_despite_server_started(
     events_path = log_dir / "run-events.jsonl"
 
     def attach() -> WireJournal:
-        journal = WireJournal(threading.Condition(threading.RLock()))
+        journal = _journal()
         journal.attach(log_dir)
         return journal
 

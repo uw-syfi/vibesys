@@ -2,44 +2,45 @@
 
 from __future__ import annotations
 
-import concurrent.futures
-import threading
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.server.support import build_server_parts
+from tests.server.support import Task, build_server_parts
 
-from server.api.protocol import ChatQuery
+from server.api.protocol import ChatQuery, Response
 from server.chat.manager import ChatAnswer
 from server.events import EventType
-from vs_sim.api.testing import wait_or_fail, wait_until_started_sync
+from vs_sim.api.testing import SimThreads, wait_or_fail
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
 def test_chat_response_excludes_concurrent_run_events(tmp_path: Path) -> None:
-    parts = build_server_parts(tmp_path)
-    handler_started = threading.Event()
-    release_handler = threading.Event()
+    threads = SimThreads()
+    parts = build_server_parts(tmp_path, threads=threads)
+    handler_started = threads.event()
+    release_handler = threads.event()
 
     def handler(_question: str) -> ChatAnswer:
         handler_started.set()
         wait_or_fail(release_handler, "the test to release the handler")
         return ChatAnswer(text="bounded answer", invocation_id="exec-bounded")
 
-    parts.chat.install_default_handler(handler)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        pending = pool.submit(parts.api.execute, ChatQuery(text="what changed?"))
+    def scenario() -> Response:
+        pending = Task(threads, lambda: parts.api.execute(ChatQuery(text="what changed?")))
         try:
             # The handler is parked until released, so the output below is
             # guaranteed to land while the chat request is in flight.
-            wait_until_started_sync(handler_started, pending)
+            wait_or_fail(handler_started, "the chat handler to start")
             for index in range(1_000):
                 parts.journal.publish_output("stdout", f"optimizer output {index}\n")
         finally:
             release_handler.set()
-        response = pending.result()
+        return pending.result()
+
+    parts.chat.install_default_handler(handler)
+    response = threads.run(scenario)
 
     assert response.chat is not None
     assert response.chat.answer == "bounded answer"

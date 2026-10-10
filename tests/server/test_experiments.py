@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from threading import Event
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 import pytest
 from pydantic import ValidationError
 from tests.server.support import (
-    DEADLOCK_GUARD_S,
+    Task,
     agent_descriptor,
     build_server_parts,
     run_record,
@@ -21,7 +19,13 @@ from server.api.experiments import (
     ExperimentQueryResult,
     build_experiment_log,
 )
-from server.api.protocol import ExperimentCursor, ExperimentQuery, HypothesisEntry, PerformanceQuery
+from server.api.protocol import (
+    ExperimentCursor,
+    ExperimentQuery,
+    HypothesisEntry,
+    PerformanceQuery,
+    Response,
+)
 from server.events import EventType, ExperimentsChangedData
 from vibesys.api.contracts import RunStatus
 from vibesys.api.hypothesis import (
@@ -49,6 +53,7 @@ from vibesys.hypothesis.transitions import reproject_run_evidence
 from vibesys.orchestration.single.models import SingleState
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StateSlot
 from vs_project.api.testing import run_execution_record
+from vs_sim.api.testing import SimThreads, wait_or_fail
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -740,11 +745,12 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=1)],
     )
     store.save(SingleState(search=initial))
+    threads = SimThreads()
     parts = build_server_parts(
-        project.state.log_directory(run_id), record=run_record(project, run_id)
+        project.state.log_directory(run_id), record=run_record(project, run_id), threads=threads
     )
-    loaded = Event()
-    release = Event()
+    loaded = threads.event()
+    release = threads.event()
     original_load = StateSlot.load_optional
     load_count = 0
 
@@ -753,13 +759,14 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
         load_count += 1
         state = original_load(current_store)
         loaded.set()
-        assert release.wait(timeout=DEADLOCK_GUARD_S)
+        wait_or_fail(release, "the test to release the load")
         return state
 
     monkeypatch.setattr(StateSlot, "load_optional", delayed_load)
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        response_future = executor.submit(parts.api.execute, ExperimentQuery())
-        assert loaded.wait(timeout=DEADLOCK_GUARD_S)
+
+    def scenario() -> Response:
+        response_future = Task(threads, lambda: parts.api.execute(ExperimentQuery()))
+        wait_or_fail(loaded, "the authoritative load to start")
         changed = initial.clone()
         changed.experiment_revision = 2
         changed.hypotheses[0].last_experiment_revision = 2
@@ -774,7 +781,9 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
             data=ExperimentsChangedData(reason="round_persisted", revision=2),
         )
         release.set()
-        response = response_future.result(timeout=DEADLOCK_GUARD_S)
+        return response_future.result()
+
+    response = threads.run(scenario)
 
     assert load_count == 1
     assert response.experiment_update is not None

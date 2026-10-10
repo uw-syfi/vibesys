@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunRecord, RunView
     from vs_project.api import Project
-    from vs_sim.api import Condition, Threads
+    from vs_sim.api import Condition, Threads, Worker
 
 
 class _ControlBridge:
@@ -261,6 +261,12 @@ def build_server_parts(
 DEADLOCK_GUARD_S = 30.0
 
 
+def wait_for_worker(worker: Worker) -> None:
+    """Join *worker*, failing the test if it is still running after the deadlock guard."""
+    worker.join(DEADLOCK_GUARD_S)
+    assert not worker.is_alive(), f"{worker.name} did not end"
+
+
 class Task[T]:
     """A call running on its own worker thread, whose outcome the test collects with `result`.
 
@@ -283,8 +289,7 @@ class Task[T]:
 
     def result(self) -> T:
         """Wait for the call to end and return its value, or raise what it raised."""
-        self._worker.join(DEADLOCK_GUARD_S)
-        assert not self._worker.is_alive(), f"{self._worker.name} did not end"
+        wait_for_worker(self._worker)
         if self._error:
             raise self._error[0]
         return self._outcome[0]

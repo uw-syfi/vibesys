@@ -30,6 +30,8 @@ from server.events import (
 )
 from server.run_attachment import AgentSelection
 
+_TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
+
 
 def test_explicit_executions_are_independent_and_finish_idempotently(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
@@ -197,7 +199,7 @@ def test_attach_merges_bootstrap_and_durable_execution_history(tmp_path: Path) -
     durable = EventStore(durable_dir / "run-events.jsonl", "run-1")
     durable.append(
         RunEvent(
-            timestamp=datetime.now(UTC),
+            timestamp=_TIMESTAMP,
             type=EventType.INVOCATION_STARTED,
             status=EventStatus.ACTIVE,
             agent_kind="implementer",
@@ -403,7 +405,7 @@ def test_legacy_invocations_project_without_becoming_live(tmp_path: Path) -> Non
     store = EventStore(tmp_path / "run-events.jsonl", "legacy")
     store.append(
         RunEvent(
-            timestamp=datetime.now(UTC),
+            timestamp=_TIMESTAMP,
             type=EventType.INVOCATION_STARTED,
             status=EventStatus.ACTIVE,
             agent_kind="implementer",
@@ -422,7 +424,7 @@ def test_legacy_invocations_project_without_becoming_live(tmp_path: Path) -> Non
 
     parts.journal.append(
         RunEvent(
-            timestamp=datetime.now(UTC),
+            timestamp=_TIMESTAMP,
             type=EventType.INVOCATION_FINISHED,
             status=EventStatus.COMPLETED,
             agent_kind="implementer",
