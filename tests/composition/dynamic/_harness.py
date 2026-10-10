@@ -646,7 +646,7 @@ def _assert_invariants(
 def assert_run_live(envelope: Mapping[str, Any] | None, end: End = End.TERMINAL) -> None:
     """Fail when the committed core record shows a run that did not make bounded progress.
 
-    The record is the run's intent ledger and final state (`tests.support.liveness`).
+    The record is the run's intent ledger and final state (`vs_core.testing.liveness`).
     """
     assert envelope is not None, "a run that ended committed no core record"
     codec = dynamic_operation_registry()
