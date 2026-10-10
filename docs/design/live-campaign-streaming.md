@@ -84,50 +84,64 @@ Non-goals (named here, deferred to "Backend path"):
   PR does wire for real (async-operation lifecycle, see "Backend PoC") is
   general-purpose plumbing the campaign projection will also depend on, not
   the campaign projection itself.
-- Running a real `dynamic` campaign locally. `dynamic` orchestration raises
-  at startup unless the run environment supports parallel candidate
-  workspaces (`_require_candidate_sandboxes`, `dynamic_core.py:143-162`,
-  called from `orchestration/dynamic/orchestration.py:1248-1260`). As of
-  `372be9840` (#1556, landed the same day as this research pass), that now
-  includes Docker alongside Slurm and Modal, so a real `dynamic` run may be
-  possible locally in principle. That was not verified end to end here, and
-  the GPU-bound serving example this doc otherwise refers to still needs real
-  hardware (no local MI300A/B200) regardless. So the prototype below is still
-  replay-driven; see "Prototype".
+- Running a real `dynamic` campaign locally. `orchestrate()`
+  (`orchestration/dynamic/orchestration.py`) raises at startup unless
+  `run.workspaces.supports_parallel_candidates`, since every workstream needs
+  an isolated candidate workspace. On `upstream/main`, `372be9840` (#1556)
+  later adds that support to the Docker run environment alongside Slurm and
+  Modal; on this branch (forked before that commit landed), Docker's
+  `RunEnvironmentView` does not set it, so Docker still cannot run `dynamic`
+  locally here. The GPU-bound serving example this doc otherwise refers to
+  needs real hardware (no local MI300A/B200) regardless, so the prototype
+  below is replay-driven either way; see "Prototype".
 
 ## Background: what already exists
 
 **A terminology note for readers arriving from the "no more outer/inner
 loop" framing.** That framing names a direction, not yet a rename.
 `--outer-loop` and `--inner-loop` are still the live CLI flags today
-(`entrypoints/cli/args.py:108-125,622-631`; `docs/cli-flags.md:140` still
-headers its section "Outer Loops"). `single-agent`/`multi-agent` are
+(`entrypoints/cli/args.py:73-90`; `docs/cli-flags.md:84` still headers its
+section "Outer Loops"). `single-agent`/`multi-agent` are
 `--inner-loop` values layered on top of an `--outer-loop` choice, one of 7
 registered strategies (`single`, `multi`, `issue_queue`/`plain`, `evolve`,
-`dynamic`, plus two profile-guided variants). "Orchestrator" is an
-`AgentRole` id shared by every one of them (`Role.PLANNER = "orchestrator"`,
-`orchestration/dynamic/strategy/_state.py:55-61`), not a new controller
-class. None of this changes the design below (frames key off
+`dynamic`, plus two profile-guided variants). "Orchestrator" is not a new
+controller class, but it is not one shared id either: `single`'s and
+`multi`'s `agents.py` both declare `DESIGNER = AgentRole(id="orchestrator",
+...)`; `dynamic`'s declares `ORCHESTRATOR = AgentRole(id="dynamic-orchestrator",
+...)`, a different id string despite the matching variable name; `evolve`
+and `issue_queue` have no orchestrator-equivalent role in their roster at
+all. None of this changes the design below (frames key off
 `workstream_id`/`phase`, not off which outer-loop strategy produced them),
 but it is worth knowing before reading backend code that still says "outer
 loop."
 
-**A second terminology note, more consequential: two "workstream" engines
-exist in `orchestration/dynamic/`, and only one is live.**
+**A second terminology note, more consequential, and one that does not
+resolve the same way on this branch as it does on `upstream/main` today.**
+Two "workstream" engines exist across `orchestration/dynamic/`'s history.
 `DynamicState`/`DynamicWorkstream`/`AgentLoopState`/`PortfolioView`
-(`models.py`, `rounds.py`, `workstream.py`, `agent_loop.py`) are a legacy
-in-process engine. Since `712586df6` ("run `--outer-loop dynamic` on the core
-path"), that engine is registered only under `legacy_plugin.py` and reachable
-only from tests (`tests/vibesys/orchestration/dynamic/*`,
-`tests/e2e/test_dynamic_loop_smoke_e2e.py`); nothing under `src/` wires it
-into a real run. The live engine, wired by `dynamic/plugin.py`
-(`dynamic_core_registration()`), is `vibesys.orchestration.dynamic.strategy`
-plus `core_policy` (glue to `vs_core`/`vs_runtime`): `DynamicStrategyState`
-holds `attempts: tuple[AttemptRecord, ...]`, not `workstreams: tuple[
-DynamicWorkstream, ...]`. The first draft of this doc cited the legacy types
-in "The gap" below; this pass corrects every citation to the live ones, and
-flags each correction inline. Anyone extending this design later should grep
-`strategy/_state.py`, not `models.py`.
+(`models.py`, `rounds.py`, `workstream.py`, `agent_loop.py`, wired by
+`dynamic/plugin.py`) are what this branch actually runs today, forked before
+`712586df6` ("run `--outer-loop dynamic` on the core path") landed upstream.
+On current `upstream/main`, that commit retires this engine to test-only
+status (reachable only via the `LEGACY_PLUGIN`/`LEGACY_REGISTRATION`
+constants in `tests/vibesys/orchestration/dynamic/loop/_harness.py`, not a
+`legacy_plugin.py` module) and replaces it with
+`vibesys.orchestration.dynamic.strategy` plus `core_policy`:
+`DynamicStrategyState` holding `attempts: tuple[AttemptRecord, ...]`, not
+`workstreams: tuple[DynamicWorkstream, ...]`.
+
+**"Telemetry inventory," "The gap," and "Scalable packaging design" below
+describe the `upstream/main` engine (`DynamicStrategyState`/`AttemptRecord`),
+not the one this branch's own `orchestration/dynamic/` currently runs.**
+That is a deliberate choice, not an oversight: `strategy/_state.py` is what
+future telemetry work will actually extend, and describing a pre-migration
+engine as the design target would go stale the moment this branch rebases.
+The cost is that those sections' file:line citations do not resolve inside
+this branch's own checked-out tree today; re-verify them against current
+`upstream/main` before relying on them, or after this branch syncs past
+`712586df6`. "Backend PoC" is the one exception: it touches only
+`src/server/`, is verified directly against this branch's own working tree
+(see its own commit citations), and does not depend on either engine.
 
 **Telemetry already flows through named chokepoints, not prints.** There are
 two, one per layer, not a single one. Core-side, every producer emits
@@ -139,8 +153,11 @@ hands it to the server-side `WireJournal.append()`
 (`server/journal.py:125,207,227`), which persists to `run-events.jsonl`
 (`EventStore`) and fans out over a chunked websocket (1 MiB frame cap,
 `server/transport/websocket.py`). Every envelope carries `sequence`,
-`run_id`, `timestamp`, and `type`, plus `execution_id`, `round_label`, and
-`agent_kind`. The frontend folds events into state with pure reducers
+`run_id`, `timestamp`, `type`, and `text`, plus `status`, `execution_id`,
+`round_label`, and `agent_kind` (all four optional, `None` unless the
+specific event populates them; `status` carries pass/fail semantics for
+events like `GateFinishedData`, not just a generic marker). The frontend
+folds events into state with pure reducers
 (`@vibesys/core-state`), and the web client already has a durable,
 reconnecting stream (`PersistentEventStream`, `WebSession`). The design below
 reuses that shape rather than inventing a parallel path.
@@ -156,7 +173,9 @@ of this roster worth knowing even though this design does not surface them as
 frames: the `implementer` role can delegate to the dedicated `profiler`
 teammate mid-turn via a `dispatch_profiler` tool, and separately can request
 accuracy and benchmark evidence via `submit_evaluation`/`accepted_evidence`
-(`vs_evaluation/agent_mcp.py:206-249`; PR #1024, #1291). A later pass could
+(`vs_evaluation/agent_mcp.py`: `dispatch_profiler` and its
+status/await/cancel siblings at lines 206-249, `submit_evaluation` at 171,
+`accepted_evidence` at 259; PR #1024, #1291). A later pass could
 turn each into its own frame kind ("implementer dispatched the profiler",
 "implementer requested evaluation"); projecting workstream phase and
 measurements does not need it.
@@ -210,16 +229,19 @@ persisted but not streamed, and not computed anywhere.
   `workstreams_started`, `workstream_budget`, `candidates_kept`) — a real
   cross-workstream count, but terminal-only, built once when a run fails.
 - **Envelope metadata on every event**: `sequence`, `timestamp`, `run_id`,
-  `execution_id`, `round_label`, `agent_kind`.
+  `type`, `text`, plus the optional `status`, `execution_id`, `round_label`,
+  `agent_kind`.
 
 ### Exists, computed or persisted, not streamed
 
 - **Per-turn usage, with cost and real per-agent-kind attribution.**
-  `usage.jsonl` / `AgentUsage` (`vs_agent/contracts.py`): input/output/cache
-  tokens, `total_cost_usd`, `duration_ms`, and a `kind` field distinguishing
-  "dynamic-implementer" from "dynamic-judge" and so on. This is the richest
-  disconnected source in the repo. It is write-only today: nothing reads it
-  back into an event.
+  `AgentUsage` (`vs_agent/contracts.py`) itself carries input/output/cache
+  tokens, `total_cost_usd`, `duration_ms`; the per-agent-kind label
+  ("dynamic-implementer", "dynamic-judge", and so on) is not a field of
+  `AgentUsage` but a separate `kind` parameter `append_usage_record()`
+  (`vs_agent/usage_records.py`) adds when it assembles each `usage.jsonl`
+  row. This is the richest disconnected source in the repo. It is write-only
+  today: nothing reads it back into an event.
 - **Portfolio concurrency.** `active()`/`capacity()` (`strategy/_context.py`)
   compute true N-way in-flight/queued counts every tick, from live
   `DynamicStrategyState.attempts`, and discard the result immediately. One
@@ -254,7 +276,9 @@ persisted but not streamed, and not computed anywhere.
   evidence ids, named cost/share attribution) and `ProfilerSummary`
   (analysis, bottlenecks, a `metrics` dict) are rich structured outputs of a
   profiler turn. Only lifecycle *state* reaches an event
-  (`AsyncOperationLifecycleData`: submitted/queued/running/succeeded/failed);
+  (`AsyncOperationLifecycleData.state`, one of 11 `AsyncOperationState`
+  members: submitted, queued, starting, running, succeeded, completed,
+  failed, canceled, interrupted, superseded, timed_out);
   the narrative, attribution, and metrics dict stay inside the turn's return
   value. One exception: `perf_metric`/`perf_unit` do reach `RoundFinishedData`
   once a round concludes.
@@ -367,8 +391,8 @@ backend and a live `CampaignRecord`:
    `AgentLoopState`, is the right next step.
 4. **No wall-clock timestamp survives in the core model.** Neither the
    legacy nor the live attempt/workstream type stores a
-   `started_at`/`finished_at`, and the generic kernel `RunView.now_at` is a
-   run-clock float for deadlines, not a timestamp. The dashboard needs real
+   `started_at`/`finished_at`, and the generic kernel `RunView.run.now_at` is
+   a run-clock float for deadlines, not a timestamp. The dashboard needs real
    ISO timestamps (to drive "active iff cursor time is before finishedAt"
    and the timer bar's axis), so a live projection has to derive them from
    the event envelope's own `timestamp` field (the first and last event
@@ -405,10 +429,10 @@ side.
 - **It is already proven additive.** `#697` added five `EventType` members
   and a field as a pure-additive, no-protocol-version-bump change. Adding a
   telemetry kind is already a small, type-checker-enforced, one-PR change,
-  not a migration. `#1749`'s `STEER_DELIVERED` addition (landed on
-  `upstream/main` after this PR forked) is a second, independent instance of
-  the same pattern: one core enum member, one wire enum member, one
-  `project_event()` case.
+  not a migration. "Backend PoC" below is a second, independent instance of
+  the same pattern on this branch directly: one core enum member, one wire
+  enum member, one conformance fixture, no `project_event()` change needed
+  since the generic fallthrough already handled it.
 - **It already avoids "a thousand streams."** One multiplexed, sequenced,
   size-capped, chunked channel discriminated by `kind`, not a connection per
   metric. This is the direct answer to the failure mode a print-statement or
@@ -697,12 +721,12 @@ exercised (it cannot be, locally).
 
 "The gap" item 2 above is a real, production-reachable crash, not a
 hypothetical: `run/host.py`'s `_evaluation_lifecycle_event` and
-`_profiler_lifecycle_event` (lines 673, 687) are live callbacks, not
+`_profiler_lifecycle_event` (lines 487, 501) are live callbacks, not
 test-only, and every call emits `CoreEventType.ASYNC_OPERATION_LIFECYCLE`.
 Until this PR, `project_event()`'s unconditional `EventType(event.type.value)`
-(`server/integration.py:365`) raised `ValueError` on it, and
+(`server/integration.py:360`) raised `ValueError` on it, and
 `server/runtime.py`'s `drive()` only catches `asyncio.CancelledError` around
-the event loop (line 176), so the error propagated uncaught: any run that
+the event loop (line 146), so the error propagated uncaught: any run that
 dispatched a profiler or submitted evaluation evidence crashed its own event
 loop the next time one of those operations changed state.
 
