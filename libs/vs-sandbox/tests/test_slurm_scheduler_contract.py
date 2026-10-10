@@ -394,6 +394,32 @@ def _after_submitter_idles(
     return executor, coordinator, idle, release
 
 
+async def _clock_when_parked(spec: _WorldSpec) -> float:
+    with tempfile.TemporaryDirectory() as raw:
+        world = spec.build(Path(raw))
+        executor, coordinator, idle, release = _after_submitter_idles(world)
+        handle = await coordinator.submit(_request())
+        await wait_until_executor_started(idle, executor, handle.id)
+        try:
+            return world.clock.now()
+        finally:
+            release.set()
+            await executor.close()
+
+
+@_worlds
+def test_the_world_is_at_the_same_time_whenever_the_submitter_parks(spec: _WorldSpec) -> None:
+    """Waiting for the submitter to park must not move the world's clock.
+
+    A scheduler that charges time per command makes every extra poll by the waiter
+    age the job, and a job aged past its end never parks: the test then failed with
+    "finished without reaching its held step" on some schedules only (#1745).
+    """
+    readings = {asyncio.run(_clock_when_parked(spec)) for _ in range(5)}
+
+    assert len(readings) == 1
+
+
 async def _stopped_after(spec: _WorldSpec, delay_s: float) -> None:
     with tempfile.TemporaryDirectory() as raw:
         world = spec.build(Path(raw))
@@ -417,6 +443,7 @@ async def _stopped_after(spec: _WorldSpec, delay_s: float) -> None:
 
 @_worlds
 @_PROPERTY
+@example(delay_s=0.0)
 @example(delay_s=3.0)
 @example(delay_s=50.0)
 @example(delay_s=83.0)

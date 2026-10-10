@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 async def _ended(executor: EvaluationExecutor, handle_id: str) -> None:
     while True:
-        observed = await executor.inspect_only(handle_id)
+        observed = await executor.inspect(handle_id)
         if observed is not None and is_finished(observed.state):
             return
         await executor.wait_for_change(handle_id, timeout_s=float("inf"))
@@ -40,6 +40,13 @@ async def wait_until_executor_started(
     test with the evaluation's end and not with a parked worker. A held step
     keeps the evaluation live, so one that is already ended when the start is
     observed was not held.
+
+    The watch reads the executor's published state with ``inspect`` and never with
+    ``inspect_only``: while the evaluation's own task runs, ``inspect`` answers from
+    what that task published, but ``inspect_only`` polls the scheduler. A poll is a
+    command, and against a scheduler that charges time per command (the trace replay)
+    each poll moves the world's clock, so how many polls land before the held step
+    decided whether the job had already ended by then.
 
     Raises:
         AssertionError: the evaluation ended without reaching its held step.

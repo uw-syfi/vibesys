@@ -10,7 +10,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_evaluation.api import EvaluationState
+from vs_evaluation.api import EvaluationState, ExecutorObservation
 from vs_evaluation.api.testing import FakeEvaluationExecutor, wait_until_executor_started
 from vs_sim.api.testing import (
     ManualClock,
@@ -123,6 +123,44 @@ def _executor_run(state: EvaluationState, *, yields: int, starts: bool) -> None:
             await mover
 
     asyncio.run(scenario())
+
+
+class _SchedulerPollingExecutor(FakeEvaluationExecutor):
+    """A Fake whose ``inspect_only`` is a scheduler command that costs the world a second."""
+
+    def __init__(self, clock: ManualClock) -> None:
+        super().__init__(clock, advance_clock_on_timeout=False)
+        self.world_clock = clock
+
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        self.world_clock.advance(1.0)
+        return await super().inspect_only(handle_id)
+
+
+@given(yields=st.integers(min_value=0, max_value=8))
+def test_watching_for_a_held_step_never_moves_the_schedulers_time(yields: int) -> None:
+    """Observing an evaluation must not poll the scheduler, whose commands advance its clock."""
+    clock = ManualClock()
+    before = clock.now()
+
+    async def scenario() -> None:
+        executor = _SchedulerPollingExecutor(clock)
+        started = threading.Event()
+
+        async def step_starts() -> None:
+            for _ in range(yields):
+                await asyncio.sleep(0)
+            started.set()
+
+        starter = asyncio.ensure_future(step_starts())
+        try:
+            await wait_until_executor_started(started, executor, "h")
+        finally:
+            await starter
+
+    asyncio.run(scenario())
+
+    assert clock.now() == before
 
 
 @given(state=st.sampled_from(_ENDED), yields=st.integers(min_value=0, max_value=5))
