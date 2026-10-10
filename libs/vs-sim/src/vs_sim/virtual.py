@@ -143,6 +143,7 @@ class _VirtualLoop(asyncio.SelectorEventLoop):
         super().__init__(selector)
         selector.loop = self
         self._clock = clock
+        self.clock = clock
         self._due: dict[float, float] = {}
         self.workers_in_flight = 0
         if trace is not None:
@@ -238,6 +239,19 @@ class VirtualClock:
         self.sleeps.append(seconds)
         # test-isolation: this sleep runs on the virtual loop, whose time is this clock, so it never waits on the wall clock
         await asyncio.sleep(seconds)
+
+
+def current_virtual_clock() -> VirtualClock:
+    """The clock of the virtual loop the caller is running on.
+
+    Raises:
+        RuntimeError: the caller is not running on a loop started by :func:`run_virtual`.
+    """
+    loop = asyncio.get_running_loop()
+    if not isinstance(loop, _VirtualLoop):
+        message = "this code is not running on a virtual loop (see run_virtual)"
+        raise RuntimeError(message)  # noqa: TRY004  # LW-163811 [TRY004]; a missing precondition of the call, not a bad argument type.
+    return loop.clock
 
 
 def run_virtual[T](

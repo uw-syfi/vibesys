@@ -10,14 +10,13 @@ import asyncio
 import itertools
 import math
 import tempfile
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.support.fake_run_clock import FakeRunClock
+from tests.support.host_clock import ProbedClock, clock_from
 from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
 from tests.support.skeleton_world import (
     LEASE,
@@ -47,6 +46,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_core.api import RunView, StrategyEvent
+    from vs_sim.api.testing import VirtualClock
 
 #: Event loop turns a stuck fake turn lasts, standing for "longer than anything the run waits".
 _TURN_BOUND = 1000
@@ -63,11 +63,13 @@ class BaselineOnly(SkeletonStrategy):
         return state.model_copy(update={"phase": "cancel"}) if state.phase == "start" else state
 
 
-@dataclass
-class ScriptedClock(FakeRunClock):
+class ScriptedClock(ProbedClock):
     """A fake clock that runs an action when the loop makes its n-th sleep."""
 
-    actions: dict[int, Callable[[], None]] = field(default_factory=dict)
+    def __init__(self, inner: VirtualClock) -> None:
+        """Wrap the loop's clock."""
+        super().__init__(inner)
+        self.actions: dict[int, Callable[[], None]] = {}
 
     async def sleep(self, seconds: float) -> None:
         """Advance time, then run the action scheduled for this sleep, if any."""
@@ -113,7 +115,7 @@ def _config(
 
 
 def _host(
-    world: World, clock: FakeRunClock, channel: RuntimeRunControlChannel | None = None
+    world: World, clock: ProbedClock, channel: RuntimeRunControlChannel | None = None
 ) -> tuple[Process, CoreRunHost]:
     process = world.runtime()
     controls = None
@@ -125,10 +127,9 @@ def _host(
     return process, host
 
 
-@pytest.mark.asyncio
 async def test_a_stop_control_ends_the_run_with_the_proposed_result(tmp_path: Path) -> None:
     channel = _channel()
-    clock = ScriptedClock(at=1.0)
+    clock = ScriptedClock(clock_from(1.0))
     clock.actions[2] = channel.request_stop
     with open_skeleton_world(tmp_path, INERT) as world:
         process, host = _host(world, clock, channel)
@@ -140,10 +141,9 @@ async def test_a_stop_control_ends_the_run_with_the_proposed_result(tmp_path: Pa
     assert process.shell.record.envelope.core.run.result == outcome.result
 
 
-@pytest.mark.asyncio
 async def test_the_deadline_ends_an_otherwise_idle_paused_run(tmp_path: Path) -> None:
     channel = _channel()
-    clock = FakeRunClock(at=1.0)
+    clock = ProbedClock(clock_from(1.0))
     with open_skeleton_world(tmp_path, INERT) as world:
         process, host = _host(world, clock, channel)
         channel.request_pause()
@@ -169,7 +169,6 @@ async def test_the_deadline_ends_an_otherwise_idle_paused_run(tmp_path: Path) ->
     poll=st.floats(min_value=25.0, max_value=300.0),
     min_sleep=st.floats(min_value=0.01, max_value=20.0),
 )
-@pytest.mark.asyncio
 async def test_an_idle_run_is_woken_a_bounded_number_of_times(
     poll: float, min_sleep: float
 ) -> None:
@@ -181,7 +180,7 @@ async def test_an_idle_run_is_woken_a_bounded_number_of_times(
         open_skeleton_world(Path(directory), INERT) as world,
     ):
         channel = _channel()
-        clock = FakeRunClock(at=1.0)
+        clock = ProbedClock(clock_from(1.0))
         process, host = _host(world, clock, channel)
         channel.request_pause()
         config = _config(control_poll_interval=poll, min_sleep=min_sleep)
@@ -206,7 +205,7 @@ async def _measure_a_job_running(tmp_path: Path, runtime: float) -> tuple[World,
 
     Returns the world, the process and whether the run reached its terminal status.
     """
-    clock = FakeRunClock(at=1.0)
+    clock = ProbedClock(clock_from(1.0))
     with open_skeleton_world(tmp_path, BaselineOnly(), timed=(clock, runtime)) as world:
         process = world.runtime()
         process.shell.start("host-a", now_at=1.0, lease_duration=LEASE)
@@ -218,7 +217,6 @@ async def _measure_a_job_running(tmp_path: Path, runtime: float) -> tuple[World,
 
 
 @pytest.mark.parametrize("runtime", [45.0, 300.0])
-@pytest.mark.asyncio
 async def test_a_running_job_is_polled_at_the_observe_interval(
     tmp_path: Path, runtime: float
 ) -> None:
@@ -238,7 +236,6 @@ async def test_a_running_job_is_polled_at_the_observe_interval(
 
 
 @pytest.mark.parametrize("leases", [1, 3, 10])
-@pytest.mark.asyncio
 async def test_a_dispatch_longer_than_the_lease_does_not_lose_the_lease(
     tmp_path: Path, leases: int
 ) -> None:
@@ -248,12 +245,13 @@ async def test_a_dispatch_longer_than_the_lease_does_not_lose_the_lease(
     the loop body does not run. Without renewal the next commit is stamped after the lease
     expired and the run dies with a fence conflict.
     """
-    clock = FakeRunClock(at=1.0)
+    clock = ProbedClock(clock_from(1.0))
 
     async def lease_durations_pass() -> None:
         for _ in range(leases * 4):
-            clock.at += LEASE / 4
-            await asyncio.sleep(0)
+            # Real virtual time, not a jump of ``clock.at``: the heartbeat renews as the
+            # timeline passes each third of the lease, as it would beside a real turn.
+            await clock.pass_time(LEASE / 4)
 
     with open_skeleton_world(tmp_path, BaselineOnly(), timed=(clock, 0.0)) as world:
         world.during_submit = lease_durations_pass
@@ -265,7 +263,6 @@ async def test_a_dispatch_longer_than_the_lease_does_not_lose_the_lease(
 
 
 @pytest.mark.parametrize("lease_durations_first", [0, 1, 5])
-@pytest.mark.asyncio
 async def test_a_stop_during_a_turn_that_never_ends_cancels_it_once_without_waiting(
     tmp_path: Path, lease_durations_first: int
 ) -> None:
@@ -276,14 +273,15 @@ async def test_a_stop_during_a_turn_that_never_ends_cancels_it_once_without_wait
     host's grace bound cancelled it. Now the loop cancels the dispatch once and ends the
     run as stopped, with no run-clock time spent waiting for a bound.
     """
-    clock = FakeRunClock(at=1.0)
+    clock = ProbedClock(clock_from(1.0))
     channel = _channel()
     cancellations: list[str] = []
 
     async def turn_that_never_ends() -> None:
         for _ in range(lease_durations_first * 4):
-            clock.at += LEASE / 4
-            await asyncio.sleep(0)
+            # Real virtual time, not a jump of ``clock.at``: the heartbeat renews as the
+            # timeline passes each third of the lease, as it would beside a real turn.
+            await clock.pass_time(LEASE / 4)
         channel.request_stop()
         try:
             # Never ends on its own as far as the run is concerned. The bound counts event
@@ -301,19 +299,19 @@ async def test_a_stop_during_a_turn_that_never_ends_cancels_it_once_without_wait
         with pytest.raises(RunStopped):
             await drive_core(host, _config())
     assert cancellations == ["cancelled"]
-    assert clock.sleeps == []
+    # The only run-clock time that passed is what the turn itself spent before the stop
+    # (the loop's control polls inside it); acting on the stop waited for nothing.
+    assert clock.at == pytest.approx(1.0 + lease_durations_first * LEASE)
 
 
-@pytest.mark.asyncio
 async def test_a_run_with_a_long_measurement_closes_after_the_job_ends(tmp_path: Path) -> None:
     _, _, terminal = await _measure_a_job_running(tmp_path, 45.0)
     assert terminal
 
 
-@pytest.mark.asyncio
 async def test_a_run_nothing_can_wake_is_reported_stalled(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path, INERT) as world:
-        _, host = _host(world, FakeRunClock(at=1.0))
+        _, host = _host(world, ProbedClock(clock_from(1.0)))
         start_core(host, _config())
         with pytest.raises(RunStalledError, match="stalled"):
             await drive_core(host, _config())
@@ -335,12 +333,11 @@ class WaitsUntil(SkeletonStrategy):
 @settings(max_examples=5, derandomize=True, deadline=None)
 @example(until=7.0)
 @given(until=st.floats(min_value=2.0, max_value=900.0))
-@pytest.mark.asyncio
 async def test_a_strategy_that_waits_for_a_time_is_woken_then_and_not_reported_stalled(
     until: float,
 ) -> None:
     waiting = WaitsUntil(state=SkeletonState(schema_version=1, phase="done"), until=until)
-    clock = FakeRunClock(at=1.0)
+    clock = ProbedClock(clock_from(1.0))
     with (
         tempfile.TemporaryDirectory() as directory,
         open_skeleton_world(Path(directory), waiting) as world,
@@ -354,13 +351,12 @@ async def test_a_strategy_that_waits_for_a_time_is_woken_then_and_not_reported_s
     assert until <= clock.at < until + _config().lease_duration
 
 
-@pytest.mark.asyncio
 async def test_restart_mid_run_resumes_from_durable_state(tmp_path: Path) -> None:
     """A shell stopped by the dispatch cap after its first request is replaced by a new
     process over the same disk, which finishes the run.
     """
     with open_skeleton_world(tmp_path, SkeletonStrategy.cancelled()) as world:
-        clock = FakeRunClock(at=1.0)
+        clock = ProbedClock(clock_from(1.0))
         first, host = _host(world, clock)
         start_core(host, _config(max_dispatches=1))
         with pytest.raises(DispatchCapExceededError) as capped:
@@ -377,13 +373,12 @@ async def test_restart_mid_run_resumes_from_durable_state(tmp_path: Path) -> Non
     assert second.shell.record.envelope.core.revision > first.shell.record.envelope.core.revision
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("elapsed", [0.0, 7.0, LEASE - 0.5])
 async def test_a_restart_waits_in_clock_time_for_a_dead_hosts_lease(
     tmp_path: Path, elapsed: float
 ) -> None:
     with open_skeleton_world(tmp_path, INERT) as world:
-        clock = FakeRunClock(at=1.0)
+        clock = ProbedClock(clock_from(1.0))
         first, crashed = _host(world, clock)
         start_core(crashed, _config())
         del first  # the process dies holding its lease, which it never releases
@@ -398,21 +393,20 @@ async def test_a_restart_waits_in_clock_time_for_a_dead_hosts_lease(
     assert LEASE - elapsed <= waited < LEASE - elapsed + 1.0
 
 
-@pytest.mark.asyncio
 async def test_a_restart_gives_up_after_one_lease_while_another_host_renews_it(
     tmp_path: Path,
 ) -> None:
     with open_skeleton_world(tmp_path, INERT) as world:
-        clock = FakeRunClock(at=1.0)
+        clock = ProbedClock(clock_from(1.0))
         holder, live = _host(world, clock)
         start_core(live, _config())
 
-        class RenewingClock(FakeRunClock):
+        class RenewingClock(ProbedClock):
             async def sleep(self, seconds: float) -> None:
                 await super().sleep(seconds)
                 holder.shell.renew(now_at=self.at, lease_duration=LEASE)
 
-        waiting = RenewingClock(at=clock.at)
+        waiting = RenewingClock(clock_from(clock.at))
         _other, restarted = _host(world, waiting)
         with pytest.raises(LeaseUnavailableError, match="still held"):
             await start_core_awaiting_lease(restarted, _config())
@@ -420,10 +414,9 @@ async def test_a_restart_gives_up_after_one_lease_while_another_host_renews_it(
     assert LEASE <= sum(waiting.sleeps) <= LEASE + 1.0
 
 
-@pytest.mark.asyncio
 async def test_a_released_lease_is_free_at_once(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path, INERT) as world:
-        clock = FakeRunClock(at=1.0)
+        clock = ProbedClock(clock_from(1.0))
         first, host = _host(world, clock)
         start_core(host, _config())
 

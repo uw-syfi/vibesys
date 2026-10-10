@@ -19,7 +19,7 @@ from tests.composition.dynamic._harness import (
     simulated_clock,
     workstream,
 )
-from tests.support.fake_run_clock import HostCrashedError
+from tests.support.host_clock import HostCrashedError
 
 from vibesys.api import RunStatus
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR

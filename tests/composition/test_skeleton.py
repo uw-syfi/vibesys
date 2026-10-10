@@ -108,7 +108,6 @@ def _assert_adopted(process: Process, world: World) -> None:
     assert len(world.cluster.submissions) == (2 if world.strategy.measured else 0)
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "crash",
     [
@@ -121,7 +120,6 @@ async def test_skeleton(tmp_path: Path, crash: CrashPoint | None) -> None:
     await _play(tmp_path, crash, SkeletonStrategy())
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "crash",
     [
@@ -135,7 +133,6 @@ async def test_skeleton_without_measurements(tmp_path: Path, crash: CrashPoint |
     await _play(tmp_path, crash, SkeletonStrategy.unmeasured())
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "crash",
     [
@@ -149,7 +146,6 @@ async def test_skeleton_discarded_attempt(tmp_path: Path, crash: CrashPoint | No
     await _play(tmp_path, crash, SkeletonStrategy.unmeasured(keeps_candidate=False))
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "crash",
     [
@@ -191,7 +187,6 @@ async def _started(world: World, crash: CrashPoint | None) -> tuple[Process, flo
 # while an earlier gap hides it from the full scenario above.
 
 
-@pytest.mark.asyncio
 async def test_a_workspace_revision_can_be_measured(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path) as world:
         executors = world.bindings().executors
@@ -282,7 +277,6 @@ def _session_requests() -> tuple[SessionRequest, ...]:
     )
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("request_", _session_requests(), ids=lambda request: request.kind)
 async def test_every_session_request_reaches_an_executor_that_serves_it(
     tmp_path: Path, request_: SessionRequest
@@ -301,7 +295,6 @@ async def test_every_session_request_reaches_an_executor_that_serves_it(
         assert "not executed here" not in diagnostic, f"{request_.kind}: {diagnostic}"
 
 
-@pytest.mark.asyncio
 async def test_inspect_reports_a_recorded_measurement_submit(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path) as world:
         executors = world.bindings().executors

@@ -1,6 +1,5 @@
 """Crash points of the skeleton run and the plans that crash at them (shared by the crash tests)."""
 
-import asyncio
 import tempfile
 from dataclasses import dataclass
 from functools import cache
@@ -10,6 +9,7 @@ from tests.support.skeleton_faults import COMMIT, RECEIPT_BEGUN, RECEIPT_PREFIX,
 from tests.support.skeleton_sim import Simulation, Summary, simulate
 
 from vs_faults.api import Boundary, Crossing, FaultPlan, FaultRule, HostFault
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 _RUNS: dict[str, Simulation] = {}
 
@@ -22,7 +22,7 @@ def run(plan: FaultPlan) -> Simulation:
     key = plan.model_dump_json()
     if key not in _RUNS:
         with tempfile.TemporaryDirectory() as tmp:
-            _RUNS[key] = asyncio.run(simulate(Path(tmp), plan))
+            _RUNS[key] = run_virtual(VirtualClock(), simulate(Path(tmp), plan))
     return _RUNS[key]
 
 

@@ -13,18 +13,18 @@ is resumed exactly once.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from typing import TYPE_CHECKING
 
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.support.agent_tool_world import Program, ScriptedAgent, scenario
-from tests.support.fake_run_clock import FakeRunClock
+from tests.support.host_clock import clock_from
 from tests.support.skeleton_world import LEASE, Process, drive
 from tests.support.waiting_loop_strategy import LoopState, LoopStrategy
 
 from vs_core.api import Limits, RunStatus
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,7 +41,7 @@ async def play(
 
     async with scenario(tmp_path, LoopStrategy(total=total), limits, agent) as played:
         process = played.world.runtime()
-        clock = FakeRunClock(0.0)
+        clock = clock_from(0.0)
         process.shell.start("skeleton", now_at=0.0, lease_duration=LEASE)
         played.bridge.attach(process.shell, clock)
         await played.bridge.serve()
@@ -72,7 +72,7 @@ def run_play(tmp_path: Path, programs: tuple[Program, ...], total: int) -> Scrip
         check(process, agent)
         return agent
 
-    return asyncio.run(go())
+    return run_virtual(VirtualClock(), go())
 
 
 SUBMIT_AND_WAIT: Program = (("submit",), ("wait", (0,)))

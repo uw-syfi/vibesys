@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.support.skeleton_world import drive, open_skeleton_world
 from tests.support.workspace_world import RUN_ID
 
@@ -27,7 +26,6 @@ _NAMESPACE = "core-view"
 LEASE = 100.0
 
 
-@pytest.mark.asyncio
 async def test_listener_fires_after_each_confirmed_commit(tmp_path: Path) -> None:
     """One call per commit, each seeing the durable record it was told about."""
     integration = LocalRunIntegration()

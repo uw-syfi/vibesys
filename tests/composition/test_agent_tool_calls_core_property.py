@@ -19,7 +19,6 @@ only the shell's own commit error; every suspension core accepted is resumed exa
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import os
@@ -31,7 +30,6 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
-from tests.support.fake_run_clock import FakeRunClock
 from tests.support.skeleton_strategy import ATTEMPT, DECLARATION, DIGEST
 from tests.support.waiting_loop_strategy import LoopState, LoopStrategy
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
@@ -80,6 +78,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.testing import FakePublicationDelivery
 from vs_runtime.contracts import AgentRole, AgentTool
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -396,7 +395,7 @@ def play(
         startup=CoreStartup(deadline_at=1000.0, limits=limits),
     )
     store = FakeStateStore()
-    clock = FakeRunClock(1.0)
+    clock = VirtualClock(1.0)
     workspaces = Workspaces()
     shells: list[CoreRuntime[LoopState]] = []
     views: list[ShellView] = []
@@ -438,7 +437,7 @@ def play(
     host = CoreRunHost(shell, FakePublicationDelivery(store), clock)
     config = RunLoopConfig(host_id="property", lease_duration=LEASE, max_dispatches=400)
     start_core(host, config)
-    asyncio.run(drive_core(host, config))
+    run_virtual(clock, drive_core(host, config))
     return Played(shell, agent, views[0])
 
 
@@ -467,7 +466,7 @@ def after_run(played: Played) -> None:
             await agent.call(token, step, count=False)
         await agent.late_calls()
 
-    asyncio.run(go())
+    run_virtual(VirtualClock(), go())
 
 
 _STEPS = st.one_of(

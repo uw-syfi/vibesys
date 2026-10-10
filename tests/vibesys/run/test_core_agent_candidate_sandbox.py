@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.fake_run_clock import FakeRunClock
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import _plugin, _request, _write_project
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
@@ -37,6 +36,7 @@ from vs_agent.api.testing import (
 from vs_runtime.api import AgentWorkspaceRouteError
 from vs_runtime.api.core import RunTiming
 from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -74,6 +74,7 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
         }
     )
     integration = LocalRunIntegration()
+    clock = VirtualClock(at=0.0)
 
     async def exercise() -> tuple[bool, list[str]]:
         async with open_product_core_host(
@@ -81,7 +82,7 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
             integration,
             plugin=_plugin(templates),
             options=EmptyOptions(),
-            timing=RunTiming(FakeRunClock(), 60.0),
+            timing=RunTiming(clock, 60.0),
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
@@ -106,7 +107,7 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
             return root_served, mapped
 
     try:
-        return asyncio.run(exercise())
+        return run_virtual(clock, exercise())
     finally:
         integration.close()
 
@@ -174,6 +175,7 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
         }
     )
     integration = LocalRunIntegration()
+    clock = VirtualClock(at=0.0)
     turns = _Turns()
 
     async def exercise() -> None:
@@ -182,7 +184,7 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
             integration,
             plugin=_plugin(templates),
             options=EmptyOptions(),
-            timing=RunTiming(FakeRunClock(), 60.0),
+            timing=RunTiming(clock, 60.0),
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
@@ -206,7 +208,7 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
                 )
 
     try:
-        asyncio.run(exercise())
+        run_virtual(clock, exercise())
     finally:
         integration.close()
     known = turns.root_containers | turns.candidate_containers

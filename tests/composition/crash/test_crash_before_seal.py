@@ -10,7 +10,6 @@ a host killed in the middle of a job poll or an agent turn leaves behind.
 
 from __future__ import annotations
 
-import asyncio
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -27,6 +26,7 @@ from tests.support.skeleton_faults import RECEIPT_SEALED
 from tests.support.skeleton_sim import Simulation, simulate
 
 from vs_faults.api import Boundary, FaultGate, FaultPlan, HostCrashError
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -64,7 +64,7 @@ def _sealed_writes() -> list[object]:
 def _run(seal: Crossing) -> Simulation:
     plan = FaultPlan(seed=seal.ordinal, rules=(rule(seal),))
     with tempfile.TemporaryDirectory() as tmp:
-        return asyncio.run(simulate(Path(tmp), plan, gate=LostSealGate(plan)))
+        return run_virtual(VirtualClock(), simulate(Path(tmp), plan, gate=LostSealGate(plan)))
 
 
 def _check(seal: Crossing) -> None:

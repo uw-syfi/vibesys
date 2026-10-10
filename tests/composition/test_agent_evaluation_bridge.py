@@ -8,7 +8,6 @@ submission, run one measurement, and authorize exactly one resume of that turn.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from contextlib import asynccontextmanager
@@ -16,11 +15,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
-from tests.support.fake_run_clock import FakeRunClock
+from tests.support.host_clock import clock_from
 from tests.support.session_world import ProviderFaults, SessionHost
 from tests.support.skeleton_strategy import ATTEMPT, DIGEST, SkeletonState, SkeletonStrategy
 from tests.support.skeleton_world import (
@@ -70,6 +68,7 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
 )
 from vs_runtime.contracts import AgentRole, AgentTool
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -252,11 +251,11 @@ async def scenario(tmp_path: Path, *, submissions: int = 1) -> AsyncIterator[Sce
         yield Scenario(world, writers[0], bridges)
 
 
-async def run(played: Scenario) -> tuple[Process, FakeRunClock]:
+async def run(played: Scenario) -> tuple[Process, VirtualClock]:
     """Drive the run to its end with the bridge attached and serving."""
     process = played.world.runtime()
     (bridge,) = played.bridge
-    clock = FakeRunClock(0.0)
+    clock = clock_from(0.0)
     process.shell.start("skeleton", now_at=0.0, lease_duration=LEASE)
     bridge.attach(process.shell, clock)
     await bridge.serve()
@@ -268,7 +267,6 @@ async def run(played: Scenario) -> tuple[Process, FakeRunClock]:
     return process, clock
 
 
-@pytest.mark.asyncio
 async def test_an_agent_submits_through_the_tool_and_is_resumed_once(tmp_path: Path) -> None:
     async with scenario(tmp_path) as played:
         process, _ = await run(played)
@@ -287,7 +285,6 @@ async def test_an_agent_submits_through_the_tool_and_is_resumed_once(tmp_path: P
         assert strategy.resumes == 1
 
 
-@pytest.mark.asyncio
 async def test_the_tool_server_is_offered_without_an_interpreter_or_import_path(
     tmp_path: Path,
 ) -> None:
@@ -318,7 +315,7 @@ async def _synthesized(tmp_path: Path, calls: list[tuple[Any, ...]]) -> None:
         process = played.world.runtime()
         (bridge,) = played.bridge
         process.shell.start("skeleton", now_at=0.0, lease_duration=LEASE)
-        bridge.attach(process.shell, FakeRunClock(0.0))
+        bridge.attach(process.shell, clock_from(0.0))
         scope = Scope(owner=process.shell.record.envelope.core.run.run_id, generation=0)
         (descriptor,) = bridge.servers(ROLE, scope)
         own = dict(descriptor.runtime_env)["VS_EVALUATION_TOKEN"]
@@ -369,10 +366,9 @@ def test_synthesized_tool_calls_never_exceed_the_budget_or_cross_tokens(
 ) -> None:
     root = tmp_path / uuid.uuid4().hex
     root.mkdir()
-    asyncio.run(_synthesized(root, calls))
+    run_virtual(VirtualClock(), _synthesized(root, calls))
 
 
-@pytest.mark.asyncio
 async def test_resubmitting_an_unchanged_candidate_is_refused_with_the_reason(
     tmp_path: Path,
 ) -> None:

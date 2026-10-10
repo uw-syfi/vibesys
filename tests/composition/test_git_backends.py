@@ -9,7 +9,6 @@ implementations).
 
 from __future__ import annotations
 
-import asyncio
 import tempfile
 from pathlib import Path
 
@@ -19,11 +18,12 @@ from tests.support.skeleton_sim import Simulation, simulate
 from tests.support.world_git import GitKind
 
 from vs_faults.api import FaultPlan
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 
 def _run(plan: FaultPlan, git: GitKind) -> Simulation:
     with tempfile.TemporaryDirectory() as scratch:
-        return asyncio.run(simulate(Path(scratch), plan, git=git))
+        return run_virtual(VirtualClock(), simulate(Path(scratch), plan, git=git))
 
 
 def _plans() -> dict[str, FaultPlan]:
