@@ -23,7 +23,7 @@ from tests.composition.dynamic._harness import (
     workstream,
 )
 
-from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
+from vibesys.dynamic_roles import ORCHESTRATOR
 
 if TYPE_CHECKING:
     from pathlib import Path

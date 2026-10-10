@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 
 from vibesys.orchestration.dynamic.models import (
     DynamicOptions,
-    DynamicState,
     EvidenceReference,
     ImplementerResult,
     ImplementPortfolioPlan,
@@ -12,12 +11,10 @@ from vibesys.orchestration.dynamic.models import (
     ProfileDecision,
     ProfilePlan,
     ReviewResult,
-    WorkstreamBudget,
     WorkstreamPlan,
 )
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.dynamic.orchestration import DynamicPlanningError
     from vibesys.orchestration.dynamic.plugin import PLUGIN, REGISTRATION
 
 
@@ -32,13 +29,6 @@ def __getattr__(name: str) -> object:
         )
 
         return PLUGIN if name == "PLUGIN" else REGISTRATION
-    if name == "DynamicPlanningError":
-        # Keep the public error export lazy for the same wiring boundary.
-        from vibesys.orchestration.dynamic.orchestration import (  # noqa: PLC0415  # lint-waiver: LW-641002 [PLC0415]; eager wiring creates a shell cycle; importlib hides the declared dependency.
-            DynamicPlanningError,
-        )
-
-        return DynamicPlanningError
     raise AttributeError(name)
 
 
@@ -46,8 +36,6 @@ __all__ = [
     "PLUGIN",
     "REGISTRATION",
     "DynamicOptions",
-    "DynamicPlanningError",
-    "DynamicState",
     "EvidenceReference",
     "ImplementPortfolioPlan",
     "ImplementerResult",
@@ -55,6 +43,5 @@ __all__ = [
     "ProfileDecision",
     "ProfilePlan",
     "ReviewResult",
-    "WorkstreamBudget",
     "WorkstreamPlan",
 ]

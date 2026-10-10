@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 import tempfile
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,7 +15,11 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 from pydantic import ValidationError
 
+from server.api.protocol import CommandAck, Response, StopCommand
 from server.instances import (
+    CONTROL_REPLY_TIMEOUT_SECONDS,
+    STOP_TIMEOUT_SECONDS,
+    ControlSocketStopRequester,
     FakeInstanceHold,
     FakeInstanceStore,
     FileInstanceHold,
@@ -24,7 +29,9 @@ from server.instances import (
     InstanceStatus,
     LiveInstanceRecord,
     LiveRegistry,
+    StopEffects,
     StopOutcome,
+    StopRoute,
     Verdict,
     instance_root,
     instance_socket_path,
@@ -34,12 +41,13 @@ from server.instances import (
 )
 from server.transport.discovery import LockState
 from server.transport.unix_jsonl import MAX_SOCKET_PATH_BYTES
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from server.instances import InstanceHold, InstanceStore
+    from server.instances import InstanceHold, InstanceStopResult, InstanceStore
+    from vs_sim.api import Listener
 
 IDS = [f"{index:012x}" for index in range(1, 6)]
 
@@ -271,6 +279,10 @@ def test_an_unreadable_lock_is_reported_but_neither_trusted_nor_removed() -> Non
 
 # --- stop ---------------------------------------------------------------------
 
+# A server whose control socket nothing answers: every stop below that uses it
+# exercises the signal fallback.
+_UNANSWERED = ControlSocketStopRequester(SimNetwork(SimThreads()))
+
 
 class _ExitingSignaller:
     """A server that ends (cleanly or not) when signalled, or ignores the signal."""
@@ -307,7 +319,9 @@ def test_stop_signals_a_live_server_and_waits_for_its_lock(
     signaller = _ExitingSignaller(hold.release if ends == "release" else hold.crash)
     clock = ManualClock()
 
-    result = LiveRegistry(store).stop(IDS[0], signaller=signaller, clock=clock, pause=clock.advance)
+    result = LiveRegistry(store).stop(
+        IDS[0], StopEffects(_UNANSWERED, signaller, clock, clock.advance)
+    )
 
     assert result.outcome is StopOutcome.STOPPED
     assert signaller.signalled == [4242]
@@ -321,7 +335,7 @@ def test_stop_reports_a_server_that_outlives_the_wait(
     clock = ManualClock()
 
     result = LiveRegistry(store).stop(
-        IDS[0], signaller=_ExitingSignaller(lambda: None), clock=clock, pause=clock.advance
+        IDS[0], StopEffects(_UNANSWERED, _ExitingSignaller(lambda: None), clock, clock.advance)
     )
 
     assert result.outcome is StopOutcome.STILL_RUNNING
@@ -338,7 +352,7 @@ def test_stop_never_signals_a_dead_or_unknown_server(
 
     for instance_id in (IDS[0], IDS[1]):
         result = LiveRegistry(store).stop(
-            instance_id, signaller=signaller, clock=clock, pause=clock.advance
+            instance_id, StopEffects(_UNANSWERED, signaller, clock, clock.advance)
         )
         assert result.outcome is StopOutcome.NOT_RUNNING
     assert signaller.signalled == []
@@ -353,13 +367,134 @@ def test_stop_reports_a_host_that_cannot_signal_safely(
 
     result = LiveRegistry(store).stop(
         IDS[0],
-        signaller=_ExitingSignaller(lambda: None, supported=False),
-        clock=clock,
-        pause=clock.advance,
+        StopEffects(
+            _UNANSWERED, _ExitingSignaller(lambda: None, supported=False), clock, clock.advance
+        ),
     )
 
     assert result.outcome is StopOutcome.UNSUPPORTED
     assert store.ids() == (IDS[0],)
+
+
+class _Reply(StrEnum):
+    """What a simulated server answers to one stop request."""
+
+    ACK = "ack"
+    ERROR = "error"
+    GARBAGE = "garbage"
+    HANG_UP = "hang_up"
+    SILENT = "silent"
+    UNBOUND = "unbound"
+
+
+def _reply_bytes(reply: _Reply, request_id: str) -> bytes:
+    match reply:
+        case _Reply.ACK:
+            response = Response(
+                request_id=request_id, ack=CommandAck(action="stop", status="pending")
+            )
+        case _Reply.ERROR:
+            response = Response(request_id=request_id, ok=False, error="read-only run")
+        case _:
+            return b"not json\n"
+    return response.model_dump_json().encode() + b"\n"
+
+
+def _stop_against(
+    reply: _Reply, exit_after: float | None, *, force: bool = False
+) -> tuple[InstanceStopResult, FakeInstanceStore, list[str], list[int]]:
+    """Stop a live server that answers ``reply`` and exits ``exit_after`` seconds later.
+
+    The server and the stopping client share one simulated network and clock;
+    the record's socket path is only an address on that network. A signal
+    ends the server at once, so whether it was sent shows in the outcome.
+    """
+    threads = SimThreads()
+    network = SimNetwork(threads)
+    store = FakeInstanceStore()
+    hold = store.hold(IDS[0])
+    record = _record(IDS[0])
+    hold.publish(record)
+    received: list[str] = []
+    signaller = _ExitingSignaller(hold.release)
+
+    def serve(listener: Listener) -> None:
+        connection = listener.accept(HANG_GUARD_S)
+        line = b""
+        while not line.endswith(b"\n"):
+            line += connection.recv(1, HANG_GUARD_S)
+        request = StopCommand.model_validate_json(line)
+        received.append(request.type)
+        if reply is _Reply.SILENT:
+            threads.sleep(2 * CONTROL_REPLY_TIMEOUT_SECONDS)
+        elif reply is not _Reply.HANG_UP:
+            connection.send(_reply_bytes(reply, request.request_id))
+        connection.close()
+        if reply is _Reply.ACK and exit_after is not None:
+            threads.sleep(exit_after)
+            hold.release()
+
+    def scenario() -> InstanceStopResult:
+        if reply is not _Reply.UNBOUND:
+            listener = network.listen(record.socket_path)
+            threads.spawn(lambda: serve(listener), name="server", daemon=True)
+        return LiveRegistry(store).stop(
+            IDS[0],
+            StopEffects(ControlSocketStopRequester(network), signaller, threads, threads.sleep),
+            force=force,
+        )
+
+    result = threads.run(scenario)
+    return result, store, received, signaller.signalled
+
+
+@given(exit_after=st.floats(min_value=0, max_value=STOP_TIMEOUT_SECONDS * 0.9))
+def test_an_acknowledged_stop_waits_for_the_run_to_end_without_signalling(
+    exit_after: float,
+) -> None:
+    result, store, received, signalled = _stop_against(_Reply.ACK, exit_after)
+
+    assert (result.outcome, result.route) == (StopOutcome.STOPPED, StopRoute.CONTROL_SOCKET)
+    assert received == ["command.stop"]
+    assert signalled == []
+    assert store.ids() == ()
+
+
+@given(
+    exit_after=st.one_of(
+        st.none(),
+        st.floats(min_value=STOP_TIMEOUT_SECONDS * 1.1, max_value=10 * STOP_TIMEOUT_SECONDS),
+    )
+)
+def test_a_run_still_in_its_agent_call_reports_stopping_and_stays_registered(
+    exit_after: float | None,
+) -> None:
+    result, store, _, signalled = _stop_against(_Reply.ACK, exit_after)
+
+    assert (result.outcome, result.route) == (StopOutcome.STOPPING, StopRoute.CONTROL_SOCKET)
+    assert signalled == []
+    # The server exits on its own once its agent call ends; until then its
+    # record stays, so `instances list` still shows it.
+    assert store.ids() == (IDS[0],)
+
+
+@pytest.mark.parametrize(
+    "reply", [_Reply.ERROR, _Reply.GARBAGE, _Reply.HANG_UP, _Reply.SILENT, _Reply.UNBOUND]
+)
+def test_a_server_that_does_not_acknowledge_falls_back_to_the_signal(reply: _Reply) -> None:
+    result, store, _, signalled = _stop_against(reply, exit_after=0.0)
+
+    assert (result.outcome, result.route) == (StopOutcome.STOPPED, StopRoute.SIGNAL)
+    assert signalled == [4242]
+    assert store.ids() == ()
+
+
+def test_a_forced_stop_signals_without_asking() -> None:
+    result, _, received, signalled = _stop_against(_Reply.ACK, exit_after=0.0, force=True)
+
+    assert (result.outcome, result.route) == (StopOutcome.STOPPED, StopRoute.SIGNAL)
+    assert received == []
+    assert signalled == [4242]
 
 
 # --- root ---------------------------------------------------------------------

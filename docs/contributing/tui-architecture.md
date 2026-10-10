@@ -180,10 +180,46 @@ $XDG_RUNTIME_DIR/vibesys/            (else /tmp/vibesys-<uid>/), mode 0700
 The root is never under `$HOME`, which may be on NFS. Liveness is proven, not read from the record:
 the server holds an exclusive `flock` on its lock file for its lifetime, and the kernel releases it
 on any exit, `kill -9` included. `vibesys instances list [--json]` reports a record only while its
-lock is held and removes the files of every id whose lock is free. `vibesys instances stop <id>
-[--json]` sends `SIGTERM` through a stable process reference only while the lock is still held,
-then waits, bounded, for the lock to drop. The web gateway's project-local record keeps its own
-format; its claim and startup-log hold use the same lock primitives (`server.transport.discovery`).
+lock is held and removes the files of every id whose lock is free. The web gateway's project-local
+record keeps its own format; its claim and startup-log hold use the same lock primitives
+(`server.transport.discovery`).
+
+#### Stopping and resuming a detached run
+
+`vibesys instances stop <id> [--json] [--force]` sends the existing `command.stop` over the
+server's control socket, the same request an attached client sends, so the run stops at its next
+controlled boundary with its state persisted, on every platform. It then waits, bounded, for the
+lock to drop. Only a server that does not acknowledge (wedged, or not yet listening), or a
+`--force` stop, is sent `SIGTERM`, through a stable process reference and only while the lock is
+still held; hosts without pidfds (macOS) report `unsupported` for that fallback. `--json` prints
+one `InstanceStopResult`:
+
+| `outcome` | Exit | Meaning |
+| --- | --- | --- |
+| `stopped` | 0 | The server stopped and its record is gone. |
+| `stopping` | 0 | The server accepted the stop; its active agent call outlasted the wait, and it exits on its own after it. Poll `instances list`. |
+| `not_running` | 1 | No live server holds the id. |
+| `still_running` | 1 | The server was signalled and still held its lock when the wait ended. |
+| `unsupported` | 1 | The socket did not answer and this host cannot signal safely. |
+
+`route` is `control_socket`, `signal`, or `null` when nothing was sent.
+
+A client attached when the run stops reads `run_status_changed` to `stopping`, then to `stopped`,
+and then the connection closes; no `run_finished`, `run_failed`, or `run_interrupted` follows. A
+server that ends with its run waits, bounded, until every open stream has written the latest
+event before it closes its transport, so the terminal status arrives before the close.
+
+`vibesys --detach --resume [RUN]` resumes a stopped or crashed run as a new detached server,
+through the same resume resolution as `vibesys --resume`. The child runs under the interpreter of
+the `vibesys` command that was invoked, so the run continues on that command's code (a desktop
+client chooses the checkout or install per host). On success stdout is the new server's
+`LiveInstanceRecord` and the exit status is 0; clients attach to its socket and receive the run's
+history through the usual subscribe backfill. On failure stdout is one `DetachedLaunchFailure`
+line (`"outcome": "failed"`), stderr repeats the message, and the exit status is its `exit_code`.
+`code` is the run's configuration diagnostic code (for example `invalid_arguments` or
+`resume_not_found`, exit 2) or one the launcher owns (exit 1): `registry_unavailable`,
+`run_already_live` (with the `live_instance` already driving the run, to attach to instead), or
+`server_start_failed` (with the server's `log_path`).
 
 ### Boot trace
 

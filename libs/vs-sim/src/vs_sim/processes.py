@@ -116,9 +116,12 @@ class ForegroundLauncher(Protocol):
     """Starts children that inherit stdin, stdout and stderr, as a shell's foreground job does."""
 
     async def start(
-        self, argv: Sequence[str], env: Mapping[str, str] | None = None
+        self,
+        argv: Sequence[str],
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> ForegroundChild:
-        """Start ``argv`` (the environment of this process when ``env`` is ``None``).
+        """Start ``argv`` (in this process's environment and directory when ``None``).
 
         Raises ``OSError`` when the program cannot be started.
         """
@@ -141,10 +144,25 @@ class InheritedStdioLauncher:
     """Starts real operating-system processes that use this process's terminal."""
 
     async def start(
-        self, argv: Sequence[str], env: Mapping[str, str] | None = None
+        self,
+        argv: Sequence[str],
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
     ) -> ForegroundChild:
         """Start ``argv`` on the running event loop with inherited standard streams."""
         process = await asyncio.create_subprocess_exec(
-            *argv, env=None if env is None else dict(env)
+            *argv, env=None if env is None else dict(env), cwd=cwd
         )
         return _InheritedHandle(process)
+
+
+async def run_foreground(
+    launcher: ForegroundLauncher,
+    argv: Sequence[str],
+    *,
+    env: Mapping[str, str] | None = None,
+    cwd: Path | None = None,
+) -> int:
+    """Start ``argv`` on ``launcher`` and wait for it; its exit status."""
+    child = await launcher.start(argv, env, cwd)
+    return await child.wait()

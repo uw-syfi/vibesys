@@ -76,6 +76,8 @@ if TYPE_CHECKING:
 
 
 _RunValueT = TypeVar("_RunValueT")
+DETACHED_DRAIN_TIMEOUT_SECONDS = 2.0
+"""How long a detached server that is exiting waits for clients to read its last events."""
 _TERMINAL_EVENT_TYPES = frozenset(
     {EventType.RUN_FINISHED, EventType.RUN_FAILED, EventType.RUN_INTERRUPTED}
 )
@@ -233,6 +235,10 @@ class ServerRuntime:
                 transport = transports.enter_context(
                     UnixJsonlServer(self.socket_path, self.api, subscriptions, self.threads)
                 )
+                if self._ends_with_run:
+                    # Registered after the transport, so it runs before the
+                    # transport closes, on every exit path.
+                    transports.callback(self._drain_subscribers, transport)
                 self.transport_listening.set()
                 if self.observer is not None:
                     self.observer.listening()
@@ -284,6 +290,21 @@ class ServerRuntime:
     def _detachable_mode(self) -> bool:
         """Whether the server lifetime is independent of its subscribers."""
         return self.detach or self.read_only_log is not None
+
+    @property
+    def _ends_with_run(self) -> bool:
+        """Whether this server exits as soon as its run ends (detached, no gateway)."""
+        return self.detach and not self.web and self.read_only_log is None
+
+    def _drain_subscribers(self, transport: UnixJsonlServer) -> None:
+        """Let attached clients read the run's last events before the socket closes.
+
+        A detached server exits with its run, so without this a client could
+        see the connection close before the terminal status that explains it.
+        The wait is bounded: a client that stopped reading cannot hold the
+        server open.
+        """
+        transport.wait_until_delivered(self.api.latest_sequence, DETACHED_DRAIN_TIMEOUT_SECONDS)
 
     def shutdown(self) -> None:
         """Request a clean shutdown of a detached or read-only server."""

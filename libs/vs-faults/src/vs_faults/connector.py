@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from vs_faults.plan import Boundary, ClusterFault, ClusterOperation, FaultPlan
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 _STATE_FILE = "state.json"
 _LOCK_FILE = "lock"
@@ -90,7 +90,24 @@ def _forward(inner: Sequence[str], request: dict[str, object]) -> dict[str, obje
 def handle(
     plan: FaultPlan, state_dir: Path, inner: Sequence[str], request: dict[str, object]
 ) -> dict[str, object]:
-    """Answer one connector request, injecting the fault ``plan`` schedules for it."""
+    """Answer one connector request, injecting the fault ``plan`` schedules for it.
+
+    A request the plan leaves alone is forwarded to the ``inner`` connector command.
+    """
+    return handle_with(plan, state_dir, lambda forwarded: _forward(inner, forwarded), request)
+
+
+def handle_with(
+    plan: FaultPlan,
+    state_dir: Path,
+    forward: Callable[[dict[str, object]], dict[str, object]],
+    request: dict[str, object],
+) -> dict[str, object]:
+    """Answer one connector request like :func:`handle`, forwarding through a callable.
+
+    A caller that holds the connector in process (the Fake cluster) passes it as
+    ``forward`` and pays for no connector process per request.
+    """
     operation, tokens = classify(request)
     state_dir.mkdir(parents=True, exist_ok=True)
     with (state_dir / _LOCK_FILE).open("a") as lock:
@@ -123,7 +140,7 @@ def handle(
         path.write_text(json.dumps(state))
     if response is not None:
         return response
-    response = _forward(inner, request)
+    response = forward(request)
     if fault is ClusterFault.WRONG_STATE and operation in _WRONG:
         response = {**response, "stdout": _WRONG[operation]}
     return response

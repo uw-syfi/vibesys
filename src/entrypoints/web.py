@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import shutil
-import subprocess
 import sys
 from http import HTTPStatus
 from http.client import HTTPConnection
@@ -31,13 +31,13 @@ from server.runtime import (
     WebPortState,
 )
 from vs_project.api import Project
-from vs_sim.api import OsThreads
+from vs_sim.api import InheritedStdioLauncher, OsThreads, run_foreground
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from entrypoints.server import WebGatewayPortEffects, WebGatewayStopEffects
-    from vs_sim.api import Threads
+    from vs_sim.api import ForegroundLauncher, Threads
 
 _LIVE_PORT = 8765
 _DEV_PORT = 5173
@@ -138,13 +138,27 @@ def _ssh() -> str:
     return executable
 
 
-def _run_dev(args: argparse.Namespace, root: Path) -> int:
+def _run_foreground(
+    children: ForegroundLauncher | None,
+    argv: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> int:
+    """Run *argv* on the terminal until it exits and return its status."""
+    launcher = InheritedStdioLauncher() if children is None else children
+    return asyncio.run(run_foreground(launcher, argv, env=env, cwd=cwd))
+
+
+def _run_dev(
+    args: argparse.Namespace, root: Path, children: ForegroundLauncher | None = None
+) -> int:
     print(f"VibeSys replay UI: http://{args.host}:{args.port}", flush=True)  # noqa: T201  # lint-waiver: LW-101074 [T201]; expose the browser URL to the developer
-    return subprocess.run(  # noqa: S603  # lint-waiver: LW-101075 [S603]; launch the repository's fixed Vite development command
+    return _run_foreground(
+        children,
         [_pnpm(), "dev", "--host", args.host, "--port", str(args.port)],
         cwd=root / "clients" / "web",
-        check=False,
-    ).returncode
+    )
 
 
 def _live_command(  # noqa: PLR0913  # lint-waiver: LW-101077 [PLR0913]; keep independent live-launch options explicit at this composition boundary
@@ -214,15 +228,18 @@ class WebLiveEffects(Protocol):
 
 
 class _DefaultWebLiveEffects:
+    """Builds and launches on the terminal, through *children* (the real system by default)."""
+
+    def __init__(self, children: ForegroundLauncher | None = None) -> None:
+        self._children = children
+
     def build(self, root: Path) -> None:
-        subprocess.run(  # noqa: S603  # lint-waiver: LW-101081 [S603]; run the repository's fixed web bundle build command
-            [_pnpm(), "build"],
-            cwd=root / "clients" / "web",
-            check=True,
-        )
+        status = _run_foreground(self._children, [_pnpm(), "build"], cwd=root / "clients" / "web")
+        if status != 0:
+            raise SystemExit(f"vibesys web: the web bundle build failed with status {status}")  # noqa: TRY003  # lint-waiver: LW-101081 [TRY003]; report a failed bundle build as the command's failure
 
     def launch(self, command: list[str], root: Path, environment: dict[str, str]) -> int:
-        return subprocess.run(command, cwd=root, env=environment, check=False).returncode  # noqa: S603  # lint-waiver: LW-101082 [S603]; launch the existing server entrypoint with validated CLI arguments
+        return _run_foreground(self._children, command, cwd=root, env=environment)
 
     def wait_for_record(self, instance: Path) -> WebInstanceRecord:
         return _wait_for_record(instance)
@@ -322,7 +339,7 @@ def _browser_url(origin: str, gateway_url: str) -> str:
     )
 
 
-def _run_tunnel(args: argparse.Namespace) -> int:
+def _run_tunnel(args: argparse.Namespace, children: ForegroundLauncher | None = None) -> int:
     parsed = urlsplit(args.url)
     remote_port = parsed.port
     if remote_port is None:
@@ -335,10 +352,9 @@ def _run_tunnel(args: argparse.Namespace) -> int:
     local_url, _ = _local_url(args.url, local_port)
     print(f"Open locally: {local_url}", flush=True)  # noqa: T201  # lint-waiver: LW-101093 [T201]; expose the forwarded capability URL to the operator
     print(f"Browser harness URL: {_browser_url(args.browser_origin, args.url)}", flush=True)  # noqa: T201  # lint-waiver: LW-101094 [T201]; expose the local browser harness URL to the operator
-    return subprocess.run(  # noqa: S603  # lint-waiver: LW-101095 [S603]; run the SSH forwarding command with validated endpoint arguments
-        [_ssh(), "-N", "-L", f"{local_port}:127.0.0.1:{remote_port}", args.host],
-        check=False,
-    ).returncode
+    return _run_foreground(
+        children, [_ssh(), "-N", "-L", f"{local_port}:127.0.0.1:{remote_port}", args.host]
+    )
 
 
 class WebPortStatusInspector(Protocol):
@@ -511,16 +527,16 @@ def _port_stop_message(result: GatewayPortStopResult) -> str:
     return f"Refused to signal the listener on {authority}. {_port_status_message(observation)}"
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Run a web UI development or operator helper."""
+def main(argv: list[str] | None = None, children: ForegroundLauncher | None = None) -> int:
+    """Run a web UI development or operator helper; *children* starts its terminal processes."""
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
     root = _repository_root()
     if args.command == "dev":
-        return _run_dev(args, root)
+        return _run_dev(args, root, children)
     if args.command == "live":
-        return _run_live(args, root)
+        return _run_live(args, root, _DefaultWebLiveEffects(children))
     if args.command == "tunnel":
-        return _run_tunnel(args)
+        return _run_tunnel(args, children)
     if args.command == "status":
         return _run_status(args)
     if args.command == "rotate":

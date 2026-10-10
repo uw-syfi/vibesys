@@ -34,7 +34,10 @@ class BlockedRuntime:
 
     def drive(self, _request: object) -> None:
         async def serve_forever() -> None:
-            print("driving", flush=True)  # noqa: T201  # lint-waiver: LW-155506 [T201]; the parent test reads the child's observations from stdout
+            # The threads the run owns (this one, the transports, the signal relay), by
+            # kernel id: the parent aims SIGTERM at these and at no library thread.
+            owned = " ".join(str(thread.native_id) for thread in threading.enumerate())
+            print(f"driving {owned}", flush=True)  # noqa: T201  # lint-waiver: LW-155506 [T201]; the parent test reads the child's observations from stdout
             await asyncio.sleep(0)
             await asyncio.Event().wait()
 

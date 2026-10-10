@@ -13,7 +13,7 @@
           "AnnAssign(target=Name(id='queued', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), value=Tuple(elts=[], ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='started', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), value=Tuple(elts=[], ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -30,7 +30,7 @@
           "Assign(targets=[Name(id='RECOVERED', ctx=Store())], value=Constant(value='recovered'))",
           "Assign(targets=[Name(id='RETRY', ctx=Store())], value=Constant(value='retry'))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -51,7 +51,7 @@
           "AnnAssign(target=Name(id='end', ctx=Store()), annotation=Name(id='SearchEnd', ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='stop', ctx=Store()), annotation=BinOp(left=Name(id='StopReason', ctx=Load()), op=BitOr(), right=Constant(value=None)), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -64,7 +64,7 @@
         "members": [
           "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -95,7 +95,7 @@
           "AnnAssign(target=Name(id='_turn_faults', ctx=Store()), annotation=Name(id='int', ctx=Load()), value=Constant(value=0), simple=1)",
           "AnnAssign(target=Name(id='limits', ctx=Store()), annotation=Name(id='HostLimits', ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -117,7 +117,7 @@
           "AnnAssign(target=Name(id='start_budget', ctx=Store()), annotation=Name(id='int', ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='turn_attempts', ctx=Store()), annotation=Name(id='int', ctx=Load()), value=Constant(value=1), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -130,7 +130,7 @@
         "members": [
           "AnnAssign(target=Name(id='item', ctx=Store()), annotation=Subscript(value=Name(id='WorkItem', ctx=Load()), slice=Name(id='P', ctx=Load()), ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -144,7 +144,7 @@
           "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='items', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Subscript(value=Name(id='WorkItem', ctx=Load()), slice=Name(id='P', ctx=Load()), ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -165,7 +165,7 @@
           "Assign(targets=[Name(id='STOPPED', ctx=Store())], value=Constant(value='stopped'))",
           "Assign(targets=[Name(id='WITHDRAWING', ctx=Store())], value=Constant(value='withdrawing'))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -179,7 +179,7 @@
           "AnnAssign(target=Name(id='code', ctx=Store()), annotation=Name(id='Refusal', ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='worker_id', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -195,7 +195,7 @@
           "Assign(targets=[Name(id='FINISHED', ctx=Store())], value=Constant(value='finished'))",
           "Assign(targets=[Name(id='STOPPED', ctx=Store())], value=Constant(value='stopped'))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -209,7 +209,7 @@
           "AnnAssign(target=Name(id='item', ctx=Store()), annotation=Subscript(value=Name(id='WorkItem', ctx=Load()), slice=Name(id='P', ctx=Load()), ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='withdrawal', ctx=Store()), annotation=Name(id='Withdrawal', ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -223,7 +223,7 @@
           "AnnAssign(target=Name(id='attempt', ctx=Store()), annotation=Name(id='Attempt', ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='item', ctx=Store()), annotation=Subscript(value=Name(id='WorkItem', ctx=Load()), slice=Name(id='P', ctx=Load()), ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -240,7 +240,7 @@
           "Assign(targets=[Name(id='TURN_FAULTS_EXHAUSTED', ctx=Store())], value=Constant(value='turn_faults_exhausted'))",
           "Assign(targets=[Name(id='WORKER_FAILED', ctx=Store())], value=Constant(value='worker_failed'))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -254,7 +254,7 @@
           "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='reason', ctx=Store()), annotation=Name(id='StopReason', ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -268,7 +268,7 @@
           "AnnAssign(target=Name(id='withdrawal', ctx=Store()), annotation=Name(id='Withdrawal', ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='worker_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -282,7 +282,7 @@
           "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='items', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Subscript(value=Name(id='WorkItem', ctx=Load()), slice=Name(id='P', ctx=Load()), ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -295,7 +295,7 @@
         "members": [
           "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -310,7 +310,7 @@
           "AnnAssign(target=Name(id='withdrawal', ctx=Store()), annotation=Name(id='Withdrawal', ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='worker_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -326,7 +326,7 @@
           "Assign(targets=[Name(id='CANCEL', ctx=Store())], value=Constant(value='cancel'))",
           "Assign(targets=[Name(id='PARK', ctx=Store())], value=Constant(value='park'))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -340,7 +340,7 @@
           "AnnAssign(target=Name(id='plan', ctx=Store()), annotation=Name(id='P', ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='worker_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -355,7 +355,7 @@
           "AnnAssign(target=Name(id='outcome', ctx=Store()), annotation=Name(id='WorkerOutcome', ctx=Load()), simple=1)",
           "AnnAssign(target=Name(id='worker_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -374,7 +374,7 @@
           "Assign(targets=[Name(id='REFUNDED', ctx=Store())], value=Constant(value='refunded'))",
           "Assign(targets=[Name(id='RETRYABLE', ctx=Store())], value=Constant(value='retryable'))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -391,7 +391,7 @@
           "AnnAssign(target=Name(id='terminal_failure', ctx=Store()), annotation=BinOp(left=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='evaluation_resume'), ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -411,7 +411,7 @@
           "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=Name(id='IntentStage', ctx=Load()), value=Attribute(value=Name(id='IntentStage', ctx=Load()), attr='PREPARED', ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -428,7 +428,7 @@
           "AnnAssign(target=Name(id='resume_revision', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -445,7 +445,7 @@
           "Assign(targets=[Name(id='CANCELLED', ctx=Store())], value=Constant(value='cancelled'))",
           "Assign(targets=[Name(id='PARKED', ctx=Store())], value=Constant(value='parked'))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -461,7 +461,7 @@
           "AnnAssign(target=Name(id='operation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -517,7 +517,7 @@
           "AnnAssign(target=Name(id='workload_digest', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='pattern', value=Constant(value='^[0-9a-f]{64}$'))]), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -542,7 +542,7 @@
           "Assign(targets=[Name(id='SUCCEEDED', ctx=Store())], value=Constant(value='succeeded'))",
           "Assign(targets=[Name(id='UNKNOWN', ctx=Store())], value=Constant(value='unknown'))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -564,7 +564,7 @@
           "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=BinOp(left=Name(id='EvaluationStage', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -590,7 +590,7 @@
           "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=BinOp(left=Name(id='EvaluationStage', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -610,7 +610,7 @@
           "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=Name(id='IntentStage', ctx=Load()), value=Attribute(value=Name(id='IntentStage', ctx=Load()), attr='PREPARED', ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -633,7 +633,7 @@
           "Assign(targets=[Name(id='RESUME', ctx=Store())], value=Constant(value='resume_agent_turn'))",
           "Assign(targets=[Name(id='TURN', ctx=Store())], value=Constant(value='turn'))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -651,7 +651,7 @@
           "Assign(targets=[Name(id='DISPATCHED', ctx=Store())], value=Constant(value='dispatched'))",
           "Assign(targets=[Name(id='PREPARED', ctx=Store())], value=Constant(value='prepared'))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -683,7 +683,7 @@
           "AnnAssign(target=Name(id='terminal_failure', ctx=Store()), annotation=BinOp(left=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='evaluation_resume'), ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -708,7 +708,7 @@
           "AnnAssign(target=Name(id='stopped', ctx=Store()), annotation=Name(id='bool', ctx=Load()), value=Constant(value=False), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -734,7 +734,7 @@
           "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=Name(id='IntentStage', ctx=Load()), value=Attribute(value=Name(id='IntentStage', ctx=Load()), attr='PREPARED', ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -750,7 +750,7 @@
           "AnnAssign(target=Name(id='intent', ctx=Store()), annotation=Name(id='LifecycleIntent', ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -765,7 +765,7 @@
         "members": [
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -785,7 +785,7 @@
           "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=Name(id='IntentStage', ctx=Load()), value=Attribute(value=Name(id='IntentStage', ctx=Load()), attr='PREPARED', ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -804,7 +804,7 @@
           "AnnAssign(target=Name(id='reached_at_s', ctx=Store()), annotation=Name(id='NonnegativeSeconds', ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -822,7 +822,7 @@
           "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='deadline_reached'), ctx=Load()), value=Constant(value='deadline_reached'), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -846,7 +846,7 @@
           "AnnAssign(target=Name(id='stopped', ctx=Store()), annotation=Name(id='bool', ctx=Load()), value=Constant(value=True), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -865,7 +865,7 @@
           "AnnAssign(target=Name(id='outcome', ctx=Store()), annotation=Name(id='EvaluationOutcome', ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -898,7 +898,7 @@
           "AnnAssign(target=Name(id='workload_digest', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='pattern', value=Constant(value='^[0-9a-f]{64}$'))]), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -916,7 +916,7 @@
           "AnnAssign(target=Name(id='resolved_cancelled_handles', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), value=Tuple(elts=[], ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -934,7 +934,7 @@
           "AnnAssign(target=Name(id='scope_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -955,7 +955,7 @@
           "AnnAssign(target=Name(id='unresolved', ctx=Store()), annotation=Name(id='bool', ctx=Load()), value=Constant(value=False), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -972,7 +972,7 @@
           "AnnAssign(target=Name(id='scope_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -989,7 +989,7 @@
           "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='worker_awaiting_evaluation'), ctx=Load()), value=Constant(value='worker_awaiting_evaluation'), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -1015,7 +1015,7 @@
           "AnnAssign(target=Name(id='turns', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), value=Constant(value=0), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid'))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -1036,7 +1036,7 @@
           "AnnAssign(target=Name(id='sequence', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='gt', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid'))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -1063,7 +1063,7 @@
           "AnnAssign(target=Name(id='workstreams', ctx=Store()), annotation=Subscript(value=Name(id='list', ctx=Load()), slice=Name(id='DynamicWorkstream', ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='list', ctx=Load()))]), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='validate_assignment', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -1100,7 +1100,7 @@
           "AnnAssign(target=Name(id='verified', ctx=Store()), annotation=BinOp(left=Name(id='VerifiedCandidate', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid'))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -1128,7 +1128,7 @@
           "AnnAssign(target=Name(id='revision', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -1145,7 +1145,7 @@
           "AnnAssign(target=Name(id='revision', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='validate_assignment', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -1167,7 +1167,7 @@
           "AnnAssign(target=Name(id='text', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1)), keyword(arg='max_length', value=Constant(value=2000))])], ctx=Load()), ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -1191,7 +1191,7 @@
           "AnnAssign(target=Name(id='revision', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -1208,7 +1208,7 @@
           "AnnAssign(target=Name(id='spent', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), value=Constant(value=0), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {
@@ -1230,7 +1230,7 @@
           "Assign(targets=[Name(id='PENDING', ctx=Store())], value=Constant(value='pending'))",
           "Assign(targets=[Name(id='REVIEWED', ctx=Store())], value=Constant(value='reviewed'))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {

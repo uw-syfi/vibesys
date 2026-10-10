@@ -544,6 +544,11 @@ class WebSocketGateway:
             loop.run_until_complete(self._serve_until_stopped(attempt))
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-101013 [BLE001]; propagate any event-loop startup failure through the owning thread
             attempt.startup_error = error
+            # Release before reporting: `start` raises as soon as `ready` is set, and a
+            # caller that retries then must find the claim free. Releasing afterwards
+            # left a window in which `start` had returned while this thread still held
+            # the claim (the second releaser saw it already detached and returned early).
+            self._release_attempt_resources(attempt)
             attempt.ready.set()
         finally:
             loop.close()
