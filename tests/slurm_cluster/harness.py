@@ -1,10 +1,10 @@
-"""Open the ``slurm`` and ``slurm-gpu`` run environments against a real cluster.
+"""Open the ``slurm``, ``slurm-local`` and ``slurm-gpu`` run environments against a real cluster.
 
-Both environments are opened through ``open_run_environment`` exactly as a run
+The environments are opened through ``open_run_environment`` exactly as a run
 opens them. What differs from production is only what the tier cannot have on a
 single host: the agent image carries no agent CLI, and the host reaches Slurm
 through the operator-configured command prefixes (``ssh`` for ``slurm``, the
-login-node shim for ``slurm-gpu``). The agent side is a real Docker container;
+login-node shim for ``slurm-gpu`` and for the ``slurm-local`` shell). The agent side is a real Docker container;
 tests drive it with scripted commands through the session's sandbox.
 """
 
@@ -186,23 +186,27 @@ def remove_run_containers(run_id: str) -> None:
         docker("rm", "-f", "-v", *ids, check=False)
 
 
-def _slurm_config(cluster: SlurmCluster) -> str:
-    ssh = json.dumps(list(cluster.ssh_command()))
-    return textwrap.dedent(
-        f"""\
-        [slurm]
-        name = "vibesys-test"
-        remote_workspace_root = "{cluster.root}/remote"
-        poll_interval_seconds = 0.2
+def _slurm_config(cluster: SlurmCluster, shim: Path | None) -> str:
+    """The ``slurm`` configuration: the SSH transport, or the local one when *shim* is given."""
+    if shim is None:
+        ssh = json.dumps(list(cluster.ssh_command()))
+        transport = f'kind = "ssh"\nhost = "{cluster.ssh_host()}"\nssh_command = {ssh}'
+    else:
+        shell = json.dumps([str(shim), "bash", "-c"])
+        transport = f'kind = "local"\nshell_command = {shell}'
+    return (
+        textwrap.dedent(
+            f"""\
+            [slurm]
+            name = "vibesys-test"
+            remote_workspace_root = "{cluster.root}/remote"
+            poll_interval_seconds = 0.2
 
-        [slurm.transport]
-        kind = "ssh"
-        host = "{cluster.ssh_host()}"
-        ssh_command = {ssh}
-
-        [vibesys]
-        remote_python = "/usr/bin/python3"
-        """
+            [slurm.transport]
+            """
+        )
+        + transport
+        + '\n\n[vibesys]\nremote_python = "/usr/bin/python3"\n'
     )
 
 
@@ -225,11 +229,16 @@ def _slurm_gpu_config(shim: Path) -> str:
 def make_environment(
     kind: str, cluster: SlurmCluster, directory: Path, image_id: str
 ) -> RunEnvironment:
-    """Return the *kind* (``slurm`` or ``slurm-gpu``) environment configured for *cluster*."""
+    """Return the *kind* environment configured for *cluster*.
+
+    The kinds are ``slurm`` (SSH transport), ``slurm-local`` (the same environment
+    over the local transport, with the login-node shim as the shell) and ``slurm-gpu``.
+    """
     docker = DockerEnvironmentConfig(build_runner=PrebuiltImageRunner(image_id))
-    if kind == "slurm":
+    if kind in ("slurm", "slurm-local"):
         config = directory / "slurm.toml"
-        config.write_text(_slurm_config(cluster), encoding="utf-8")
+        shim = cluster.write_login_shim(directory) if kind == "slurm-local" else None
+        config.write_text(_slurm_config(cluster, shim), encoding="utf-8")
         return SlurmEnvironment(config, docker=docker)
     config = directory / "slurm-gpu.toml"
     config.write_text(_slurm_gpu_config(cluster.write_login_shim(directory)), encoding="utf-8")

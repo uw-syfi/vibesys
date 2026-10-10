@@ -25,7 +25,7 @@ def _hold(run: OpenRun) -> str:
 
 
 def _broker_sockets(run: OpenRun) -> list[Path]:
-    """Every host socket the run exposed: the container's broker, and the SSH transport's."""
+    """Every host socket the run exposed: the container's broker, and the SSH transport's, if any."""
     inspected = docker("inspect", "--format", "{{json .Config.Env}}", run.container_id)
     env = dict(entry.split("=", 1) for entry in json.loads(inspected.stdout))
     sockets = [Path(env["VIBESYS_COMMAND_BROKER_SOCKET"])]
@@ -35,7 +35,7 @@ def _broker_sockets(run: OpenRun) -> list[Path]:
     return sockets
 
 
-@pytest.mark.parametrize("kind", ["slurm", "slurm-gpu"])
+@pytest.mark.parametrize("kind", ["slurm", "slurm-local", "slurm-gpu"])
 def test_stopping_the_agent_container_cancels_its_running_job(
     kind: str, slurm_cluster: SlurmCluster, workdir: Path, agent_image_id: str
 ) -> None:
@@ -58,13 +58,14 @@ def _broker_sockets_after_kill(run: OpenRun) -> list[Path]:
     return _broker_sockets(run)
 
 
-@pytest.mark.parametrize("kind", ["slurm", "slurm-gpu"])
+@pytest.mark.parametrize("kind", ["slurm", "slurm-local", "slurm-gpu"])
 def test_closing_the_session_cancels_jobs_and_removes_brokers_sockets_and_containers(
     kind: str, slurm_cluster: SlurmCluster, workdir: Path, agent_image_id: str
 ) -> None:
     with open_run(kind, slurm_cluster, workdir, agent_image_id) as run:
         sockets = _broker_sockets(run)
-        assert len(sockets) == 2 if kind == "slurm" else len(sockets) == 1
+        # The transport broker exists only for SSH: the local transport has none.
+        assert len(sockets) == {"slurm": 2, "slurm-local": 1, "slurm-gpu": 1}[kind]
         assert all(socket.exists() for socket in sockets)
         assert run_container_ids(run.run_id)
         pending = in_background(lambda: run.agent(_hold(run)))
