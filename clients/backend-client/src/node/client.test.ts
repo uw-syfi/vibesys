@@ -713,6 +713,66 @@ describe('ServerClient', () => {
     );
   });
 
+  it('close() rejects a subscription whose handshake is still pending', async () => {
+    let connections = 0;
+    const subscriptionAccepted = new Signal();
+    await withServer(
+      socket => {
+        connections += 1;
+        socket.on('error', () => undefined);
+        if (connections === 2) subscriptionAccepted.fire();
+      },
+      async client => {
+        let outcome: unknown;
+        const pending = client.subscribe(0, () => undefined, noopDisconnect);
+        void pending.then(
+          () => {
+            outcome = 'resolved';
+          },
+          error => {
+            outcome = error;
+          },
+        );
+        await subscriptionAccepted.fired;
+
+        await client.close();
+        await Promise.resolve();
+
+        expect(outcome).toBeInstanceOf(BackendClientError);
+        expect(outcome).toMatchObject({
+          kind: 'disconnected',
+          retryable: true,
+          message: 'Client closed during subscription',
+        });
+      },
+      {closeGraceMs: 30},
+    );
+  });
+
+  it('rejects subscribe after close without opening another socket', async () => {
+    let connections = 0;
+    await withServer(
+      socket => {
+        connections += 1;
+        socket.on('error', () => undefined);
+        if (connections > 1) socket.destroy();
+      },
+      async client => {
+        await client.close();
+
+        const rejected = client.subscribe(0, () => undefined, noopDisconnect);
+
+        await expect(rejected).rejects.toMatchObject({
+          name: 'BackendClientError',
+          kind: 'disconnected',
+          retryable: true,
+          message: 'Client is closed',
+        });
+        expect(connections).toBe(1);
+      },
+    );
+  });
+
   it('close() resolves within the grace deadline when the server never closes', async () => {
     socketPath = join('/tmp', `vs-${randomUUID().slice(0, 8)}.sock`);
     // Accept the connection and then ignore it forever: never respond, never end.
