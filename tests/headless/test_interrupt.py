@@ -22,7 +22,7 @@ from vibesys.api import (
     RunStopped,
 )
 from vibesys.api.testing import FakeRunHandle
-from vs_sim.api.testing import arrival
+from vs_sim.api.testing import FakeSignalSource, arrival
 
 
 class _InterruptibleSession:
@@ -68,39 +68,32 @@ async def test_one_interrupt_stops_and_drains_the_run_before_headless_exits() ->
 
 
 class _SignalledSession(_InterruptibleSession):
-    """Session whose run receives a real SIGINT once it is running."""
+    """Session whose run is interrupted by a delivered SIGINT once it is running."""
+
+    def __init__(self, signals: FakeSignalSource) -> None:
+        super().__init__()
+        self._signals = signals
 
     async def await_result(self) -> RunResult:
         self.started.set()
-        signal.raise_signal(signal.SIGINT)
+        assert self._signals.deliver(signal.SIGINT), "supervise installed no SIGINT handler"
         await self.stop_requested.wait()
         return RunResult(run_id="signalled", loop="test", succeeded=False, status=RunStatus.STOPPED)
 
 
-def _replacement_handler(signum: int, frame: object) -> None:
-    """Stand-in for an import-time SIGINT handler that raises directly."""
-    del signum, frame
-    raise KeyboardInterrupt
+@pytest.mark.asyncio
+async def test_ctrl_c_drains_the_run_and_returns_its_stopped_result() -> None:
+    signals = FakeSignalSource()
+    session = _SignalledSession(signals)
+    handle = FakeRunHandle("signalled")
+    handle.bind(cast("RunSession", session))
+    handle.start()
 
+    result = await supervise(handle, signals=signals)
 
-def test_ctrl_c_drains_the_run_even_when_a_dependency_replaced_the_sigint_handler() -> None:
-    """r6: the Docker backend's import-time handler made Ctrl-C exit without a stop."""
-    previous = signal.signal(signal.SIGINT, _replacement_handler)
-    try:
-        session = _SignalledSession()
-
-        async def execute() -> None:
-            handle = FakeRunHandle("signalled")
-            handle.bind(cast("RunSession", session))
-            handle.start()
-            result = await supervise(handle)
-            assert result.status is RunStatus.STOPPED
-
-        asyncio.run(execute())
-        assert session.stop_calls == 1
-        assert signal.getsignal(signal.SIGINT) is _replacement_handler
-    finally:
-        signal.signal(signal.SIGINT, previous)
+    assert result.status is RunStatus.STOPPED
+    assert session.stop_calls == 1
+    assert not signals.handles(signal.SIGINT)
 
 
 @pytest.mark.asyncio

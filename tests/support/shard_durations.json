@@ -438,7 +438,7 @@
  "tests/headless/test_format.py": 0.02,
  "tests/headless/test_interrupt.py": 0.02,
  "tests/headless/test_render.py": 0.2,
- "tests/headless/test_signals_cancel_slurm_jobs.py": 45.41,
+ "tests/e2e/test_signals_cancel_slurm_jobs.py": 45.41,
  "tests/minimal_container/test_agent_clis.py": 0.0,
  "tests/minimal_container/test_agent_identity.py": 0.0,
  "tests/minimal_container/test_broker_clients.py": 0.0,

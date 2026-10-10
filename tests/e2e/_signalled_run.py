@@ -1,6 +1,6 @@
 """A headless run, for a test to signal, whose orchestration awaits a Slurm job.
 
-``python -m tests.headless._signalled_run PROJECT SLURM_CONFIG`` runs the
+``python -m tests.e2e._signalled_run PROJECT SLURM_CONFIG`` runs the
 headless supervisor over the product session, rendering to stdout, with a
 policy that awaits one benchmark on the configured (Fake) Slurm cluster. A
 stop does not interrupt the benchmark, as a stop does not interrupt in-flight
