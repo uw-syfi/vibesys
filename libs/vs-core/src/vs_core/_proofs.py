@@ -159,9 +159,12 @@ class Mismatch(_ExplicitVerdict):
 type Verdict[T] = Proven[T] | Missing | Mismatch
 
 
+_FIELD_ORDER = {field: position for position, field in enumerate(ProofField)}
+
+
 def _identity_mismatch(checks: tuple[tuple[ProofField, object, object], ...]) -> Mismatch | None:
     """Compare independent fields in declared order without verdict truthiness."""
-    ordered = sorted(checks, key=lambda check: tuple(ProofField).index(check[0]))
+    ordered = sorted(checks, key=lambda check: _FIELD_ORDER[check[0]])
     return next(
         (Mismatch(field) for field, actual, expected in ordered if actual != expected), None
     )
