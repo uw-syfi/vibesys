@@ -130,6 +130,11 @@ path = "examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit"
 layout = "legacy"
 
 [[example]]
+path = "examples/model-serving/Llama-3.2-3B-Instruct-MLX-4bit-shared-prefix"
+layout = "task"
+tasks = ["shared-prefix"]
+
+[[example]]
 path = "examples/model-serving/deepseek-v3.2-8xb200"
 layout = "legacy"
 
