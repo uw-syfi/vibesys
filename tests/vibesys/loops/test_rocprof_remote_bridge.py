@@ -4,8 +4,8 @@ import contextlib
 import json
 import os
 import sys
+import threading
 from dataclasses import dataclass, field
-from threading import Event, Thread
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,7 +18,7 @@ from vs_sandbox.api.slurm import (
     load_slurm_policy,
     write_slurm_capture_plan,
 )
-from vs_sim.api.testing import HANG_GUARD_S, join_or_fail, start_thread, wait_until_started_sync
+from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_or_fail, wait_until_started_sync
 from vs_slurm.api import (
     SlurmError,
     SlurmJobRequest,
@@ -83,17 +83,26 @@ class _FakeCaptureCluster(FakeCluster):
         return super().submit(request, operation_id=operation_id)
 
 
+def _cancel() -> threading.Event:
+    """A fresh cancel token.
+
+    The bridge is a stdlib-only resource that runs beside the profiler, so its signature is
+    ``threading.Event`` and cannot name the ``vs_sim`` interface.
+    """
+    return threading.Event()
+
+
 class _BlockingCaptureCluster(_FakeCaptureCluster):
     def __init__(self) -> None:
         super().__init__()
-        self.entered = Event()
-        self.release = Event()
+        self.entered = _cancel()
+        self.release = _cancel()
 
     def submit(
         self, request: SlurmJobRequest | SlurmBatchRequest, *, operation_id: str
     ) -> ClusterSubmitOutcome:
         self.entered.set()
-        self.release.wait()
+        wait_or_fail(self.release, "the held capture submission to be released")
         return super().submit(request, operation_id=operation_id)
 
 
@@ -228,7 +237,7 @@ def test_remote_capture_uses_configured_python_and_setup_script(tmp_path: Path) 
     runner = _FakeCaptureCluster()
     bridge = _bridge(tmp_path, runner)
 
-    output = bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+    output = bridge.capture("stats", _Lifecycle(), {}, cancel_event=_cancel())
 
     request = runner.requests[0]
     assert request.command[:2] == (
@@ -248,10 +257,10 @@ def test_a_remote_capture_whose_workload_did_not_run_is_a_typed_failure(
     bridge = _bridge(tmp_path, _FakeCaptureCluster(status))
 
     if status in capture_runtime.WORKLOAD_RAN_STATUSES:
-        assert bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        assert bridge.capture("stats", _Lifecycle(), {}, cancel_event=_cancel())
         return
     with pytest.raises(capture_runtime.CaptureFailedError, match=f"status={status}"):
-        bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        bridge.capture("stats", _Lifecycle(), {}, cancel_event=_cancel())
 
 
 def test_remote_capture_rejects_overlap_without_submitting_another_job(
@@ -262,14 +271,14 @@ def test_remote_capture_rejects_overlap_without_submitting_another_job(
     outputs: list[str] = []
 
     def capture_first() -> None:
-        outputs.append(bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event()))
+        outputs.append(bridge.capture("stats", _Lifecycle(), {}, cancel_event=_cancel()))
 
     worker = start_thread(capture_first)
     wait_until_started_sync(runner.entered, worker)
 
     try:
         with pytest.raises(RuntimeError) as failed:
-            bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+            bridge.capture("stats", _Lifecycle(), {}, cancel_event=_cancel())
         overlap = getattr(failed.value, "report", None)
     finally:
         runner.release.set()
@@ -288,9 +297,9 @@ def test_remote_capture_releases_ownership_after_failure(tmp_path: Path) -> None
     bridge = _bridge(tmp_path, runner)
 
     with pytest.raises(_SubmissionError):
-        bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        bridge.capture("stats", _Lifecycle(), {}, cancel_event=_cancel())
 
-    output = bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+    output = bridge.capture("stats", _Lifecycle(), {}, cancel_event=_cancel())
 
     assert output == f"captured at {tmp_path / 'profiles'}/capture-1"
 
@@ -344,7 +353,7 @@ remote_python = "/remote/venv/bin/python"
     bridge = RemoteCaptureBridge(
         config_path, workspace, profile_root=tmp_path / "profiles", evaluator_plan=plan_path
     )
-    cancel = Event()
+    cancel = _cancel()
     failures: list[BaseException] = []
 
     def capture() -> None:
@@ -358,12 +367,11 @@ remote_python = "/remote/venv/bin/python"
             os.write(descriptor, b"none")
             os.close(descriptor)
 
-    worker = Thread(target=capture)
+    worker = start_thread(capture)
     try:
-        worker.start()
         submitted = (cluster / SUBMITTED_FILE).read_text(encoding="utf-8")
         cancel.set()
-        join_or_fail(worker)
+        worker.result(HANG_GUARD_S)
     finally:
         broker.close()
 
@@ -380,10 +388,10 @@ def test_remote_capture_manifest_cannot_turn_failure_into_a_profile(
         capture_runtime.CaptureStatus.OK,
         capture_runtime.CaptureStatus.KILLED_AFTER_GRACE,
     ):
-        assert bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        assert bridge.capture("stats", _Lifecycle(), {}, cancel_event=_cancel())
     else:
         with pytest.raises(RuntimeError, match=f"status={status.value}") as failed:
-            bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+            bridge.capture("stats", _Lifecycle(), {}, cancel_event=_cancel())
         assert type(failed.value).__name__ == "CaptureFailedError"
 
 
@@ -397,7 +405,7 @@ def test_ambiguous_capture_keeps_artifacts_without_publishing_a_profile(tmp_path
     cluster = _FakeCaptureCluster(collection_failure="allocation metadata unavailable")
     bridge = _bridge(tmp_path, cluster)
     with pytest.raises(ValueError, match="outcome is unresolved"):
-        bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        bridge.capture("stats", _Lifecycle(), {}, cancel_event=_cancel())
     (operation_id,) = cluster.operation_ids
     (request,) = cluster.requests
     assert request.file_artifacts[0].remote_path == f".vibesys-rocprof-result-{operation_id}.json"

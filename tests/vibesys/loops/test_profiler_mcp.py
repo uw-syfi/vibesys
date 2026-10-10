@@ -14,7 +14,6 @@ import select
 import sqlite3
 import sys
 import textwrap
-import threading
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from pathlib import Path
 from types import ModuleType
@@ -22,6 +21,9 @@ from typing import Protocol
 
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
+
+from vs_sim.api import Event, OsThreads
+from vs_sim.api.testing import wait_or_fail
 
 
 class _ToolInfo(Protocol):
@@ -1258,7 +1260,7 @@ class _PidChannel:
         self.path = path
         self._fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
         self._teardown_fd: int | None = None
-        self._lock = threading.Lock()
+        self._lock = OsThreads().lock()
 
     def retain_until_worker_returns(self) -> None:
         """Keep EOF from arriving until the injected worker has returned."""
@@ -1325,19 +1327,19 @@ class _WorkerTracker:
         self._run_cancellable = run_cancellable
         self._on_idle = on_idle
         self._in_flight = 0
-        self._lock = threading.Lock()
-        self._started = threading.Event()
+        self._lock = OsThreads().lock()
+        self._started = OsThreads().event()
 
     def wait_started(self) -> None:
         """Wait for the real cancellable worker to enter its blocking function."""
-        self._started.wait()
+        wait_or_fail(self._started, "the cancellable worker to start")
 
     async def __call__(
         self,
         fn: Callable[..., str],
         /,
         *args: object,
-        cancel_event: threading.Event,
+        cancel_event: Event,
         **kwargs: object,
     ) -> str:
         with self._lock:

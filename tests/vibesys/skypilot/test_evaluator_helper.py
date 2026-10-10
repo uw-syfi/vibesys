@@ -8,10 +8,9 @@ import os
 import socket
 import stat
 import tempfile
-import threading
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 
@@ -27,7 +26,11 @@ from vs_sandbox.api.skypilot import (
 from vs_sandbox.skypilot_evaluator import (
     run_evaluator,
 )  # test-isolation: remote helper execution is tested directly.
-from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_or_fail
+
+if TYPE_CHECKING:
+    from concurrent.futures import Future
 
 type _Frame = ArtifactFrame | ErrorFrame | OutputFrame | ResultFrame
 
@@ -36,14 +39,14 @@ def _serve_frames(
     socket_path: Path,
     frames: list[_Frame],
     invocation_ids: list[str] | None = None,
-) -> threading.Thread:
+) -> Future[None]:
     """Serve one bridge conversation on ``socket_path``, then exit.
 
     ``ready`` is released from a ``finally`` so a server thread that dies
     during setup surfaces as a connection failure in the test rather than
     parking the main thread on ``ready.wait()`` for the life of the run.
     """
-    ready = threading.Event()
+    ready = OsThreads().event()
 
     def serve() -> None:
         try:
@@ -69,9 +72,8 @@ def _serve_frames(
         finally:
             ready.set()
 
-    thread = threading.Thread(target=serve)
-    thread.start()
-    ready.wait()
+    thread = start_thread(serve)
+    wait_or_fail(ready, "the server to listen")
     return thread
 
 
@@ -100,7 +102,7 @@ def test_helper_relays_streams_and_maps_terminal_status(
         run_evaluator("accuracy", path, state_dir=tmp_path, stdout=stdout, stderr=stderr)
         == expected
     )
-    join_or_fail(thread)
+    thread.result(HANG_GUARD_S)
     assert stdout.getvalue() == "out\n"
     assert stderr.getvalue() == "err\n"
 
@@ -114,13 +116,13 @@ def test_helper_reports_bridge_error_as_transport_failure(socket_dir: Path, tmp_
         run_evaluator("benchmark", path, state_dir=tmp_path, stdout=io.StringIO(), stderr=stderr)
         == 2
     )
-    join_or_fail(thread)
+    thread.result(HANG_GUARD_S)
     assert "SkyPilotTimeoutError" in stderr.getvalue()
 
 
 def test_helper_rejects_incomplete_terminal_result(socket_dir: Path, tmp_path: Path) -> None:
     path = socket_dir / "bridge.sock"
-    ready = threading.Event()
+    ready = OsThreads().event()
 
     def serve() -> None:
         try:
@@ -136,16 +138,15 @@ def test_helper_rejects_incomplete_terminal_result(socket_dir: Path, tmp_path: P
         finally:
             ready.set()
 
-    raw_thread = threading.Thread(target=serve)
-    raw_thread.start()
-    ready.wait()
+    raw_thread = start_thread(serve)
+    wait_or_fail(ready, "the server to listen")
     stderr = io.StringIO()
 
     assert (
         run_evaluator("accuracy", path, state_dir=tmp_path, stdout=io.StringIO(), stderr=stderr)
         == 2
     )
-    join_or_fail(raw_thread)
+    raw_thread.result(HANG_GUARD_S)
     assert "invalid result" in stderr.getvalue()
 
 
@@ -181,7 +182,7 @@ def test_helper_materializes_narrow_framework_result_artifact(
             )
             == 0
         )
-        join_or_fail(thread)
+        thread.result(HANG_GUARD_S)
         assert output_path.read_text() == '{"score": 1}'
     finally:
         output_path.unlink(missing_ok=True)
@@ -199,7 +200,7 @@ def test_pending_invocation_identity_survives_helper_process_state_reload(
         )
         == 2
     )
-    join_or_fail(first_thread)
+    first_thread.result(HANG_GUARD_S)
     pending_files = list(tmp_path.glob("pending-*"))
     assert len(pending_files) == 1
     second_path = tmp_path / "second.sock"
@@ -214,7 +215,7 @@ def test_pending_invocation_identity_survives_helper_process_state_reload(
         )
         == 0
     )
-    join_or_fail(second_thread)
+    second_thread.result(HANG_GUARD_S)
 
     assert invocation_ids[0] == invocation_ids[1]
     assert not pending_files[0].exists()
@@ -245,7 +246,7 @@ def test_acknowledged_pending_invocation_removal_is_directory_durable(
         )
         == 0
     )
-    join_or_fail(thread)
+    thread.result(HANG_GUARD_S)
 
     assert list(tmp_path.glob("pending-*")) == []
     assert fsynced == [tmp_path, tmp_path]
@@ -263,7 +264,7 @@ def test_pending_invocation_recovers_an_incomplete_token_file(
         )
         == 2
     )
-    join_or_fail(first_thread)
+    first_thread.result(HANG_GUARD_S)
     pending_path = next(tmp_path.glob("pending-*"))
     pending_path.write_text("partial", encoding="utf-8")
 
@@ -284,7 +285,7 @@ def test_pending_invocation_recovers_an_incomplete_token_file(
         )
         == 0
     )
-    join_or_fail(recovered_thread)
+    recovered_thread.result(HANG_GUARD_S)
     assert len(recovered_ids[0]) == 32
     assert recovered_ids[0] != first_ids[0]
     assert not pending_path.exists()

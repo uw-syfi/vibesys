@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import multiprocessing
 import os
-import threading
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
@@ -23,7 +22,8 @@ from vs_agent.api import AgentInvocationState, AgentSessionKey, Completed
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_sandbox.api import create_compute_backend
-from vs_sim.api.testing import join_or_fail
+from vs_sim.api import Event, OsThreads
+from vs_sim.api.testing import join_or_fail, wait_or_fail
 from vs_slurm.fake_connector import SUBMITTED_FILE, active_jobs, pending_jobs, release_jobs
 
 from ._harness import (
@@ -108,15 +108,13 @@ def _discard_event(event: CoreEvent) -> None:
     del event
 
 
-def _agents(
-    loop_input: LoopInput, phase: _Phase, baseline_ready: threading.Event
-) -> ScriptedAgents:
+def _agents(loop_input: LoopInput, phase: _Phase, baseline_ready: Event) -> ScriptedAgents:
     agents = ScriptedAgents()
     if phase in {"pending", "settle-resume"}:
         agents.plan(portfolio(workstream("held")))
 
         def submit(agent: Turn) -> dict[str, object]:
-            baseline_ready.wait()
+            wait_or_fail(baseline_ready, "the baseline to be ready")
             build_project_path_policy(loop_input.root, evaluator_source=None).resolve(
                 agent.workspace
             )
@@ -145,7 +143,7 @@ def _agents(
 def _execute(
     loop_input: LoopInput, phase: _Phase, signal: Connection | None = None
 ) -> tuple[RunResult, ScriptedAgents]:
-    baseline_ready = threading.Event()
+    baseline_ready = OsThreads().event()
     agents = _agents(loop_input, phase, baseline_ready)
 
     def journal(state: RunState, key: AgentSessionKey) -> AgentInvocationStore:

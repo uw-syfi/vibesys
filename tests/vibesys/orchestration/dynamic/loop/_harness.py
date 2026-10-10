@@ -31,7 +31,6 @@ import asyncio
 import json
 import re
 import sys
-import threading
 from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -70,6 +69,7 @@ from vs_evaluation.api.tools import build_evaluation_tools
 from vs_project.api import GitRepositoryFactory, Project, run_git
 from vs_runtime.api import OrchestrationPlugin
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
+from vs_sim.api import OsThreads
 from vs_slurm.fake_connector import (
     HOLD_FILE,
     SUBMITTED_FILE,
@@ -88,6 +88,10 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
     from vs_mcp.api import ToolSpec
+    from vs_sim.api import Lock
+
+
+_THREADS = OsThreads()
 
 
 def _project(raw_state: BaseModel) -> PluginProjection:
@@ -398,7 +402,7 @@ class ScriptedAgents:
     profilers: deque[Reply] = field(default_factory=deque)
     unscripted: list[str] = field(default_factory=list)
     turns: list[tuple[str, str | None, str]] = field(default_factory=list)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _lock: Lock = field(default_factory=_THREADS.lock)
     _client: FakeAgentClient | None = None
     _members: dict[AgentSessionKey, str] = field(default_factory=dict)
 

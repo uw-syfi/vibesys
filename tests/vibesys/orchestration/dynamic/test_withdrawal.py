@@ -22,6 +22,7 @@ from vibesys.orchestration.dynamic.models import WorkstreamPhase
 # test-isolation: DynamicRun is the current Workers port; an orchestrator
 # service product entrypoint is deferred to the following migration chunk.
 from vibesys.orchestration.dynamic.orchestration import _DynamicRun
+from vs_sim.api.testing import arrival
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -66,7 +67,8 @@ async def _withdraw_at(
     loop = dynamic.search_loop()
     task = asyncio.create_task(loop.run(dynamic.recoverable()))
     try:
-        await (evaluation_gate.entered.wait() if evaluation_gate is not None else entered.wait())
+        reached = evaluation_gate.entered if evaluation_gate is not None else entered
+        await arrival(reached.wait(), task)
         result = await loop.withdraw("a", withdrawal)
         await task
     finally:

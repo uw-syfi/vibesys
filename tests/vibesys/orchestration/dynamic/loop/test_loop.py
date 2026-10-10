@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import threading
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -31,6 +30,7 @@ from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATO
 from vibesys.orchestration.dynamic.models import WorkstreamPhase
 from vs_agent.api import AgentOutputSchemaError
 from vs_runtime.api import RuntimeContractError, StructuredResponseError
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -439,8 +439,8 @@ def test_the_planner_sees_a_running_turns_stage_outcomes_and_its_applied_parks(
     left no trace in the history.
     """
     loop_input = LoopInput.create(tmp_path)
-    second_turn = threading.Event()
-    planned = threading.Event()
+    second_turn = OsThreads().event()
+    planned = OsThreads().event()
     seen: dict[str, object] = {}
 
     def fail_twice(agent: Turn) -> dict[str, object]:
