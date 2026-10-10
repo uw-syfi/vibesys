@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
 
+from vs_sim.api.testing import wait_or_fail
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -57,7 +59,7 @@ def test_terminal_cleanup_waits_for_in_flight_answer(tmp_path: Path) -> None:
 
     def handler(_question: str) -> ChatAnswer:
         handler_started.set()
-        release_handler.wait()
+        wait_or_fail(release_handler, "the test to release the handler")
         order.append("answer finished")
         return ChatAnswer(text="finished answer", invocation_id="exec-1")
 
@@ -86,7 +88,7 @@ def test_terminal_cleanup_bounds_wait_and_defers_close(tmp_path: Path) -> None:
 
     def handler(_question: str) -> ChatAnswer:
         handler_started.set()
-        release_handler.wait()
+        wait_or_fail(release_handler, "the test to release the handler")
         return ChatAnswer(text="late answer", invocation_id="exec-1")
 
     assert parts.chat.retain_terminal_resource(

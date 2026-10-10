@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import os
 import secrets
-import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vs_sim.api import Clock
 
 try:
     import fcntl
@@ -67,16 +69,20 @@ class WebInstanceRecord:
 
     @classmethod
     def from_gateway(
-        cls, *, pid: int, port: int, token: str, project_root: Path
+        cls, *, pid: int, port: int, token: str, project_root: Path, clock: Clock
     ) -> WebInstanceRecord:
-        """Build a record only after the gateway has successfully bound."""
+        """Build a record only after the gateway has successfully bound.
+
+        `clock` must be on the epoch timeline (`SystemClock`): `started_at` is
+        persisted and read back by other processes.
+        """
         return cls(
             pid=pid,
             port=port,
             token=token,
             url=f"http://127.0.0.1:{port}/?token={token}",
             project_root=str(project_root.resolve()),
-            started_at=time.time(),
+            started_at=clock.now(),
         )
 
     def write(self, path: Path) -> None:

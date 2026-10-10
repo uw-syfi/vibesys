@@ -93,11 +93,11 @@ depends_on = ["vibesys.api", "vibesys.api.hypothesis", "server.diagnostics", "se
 
 [[modules]]
 path = "server.chat"
-depends_on = [ "vibesys.api", "vs_prompts", "server", "server.controller", "server.run_lifecycle", "server.journal", "server.events", "server.execution"]
+depends_on = [ "vibesys.api", "vs_prompts", "server", "server.controller", "server.run_lifecycle", "server.journal", "server.events", "server.execution", "vs_sim.api"]
 
 [[modules]]
 path = "server.transport"
-depends_on = ["server.api"]
+depends_on = ["server.api", "vs_sim.api"]
 
 [[modules]]
 path = "server.controller"

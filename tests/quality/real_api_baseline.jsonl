@@ -217,14 +217,12 @@
 {"path": "src/server/api/service.py", "rule": "threading", "count": 3}
 {"path": "src/server/chat/factory.py", "rule": "threading", "count": 1}
 {"path": "src/server/chat/manager.py", "rule": "threading", "count": 6}
-{"path": "src/server/chat/manager.py", "rule": "time", "count": 2}
 {"path": "src/server/chat/session.py", "rule": "threading", "count": 1}
 {"path": "src/server/controller.py", "rule": "threading", "count": 1}
 {"path": "src/server/events.py", "rule": "threading", "count": 2}
 {"path": "src/server/execution.py", "rule": "threading", "count": 3}
 {"path": "src/server/journal.py", "rule": "threading", "count": 1}
 {"path": "src/server/runtime.py", "rule": "threading", "count": 4}
-{"path": "src/server/transport/discovery.py", "rule": "time", "count": 1}
 {"path": "src/server/transport/subscriptions.py", "rule": "threading", "count": 4}
 {"path": "src/server/transport/unix_jsonl.py", "rule": "socket", "count": 2}
 {"path": "src/server/transport/unix_jsonl.py", "rule": "threading", "count": 2}
@@ -274,9 +272,7 @@
 {"path": "tests/quality/test_smoke_dynamic_loop_script.py", "rule": "subprocess", "count": 2}
 {"path": "tests/server/support.py", "rule": "threading", "count": 9}
 {"path": "tests/server/test_api_transport.py", "rule": "socket", "count": 15}
-{"path": "tests/server/test_chat_resources.py", "rule": "bare_wait", "count": 2}
 {"path": "tests/server/test_chat_resources.py", "rule": "threading", "count": 6}
-{"path": "tests/server/test_chat_response_bound.py", "rule": "bare_wait", "count": 1}
 {"path": "tests/server/test_chat_response_bound.py", "rule": "threading", "count": 2}
 {"path": "tests/server/test_chat_thread_lifecycle.py", "rule": "threading", "count": 15}
 {"path": "tests/server/test_detached_runtime.py", "rule": "socket", "count": 3}
@@ -291,7 +287,6 @@
 {"path": "tests/server/test_transport_subscription.py", "rule": "socket", "count": 3}
 {"path": "tests/server/test_transport_subscription.py", "rule": "threading", "count": 3}
 {"path": "tests/server/test_tui_dev_harness.py", "rule": "threading", "count": 1}
-{"path": "tests/server/test_websocket_transport.py", "rule": "bare_wait", "count": 3}
 {"path": "tests/server/test_websocket_transport.py", "rule": "socket", "count": 9}
 {"path": "tests/server/test_websocket_transport.py", "rule": "threading", "count": 11}
 {"path": "tests/support/__init__.py", "rule": "subprocess", "count": 7}
