@@ -555,9 +555,18 @@ class ConfinedSessionLauncher:
             if launch.confinement is not None or sandbox is None
             else sandbox.agent_path
         )
+        # A conversation's MCP servers are fixed when it opens: a stream
+        # provider (Codex's app-server) refuses a turn that names a different
+        # set, so they ride the session and a turn never resends them.
         session = LaunchedSession(
             session=agent.session(
                 str(spec.workspace),
+                mcp_servers=tuple(
+                    shim_translation.mcp_server_from(
+                        server, agent_path, pin_interpreter=not spec.policy.containerized
+                    )
+                    for server in spec.mcp_servers
+                ),
                 skill_scope=skill_scope,
                 mcp_scope=mcp_scope,
                 config_scope=config_scope,
@@ -569,12 +578,6 @@ class ConfinedSessionLauncher:
             agent_path=agent_path,
             timeout=self._timeout,
             log=self._log,
-            mcp_servers=tuple(
-                shim_translation.mcp_server_from(
-                    server, agent_path, pin_interpreter=not spec.policy.containerized
-                )
-                for server in spec.mcp_servers
-            ),
         )
         self._sessions.add(session)
         return session

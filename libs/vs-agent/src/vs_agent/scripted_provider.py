@@ -306,7 +306,6 @@ class ScriptedSession(LaunchedSession):
             agent_path=launched.agent_path,
             timeout=launched.timeout,
             log=launched.log,
-            mcp_servers=launched.mcp_servers,
         )
         self.hooks = hooks
         self.in_flight = in_flight
