@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import settings
+from tests.support.scratch_tree import remove_scratch_tree
 
 # `--shard=I/N` splits the suite across CI runners (see tests/support/sharding.py).
 pytest_plugins = [
@@ -34,8 +35,11 @@ def sandbox_tmp_path() -> Iterator[Path]:
     boundary. A --basetemp under /dev/shm instead falls beneath /dev, whose
     device access grant cannot be narrowed by a child-path restriction.
     """
-    with tempfile.TemporaryDirectory(prefix="vs-sbx-", dir="/tmp") as directory:
-        yield Path(directory).resolve()
+    root = Path(tempfile.mkdtemp(prefix="vs-sbx-", dir="/tmp")).resolve()
+    try:
+        yield root
+    finally:
+        remove_scratch_tree(root)
 
 
 # Hypothesis's per-example deadline is a wall-clock dependence, so it is off in
