@@ -18,6 +18,8 @@ from server.chat.manager import ChatAnswer, ChatThreadFactory, ChatThreadHandle
 from server.chat.options import ChatRunSettings
 from server.events import ChatData, ChatThreadCreatedData, EventType, RunEvent, make_event
 
+_TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
+
 
 def _factory(calls: list[tuple[str, str | None, str | None]], answer: str) -> ChatThreadFactory:
     def factory(thread_id: str, provider: str | None, model: str | None) -> ChatThreadHandle:
@@ -27,7 +29,7 @@ def _factory(calls: list[tuple[str, str | None, str | None]], answer: str) -> Ch
                 thread_id=thread_id,
                 provider=provider or "codex",
                 model=model or "gpt-default",
-                created_at=datetime.now(UTC),
+                created_at=_TIMESTAMP,
             ),
             handler=lambda question: ChatAnswer(
                 text=f"{answer}: {question}", invocation_id=f"exec-{thread_id}"
@@ -266,7 +268,7 @@ def test_chat_thread_wire_shapes_round_trip() -> None:
             thread_id="thread-1",
             provider="claude",
             model="opus",
-            created_at=datetime.now(UTC),
+            created_at=_TIMESTAMP,
         ),
     )
     restored = RunEvent.model_validate_json(event.model_dump_json())

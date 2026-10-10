@@ -1,79 +1,110 @@
-"""Unit contracts of the transport's subscription lifetime tracker."""
+"""Unit contracts of the transport's subscription lifetime tracker, on simulated threads."""
 
-import threading
+from __future__ import annotations
 
-from tests.server.support import DEADLOCK_GUARD_S, FakeSettleWindow
+from hypothesis import given, settings
+from hypothesis import strategies as st
+from tests.server.support import wait_for_worker
 
 from server.transport.subscriptions import SubscriptionTracker, ThreadingSettleWindow
+from vs_sim.api.testing import SimThreads, wait_or_fail
+
+SETTLE_SECONDS = 1.0
+SEEDS = st.one_of(st.none(), st.integers(0, 2**32))
+STREAM_SECONDS = st.sampled_from([0.5, 2.0, 7.0])
+# Never equal to the settle window, so a redial never ties with its end.
+REDIAL_GAPS = st.sampled_from([0.25, 0.75, 1.5, 4.0])
 
 
-def _wait_in_thread(tracker: SubscriptionTracker) -> tuple[threading.Thread, threading.Event]:
-    returned = threading.Event()
+def _disconnect_wait_seconds(
+    seed: int | None, first: float, redials: list[tuple[float, float]]
+) -> float:
+    """Simulated seconds `wait_for_none_active` blocks for a stream and its later redials."""
+    threads = SimThreads(schedule_seed=seed)
+    tracker = SubscriptionTracker(threads=threads)
 
-    def wait_for_none() -> None:
-        tracker.wait_for_none_active(settle_seconds=1.0)
-        returned.set()
+    def main() -> float:
+        opened = threads.event()
 
-    waiter = threading.Thread(target=wait_for_none, daemon=True)
-    waiter.start()
-    return waiter, returned
+        def client() -> None:
+            with tracker.track():
+                opened.set()
+                threads.sleep(first)
+            for gap, duration in redials:
+                threads.sleep(gap)
+                with tracker.track():
+                    threads.sleep(duration)
 
+        worker = threads.spawn(client, name="client")
+        wait_or_fail(opened, "the first stream to open")
+        started = threads.now()
+        tracker.wait_for_none_active(settle_seconds=SETTLE_SECONDS)
+        waited = threads.now() - started
+        wait_for_worker(worker)
+        return waited
 
-def test_disconnect_wait_bridges_a_redial_inside_the_settle_window() -> None:
-    settle = FakeSettleWindow()
-    tracker = SubscriptionTracker(settle)
-    first = tracker.track()
-    first.__enter__()
-    waiter, returned = _wait_in_thread(tracker)
-
-    first.__exit__(None, None, None)
-    settle.await_window(1)
-    # The redial lands inside the first window, which ends the window without
-    # the wait returning: only a window that opens after the redial closes can.
-    redial = tracker.track()
-    redial.__enter__()
-    settle.await_window_end(1)
-    assert not returned.is_set()
-    redial.__exit__(None, None, None)
-    settle.await_window(2)
-    assert not returned.is_set()
-
-    settle.elapse()
-    assert returned.wait(timeout=DEADLOCK_GUARD_S)
-    waiter.join(timeout=DEADLOCK_GUARD_S)
-    assert not waiter.is_alive()
+    return threads.run(main)
 
 
-def test_disconnect_wait_returns_when_the_settle_window_elapses_with_no_stream() -> None:
-    settle = FakeSettleWindow()
-    tracker = SubscriptionTracker(settle)
-    waiter, returned = _wait_in_thread(tracker)
-
-    settle.await_window(1)
-    settle.elapse()
-
-    assert returned.wait(timeout=DEADLOCK_GUARD_S)
-    waiter.join(timeout=DEADLOCK_GUARD_S)
-    assert not waiter.is_alive()
+def _bridged(redials: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """The leading redials that land inside the settle window of the stream before them."""
+    bridged = []
+    for redial in redials:
+        if redial[0] >= SETTLE_SECONDS:
+            break
+        bridged.append(redial)
+    return bridged
 
 
-def test_a_wait_does_not_open_a_window_while_a_stream_is_active() -> None:
-    settle = FakeSettleWindow()
-    tracker = SubscriptionTracker(settle)
-    with tracker.track():
-        waiter, returned = _wait_in_thread(tracker)
-        assert not returned.is_set()
-    settle.await_window(1)
-    settle.elapse()
+def _expected_wait_seconds(first: float, redials: list[tuple[float, float]]) -> float:
+    """The wait ends one settle window after the last stream a redial bridged to."""
+    return first + sum(gap + duration for gap, duration in redials) + SETTLE_SECONDS
 
-    assert returned.wait(timeout=DEADLOCK_GUARD_S)
-    waiter.join(timeout=DEADLOCK_GUARD_S)
+
+@settings(deadline=None, max_examples=60)
+@given(
+    seed=SEEDS,
+    first=STREAM_SECONDS,
+    redials=st.lists(st.tuples(REDIAL_GAPS, STREAM_SECONDS), max_size=3),
+)
+def test_disconnect_wait_bridges_exactly_the_redials_inside_the_settle_window(
+    seed: int | None, first: float, redials: list[tuple[float, float]]
+) -> None:
+    bridged = _bridged(redials)
+    # The client also makes the first redial that misses the window; it must not extend the wait.
+    attempted = redials[: len(bridged) + 1]
+
+    assert _disconnect_wait_seconds(seed, first, attempted) == _expected_wait_seconds(
+        first, bridged
+    )
+
+
+@given(seed=SEEDS)
+def test_a_wait_with_no_stream_ever_opened_returns_after_one_settle_window(
+    seed: int | None,
+) -> None:
+    threads = SimThreads(schedule_seed=seed)
+    tracker = SubscriptionTracker(threads=threads)
+
+    def main() -> float:
+        started = threads.now()
+        tracker.wait_for_none_active(settle_seconds=SETTLE_SECONDS)
+        return threads.now() - started
+
+    assert threads.run(main) == SETTLE_SECONDS
 
 
 def test_the_threading_settle_window_satisfies_the_window_contract() -> None:
     """A predicate that already holds ends the wait True; an empty window ends it False."""
-    condition = threading.Condition()
+    threads = SimThreads()
+    condition = threads.condition()
     window = ThreadingSettleWindow()
-    with condition:
-        assert window.wait_for(condition, lambda: True, 0.0) is True
-        assert window.wait_for(condition, lambda: False, 0.0) is False
+
+    def main() -> tuple[bool, bool]:
+        with condition:
+            return (
+                window.wait_for(condition, lambda: True, 0.0),
+                window.wait_for(condition, lambda: False, 0.0),
+            )
+
+    assert threads.run(main) == (True, False)

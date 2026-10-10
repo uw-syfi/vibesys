@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -33,6 +32,7 @@ from pydantic import ValidationError
 from server.api.protocol import PROTOCOL_VERSION, ProtocolRequest, Response
 from server.events import RunEvent
 from server.journal import WireJournal
+from vs_sim.api.testing import SimThreads
 
 _HARNESS_DIR = Path(__file__).resolve().parents[2] / "clients" / "tui" / "dev"
 _FIXTURE_DIR = _HARNESS_DIR / "fixtures"
@@ -41,6 +41,12 @@ _CANONICAL_GOLDEN_PATH = _HARNESS_DIR / "canonical-events.golden.json"
 
 _UPDATE_CANONICAL_ENV = "UPDATE_CANONICAL_EVENTS"
 """Set to ``1`` to rewrite the golden from this read path. Review the diff."""
+
+
+def _journal() -> WireJournal:
+    """A journal whose locks and event store run on simulated threads."""
+    threads = SimThreads()
+    return WireJournal(threads.condition(), threads=threads)
 
 
 class SchemaAge(StrEnum):
@@ -134,7 +140,7 @@ def _canonical_events(fixture: FixtureContract, tmp_path: Path, through: int) ->
     log_dir = tmp_path / fixture.name
     log_dir.mkdir(parents=True)
     (log_dir / "run-events.jsonl").write_bytes((_FIXTURE_DIR / fixture.name).read_bytes())
-    journal = WireJournal(threading.Condition())
+    journal = _journal()
     journal.attach(log_dir, run_id="harness-parity")
     return journal.read(before_sequence=through + 1)
 

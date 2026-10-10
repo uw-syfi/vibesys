@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import threading
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from functools import partial
 from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
@@ -14,6 +13,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.server.support import Task
 
 from server.events import (
     MAX_SERIALIZED_RUN_EVENT_BYTES,
@@ -24,11 +24,13 @@ from server.events import (
     ToolCallData,
     make_event,
 )
-from vs_sim.api.testing import wait_until_started_sync
+from vs_sim.api.testing import SimThreads, wait_or_fail
 
 if TYPE_CHECKING:
     from types import TracebackType
     from typing import TextIO
+
+_TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 class _PathOpenOptions(TypedDict, total=False):
@@ -42,7 +44,7 @@ def _persisted_event(sequence: int, text: str = "") -> RunEvent:
     return RunEvent(
         sequence=sequence,
         run_id="persisted-run",
-        timestamp=datetime.now(UTC),
+        timestamp=_TIMESTAMP,
         type=EventType.OUTPUT,
         text=text,
     )
@@ -402,19 +404,24 @@ class TestEventStore:
             EventStore(path, run_id="active-run")
 
     def test_append_wakes_multiple_independent_readers(self, tmp_path: Path) -> None:
-        store = EventStore(tmp_path / "events.jsonl", run_id="active-run")
-        waiting = [threading.Event(), threading.Event()]
+        threads = SimThreads()
+        store = EventStore(tmp_path / "events.jsonl", run_id="active-run", threads=threads)
+        waiting = [threads.event(), threads.event()]
 
         def wait_for_first_event(reader: int) -> list[RunEvent]:
             return store.wait(after_sequence=0, on_waiting=waiting[reader].set)
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            readers = [executor.submit(wait_for_first_event, reader) for reader in range(2)]
-            for registered, reader in zip(waiting, readers, strict=True):
-                wait_until_started_sync(registered, reader)
+        def scenario() -> tuple[RunEvent, list[list[RunEvent]]]:
+            readers = [
+                Task(threads, partial(wait_for_first_event, reader), name=f"reader-{reader}")
+                for reader in range(2)
+            ]
+            for registered in waiting:
+                wait_or_fail(registered, "a reader to start waiting")
             appended = store.append(make_event(EventType.OUTPUT, "visible"))
+            return appended, [reader.result() for reader in readers]
 
-        batches = [reader.result() for reader in readers]
+        appended, batches = threads.run(scenario)
         assert [[event.sequence for event in batch] for batch in batches] == [[1], [1]]
         assert all(batch[0] == appended for batch in batches)
         # Readers share the stored event rather than each getting a copy: it is

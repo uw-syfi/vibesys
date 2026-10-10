@@ -5,9 +5,8 @@ from __future__ import annotations
 import threading
 import uuid
 from collections.abc import Callable
-from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING
 
 from server.events import (
     ChatData,
@@ -87,7 +86,36 @@ class _ThreadLease:
         return self.handler(text)
 
 
-_ThreadRestoration: TypeAlias = Future[_ThreadRoute]
+class _ThreadRestoration:
+    """The outcome of one thread restoration, awaited by every caller that joined it.
+
+    Built on the injected ``Threads`` event so the wait is visible to a simulator.
+    """
+
+    def __init__(self, threads: Threads) -> None:
+        self._done = threads.event()
+        self._outcome: _ThreadRoute | BaseException | None = None
+
+    def set_result(self, route: _ThreadRoute) -> None:
+        """Publish the restored route and wake every waiter."""
+        self._outcome = route
+        self._done.set()
+
+    def set_exception(self, error: BaseException) -> None:
+        """Publish the failure and wake every waiter."""
+        self._outcome = error
+        self._done.set()
+
+    def result(self) -> _ThreadRoute:
+        """Wait for the outcome; raise the restoration's failure."""
+        self._done.wait()
+        outcome = self._outcome
+        if isinstance(outcome, BaseException):
+            raise outcome
+        if outcome is None:
+            message = "restoration ended without an outcome"
+            raise RuntimeError(message)
+        return outcome
 
 
 @dataclass(frozen=True)
@@ -426,7 +454,7 @@ class ChatManager:
             restoration = self._thread_restorations.get(thread_id)
             should_restore = restoration is None
             if restoration is None:
-                restoration = Future()
+                restoration = _ThreadRestoration(self._threads)
                 self._thread_restorations[thread_id] = restoration
             self._active_thread_calls += 1
             return _ThreadRestorationClaim(spec, factory, restoration, should_restore)
