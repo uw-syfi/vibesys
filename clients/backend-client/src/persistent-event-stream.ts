@@ -337,15 +337,20 @@ export class PersistentEventStream {
    * exhausted the stream stays down with the disconnect as its answer, and this
    * is the entry point a caller uses to try again (a reconnect affordance, or a
    * resume-after-sleep watcher such as #832). It resets the attempt count so a
-   * fresh try gets the full schedule, and no-ops while closed, unsubscribed, or
-   * while a scheduled or in-flight reconnect is already running, so a caller
-   * cannot stack redials. A drop the caller deems not worth reconnecting stays
-   * down.
+   * fresh try gets the full schedule. An armed timer is cancelled because a
+   * browser wake is evidence that waiting for a timer coalesced while the page
+   * slept is no longer useful; an actual dial already in flight still owns the
+   * attempt, so a caller cannot stack redials. Closed, unsubscribed, and ended
+   * streams stay down.
    */
   retry(): void {
     if (this.#closed || this.#callbacks === null) return;
-    if (this.#cancelReconnect !== null || this.#reconnecting) return;
+    if (this.#reconnecting) return;
     if (!this.#active().shouldReconnect()) return;
+    if (this.#cancelReconnect !== null) {
+      this.#cancelReconnect();
+      this.#cancelReconnect = null;
+    }
     this.#backoff.reset();
     void this.#reconnectNow();
   }

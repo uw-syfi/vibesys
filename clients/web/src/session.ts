@@ -280,6 +280,12 @@ export class WebSession {
   };
 
   async #resume(): Promise<void> {
+    // A browser wake is stronger evidence than either reconnect timer: a
+    // background tab may have had both callbacks coalesced indefinitely.
+    // `reconnect()` is inert on a healthy or already-dialing control channel,
+    // and otherwise cancels its timer and dials before the snapshot request is
+    // queued. The stream's corresponding override runs after the snapshot.
+    this.#transport.reconnect();
     try {
       await this.#loadSnapshot();
       this.#stream.retry();
