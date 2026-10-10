@@ -13,8 +13,9 @@ version declared by `go.mod`, before running it.
 From a repository root:
 
 ```sh
-./support/repoctl/repoctl test                    # plan and run selected checks
-./support/repoctl/repoctl test --dry-run          # show selected commands
+./support/repoctl/repoctl check                   # plan from the diff and run its local groups
+./support/repoctl/repoctl check --dry-run         # show selected commands
+./support/repoctl/repoctl check --all             # every local group, regardless of the diff
 ./support/repoctl/repoctl plan --base main --head HEAD
 ./support/repoctl/repoctl explain path/to/file --json
 ./support/repoctl/repoctl validate
@@ -22,7 +23,8 @@ From a repository root:
 ./support/repoctl/repoctl run-checks --group python_quality
 ```
 
-`test` and `plan` accept `--base`, `--head`, and `--event`. `test` also includes
+`check` and `plan` accept `--base`, `--head`, and `--event` (not with
+`check --all`). `check` also includes
 staged, unstaged, and untracked local paths; `plan` uses only committed changes
 for CI. Pull requests compare against the merge base; pushes use the exact
 endpoints. By default, repoctl loads `.repoctl/components.toml` and
@@ -33,8 +35,12 @@ configured job and collection names, then runs named `[[check_groups]]` from
 `.repoctl/checks.toml` independently with `run-checks --group NAME`. Groups can
 have ordered commands, environment overrides, and selected package
 collections. `run-native --targets-json JSON` executes only registered native
-targets from a plan. `test` runs groups marked
-`include_in_test` for affected jobs, plus affected native targets.
+targets from a plan. `check` runs groups marked
+`local = true` for affected jobs, plus affected native targets; `--all` runs
+every local group with its full commands and every selected native target.
+`test` is a deprecated alias of `check` that prints a one-line notice, and
+`include_in_test` is the deprecated spelling of `local` (a group that sets both
+is rejected).
 Pass `--collection-json '["package-name"]'` to `run-checks` for a group with
 a configured collection; unknown or duplicate values fail before execution.
 In GitHub Actions, `plan --github-event` reads `GITHUB_EVENT_NAME` and
@@ -83,9 +89,18 @@ executes checks and reports failures. Language planners live in
 `execution/rust/`. TypeScript expands selected workspace packages; Go and Rust
 native targets run their configured commands within each selected manifest
 root. Python currently runs its configured full suite for a selected job.
+A selected Python job runs its whole group; selecting individual Python tests
+from the diff is a possible follow-up.
 
-`repoctl test` runs only the affected groups marked `include_in_test`; it is
-not a command to run every CI group. In particular, browser end-to-end group
+`verify-policy` cases may also assert `local_groups` (the exact groups `check`
+runs for the case paths), and the cases file may assert `all_local_groups` (the
+groups `check --all` runs).
+
+`repoctl check` runs only the affected groups marked `local = true`; it is
+not a command to run every CI group, and `--all` means every local group.
+`local` only affects `check`: CI calls `run-checks --group NAME` inside jobs
+already gated by `plan`, so adding `trigger_job` or `local` to a group does not
+change which CI jobs run. In particular, browser end-to-end group
 `tui_e2e` intentionally has no local-selection keys and remains CI-only by
 default. The [contributor guide](../../docs/contributing/development.md#ci-gates)
 documents its explicit `run-checks` command and the required uv,

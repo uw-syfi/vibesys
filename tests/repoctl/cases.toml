@@ -1,5 +1,19 @@
 # Repository-owned contracts for the impact policy. Verify with `repoctl verify-policy`.
 
+# The check groups `repoctl check --all` runs: every group marked `local` in .repoctl/checks.toml.
+all_local_groups = [
+  "agent_image_tests",
+  "examples_tests",
+  "python_quality",
+  "python_tests",
+  "python_types",
+  "repoctl_policy",
+  "repoctl_tests",
+  "tui_build",
+  "tui_quality",
+  "tui_tests",
+]
+
 [[cases]]
 name = "server event changes reach the client"
 paths = ["src/server/events.py"]
@@ -76,6 +90,75 @@ pnpm_packages = []
 name = "website files do not start application CI"
 paths = ["website/package.json"]
 jobs = []
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "a TypeScript-only change selects no Python check group"
+paths = ["clients/core-state/src/core-state.test.ts"]
+jobs = ["tui"]
+local_groups = ["tui_build", "tui_quality", "tui_tests"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = ["@vibesys/core-state", "@vibesys/tui", "@vibesys/web"]
+
+[[cases]]
+name = "a Python-only change selects Python quality, types, and tests and no TypeScript group"
+paths = ["src/vibesys/api.py"]
+jobs = ["python"]
+local_groups = ["python_quality", "python_tests", "python_types"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "a policy change selects the repoctl checks and every other local group"
+paths = ["tests/repoctl/cases.toml"]
+jobs = ["agent_image", "evaluators", "examples", "impact", "python", "tui"]
+local_groups = [
+  "agent_image_tests",
+  "examples_tests",
+  "python_quality",
+  "python_tests",
+  "python_types",
+  "repoctl_policy",
+  "repoctl_tests",
+  "tui_build",
+  "tui_quality",
+  "tui_tests",
+]
+[cases.collections]
+native_languages = ["go", "rust"]
+native_targets = [
+  "examples/data-structures/repositories/queue-rs",
+  "examples/evaluators/ordered-map",
+  "examples/evaluators/ordered-map/native_runner",
+  "examples/evaluators/priority-queue",
+  "examples/evaluators/priority-queue/native_runner",
+  "examples/evaluators/stack",
+  "examples/evaluators/stack/native_runner",
+  "examples/evaluators/unordered-map",
+  "examples/evaluators/unordered-map/native_runner",
+  "examples/starters/ordered-map-rs",
+  "examples/starters/priority-queue-rs",
+  "examples/starters/stack-rs",
+  "examples/starters/unordered-map-rs",
+  "resources/evaluators/microservice",
+  "resources/evaluators/queue",
+  "resources/evaluators/queue/native_runner",
+  "sdk/vs-evaluator/vseval",
+]
+pnpm_packages = ["@vibesys/backend-client", "@vibesys/core-state", "@vibesys/tui", "@vibesys/web"]
+
+[[cases]]
+name = "a documentation-only change runs only the examples checks"
+paths = ["docs/contributing/development.md"]
+jobs = ["examples"]
+local_groups = ["examples_tests"]
 [cases.collections]
 native_languages = []
 native_targets = []

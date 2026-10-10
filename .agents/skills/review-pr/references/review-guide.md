@@ -115,8 +115,8 @@ Ask of new abstractions:
   double completion, and exception retrieval. Review context managers and
   generators for cleanup across exceptional exits.
 - Favor observable-contract tests with Pytest/Hypothesis over private call
-  structure. When relevant, run focused tests, `./scripts/check_format.sh`,
-  `./scripts/check_lint.sh`, and `./scripts/check_types.sh` for affected typed packages.
+  structure. When relevant, run focused tests, or `./support/repoctl/repoctl check` on
+  the checked-out diff.
 
 ## TypeScript TUI
 

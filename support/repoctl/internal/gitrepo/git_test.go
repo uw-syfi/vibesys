@@ -142,3 +142,17 @@ func gitTest(t *testing.T, root string, args ...string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+func TestPreferRemoteBranchUsesOriginOnlyWhenItExists(t *testing.T) {
+	root := t.TempDir()
+	initTestRepo(t, root)
+	writeTestFile(t, root, "a.txt", "a\n")
+	head := commitTestFixture(t, root, "first")
+	if got := PreferRemoteBranch(root, "main"); got != "main" {
+		t.Fatalf("without origin/main = %q, want main", got)
+	}
+	gitTest(t, root, "update-ref", "refs/remotes/origin/main", head)
+	if got := PreferRemoteBranch(root, "main"); got != "origin/main" {
+		t.Fatalf("with origin/main = %q, want origin/main", got)
+	}
+}

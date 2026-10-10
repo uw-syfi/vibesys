@@ -31,8 +31,8 @@ func testFixture() (graph, plan) {
 		NativeChecks:         nativeChecks{Commands: map[string][][]string{"go": {{"go", "test", "./..."}}}, TimeoutSeconds: 1},
 		NativeCheckOverrides: map[string]nativeCheckOverride{},
 		CheckGroups: map[string]execution.Suite{
-			"python": {Name: "python", TriggerJob: "python", IncludeInTest: true, Language: "python", Directory: ".", Commands: [][]string{{"uv", "run", "pytest"}}, TimeoutSeconds: 1},
-			"tui":    {Name: "tui", TriggerJob: "tui", IncludeInTest: true, Language: "typescript", Directory: "clients", Collection: "pnpm_packages", Commands: [][]string{{"pnpm", "test:clients"}}, PackageCommands: [][]string{{"pnpm", "--filter", "{package}", "test"}}, TimeoutSeconds: 1},
+			"python": {Name: "python", TriggerJob: "python", RunLocal: true, Language: "python", Directory: ".", Commands: [][]string{{"uv", "run", "pytest"}}, TimeoutSeconds: 1},
+			"tui":    {Name: "tui", TriggerJob: "tui", RunLocal: true, Language: "typescript", Directory: "clients", Collection: "pnpm_packages", Commands: [][]string{{"pnpm", "test:clients"}}, PackageCommands: [][]string{{"pnpm", "--filter", "{package}", "test"}}, TimeoutSeconds: 1},
 		},
 	}
 	p := plan{
@@ -113,7 +113,7 @@ func TestInvalidTestSuiteConfiguration(t *testing.T) {
 	g.Jobs = []string{"python", "tui"}
 	g.Collections = []collectionSpec{{Name: "pnpm_packages"}}
 	tests := []execution.Suite{
-		{Name: "unknown", TriggerJob: "unknown", IncludeInTest: true, Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}},
+		{Name: "unknown", TriggerJob: "unknown", RunLocal: true, Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}},
 		{Name: "python", Language: "python", Directory: "../escape", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}},
 		{Name: "python", Language: "python", Directory: ".", TimeoutSeconds: 0, Commands: [][]string{{"pytest"}}},
 		{Name: "tui", Language: "typescript", Directory: "clients", Collection: "missing", TimeoutSeconds: 1, Commands: [][]string{{"pnpm"}}, PackageCommands: [][]string{{"pnpm", "{package}"}}},

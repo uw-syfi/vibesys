@@ -101,19 +101,13 @@ grows and then names unrelated code.
 
 ## Checks
 
-Run the narrowest relevant test first, then broaden when the change crosses
-module boundaries.
+Run the narrowest relevant test first. The pre-PR rule (`repoctl check`, and
+when to use `--all`) is in `AGENTS.md`; the groups it
+runs, including `python_quality` and `python_types`, are listed in
+`.repoctl/checks.toml`.
 
-Before opening or updating a PR, run the one command that runs CI's Python
-checks (`python_quality` and `python_types` in `.repoctl/checks.toml`, through
-`support/repoctl`, which needs Go). It stops at the first failing command and
-names it. It does not run the full test suite.
-
-```bash
-./scripts/check_ci.sh
-```
-
-Faster commands for iterating:
+These commands are the ones those groups call. They stay useful for fast
+iteration:
 
 ```bash
 ./scripts/format.sh

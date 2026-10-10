@@ -17,23 +17,32 @@ type policyCase struct {
 	Paths       *[]string            `toml:"paths"`
 	Jobs        *[]string            `toml:"jobs"`
 	Collections *map[string][]string `toml:"collections"`
+	// LocalGroups, when present, is the exact set of check groups that
+	// `repoctl check` runs for these paths.
+	LocalGroups *[]string `toml:"local_groups"`
 }
 
 type policyCases struct {
-	Cases []policyCase `toml:"cases"`
+	// AllLocalGroups, when present, is the exact set of check groups that
+	// `repoctl check --all` runs.
+	AllLocalGroups *[]string    `toml:"all_local_groups"`
+	Cases          []policyCase `toml:"cases"`
 }
 
-func readPolicyCases(path string, g graph) ([]policyCase, error) {
+func readPolicyCases(path string, g graph) (policyCases, error) {
 	var file policyCases
 	md, err := toml.DecodeFile(path, &file)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return policyCases{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if keys := md.Undecoded(); len(keys) > 0 {
-		return nil, fmt.Errorf("%s: unknown keys %v", path, keys)
+		return policyCases{}, fmt.Errorf("%s: unknown keys %v", path, keys)
 	}
 	if len(file.Cases) == 0 {
-		return nil, fmt.Errorf("%s: cases must not be empty", path)
+		return policyCases{}, fmt.Errorf("%s: cases must not be empty", path)
+	}
+	if err := validateLocalGroupNames(g, path+": all_local_groups", file.AllLocalGroups); err != nil {
+		return policyCases{}, err
 	}
 	knownCollections := map[string]bool{}
 	collectionNames := make([]string, 0, len(g.Collections))
@@ -46,53 +55,87 @@ func readPolicyCases(path string, g graph) ([]policyCase, error) {
 	for i, c := range file.Cases {
 		label := fmt.Sprintf("%s: cases[%d]", path, i)
 		if c.Name == nil || strings.TrimSpace(*c.Name) == "" {
-			return nil, fmt.Errorf("%s: name is required", label)
+			return policyCases{}, fmt.Errorf("%s: name is required", label)
 		}
 		label = fmt.Sprintf("%s: case %q", path, *c.Name)
 		if seenNames[*c.Name] {
-			return nil, fmt.Errorf("%s: duplicate case name", label)
+			return policyCases{}, fmt.Errorf("%s: duplicate case name", label)
 		}
 		seenNames[*c.Name] = true
 		if c.Paths == nil || len(*c.Paths) == 0 {
-			return nil, fmt.Errorf("%s: paths must not be empty", label)
+			return policyCases{}, fmt.Errorf("%s: paths must not be empty", label)
 		}
 		if err := unique(*c.Paths, label+" paths"); err != nil {
-			return nil, err
+			return policyCases{}, err
 		}
 		for _, item := range *c.Paths {
 			if !validPath(item) {
-				return nil, fmt.Errorf("%s: unsafe path %q", label, item)
+				return policyCases{}, fmt.Errorf("%s: unsafe path %q", label, item)
 			}
 		}
 		if c.Jobs == nil {
-			return nil, fmt.Errorf("%s: jobs is required", label)
+			return policyCases{}, fmt.Errorf("%s: jobs is required", label)
 		}
 		if err := unique(*c.Jobs, label+" jobs"); err != nil {
-			return nil, err
+			return policyCases{}, err
 		}
 		for _, job := range *c.Jobs {
 			if !contains(g.Jobs, job) {
-				return nil, fmt.Errorf("%s: unknown job %q", label, job)
+				return policyCases{}, fmt.Errorf("%s: unknown job %q", label, job)
 			}
 		}
+		if err := validateLocalGroupNames(g, label+" local_groups", c.LocalGroups); err != nil {
+			return policyCases{}, err
+		}
 		if c.Collections == nil {
-			return nil, fmt.Errorf("%s: collections is required", label)
+			return policyCases{}, fmt.Errorf("%s: collections is required", label)
 		}
 		for name, values := range *c.Collections {
 			if !knownCollections[name] {
-				return nil, fmt.Errorf("%s: unknown collection %q", label, name)
+				return policyCases{}, fmt.Errorf("%s: unknown collection %q", label, name)
 			}
 			if err := unique(values, label+" collection "+name); err != nil {
-				return nil, err
+				return policyCases{}, err
 			}
 		}
 		for _, name := range collectionNames {
 			if _, ok := (*c.Collections)[name]; !ok {
-				return nil, fmt.Errorf("%s: missing collection %q", label, name)
+				return policyCases{}, fmt.Errorf("%s: missing collection %q", label, name)
 			}
 		}
 	}
-	return file.Cases, nil
+	return file, nil
+}
+
+func validateLocalGroupNames(g graph, label string, names *[]string) error {
+	if names == nil {
+		return nil
+	}
+	if err := unique(*names, label); err != nil {
+		return err
+	}
+	for _, name := range *names {
+		suite, ok := g.CheckGroups[name]
+		if !ok {
+			return fmt.Errorf("%s: unknown check group %q", label, name)
+		}
+		if !suite.RunLocal {
+			return fmt.Errorf("%s: check group %q is not local", label, name)
+		}
+	}
+	return nil
+}
+
+func compareLocalGroups(label string, got []string, want *[]string) error {
+	if want == nil {
+		return nil
+	}
+	sortedWant := slices.Clone(*want)
+	sort.Strings(sortedWant)
+	if !slices.Equal(got, sortedWant) {
+		return fmt.Errorf("%s: local groups = %v, want %v", label, got, sortedWant)
+	}
+	return nil
 }
 
 func sortedSelectedJobs(jobs map[string]bool) []string {
@@ -106,8 +149,11 @@ func sortedSelectedJobs(jobs map[string]bool) []string {
 	return selected
 }
 
-func verifyPolicyCases(g graph, cases []policyCase) error {
-	for _, c := range cases {
+func verifyPolicyCases(g graph, file policyCases) error {
+	if err := compareLocalGroups("--all", selectedLocalGroups(g, allLocalPlan(g)), file.AllLocalGroups); err != nil {
+		return err
+	}
+	for _, c := range file.Cases {
 		p, err := g.selectPaths(*c.Paths)
 		if err != nil {
 			return fmt.Errorf("case %q: %w", *c.Name, err)
@@ -116,6 +162,9 @@ func verifyPolicyCases(g graph, cases []policyCase) error {
 		sort.Strings(wantJobs)
 		if got := sortedSelectedJobs(p.Jobs); !slices.Equal(got, wantJobs) {
 			return fmt.Errorf("case %q: jobs = %v, want %v", *c.Name, got, wantJobs)
+		}
+		if err := compareLocalGroups(fmt.Sprintf("case %q", *c.Name), selectedLocalGroups(g, p), c.LocalGroups); err != nil {
+			return err
 		}
 		collectionNames := make([]string, 0, len(*c.Collections))
 		for name := range *c.Collections {
@@ -155,6 +204,6 @@ func runVerifyPolicy(root string, g graph, args []string) error {
 	if err := verifyPolicyCases(g, cases); err != nil {
 		return err
 	}
-	fmt.Printf("Verified %d policy cases.\n", len(cases))
+	fmt.Printf("Verified %d policy cases.\n", len(cases.Cases))
 	return nil
 }
