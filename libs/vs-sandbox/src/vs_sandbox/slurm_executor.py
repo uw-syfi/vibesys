@@ -12,7 +12,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Any, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -334,6 +334,7 @@ class SlurmEvaluationExecutor:
         self._handles: dict[str, SlurmBatchHandle] = {}
         self._lifecycle = LifecyclePublisher()
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._calls: set[asyncio.Future[Any]] = set()
         # Only observed termination suppresses redundant cancellation. A sent
         # scancel request does not prove that the allocation has stopped.
         self._terminated_jobs: set[str] = set()
@@ -415,7 +416,7 @@ class SlurmEvaluationExecutor:
         if ended is not None:
             return ended
         target = durable.handle if durable.handle is not None else handle_id
-        inspected = await asyncio.to_thread(self._cluster.inspect, target)
+        inspected = await self._in_thread(self._cluster.inspect, target)
         if not isinstance(inspected, ClusterObservation):
             return None
         # Scheduler terminality cannot replace collected stage evidence. Normal
@@ -454,7 +455,7 @@ class SlurmEvaluationExecutor:
 
     async def _poll_cluster(self, handle_id: str, durable: _DurableSlurmEvaluation) -> ExecutorPoll:
         target = durable.handle if durable.handle is not None else handle_id
-        inspected = await asyncio.to_thread(self._cluster.inspect, target)
+        inspected = await self._in_thread(self._cluster.inspect, target)
         if not isinstance(inspected, ClusterObservation):
             return ExecutorPoll(phase=PollPhase.UNKNOWN, detail=inspected.reason)
         view, merged = self._scheduler_view(handle_id, inspected)
@@ -501,7 +502,7 @@ class SlurmEvaluationExecutor:
         if not isinstance(handle, SlurmBatchHandle):
             return ExecutorPoll(phase=PollPhase.UNKNOWN, detail="missing batch identity")
         # The poll just read this job's terminal state; collecting reuses that reading.
-        collected = await asyncio.to_thread(
+        collected = await self._in_thread(
             functools.partial(self._cluster.collect, handle, observed=inspected)
         )
         try:
@@ -600,6 +601,9 @@ class SlurmEvaluationExecutor:
         for task in leftover:
             task.cancel()
         await asyncio.gather(*leftover, return_exceptions=True)
+        # A cluster call whose caller was cancelled still runs in its thread.
+        while self._calls:
+            await asyncio.gather(*tuple(self._calls), return_exceptions=True)
         for result in results:
             if isinstance(result, BaseException):
                 raise result
@@ -694,7 +698,7 @@ class SlurmEvaluationExecutor:
             self._handles[handle_id] = existing
             return
         if reconcile and durable is not None and durable.dispatch_started:
-            observed = await asyncio.to_thread(self._cluster.inspect, handle_id)
+            observed = await self._in_thread(self._cluster.inspect, handle_id)
             if isinstance(observed, ClusterObservation) and isinstance(
                 observed.handle, SlurmBatchHandle
             ):
@@ -721,7 +725,7 @@ class SlurmEvaluationExecutor:
             for step, stage in zip(request.stages, stages, strict=True)
         )
         self._write_evaluation(handle_id, None, request, dispatch_started=True)
-        submitted = await asyncio.to_thread(
+        submitted = await self._in_thread(
             self._cluster.submit,
             SlurmBatchRequest(
                 workspace=self._workspace,
@@ -740,7 +744,7 @@ class SlurmEvaluationExecutor:
         if isinstance(submitted, ClusterConflict):
             raise ExecutorRejectedError(str(_SlurmExecutionError.request_conflict(handle_id)))
         if isinstance(submitted, ClusterUnknown):
-            observed = await asyncio.to_thread(self._cluster.inspect, handle_id)
+            observed = await self._in_thread(self._cluster.inspect, handle_id)
             if not isinstance(observed, ClusterObservation) or not isinstance(
                 observed.handle, SlurmBatchHandle
             ):
@@ -774,7 +778,7 @@ class SlurmEvaluationExecutor:
             # contradict the scheduler and turn a requested stop into a failure.
             self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
             return
-        collection = asyncio.create_task(asyncio.to_thread(self._cluster.collect, handle))
+        collection = asyncio.create_task(self._in_thread(self._cluster.collect, handle))
         try:
             collected = await asyncio.shield(collection)
         except asyncio.CancelledError:
@@ -980,12 +984,51 @@ class SlurmEvaluationExecutor:
         if self._pause is None:
             await asyncio.sleep(interval)
         else:
-            await asyncio.to_thread(self._pause, interval)
+            await self._in_thread(self._pause, interval)
+
+    async def _in_thread[**P, R](
+        self, function: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
+    ) -> R:
+        """Run a blocking call on a worker thread that ``close`` waits for.
+
+        ``asyncio.to_thread`` abandons its worker when the awaiting task is cancelled,
+        and the call keeps running in it. Every such call is held in ``_calls`` until
+        its thread returns, so ``close`` can wait for it, and a cancelled caller still
+        stops waiting at once.
+        """
+        work = asyncio.ensure_future(asyncio.to_thread(function, *args, **kwargs))
+        self._calls.add(work)
+        work.add_done_callback(self._call_ended)
+        return await asyncio.shield(work)
+
+    def _call_ended(self, work: asyncio.Future[Any]) -> None:
+        self._calls.discard(work)
+        if not work.cancelled():
+            work.exception()  # a cancelled caller never reads the outcome; mark it retrieved
+
+    async def _finish_in_thread[**P, R](
+        self, function: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
+    ) -> R:
+        """Run a blocking cluster call that must finish even if its awaiter is cancelled.
+
+        ``asyncio.to_thread`` abandons its worker when the awaiting task is cancelled,
+        so a cancel or inspect could still be mid-flight (an scancel not yet sent) after
+        the executor reported itself closed. This waits for the call to end, then
+        re-raises the cancellation.
+        """
+        work = asyncio.ensure_future(self._in_thread(function, *args, **kwargs))
+        try:
+            return await asyncio.shield(work)
+        except asyncio.CancelledError:
+            while not work.done():
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await asyncio.shield(work)
+            raise
 
     async def _inspect_cancellation_safe(
         self, handle_id: str, handle: SlurmBatchHandle
     ) -> ClusterInspectOutcome:
-        inspection = asyncio.create_task(asyncio.to_thread(self._cluster.inspect, handle))
+        inspection = asyncio.create_task(self._in_thread(self._cluster.inspect, handle))
         try:
             return await asyncio.shield(inspection)
         except asyncio.CancelledError:
@@ -1034,7 +1077,7 @@ class SlurmEvaluationExecutor:
         if job_id is None or job_id not in self._cancel_sent or exhausted:
             if exhausted:
                 self._confirmations_left[handle_id] = self._cancel_confirmations
-            cancelled = await _finish_in_thread(self._cluster.cancel, target)
+            cancelled = await self._finish_in_thread(self._cluster.cancel, target)
             if isinstance(cancelled, ClusterUnknown):
                 job_id = job_id or cancelled.job_id
                 if job_id in {None, _UNRESOLVED_JOB_ID}:
@@ -1069,7 +1112,7 @@ class SlurmEvaluationExecutor:
     ) -> _CancelOutcome:
         left = self._confirmations_left.setdefault(handle_id, self._cancel_confirmations)
         for _ in range(max(left, 1)):
-            observed = await _finish_in_thread(self._cluster.inspect, target)
+            observed = await self._finish_in_thread(self._cluster.inspect, target)
             if isinstance(observed, ClusterObservation) and observed.status in {
                 SlurmJobStatus.COMPLETED,
                 SlurmJobStatus.FAILED,
@@ -1180,26 +1223,6 @@ class _SlurmStagePayloadError(ValueError):
     @classmethod
     def missing_command(cls, name: str) -> _SlurmStagePayloadError:
         return cls(f"Slurm stage {name!r} requires a nonempty configured command")
-
-
-async def _finish_in_thread[**P, R](
-    function: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
-) -> R:
-    """Run a blocking cluster call that must finish even if its awaiter is cancelled.
-
-    ``asyncio.to_thread`` abandons its worker when the awaiting task is cancelled,
-    so a cancel or inspect could still be mid-flight (an scancel not yet sent) after
-    the executor reported itself closed. This waits for the call to end, then
-    re-raises the cancellation.
-    """
-    work = asyncio.ensure_future(asyncio.to_thread(function, *args, **kwargs))
-    try:
-        return await asyncio.shield(work)
-    except asyncio.CancelledError:
-        while not work.done():
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await asyncio.shield(work)
-        raise
 
 
 def _stage_command(name: str, command: str | None) -> tuple[str, ...]:

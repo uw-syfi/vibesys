@@ -152,7 +152,7 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_command.py", "rule": "threading", "count": 5}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_command.py", "rule": "time", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "asyncio_sleep", "count": 1}
-{"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "executor", "count": 10}
+{"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "executor", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "subprocess", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "time", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_gpu.py", "rule": "subprocess", "count": 11}
