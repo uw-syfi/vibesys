@@ -1,6 +1,7 @@
 /**
  * The detached-run registry as the desktop reads it: `vibesys --detach` prints one
- * `LiveInstanceRecord`, and `vibesys instances list --json` prints an `InstanceList`
+ * `LiveInstanceRecord` (or one `DetachedLaunchFailure`), `vibesys instances list --json` prints an
+ * `InstanceList`, and `vibesys instances stop ID --json` an `InstanceStopResult`
  * (`src/server/instances.py` is the authoritative definition).
  *
  * Parsing is strict (unknown keys and wrong types are rejected, naming the path), with one
@@ -84,6 +85,7 @@ export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRe
   if (runId !== null && typeof runId !== 'string') {
     throw new RecordError(`${path}.run_id must be a string or null`);
   }
+  const socketPath = absolutePath(record, 'socket_path', path);
   const pid = number(record, 'pid', path);
   if (!Number.isInteger(pid) || pid <= 0) {
     throw new RecordError(`${path}.pid must be a positive integer`);
@@ -93,7 +95,7 @@ export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRe
     instance: {
       id,
       status,
-      socketPath: string(record, 'socket_path', path),
+      socketPath,
       projectRoot: string(record, 'project_root', path),
       runId,
       pid,
@@ -121,6 +123,102 @@ export function parseInstanceList(value: unknown): InstanceListing {
     ),
     unverified,
   };
+}
+
+/** Why `vibesys --detach` started nothing (`DetachedLaunchFailure`). */
+export interface DetachedLaunchFailure {
+  /** A `DetachedLaunchErrorCode` or a configuration diagnostic code (`invalid_arguments`, ...). */
+  readonly code: string;
+  readonly stage: string;
+  readonly message: string;
+  readonly exitCode: number;
+  /** The detached server's log, when one was started. */
+  readonly logPath: string | null;
+  /** For `run_already_live`: the server already driving the run, to attach to instead. */
+  readonly liveInstance: InstanceRecord | null;
+}
+
+/** What `vibesys --detach` printed: the started server's record, or why it started nothing. */
+export type DetachedLaunch =
+  | {readonly kind: 'started'; readonly record: InstanceRecord}
+  | {readonly kind: 'failed'; readonly failure: DetachedLaunchFailure};
+
+const FAILURE_KEYS = [
+  'version',
+  'outcome',
+  'code',
+  'stage',
+  'message',
+  'exit_code',
+  'log_path',
+  'live_instance',
+] as const;
+
+/** Parse `vibesys --detach`'s one line: a failure has `outcome`, which a record never has. */
+export function parseDetachedLaunch(value: unknown): DetachedLaunch {
+  const document = object(value, 'launch');
+  if (!('outcome' in document)) return {kind: 'started', record: parseInstanceRecord(document)};
+  const path = 'launch';
+  onlyKeys(document, FAILURE_KEYS, path);
+  if (document['version'] !== 1) throw new RecordError(`${path}.version must be 1`);
+  if (document['outcome'] !== 'failed') throw new RecordError(`${path}.outcome must be "failed"`);
+  const exitCode = number(document, 'exit_code', path);
+  const logPath = document['log_path'] ?? null;
+  if (logPath !== null && typeof logPath !== 'string') {
+    throw new RecordError(`${path}.log_path must be a string or null`);
+  }
+  const live = document['live_instance'] ?? null;
+  return {
+    kind: 'failed',
+    failure: {
+      code: string(document, 'code', path),
+      stage: string(document, 'stage', path),
+      message: string(document, 'message', path),
+      exitCode,
+      logPath,
+      liveInstance: live === null ? null : parseInstanceRecord(live, `${path}.live_instance`),
+    },
+  };
+}
+
+/** What a user reads about a launch that started nothing. */
+export function detachedFailureMessage(failure: DetachedLaunchFailure): string {
+  const log = failure.logPath === null ? '' : ` Its log is ${failure.logPath}.`;
+  return `${failure.message} (${failure.code} at ${failure.stage}).${log}`;
+}
+
+/** What `vibesys instances stop ID --json` observed (`StopOutcome`). */
+export type StopOutcome = 'stopped' | 'stopping' | 'not_running' | 'still_running' | 'unsupported';
+
+export interface StopResult {
+  readonly id: string;
+  readonly outcome: StopOutcome;
+  readonly route: 'control_socket' | 'signal' | null;
+}
+
+const STOP_OUTCOMES: readonly StopOutcome[] = [
+  'stopped',
+  'stopping',
+  'not_running',
+  'still_running',
+  'unsupported',
+];
+
+/** Parse an `InstanceStopResult`. */
+export function parseStopResult(value: unknown): StopResult {
+  const path = 'stop';
+  const document = object(value, path);
+  onlyKeys(document, ['version', 'id', 'outcome', 'route'], path);
+  if (document['version'] !== 1) throw new RecordError(`${path}.version must be 1`);
+  const outcome = STOP_OUTCOMES.find(known => known === document['outcome']);
+  if (outcome === undefined) {
+    throw new RecordError(`${path}.outcome must be one of ${STOP_OUTCOMES.join(', ')}`);
+  }
+  const route = document['route'] ?? null;
+  if (route !== null && route !== 'control_socket' && route !== 'signal') {
+    throw new RecordError(`${path}.route must be "control_socket", "signal", or null`);
+  }
+  return {id: string(document, 'id', path), outcome, route};
 }
 
 /** The message for a server this client cannot read: both versions, and the command to change. */
@@ -155,6 +253,12 @@ function onlyKeys(record: Record<string, unknown>, allowed: readonly string[], p
 function string(record: Record<string, unknown>, key: string, path: string): string {
   const value = record[key];
   if (typeof value !== 'string') throw new RecordError(`${path}.${key} must be a string`);
+  return value;
+}
+
+function absolutePath(record: Record<string, unknown>, key: string, path: string): string {
+  const value = string(record, key, path);
+  if (!value.startsWith('/')) throw new RecordError(`${path}.${key} must be an absolute path`);
   return value;
 }
 

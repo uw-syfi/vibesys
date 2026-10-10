@@ -1,7 +1,13 @@
 import {describe, expect, test} from 'bun:test';
 import {PROTOCOL_VERSION} from '@vibesys/backend-client';
 import {checkAttachment} from './attachment.js';
-import {parseInstanceList, parseInstanceRecord, RecordError} from './instances.js';
+import {
+  parseDetachedLaunch,
+  parseInstanceList,
+  parseInstanceRecord,
+  parseStopResult,
+  RecordError,
+} from './instances.js';
 import {FakeHost} from './testing/fake-host.js';
 import {fakeRecord} from './testing/fake-record.js';
 
@@ -95,5 +101,60 @@ describe('version gate', () => {
       ok: false,
       cause: 'run-gone',
     });
+  });
+});
+
+describe('detached launch and stop documents', () => {
+  test('a record is a start, a document with an outcome is a failure', () => {
+    expect(parseDetachedLaunch(fakeRecord(ID, SOCKET)).kind).toBe('started');
+    const failed = parseDetachedLaunch({
+      version: 1,
+      outcome: 'failed',
+      code: 'run_already_live',
+      stage: 'resume',
+      message: 'run r is live',
+      exit_code: 1,
+      live_instance: fakeRecord(ID, SOCKET),
+    });
+    expect(failed.kind === 'failed' && failed.failure.liveInstance?.kind).toBe('compatible');
+    expect(() =>
+      parseDetachedLaunch({
+        version: 1,
+        outcome: 'failed',
+        code: 'x',
+        stage: 's',
+        message: 'm',
+        exit_code: 2,
+        extra: 1,
+      }),
+    ).toThrow('launch.extra is not a known field');
+  });
+
+  test('every stop outcome parses, and nothing else does', () => {
+    for (const outcome of [
+      'stopped',
+      'stopping',
+      'not_running',
+      'still_running',
+      'unsupported',
+    ] as const) {
+      for (const route of ['control_socket', 'signal', null] as const) {
+        expect(parseStopResult({version: 1, id: ID, outcome, route})).toEqual({
+          id: ID,
+          outcome,
+          route,
+        });
+      }
+    }
+    expect(() => parseStopResult({version: 1, id: ID, outcome: 'paused'})).toThrow('stop.outcome');
+    expect(() => parseStopResult({version: 1, id: ID, outcome: 'stopped', route: 'x'})).toThrow(
+      'stop.route',
+    );
+  });
+
+  test('a socket path must be absolute', () => {
+    for (const socket of ['relative.sock', '-oProxyCommand=x', '~/x.sock', '']) {
+      expect(() => parseInstanceRecord(fakeRecord(ID, socket))).toThrow('socket_path');
+    }
   });
 });

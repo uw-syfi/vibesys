@@ -14,6 +14,11 @@ import {fakeRecord} from './fake-record.js';
 export interface FakeNodeScripts {
   server: (args: readonly string[]) => ServerScript;
   command: (argv: readonly string[]) => CommandResult;
+  /**
+   * A `DetachedLaunchFailure` document `vibesys --detach ARGS` prints instead of starting anything
+   * (it exits with the document's `exit_code`), or null to start a server.
+   */
+  launchFailure?: (args: readonly string[], node: FakeVibesysNode) => {exit_code: number} | null;
 }
 
 export class FakeVibesysNode {
@@ -53,8 +58,17 @@ export class FakeVibesysNode {
     this.#live.clear();
   }
 
+  /** The live servers' ids and socket paths. */
+  get live(): ReadonlyMap<string, string> {
+    return this.#live;
+  }
+
   #detach(args: readonly string[], cwd: string | undefined): CommandResult {
     this.startDirectories.push(cwd);
+    const failure = this.#scripts.launchFailure?.(args, this) ?? null;
+    if (failure !== null) {
+      return {code: failure.exit_code, stdout: `${JSON.stringify(failure)}\n`, stderr: ''};
+    }
     const script = this.#scripts.server(args);
     if (typeof script !== 'function') {
       return {code: 1, stdout: '', stderr: `${script.logTail}\n`};

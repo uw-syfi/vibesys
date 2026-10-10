@@ -10,7 +10,7 @@
  * (`vibesys instances list --json`), so every layer above this interface is the same for both.
  */
 import type {Duplex} from 'node:stream';
-import type {InstanceRecord} from './instances.js';
+import type {InstanceRecord, StopOutcome} from './instances.js';
 
 /** A server's control endpoint, named in the host's own terms. */
 export interface Endpoint {
@@ -24,6 +24,12 @@ export interface ServerExit {
   readonly code: number | null;
   /** The last lines of the server's output, for a startup failure report. */
   readonly logTail: string;
+  /**
+   * What the host's stop reported, when it reported one. `stopping` means the server accepted the
+   * stop and exits on its own at its next safe point: it leaves the registry then; do not stop it
+   * again.
+   */
+  readonly stopOutcome?: StopOutcome;
 }
 
 /** A server started by `Host.startServer`. */
@@ -32,6 +38,11 @@ export interface ServerHandle {
   readonly endpoint: Endpoint;
   /** What the server published about itself in the host's registry. */
   readonly record: InstanceRecord;
+  /**
+   * True when the start resumed a run that another detached server already drives: this handle is
+   * that server (attach to it), and nothing new was started.
+   */
+  readonly alreadyLive: boolean;
   /** Settles once the server has been stopped through this handle. */
   readonly exited: Promise<ServerExit>;
   /** Stop the server and wait for it to end. Idempotent. */
@@ -77,8 +88,8 @@ export interface Host {
   ensureLink(): Promise<void>;
   /**
    * Start a detached VibeSys server with `args` (the server's own arguments) and resolve with its
-   * registry record once it is up. Rejects with `failed` when the server cannot start, carrying
-   * its log tail in the message.
+   * registry record once it is up. Rejects with `failed` when the server cannot start, with the
+   * launch's own reason (and its log path or tail) in the message.
    */
   startServer(args: readonly string[], options?: StartOptions): Promise<ServerHandle>;
   /**

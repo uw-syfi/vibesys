@@ -16,7 +16,15 @@ import {
   type ServerHandle,
   type StartOptions,
 } from './host.js';
-import {type InstanceRecord, parseInstanceRecord, RecordError} from './instances.js';
+import {
+  type DetachedLaunch,
+  detachedFailureMessage,
+  type InstanceRecord,
+  parseDetachedLaunch,
+  parseStopResult,
+  RecordError,
+  type StopOutcome,
+} from './instances.js';
 import type {CommandOutput} from './process.js';
 
 /** How a host runs `vibesys` and reaches a Unix socket on its machine. */
@@ -53,14 +61,18 @@ export class DetachedHost implements Host {
   async startServer(args: readonly string[], options: StartOptions = {}): Promise<ServerHandle> {
     this.#assertOpen();
     const output = await this.#access.run(['--detach', ...args], options.cwd);
-    if (output.code !== 0) {
-      const tail = logTail(`${output.stdout}\n${output.stderr}`);
-      throw new HostError(
-        'failed',
-        `the server exited with ${output.code ?? 'a signal'}${tail === '' ? '' : `\n${tail}`}`,
-      );
+    const launch = detachedLaunch(output);
+    let record: InstanceRecord;
+    let alreadyLive = false;
+    if (launch.kind === 'started') {
+      record = launch.record;
+    } else if (launch.failure.liveInstance !== null) {
+      // `--resume` of a run another detached server drives: attach to that one instead.
+      record = launch.failure.liveInstance;
+      alreadyLive = true;
+    } else {
+      throw new HostError('failed', detachedFailureMessage(launch.failure));
     }
-    const record = detachedRecord(output.stdout);
     const id = record.kind === 'compatible' ? record.instance.id : record.id;
     const socketPath = record.kind === 'compatible' ? record.instance.socketPath : '';
     let resolveExit: (exit: ServerExit) => void = () => {};
@@ -71,6 +83,7 @@ export class DetachedHost implements Host {
     const handle: ServerHandle = {
       endpoint: {socketPath},
       record,
+      alreadyLive,
       exited,
       stop: () => {
         stopping ??= this.#stop(id).then(exit => {
@@ -120,7 +133,10 @@ export class DetachedHost implements Host {
     await this.#access.close();
   }
 
-  /** Stop registry instance `id`; a server that is already gone counts as stopped. */
+  /**
+   * Stop registry instance `id`. A server that is already gone counts as stopped; one that accepted
+   * the stop (`stopping`) exits on its own, so this does not ask again.
+   */
   async #stop(id: string | null): Promise<ServerExit> {
     if (id === null) return {code: null, logTail: ''};
     let output: CommandOutput;
@@ -129,7 +145,13 @@ export class DetachedHost implements Host {
     } catch (error) {
       return {code: null, logTail: (error as Error).message};
     }
-    return {code: output.code, logTail: logTail(output.stderr)};
+    let stopOutcome: StopOutcome;
+    try {
+      stopOutcome = parseStopResult(JSON.parse(lastLine(output.stdout) ?? '') as unknown).outcome;
+    } catch {
+      return {code: output.code, logTail: logTail(`${output.stdout}\n${output.stderr}`)};
+    }
+    return {code: output.code, logTail: logTail(output.stderr), stopOutcome};
   }
 
   #assertOpen(): void {
@@ -137,22 +159,46 @@ export class DetachedHost implements Host {
   }
 }
 
-/** The record `vibesys --detach` printed: its last non-empty line of standard output. */
-function detachedRecord(stdout: string): InstanceRecord {
-  const line = stdout
-    .split('\n')
-    .map(text => text.trim())
-    .filter(text => text !== '')
-    .at(-1);
-  if (line === undefined) throw new HostError('malformed', 'vibesys --detach printed no record');
-  try {
-    return parseInstanceRecord(JSON.parse(line) as unknown);
-  } catch (error) {
-    const detail = error instanceof RecordError ? `: ${error.message}` : '';
-    throw new HostError('malformed', `vibesys --detach did not print a record${detail}`, {
-      cause: error,
-    });
+/**
+ * What `vibesys --detach` printed as its one line (a record or a `DetachedLaunchFailure`). Output
+ * that is neither, from an older VibeSys or a crash, is reported by exit status and log tail.
+ */
+function detachedLaunch(output: CommandOutput): DetachedLaunch {
+  const launch = parsedLaunch(lastLine(output.stdout));
+  const parsed = launch !== null && !(launch instanceof Error);
+  if (parsed && (launch.kind === 'failed' || output.code === 0)) return launch;
+  if (output.code !== 0) {
+    const tail = logTail(`${output.stdout}\n${output.stderr}`);
+    throw new HostError(
+      'failed',
+      `the server exited with ${output.code ?? 'a signal'}${tail === '' ? '' : `\n${tail}`}`,
+    );
   }
+  if (launch === null) throw new HostError('malformed', 'vibesys --detach printed no record');
+  const detail = launch instanceof RecordError ? `: ${launch.message}` : '';
+  throw new HostError('malformed', `vibesys --detach did not print a record${detail}`, {
+    cause: launch,
+  });
+}
+
+/** `line` as a launch document, the error that refused it, or null when there is no line. */
+function parsedLaunch(line: string | null): DetachedLaunch | Error | null {
+  if (line === null) return null;
+  try {
+    return parseDetachedLaunch(JSON.parse(line) as unknown);
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+function lastLine(text: string): string | null {
+  return (
+    text
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line !== '')
+      .at(-1) ?? null
+  );
 }
 
 function logTail(text: string): string {

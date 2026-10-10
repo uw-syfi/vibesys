@@ -67,10 +67,11 @@ export class FakeHost implements Host {
     const handle: ServerHandle = {
       endpoint: {socketPath},
       record: parseInstanceRecord(fakeRecord(id, socketPath)),
+      alreadyLive: false,
       exited,
       stop: async () => {
         this.network.unlisten(socketPath);
-        resolveExit({code: null, logTail: ''});
+        resolveExit({code: null, logTail: '', stopOutcome: 'stopped'});
         await exited;
       },
     };

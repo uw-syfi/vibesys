@@ -5,6 +5,7 @@ import {LocalHost} from './local-host.js';
 import {PROBED_DIRECTORIES, SshHost} from './ssh-host.js';
 import type {CommandResult} from './testing/fake-host.js';
 import {fakeLocalSystem} from './testing/fake-local-system.js';
+import {fakeRecord} from './testing/fake-record.js';
 import {FAKE_VIBESYS_PATH, FAKE_VIBESYS_PYTHON, FakeSsh} from './testing/fake-ssh.js';
 import {FakeVibesysNode} from './testing/fake-vibesys-node.js';
 
@@ -309,5 +310,78 @@ describe('detached starts', () => {
     expect(node.startDirectories).toEqual(['/Users/me/p']);
     expect(server.record.kind).toBe('compatible');
     await local.close();
+  });
+});
+
+describe('detached launch and stop contracts', () => {
+  const failure = (code: string, extra: object = {}) => ({
+    version: 1,
+    outcome: 'failed',
+    code,
+    stage: 'launch',
+    message: `launch said ${code}`,
+    exit_code: 2,
+    log_path: null,
+    live_instance: null,
+    ...extra,
+  });
+
+  function launching(launchFailure: (args: readonly string[], node: FakeVibesysNode) => object) {
+    const node = new FakeVibesysNode({
+      server: () => () => {},
+      command: () => ({code: 0, stdout: '{}', stderr: ''}),
+      launchFailure: (args, self) =>
+        args.includes('--resume') ? ({exit_code: 2, ...launchFailure(args, self)} as never) : null,
+    });
+    const ssh = new FakeSsh(node);
+    const host = new SshHost({
+      alias: 'node-1',
+      vibesysCommand: 'vibesys',
+      controlPath: '/tmp/vsd/%C',
+      runner: ssh,
+    });
+    return {node, host};
+  }
+
+  test('resuming a run another server drives attaches to that server instead', async () => {
+    const {node, host} = launching((_args, self) => {
+      const [id, socketPath] = [...self.live.entries()][0] ?? ['', ''];
+      return failure('run_already_live', {live_instance: fakeRecord(id, socketPath)});
+    });
+    const first = await host.startServer(['--project', '/p']);
+    expect(first.alreadyLive).toBe(false);
+    const again = await host.startServer(['--resume', 'run-1'], {cwd: '/p'});
+    expect(again.alreadyLive).toBe(true);
+    expect(again.endpoint).toEqual(first.endpoint);
+    expect(node.live.size).toBe(1);
+    (await host.dial(again.endpoint)).destroy();
+    await host.close();
+  });
+
+  test('a launch that starts nothing is reported with its own code, message, and log', async () => {
+    for (const [code, extra, expected] of [
+      ['resume_not_found', {}, 'launch said resume_not_found (resume_not_found at launch).'],
+      ['invalid_arguments', {}, 'invalid_arguments'],
+      ['registry_unavailable', {exit_code: 1}, 'registry_unavailable'],
+      ['server_start_failed', {log_path: '/run/x/server.log'}, 'Its log is /run/x/server.log.'],
+    ] as const) {
+      const {host} = launching(() => failure(code, extra));
+      try {
+        await host.startServer(['--resume', 'r'], {cwd: '/p'});
+        throw new Error('expected a failure');
+      } catch (error) {
+        expect((error as HostError).kind).toBe('failed');
+        expect((error as Error).message).toContain(expected);
+      }
+      await host.close();
+    }
+  });
+
+  test('a stop reports the outcome the host observed', async () => {
+    const {host} = launching(() => failure('x'));
+    const server = await host.startServer([]);
+    await server.stop();
+    expect((await server.exited).stopOutcome).toBe('stopped');
+    await host.close();
   });
 });
