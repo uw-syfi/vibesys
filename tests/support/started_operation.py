@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
+import threading
 from typing import TYPE_CHECKING, Any
 
 from vs_evaluation.api import EvaluationState
 
 if TYPE_CHECKING:
-    import threading
-    from collections.abc import Awaitable
+    from collections.abc import Awaitable, Callable
 
     from vs_evaluation.api import EvaluationExecutor
 
@@ -115,3 +116,47 @@ async def arrival[T](awaited: Awaitable[T], *operations: asyncio.Future[Any]) ->
             waiter.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await waiter
+
+
+def wait_until_started_sync(
+    started: threading.Event, operation: concurrent.futures.Future[Any]
+) -> None:
+    """Return once *started* is set; surface the outcome of *operation* if it ends first.
+
+    The test-thread form of ``wait_until_started``: a bare ``started.wait()``
+    parks the test forever when the worker running *operation* fails or returns
+    before it reaches the point that sets *started*. Ending *operation* releases
+    the wait, so *started* is set on that path and a return from here, not the
+    event, is the proof of a start.
+
+    Raises:
+        AssertionError: *operation* returned without ever starting.
+        BaseException: whatever *operation* raised before it started.
+    """
+    operation.add_done_callback(lambda _done: started.set())
+    started.wait()
+    if operation.done():
+        operation.result()
+        message = "the operation finished without reaching its held step"
+        raise AssertionError(message)
+
+
+def start_thread[T](target: Callable[[], T]) -> concurrent.futures.Future[T]:
+    """Run *target* on its own thread and return a future for its outcome.
+
+    For a test that waits on a worker's progress with ``wait_until_started_sync``
+    and has no pool to submit to. The thread is a daemon so that a stuck target
+    never keeps the interpreter alive.
+    """
+    future: concurrent.futures.Future[T] = concurrent.futures.Future()
+
+    def run() -> None:
+        if not future.set_running_or_notify_cancel():
+            return
+        try:
+            future.set_result(target())
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-159901 [BLE001]; relayed to the waiter through the future.
+            future.set_exception(error)
+
+    threading.Thread(target=run, daemon=True).start()
+    return future

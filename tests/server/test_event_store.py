@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
 import pytest
 from pydantic import ValidationError
+from tests.support.started_operation import wait_until_started_sync
 
 from server.events import EventStore, EventType, RunEvent, ToolCallData, make_event
 
@@ -299,8 +300,8 @@ class TestEventStore:
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             readers = [executor.submit(wait_for_first_event, reader) for reader in range(2)]
-            for registered in waiting:
-                registered.wait()
+            for registered, reader in zip(waiting, readers, strict=True):
+                wait_until_started_sync(registered, reader)
             appended = store.append(make_event(EventType.OUTPUT, "visible"))
 
         batches = [reader.result() for reader in readers]

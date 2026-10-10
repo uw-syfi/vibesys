@@ -592,12 +592,10 @@ def test_disconnect_wait_blocks_until_last_subscriber_closes(
         with _subscribed_client(socket_path, request) as read:
             assert read()["type"] == "subscribed"
             order: list[str] = []
-            returned = threading.Event()
 
             def wait_for_disconnect() -> None:
                 server.wait_for_subscriber_disconnect()
                 order.append("wait returned")
-                returned.set()
 
             waiter = threading.Thread(target=wait_for_disconnect, daemon=True)
             waiter.start()
@@ -607,7 +605,6 @@ def test_disconnect_wait_blocks_until_last_subscriber_closes(
             order.append("second client hanging up")
         parts.journal.publish_output("stdout", "wake the second handler")
 
-        returned.wait()
         join_or_fail(waiter)
         assert order == ["second client hanging up", "wait returned"]
 

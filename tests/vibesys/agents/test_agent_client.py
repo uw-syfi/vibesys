@@ -12,6 +12,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, Field
+from tests.support.started_operation import wait_until_started_sync
 
 from vibesys.api import CoreAgentEventSink
 from vibesys.events import (
@@ -647,7 +648,7 @@ def test_cancel_stops_an_active_session_without_closing_it() -> None:
             turn=AgentTurnRequest("one"),
             session_key=_key("impl"),
         )
-        started.wait()
+        wait_until_started_sync(started, turn)
         client.cancel()
         assert turn.result().text == "ok"
 

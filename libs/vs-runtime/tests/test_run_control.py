@@ -7,7 +7,8 @@ import threading
 
 import pytest
 from pydantic import ValidationError
-from tests.support.bounded_waits import join_or_fail
+from tests.support.bounded_waits import HANG_GUARD_S
+from tests.support.started_operation import start_thread, wait_until_started_sync
 
 from vs_runtime.api.infrastructure import (
     BlockingOperations,
@@ -53,15 +54,12 @@ def test_pause_parks_at_a_boundary_until_resume() -> None:
     control = create_run_control_channel(events)
     control.request_pause()
 
-    waiter = threading.Thread(
-        target=lambda: (control.wait_while_paused(), released.set()),
-    )
-    waiter.start()
-    paused.wait()
+    waiter = start_thread(lambda: (control.wait_while_paused(), released.set()))
+    wait_until_started_sync(paused, waiter)
     assert not released.is_set()
 
     control.resume()
-    join_or_fail(waiter)
+    waiter.result(timeout=HANG_GUARD_S)
 
     assert released.is_set()
     assert [transition.kind for transition in events.transitions] == [
@@ -88,11 +86,10 @@ def test_stop_releases_a_paused_boundary_and_unwinds() -> None:
         except RunStopped as error:
             raised.append(error)
 
-    waiter = threading.Thread(target=wait_at_boundary)
-    waiter.start()
-    paused.wait()
+    waiter = start_thread(wait_at_boundary)
+    wait_until_started_sync(paused, waiter)
     control.request_stop()
-    join_or_fail(waiter)
+    waiter.result(timeout=HANG_GUARD_S)
 
     assert [type(error) for error in raised] == [RunStopped]
     assert [transition.kind for transition in events.transitions] == [
