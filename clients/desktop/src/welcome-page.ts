@@ -339,13 +339,25 @@ async function renderRecent(recent: readonly WelcomeRecent[]): Promise<void> {
 
 // ---- host panel ---------------------------------------------------------------------------------
 
+/** The panel's heading; another host's panel links back to This Mac (the host list has only ssh). */
+function panelTitle(key: HostKey, label: string): HTMLElement {
+  const title = element('h2', label);
+  if (key !== 'local') {
+    title.append(button('Back to This Mac', () => void showHost('local'), 'link'));
+  }
+  return title;
+}
+
 async function showHost(key: HostKey, quiet = false): Promise<void> {
   if (bridge === undefined) return;
   current = key;
+  // Keep the hash on the shown host (without a hashchange), so a later request from the main
+  // process to show a host is a change even when it names the host shown before.
+  history.replaceState(null, '', `#${encodeURIComponent(key)}`);
   const label = key === 'local' ? 'This Mac' : key.slice('ssh:'.length);
   if (!quiet) {
     hostPanel.replaceChildren(
-      element('h2', label),
+      panelTitle(key, label),
       element('p', `Connecting to ${label}…`, 'muted'),
     );
   }
@@ -353,7 +365,7 @@ async function showHost(key: HostKey, quiet = false): Promise<void> {
   if (current !== key) return;
   if (!result.ok) {
     const error = element('p', result.error, 'error');
-    hostPanel.replaceChildren(element('h2', label), error);
+    hostPanel.replaceChildren(panelTitle(key, label), error);
     if (result.authNeeded) {
       hostPanel.append(signInButton(key, label, error));
     } else {
@@ -365,7 +377,7 @@ async function showHost(key: HostKey, quiet = false): Promise<void> {
 }
 
 function renderHost(host: WelcomeHost): void {
-  const title = element('h2', host.label);
+  const title = panelTitle(host.key, host.label);
   hostPanel.replaceChildren(title);
   if (host.checkout === null) {
     hostPanel.append(checkoutForm(host, host.suggestedCheckout ?? ''));
