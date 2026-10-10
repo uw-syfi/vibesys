@@ -12,6 +12,8 @@ import os
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.loop._chaos import (
     Injected,
     plan_for,
@@ -22,7 +24,7 @@ from tests.vibesys.orchestration.dynamic.loop._chaos import (
 from vibesys.api import RunStatus, RunStopped
 from vibesys.orchestration.dynamic import DynamicPlanningError
 from vs_agent.api import AgentOutputSchemaError
-from vs_faults.api import AgentCrashError, AgentFault
+from vs_faults.api import AgentCrashError, AgentFault, Boundary, ClusterFault
 from vs_runtime.api import RunCleanupError, RuntimeContractError, UnresolvedDispatchError
 
 if TYPE_CHECKING:
@@ -124,9 +126,33 @@ def test_an_ending_no_injected_fault_explains_is_a_violation(
         (AgentOutputSchemaError("x"), Injected(agent=frozenset({AgentFault.SCHEMA_INVALID}))),
         (DynamicPlanningError(None), Injected(agent=frozenset({AgentFault.WRONG_VALUES}))),
         (RunStopped("x"), Injected(stop_delivered=True)),
+        # Seed 2 on #1721: exec ssh_down plus sacct wrong_state left a cancellation's
+        # outcome unknown, so cleanup ended the run with a typed error.
+        (
+            RunCleanupError("evaluation agent cleanup failed", ()),
+            Injected(cluster=frozenset({ClusterFault.SSH_DOWN, ClusterFault.WRONG_STATE})),
+        ),
     ],
 )
 def test_an_ending_an_injected_fault_explains_is_accepted(
     error: BaseException | None, injected: Injected
 ) -> None:
     assert unexplained_end(error, injected) is None
+
+
+@given(seed=st.integers(min_value=0, max_value=10_000))
+def test_the_oracle_verdict_depends_on_the_faults_a_seed_declares_not_on_which_call_got_them(
+    seed: int,
+) -> None:
+    """Whichever Slurm call receives a declared cluster fault, a cleanup ending is accepted."""
+    plan = plan_for(seed)
+    assert plan == plan_for(seed)
+    declared = frozenset(
+        ClusterFault(str(rule.fault)) for rule in plan.rules if rule.boundary is Boundary.CLUSTER
+    )
+    cleanup = RunCleanupError("evaluation agent cleanup failed", ())
+
+    verdict = unexplained_end(cleanup, Injected(cluster=declared))
+
+    assert (verdict is None) == bool(declared)
+    assert unexplained_end(cleanup, Injected(agent=frozenset(AgentFault))) is not None
