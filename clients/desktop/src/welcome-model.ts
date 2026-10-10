@@ -132,7 +132,7 @@ export function recentChanged(before: ChromeState, after: ChromeState): boolean 
 }
 
 /** The task list of "Start a run": what the latest "List tasks" answered. */
-export type TaskList =
+type TaskList =
   | {readonly kind: 'idle'}
   | {readonly kind: 'loading'}
   | {readonly kind: 'listed'; readonly tasks: readonly string[]}
