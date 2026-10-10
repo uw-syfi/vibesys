@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import subprocess
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 import agentshim
 import pytest
@@ -14,6 +13,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_agent.api import OrphanReapError, reap_orphaned_agents
+from vs_agent.api.testing import DockerResult, docker_result, docker_timed_out
 from vs_sandbox.api import RUN_ID_LABEL
 from vs_sandbox.fake_docker_engine import FakeDockerEngine
 
@@ -104,14 +104,12 @@ class _BrokenDocker:
     def __init__(self, returncode: int | None) -> None:
         self._returncode = returncode
 
-    def run(
-        self, argv: Sequence[str], *, timeout_seconds: float
-    ) -> subprocess.CompletedProcess[str]:
+    def run(self, argv: Sequence[str], *, timeout_seconds: float) -> DockerResult:
         if self._returncode is None:
-            raise subprocess.TimeoutExpired(list(argv), timeout_seconds)
-        return subprocess.CompletedProcess(list(argv), self._returncode, "", "daemon down")
+            raise docker_timed_out(list(argv), timeout_seconds)
+        return docker_result(list(argv), self._returncode, "", "daemon down")
 
-    def spawn(self, argv: Sequence[str]) -> subprocess.Popen[str]:
+    def spawn(self, argv: Sequence[str]) -> NoReturn:
         raise AssertionError(argv)
 
 

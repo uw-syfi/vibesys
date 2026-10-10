@@ -16,12 +16,9 @@ duplicated per mode.
 
 from __future__ import annotations
 
-import concurrent.futures
 import json
 import os
 import sys
-import threading
-import time
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -72,12 +69,15 @@ from vs_agent.contracts import (
     AgentTurnRequest,
 )
 from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
+from vs_sim.api.testing import HANG_GUARD_S, start_thread
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+    from concurrent.futures import Future
 
     # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
     from vs_agent.shim_turns import LaunchedSession
+    from vs_sim.api.testing import Sim
 
 SCRIPTED_PROVIDERS = ("claude", "codex", "gemini", "opencode")
 SKILL_LOAD_PROVIDERS = tuple(
@@ -1682,14 +1682,26 @@ def test_a_dropped_conversation_after_a_failed_resumed_turn_is_logged(
     assert any("dropped the conversation" in line for line in logs)
 
 
+def _cancel_on_a_real_thread(session: LaunchedSession) -> Future[None]:
+    """Cancel *session* from a real thread, off the simulator's baton.
+
+    ``cancel`` waits on a real event inside the library for the turn to unwind; called from
+    a simulated thread it would hold the baton for the whole grace period, so the turn
+    (a simulated thread) could never unwind. On its own thread it waits while the
+    simulated turn polls the process handle on virtual time.
+    """
+    return start_thread(session.cancel)
+
+
 def test_a_cancelled_resumed_turn_raises_and_keeps_its_conversation(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
+    sim: Sim,
 ) -> None:
     """A stopped turn raises, but unlike a failure it does not cost the conversation."""
     del sandbox_builds
-    reached = threading.Event()
-    cancelled = threading.Event()
+    threads = sim.threads()
+    reached = threads.event()
     holder: list[FakeExecutor] = []
     turns: list[int] = []
 
@@ -1700,25 +1712,34 @@ def test_a_cancelled_resumed_turn_raises_and_keeps_its_conversation(
             reached.set()
             # Hold the process open until cancel() reaches its handle, then
             # exit the way a terminated process does.
-            for _ in range(500):
-                if holder[0].handles[-1].terminated:
-                    break
-                cancelled.wait(0.01)
+            while not holder[0].handles[-1].terminated:
+                threads.sleep(0.01)
             return FakeRun(returncode=-15)
         return scripted_turn("codex", text="ok", session_id="thread-1")
 
     session, fake = _session(tmp_path, "codex", run)
     holder.append(fake)
-    session.run_turn(AgentTurnRequest(message="one"))
+    cancelled: list[agentshim.TurnCancelledError] = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        turn = pool.submit(session.run_turn, AgentTurnRequest(message="two"))
-        assert reached.wait(5)
-        session.cancel()
-        with pytest.raises(agentshim.TurnCancelledError):
-            turn.result(timeout=5)
+    def second_turn() -> None:
+        try:
+            session.run_turn(AgentTurnRequest(message="two"))
+        except agentshim.TurnCancelledError as exc:
+            cancelled.append(exc)
 
-    session.run_turn(AgentTurnRequest(message="three"))
+    def scenario() -> None:
+        session.run_turn(AgentTurnRequest(message="one"))
+        turn = threads.spawn(second_turn, name="second-turn")
+        reached.wait(HANG_GUARD_S)
+        cancel = _cancel_on_a_real_thread(session)
+        turn.join(HANG_GUARD_S)
+        cancel.result()
+        session.run_turn(AgentTurnRequest(message="three"))
+
+    threads.run(scenario)
+
+    assert len(cancelled) == 1
+    assert threads.errors == []
     assert "thread-1" in fake.requests[2].argv
 
 
@@ -1732,10 +1753,12 @@ def test_cancel_stops_the_running_provider_process(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
     provider: str,
+    sim: Sim,
 ) -> None:
     del sandbox_builds
+    threads = sim.threads()
     session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"))
-    reached = threading.Event()
+    reached = threads.event()
 
     class _HoldingObserver:
         def on_event(self, event: AgentEvent) -> None:
@@ -1744,19 +1767,25 @@ def test_cancel_stops_the_running_provider_process(
                 return
             reached.set()
             # Hold the turn open until the canceller reaches the process handle.
-            deadline = time.monotonic() + 5
-            while not fake.handles[-1].terminated and time.monotonic() < deadline:
-                time.sleep(0.01)
+            while not fake.handles[-1].terminated:
+                threads.sleep(0.01)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        turn = pool.submit(session.run_turn, AgentTurnRequest(message="one"), _HoldingObserver())
-        assert reached.wait(5)
-        session.cancel()
-        turn.result(timeout=5)
+    def scenario() -> None:
+        turn = threads.spawn(
+            lambda: session.run_turn(AgentTurnRequest(message="one"), _HoldingObserver()),
+            name="turn",
+        )
+        reached.wait(HANG_GUARD_S)
+        cancel = _cancel_on_a_real_thread(session)
+        turn.join(HANG_GUARD_S)
+        cancel.result()
+
+    threads.run(scenario)
 
     assert fake.handles[-1].terminated
     # The turn unwound on its own, so the harder stop was never needed.
     assert not fake.handles[-1].killed
+    assert threads.errors == []
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
@@ -1764,17 +1793,24 @@ def test_independent_sessions_run_concurrently(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
     provider: str,
+    sim: Sim,
 ) -> None:
     """Closing one session must not interrupt another session's turn."""
     del sandbox_builds
-    barrier = threading.Barrier(2)
-    release_optimizer = threading.Event()
+    threads = sim.threads()
+    both_started = threads.event()
+    started = [0]
+    release_optimizer = threads.event()
+    results: dict[str, str] = {}
 
     def run(request: agentshim.CommandRequest) -> FakeRun:
-        barrier.wait(timeout=5)
+        started[0] += 1
+        if started[0] == 2:
+            both_started.set()
+        both_started.wait(HANG_GUARD_S)
         if request.env.get("CHAT_MODE") == "read-only":
             return scripted_turn(provider, text="chat result")
-        assert release_optimizer.wait(timeout=5)
+        release_optimizer.wait(HANG_GUARD_S)
         return scripted_turn(provider, text="optimizer result")
 
     launcher, _fake = _launcher(provider, run)
@@ -1788,15 +1824,25 @@ def test_independent_sessions_run_concurrently(
         )
     )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        optimizer_turn = pool.submit(optimizer.run_turn, AgentTurnRequest(message="optimize"))
-        chat_turn = pool.submit(chat.run_turn, AgentTurnRequest(message="explain"))
-        assert chat_turn.result(timeout=10).text == "chat result"
-        chat.close()
-        assert not optimizer_turn.done()
-        release_optimizer.set()
-        assert optimizer_turn.result(timeout=10).text == "optimizer result"
+    def turn(name: str, session: LaunchedSession) -> Callable[[], None]:
+        def body() -> None:
+            results[name] = session.run_turn(AgentTurnRequest(message=name)).text
 
+        return body
+
+    def scenario() -> None:
+        optimizer_turn = threads.spawn(turn("optimizer", optimizer), name="optimizer")
+        chat_turn = threads.spawn(turn("chat", chat), name="chat")
+        chat_turn.join(HANG_GUARD_S)
+        chat.close()
+        assert optimizer_turn.is_alive()
+        release_optimizer.set()
+        optimizer_turn.join(HANG_GUARD_S)
+
+    threads.run(scenario)
+
+    assert results == {"chat": "chat result", "optimizer": "optimizer result"}
+    assert threads.errors == []
     launcher.close()
 
 

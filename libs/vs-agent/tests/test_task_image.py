@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
@@ -11,7 +10,12 @@ from vs_agent.api.images import (
     TaskImageBuildError,
     build_task_image,
 )
-from vs_agent.api.testing import FakeDockerBuildRunner
+from vs_agent.api.testing import (
+    DockerResult,
+    FakeDockerBuildRunner,
+    docker_result,
+    docker_timed_out,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -91,7 +95,7 @@ def test_build_passes_base_image_as_build_arg(tmp_path: Path) -> None:
     [
         (FileNotFoundError(), "Docker was not found while building"),
         (
-            subprocess.TimeoutExpired(("docker", "build"), 7),
+            docker_timed_out(("docker", "build"), 7),
             "timed out after 7 seconds while building",
         ),
     ],
@@ -109,7 +113,7 @@ def test_build_translates_process_failures(
 
 def test_build_reports_bounded_docker_failure(tmp_path: Path) -> None:
     runner = FakeDockerBuildRunner(
-        build_result=subprocess.CompletedProcess(("docker",), 17, "ignored", "specific failure"),
+        build_result=docker_result(("docker",), 17, "ignored", "specific failure"),
     )
 
     with pytest.raises(TaskImageBuildError, match=r"exit 17.*specific failure"):
@@ -141,18 +145,18 @@ def test_build_rejects_malformed_runnable_image_id(
     [
         (FileNotFoundError(), "Docker was not found while inspecting"),
         (
-            subprocess.TimeoutExpired(("docker", "image", "inspect"), 7),
+            docker_timed_out(("docker", "image", "inspect"), 7),
             "timed out after 7 seconds while inspecting",
         ),
         (
-            subprocess.CompletedProcess(("docker",), 17, "ignored", "inspect failure"),
+            docker_result(("docker",), 17, "ignored", "inspect failure"),
             r"Could not resolve runnable task image.*exit 17.*inspect failure",
         ),
     ],
 )
 def test_build_translates_inspect_failures(
     tmp_path: Path,
-    failure: subprocess.CompletedProcess[str] | BaseException,
+    failure: DockerResult | BaseException,
     match: str,
 ) -> None:
     runner = FakeDockerBuildRunner(inspect_result=failure)
