@@ -925,6 +925,21 @@ def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
     assert child.returncode != 0
 
 
+def _signal_state(stopping: threading.Event) -> str:
+    """The process signal state a stuck SIGTERM relay leaves, for the failure message."""
+    wakeup = signal.set_wakeup_fd(-1)
+    signal.set_wakeup_fd(wakeup, warn_on_full_buffer=False)
+    return (
+        "SIGTERM did not interrupt the foreground run: "
+        f"shutdown_called={stopping.is_set()} wakeup_fd={wakeup} "
+        f"sigterm_handler={signal.getsignal(signal.SIGTERM)!r} "
+        f"sigusr1_handler={signal.getsignal(signal.SIGUSR1)!r} "
+        f"blocked={sorted(signal.pthread_sigmask(signal.SIG_BLOCK, []))} "
+        f"pending={sorted(signal.sigpending())} "
+        f"threads={[thread.name for thread in threading.enumerate()]}"
+    )
+
+
 def test_a_sigterm_during_the_foreground_run_shuts_the_runtime_down_and_interrupts_the_caller(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -940,8 +955,11 @@ def test_a_sigterm_during_the_foreground_run_shuts_the_runtime_down_and_interrup
 
         def drive(self, _request: object) -> None:
             os.kill(os.getpid(), signal.SIGTERM)
-            # Blocks until the relay wakes this thread with the interrupt.
-            threading.Event().wait()
+            # Blocks until the relay wakes this thread with the interrupt. The bound is a
+            # hang guard (#1611): reaching it fails the test with the signal state, so a
+            # stuck relay is diagnosed from the log and does not cost the hard per-test bound.
+            if not threading.Event().wait(HANG_GUARD_S):
+                pytest.fail(_signal_state(stopping))
 
         def shutdown(self) -> None:
             stopping.set()
