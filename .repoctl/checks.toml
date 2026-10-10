@@ -39,6 +39,16 @@ commands = [
   ["uv", "run", "python", "scripts/check_lint_waivers.py"],
 ]
 
+# The fast repo-policy guards (real-API ratchet, isolation baseline, wait bans, CI wall-time, ...).
+# CI also runs them inside the sharded suite; this group runs them on their own, in the quality job
+# that runs beside the shards, so `scripts/check_ci.sh` catches a ratchet failure before the PR.
+[[check_groups]]
+name = "python_guards"
+language = "python"
+directory = "."
+timeout_seconds = 600
+commands = [["uv", "run", "python", "-m", "pytest", "-q", "-n", "auto", "--dist", "loadgroup", "--no-cov", "tests/quality", "tests/ci"]]
+
 [[check_groups]]
 name = "python_types"
 language = "python"

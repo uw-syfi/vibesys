@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CHECK_GROUPS=(python_quality python_types)
+CHECK_GROUPS=(python_quality python_guards python_types)
 
 for group in "${CHECK_GROUPS[@]}"; do
   echo "== check group: ${group}"
