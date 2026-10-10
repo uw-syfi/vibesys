@@ -8,19 +8,6 @@ from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from tests.support.executor_context import RevocableLease, context_for
-from tests.support.executor_harness import FaultingNamespace, Scenario
-from tests.support.runtime_evaluation import (
-    ADMISSION,
-    ScenarioCluster,
-    Stack,
-    build_stack,
-    submission,
-)
-from tests.support.runtime_evaluation import (
-    SCOPE as EVALUATION_SCOPE,
-)
-from tests.support.runtime_operations import SCOPE, catalog_of, execute_request, scenarios
 from tests.support.session_lifecycle_world import (
     CONTINUATION,
     cancel_request,
@@ -41,7 +28,6 @@ from tests.support.session_world import (
     open_host,
 )
 from tests.support.workspace_world import WorkspaceEnv, open_workspace_env
-from tests.support.world_git import WorldGit, world_git
 
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_core.api import (
@@ -85,6 +71,7 @@ from vs_core.api import (
     WorkspacePlan,
 )
 from vs_project.api import Project
+from vs_project.api.testing import WorldGit, world_git
 from vs_runtime.api.core import (
     ContinuationBinding,
     ExecutionResult,
@@ -99,15 +86,27 @@ from vs_runtime.api.core import (
     owner_key,
     revision_ref,
 )
+from vs_runtime.api.executor_contexts import RevocableLease, context_for
+from vs_runtime.api.executor_contracts import FaultingNamespace, Scenario
+from vs_runtime.api.operation_fixtures import SCOPE, catalog_of, execute_request, scenarios
+from vs_runtime.api.slurm_evaluation_stack import (
+    ADMISSION,
+    ScenarioCluster,
+    Stack,
+    build_stack,
+    submission,
+)
+from vs_runtime.api.slurm_evaluation_stack import (
+    SCOPE as EVALUATION_SCOPE,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
 
-    from tests.support.executor_harness import CaseWorld
-    from tests.support.runtime_operations import OperationScenario
-
     from vs_core.api import Request, RequestBase, RevisionRef
     from vs_project.api import StateNamespace
+    from vs_runtime.api.executor_contracts import CaseWorld
+    from vs_runtime.api.operation_fixtures import OperationScenario
 
 
 class _World:
@@ -372,7 +371,10 @@ class _EvaluationCase:
     async def world(self) -> AsyncIterator[_EvaluationWorld]:
         with tempfile.TemporaryDirectory() as raw:
             base = Path(raw)
-            stack = await build_stack(base / "stack", ScenarioCluster())
+            stack = await build_stack(
+                base / "stack",
+                ScenarioCluster(),
+            )
             try:
                 yield _EvaluationWorld(base, stack)
             finally:

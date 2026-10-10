@@ -514,7 +514,7 @@ depends_on = ["vs_evaluation.agent_mcp", "vs_evaluation.agent_core_mcp", "vs_eva
 [[modules]]
 path = "vs_evaluation.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.profiler_testing", "vs_evaluation.testing"]
+depends_on = ["vs_evaluation.profiler_testing", "vs_evaluation.started_operation", "vs_evaluation.testing"]
 
 [[modules]]
 path = "vs_evaluation.agent_evidence"
@@ -603,6 +603,11 @@ depends_on = ["vs_async_ops.api", "vs_evaluation.agent_evidence", "vs_evaluation
 path = "vs_evaluation.profiler_testing"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_evaluation.profiler_models"]
+
+[[modules]]
+path = "vs_evaluation.started_operation"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.lifecycle", "vs_evaluation.ports", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_evaluation.testing"

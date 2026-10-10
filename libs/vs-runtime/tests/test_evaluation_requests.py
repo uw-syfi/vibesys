@@ -12,17 +12,6 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.executor_harness import FaultingNamespace, ProcessKilledError
-from tests.support.observation_contract import assert_core_accepts
-from tests.support.runtime_evaluation import (
-    ADMISSION,
-    SCOPE,
-    ScenarioCluster,
-    Stack,
-    build_stack,
-    plan,
-    submission,
-)
 
 from vs_core.api import (
     AttemptId,
@@ -61,6 +50,17 @@ from vs_runtime.api.core import (
     StageSettled,
     StageStarted,
     revision_ref,
+)
+from vs_runtime.api.executor_contracts import FaultingNamespace, ProcessKilledError
+from vs_runtime.api.observation_contracts import assert_core_accepts
+from vs_runtime.api.slurm_evaluation_stack import (
+    ADMISSION,
+    SCOPE,
+    ScenarioCluster,
+    Stack,
+    build_stack,
+    plan,
+    submission,
 )
 from vs_slurm.api import SlurmJobStatus
 

@@ -28,6 +28,7 @@ from vs_sandbox.fake_docker_command import (
     docker_result,
     docker_timed_out,
 )
+from vs_sandbox.fake_docker_confinement import FakeDockerConfinement
 from vs_sandbox.fake_docker_engine import FakeContainer, FakeDockerEngine
 from vs_sandbox.fake_gpu_telemetry import FakeGpuTelemetry
 from vs_sandbox.fake_host_container import HostExecutedContainer, HostExecutedContainerBackend
@@ -48,6 +49,7 @@ __all__ = [
     "FakeComputeBackend",
     "FakeContainer",
     "FakeDockerCommandRunner",
+    "FakeDockerConfinement",
     "FakeDockerEngine",
     "FakeExecution",
     "FakeGpuTelemetry",

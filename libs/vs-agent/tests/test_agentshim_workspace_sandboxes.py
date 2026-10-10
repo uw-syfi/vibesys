@@ -18,10 +18,10 @@ from agentshim.testing import (
 )
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
 from vs_agent.api import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
 from vs_agent.api.testing import fake_stream_launcher
+from vs_sandbox.api.testing import FakeDockerConfinement
 
 if TYPE_CHECKING:
     from vs_sandbox.api import DockerSandbox
@@ -40,9 +40,9 @@ def _spec(workspace: Path) -> AgentSessionSpec:
 @settings(max_examples=20, deadline=None)
 @given(candidates=st.integers(min_value=1, max_value=4))
 def test_each_turn_execs_in_the_container_of_its_workspace(candidates: int) -> None:
-    root = FakeDockerSandbox(workspace=Path("/srv/project"), container_id="root-container")
+    root = FakeDockerConfinement(workspace=Path("/srv/project"), container_id="root-container")
     owned = {
-        Path(f"/srv/project/worktrees/c{n}/workspace"): FakeDockerSandbox(
+        Path(f"/srv/project/worktrees/c{n}/workspace"): FakeDockerConfinement(
             workspace=Path(f"/srv/project/worktrees/c{n}/workspace"),
             container_id=f"candidate-container-{n}",
         )

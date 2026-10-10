@@ -8,7 +8,6 @@ first planner turn: core refuses a turn reply today (see test_scenarios).
 from __future__ import annotations
 
 import pytest
-from tests.support.liveness import End
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, config, kinds, run
 
@@ -28,6 +27,7 @@ from vs_core.api import (
     StartAttempt,
 )
 from vs_core.testing.drive import Failed, Faults, Harness, drive, new_run
+from vs_core.testing.liveness import End
 
 FAULTS = {
     "unknown_first": Faults(unknown_first=lambda _request: True),

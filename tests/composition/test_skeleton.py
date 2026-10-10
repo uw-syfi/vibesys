@@ -20,7 +20,6 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from tests.support.executor_context import context_for
 from tests.support.session_world import (
     ROLE,
     SCHEMA,
@@ -79,6 +78,7 @@ from vs_runtime.api.core import (
     new_core_state,
     revision_ref,
 )
+from vs_runtime.api.executor_contexts import context_for
 
 LEASE = 100.0
 

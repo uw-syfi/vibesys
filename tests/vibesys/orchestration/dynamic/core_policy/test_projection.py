@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue
-from tests.support.run_execution import run_execution_record
 from tests.vibesys.orchestration.dynamic.strategy._harness import envelope
 
 from vibesys.dynamic_core import dynamic_projector
@@ -24,6 +23,7 @@ from vibesys.plugin_registration import OrchestrationRegistration, project_run
 from vibesys.run.contracts import RunStatus, RunView
 from vs_core.api import AttemptId, EventCursor, HostFence, HostId, RunEnvelope
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
+from vs_project.api.testing import run_execution_record
 from vs_runtime.api import OrchestrationPlugin, Run
 from vs_runtime.api import RunStatus as RuntimeStatus
 from vs_runtime.api.core import RuntimeRecord

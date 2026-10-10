@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
-from tests.support.run_execution import run_execution_record
 
 from launch import open_run_store
 from vibesys.api import OrchestrationRegistry
@@ -22,6 +21,7 @@ from vs_project.api import (
     ProjectStateError,
     RunEnvironmentRecord,
 )
+from vs_project.api.testing import run_execution_record
 from vs_runtime.api import OrchestrationPlugin, Run
 from vs_runtime.api import RunStatus as PluginRunStatus
 

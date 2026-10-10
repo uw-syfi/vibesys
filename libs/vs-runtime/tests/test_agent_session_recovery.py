@@ -8,16 +8,22 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.runtime_agent_sessions import (
-    _open_resume_contract,
-    _open_session_contract,
-    _resume_transport,
-    _WorkspaceResource,
-)
 
 from vs_agent.api import Completed
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import AgentRole, RuntimeContractError, WorkspaceAccess, WorkspaceRestoreError
+from vs_runtime.api.agent_session_fixtures import (
+    WorkspaceResource as _WorkspaceResource,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    open_resume_contract as _open_resume_contract,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    open_session_contract as _open_session_contract,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    resume_transport as _resume_transport,
+)
 from vs_runtime.api.testing import FakeWorkspace
 
 if TYPE_CHECKING:

@@ -7,9 +7,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.executor_cases import CASES, inspect_dispatch_of, inspect_request_of
-from tests.support.executor_context import RevocableLease
-from tests.support.executor_harness import ProcessKilledError
-from tests.support.observation_contract import assert_core_accepts
 
 from vs_core.api import DispatchTurn, ObservationStatus, ResumeSessionTurn
 from vs_runtime.api.core import (
@@ -21,11 +18,13 @@ from vs_runtime.api.core import (
     result_type_name,
     settle,
 )
+from vs_runtime.api.executor_contexts import RevocableLease
+from vs_runtime.api.executor_contracts import ProcessKilledError
+from vs_runtime.api.observation_contracts import assert_core_accepts
 
 if TYPE_CHECKING:
-    from tests.support.executor_harness import ExecutorCase, Scenario
-
     from vs_core.api import Observation, RequestBase
+    from vs_runtime.api.executor_contracts import ExecutorCase, Scenario
 
 pytestmark = pytest.mark.asyncio
 

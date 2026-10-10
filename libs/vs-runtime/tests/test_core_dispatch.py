@@ -7,12 +7,6 @@ from enum import StrEnum
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.runtime_core_shell import (
-    CounterState,
-    CounterStrategy,
-    LostAcknowledgementStateStore,
-    ShellTraceTransitions,
-)
 
 from vs_core.api import (
     ClockAdvanced,
@@ -37,6 +31,12 @@ from vs_runtime.api.core import (
     RequestExecutors,
     RuntimeCommitUncertainError,
     RuntimeRecord,
+)
+from vs_runtime.api.core_shell_fixtures import (
+    CounterState,
+    CounterStrategy,
+    LostAcknowledgementStateStore,
+    ShellTraceTransitions,
 )
 from vs_runtime.api.testing import FakeRequestExecution
 

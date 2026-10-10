@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.runtime_core_shell import CounterState, runtime
 
 from vs_core.api import (
     ArtifactId,
@@ -25,6 +24,7 @@ from vs_core.api import (
 )
 from vs_project.api import FakeStateStore, Project, StoredEnvelope
 from vs_runtime.api.core import RuntimeRecord
+from vs_runtime.api.core_shell_fixtures import CounterState, runtime
 
 if TYPE_CHECKING:
     from pathlib import Path

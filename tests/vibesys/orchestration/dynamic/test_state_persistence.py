@@ -11,7 +11,6 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.support.run_execution import run_execution_record
 from tests.vibesys.orchestration.dynamic._support import (
     INPUT_BASELINE,
     Script,
@@ -32,6 +31,7 @@ from vs_project.api import (
     ProjectStateError,
     RunEnvironmentRecord,
 )
+from vs_project.api.testing import run_execution_record
 
 if TYPE_CHECKING:
     from vs_project.api import StateNamespace

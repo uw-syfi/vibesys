@@ -8,7 +8,6 @@ from tempfile import TemporaryDirectory
 
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.run_execution import run_execution_record
 
 from vs_agent.api import (
     AgentClient,
@@ -26,6 +25,7 @@ from vs_agent.api.testing import (
     usage,
 )
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api.testing import run_execution_record
 
 TOKEN_FIELDS = (
     "input_tokens",

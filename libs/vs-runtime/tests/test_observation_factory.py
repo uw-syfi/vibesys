@@ -11,7 +11,6 @@ from uuid import UUID
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.run_execution import run_execution_record
 
 from vs_core.api import (
     AttemptId,
@@ -24,6 +23,7 @@ from vs_core.api import (
 )
 from vs_core.api.proofs import Proven, fresh_observation
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import (
     ObservationFactory,
     ObservationFacts,

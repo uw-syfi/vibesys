@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from tests.support.executor_context import context_for
 from tests.support.session_lifecycle_world import cancel_request
 from tests.support.session_world import (
     ROLE,
@@ -39,6 +38,7 @@ from vs_runtime.api.core import (
     open_session_requests,
     report_turns,
 )
+from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     AgentExecutionFinished,

@@ -15,25 +15,6 @@ import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import BaseModel, TypeAdapter, ValidationError
-from tests.support.run_execution import run_execution_record
-from tests.support.runtime_agent_sessions import (
-    _BlockedFakeWorkspace,
-    _BlockedRuntimeWorkspace,
-    _candidate_resource,
-    _client,
-    _ClientFactory,
-    _durable_session_slot,
-    _environment,
-    _EnvironmentOpener,
-    _open_resume_contract,
-    _open_session_contract,
-    _resume_transport,
-    _runtime,
-    _RuntimeEffects,
-    _scope,
-    _WorkspaceResource,
-    _WorkspaceResources,
-)
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
@@ -54,6 +35,7 @@ from vs_agent.api import (
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
 from vs_agent.api.testing import FakeAgentClient, FakeAgentSessions, FakeProvider
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api.testing import run_execution_record
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
     AgentCapability,
@@ -69,6 +51,54 @@ from vs_runtime.api import (
     Workspace,
     WorkspaceAccess,
     WorkspaceRestoreError,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    BlockedFakeWorkspace as _BlockedFakeWorkspace,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    BlockedRuntimeWorkspace as _BlockedRuntimeWorkspace,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    ClientFactory as _ClientFactory,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    EnvironmentOpener as _EnvironmentOpener,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    RuntimeEffects as _RuntimeEffects,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    WorkspaceResource as _WorkspaceResource,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    WorkspaceResources as _WorkspaceResources,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    candidate_resource as _candidate_resource,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    durable_session_slot as _durable_session_slot,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    environment as _environment,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    open_resume_contract as _open_resume_contract,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    open_session_contract as _open_session_contract,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    resume_transport as _resume_transport,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    scope as _scope,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    scripted_client as _client,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    session_runtime as _runtime,
 )
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,

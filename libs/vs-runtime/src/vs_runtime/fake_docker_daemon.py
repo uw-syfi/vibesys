@@ -9,12 +9,11 @@ therefore reaches host sockets the environment bind-mounted into it.
 from __future__ import annotations
 
 import os
-import subprocess
 from typing import TYPE_CHECKING
 
-from vibesys.constants import ComputeBackend
-from vs_runtime.api.infrastructure import DockerEnvironmentConfig
-from vs_sandbox.api import DockerSandbox, SandboxKind
+from vs_agent.api.testing import FakeDockerBuildRunner
+from vs_runtime._run_environment import DockerEnvironmentConfig
+from vs_sandbox.api import ComputeBackend, DockerSandbox, SandboxKind
 from vs_sandbox.api.testing import FakeDockerEngine
 
 if TYPE_CHECKING:
@@ -22,20 +21,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.api import CommandRunner, HostResource
-
-_IMAGE_ID = "sha256:" + "d" * 64
-
-
-class InMemoryBuildRunner:
-    """Answers ``docker build`` and ``docker image inspect`` without a daemon."""
-
-    def run(
-        self, argv: Sequence[str], *, cwd: Path, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
-        del cwd, timeout
-        return subprocess.CompletedProcess(
-            tuple(argv), 0, _IMAGE_ID if argv[1] == "image" else "", ""
-        )
 
 
 class DaemonBackend:
@@ -45,6 +30,7 @@ class DaemonBackend:
     name = ComputeBackend.CUDA
 
     def __init__(self, engine: FakeDockerEngine) -> None:
+        """Serve the fake daemon ``engine``."""
         self.engine = engine
         self.attach_accelerator: list[bool] = []
         self.kinds: list[SandboxKind] = []
@@ -62,6 +48,7 @@ class DaemonBackend:
         attach_accelerator: bool = True,
         **_other: object,
     ) -> CommandRunner:
+        """Record the request and return a Docker sandbox over the fake engine."""
         self.kinds.append(kind)
         self.attach_accelerator.append(attach_accelerator)
         return DockerSandbox(
@@ -75,9 +62,11 @@ class DaemonBackend:
         )
 
     def make_monitor(self, log_dir: Path) -> None:
+        """The fake runs no device monitor."""
         del log_dir
 
     def reselect_device(self) -> None:
+        """The fake has one device."""
         return
 
 
@@ -92,4 +81,4 @@ def daemon_engine(directory: Path) -> FakeDockerEngine:
 
 def daemon_docker_config(engine: FakeDockerEngine) -> DockerEnvironmentConfig:
     """Return the Docker settings that send an environment's containers to *engine*."""
-    return DockerEnvironmentConfig(docker=engine, build_runner=InMemoryBuildRunner())
+    return DockerEnvironmentConfig(docker=engine, build_runner=FakeDockerBuildRunner())

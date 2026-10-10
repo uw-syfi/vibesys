@@ -27,11 +27,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from pydantic import BaseModel
-    from tests.support.executor_context import RevocableLease
 
     from vs_core.api import RequestBase
     from vs_project.api import StateNamespace
     from vs_runtime.api.core import ExecutionResult
+    from vs_runtime.api.executor_contexts import RevocableLease
 
 
 class ProcessKilledError(
@@ -49,6 +49,7 @@ class FaultingNamespace:
     """
 
     def __init__(self, real: StateNamespace, crash_at: int | None = None) -> None:
+        """Wrap ``real``; the host dies at boundary ``crash_at`` (never when ``None``)."""
         self._real = real
         self._crash_at = crash_at
         self.writes = 0

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.support.liveness import Budget, End, Journal, assert_live
 from tests.vibesys.orchestration.dynamic.strategy._shell import Run, Script, drive_shell
 
 from vibesys.orchestration.dynamic.core_policy.api import (
@@ -19,6 +18,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
 )
 from vs_core.api import ArtifactId, ArtifactRef, Limits, RevisionRef, RunEnvelope, RunFacts
 from vs_core.testing.drive import Faults, Harness, Trace, drive
+from vs_core.testing.liveness import Budget, End, Journal, assert_live
 
 if TYPE_CHECKING:
     from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
@@ -59,7 +59,7 @@ def run(
 ) -> Trace[DynamicStrategyState]:
     """Drive a fresh strategy to quiescence against ``executors``.
 
-    The run must satisfy the liveness invariants (`tests.support.liveness`) unless ``live``
+    The run must satisfy the liveness invariants (`vs_core.testing.liveness`) unless ``live``
     is False. ``end`` says how the scenario ends the run; `End.CUT_SHORT` is for a scenario
     this driver cannot take to the end of the run (it answers no agent turn).
     """
@@ -91,7 +91,7 @@ def run_shell(
 ) -> Run:
     """Run a fresh strategy to the end of its run on the production shell.
 
-    The run must satisfy the liveness invariants (`tests.support.liveness`) unless ``live``
+    The run must satisfy the liveness invariants (`vs_core.testing.liveness`) unless ``live``
     is False.
     """
     settings = config(**overrides)

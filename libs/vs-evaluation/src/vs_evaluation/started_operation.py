@@ -11,28 +11,18 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING
 
-from vs_evaluation.api import EvaluationState
+from vs_evaluation.lifecycle import is_finished
 from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
-    from vs_evaluation.api import EvaluationExecutor
+    from vs_evaluation.ports import EvaluationExecutor
     from vs_sim.api import Event
-
-
-_ENDED = frozenset(
-    {
-        EvaluationState.SUCCEEDED,
-        EvaluationState.FAILED,
-        EvaluationState.CANCELED,
-        EvaluationState.SUPERSEDED,
-    }
-)
 
 
 async def _ended(executor: EvaluationExecutor, handle_id: str) -> None:
     while True:
         observed = await executor.inspect_only(handle_id)
-        if observed is not None and observed.state in _ENDED:
+        if observed is not None and is_finished(observed.state):
             return
         await executor.wait_for_change(handle_id, timeout_s=float("inf"))
         # A fake may return at once; yield so the test's own tasks still run.

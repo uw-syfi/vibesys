@@ -10,10 +10,10 @@ import pytest
 from vs_project.api import GitCommandError, StagingError
 
 if TYPE_CHECKING:
-    from tests.support.git_contract import Sandbox
+    from vs_project.api.testing import ContractProject
 
 
-def test_staged_changes_are_reported_until_committed(sandbox: Sandbox) -> None:
+def test_staged_changes_are_reported_until_committed(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n"})
     repo = sandbox.repo
     assert not repo.has_staged_changes()
@@ -30,7 +30,7 @@ def test_staged_changes_are_reported_until_committed(sandbox: Sandbox) -> None:
     assert repo.read_blob("HEAD", "a.txt") == b"2\n"
 
 
-def test_stage_all_records_additions_modifications_and_deletions(sandbox: Sandbox) -> None:
+def test_stage_all_records_additions_modifications_and_deletions(sandbox: ContractProject) -> None:
     sandbox.start({"keep.txt": "k\n", "gone.txt": "g\n", "edit.txt": "1\n"})
     sandbox.delete("gone.txt")
     sandbox.write("edit.txt", "2\n")
@@ -45,7 +45,7 @@ def test_stage_all_records_additions_modifications_and_deletions(sandbox: Sandbo
     assert repo.read_blob("HEAD", "keep.txt") == b"k\n"
 
 
-def test_stage_all_is_limited_to_its_pathspecs(sandbox: Sandbox) -> None:
+def test_stage_all_is_limited_to_its_pathspecs(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n", "dir/b.txt": "1\n"})
     sandbox.write("a.txt", "2\n")
     sandbox.write("dir/b.txt", "2\n")
@@ -56,7 +56,7 @@ def test_stage_all_is_limited_to_its_pathspecs(sandbox: Sandbox) -> None:
     assert not sandbox.repo.has_staged_changes(["a.txt"])
 
 
-def test_ignored_files_are_staged_only_when_forced(sandbox: Sandbox) -> None:
+def test_ignored_files_are_staged_only_when_forced(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n"})
     repo = sandbox.repo
     assert repo.add_excludes(["*.log"]) == ("*.log",)
@@ -69,7 +69,7 @@ def test_ignored_files_are_staged_only_when_forced(sandbox: Sandbox) -> None:
     assert repo.has_staged_changes(["run.log"])
 
 
-def test_exclude_pathspecs_subtract_from_the_selection(sandbox: Sandbox) -> None:
+def test_exclude_pathspecs_subtract_from_the_selection(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n"})
     sandbox.write("keep.txt", "k\n")
     sandbox.write("vendor/lib.txt", "v\n")
@@ -80,7 +80,7 @@ def test_exclude_pathspecs_subtract_from_the_selection(sandbox: Sandbox) -> None
     assert not sandbox.repo.has_staged_changes(["vendor"])
 
 
-def test_unstage_resets_the_index_and_leaves_the_worktree(sandbox: Sandbox) -> None:
+def test_unstage_resets_the_index_and_leaves_the_worktree(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n"})
     repo = sandbox.repo
     sandbox.write("a.txt", "2\n")
@@ -97,7 +97,7 @@ def test_unstage_resets_the_index_and_leaves_the_worktree(sandbox: Sandbox) -> N
     assert (sandbox.root / "b.txt").exists()
 
 
-def test_unstage_before_the_first_commit_empties_the_index(sandbox: Sandbox) -> None:
+def test_unstage_before_the_first_commit_empties_the_index(sandbox: ContractProject) -> None:
     sandbox.repo.initialize(initial_branch="main")
     sandbox.repo.bind()
     sandbox.write("a.txt", "1\n")
@@ -112,7 +112,7 @@ def test_unstage_before_the_first_commit_empties_the_index(sandbox: Sandbox) -> 
 
 
 def test_commit_without_staged_changes_is_refused_unless_empty_is_allowed(
-    sandbox: Sandbox,
+    sandbox: ContractProject,
 ) -> None:
     baseline = sandbox.start({"a.txt": "1\n"})
 
@@ -125,7 +125,9 @@ def test_commit_without_staged_changes_is_refused_unless_empty_is_allowed(
     assert sandbox.repo.recent_subjects(1)[0].subject == "marker"
 
 
-def test_commit_only_refuses_a_tracked_path_that_became_a_directory(sandbox: Sandbox) -> None:
+def test_commit_only_refuses_a_tracked_path_that_became_a_directory(
+    sandbox: ContractProject,
+) -> None:
     baseline = sandbox.start({"a.txt": "1\n"})
     sandbox.delete("a.txt")
     sandbox.write("a.txt/inner.txt", "inner\n")
@@ -137,7 +139,7 @@ def test_commit_only_refuses_a_tracked_path_that_became_a_directory(sandbox: San
 
 
 def test_commit_only_takes_the_named_paths_and_keeps_other_staged_changes(
-    sandbox: Sandbox,
+    sandbox: ContractProject,
 ) -> None:
     sandbox.start({"a.txt": "1\n", "b.txt": "1\n"})
     repo = sandbox.repo
@@ -153,7 +155,7 @@ def test_commit_only_takes_the_named_paths_and_keeps_other_staged_changes(
     assert not repo.has_staged_changes(["a.txt"])
 
 
-def test_commit_message_is_kept_verbatim(sandbox: Sandbox) -> None:
+def test_commit_message_is_kept_verbatim(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n"})
     sandbox.write("a.txt", "2\n")
 
@@ -163,7 +165,7 @@ def test_commit_message_is_kept_verbatim(sandbox: Sandbox) -> None:
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can read mode-000 files")
-def test_staging_names_unreadable_paths_and_stages_nothing(sandbox: Sandbox) -> None:
+def test_staging_names_unreadable_paths_and_stages_nothing(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n"})
     repo = sandbox.repo
     sandbox.write("a.txt", "2\n")
@@ -184,7 +186,7 @@ def test_staging_names_unreadable_paths_and_stages_nothing(sandbox: Sandbox) -> 
         secret.chmod(0o644)
 
 
-def test_other_staging_failures_name_no_unreadable_paths(sandbox: Sandbox) -> None:
+def test_other_staging_failures_name_no_unreadable_paths(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n"})
 
     with pytest.raises(StagingError) as raised:
@@ -193,7 +195,7 @@ def test_other_staging_failures_name_no_unreadable_paths(sandbox: Sandbox) -> No
     assert raised.value.unreadable == ()
 
 
-def test_excludes_are_added_once_in_order(sandbox: Sandbox) -> None:
+def test_excludes_are_added_once_in_order(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n"})
     repo = sandbox.repo
 
@@ -208,7 +210,7 @@ def test_excludes_are_added_once_in_order(sandbox: Sandbox) -> None:
 # -- what a restart sees: the checkpoint recovery contract --------------------------
 
 
-def test_a_new_instance_sees_staged_state_branches_and_commits(sandbox: Sandbox) -> None:
+def test_a_new_instance_sees_staged_state_branches_and_commits(sandbox: ContractProject) -> None:
     baseline = sandbox.start({"a.txt": "1\n"})
     sandbox.repo.switch_branch("run", create=True)
     sandbox.write("a.txt", "2\n")
@@ -224,7 +226,9 @@ def test_a_new_instance_sees_staged_state_branches_and_commits(sandbox: Sandbox)
     assert sandbox.repo.head() != baseline
 
 
-def test_recovery_tells_a_landed_commit_from_a_lost_one_by_head_alone(sandbox: Sandbox) -> None:
+def test_recovery_tells_a_landed_commit_from_a_lost_one_by_head_alone(
+    sandbox: ContractProject,
+) -> None:
     """The checkpoint journal records ``HEAD`` before committing.
 
     After a crash, a fresh instance decides from ``head()`` and ``is_ancestor``
@@ -255,7 +259,7 @@ def test_recovery_tells_a_landed_commit_from_a_lost_one_by_head_alone(sandbox: S
     assert not after.is_ancestor(landed, pre_commit)
 
 
-def test_a_failed_operation_leaves_head_and_index_as_they_were(sandbox: Sandbox) -> None:
+def test_a_failed_operation_leaves_head_and_index_as_they_were(sandbox: ContractProject) -> None:
     baseline = sandbox.start({"a.txt": "1\n", "b.txt": "1\n"})
     repo = sandbox.repo
     sandbox.write("a.txt", "2\n")

@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.run_execution import run_execution_record
 
 from vs_agent.api import NULL_SKILL_SELECTION, AgentBackend, AgentSpec
 from vs_project.api import (
@@ -16,7 +15,7 @@ from vs_project.api import (
     OrchestrationDescriptor,
     RunEnvironmentRecord,
 )
-from vs_project.api.testing import FakeGitRepositories
+from vs_project.api.testing import FakeGitRepositories, run_execution_record
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     AgentPaths,

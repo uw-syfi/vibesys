@@ -8,7 +8,6 @@ from uuid import UUID
 
 import pytest
 from pydantic import BaseModel, ConfigDict
-from tests.support.run_execution import run_execution_record
 
 from vs_project.api import (
     FakeStateModels,
@@ -19,6 +18,7 @@ from vs_project.api import (
     StateDocumentDamagedError,
     StateNamespace,
 )
+from vs_project.api.testing import run_execution_record
 
 if TYPE_CHECKING:
     from pathlib import Path

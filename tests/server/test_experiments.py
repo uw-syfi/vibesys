@@ -14,7 +14,6 @@ from tests.server.support import (
     build_server_parts,
     run_record,
 )
-from tests.support.run_execution import run_execution_record
 
 from server.api.experiments import (
     ExperimentLoadToken,
@@ -49,6 +48,7 @@ from vibesys.hypothesis.state import (
 from vibesys.hypothesis.transitions import reproject_run_evidence
 from vibesys.orchestration.single.models import SingleState
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StateSlot
+from vs_project.api.testing import run_execution_record
 
 if TYPE_CHECKING:
     from pathlib import Path

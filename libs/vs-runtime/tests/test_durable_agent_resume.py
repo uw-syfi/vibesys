@@ -15,8 +15,6 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
-from tests.support.run_execution import run_execution_record
-from tests.support.runtime_agent_sessions import _OpenedSessionContract, _resume_transport
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
@@ -45,6 +43,7 @@ from vs_agent.api import (
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider, FakeTurnScript
 from vs_mcp.api import StdioServerDescriptor
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api.testing import run_execution_record
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
     AgentCapability,
@@ -55,6 +54,8 @@ from vs_runtime.api import (
     StructuredResponseError,
     WorkspaceAccess,
 )
+from vs_runtime.api.agent_session_fixtures import OpenedSessionContract as _OpenedSessionContract
+from vs_runtime.api.agent_session_fixtures import resume_transport as _resume_transport
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     AgentExecutionFinished,

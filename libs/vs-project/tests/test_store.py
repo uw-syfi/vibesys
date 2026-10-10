@@ -13,7 +13,6 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, Json, ValidationError
-from tests.support.run_execution import run_execution_record
 
 from vs_project.api import (
     PROJECT_SCHEMA_VERSION,
@@ -30,6 +29,7 @@ from vs_project.api import (
     generate_run_id,
     is_project_state_path,
 )
+from vs_project.api.testing import run_execution_record
 from vs_sim.api.testing import file_size_limit
 
 NOW = datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC)

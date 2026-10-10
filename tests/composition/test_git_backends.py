@@ -15,9 +15,9 @@ from pathlib import Path
 import pytest
 from tests.support.crash_harness import crash_plan, crash_points
 from tests.support.skeleton_sim import Simulation, simulate
-from tests.support.world_git import GitKind
 
 from vs_faults.api import FaultPlan
+from vs_project.api.testing import GitKind
 from vs_sim.api.testing import VirtualClock, run_virtual
 
 

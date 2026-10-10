@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ConfigDict
-from tests.support.run_execution import run_execution_record
 
 from vs_project.api import (
     GitError,
@@ -17,7 +16,7 @@ from vs_project.api import (
     Project,
     RunEnvironmentRecord,
 )
-from vs_project.api.testing import FakeGitRepositories
+from vs_project.api.testing import FakeGitRepositories, run_execution_record
 from vs_runtime.api import OrchestrationResumeDecision
 from vs_runtime.api.infrastructure import (
     ProjectMaterializer,

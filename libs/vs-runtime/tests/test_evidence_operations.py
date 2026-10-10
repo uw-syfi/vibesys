@@ -9,14 +9,6 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
-from tests.support.runtime_evaluation import (
-    ADMISSION,
-    SCOPE,
-    ScenarioCluster,
-    build_stack,
-    submission,
-)
-from tests.support.runtime_operations import execute_request
 
 from vs_core.api import (
     Capabilities,
@@ -75,6 +67,14 @@ from vs_runtime.api.core import (
     commit_of,
     production_owners,
     revision_ref,
+)
+from vs_runtime.api.operation_fixtures import execute_request
+from vs_runtime.api.slurm_evaluation_stack import (
+    ADMISSION,
+    SCOPE,
+    ScenarioCluster,
+    build_stack,
+    submission,
 )
 from vs_runtime.api.testing import FakeEvidenceLedger, FakeWorkspace, FakeWorkspaces
 

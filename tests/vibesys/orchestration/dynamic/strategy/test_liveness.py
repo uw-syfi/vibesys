@@ -5,7 +5,7 @@ candidates. Each measurement can succeed, be refused for its workload, end witho
 evidence because the evaluation infrastructure failed, or never be answered (lost);
 each agent turn can reply, reply with something unparsable, fail in a retryable way, or
 be lost. These tests generate sequences of those outcomes, run the whole search on the
-production shell, and check `tests.support.liveness`: a bounded number of requests, no
+production shell, and check `vs_core.testing.liveness`: a bounded number of requests, no
 request repeated without new information, and a terminal run with nothing left open.
 """
 
@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.liveness import Journal, spin_violations
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._replies import (
     implement,
@@ -36,6 +35,7 @@ from vs_core.api import (
     SubmitMeasurement,
 )
 from vs_core.testing.drive import Failed, Retryable, Succeeded, Unknown
+from vs_core.testing.liveness import Journal, spin_violations
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request

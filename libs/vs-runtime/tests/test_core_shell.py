@@ -10,12 +10,6 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.support.runtime_core_shell import (
-    CounterState,
-    CounterStrategy,
-    ShellTraceTransitions,
-    runtime,
-)
 
 from vs_core.api import (
     Access,
@@ -48,6 +42,12 @@ from vs_runtime.api.core import (
     RuntimeCommitError,
     RuntimeCommitUncertainError,
     RuntimeRecord,
+)
+from vs_runtime.api.core_shell_fixtures import (
+    CounterState,
+    CounterStrategy,
+    ShellTraceTransitions,
+    runtime,
 )
 
 

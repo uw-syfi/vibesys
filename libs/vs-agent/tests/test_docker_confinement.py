@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING, cast
 from agentshim.testing import FakeExecutor, FakeRun
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.docker_confinement import DockerContainerConfinement
+from vs_sandbox.api.testing import FakeDockerConfinement
 
 if TYPE_CHECKING:
     from vs_sandbox.api import DockerSandbox
@@ -23,7 +23,9 @@ ENV_NAMES = st.text(alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ_", min_size=1, max_size
 )
 
 
-def _confinement(sandbox: FakeDockerSandbox, runner: FakeExecutor) -> DockerContainerConfinement:
+def _confinement(
+    sandbox: FakeDockerConfinement, runner: FakeExecutor
+) -> DockerContainerConfinement:
     return DockerContainerConfinement(cast("DockerSandbox", sandbox), runner=runner)
 
 
@@ -31,7 +33,7 @@ def _confinement(sandbox: FakeDockerSandbox, runner: FakeExecutor) -> DockerCont
 def test_every_wrap_and_reap_targets_the_containers_current_id(
     first: str, second: str, argv: list[str]
 ) -> None:
-    sandbox = FakeDockerSandbox(workspace=_WORKSPACE, container_id=first)
+    sandbox = FakeDockerConfinement(workspace=_WORKSPACE, container_id=first)
     runner = FakeExecutor(FakeRun())
     confinement = _confinement(sandbox, runner)
 
@@ -50,7 +52,7 @@ def test_every_wrap_and_reap_targets_the_containers_current_id(
 def test_the_environment_travels_by_name_and_the_process_is_marked(
     names: list[str], value: str
 ) -> None:
-    sandbox = FakeDockerSandbox(workspace=_WORKSPACE, extra_env=dict.fromkeys(names, value))
+    sandbox = FakeDockerConfinement(workspace=_WORKSPACE, extra_env=dict.fromkeys(names, value))
     confinement = _confinement(sandbox, FakeExecutor(FakeRun()))
 
     argv = confinement.wrap(["claude"], "/workspace")
@@ -63,7 +65,7 @@ def test_the_environment_travels_by_name_and_the_process_is_marked(
 
 
 def test_agent_paths_follow_the_sandboxs_own_mapping(tmp_path: Path) -> None:
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
     confinement = _confinement(sandbox, FakeExecutor(FakeRun()))
 
     assert confinement.agent_path(tmp_path / "src" / "a.py") == "/workspace/src/a.py"

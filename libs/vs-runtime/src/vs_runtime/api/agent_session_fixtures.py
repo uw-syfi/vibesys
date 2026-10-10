@@ -10,9 +10,6 @@ from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-import pytest
-from tests.support.run_execution import run_execution_record
-
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
     AgentBackend,
@@ -30,6 +27,7 @@ from vs_agent.api import (
 )
 from vs_agent.api.testing import FakeAgentClient, FakeAgentSessions, FakeProvider
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api.testing import run_execution_record
 from vs_runtime.api import (
     AgentCapability,
     AgentRole,
@@ -77,7 +75,7 @@ if TYPE_CHECKING:
     from vs_sandbox.api import CommandRunner
 
 
-class _WorkspaceResource:
+class WorkspaceResource:
     def __init__(
         self,
         workspace_id: str | None = None,
@@ -196,8 +194,8 @@ class _WorkspaceResource:
             self._close_events.append(f"resource:{self.id or 'root'}")
 
 
-def _candidate_resource(workspace_id: str, revision: str) -> _WorkspaceResource:
-    resource = _WorkspaceResource(workspace_id)
+def candidate_resource(workspace_id: str, revision: str) -> WorkspaceResource:
+    resource = WorkspaceResource(workspace_id)
     resource.revision = revision
     return resource
 
@@ -240,7 +238,7 @@ class _AsyncSnapshotGate:
         self.release.set()
 
 
-class _BlockedRuntimeWorkspace(_WorkspaceResource):
+class BlockedRuntimeWorkspace(WorkspaceResource):
     def __init__(self, workspace_id: str) -> None:
         super().__init__(workspace_id)
         self.gate = _SnapshotGate()
@@ -250,7 +248,7 @@ class _BlockedRuntimeWorkspace(_WorkspaceResource):
         return super().snapshot(label)
 
 
-class _BlockedFakeWorkspace(FakeWorkspace):
+class BlockedFakeWorkspace(FakeWorkspace):
     def __init__(self, workspace_id: str) -> None:
         super().__init__(workspace_id=workspace_id, path=Path(f"/{workspace_id}"))
         self.gate = _AsyncSnapshotGate()
@@ -260,7 +258,7 @@ class _BlockedFakeWorkspace(FakeWorkspace):
         return await super().snapshot(label)
 
 
-class _ClientFactory:
+class ClientFactory:
     def __init__(self, *clients: AgentClientProtocol) -> None:
         self._clients = deque(clients)
         self.calls: list[dict[str, object]] = []
@@ -270,7 +268,7 @@ class _ClientFactory:
         return self._clients.popleft()
 
 
-class _EnvironmentOpener:
+class EnvironmentOpener:
     def __init__(self, *environments: FakeAgentExecutionEnvironment) -> None:
         self._environments = deque(environments)
         self.configurations: list[AgentExecutionConfiguration] = []
@@ -280,9 +278,9 @@ class _EnvironmentOpener:
         return self._environments.popleft()
 
 
-def _scope(
+def scope(
     workspace: Workspace,
-    opener: _EnvironmentOpener,
+    opener: EnvironmentOpener,
 ) -> AgentExecutionScope:
     return AgentExecutionScope(
         workspace_path=workspace.path,
@@ -294,9 +292,9 @@ def _scope(
 
 
 @dataclass(frozen=True, slots=True)
-class _RuntimeEffects:
+class RuntimeEffects:
     clients: Callable[..., AgentClientProtocol] | None
-    environments: _EnvironmentOpener
+    environments: EnvironmentOpener
     lifecycle: FakeAgentExecutionLifecycleSink
     tool_bindings: (
         dict[str, Callable[[AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]] | None
@@ -309,41 +307,41 @@ class _RuntimeEffects:
 
 
 @dataclass(frozen=True, slots=True)
-class _WorkspaceResources:
-    root: _WorkspaceResource
-    create_candidate: Callable[[str, str], _WorkspaceResource]
+class WorkspaceResources:
+    root: WorkspaceResource
+    create_candidate: Callable[[str, str], WorkspaceResource]
     supports_parallel_candidates: bool = True
 
-    def reattach_candidate(self, workspace_id: str, revision: str) -> _WorkspaceResource | None:
+    def reattach_candidate(self, workspace_id: str, revision: str) -> WorkspaceResource | None:
         del workspace_id, revision
         return None
 
 
-def _runtime(
+def session_runtime(
     role: AgentRole,
-    effects: _RuntimeEffects,
+    effects: RuntimeEffects,
     *,
-    root_resource: _WorkspaceResource | None = None,
-    candidate_resources: tuple[_WorkspaceResource, ...] = (),
+    root_resource: WorkspaceResource | None = None,
+    candidate_resources: tuple[WorkspaceResource, ...] = (),
     control: RunControlChannel | None = None,
 ) -> WorkspaceRuntime:
     candidates = deque(candidate_resources)
-    selected_root = root_resource or _WorkspaceResource()
+    selected_root = root_resource or WorkspaceResource()
     selected_root.id = None
-    selected_root.scope_factory = lambda: _scope(
+    selected_root.scope_factory = lambda: scope(
         cast("Workspace", selected_root), effects.environments
     )
 
-    def create_candidate(workspace_id: str, revision: str) -> _WorkspaceResource:
-        resource = candidates.popleft() if candidates else _WorkspaceResource(workspace_id)
+    def create_candidate(workspace_id: str, revision: str) -> WorkspaceResource:
+        resource = candidates.popleft() if candidates else WorkspaceResource(workspace_id)
         resource.id = workspace_id
         resource.revision = revision
-        resource.scope_factory = lambda: _scope(cast("Workspace", resource), effects.environments)
+        resource.scope_factory = lambda: scope(cast("Workspace", resource), effects.environments)
         return resource
 
     return create_workspace_runtime(
         (role,),
-        workspace_resources=_WorkspaceResources(selected_root, create_candidate),
+        workspace_resources=WorkspaceResources(selected_root, create_candidate),
         resolve_configuration=lambda selected_role: AgentExecutionConfiguration(
             agent_id=selected_role.id,
             spec=effects.spec,
@@ -364,7 +362,7 @@ def _runtime(
     )
 
 
-def _client(*, responses: tuple[str, ...] = ()) -> FakeAgentClient:
+def scripted_client(*, responses: tuple[str, ...] = ()) -> FakeAgentClient:
     return FakeAgentClient(
         model="fake-model",
         capabilities=AgentCapabilities(
@@ -375,13 +373,13 @@ def _client(*, responses: tuple[str, ...] = ()) -> FakeAgentClient:
     ).enqueue_text("worker", *responses)
 
 
-def _environment() -> FakeAgentExecutionEnvironment:
+def environment() -> FakeAgentExecutionEnvironment:
     return FakeAgentExecutionEnvironment(
         project_path_policy=ProjectPathPolicy(),
     )
 
 
-class _OpenedSessionContract:
+class OpenedSessionContract:
     def __init__(
         self,
         owner: WorkspaceAgentSessions,
@@ -399,14 +397,14 @@ class _OpenedSessionContract:
             await self.runtime.workspaces.close()
 
 
-async def _open_session_contract(
+async def open_session_contract(
     implementation: str,
     role: AgentRole,
-    workspaces: tuple[_WorkspaceResource | FakeWorkspace, ...],
+    workspaces: tuple[WorkspaceResource | FakeWorkspace, ...],
     *,
     effects: tuple[Callable[[], None] | None, ...] = (),
     writable_paths: tuple[str, ...] = (),
-) -> _OpenedSessionContract:
+) -> OpenedSessionContract:
     selected_effects = effects or (None,) * len(workspaces)
     if implementation == "fake":
         pending_effects = deque(selected_effects)
@@ -428,23 +426,24 @@ async def _open_session_contract(
             workspace for workspace in workspaces if isinstance(workspace, FakeWorkspace)
         )
         if len(fake_workspaces) != len(workspaces):
-            pytest.fail("fake contract requires fake workspaces")
+            message = "fake contract requires fake workspaces"
+            raise AssertionError(message)
         session_workspaces: tuple[Workspace, ...] = fake_workspaces
     else:
         clients = []
         for index, effect in enumerate(selected_effects):
-            client = _client(responses=tuple(f"reply-{index}-{turn}" for turn in range(4)))
+            client = scripted_client(responses=tuple(f"reply-{index}-{turn}" for turn in range(4)))
             if effect is not None:
                 client.on_invoke(lambda _call, selected=effect: selected())
             clients.append(client)
         resources = tuple(
-            resource for resource in workspaces if isinstance(resource, _WorkspaceResource)
+            resource for resource in workspaces if isinstance(resource, WorkspaceResource)
         )
-        runtime = _runtime(
+        runtime = session_runtime(
             role,
-            _RuntimeEffects(
-                _ClientFactory(*clients),
-                _EnvironmentOpener(*(_environment() for _workspace_value in workspaces)),
+            RuntimeEffects(
+                ClientFactory(*clients),
+                EnvironmentOpener(*(environment() for _workspace_value in workspaces)),
                 FakeAgentExecutionLifecycleSink(),
             ),
             root_resource=resources[0],
@@ -464,10 +463,10 @@ async def _open_session_contract(
             for workspace in session_workspaces
         ]
     )
-    return _OpenedSessionContract(owner, sessions, runtime)
+    return OpenedSessionContract(owner, sessions, runtime)
 
 
-def _durable_session_slot(tmp_path: Path) -> StateSlot[AgentSessionState]:
+def durable_session_slot(tmp_path: Path) -> StateSlot[AgentSessionState]:
     project = Project.open(tmp_path)
     project.state.create_project("member workspace continuity")
     manifest = project.state.new_run_manifest(
@@ -487,13 +486,13 @@ def _durable_session_slot(tmp_path: Path) -> StateSlot[AgentSessionState]:
     )
 
 
-async def _open_resume_contract(
+async def open_resume_contract(
     implementation: str,
     role: AgentRole,
-    workspace: _WorkspaceResource | FakeWorkspace,
+    workspace: WorkspaceResource | FakeWorkspace,
     transport: AgentSessions,
     grants: tuple[str, ...] = (),
-) -> _OpenedSessionContract:
+) -> OpenedSessionContract:
     if implementation == "fake":
         owner = FakeWorkspaceAgentSessions(
             (role,),
@@ -507,12 +506,12 @@ async def _open_resume_contract(
         assert isinstance(workspace, FakeWorkspace)
         handle: Workspace = workspace
     else:
-        assert isinstance(workspace, _WorkspaceResource)
-        runtime = _runtime(
+        assert isinstance(workspace, WorkspaceResource)
+        runtime = session_runtime(
             role,
-            _RuntimeEffects(
-                _ClientFactory(_client(), _client()),
-                _EnvironmentOpener(_environment(), _environment()),
+            RuntimeEffects(
+                ClientFactory(scripted_client(), scripted_client()),
+                EnvironmentOpener(environment(), environment()),
                 FakeAgentExecutionLifecycleSink(),
                 session_transport=transport,
             ),
@@ -523,13 +522,13 @@ async def _open_resume_contract(
     session = await owner.create_session(
         role, workspace=handle, member_id="member", writable_paths=grants
     )
-    return _OpenedSessionContract(owner, (session,), runtime)
+    return OpenedSessionContract(owner, (session,), runtime)
 
 
-def _resume_transport(
+def resume_transport(
     tmp_path: Path, before_turn: Callable[[AgentTurnRequest], None]
 ) -> tuple[FakeAgentSessions, AgentClient]:
-    slot = _durable_session_slot(tmp_path)
+    slot = durable_session_slot(tmp_path)
     client = AgentClient(
         FakeProvider(answer="done", on_turn=before_turn),
         session_store=DurableSessionStore(slot),

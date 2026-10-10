@@ -10,18 +10,18 @@ import pytest
 from vs_project.api import GitCommandError, PatchStyle
 
 if TYPE_CHECKING:
-    from tests.support.git_contract import Sandbox
+    from vs_project.api.testing import ContractProject
 
 _BODY = "".join(f"line {number}\n" for number in range(20))
 
 
-def _renamed(sandbox: Sandbox) -> tuple[str, str]:
+def _renamed(sandbox: ContractProject) -> tuple[str, str]:
     base = sandbox.start({"old.txt": _BODY, "stay.txt": "s\n"})
     (sandbox.root / "old.txt").rename(sandbox.root / "new.txt")
     return base, sandbox.commit_all("rename")
 
 
-def test_review_patches_show_renames_and_exact_patches_do_not(sandbox: Sandbox) -> None:
+def test_review_patches_show_renames_and_exact_patches_do_not(sandbox: ContractProject) -> None:
     base, renamed = _renamed(sandbox)
 
     review = sandbox.repo.diff_patch(base, renamed)
@@ -36,7 +36,7 @@ def test_review_patches_show_renames_and_exact_patches_do_not(sandbox: Sandbox) 
     assert all(len(left) == len(right) == 40 for left, right in ids)
 
 
-def test_patches_are_limited_to_pathspecs(sandbox: Sandbox) -> None:
+def test_patches_are_limited_to_pathspecs(sandbox: ContractProject) -> None:
     base = sandbox.start({"a.txt": "1\n", "dir/b.txt": "1\n", "dir/skip.txt": "1\n"})
     for path in ("a.txt", "dir/b.txt", "dir/skip.txt"):
         sandbox.write(path, "2\n")
@@ -54,7 +54,7 @@ def test_patches_are_limited_to_pathspecs(sandbox: Sandbox) -> None:
     assert repo.diff_patch(base, base) == ""
 
 
-def test_diffs_between_unknown_revisions_are_command_errors(sandbox: Sandbox) -> None:
+def test_diffs_between_unknown_revisions_are_command_errors(sandbox: ContractProject) -> None:
     head = sandbox.start({"a.txt": "1\n"})
 
     with pytest.raises(GitCommandError):
@@ -63,7 +63,7 @@ def test_diffs_between_unknown_revisions_are_command_errors(sandbox: Sandbox) ->
         sandbox.repo.diff_name_status(head, "1" * 40)
 
 
-def test_name_status_is_nul_delimited_with_rename_detection(sandbox: Sandbox) -> None:
+def test_name_status_is_nul_delimited_with_rename_detection(sandbox: ContractProject) -> None:
     base, renamed = _renamed(sandbox)
     sandbox.write("added.txt", "a\n")
     sandbox.delete("stay.txt")
@@ -78,7 +78,7 @@ def test_name_status_is_nul_delimited_with_rename_detection(sandbox: Sandbox) ->
 
 
 def test_tracked_changes_since_head_counts_index_and_worktree_but_not_untracked(
-    sandbox: Sandbox,
+    sandbox: ContractProject,
 ) -> None:
     sandbox.start({"a.txt": "1\n", "b.txt": "1\n", "c/d.txt": "1\n"})
     repo = sandbox.repo
@@ -96,7 +96,7 @@ def test_tracked_changes_since_head_counts_index_and_worktree_but_not_untracked(
 
 
 def test_uncommitted_paths_list_modified_staged_and_untracked_files_individually(
-    sandbox: Sandbox,
+    sandbox: ContractProject,
 ) -> None:
     sandbox.start({"a.txt": "1\n", "b.txt": "1\n"})
     repo = sandbox.repo
@@ -119,7 +119,7 @@ def test_uncommitted_paths_list_modified_staged_and_untracked_files_individually
     assert repo.uncommitted_paths(["fresh"]) == ("fresh/one.txt", "fresh/two.txt")
 
 
-def test_changed_since_unions_committed_and_uncommitted_paths(sandbox: Sandbox) -> None:
+def test_changed_since_unions_committed_and_uncommitted_paths(sandbox: ContractProject) -> None:
     base = sandbox.start({"a.txt": "1\n", "b.txt": "1\n", "tests/t.py": "1\n"})
     sandbox.write("a.txt", "2\n")
     sandbox.write("tests/t.py", "2\n")
@@ -135,7 +135,7 @@ def test_changed_since_unions_committed_and_uncommitted_paths(sandbox: Sandbox) 
         repo.changed_since("1" * 40, ["."])
 
 
-def test_tracked_file_queries(sandbox: Sandbox) -> None:
+def test_tracked_file_queries(sandbox: ContractProject) -> None:
     sandbox.start({"dir/a.txt": "1\n"})
     sandbox.write("loose.txt", "x\n")
 
@@ -146,7 +146,7 @@ def test_tracked_file_queries(sandbox: Sandbox) -> None:
 
 
 def test_worktree_matches_compares_tracked_untracked_and_optionally_ignored(
-    sandbox: Sandbox,
+    sandbox: ContractProject,
 ) -> None:
     head = sandbox.start({"a.txt": "1\n", "dir/b.txt": "1\n"})
     repo = sandbox.repo
@@ -170,7 +170,7 @@ def test_worktree_matches_compares_tracked_untracked_and_optionally_ignored(
     assert not repo.worktree_matches(head, ["."], include_ignored=False)
 
 
-def test_worktree_matches_leaves_the_real_index_alone(sandbox: Sandbox) -> None:
+def test_worktree_matches_leaves_the_real_index_alone(sandbox: ContractProject) -> None:
     head = sandbox.start({"a.txt": "1\n"})
     sandbox.write("new.txt", "n\n")
 
@@ -180,7 +180,7 @@ def test_worktree_matches_leaves_the_real_index_alone(sandbox: Sandbox) -> None:
     assert sandbox.repo.uncommitted_paths(["."]) == ("new.txt",)
 
 
-def test_worktree_matches_an_unknown_revision_is_false(sandbox: Sandbox) -> None:
+def test_worktree_matches_an_unknown_revision_is_false(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n"})
 
     assert not sandbox.repo.worktree_matches("1" * 40, ["."], include_ignored=False)

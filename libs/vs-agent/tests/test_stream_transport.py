@@ -28,7 +28,6 @@ from agentshim.testing import (
     SequentialIds,
     scripted_turn,
 )
-from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent import session_launch as subject
@@ -41,6 +40,7 @@ from vs_agent.api import (
     AgentTurnTimeoutError,
     SteerOutcome,
 )
+from vs_sandbox.api.testing import FakeDockerConfinement
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import start_thread, wait_until_started_sync
 
@@ -130,7 +130,7 @@ class _Observer:
 
 
 def _launcher(
-    provider: str, executor: FakeExecutor, sandbox: FakeDockerSandbox
+    provider: str, executor: FakeExecutor, sandbox: FakeDockerConfinement
 ) -> subject.ConfinedSessionLauncher:
     return subject.ConfinedSessionLauncher(
         provider=provider,
@@ -157,7 +157,9 @@ def _container_spec(tmp_path: Path, provider: str) -> AgentSessionSpec:
 def test_container_turns_share_one_process_marked_for_reaping(
     tmp_path: Path, provider: str
 ) -> None:
-    sandbox = FakeDockerSandbox(workspace=tmp_path, extra_env={"ANTHROPIC_AUTH_TOKEN": LOGIN_VALUE})
+    sandbox = FakeDockerConfinement(
+        workspace=tmp_path, extra_env={"ANTHROPIC_AUTH_TOKEN": LOGIN_VALUE}
+    )
     executor = FakeExecutor([], peers=_answering(provider, "one", "two"))
     session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
 
@@ -181,7 +183,7 @@ def test_container_turns_share_one_process_marked_for_reaping(
 def test_providers_without_a_stream_transport_stay_one_process_per_turn(
     tmp_path: Path, provider: str
 ) -> None:
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
     executor = FakeExecutor(scripted_turn(provider, text="ok"))
     session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
 
@@ -209,7 +211,7 @@ class _SteerWhenRunning:
 
 @pytest.mark.parametrize("provider", STREAM_PROVIDERS)
 def test_a_steer_is_delivered_to_the_running_container_turn(tmp_path: Path, provider: str) -> None:
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
     executor = FakeExecutor([], peers=_awaiting_steer(provider))
     session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
     steerer = _SteerWhenRunning(session, "instead, say STEERED")
@@ -224,7 +226,7 @@ def test_a_steer_is_delivered_to_the_running_container_turn(tmp_path: Path, prov
 
 @pytest.mark.parametrize("provider", STREAM_PROVIDERS)
 def test_a_rate_limit_report_precedes_the_turns_close(tmp_path: Path, provider: str) -> None:
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
     executor = FakeExecutor([], peers=_reporting_rate_limits(provider))
     session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
     observer = _Observer()
@@ -241,7 +243,7 @@ def test_a_rate_limit_report_precedes_the_turns_close(tmp_path: Path, provider: 
 def test_a_rate_limit_report_reaches_the_observer_while_the_turn_still_runs(
     tmp_path: Path, provider: str
 ) -> None:
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
     executor = FakeExecutor([], peers=STALLING[provider]())
     session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
     observer = _Observer()
@@ -268,7 +270,7 @@ def test_a_hung_turn_ends_in_the_typed_timeout_the_run_understands(
     tmp_path: Path, provider: str
 ) -> None:
     """A long-lived process raises agentshim's `TurnTimeoutError`, not the one-shot subclass."""
-    sandbox = FakeDockerSandbox(workspace=tmp_path)
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
     executor = FakeExecutor([], peers=_hanging(provider))
     session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
 

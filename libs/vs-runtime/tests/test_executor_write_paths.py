@@ -15,13 +15,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.executor_cases import CASES
-from tests.support.executor_context import RevocableLease
 
 from vs_runtime.api import core
 from vs_runtime.api.core import HAND_ROLLED_ROLES, REQUEST_DISPATCH, NeverBegun, ReceiptStore
+from vs_runtime.api.executor_contexts import RevocableLease
 
 if TYPE_CHECKING:
-    from tests.support.executor_harness import ExecutorCase, Scenario
+    from vs_runtime.api.executor_contracts import ExecutorCase, Scenario
 
 SOURCE = Path(core.__file__).parents[1]  # the package's own source, scanned below
 

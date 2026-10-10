@@ -15,8 +15,6 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
 from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_proof
-from tests.support.run_execution import run_execution_record
-from tests.support.runtime_operations import VerifyParentRevision as _VerifyRequest
 
 from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
 from vs_core.api import HostFence, HostId
@@ -26,6 +24,7 @@ from vs_project.api import (
     OrchestrationDescriptor,
     RunEnvironmentRecord,
 )
+from vs_project.api.testing import run_execution_record
 from vs_runtime.api import (
     RuntimeContractError,
     WorkspaceRestoreError,
@@ -53,6 +52,7 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
 )
+from vs_runtime.api.operation_fixtures import VerifyParentRevision as _VerifyRequest
 from vs_runtime.api.testing import (
     FakeAgentExecutionLifecycleSink,
     FakeRunControlEventSink,

@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
-from tests.support.started_operation import wait_until_executor_started
 from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from vibesys.orchestration.dynamic.agents import PROFILER
@@ -40,7 +39,11 @@ from vs_evaluation.api import (
     StageState,
     TrustedEvidence,
 )
-from vs_evaluation.api.testing import FakeProfilerTurnProvision, InMemoryEvaluationStore
+from vs_evaluation.api.testing import (
+    FakeProfilerTurnProvision,
+    InMemoryEvaluationStore,
+    wait_until_executor_started,
+)
 from vs_evaluation.api.tools import build_evaluation_tools
 from vs_project.api import StateNamespace
 from vs_runtime.api import (

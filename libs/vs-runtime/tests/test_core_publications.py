@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.runtime_core_shell import LostAcknowledgementStateStore, runtime
 
 from vs_core.api import ClockAdvanced, ContractError, OperationRegistry
 from vs_project.api import FakeStateStore, Project, StateDocumentDamagedError
@@ -19,6 +18,7 @@ from vs_runtime.api.core import (
     RuntimeCommitError,
     RuntimeCommitUncertainError,
 )
+from vs_runtime.api.core_shell_fixtures import LostAcknowledgementStateStore, runtime
 from vs_runtime.api.testing import FakePublicationDelivery
 
 pytestmark = pytest.mark.asyncio

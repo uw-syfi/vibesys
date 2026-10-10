@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Annotated, get_args, get_origin
 import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from tests.support.runtime_core_shell import CounterState, CounterStrategy, ShellTraceTransitions
 
 from vs_core.api import (
     ArtifactId,
@@ -60,6 +59,7 @@ from vs_runtime.api.core import (
     RuntimeCommitError,
     RuntimeExecutionError,
 )
+from vs_runtime.api.core_shell_fixtures import CounterState, CounterStrategy, ShellTraceTransitions
 from vs_runtime.api.testing import FakePublicationDelivery, FakeRequestExecution
 
 if TYPE_CHECKING:

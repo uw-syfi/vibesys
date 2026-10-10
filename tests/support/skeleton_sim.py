@@ -14,7 +14,6 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from tests.support.runtime_evaluation import ScenarioCluster
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.skeleton_world import (
     LEASE,
@@ -23,10 +22,11 @@ from tests.support.skeleton_world import (
     drive,
     open_skeleton_world,
 )
-from tests.support.world_git import GitKind
 
 from vs_core.api import IntentPhase, RunStatus
 from vs_faults.api import FaultGate, FaultPlan, HostCrashError
+from vs_project.api.testing import GitKind
+from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 
 if TYPE_CHECKING:
     from pathlib import Path

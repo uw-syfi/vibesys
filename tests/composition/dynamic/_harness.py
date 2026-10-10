@@ -31,7 +31,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from tests.support.docker_environment import host_container_backend
-from tests.support.liveness import Budget, End, Journal, assert_live
 from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.slurm_environment import with_fake_image_build
 
@@ -54,6 +53,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_core.api import RunEnvelope
+from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_project.api import FakeStateStores, Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_runtime.api.testing import CrashableRunClock, FakeStopTimer

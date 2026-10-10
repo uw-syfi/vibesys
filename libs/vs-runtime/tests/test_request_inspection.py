@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ConfigDict
-from tests.support.executor_context import context_for
-from tests.support.runtime_operations import SCOPE
 
 from vs_core.api import (
     EventId,
@@ -38,6 +36,8 @@ from vs_runtime.api.core import (
     owner_key,
     settle,
 )
+from vs_runtime.api.executor_contexts import context_for
+from vs_runtime.api.operation_fixtures import SCOPE
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

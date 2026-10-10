@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 import pytest
 from tests.server.support import agent_descriptor, build_server_parts, run_record
 from tests.support import run_test_command
-from tests.support.run_execution import run_execution_record
 
 from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
 from server.api.protocol import DesignPatchQuery, DesignQuery
@@ -20,6 +19,7 @@ from vibesys.hypothesis.readmodel import project_run_view
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.orchestration.single.models import SingleState
 from vs_project.api import Project, RunEnvironmentRecord
+from vs_project.api.testing import run_execution_record
 
 if TYPE_CHECKING:
     from pathlib import Path

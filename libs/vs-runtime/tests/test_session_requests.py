@@ -12,8 +12,6 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.executor_context import RevocableLease
-from tests.support.observation_contract import assert_core_accepts
 from tests.support.session_world import (
     CrashOnReplace,
     SessionHost,
@@ -33,6 +31,8 @@ from vs_core.api import (
 )
 from vs_project.api import Project
 from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, ReceiptStore
+from vs_runtime.api.executor_contexts import RevocableLease
+from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:

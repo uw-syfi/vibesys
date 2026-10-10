@@ -7,14 +7,6 @@ from typing import TYPE_CHECKING, Literal
 
 import pytest
 from pydantic import BaseModel, RootModel
-from tests.support.runtime_agent_sessions import (
-    _ClientFactory,
-    _durable_session_slot,
-    _environment,
-    _EnvironmentOpener,
-    _runtime,
-    _RuntimeEffects,
-)
 
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.orchestration.dynamic import agents as dynamic
@@ -57,6 +49,24 @@ from vs_runtime.api import (
     SessionResumeError,
     StructuredResponseError,
     WorkspaceAccess,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    ClientFactory as _ClientFactory,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    EnvironmentOpener as _EnvironmentOpener,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    RuntimeEffects as _RuntimeEffects,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    durable_session_slot as _durable_session_slot,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    environment as _environment,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    session_runtime as _runtime,
 )
 from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink
 

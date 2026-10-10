@@ -12,7 +12,6 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.host_environment import unconfined_host_spec
-from tests.support.world_git import IN_MEMORY_GIT
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 import vibesys
@@ -40,6 +39,7 @@ from vs_agent.api import (
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner, FakeInvocation
 from vs_mcp.api import StdioServerDescriptor, ToolServerDescriptor
 from vs_project.api import OrchestrationDescriptor
+from vs_project.api.testing import IN_MEMORY_GIT
 from vs_runtime.api import (
     AgentCapability,
     AgentRole,

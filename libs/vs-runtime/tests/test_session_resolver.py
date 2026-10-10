@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.executor_context import context_for
 from tests.support.session_world import (
     ROLE,
     SCHEMA,
@@ -51,6 +50,7 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
     open_session_requests,
 )
+from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.infrastructure import AgentExecutionConfiguration
 
 if TYPE_CHECKING:

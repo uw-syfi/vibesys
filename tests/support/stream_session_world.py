@@ -13,7 +13,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from tests.support.fake_docker_sandbox import FakeDockerSandbox
 from tests.support.session_world import (
     FakeSessionResolver,
     ProviderFaults,
@@ -23,6 +22,7 @@ from tests.support.session_world import (
 from vs_agent.api import AgentClient, AgentExecutionPolicy, AgentSessionSpec
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeExecutor, fake_stream_launcher
 from vs_faults.api import FaultPlan, FaultyExecutor
+from vs_sandbox.api.testing import FakeDockerConfinement
 
 if TYPE_CHECKING:
     from vs_agent.api.testing import StreamPeers
@@ -73,7 +73,7 @@ def open_stream_host(
         plan or FaultPlan(seed=0),
         on_container_replaced=peers.forget_conversations,
     )
-    sandbox = cast("DockerSandbox", FakeDockerSandbox(workspace=resolver.workspace))
+    sandbox = cast("DockerSandbox", FakeDockerConfinement(workspace=resolver.workspace))
     launcher = fake_stream_launcher(
         provider=provider,
         executor=executor,

@@ -15,14 +15,6 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.runtime_agent_sessions import (
-    _client,
-    _ClientFactory,
-    _environment,
-    _EnvironmentOpener,
-    _runtime,
-    _RuntimeEffects,
-)
 
 from vs_agent.api import (
     AgentQuotaError,
@@ -33,6 +25,24 @@ from vs_agent.api import (
     QuotaPlan,
 )
 from vs_runtime.api import AgentRole
+from vs_runtime.api.agent_session_fixtures import (
+    ClientFactory as _ClientFactory,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    EnvironmentOpener as _EnvironmentOpener,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    RuntimeEffects as _RuntimeEffects,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    environment as _environment,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    scripted_client as _client,
+)
+from vs_runtime.api.agent_session_fixtures import (
+    session_runtime as _runtime,
+)
 from vs_runtime.api.infrastructure import (
     CapacityHandling,
     QuotaAction,

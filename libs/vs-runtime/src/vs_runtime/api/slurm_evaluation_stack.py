@@ -25,6 +25,7 @@ from vs_core.api import (
     SubmitMeasurement,
 )
 from vs_project.api import StateNamespace
+from vs_project.api.testing import scratch_state_directory
 from vs_runtime.api import render_stage_failure
 from vs_runtime.api.infrastructure import (
     ScalarBenchmarkContract,
@@ -160,8 +161,7 @@ async def build_stack(root: Path, cluster: ScenarioCluster | None = None) -> Sta
     cluster = cluster or ScenarioCluster()
     workspaces = _Candidates(FakeWorkspace(), supports_parallel_candidates=True)
     snapshot = await workspaces.root.snapshot("candidate")
-    state = root / ".vibesys" / "state" / "evaluation"
-    state.mkdir(parents=True, exist_ok=True)
+    state = scratch_state_directory(root, "evaluation")
     namespace = StateNamespace(project_root=root, root=state, portable=False)
     executor = SemanticSlurmEvaluationExecutor(
         _config(),

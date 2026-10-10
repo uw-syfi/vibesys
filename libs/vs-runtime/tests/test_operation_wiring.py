@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.runtime_operations import SCENARIO_NAMES, OperationScenario, scenarios
 
 from vs_core.api import (
     Capabilities,
@@ -28,6 +27,7 @@ from vs_runtime.api.core import (
     bind_operations,
     build_operation_catalog,
 )
+from vs_runtime.api.operation_fixtures import SCENARIO_NAMES, OperationScenario, scenarios
 
 _STRATEGY_NAMES = tuple(name for name in SCENARIO_NAMES if name != "echo")
 

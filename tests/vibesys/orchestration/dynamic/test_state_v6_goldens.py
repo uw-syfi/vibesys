@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-from tests.support.run_execution import run_execution_record
 
 from vibesys.orchestration.dynamic import DynamicState
 from vs_project.api import (
@@ -13,6 +12,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
     StateNamespace,
 )
+from vs_project.api.testing import run_execution_record
 
 
 def _namespace(tmp_path: Path) -> StateNamespace:
