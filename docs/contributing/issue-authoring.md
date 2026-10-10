@@ -44,7 +44,12 @@ that item instead of opening a duplicate.
 - **Approval.** A new roadmap is created only after a maintainer approves its
   plan. Agents may draft it, create it once approved, and maintain it. Agents
   may add sub-issues under an already approved roadmap.
-- **Progress** is the roadmap's native sub-issue count. New work becomes a new
+- **Just in time.** A roadmap needs intent, end state, and scope to be
+  approved, not a full task list. Create a sub-issue when its work is about to
+  start. Work may start without one; when a change grows to several PRs, create
+  the sub-issue then and link the PRs.
+- **Progress** is the roadmap's native sub-issue count of known outcomes, which
+  grows as work is discovered; the End state defines done. New work becomes a new
   sub-issue rather than growing an existing one. PRs close sub-issues
   (`Closes #N`), never the roadmap.
 - **Changes.** Update the roadmap body when the plan changes, with a dated

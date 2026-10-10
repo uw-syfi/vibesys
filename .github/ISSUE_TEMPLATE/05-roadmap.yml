@@ -50,4 +50,4 @@ body:
     id: phases
     attributes:
       label: Phases
-      description: The rough order of work and dependencies between phases. Phases are an ordering, not a contract, and may be reshaped as work proceeds; the sub-issues show the current plan. Do not prescribe how to get there unless there is really only one way (for example a mechanical refactor or a migration with a fixed target); then say so.
+      description: The rough order of work and dependencies between phases. Phases are an ordering, not a contract, and may be reshaped as work proceeds. Do not prescribe how to get there unless there is really only one way (for example a mechanical refactor or a migration with a fixed target); then say so.
