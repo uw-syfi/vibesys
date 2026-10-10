@@ -17,13 +17,26 @@ from vs_sandbox.fake_compute_backend import (
     FakeComputeBackend,
     FakeRunnerCreation,
 )
-from vs_sandbox.fake_docker_command import DockerCommandCall, FakeDockerCommandRunner
+from vs_sandbox.fake_docker_command import (
+    DockerCliCall,
+    DockerCliOutcome,
+    DockerCommandCall,
+    DockerCommandOutcome,
+    FakeDockerCommandRunner,
+    ScriptedDockerCli,
+    docker_missing,
+    docker_result,
+    docker_timed_out,
+)
 from vs_sandbox.fake_docker_engine import FakeContainer, FakeDockerEngine
 from vs_sandbox.fake_host_container import HostExecutedContainer, HostExecutedContainerBackend
 
 __all__ = [
     "DEFAULT_RESULT",
+    "DockerCliCall",
+    "DockerCliOutcome",
     "DockerCommandCall",
+    "DockerCommandOutcome",
     "FakeAcceleratorDiscovery",
     "FakeCommandRunner",
     "FakeComputeBackend",
@@ -35,4 +48,8 @@ __all__ = [
     "FakeRunnerCreation",
     "HostExecutedContainer",
     "HostExecutedContainerBackend",
+    "ScriptedDockerCli",
+    "docker_missing",
+    "docker_result",
+    "docker_timed_out",
 ]

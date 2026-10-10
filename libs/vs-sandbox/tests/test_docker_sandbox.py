@@ -1,12 +1,10 @@
-"""Tests for DockerSandbox — all mock subprocess.run, no Docker required."""
+"""Tests for DockerSandbox against scripted and in-memory Docker CLIs; no Docker required."""
 
 import json
 import os
-import subprocess
 from collections.abc import Generator
 from pathlib import Path
 from typing import Literal
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -16,7 +14,13 @@ from vs_sandbox.api import (
     SandboxLifecycleError,
     SandboxLifecycleHooks,
 )
-from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sandbox.api.testing import (
+    DockerCliOutcome,
+    FakeDockerEngine,
+    ScriptedDockerCli,
+    docker_result,
+    docker_timed_out,
+)
 from vs_sandbox.docker_sandbox import (
     AGENT_HOME,
     DockerSandbox,
@@ -43,8 +47,14 @@ class _FailingHooks(SandboxLifecycleHooks):
 
 
 @pytest.fixture
-def sandbox(tmp_path: Path) -> DockerSandbox:
+def docker() -> ScriptedDockerCli:
+    return ScriptedDockerCli()
+
+
+@pytest.fixture
+def sandbox(tmp_path: Path, docker: ScriptedDockerCli) -> DockerSandbox:
     return DockerSandbox(
+        docker=docker,
         host_workspace=str(tmp_path / "workspace"),
         image="nvcr.io/nvidia/pytorch:25.04-py3",
         gpus="all",
@@ -52,8 +62,9 @@ def sandbox(tmp_path: Path) -> DockerSandbox:
 
 
 @pytest.fixture
-def sandbox_with_mounts(tmp_path: Path) -> DockerSandbox:
+def sandbox_with_mounts(tmp_path: Path, docker: ScriptedDockerCli) -> DockerSandbox:
     return DockerSandbox(
+        docker=docker,
         host_workspace=str(tmp_path / "workspace"),
         image="nvcr.io/nvidia/pytorch:25.04-py3",
         gpus="all",
@@ -66,15 +77,21 @@ def sandbox_with_mounts(tmp_path: Path) -> DockerSandbox:
 
 def _start_test_container(
     sandbox: DockerSandbox,
-    mock_run: MagicMock,
+    docker: ScriptedDockerCli,
     container_id: str = "abc123",
 ) -> None:
-    """Start *sandbox* with a fake Docker id, then clear setup calls."""
-    mock_run.return_value = subprocess.CompletedProcess(
-        args=[], returncode=0, stdout=f"{container_id}\n", stderr=""
-    )
+    """Start *sandbox* with a fake Docker id, then forget the script and setup calls."""
+    docker.always(docker_result(stdout=f"{container_id}\n"))
     sandbox.start()
-    mock_run.reset_mock()
+    docker.clear_script()
+    docker.calls.clear()
+
+
+def _failed_cleanup(mode: Literal["raises", "nonzero"]) -> DockerCliOutcome:
+    """A stop or remove that either throws like a dead daemon or exits nonzero."""
+    if mode == "raises":
+        return OSError("Docker daemon disconnected")
+    return docker_result(returncode=1, stderr="daemon unavailable")
 
 
 def _assert_container_stopped(sandbox: DockerSandbox) -> None:
@@ -88,25 +105,22 @@ def _read_sandbox_metadata(workspace: Path) -> dict[str, object]:
 
 
 class TestStart:
-    @patch.dict("os.environ", {}, clear=False)
-    @patch("subprocess.run")
     def test_start_runs_docker_run_with_correct_args(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self,
+        sandbox: DockerSandbox,
+        docker: ScriptedDockerCli,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-
         # Remove CUDA_VISIBLE_DEVICES so fallback to "all" is tested
-        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
 
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123container\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123container\n"))
 
         sandbox.start()
 
-        calls = mock_run.call_args_list
         # First call: docker run
-        docker_run_call = calls[0]
-        cmd = docker_run_call[0][0]
+        docker_run_call = docker.calls[0]
+        cmd = docker_run_call.argv
         assert cmd[0] == "docker"
         assert cmd[1] == "run"
         assert "-d" in cmd
@@ -122,64 +136,46 @@ class TestStart:
         assert "--name" in cmd
         name_idx = cmd.index("--name")
         assert cmd[name_idx + 1].startswith("vibesys-")
-        assert docker_run_call.kwargs["timeout"] == 120
+        assert docker_run_call.timeout_seconds == 120
 
-    @patch("subprocess.run")
     def test_start_docker_run_timeout_raises_clear_error(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
-        mock_run.side_effect = subprocess.TimeoutExpired(
-            cmd=["docker", "run"],
-            timeout=120,
-        )
+        docker.always(docker_timed_out(["docker", "run"], 120))
 
         with pytest.raises(RuntimeError, match="Timed out starting Docker container"):
             sandbox.start()
 
-    @patch("subprocess.run")
     def test_start_failure_removes_created_container(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
 
-        mock_run.side_effect = [
-            subprocess.CompletedProcess(
-                args=[],
-                returncode=125,
-                stdout="abc123container\n",
-                stderr="gpu error",
-            ),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-        ]
+        docker.then(
+            docker_result(returncode=125, stdout="abc123container\n", stderr="gpu error"),
+            docker_result(),
+            docker_result(),
+        )
 
         with pytest.raises(RuntimeError, match="Failed to start Docker container"):
             sandbox.start()
 
-        stop_call, rm_call = mock_run.call_args_list[1:]
-        assert stop_call.args[0] == ["docker", "stop", "abc123container"]
-        assert stop_call.kwargs["timeout"] == 30
-        assert rm_call.args[0] == ["docker", "rm", "-f", "abc123container"]
-        assert rm_call.kwargs["timeout"] == 10
+        stop_call, rm_call = docker.calls[1:]
+        assert stop_call.argv == ("docker", "stop", "abc123container")
+        assert stop_call.timeout_seconds == 30
+        assert rm_call.argv == ("docker", "rm", "-f", "abc123container")
+        assert rm_call.timeout_seconds == 10
         _assert_container_stopped(sandbox)
         assert "abc123container" not in _live_containers
 
-    @patch("subprocess.run")
     def test_start_failure_retains_created_container_when_removal_fails(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
 
-        mock_run.side_effect = [
-            subprocess.CompletedProcess(
-                args=[],
-                returncode=125,
-                stdout="abc123container\n",
-                stderr="gpu error",
-            ),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-            subprocess.CompletedProcess(
-                args=[], returncode=1, stdout="", stderr="daemon unavailable"
-            ),
-        ]
+        docker.then(
+            docker_result(returncode=125, stdout="abc123container\n", stderr="gpu error"),
+            docker_result(),
+            docker_result(returncode=1, stderr="daemon unavailable"),
+        )
 
         try:
             with pytest.raises(RuntimeError, match="Failed to start Docker container"):
@@ -190,92 +186,78 @@ class TestStart:
         finally:
             _live_containers.pop("abc123container", None)
 
-    @patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": "3,5,7"})
-    @patch("subprocess.run")
     def test_start_uses_first_cuda_visible_device(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, sandbox: DockerSandbox, monkeypatch: pytest.MonkeyPatch, docker: ScriptedDockerCli
     ) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123container\n", stderr=""
-        )
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3,5,7")
+        docker.always(docker_result(stdout="abc123container\n"))
 
         sandbox.start()
 
-        cmd = mock_run.call_args_list[0][0][0]
+        cmd = docker.argvs[0]
         idx = cmd.index("--gpus")
         assert cmd[idx + 1] == "device=3"
         # DockerSandbox no longer hardcodes CUDA_VISIBLE_DEVICES; the cuda
         # backend supplies it via env=. The shape was tested above.
 
-    @patch("subprocess.run")
     def test_start_bind_mounts_workspace(
-        self, mock_run: MagicMock, sandbox: DockerSandbox, tmp_path: Path
+        self, sandbox: DockerSandbox, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
 
         sandbox.start()
 
-        cmd = mock_run.call_args_list[0][0][0]
+        cmd = docker.argvs[0]
         # Should have -v for workspace mount
         cmd_str = " ".join(cmd)
         assert f"{tmp_path / 'workspace'}:/workspace" in cmd_str
 
-    @patch("subprocess.run")
     def test_start_bind_mounts_extra(
-        self, mock_run: MagicMock, sandbox_with_mounts: DockerSandbox
+        self, sandbox_with_mounts: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
 
         sandbox_with_mounts.start()
 
-        cmd = mock_run.call_args_list[0][0][0]
+        cmd = docker.argvs[0]
         cmd_str = " ".join(cmd)
         # Extra bind mounts should be read-only
         assert "/workspace/reference/model:ro" in cmd_str
         assert "/workspace/accuracy_checker:ro" in cmd_str
 
-    @patch("subprocess.run")
     def test_no_install_step_runs_at_start(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
         """The agent image ships every tool baked in; start() installs nothing."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
 
         sandbox.start()
 
-        cmd_strs = [" ".join(c[0][0]) for c in mock_run.call_args_list]
+        cmd_strs = [" ".join(argv) for argv in docker.argvs]
         assert not any("pip install" in cmd for cmd in cmd_strs)
         assert not any("apt-get" in cmd for cmd in cmd_strs)
 
-    @patch("subprocess.run")
     def test_init_failure_stops_and_removes_created_container(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
 
         invocations: list[CommandRunner] = []
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
             agent_uid=1234,
             agent_gid=5678,
             lifecycle_hooks=[_RecordingHooks(invocations)],
         )
-        mock_run.side_effect = [
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+        docker.then(
+            docker_result(stdout="abc123\n"),
             # Current agent user ids, mismatched, so a remap is attempted.
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
-            subprocess.CompletedProcess(
-                args=[], returncode=17, stdout="partial output", stderr="usermod failed"
-            ),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-        ]
+            docker_result(stdout="1000\n1000\n"),
+            docker_result(returncode=17, stdout="partial output", stderr="usermod failed"),
+            docker_result(),
+            docker_result(),
+        )
 
         try:
             with pytest.raises(RuntimeError, match="agent user id remap failed"):
@@ -284,56 +266,59 @@ class TestStart:
             _assert_container_stopped(sandbox)
             assert "abc123" not in _live_containers
             assert invocations == []
-            assert mock_run.call_args_list[-2][0][0] == ["docker", "stop", "abc123"]
-            assert mock_run.call_args_list[-1][0][0] == ["docker", "rm", "-f", "abc123"]
+            assert docker.argvs[-2] == ("docker", "stop", "abc123")
+            assert docker.argvs[-1] == ("docker", "rm", "-f", "abc123")
         finally:
             _live_containers.pop("abc123", None)
 
 
 class TestAgentUserRemap:
-    @patch("subprocess.run")
-    def test_remaps_agent_user_when_ids_differ(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_remaps_agent_user_when_ids_differ(
+        self, tmp_path: Path, docker: ScriptedDockerCli
+    ) -> None:
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
             agent_uid=4242,
             agent_gid=4343,
         )
-        mock_run.side_effect = [
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+        docker.then(
+            docker_result(stdout="abc123\n"),
             # Image default agent user is 1000:1000.
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-        ]
+            docker_result(stdout="1000\n1000\n"),
+            docker_result(),
+        )
 
         sandbox.start()
 
-        remap_call = mock_run.call_args_list[2]
-        cmd = remap_call[0][0]
-        assert cmd[:4] == ["docker", "exec", "-u", "root"]
+        cmd = docker.argvs[2]
+        assert cmd[:4] == ("docker", "exec", "-u", "root")
         cmd_str = " ".join(cmd)
         assert "usermod -o -u 4242 agent" in cmd_str
         assert "groupmod -o -g 4343 agent" in cmd_str
         assert "chown -R agent:agent /home/agent" in cmd_str
 
-    @patch("subprocess.run")
-    def test_skips_remap_when_ids_already_match(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_skips_remap_when_ids_already_match(
+        self, tmp_path: Path, docker: ScriptedDockerCli
+    ) -> None:
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
             agent_uid=1000,
             agent_gid=1000,
         )
-        mock_run.side_effect = [
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
-        ]
+        docker.then(
+            docker_result(stdout="abc123\n"),
+            docker_result(stdout="1000\n1000\n"),
+        )
 
         sandbox.start()
 
         # Only the id query follows `docker run`; no usermod/groupmod exec.
-        assert mock_run.call_count == 2
-        assert not any("usermod" in " ".join(c[0][0]) for c in mock_run.call_args_list)
+        assert len(docker.calls) == 2
+        assert not any("usermod" in " ".join(argv) for argv in docker.argvs)
 
     def test_remap_runs_as_root_but_agent_commands_do_not(self, tmp_path: Path) -> None:
         (tmp_path / "workspace").mkdir()
@@ -358,41 +343,39 @@ class TestAgentUserRemap:
 
 
 class TestAuthFileCopy:
-    @patch("subprocess.run")
     def test_copies_staged_files_into_agent_home_and_chowns_them(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
             agent_uid=1000,
             agent_gid=1000,
             auth_files=[("/opt/vibesys-auth/0", "/home/agent/.claude.json")],
         )
-        mock_run.side_effect = [
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-        ]
-
-        sandbox.start()
-
-        copy_call = mock_run.call_args_list[2]
-        cmd = copy_call[0][0]
-        assert cmd[:4] == ["docker", "exec", "-u", "root"]
-        cmd_str = " ".join(cmd)
-        assert "cp -a /opt/vibesys-auth/0 /home/agent/.claude.json" in cmd_str
-        assert "find /home/agent/.claude.json -xdev -exec chown -h agent:agent" in cmd_str
-
-    @patch("subprocess.run")
-    def test_no_auth_files_by_default(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
+        docker.then(
+            docker_result(stdout="abc123\n"),
+            docker_result(stdout="1000\n1000\n"),
+            docker_result(),
         )
 
         sandbox.start()
 
-        assert not any("cp -a" in " ".join(c[0][0]) for c in mock_run.call_args_list)
+        cmd = docker.argvs[2]
+        assert cmd[:4] == ("docker", "exec", "-u", "root")
+        cmd_str = " ".join(cmd)
+        assert "cp -a /opt/vibesys-auth/0 /home/agent/.claude.json" in cmd_str
+        assert "find /home/agent/.claude.json -xdev -exec chown -h agent:agent" in cmd_str
+
+    def test_no_auth_files_by_default(
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
+    ) -> None:
+        docker.always(docker_result(stdout="abc123\n"))
+
+        sandbox.start()
+
+        assert not any("cp -a" in " ".join(argv) for argv in docker.argvs)
 
 
 class TestExecute:
@@ -444,17 +427,12 @@ class TestExecute:
 
 
 class TestLifecycleHooks:
-    @patch("subprocess.run")
-    def test_hooks_run_before_ready(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="abc123container\n",
-            stderr="",
-        )
+    def test_hooks_run_before_ready(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
+        docker.always(docker_result(stdout="abc123container\n"))
         invocations: list[CommandRunner] = []
 
         s = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
             lifecycle_hooks=[_RecordingHooks(invocations)],
@@ -462,18 +440,13 @@ class TestLifecycleHooks:
         s.start()
         assert invocations == [s]
 
-    @patch("subprocess.run")
-    def test_hooks_re_run_on_restart(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_hooks_re_run_on_restart(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         """A second start, such as device reselection, reruns the hooks."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="abc123container\n",
-            stderr="",
-        )
+        docker.always(docker_result(stdout="abc123container\n"))
         invocations: list[CommandRunner] = []
 
         s = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
             lifecycle_hooks=[_RecordingHooks(invocations)],
@@ -482,23 +455,15 @@ class TestLifecycleHooks:
         s.start()
         assert invocations == [s, s]
 
-    @patch("subprocess.run")
     def test_setup_failure_preserves_error_when_stop_fails(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
 
-        def run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-            if cmd[:2] == ["docker", "run"]:
-                return subprocess.CompletedProcess(
-                    args=cmd, returncode=0, stdout="abc123\n", stderr=""
-                )
-            if cmd[:2] == ["docker", "stop"]:
-                _failure_message = "Docker daemon disconnected"
-                raise OSError(_failure_message)
-            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = run
+        docker.on(("docker", "run"), docker_result(stdout="abc123\n"))
+        docker.on(("docker", "stop"), OSError("Docker daemon disconnected"))
+        docker.always(docker_result())
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
             lifecycle_hooks=[_FailingHooks()],
@@ -511,37 +476,22 @@ class TestLifecycleHooks:
             assert isinstance(error.value.__cause__, ValueError)
             _assert_container_stopped(sandbox)
             assert "abc123" not in _live_containers
-            commands = [call.args[0] for call in mock_run.call_args_list]
-            assert ["docker", "stop", "abc123"] in commands
-            assert ["docker", "rm", "-f", "abc123"] in commands
+            assert ("docker", "stop", "abc123") in docker.argvs
+            assert ("docker", "rm", "-f", "abc123") in docker.argvs
         finally:
             _live_containers.pop("abc123", None)
 
     @pytest.mark.parametrize("cleanup_mode", ["raises", "nonzero"])
-    @patch("subprocess.run")
     def test_setup_failure_retains_container_for_retry_when_removal_fails(
-        self,
-        mock_run: MagicMock,
-        cleanup_mode: Literal["raises", "nonzero"],
-        tmp_path: Path,
+        self, cleanup_mode: Literal["raises", "nonzero"], tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
 
-        def run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-            if cmd[:2] == ["docker", "run"]:
-                return subprocess.CompletedProcess(
-                    args=cmd, returncode=0, stdout="abc123\n", stderr=""
-                )
-            if cmd[:2] in (["docker", "stop"], ["docker", "rm"]):
-                if cleanup_mode == "raises":
-                    _failure_message = "Docker daemon disconnected"
-                    raise OSError(_failure_message)
-                return subprocess.CompletedProcess(
-                    args=cmd, returncode=1, stdout="", stderr="daemon unavailable"
-                )
-            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = run
+        docker.on(("docker", "run"), docker_result(stdout="abc123\n"))
+        for cleanup in (("docker", "stop"), ("docker", "rm")):
+            docker.on(cleanup, _failed_cleanup(cleanup_mode))
+        docker.always(docker_result())
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
             lifecycle_hooks=[_FailingHooks()],
@@ -558,68 +508,50 @@ class TestLifecycleHooks:
 
 
 class TestStop:
-    @patch("subprocess.run")
-    def test_stop_removes_container(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123container\n", stderr=""
-        )
+    def test_stop_removes_container(
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
+    ) -> None:
+        docker.always(docker_result(stdout="abc123container\n"))
         sandbox.start()
-        mock_run.reset_mock()
+        docker.calls.clear()
 
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr=""
-        )
+        docker.always(docker_result())
         sandbox.stop()
 
         # Should call docker stop then docker rm
-        assert mock_run.call_count == 2
-        stop_cmd = mock_run.call_args_list[0][0][0]
-        rm_cmd = mock_run.call_args_list[1][0][0]
+        assert len(docker.calls) == 2
+        stop_cmd = docker.argvs[0]
+        rm_cmd = docker.argvs[1]
         assert stop_cmd[0] == "docker"
         assert "stop" in stop_cmd
         assert rm_cmd[0] == "docker"
         assert "rm" in rm_cmd
 
-    @patch("subprocess.run")
-    def test_stop_idempotent(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+    def test_stop_idempotent(self, sandbox: DockerSandbox, docker: ScriptedDockerCli) -> None:
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
-        mock_run.reset_mock()
+        docker.calls.clear()
 
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr=""
-        )
+        docker.always(docker_result())
         sandbox.stop()
-        mock_run.reset_mock()
+        docker.calls.clear()
 
         # Second stop should be a no-op
         sandbox.stop()
-        assert mock_run.call_count == 0
+        assert len(docker.calls) == 0
 
     @pytest.mark.parametrize("cleanup_mode", ["raises", "nonzero"])
-    @patch("subprocess.run")
     def test_failed_removal_retains_ownership_and_can_be_retried(
         self,
-        mock_run: MagicMock,
         cleanup_mode: Literal["raises", "nonzero"],
         sandbox: DockerSandbox,
+        docker: ScriptedDockerCli,
     ) -> None:
 
-        _start_test_container(sandbox, mock_run)
+        _start_test_container(sandbox, docker)
 
-        def fail_removal(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-            if cmd[1] == "rm":
-                if cleanup_mode == "raises":
-                    _failure_message = "Docker daemon disconnected"
-                    raise OSError(_failure_message)
-                return subprocess.CompletedProcess(
-                    args=cmd, returncode=1, stdout="", stderr="daemon unavailable"
-                )
-            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = fail_removal
+        docker.on(("docker", "rm"), _failed_cleanup(cleanup_mode))
+        docker.always(docker_result())
         try:
             expected_error = OSError if cleanup_mode == "raises" else RuntimeError
             with pytest.raises(expected_error):
@@ -628,10 +560,8 @@ class TestStop:
             assert sandbox.container_id == "abc123"
             assert "abc123" in _live_containers
 
-            mock_run.side_effect = None
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="", stderr=""
-            )
+            docker.clear_script()
+            docker.always(docker_result())
             sandbox.stop()
 
             _assert_container_stopped(sandbox)
@@ -639,51 +569,46 @@ class TestStop:
         finally:
             _live_containers.pop("abc123", None)
 
-    @patch("subprocess.run")
     def test_stop_failure_does_not_prevent_forced_removal(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
 
-        _start_test_container(sandbox, mock_run)
-        mock_run.side_effect = [
+        _start_test_container(sandbox, docker)
+        docker.then(
             OSError("Docker daemon disconnected"),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-        ]
+            docker_result(),
+        )
 
         sandbox.stop()
 
-        assert mock_run.call_args_list[1].args[0] == ["docker", "rm", "-f", "abc123"]
+        assert docker.argvs[1] == ("docker", "rm", "-f", "abc123")
         _assert_container_stopped(sandbox)
         assert "abc123" not in _live_containers
 
-    @patch("subprocess.run")
     def test_already_absent_container_clears_ownership(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
 
-        _start_test_container(sandbox, mock_run)
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="", stderr="Error: No such container: abc123"
-        )
+        _start_test_container(sandbox, docker)
+        docker.always(docker_result(returncode=1, stderr="Error: No such container: abc123"))
 
         sandbox.stop()
 
         _assert_container_stopped(sandbox)
         assert "abc123" not in _live_containers
 
-    @patch("subprocess.run")
     def test_removal_already_in_progress_clears_ownership(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
 
-        _start_test_container(sandbox, mock_run)
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=1,
-            stdout="",
-            stderr=(
-                "Error response from daemon: removal of container abc123 is already in progress"
-            ),
+        _start_test_container(sandbox, docker)
+        docker.always(
+            docker_result(
+                returncode=1,
+                stderr=(
+                    "Error response from daemon: removal of container abc123 is already in progress"
+                ),
+            )
         )
 
         sandbox.stop()
@@ -691,19 +616,18 @@ class TestStop:
         _assert_container_stopped(sandbox)
         assert "abc123" not in _live_containers
 
-    @patch("subprocess.run")
     def test_keyboard_interrupt_is_not_swallowed(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
 
-        _start_test_container(sandbox, mock_run)
-        mock_run.side_effect = KeyboardInterrupt()
+        _start_test_container(sandbox, docker)
+        docker.always(KeyboardInterrupt())
 
         try:
             with pytest.raises(KeyboardInterrupt):
                 sandbox.stop()
 
-            assert mock_run.call_count == 1
+            assert len(docker.calls) == 1
             assert sandbox.container_id == "abc123"
             assert "abc123" in _live_containers
         finally:
@@ -711,11 +635,8 @@ class TestStop:
 
 
 class TestIdProperty:
-    @patch("subprocess.run")
-    def test_id_property(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123def456ghi789\n", stderr=""
-        )
+    def test_id_property(self, sandbox: DockerSandbox, docker: ScriptedDockerCli) -> None:
+        docker.always(docker_result(stdout="abc123def456ghi789\n"))
         sandbox.start()
 
         assert sandbox.id.startswith("vibesys-")
@@ -723,13 +644,10 @@ class TestIdProperty:
 
 
 class TestContainerIdProperty:
-    @patch("subprocess.run")
     def test_container_id_returns_running_container(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123def456ghi789\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123def456ghi789\n"))
         sandbox.start()
 
         assert sandbox.container_id == "abc123def456ghi789"
@@ -738,13 +656,10 @@ class TestContainerIdProperty:
         with pytest.raises(RuntimeError, match="no running container"):
             _ = sandbox.container_id
 
-    @patch("subprocess.run")
     def test_container_id_after_stop_raises(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123def456ghi789\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123def456ghi789\n"))
         sandbox.start()
         sandbox.stop()
 
@@ -753,11 +668,8 @@ class TestContainerIdProperty:
 
 
 class TestContextManager:
-    @patch("subprocess.run")
-    def test_context_manager(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+    def test_context_manager(self, sandbox: DockerSandbox, docker: ScriptedDockerCli) -> None:
+        docker.always(docker_result(stdout="abc123\n"))
 
         with sandbox:
             assert sandbox.container_id
@@ -775,12 +687,11 @@ class TestCleanupOnExit:
         yield
         _live_containers.clear()
 
-    @patch("subprocess.run")
-    def test_live_containers_tracked(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
+    def test_live_containers_tracked(
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
+    ) -> None:
 
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
 
         assert sandbox.container_id in _live_containers
@@ -788,102 +699,84 @@ class TestCleanupOnExit:
         sandbox.stop()
         assert "abc123" not in _live_containers
 
-    @patch("subprocess.run")
     def test_cleanup_containers_stops_all(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
 
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="container_xyz\n", stderr=""
-        )
+        docker.always(docker_result(stdout="container_xyz\n"))
         sandbox.start()
         assert "container_xyz" in _live_containers
 
-        mock_run.reset_mock()
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr=""
-        )
+        docker.calls.clear()
+        docker.always(docker_result())
 
-        _cleanup_containers()
+        _cleanup_containers(docker)
 
         assert len(_live_containers) == 0
         # Should have called docker stop + docker rm
-        stop_calls = [c for c in mock_run.call_args_list if "stop" in c[0][0]]
-        rm_calls = [c for c in mock_run.call_args_list if "rm" in c[0][0]]
+        stop_calls = [argv for argv in docker.argvs if "stop" in argv]
+        rm_calls = [argv for argv in docker.argvs if "rm" in argv]
         assert len(stop_calls) == 1
         assert len(rm_calls) == 1
 
     @pytest.mark.parametrize("cleanup_mode", ["raises", "nonzero"])
-    @patch("subprocess.run")
     def test_cleanup_retains_failed_removal_for_retry(
-        self, mock_run: MagicMock, cleanup_mode: Literal["raises", "nonzero"]
+        self, cleanup_mode: Literal["raises", "nonzero"], docker: ScriptedDockerCli
     ) -> None:
 
         _live_containers["abc123"] = "vibesys-test"
 
-        def fail_removal(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-            if cmd[1] == "rm":
-                if cleanup_mode == "raises":
-                    _failure_message = "Docker daemon disconnected"
-                    raise OSError(_failure_message)
-                return subprocess.CompletedProcess(
-                    args=cmd, returncode=1, stdout="", stderr="daemon unavailable"
-                )
-            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        docker.on(("docker", "rm"), _failed_cleanup(cleanup_mode))
+        docker.always(docker_result())
 
-        mock_run.side_effect = fail_removal
-
-        _cleanup_containers()
+        _cleanup_containers(docker)
 
         assert "abc123" in _live_containers
-        rm_call = mock_run.call_args_list[1]
-        assert rm_call.args[0] == ["docker", "rm", "-f", "abc123"]
-        assert rm_call.kwargs["timeout"] == 10
+        rm_call = docker.calls[1]
+        assert rm_call.argv == ("docker", "rm", "-f", "abc123")
+        assert rm_call.timeout_seconds == 10
 
-    @patch("subprocess.run")
-    def test_cleanup_forces_removal_after_stop_exception(self, mock_run: MagicMock) -> None:
+    def test_cleanup_forces_removal_after_stop_exception(self, docker: ScriptedDockerCli) -> None:
 
         _live_containers["abc123"] = "vibesys-test"
-        mock_run.side_effect = [
+        docker.then(
             OSError("Docker daemon disconnected"),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-        ]
+            docker_result(),
+        )
 
-        _cleanup_containers()
+        _cleanup_containers(docker)
 
-        assert mock_run.call_args_list[1].args[0] == ["docker", "rm", "-f", "abc123"]
+        assert docker.argvs[1] == ("docker", "rm", "-f", "abc123")
         assert "abc123" not in _live_containers
 
 
 class TestEnvVars:
-    @patch("subprocess.run")
-    def test_env_vars_passed_to_docker_run(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_env_vars_passed_to_docker_run(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="pytorch:latest",
             env={"MY_KEY": "my_value", "OTHER": "thing"},
         )
 
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
 
         sandbox.start()
 
-        cmd = mock_run.call_args_list[0][0][0]
+        cmd = docker.argvs[0]
         cmd_str = " ".join(cmd)
         assert "-e" in cmd
         assert "MY_KEY=my_value" in cmd_str
         assert "OTHER=thing" in cmd_str
 
-    @patch("subprocess.run")
     def test_credential_values_reach_the_container_but_not_the_log(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         log_path = tmp_path / "docker.log"
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(workspace),
             image="pytorch:latest",
             env={
@@ -894,13 +787,11 @@ class TestEnvVars:
             log_path=log_path,
         )
 
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
 
         sandbox.start()
 
-        cmd_str = " ".join(mock_run.call_args_list[0][0][0])
+        cmd_str = " ".join(docker.argvs[0])
         assert "ANTHROPIC_AUTH_TOKEN=sk-secret-token" in cmd_str
 
         log_text = log_path.read_text()
@@ -910,21 +801,19 @@ class TestEnvVars:
         assert "ANTHROPIC_BASE_URL=https://proxy.invalid/v1" in log_text
         assert "PYTHONPATH=/opt/vibesys" in log_text
 
-    @patch("subprocess.run")
     def test_credential_values_are_omitted_from_workspace_metadata(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(workspace),
             image="pytorch:latest",
             env={"ANTHROPIC_API_KEY": "sk-secret-key", "PYTHONPATH": "/opt/vibesys"},
         )
 
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
 
         sandbox.start()
 
@@ -932,19 +821,17 @@ class TestEnvVars:
         assert "sk-secret-key" not in metadata_text
         assert json.loads(metadata_text)["env"] == {"PYTHONPATH": "/opt/vibesys"}
 
-    @patch("subprocess.run")
     def test_start_failure_error_does_not_expose_credentials(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="pytorch:latest",
             env={"ANTHROPIC_AUTH_TOKEN": "sk-secret-token"},
         )
 
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=125, stdout="", stderr="boom"
-        )
+        docker.always(docker_result(returncode=125, stderr="boom"))
 
         with pytest.raises(RuntimeError) as excinfo:
             sandbox.start()
@@ -954,25 +841,23 @@ class TestEnvVars:
 
 
 class TestDevicePassthrough:
-    @patch("subprocess.run")
     def test_devices_emit_device_flags_and_no_gpus(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(workspace),
             image="public.ecr.aws/neuron/pytorch-inference-neuronx:latest",
             gpus=None,  # Neuron uses --device, not --gpus
             devices=["/dev/neuron0", "/dev/neuron1"],
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
 
         sandbox.start()
 
-        cmd = mock_run.call_args_list[0][0][0]
+        cmd = docker.argvs[0]
         assert "--gpus" not in cmd
         # Each device forwarded with its own --device flag.
         assert cmd.count("--device") == 2
@@ -981,26 +866,26 @@ class TestDevicePassthrough:
             assert cmd[i - 1] == "--device"
         assert _read_sandbox_metadata(workspace)["devices"] == ["/dev/neuron0", "/dev/neuron1"]
 
-    @patch("subprocess.run")
-    def test_group_add_emits_group_add_flags(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_group_add_emits_group_add_flags(
+        self, tmp_path: Path, docker: ScriptedDockerCli
+    ) -> None:
         """AMD /dev/kfd and /dev/dri/* are group-owned; without --group-add the
         container user cannot open them and every HIP call fails at runtime."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(workspace),
             image="rocm/pytorch:latest",
             gpus=None,
             devices=["/dev/kfd", "/dev/dri/renderD128"],
             group_add=["video", "render"],
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
 
         sandbox.start()
 
-        cmd = mock_run.call_args_list[0][0][0]
+        cmd = docker.argvs[0]
         assert cmd.count("--group-add") == 2
         for group in ("video", "render"):
             i = cmd.index(group)
@@ -1010,124 +895,109 @@ class TestDevicePassthrough:
         # fails — the exact failure --group-add exists to prevent.
         assert _read_sandbox_metadata(workspace)["group_add"] == ["video", "render"]
 
-    @patch("subprocess.run")
-    def test_no_group_add_by_default(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_no_group_add_by_default(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="img",
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
-        cmd = mock_run.call_args_list[0][0][0]
+        cmd = docker.argvs[0]
         assert "--group-add" not in cmd
 
-    @patch("subprocess.run")
-    def test_no_devices_by_default(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_no_devices_by_default(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="img",
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
-        cmd = mock_run.call_args_list[0][0][0]
+        cmd = docker.argvs[0]
         assert "--device" not in cmd
 
 
 class TestEntrypointOverride:
-    @patch("subprocess.run")
     def test_entrypoint_override_emitted_before_image(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
         image = "public.ecr.aws/neuron/pytorch-inference-neuronx:latest"
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(workspace),
             image=image,
             gpus=None,
             entrypoint="",  # clear the DLC's baked-in model-server entrypoint
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
-        cmd = mock_run.call_args_list[0][0][0]
+        cmd = docker.argvs[0]
         assert "--entrypoint" in cmd
         ep_idx = cmd.index("--entrypoint")
         assert cmd[ep_idx + 1] == ""
         # Override must precede the image positional, which precedes the command.
         img_idx = cmd.index(image)
         assert ep_idx < img_idx
-        assert cmd[-2:] == ["sleep", "infinity"]
+        assert cmd[-2:] == ("sleep", "infinity")
         assert _read_sandbox_metadata(workspace)["entrypoint"] == ""
 
-    @patch("subprocess.run")
-    def test_no_entrypoint_flag_by_default(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_no_entrypoint_flag_by_default(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="img",
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
-        cmd = mock_run.call_args_list[0][0][0]
+        cmd = docker.argvs[0]
         assert "--entrypoint" not in cmd
 
 
 class TestShmSize:
-    @patch("subprocess.run")
-    def test_shm_size_emitted(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_shm_size_emitted(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(workspace),
             image="img",
             shm_size="16g",
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
-        cmd = mock_run.call_args_list[0][0][0]
+        cmd = docker.argvs[0]
         assert "--shm-size" in cmd
         assert cmd[cmd.index("--shm-size") + 1] == "16g"
         assert _read_sandbox_metadata(workspace)["shm_size"] == "16g"
 
-    @patch("subprocess.run")
-    def test_no_shm_size_by_default(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc\n", stderr=""
+    def test_no_shm_size_by_default(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
+        sandbox = DockerSandbox(
+            docker=docker, host_workspace=str(tmp_path / "workspace"), image="img"
         )
+        docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
-        assert "--shm-size" not in mock_run.call_args_list[0][0][0]
+        assert "--shm-size" not in docker.argvs[0]
 
 
 class TestAutoRemove:
-    @patch("subprocess.run")
-    def test_auto_remove_emits_rm_flag(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_auto_remove_emits_rm_flag(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         sandbox = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"), image="img", auto_remove=True
+            docker=docker, host_workspace=str(tmp_path / "workspace"), image="img", auto_remove=True
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
-        assert "--rm" in mock_run.call_args_list[0][0][0]
+        assert "--rm" in docker.argvs[0]
 
-    @patch("subprocess.run")
-    def test_no_rm_by_default(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc\n", stderr=""
+    def test_no_rm_by_default(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
+        sandbox = DockerSandbox(
+            docker=docker, host_workspace=str(tmp_path / "workspace"), image="img"
         )
+        docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
-        assert "--rm" not in mock_run.call_args_list[0][0][0]
+        assert "--rm" not in docker.argvs[0]
 
 
 class TestWritableCredentialMounts:
@@ -1213,47 +1083,43 @@ class TestAuthCopyOwnership:
 class TestResources:
     """Constructing from a ``HostResource`` list, as ``WorkspaceSandbox`` does."""
 
-    @patch("subprocess.run")
-    def test_read_only_resource_mounts_ro(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_read_only_resource_mounts_ro(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="img",
             resources=(
                 HostResource(tmp_path / "toolchain", HostResourceAccess.READ_ONLY, "toolchain"),
             ),
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
-        cmd_str = " ".join(mock_run.call_args_list[0][0][0])
+        cmd_str = " ".join(docker.argvs[0])
         assert f"{tmp_path / 'toolchain'}:{tmp_path / 'toolchain'}:ro" in cmd_str
 
-    @patch("subprocess.run")
     def test_read_write_resource_mounts_without_ro_suffix(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="img",
             resources=(HostResource(tmp_path / "state", HostResourceAccess.READ_WRITE, "state"),),
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
-        cmd = mock_run.call_args_list[0][0][0]
+        cmd = docker.argvs[0]
         cmd_str = " ".join(cmd)
         mount = f"{tmp_path / 'state'}:{tmp_path / 'state'}"
         assert mount in cmd_str
         assert f"{mount}:ro" not in cmd_str
 
-    @patch("subprocess.run")
     def test_agent_path_becomes_the_mount_destination(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
         resource_path = tmp_path / "toolchain"
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="img",
             resources=(
@@ -1265,33 +1131,31 @@ class TestResources:
                 ),
             ),
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
-        cmd_str = " ".join(mock_run.call_args_list[0][0][0])
+        cmd_str = " ".join(docker.argvs[0])
         assert f"{resource_path}:/opt/vibesys-toolchain:ro" in cmd_str
 
-    @patch("subprocess.run")
-    def test_unlisted_path_is_never_mounted(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_unlisted_path_is_never_mounted(
+        self, tmp_path: Path, docker: ScriptedDockerCli
+    ) -> None:
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="img",
             resources=(HostResource(tmp_path / "listed", HostResourceAccess.READ_ONLY, "listed"),),
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
-        cmd_str = " ".join(mock_run.call_args_list[0][0][0])
+        cmd_str = " ".join(docker.argvs[0])
         assert str(tmp_path / "unlisted") not in cmd_str
 
-    @patch("subprocess.run")
     def test_resources_combine_with_explicit_bind_mounts(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
         """Existing callers that pass bind_mounts directly keep working unchanged."""
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="img",
             bind_mounts=[(str(tmp_path / "explicit"), "/explicit", True)],
@@ -1299,22 +1163,19 @@ class TestResources:
                 HostResource(tmp_path / "declared", HostResourceAccess.READ_ONLY, "declared"),
             ),
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc\n"))
         sandbox.start()
-        cmd_str = " ".join(mock_run.call_args_list[0][0][0])
+        cmd_str = " ".join(docker.argvs[0])
         assert f"{tmp_path / 'explicit'}:/explicit:ro" in cmd_str
         assert f"{tmp_path / 'declared'}:{tmp_path / 'declared'}:ro" in cmd_str
 
-    @patch("subprocess.run")
-    def test_no_resources_by_default(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
+    def test_no_resources_by_default(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
+        sandbox = DockerSandbox(
+            docker=docker, host_workspace=str(tmp_path / "workspace"), image="img"
         )
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
-        command = mock_run.call_args_list[0].args[0]
+        command = docker.argvs[0]
         mount_arguments = [
             command[index + 1] for index, argument in enumerate(command[:-1]) if argument == "-v"
         ]
@@ -1399,68 +1260,55 @@ class TestAgentPath:
 class TestWrap:
     """``wrap`` builds the ``docker exec`` prefix a driver's command executor needs."""
 
-    @patch("subprocess.run")
-    def test_wrap_before_start_raises(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        del mock_run
+    def test_wrap_before_start_raises(self, tmp_path: Path) -> None:
         sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
         with pytest.raises(RuntimeError, match="not started"):
             sandbox.wrap(["echo", "hi"], str(tmp_path / "workspace"))
 
-    @patch("subprocess.run")
-    def test_wrap_shape(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_wrap_shape(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         workspace = tmp_path / "workspace"
-        sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        sandbox = DockerSandbox(docker=docker, host_workspace=str(workspace), image="img")
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
 
         argv = sandbox.wrap(["echo", "hi"], workspace)
 
         assert argv == ["docker", "exec", "-i", "-w", "/workspace", "abc123", "echo", "hi"]
 
-    @patch("subprocess.run")
     def test_wrap_defaults_cwd_to_the_workspace_root(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
         """Omitting cwd matches the base ``WorkspaceSandbox.wrap(argv)`` shape."""
         workspace = tmp_path / "workspace"
-        sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        sandbox = DockerSandbox(docker=docker, host_workspace=str(workspace), image="img")
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
 
         argv = sandbox.wrap(["echo", "hi"])
 
         assert argv == ["docker", "exec", "-i", "-w", "/workspace", "abc123", "echo", "hi"]
 
-    @patch("subprocess.run")
-    def test_wrap_uses_agent_path_of_cwd(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_wrap_uses_agent_path_of_cwd(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         workspace = tmp_path / "workspace"
-        sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        sandbox = DockerSandbox(docker=docker, host_workspace=str(workspace), image="img")
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
 
         argv = sandbox.wrap(["ls"], workspace / "sub")
 
         assert argv[4] == "/workspace/sub"
 
-    @patch("subprocess.run")
     def test_wrap_forwards_extra_env_as_dash_e_flags(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
         workspace = tmp_path / "workspace"
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(workspace),
             image="img",
             env={"FOO": "bar"},
         )
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
 
         argv = sandbox.wrap(["echo", "hi"], workspace)
@@ -1469,14 +1317,13 @@ class TestWrap:
         assert "FOO=bar" in argv
         assert argv.index("-e") + 1 == argv.index("FOO=bar")
 
-    @patch("subprocess.run")
-    def test_wrap_runs_as_the_image_default_user(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_wrap_runs_as_the_image_default_user(
+        self, tmp_path: Path, docker: ScriptedDockerCli
+    ) -> None:
         """No ``-u`` flag: the container already runs as the remapped agent user."""
         workspace = tmp_path / "workspace"
-        sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
+        sandbox = DockerSandbox(docker=docker, host_workspace=str(workspace), image="img")
+        docker.always(docker_result(stdout="abc123\n"))
         sandbox.start()
 
         argv = sandbox.wrap(["echo", "hi"], workspace)
@@ -1487,48 +1334,50 @@ class TestWrap:
 class TestEnv:
     """``env`` reports HOME, the image's own PATH, and any extra env."""
 
-    @patch("subprocess.run")
-    def test_env_before_start_raises(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        del mock_run
+    def test_env_before_start_raises(self, tmp_path: Path) -> None:
         sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
         with pytest.raises(RuntimeError, match="not started"):
             _ = sandbox.env
 
-    @patch("subprocess.run")
     def test_env_reads_path_from_the_running_container(
-        self, mock_run: MagicMock, tmp_path: Path
+        self, tmp_path: Path, docker: ScriptedDockerCli
     ) -> None:
         sandbox = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"), image="img", agent_uid=1000, agent_gid=1000
+            docker=docker,
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            agent_uid=1000,
+            agent_gid=1000,
         )
-        mock_run.side_effect = [
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+        docker.then(
+            docker_result(stdout="abc123\n"),
             # Id query: already matches (agent_uid, agent_gid), so the remap
             # step is skipped and the very next call is the PATH read below.
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
-            subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="/usr/local/bin:/usr/bin:/bin\n", stderr=""
-            ),
-        ]
+            docker_result(stdout="1000\n1000\n"),
+            docker_result(stdout="/usr/local/bin:/usr/bin:/bin\n"),
+        )
         sandbox.start()
 
         env = sandbox.env
 
         assert env["HOME"] == AGENT_HOME
         assert env["PATH"] == "/usr/local/bin:/usr/bin:/bin"
-        exec_cmd = mock_run.call_args_list[2][0][0]
-        assert exec_cmd == ["docker", "exec", "abc123", "sh", "-c", "echo $PATH"]
+        exec_cmd = docker.argvs[2]
+        assert exec_cmd == ("docker", "exec", "abc123", "sh", "-c", "echo $PATH")
 
-    @patch("subprocess.run")
-    def test_env_caches_path_across_calls(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_env_caches_path_across_calls(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
         sandbox = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"), image="img", agent_uid=1000, agent_gid=1000
+            docker=docker,
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            agent_uid=1000,
+            agent_gid=1000,
         )
-        mock_run.side_effect = [
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="/usr/bin:/bin\n", stderr=""),
-        ]
+        docker.then(
+            docker_result(stdout="abc123\n"),
+            docker_result(stdout="1000\n1000\n"),
+            docker_result(stdout="/usr/bin:/bin\n"),
+        )
         sandbox.start()
 
         first = sandbox.env
@@ -1536,23 +1385,25 @@ class TestEnv:
 
         assert first["PATH"] == second["PATH"] == "/usr/bin:/bin"
         # Only one PATH-reading exec call across both reads.
-        path_reads = [c for c in mock_run.call_args_list if "echo $PATH" in " ".join(c[0][0])]
+        path_reads = [argv for argv in docker.argvs if "echo $PATH" in " ".join(argv)]
         assert len(path_reads) == 1
 
-    @patch("subprocess.run")
-    def test_extra_env_overrides_home_and_path(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_extra_env_overrides_home_and_path(
+        self, tmp_path: Path, docker: ScriptedDockerCli
+    ) -> None:
         sandbox = DockerSandbox(
+            docker=docker,
             host_workspace=str(tmp_path / "workspace"),
             image="img",
             env={"HOME": "/custom/home", "EXTRA": "1"},
             agent_uid=1000,
             agent_gid=1000,
         )
-        mock_run.side_effect = [
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="/usr/bin\n", stderr=""),
-        ]
+        docker.then(
+            docker_result(stdout="abc123\n"),
+            docker_result(stdout="1000\n1000\n"),
+            docker_result(stdout="/usr/bin\n"),
+        )
         sandbox.start()
 
         env = sandbox.env
@@ -1561,18 +1412,21 @@ class TestEnv:
         assert env["EXTRA"] == "1"
         assert env["PATH"] == "/usr/bin"
 
-    @patch("subprocess.run")
-    def test_env_raises_when_path_cannot_be_read(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_env_raises_when_path_cannot_be_read(
+        self, tmp_path: Path, docker: ScriptedDockerCli
+    ) -> None:
         sandbox = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"), image="img", agent_uid=1000, agent_gid=1000
+            docker=docker,
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            agent_uid=1000,
+            agent_gid=1000,
         )
-        mock_run.side_effect = [
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
-            subprocess.CompletedProcess(
-                args=[], returncode=1, stdout="", stderr="no such container"
-            ),
-        ]
+        docker.then(
+            docker_result(stdout="abc123\n"),
+            docker_result(stdout="1000\n1000\n"),
+            docker_result(returncode=1, stderr="no such container"),
+        )
         sandbox.start()
 
         with pytest.raises(RuntimeError, match="could not read PATH"):
