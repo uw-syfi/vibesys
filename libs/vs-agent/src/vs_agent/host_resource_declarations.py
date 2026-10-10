@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -102,61 +101,6 @@ def declare_rust_toolchain_resources(
         (cargo_home / "bin", cargo_home / "env", rustup_home),
         purpose="Rust toolchain",
     )
-
-
-def resolve_active_rust_toolchain(
-    ctx: HostResourceContext,
-    *,
-    workspace: Path | None = None,
-) -> tuple[Path, Path] | None:
-    """Return the active Rust sysroot and target library directory."""
-    rustc = shutil.which("rustc", path=ctx.env.get("PATH"))
-    if rustc is None:
-        return None
-
-    def rustc_print(name: str) -> str:
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007108 [S603]; compiler path is resolved from the environment and invoked with fixed query arguments without a shell.
-            [rustc, "--print", name],
-            check=True,
-            capture_output=True,
-            cwd=workspace,
-            env={**ctx.env, "RUSTUP_AUTO_INSTALL": "0"},
-            text=True,
-            timeout=10,
-        )
-        return result.stdout.strip()
-
-    try:
-        sysroot_text = rustc_print("sysroot")
-        target_libdir_text = rustc_print("target-libdir")
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return None
-    if not sysroot_text or not target_libdir_text:  # pragma: no cover - malformed compiler
-        return None
-    sysroot = Path(sysroot_text).expanduser().resolve()
-    target_libdir = Path(target_libdir_text).expanduser().resolve()
-    return sysroot, target_libdir
-
-
-def declare_active_rust_toolchain_resources(
-    ctx: HostResourceContext,
-    *,
-    workspace: Path | None = None,
-) -> Iterable[HostResource]:
-    """Declare a narrow view of the active Rust compiler and runtime.
-
-    Granting all of ``~/.rustup`` is expensive, so
-    VibeSys bypasses the rustup proxy and exposes only the selected toolchain.
-    """
-    resolved = resolve_active_rust_toolchain(ctx, workspace=workspace)
-    if resolved is None:
-        return ()
-    sysroot, target_libdir = resolved
-    del target_libdir
-    paths = [sysroot / "bin", sysroot / "lib"]
-    if (sysroot / "libexec").is_dir():
-        paths.append(sysroot / "libexec")
-    return _resources(paths, purpose="active Rust toolchain")
 
 
 def _shell_setup(ctx: HostResourceContext) -> Iterable[HostResource]:

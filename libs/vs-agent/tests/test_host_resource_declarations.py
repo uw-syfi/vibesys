@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import agentshim
 import pytest
@@ -147,41 +146,6 @@ def test_defaults_declare_path_rust_and_shell_resources(tmp_path: Path) -> None:
     assert resources[rustup_home] is HostResourceAccess.READ_ONLY
     assert resources[bash_profile] is HostResourceAccess.READ_ONLY
     assert home not in resources
-
-
-def test_active_rust_toolchain_declaration_is_narrow(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    home = tmp_path / "home"
-    rustup_home = home / ".rustup"
-    sysroot = rustup_home / "toolchains" / "stable"
-    target_libdir = sysroot / "lib" / "rustlib" / "host" / "lib"
-    lib_dir = sysroot / "lib"
-    lib_dir.mkdir(parents=True)
-    target_libdir.mkdir(parents=True)
-    monkeypatch.setattr(
-        host_resource_declarations.shutil, "which", lambda *_args, **_kwargs: "rustc"
-    )
-    outputs = iter((f"{sysroot}\n", f"{target_libdir}\n"))
-    monkeypatch.setattr(
-        host_resource_declarations.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(stdout=next(outputs)),
-    )
-
-    declarations = tuple(
-        host_resource_declarations.declare_active_rust_toolchain_resources(
-            host_resource_declarations.HostResourceContext(
-                env={"HOME": str(home), "PATH": str(home / ".cargo" / "bin")}
-            )
-        )
-    )
-    paths = {resource.path for resource in declarations}
-
-    assert sysroot / "bin" in paths
-    assert sysroot / "lib" in paths
-    assert rustup_home not in paths
 
 
 def _writable_state(

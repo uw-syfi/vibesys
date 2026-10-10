@@ -67,14 +67,6 @@ def parse_typed_response(text: str, response_cls: type[T]) -> T:
     raise AgentOutputSchemaError(_closest_failure(failures))
 
 
-def parse_typed_response_text(text: str, response_cls: type[T]) -> T | None:
-    """Like ``parse_typed_response``, but ``None`` when no JSON value validates."""
-    try:
-        return parse_typed_response(text, response_cls)
-    except AgentOutputSchemaError:
-        return None
-
-
 def _closest_failure(failures: list[ValidationError | TypeError]) -> str:
     """Describe the failure nearest to valid: fewest errors, later wins ties, ``{}`` last."""
     if not failures:

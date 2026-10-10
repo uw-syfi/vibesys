@@ -29,7 +29,7 @@ from tests.support import run_test_command
 from vs_agent import host_resource_declarations
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
-from vs_agent.session_launch import build_host_executor, confine_to_sandbox
+from vs_agent.session_launch import confine_to_sandbox
 from vs_sandbox import host_resources
 from vs_sandbox import host_sandbox as hostsandbox
 
@@ -490,7 +490,7 @@ def test_reproduces_escape_without_sandbox(tmp_path_factory: pytest.TempPathFact
     """Without confinement the stub agent reaches the sibling run — the #149 bug."""
     probe = _escape_probe(tmp_path_factory)
 
-    out = probe.run(build_host_executor(None), cwd=str(probe.workspace))
+    out = probe.run(agentshim.HostCommandExecutor(), cwd=str(probe.workspace))
 
     assert "READ_OK" in out
     assert "SECRET=leak" in out
@@ -507,7 +507,9 @@ def test_sandbox_blocks_escape_but_allows_workspace(
     sandbox = _probe_sandbox(probe)
     assert sandbox is not None
 
-    out = probe.run(build_host_executor(sandbox), cwd=str(probe.workspace))
+    out = probe.run(
+        confine_to_sandbox(agentshim.HostCommandExecutor(), sandbox), cwd=str(probe.workspace)
+    )
 
     assert "READ_OK" not in out
     assert "SECRET=leak" not in out
@@ -629,7 +631,9 @@ def test_seatbelt_blocks_escape_but_allows_workspace(
         f"stderr={launch.stderr!r}\n--- profile ---\n{sandbox.profile()}"
     )
 
-    out = probe.run(build_host_executor(sandbox), cwd=str(probe.workspace))
+    out = probe.run(
+        confine_to_sandbox(agentshim.HostCommandExecutor(), sandbox), cwd=str(probe.workspace)
+    )
 
     assert "READ_OK" not in out
     assert "SECRET=leak" not in out

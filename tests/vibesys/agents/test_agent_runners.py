@@ -299,7 +299,7 @@ class TestAgentLoggerEventHandler:
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0,
         }
-        logger.on_usage(usage)
+        logger.update_usage(usage)
 
         event_sink.usage_update.assert_called_once()
         assert event_sink.usage_update.call_args.args == (12_345,)

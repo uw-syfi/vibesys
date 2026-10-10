@@ -180,17 +180,6 @@ def confine_to_sandbox(
     return agentshim.TransformingExecutor(executor, transform, find_binary=find_binary)
 
 
-def build_host_executor(sandbox: WorkspaceSandbox | None) -> agentshim.CommandExecutor:
-    """Run on this host, confined to *sandbox* when one is given.
-
-    A thin convenience over :func:`confine_to_sandbox` for callers (notably
-    the host-confinement test suite) that want the launcher's own default
-    executor policy without going through :class:`ConfinedSessionLauncher` itself.
-    """
-    host = agentshim.HostCommandExecutor()
-    return host if sandbox is None else confine_to_sandbox(host, sandbox)
-
-
 def _resolve_binary_path(binary: str, env: Mapping[str, str]) -> str | None:
     """Locate *binary* for the host resource declaration, or ``None`` if absent.
 

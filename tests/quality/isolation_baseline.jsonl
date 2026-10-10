@@ -6,7 +6,7 @@
 {"path": "clients/web/src/session.test.ts", "rule": "wall_clock_sync", "count": 1}
 {"path": "libs/vs-agent/tests/test_cli_docker.py", "rule": "patch", "count": 2}
 {"path": "libs/vs-agent/tests/test_fake_client.py", "rule": "private_import", "count": 5}
-{"path": "libs/vs-agent/tests/test_host_resource_declarations.py", "rule": "patch", "count": 4}
+{"path": "libs/vs-agent/tests/test_host_resource_declarations.py", "rule": "patch", "count": 2}
 {"path": "libs/vs-agent/tests/test_hostsandbox.py", "rule": "patch", "count": 11}
 {"path": "libs/vs-agent/tests/test_session_launch.py", "rule": "patch", "count": 2}
 {"path": "libs/vs-issue-tracker/tests/test_issue_board_core.py", "rule": "mock", "count": 4}

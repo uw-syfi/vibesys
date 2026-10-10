@@ -3,7 +3,6 @@
 {"path": "libs/vs-agent/src/vs_agent/faulty_executor.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-agent/src/vs_agent/faulty_transport.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-agent/src/vs_agent/host_resource_declarations.py", "rule": "process", "count": 1}
-{"path": "libs/vs-agent/src/vs_agent/host_resource_declarations.py", "rule": "subprocess", "count": 3}
 {"path": "libs/vs-agent/src/vs_agent/images.py", "rule": "subprocess", "count": 9}
 {"path": "libs/vs-agent/src/vs_agent/orphans.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-agent/src/vs_agent/shim_translation.py", "rule": "process", "count": 1}

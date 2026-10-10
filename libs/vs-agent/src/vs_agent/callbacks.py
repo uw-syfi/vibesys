@@ -99,8 +99,6 @@ class AgentLogger:
         self._clock = clock or MonotonicClock()
         self._start_time = self._clock.now()
         self._input_tokens = 0
-        # Most recent usage dict from the cli backend (see ``update_usage``).
-        self._latest_usage: dict[str, Any] | None = None
         self._context_window_lookup = context_window_lookup or _default_context_window_lookup
         self._context_window = self._context_window_lookup(model_name)
         self._pending_tool_calls: dict[str, deque[str]] = defaultdict(deque)
@@ -122,10 +120,6 @@ class AgentLogger:
             input_tokens=self._input_tokens,
             context_window=self._context_window,
         )
-
-    def _format_prefix(self) -> str:
-        """Render the status snapshot as the plain-text log prefix."""
-        return format_status_prefix(self._status())
 
     # --- Event emission + log formatting ---
 
@@ -184,12 +178,6 @@ class AgentLogger:
                 s = json.dumps(v) if not isinstance(v, str) else v
                 full_parts.append(f'{k}="{s}"' if isinstance(v, str) else f"{k}={s}")
             self._log_line(f"\n→ {name}({', '.join(full_parts)})")
-
-    def _emit_thinking(self, text: str) -> None:
-        self._publish(text, "analysis")
-        self._log_line("\n[thinking]")
-        for line in text.split("\n"):
-            self._log_line(line)
 
     # Maximum chars to write per tool result in the log file.  Keeps logs
     # readable while still capturing enough output for debugging.
@@ -323,10 +311,6 @@ class AgentLogger:
         content = stdout or stderr
         self.log_tool_result(tool, content, is_error=is_error, payload=payload)
 
-    def on_usage(self, usage: dict[str, Any]) -> None:
-        """Update token usage from the provider's current turn."""
-        self.update_usage(usage)
-
     def update_usage(self, usage: dict[str, Any] | None) -> None:
         """Refresh token tracking from a CLI provider's per-turn usage dict.
 
@@ -340,7 +324,6 @@ class AgentLogger:
         """
         if not usage:
             return
-        self._latest_usage = usage
         input_tokens = usage.get("input_tokens") or 0
         if input_tokens:
             self._input_tokens = input_tokens

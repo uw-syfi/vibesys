@@ -11,7 +11,6 @@ listed in ``[tool.ty.environment] root``.
 """
 
 import argparse
-import json
 import sqlite3
 from pathlib import Path
 
@@ -25,7 +24,6 @@ from resources.profilers.nsys.analyze_nsys import (
 )
 
 from vibesys.orchestration.profilers import ProfilerSummary
-from vs_agent.runner import parse_typed_response_text
 
 # ---------------------------------------------------------------------------
 # ProfilerSummary model tests
@@ -63,50 +61,6 @@ def test_profiler_response_serialization() -> None:
     assert dumped["analysis"] == "Analysis."
     restored = ProfilerSummary.model_validate(dumped)
     assert restored == resp
-
-
-# ---------------------------------------------------------------------------
-# Profiler response parsing tests
-# ---------------------------------------------------------------------------
-
-
-def _profiler_json(**overrides: object) -> str:
-    data = {
-        "analysis": "Kernel analysis here.",
-        "bottlenecks": "Top bottleneck: attention at 45%.",
-        "suggestions": "Use CUDA graphs.",
-    }
-    data.update(overrides)
-    return json.dumps(data)
-
-
-def test_parse_profiler_response_raw_json() -> None:
-    text = _profiler_json()
-    resp = parse_typed_response_text(text, ProfilerSummary)
-    assert resp is not None
-    assert resp.analysis == "Kernel analysis here."
-
-
-def test_parse_profiler_response_fenced_json() -> None:
-    text = f"```json\n{_profiler_json()}\n```"
-    resp = parse_typed_response_text(text, ProfilerSummary)
-    assert resp is not None
-    assert "attention" in resp.bottlenecks
-
-
-def test_parse_profiler_response_with_surrounding_text() -> None:
-    text = f"Here is the analysis:\n{_profiler_json()}\nDone."
-    resp = parse_typed_response_text(text, ProfilerSummary)
-    assert resp is not None
-
-
-def test_parse_profiler_response_empty() -> None:
-    assert parse_typed_response_text("", ProfilerSummary) is None
-    assert parse_typed_response_text("no json here", ProfilerSummary) is None
-
-
-def test_parse_profiler_response_invalid_json() -> None:
-    assert parse_typed_response_text("{invalid json}", ProfilerSummary) is None
 
 
 # ---------------------------------------------------------------------------
