@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.support.bounded_waits import HANG_GUARD_S
 
 from vs_slurm.fake_connector import JOB_ID, POLLED_FILE, SUBMITTED_FILE, recorded_commands
 
@@ -118,7 +119,7 @@ def test_a_signal_that_ends_the_run_cancels_its_slurm_job(
             os.close(reader)
         for number in signals:
             os.killpg(run.pid, number)
-        returncode = run.wait()
+        returncode = run.wait(timeout=HANG_GUARD_S)
     finally:
         if not closed_stdout:
             os.close(reader)

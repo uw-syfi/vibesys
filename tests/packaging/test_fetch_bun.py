@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fetch_bun import BunFetchError, _download, fetch_bun
+from tests.support.bounded_waits import join_or_fail
 from wheel_targets import TARGETS
 
 if TYPE_CHECKING:
@@ -103,4 +104,4 @@ def test_download_follows_redirects_like_github_release_assets() -> None:
     finally:
         server.shutdown()
         server.server_close()
-        thread.join()
+        join_or_fail(thread)

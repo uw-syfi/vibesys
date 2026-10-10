@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
+from tests.support.bounded_waits import join_or_fail
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -591,7 +592,7 @@ def test_no_load_cancel_event_stops_target_and_returns_cancelled(tmp_path: Path)
         [], lifecycle, kind="unit", out_dir=out_dir, meta={}, cancel_event=cancel_event
     )
     elapsed = time.monotonic() - start
-    canceller.join()
+    join_or_fail(canceller)
 
     assert result.status is cr.CaptureStatus.CANCELLED
     assert result.escalated is True
@@ -637,7 +638,7 @@ def test_load_cancel_event_during_load_command_stops_both_and_returns_cancelled(
         cancel_event=cancel_event,
     )
     elapsed = time.monotonic() - start
-    canceller.join()
+    join_or_fail(canceller)
 
     assert result.status is cr.CaptureStatus.CANCELLED
     assert elapsed < 10.0

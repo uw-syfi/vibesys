@@ -11,6 +11,7 @@ import threading
 from typing import TYPE_CHECKING, TypedDict
 
 import pytest
+from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 from tests.support.thread_signals import non_main_thread_ids, requires_tgkill, send_to_thread
 
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, write_slurm_evaluation_plan
@@ -294,7 +295,7 @@ def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
     gate, state, job_id = _start_gate_with_held_job(tmp_path)
 
     gate.send_signal(signal.SIGTERM)
-    _, stderr = gate.communicate()
+    _, stderr = gate.communicate(timeout=HANG_GUARD_S)
 
     assert gate.returncode == 128 + signal.SIGTERM, stderr
     commands = recorded_commands(state)
@@ -369,7 +370,7 @@ def test_an_in_process_sigterm_cancels_the_job_and_reports_it(
     signaller = threading.Thread(target=terminate_once_submitted)
     signaller.start()
     exit_code = main(("--plan", str(plan_path), "benchmark"))
-    signaller.join()
+    join_or_fail(signaller)
 
     assert exit_code == 128 + signal.SIGTERM
     job_id = submitted_ids[0]

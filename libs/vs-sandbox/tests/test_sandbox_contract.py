@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 import pytest
+from tests.support.bounded_waits import join_or_fail
 
 from vs_agent.api.images import agent_image
 from vs_sandbox.api import CommandResult, CommandRunner, DockerSandbox, LocalShellRunner
@@ -320,7 +321,7 @@ class _Execution:
         self._thread.start()
 
     def result(self) -> CommandResult:
-        self._thread.join()
+        join_or_fail(self._thread)
         if self._error is not None:
             raise self._error
         assert self._result is not None

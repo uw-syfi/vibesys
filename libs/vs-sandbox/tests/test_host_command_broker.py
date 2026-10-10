@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 
 from vs_sandbox.api.slurm import (
     COMMAND_BROKER_SOCKET_ENV,
@@ -532,6 +533,7 @@ def _status_when_the_broker_drops(*, argument_bytes: int) -> int:
         server.listen(1)
 
         def accept_and_drop() -> None:
+            server.settimeout(HANG_GUARD_S)
             connection, _ = server.accept()
             connection.close()
 
@@ -542,7 +544,7 @@ def _status_when_the_broker_drops(*, argument_bytes: int) -> int:
         try:
             return client_main(["--", "x" * argument_bytes])
         finally:
-            thread.join()
+            join_or_fail(thread)
             server.close()
 
 

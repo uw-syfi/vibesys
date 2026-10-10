@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
+from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 
 import vs_sandbox.skypilot_evaluator as helper_module  # test-isolation: failure injection exercises the private remote helper process boundary.
 from vs_sandbox.api.skypilot import (
@@ -50,6 +51,7 @@ def _serve_frames(
                 server.bind(str(socket_path))
                 server.listen(1)
                 ready.set()
+                server.settimeout(HANG_GUARD_S)
                 connection, _ = server.accept()
                 with connection:
                     reader = connection.makefile("rb")
@@ -98,7 +100,7 @@ def test_helper_relays_streams_and_maps_terminal_status(
         run_evaluator("accuracy", path, state_dir=tmp_path, stdout=stdout, stderr=stderr)
         == expected
     )
-    thread.join()
+    join_or_fail(thread)
     assert stdout.getvalue() == "out\n"
     assert stderr.getvalue() == "err\n"
 
@@ -112,7 +114,7 @@ def test_helper_reports_bridge_error_as_transport_failure(socket_dir: Path, tmp_
         run_evaluator("benchmark", path, state_dir=tmp_path, stdout=io.StringIO(), stderr=stderr)
         == 2
     )
-    thread.join()
+    join_or_fail(thread)
     assert "SkyPilotTimeoutError" in stderr.getvalue()
 
 
@@ -126,6 +128,7 @@ def test_helper_rejects_incomplete_terminal_result(socket_dir: Path, tmp_path: P
                 server.bind(str(path))
                 server.listen(1)
                 ready.set()
+                server.settimeout(HANG_GUARD_S)
                 connection, _ = server.accept()
                 with connection:
                     connection.makefile("rb").readline()
@@ -142,7 +145,7 @@ def test_helper_rejects_incomplete_terminal_result(socket_dir: Path, tmp_path: P
         run_evaluator("accuracy", path, state_dir=tmp_path, stdout=io.StringIO(), stderr=stderr)
         == 2
     )
-    raw_thread.join()
+    join_or_fail(raw_thread)
     assert "invalid result" in stderr.getvalue()
 
 
@@ -178,7 +181,7 @@ def test_helper_materializes_narrow_framework_result_artifact(
             )
             == 0
         )
-        thread.join()
+        join_or_fail(thread)
         assert output_path.read_text() == '{"score": 1}'
     finally:
         output_path.unlink(missing_ok=True)
@@ -196,7 +199,7 @@ def test_pending_invocation_identity_survives_helper_process_state_reload(
         )
         == 2
     )
-    first_thread.join()
+    join_or_fail(first_thread)
     pending_files = list(tmp_path.glob("pending-*"))
     assert len(pending_files) == 1
     second_path = tmp_path / "second.sock"
@@ -211,7 +214,7 @@ def test_pending_invocation_identity_survives_helper_process_state_reload(
         )
         == 0
     )
-    second_thread.join()
+    join_or_fail(second_thread)
 
     assert invocation_ids[0] == invocation_ids[1]
     assert not pending_files[0].exists()
@@ -242,7 +245,7 @@ def test_acknowledged_pending_invocation_removal_is_directory_durable(
         )
         == 0
     )
-    thread.join()
+    join_or_fail(thread)
 
     assert list(tmp_path.glob("pending-*")) == []
     assert fsynced == [tmp_path, tmp_path]
@@ -260,7 +263,7 @@ def test_pending_invocation_recovers_an_incomplete_token_file(
         )
         == 2
     )
-    first_thread.join()
+    join_or_fail(first_thread)
     pending_path = next(tmp_path.glob("pending-*"))
     pending_path.write_text("partial", encoding="utf-8")
 
@@ -281,7 +284,7 @@ def test_pending_invocation_recovers_an_incomplete_token_file(
         )
         == 0
     )
-    recovered_thread.join()
+    join_or_fail(recovered_thread)
     assert len(recovered_ids[0]) == 32
     assert recovered_ids[0] != first_ids[0]
     assert not pending_path.exists()

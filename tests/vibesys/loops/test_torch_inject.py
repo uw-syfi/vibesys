@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.support.bounded_waits import HANG_GUARD_S
 from tests.vibesys.loops.torch_inject_fixtures import (
     StderrTail,
     base_env,
@@ -298,7 +299,7 @@ def test_sigusr2_toggles_stop_early_without_killing_process(tmp_path: Path) -> N
     finally:
         if proc.poll() is None:
             proc.kill()
-            proc.communicate()
+            proc.communicate(timeout=HANG_GUARD_S)
 
     assert proc.returncode == 0, stderr
     assert "done" in stdout
@@ -377,7 +378,7 @@ def _finish(proc: subprocess.Popen[str]) -> tuple[str, str]:
     finally:
         if proc.poll() is None:
             proc.kill()
-            proc.communicate()
+            proc.communicate(timeout=HANG_GUARD_S)
 
 
 def _finish_tailed(proc: subprocess.Popen[str]) -> None:
@@ -390,7 +391,7 @@ def _finish_tailed(proc: subprocess.Popen[str]) -> None:
     finally:
         if proc.poll() is None:
             proc.kill()
-            proc.wait()
+            proc.wait(timeout=HANG_GUARD_S)
 
 
 def test_signal_mode_repeated_windows_produce_two_traces(tmp_path: Path) -> None:
@@ -520,7 +521,7 @@ def test_sigint_exports_then_still_terminates_the_process(tmp_path: Path) -> Non
     finally:
         if proc.poll() is None:
             proc.kill()
-            proc.communicate()
+            proc.communicate(timeout=HANG_GUARD_S)
 
     # The host program still terminates via SIGINT the way it would without
     # this module installed (default disposition, not swallowed).
@@ -567,7 +568,7 @@ def test_sigint_during_a_running_start_handler_is_deferred_not_deadlocked(
     finally:
         if proc.poll() is None:
             proc.kill()
-            proc.communicate()
+            proc.communicate(timeout=HANG_GUARD_S)
 
     assert proc.returncode == -signal.SIGINT, proc.returncode
     assert len(_trace_files(out_dir)) == 1

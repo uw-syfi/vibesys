@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 import pytest
 import yaml
 from pydantic import ValidationError
+from tests.support.bounded_waits import HANG_GUARD_S
 from tests.support.example_registry import require_external_repo_checkout
 
 EVALUATOR_ROOT = Path(__file__).parents[2] / "resources/evaluators/microservice"
@@ -639,6 +640,7 @@ def test_request_action_reports_empty_response_and_times_out(tmp_path: Path) -> 
     accepted: list[socket.socket] = []
 
     def close_immediately() -> None:
+        listener.settimeout(HANG_GUARD_S)
         connection, _ = listener.accept()
         connection.close()
 
@@ -649,6 +651,7 @@ def test_request_action_reports_empty_response_and_times_out(tmp_path: Path) -> 
     closer.join(timeout=2)
 
     def hold_open() -> None:
+        listener.settimeout(HANG_GUARD_S)
         connection, _ = listener.accept()
         accepted.append(connection)
 
