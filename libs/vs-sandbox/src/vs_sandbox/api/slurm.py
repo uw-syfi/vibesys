@@ -11,6 +11,7 @@ from vs_sandbox import host_command_client
 from vs_sandbox.benchmark_output import BenchmarkOutputKind, classify_benchmark_output
 from vs_sandbox.gate_runners import DEFAULT_WRAPPER, SlurmCommandGateRunner, SrunGateRunner
 from vs_sandbox.host_command_broker import (
+    BrokerTransport,
     GateKind,
     GateRunner,
     Gates,
@@ -76,6 +77,7 @@ __all__ = [
     "HOST_COMMAND_CLIENT",
     "PROFILE_OUTPUT_ROOT",
     "BenchmarkOutputKind",
+    "BrokerTransport",
     "GateKind",
     "GateRunner",
     "Gates",

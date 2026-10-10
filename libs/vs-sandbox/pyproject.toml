@@ -14,6 +14,7 @@ dependencies = [
     "pyyaml>=6",
     "vs-evaluation",
     "vs-project",
+    "vs-sim",
     "vs-slurm",
 ]
 
@@ -26,4 +27,5 @@ vs_sandbox = ["py.typed"]
 [tool.uv.sources]
 vs-evaluation = { workspace = true }
 vs-project = { workspace = true }
+vs-sim = { workspace = true }
 vs-slurm = { workspace = true }

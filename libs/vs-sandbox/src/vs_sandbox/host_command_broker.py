@@ -27,14 +27,11 @@ import contextlib
 import json
 import os
 import secrets
-import socketserver
 import stat
-import threading
-import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
@@ -50,16 +47,15 @@ from vs_sandbox.slurm_gpu import (
     SlurmGpuConfig,
     SlurmGpuLauncher,
 )
+from vs_sim.api import Network, OsThreads, Threads, UnixNetwork
 
 if TYPE_CHECKING:
-    import socket
     from collections.abc import Callable, Mapping, Sequence
 
     from vs_sandbox.job_confinement import JobConfinement
+    from vs_sim.api import Connection, Event, Listener, Worker
 
 _MAX_FRAME_BYTES = 4 * 1024 * 1024
-# How often the serving loop checks for shutdown; bounds close() latency.
-_POLL_SECONDS = 0.05
 _MAX_RELAYED_FILE_BYTES = 8 * 1024 * 1024
 # How long close() waits for cancelled jobs to be torn down (their scancel round trips).
 _DRAIN_SECONDS = 60.0
@@ -201,7 +197,7 @@ class GateRunner(Protocol):
         *,
         cwd: Path,
         write: Callable[[bytes], None],
-        cancel: threading.Event,
+        cancel: Event,
     ) -> int:
         """Run the gate from *cwd*, stream its output to *write*, stop when *cancel* is set."""
         ...
@@ -247,64 +243,31 @@ class Gates:
 
 
 @dataclass(frozen=True, slots=True)
+class BrokerTransport:
+    """The I/O a broker runs on: where its socket lives and the threads that serve it."""
+
+    network: Network = field(default_factory=UnixNetwork)
+    threads: Threads = field(default_factory=OsThreads)
+
+
+@dataclass(frozen=True, slots=True)
 class _Job:
     """One authorized request, ready to run."""
 
-    run: Callable[[Callable[[bytes], None], threading.Event], int]
+    run: Callable[[Callable[[bytes], None], Event], int]
     #: ``(host file, path in the caller)``: the result to relay once the job ends.
     relay: tuple[Path, str] | None = None
 
 
-class _Server(socketserver.ThreadingUnixStreamServer):
-    daemon_threads = True
-
-    def __init__(self, owner: HostCommandBroker) -> None:
-        self.owner = owner
-        super().__init__(str(owner.socket_path), _Handler)
-
-
-class _Handler(socketserver.StreamRequestHandler):
-    def handle(self) -> None:
-        owner = cast("_Server", self.server).owner
-        frame = self.rfile.readline(_MAX_FRAME_BYTES + 1)
-        try:
-            job = owner.prepare(_parse_call(frame))
-        except (ValueError, PermissionError) as error:
-            _send(self.connection, {"error": str(error)})
-            return
-        cancel = threading.Event()
-        owner.track(cancel)
-        # A request sends nothing after its first line, so a readable socket
-        # means the client went away: cancel the job, queued or running.
-        threading.Thread(
-            target=_cancel_on_hangup,
-            args=(self.connection, cancel),
-            name="vibesys-command-hangup",
-            daemon=True,
-        ).start()
-
-        def write(chunk: bytes) -> None:
-            if cancel.is_set():
-                return
-            try:
-                _send(self.connection, {"output": base64.b64encode(chunk).decode()})
-            except OSError:
-                cancel.set()
-
-        try:
-            status = job.run(write, cancel)
-            if cancel.is_set():
-                return
-            try:
-                if job.relay is not None:
-                    _relay_file(self.connection, *job.relay)
-                _send(self.connection, {"exit": status})
-            except OSError:
-                return
-        finally:
-            owner.untrack()
-            if job.relay is not None:
-                job.relay[0].unlink(missing_ok=True)
+def _read_frame(connection: Connection) -> bytes:
+    """Read up to the first newline, or until the frame is too long or the peer closes."""
+    frame = b""
+    while b"\n" not in frame and len(frame) <= _MAX_FRAME_BYTES:
+        chunk = connection.recv(_MAX_FRAME_BYTES + 1 - len(frame))
+        if not chunk:
+            break
+        frame += chunk
+    return frame[: frame.find(b"\n") + 1] if b"\n" in frame else frame
 
 
 def _parse_call(frame: bytes) -> GpuCall | GateCall:
@@ -314,11 +277,11 @@ def _parse_call(frame: bytes) -> GpuCall | GateCall:
     return _CALL.validate_json(frame)
 
 
-def _send(connection: socket.socket, payload: Mapping[str, object]) -> None:
-    connection.sendall(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
+def _send(connection: Connection, payload: Mapping[str, object]) -> None:
+    connection.send(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
 
 
-def _relay_file(connection: socket.socket, host_file: Path, caller_path: str) -> None:
+def _relay_file(connection: Connection, host_file: Path, caller_path: str) -> None:
     """Send the result a gate wrote at *host_file*, to be written at *caller_path*."""
     content = _read_owned_file(host_file)
     if content is None:
@@ -358,7 +321,7 @@ def _reserve_result_file() -> Path:
     return path
 
 
-def _cancel_on_hangup(connection: socket.socket, cancel: threading.Event) -> None:
+def _cancel_on_hangup(connection: Connection, cancel: Event) -> None:
     with contextlib.suppress(OSError):
         connection.recv(1)
     cancel.set()
@@ -393,7 +356,9 @@ class HostCommandBroker:
     """Serve one run's Slurm requests over a private Unix socket.
 
     *roots* bound where a command may run. *gpu* and *gates* are the operations
-    the run offers; a request for another is refused by name.
+    the run offers; a request for another is refused by name. *transport* is
+    where the socket is bound and what runs the accept loop and the handlers;
+    production uses the defaults, tests pass simulators.
     """
 
     def __init__(
@@ -403,10 +368,14 @@ class HostCommandBroker:
         roots: RunRoots,
         gpu: GpuCommands | None = None,
         gates: Gates | None = None,
+        transport: BrokerTransport | None = None,
     ) -> None:
         """Bind the private socket, the run's roots, and the operations it offers."""
         self.socket_path = socket_path
         self.token = secrets.token_urlsafe(32)
+        transport = transport or BrokerTransport()
+        self._network = transport.network
+        self._threads = transport.threads
         self._workspaces = tuple(path.resolve() for path in roots.workspaces)
         self._worktree_roots = tuple(path.resolve() for path in roots.worktree_roots)
         self._gpu = gpu
@@ -414,32 +383,27 @@ class HostCommandBroker:
         self._launcher: GpuLauncher | None = (
             None if gpu is None else (gpu.launcher or SlurmGpuLauncher(gpu.config))
         )
-        self._server: _Server | None = None
-        self._thread: threading.Thread | None = None
-        self._in_flight: dict[threading.Thread, threading.Event] = {}
-        self._in_flight_lock = threading.Lock()
-        self._socket_identity: tuple[int, int] | None = None
+        self._listener: Listener | None = None
+        self._acceptor: Worker | None = None
+        self._in_flight: set[Event] = set()
+        self._idle = self._threads.condition(self._threads.lock())
+        self._closing = False
 
     def start(self) -> None:
         """Bind the private socket and start serving requests."""
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
-        server = _Server(self)
+        listener = self._network.listen(str(self.socket_path))
         try:
-            info = self.socket_path.stat()
-            self._socket_identity = (info.st_dev, info.st_ino)
-            self.socket_path.chmod(0o600)
-            thread = threading.Thread(
-                target=server.serve_forever,
-                kwargs={"poll_interval": _POLL_SECONDS},
-                name="vibesys-command-broker",
+            # The socket is a file only on a filesystem network; any other has nothing to restrict.
+            with contextlib.suppress(FileNotFoundError):
+                self.socket_path.chmod(0o600)
+            self._acceptor = self._threads.spawn(
+                lambda: self._accept_loop(listener), name="vibesys-command-broker", daemon=False
             )
-            thread.start()
-            self._server = server
-            self._thread = thread
         except BaseException:
-            server.server_close()
-            self._unlink_owned_socket()
+            listener.close()
             raise
+        self._listener = listener
 
     def close(self, drain_seconds: float = _DRAIN_SECONDS) -> None:
         """Stop accepting requests and remove the socket exactly once.
@@ -449,46 +413,91 @@ class HostCommandBroker:
         asked for are cancelled before the run is gone rather than left to the
         cluster's time limit.
         """
-        server, self._server = self._server, None
-        thread, self._thread = self._thread, None
-        if server is None:
+        listener, self._listener = self._listener, None
+        acceptor, self._acceptor = self._acceptor, None
+        if listener is None:
             return
-        server.shutdown()
-        server.server_close()
-        if thread is not None:
-            thread.join()
-        self._drain_in_flight(drain_seconds)
-        self._unlink_owned_socket()
+        with self._idle:
+            self._closing = True
+        listener.close()
+        if acceptor is not None:
+            acceptor.join()
+        with self._idle:
+            for cancel in self._in_flight:
+                cancel.set()
+            self._idle.wait_for(lambda: not self._in_flight, drain_seconds)
 
-    def track(self, cancel: threading.Event) -> None:
-        """Register the calling handler thread and its cancel event as in flight."""
-        with self._in_flight_lock:
-            self._in_flight[threading.current_thread()] = cancel
+    def _accept_loop(self, listener: Listener) -> None:
+        while True:
+            try:
+                connection = listener.accept()
+            except OSError:
+                return  # the listener was closed
+            self._threads.spawn(lambda c=connection: self._handle(c), name="vibesys-command-job")
 
-    def untrack(self) -> None:
-        """Remove the calling handler thread from the in-flight set."""
-        with self._in_flight_lock:
-            self._in_flight.pop(threading.current_thread(), None)
+    def _track(self, cancel: Event) -> bool:
+        """Register a request as in flight; ``False`` once the broker is closing."""
+        with self._idle:
+            if self._closing:
+                return False
+            self._in_flight.add(cancel)
+            return True
 
-    def _drain_in_flight(self, drain_seconds: float) -> None:
-        with self._in_flight_lock:
-            running = dict(self._in_flight)
-        for cancel in running.values():
-            cancel.set()
-        deadline = time.monotonic() + drain_seconds
-        for handler in running:
-            handler.join(max(0.0, deadline - time.monotonic()))
+    def _untrack(self, cancel: Event) -> None:
+        with self._idle:
+            self._in_flight.discard(cancel)
+            self._idle.notify_all()
 
-    def _unlink_owned_socket(self) -> None:
-        identity, self._socket_identity = self._socket_identity, None
-        if identity is None:
+    def _handle(self, connection: Connection) -> None:
+        try:
+            self._serve(connection)
+        finally:
+            connection.close()
+
+    def _serve(self, connection: Connection) -> None:
+        try:
+            frame = _read_frame(connection)
+        except OSError:
+            return  # the client went away before finishing its request
+        try:
+            job = self.prepare(_parse_call(frame))
+        except (ValueError, PermissionError) as error:
+            with contextlib.suppress(OSError):
+                _send(connection, {"error": str(error)})
+            return
+        cancel = self._threads.event()
+        try:
+            if self._track(cancel):
+                self._run(connection, job, cancel)
+        finally:
+            self._untrack(cancel)
+            if job.relay is not None:
+                job.relay[0].unlink(missing_ok=True)
+
+    def _run(self, connection: Connection, job: _Job, cancel: Event) -> None:
+        # A request sends nothing after its first line, so a readable socket
+        # means the client went away: cancel the job, queued or running.
+        self._threads.spawn(
+            lambda: _cancel_on_hangup(connection, cancel), name="vibesys-command-hangup"
+        )
+
+        def write(chunk: bytes) -> None:
+            if cancel.is_set():
+                return
+            try:
+                _send(connection, {"output": base64.b64encode(chunk).decode()})
+            except OSError:
+                cancel.set()
+
+        status = job.run(write, cancel)
+        if cancel.is_set():
             return
         try:
-            info = self.socket_path.stat()
-        except FileNotFoundError:
+            if job.relay is not None:
+                _relay_file(connection, *job.relay)
+            _send(connection, {"exit": status})
+        except OSError:
             return
-        if (info.st_dev, info.st_ino) == identity:
-            self.socket_path.unlink(missing_ok=True)
 
     def prepare(self, call: GpuCall | GateCall) -> _Job:
         """Authorize *call* and return the job it asks for."""
@@ -569,6 +578,7 @@ class HostCommandBroker:
 __all__ = [
     "SOCKET_ENV",
     "TOKEN_ENV",
+    "BrokerTransport",
     "GateCall",
     "GateKind",
     "GateRunner",

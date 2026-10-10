@@ -1,8 +1,10 @@
 """Contract tests for the host command broker and the client that talks to it.
 
 The broker serves an agent's Slurm requests from the submit host. Everything
-here goes through its public surface and a real Unix socket, with a recording
-launcher and gate runner standing in for ``srun`` and the cluster.
+here goes through its public surface over the simulated network, with every
+handler a simulated thread and a recording launcher and gate runner standing in
+for ``srun`` and the cluster. The real Unix socket is covered by
+``tests/e2e/test_host_command_broker_unix_socket.py``.
 """
 
 from __future__ import annotations
@@ -11,11 +13,9 @@ import ast
 import base64
 import json
 import posixpath
-import socket
-import tempfile
-import threading
 import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +28,7 @@ from vs_sandbox.api.slurm import (
     COMMAND_BROKER_TOKEN_ENV,
     HOST_COMMAND_CLIENT,
     BenchmarkOutputKind,
+    BrokerTransport,
     GateKind,
     Gates,
     GpuCommand,
@@ -39,12 +40,17 @@ from vs_sandbox.api.slurm import (
     classify_benchmark_output,
 )
 
-# test-isolation: main is the CLI entry point and is intentionally absent from the library API.
-from vs_sandbox.host_command_client import main as client_main
-from vs_sim.api.testing import HANG_GUARD_S, join_or_fail
+# test-isolation: the client is a single-file CLI that is intentionally absent from the library API.
+from vs_sandbox.host_command_client import Stop, execute
+from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
+
+    from vs_sim.api import Connection, Event
+    from vs_sim.api.testing import Sim
+
+SEEDS = st.one_of(st.none(), st.integers(0, 2**32))
 
 _OUTPUT_ARGUMENT = "--vs-output"
 _FRAMEWORK_RESULT = "/tmp/vibesys-framework-benchmark-0123456789abcdef.json"  # noqa: S108  # lint-waiver: LW-954372 [S108]; the framework's fixed result path shape under test.
@@ -53,10 +59,10 @@ _FRAMEWORK_RESULT = "/tmp/vibesys-framework-benchmark-0123456789abcdef.json"  # 
 class _RecordingLauncher:
     """Fake launcher: records the job and optionally blocks until it is cancelled."""
 
-    def __init__(self, *, block: bool = False) -> None:
+    def __init__(self, threads: SimThreads, *, block: bool = False) -> None:
         self.commands: list[GpuCommand] = []
         self.requests: list[GpuJobRequest] = []
-        self.cancelled = threading.Event()
+        self.cancelled = threads.event()
         self._block = block
 
     def run(
@@ -65,12 +71,12 @@ class _RecordingLauncher:
         command: GpuCommand,
         *,
         write: Callable[[bytes], None],
-        cancel: threading.Event,
+        cancel: Event,
     ) -> int:
         self.requests.append(request)
         self.commands.append(command)
         write(b"started\n")
-        if self._block and cancel.wait(10):
+        if self._block and cancel.wait(HANG_GUARD_S):
             self.cancelled.set()
         return 5
 
@@ -78,9 +84,11 @@ class _RecordingLauncher:
 class _RecordingGates:
     """Fake gate runner: records each gate, can write the result file, can block."""
 
-    def __init__(self, *, block: bool = False, result: bytes | None = None) -> None:
+    def __init__(
+        self, threads: SimThreads, *, block: bool = False, result: bytes | None = None
+    ) -> None:
         self.runs: list[tuple[GateKind, tuple[str, ...], Path]] = []
-        self.cancelled = threading.Event()
+        self.cancelled = threads.event()
         self._block = block
         self._result = result
 
@@ -91,13 +99,13 @@ class _RecordingGates:
         *,
         cwd: Path,
         write: Callable[[bytes], None],
-        cancel: threading.Event,
+        cancel: Event,
     ) -> int:
         self.runs.append((kind, tuple(arguments), cwd))
         write(f"gate {kind.value}\n".encode())
         if self._result is not None and arguments:
             Path(arguments[-1]).write_bytes(self._result)
-        if self._block and cancel.wait(10):
+        if self._block and cancel.wait(HANG_GUARD_S):
             self.cancelled.set()
         return 3
 
@@ -134,8 +142,28 @@ def _gates(gates: _RecordingGates, output_argument: str | None = _OUTPUT_ARGUMEN
     return Gates(gates, output_argument)
 
 
+@dataclass(frozen=True)
+class _Network:
+    """The simulated network the broker listens on and the clients dial."""
+
+    threads: SimThreads
+    network: SimNetwork
+
+    @property
+    def transport(self) -> BrokerTransport:
+        return BrokerTransport(self.network, self.threads)
+
+    def dial(self, address: str) -> Connection:
+        return self.network.connect(address, HANG_GUARD_S)
+
+
+def _network(threads: SimThreads) -> _Network:
+    return _Network(threads, SimNetwork(threads))
+
+
 @contextmanager
 def _serving(
+    net: _Network,
     tmp_path: Path,
     workspace: Path,
     *,
@@ -147,6 +175,7 @@ def _serving(
         roots=RunRoots((workspace,), (tmp_path / "worktrees",)),
         gpu=gpu,
         gates=gates,
+        transport=net.transport,
     )
     broker.start()
     try:
@@ -160,13 +189,36 @@ def _point_at(monkeypatch: pytest.MonkeyPatch, broker: HostCommandBroker) -> Non
     monkeypatch.setenv(COMMAND_BROKER_TOKEN_ENV, broker.token)
 
 
-def _raw_request(broker: HostCommandBroker, request: Mapping[str, object]) -> dict[str, object]:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(HANG_GUARD_S)
-        client.connect(str(broker.socket_path))
-        client.sendall(json.dumps(request).encode() + b"\n")
-        with client.makefile("rb") as frames:
-            return json.loads(frames.readline())
+def _run_client(net: _Network, arguments: list[str]) -> int:
+    """Run the agent-side client against the simulated network, as ``vibesys-gpu`` would."""
+    return execute(arguments, stop=Stop(), dial=net.dial)
+
+
+def _send_request(
+    net: _Network, broker: HostCommandBroker, request: Mapping[str, object]
+) -> Connection:
+    connection = net.dial(str(broker.socket_path))
+    connection.send(json.dumps(request).encode() + b"\n")
+    return connection
+
+
+def _read_frame(connection: Connection) -> dict[str, Any]:
+    line = b""
+    while not line.endswith(b"\n"):
+        chunk = connection.recv(1, HANG_GUARD_S)
+        assert chunk, "the broker closed the connection before finishing a frame"
+        line += chunk
+    return json.loads(line)
+
+
+def _raw_request(
+    net: _Network, broker: HostCommandBroker, request: Mapping[str, object]
+) -> dict[str, object]:
+    connection = _send_request(net, broker, request)
+    try:
+        return _read_frame(connection)
+    finally:
+        connection.close()
 
 
 def _gpu_call(broker: HostCommandBroker, cwd: str, **updates: object) -> dict[str, object]:
@@ -193,21 +245,34 @@ def _gate_call(broker: HostCommandBroker, cwd: str, **updates: object) -> dict[s
     return {**call, **updates}
 
 
+def _simulate[T](sim: Sim, program: Callable[[_Network], T]) -> T:
+    """Run *program* as the main simulated thread, on a network all its threads share."""
+    threads = sim.threads()
+    net = _network(threads)
+    return threads.run(lambda: program(net))
+
+
 class TestGpuOperation:
     def test_confines_the_command_and_relays_output_and_status(
         self,
+        sim: Sim,
         tmp_path: Path,
         workspace: Path,
         monkeypatch: pytest.MonkeyPatch,
         capsysbinary: pytest.CaptureFixture[bytes],
     ) -> None:
-        launcher = _RecordingLauncher()
         monkeypatch.chdir(workspace / "sub")
         monkeypatch.setenv("KEEP_ME", "1")
         monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
-        with _serving(tmp_path, workspace, gpu=_gpu(launcher)) as broker:
-            _point_at(monkeypatch, broker)
-            status = client_main(["--gpus", "4", "--time", "9", "--", "nvidia-smi"])
+
+        def program(net: _Network) -> tuple[int, _RecordingLauncher]:
+            launcher = _RecordingLauncher(net.threads)
+            with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
+                _point_at(monkeypatch, broker)
+                status = _run_client(net, ["--gpus", "4", "--time", "9", "--", "nvidia-smi"])
+            return status, launcher
+
+        status, launcher = _simulate(sim, program)
 
         command = launcher.commands[0]
         assert status == 5
@@ -219,17 +284,20 @@ class TestGpuOperation:
         assert "CUDA_VISIBLE_DEVICES" not in command.env
 
     def test_a_candidate_worktree_is_confined_to_itself(
-        self, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
+        self, sim: Sim, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         candidate = tmp_path / "worktrees" / "candidate-1"
         (candidate / "src").mkdir(parents=True)
-        launcher = _RecordingLauncher()
         monkeypatch.chdir(candidate / "src")
-        with _serving(tmp_path, workspace, gpu=_gpu(launcher)) as broker:
-            _point_at(monkeypatch, broker)
-            client_main(["--gpus", "1", "--time", "1", "--", "true"])
 
-        assert launcher.commands[0].argv[1] == str(candidate.resolve())
+        def program(net: _Network) -> _RecordingLauncher:
+            launcher = _RecordingLauncher(net.threads)
+            with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
+                _point_at(monkeypatch, broker)
+                _run_client(net, ["--gpus", "1", "--time", "1", "--", "true"])
+            return launcher
+
+        assert _simulate(sim, program).commands[0].argv[1] == str(candidate.resolve())
 
     @pytest.mark.parametrize(
         ("overrides", "message"),
@@ -241,22 +309,26 @@ class TestGpuOperation:
     )
     def test_rejects_requests_outside_the_capability(
         self,
+        sim: Sim,
         tmp_path: Path,
         workspace: Path,
         overrides: Mapping[str, object],
         message: str,
     ) -> None:
-        launcher = _RecordingLauncher()
-        with _serving(tmp_path, workspace, gpu=_gpu(launcher)) as broker:
-            reply = _raw_request(broker, {**_gpu_call(broker, str(workspace)), **overrides})
+        def program(net: _Network) -> tuple[dict[str, object], _RecordingLauncher]:
+            launcher = _RecordingLauncher(net.threads)
+            with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
+                call = {**_gpu_call(broker, str(workspace)), **overrides}
+                return _raw_request(net, broker, call), launcher
+
+        reply, launcher = _simulate(sim, program)
 
         assert message in str(reply["error"])
         assert launcher.commands == []
 
     def test_the_job_gets_the_host_baseline_and_none_of_the_containers_identity(
-        self, tmp_path: Path, workspace: Path
+        self, sim: Sim, tmp_path: Path, workspace: Path
     ) -> None:
-        launcher = _RecordingLauncher()
         host = {"PATH": "/host/bin", "HOME": "/home/host", "ANTHROPIC_API_KEY": "secret"}
         container = {
             "PATH": "/container/bin",
@@ -266,48 +338,59 @@ class TestGpuOperation:
             "VIBESYS_COMMAND_BROKER_TOKEN": "t",
             "XDG_CACHE_HOME": "/home/agent/.cache",
         }
-        with _serving(tmp_path, workspace, gpu=_gpu(launcher, host)) as broker:
-            _raw_request(broker, _gpu_call(broker, str(workspace), env=container))
+
+        def program(net: _Network) -> _RecordingLauncher:
+            launcher = _RecordingLauncher(net.threads)
+            with _serving(net, tmp_path, workspace, gpu=_gpu(launcher, host)) as broker:
+                _raw_request(net, broker, _gpu_call(broker, str(workspace), env=container))
+            return launcher
+
+        launcher = _simulate(sim, program)
 
         assert launcher.commands[0].env == {"PATH": "/host/bin", "HOME": "/home/host", "FOO": "bar"}
 
-    def test_closing_the_connection_cancels_the_job(self, tmp_path: Path, workspace: Path) -> None:
-        launcher = _RecordingLauncher(block=True)
-        with _serving(tmp_path, workspace, gpu=_gpu(launcher)) as broker:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(HANG_GUARD_S)
-                client.connect(str(broker.socket_path))
-                client.sendall(json.dumps(_gpu_call(broker, str(workspace))).encode() + b"\n")
-                with client.makefile("rb") as frames:
-                    first = json.loads(frames.readline())
-            cancelled = launcher.cancelled.wait(10)
+    def test_closing_the_connection_cancels_the_job(
+        self, sim: Sim, tmp_path: Path, workspace: Path
+    ) -> None:
+        def program(net: _Network) -> tuple[dict[str, Any], bool]:
+            launcher = _RecordingLauncher(net.threads, block=True)
+            with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
+                client = _send_request(net, broker, _gpu_call(broker, str(workspace)))
+                first = _read_frame(client)
+                client.close()
+                return first, launcher.cancelled.wait(HANG_GUARD_S)
+
+        first, cancelled = _simulate(sim, program)
 
         assert base64.b64decode(first["output"]) == b"started\n"
         assert cancelled
 
     def test_closing_the_broker_cancels_running_jobs_and_waits_for_them(
-        self, tmp_path: Path, workspace: Path
+        self, sim: Sim, tmp_path: Path, workspace: Path
     ) -> None:
         """A run that exits leaves no job behind: close() returns after the cancel was acted on."""
-        launcher = _RecordingLauncher(block=True)
-        with (
-            _serving(tmp_path, workspace, gpu=_gpu(launcher)) as broker,
-            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client,
-        ):
-            client.settimeout(HANG_GUARD_S)
-            client.connect(str(broker.socket_path))
-            client.sendall(json.dumps(_gpu_call(broker, str(workspace))).encode() + b"\n")
-            with client.makefile("rb") as frames:
-                frames.readline()  # the job is running, and this connection stays open
-                broker.close()
 
-                assert launcher.cancelled.is_set()
+        def program(net: _Network) -> bool:
+            launcher = _RecordingLauncher(net.threads, block=True)
+            with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
+                client = _send_request(net, broker, _gpu_call(broker, str(workspace)))
+                _read_frame(client)  # the job is running, and this connection stays open
+                broker.close()
+                cancelled = launcher.cancelled.is_set()
+                client.close()
+            return cancelled
+
+        assert _simulate(sim, program)
 
     def test_an_operation_the_run_does_not_offer_is_refused_by_name(
-        self, tmp_path: Path, workspace: Path
+        self, sim: Sim, tmp_path: Path, workspace: Path
     ) -> None:
-        with _serving(tmp_path, workspace, gates=_gates(_RecordingGates())) as broker:
-            reply = _raw_request(broker, _gpu_call(broker, str(workspace)))
+        def program(net: _Network) -> dict[str, object]:
+            gates = _RecordingGates(net.threads)
+            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
+                return _raw_request(net, broker, _gpu_call(broker, str(workspace)))
+
+        reply = _simulate(sim, program)
 
         assert "does not offer the gpu operation" in str(reply["error"])
 
@@ -315,47 +398,66 @@ class TestGpuOperation:
 class TestGateOperation:
     def test_runs_the_planned_gate_from_the_requested_directory(
         self,
+        sim: Sim,
         tmp_path: Path,
         workspace: Path,
         monkeypatch: pytest.MonkeyPatch,
         capsysbinary: pytest.CaptureFixture[bytes],
     ) -> None:
-        gates = _RecordingGates()
         monkeypatch.chdir(workspace)
-        with _serving(tmp_path, workspace, gates=_gates(gates)) as broker:
-            _point_at(monkeypatch, broker)
-            status = client_main(["--gate", "accuracy"])
+
+        def program(net: _Network) -> tuple[int, _RecordingGates]:
+            gates = _RecordingGates(net.threads)
+            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
+                _point_at(monkeypatch, broker)
+                return _run_client(net, ["--gate", "accuracy"]), gates
+
+        status, gates = _simulate(sim, program)
 
         assert status == 3
         assert capsysbinary.readouterr().out == b"gate accuracy\n"
         assert gates.runs == [(GateKind.ACCURACY, (), workspace.resolve())]
 
     def test_a_workspace_result_path_passes_through_unchanged(
-        self, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
+        self, sim: Sim, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        gates = _RecordingGates()
         monkeypatch.chdir(workspace)
-        with _serving(tmp_path, workspace, gates=_gates(gates)) as broker:
-            _point_at(monkeypatch, broker)
-            client_main(["--gate", "benchmark", _OUTPUT_ARGUMENT, ".vibesys-benchmark-x1.json"])
 
-        assert gates.runs[0][1] == (_OUTPUT_ARGUMENT, ".vibesys-benchmark-x1.json")
+        def program(net: _Network) -> _RecordingGates:
+            gates = _RecordingGates(net.threads)
+            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
+                _point_at(monkeypatch, broker)
+                _run_client(
+                    net, ["--gate", "benchmark", _OUTPUT_ARGUMENT, ".vibesys-benchmark-x1.json"]
+                )
+            return gates
+
+        assert _simulate(sim, program).runs[0][1] == (
+            _OUTPUT_ARGUMENT,
+            ".vibesys-benchmark-x1.json",
+        )
 
     def test_a_framework_result_is_written_on_the_host_and_relayed_to_the_caller(
-        self, tmp_path: Path, workspace: Path
+        self, sim: Sim, tmp_path: Path, workspace: Path
     ) -> None:
         """The gate writes a host file of the same allowed shape; the caller gets its contents."""
-        gates = _RecordingGates(result=b'{"ok": true}')
-        with _serving(tmp_path, workspace, gates=_gates(gates)) as broker:
-            frames = _frames(
-                broker,
-                _gate_call(
+
+        def program(net: _Network) -> tuple[list[dict[str, Any]], _RecordingGates]:
+            gates = _RecordingGates(net.threads, result=b'{"ok": true}')
+            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
+                frames = _frames(
+                    net,
                     broker,
-                    str(workspace),
-                    kind="benchmark",
-                    arguments=[_OUTPUT_ARGUMENT, _FRAMEWORK_RESULT],
-                ),
-            )
+                    _gate_call(
+                        broker,
+                        str(workspace),
+                        kind="benchmark",
+                        arguments=[_OUTPUT_ARGUMENT, _FRAMEWORK_RESULT],
+                    ),
+                )
+            return frames, gates
+
+        frames, gates = _simulate(sim, program)
 
         argument = gates.runs[0][1]
         assert argument[0] == _OUTPUT_ARGUMENT
@@ -370,16 +472,20 @@ class TestGateOperation:
         assert frames[-1] == {"exit": 3}
 
     def test_the_client_writes_the_relayed_file_where_the_caller_asked(
-        self, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
+        self, sim: Sim, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        gates = _RecordingGates(result=b"relayed")
         # The framework names this fixed /tmp shape; a fresh nonce keeps runs apart.
         target = Path(f"/tmp/vibesys-framework-benchmark-{uuid.uuid4().hex}.json")  # noqa: S108  # lint-waiver: LW-954374 [S108]; the framework's result path shape under test.
         monkeypatch.chdir(workspace)
-        try:
-            with _serving(tmp_path, workspace, gates=_gates(gates)) as broker:
+
+        def program(net: _Network) -> int:
+            gates = _RecordingGates(net.threads, result=b"relayed")
+            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
                 _point_at(monkeypatch, broker)
-                status = client_main(["--gate", "benchmark", _OUTPUT_ARGUMENT, str(target)])
+                return _run_client(net, ["--gate", "benchmark", _OUTPUT_ARGUMENT, str(target)])
+
+        try:
+            status = _simulate(sim, program)
 
             assert status == 3
             assert target.read_bytes() == b"relayed"
@@ -387,97 +493,134 @@ class TestGateOperation:
         finally:
             target.unlink(missing_ok=True)
 
+    @settings(max_examples=60, deadline=None)
+    @given(
+        seed=SEEDS,
+        kind=st.sampled_from(list(GateKind)),
+        arguments=st.lists(
+            st.sampled_from(
+                [
+                    _OUTPUT_ARGUMENT,
+                    "--other",
+                    "x",
+                    ".vibesys-benchmark-ok.json",
+                    ".vibesys-benchmark-/../escape.json",
+                    _FRAMEWORK_RESULT,
+                    "/tmp/vibesys-framework-benchmark-../x.json",  # noqa: S108  # lint-waiver: LW-954373 [S108]; a rejected path under test.
+                    "/etc/passwd",
+                ]
+            ),
+            max_size=3,
+        ),
+    )
     def test_gate_arguments_are_accepted_only_in_the_planned_shapes(
-        self, tmp_path: Path, workspace: Path
+        self,
+        seed: int | None,
+        kind: GateKind,
+        arguments: list[str],
+        tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
-        gates = _RecordingGates()
+        workspace = tmp_path_factory.mktemp("workspace")
         valid_results = {".vibesys-benchmark-ok.json", _FRAMEWORK_RESULT}
 
-        @settings(max_examples=60, deadline=None)
-        @given(
-            kind=st.sampled_from(list(GateKind)),
-            arguments=st.lists(
-                st.sampled_from(
-                    [
-                        _OUTPUT_ARGUMENT,
-                        "--other",
-                        "x",
-                        ".vibesys-benchmark-ok.json",
-                        ".vibesys-benchmark-/../escape.json",
-                        _FRAMEWORK_RESULT,
-                        "/tmp/vibesys-framework-benchmark-../x.json",  # noqa: S108  # lint-waiver: LW-954373 [S108]; a rejected path under test.
-                        "/etc/passwd",
-                    ]
-                ),
-                max_size=3,
-            ),
-        )
-        def check(kind: GateKind, arguments: list[str]) -> None:
-            runs_before = len(gates.runs)
-            frames = _frames(
-                broker,
-                _gate_call(broker, str(workspace), kind=kind.value, arguments=arguments),
-            )
-            expected = (kind is GateKind.ACCURACY and arguments == []) or (
-                kind is GateKind.BENCHMARK
-                and len(arguments) == 2
-                and arguments[0] == _OUTPUT_ARGUMENT
-                and arguments[1] in valid_results
-            )
-            assert (len(gates.runs) > runs_before) == expected
-            if expected and kind is GateKind.BENCHMARK:
-                # What the broker hands the gate wrapper is itself an allowed result path:
-                # the wrapper validates it again with the same function.
-                assert classify_benchmark_output(gates.runs[-1][1][1]) is not None
-            if not expected:
-                assert "invalid arguments" in str(frames[0]["error"])
+        def program(net: _Network) -> tuple[list[dict[str, Any]], _RecordingGates]:
+            gates = _RecordingGates(net.threads)
+            with _serving(net, workspace, workspace, gates=_gates(gates)) as broker:
+                call = _gate_call(broker, str(workspace), kind=kind.value, arguments=arguments)
+                return _frames(net, broker, call), gates
 
-        with _serving(tmp_path, workspace, gates=_gates(gates)) as broker:
-            check()
+        frames, gates = _simulate_with(seed, program)
+
+        expected = (kind is GateKind.ACCURACY and arguments == []) or (
+            kind is GateKind.BENCHMARK
+            and len(arguments) == 2
+            and arguments[0] == _OUTPUT_ARGUMENT
+            and arguments[1] in valid_results
+        )
+        assert bool(gates.runs) == expected
+        if expected and kind is GateKind.BENCHMARK:
+            # What the broker hands the gate wrapper is itself an allowed result path:
+            # the wrapper validates it again with the same function.
+            assert classify_benchmark_output(gates.runs[-1][1][1]) is not None
+        if not expected:
+            assert "invalid arguments" in str(frames[0]["error"])
 
     def test_a_benchmark_without_a_declared_result_argument_takes_no_arguments(
-        self, tmp_path: Path, workspace: Path
+        self, sim: Sim, tmp_path: Path, workspace: Path
     ) -> None:
-        gates = _RecordingGates()
-        with _serving(tmp_path, workspace, gates=_gates(gates, None)) as broker:
-            refused = _frames(
-                broker,
-                _gate_call(broker, str(workspace), kind="benchmark", arguments=["--x", "y"]),
-            )
-            accepted = _frames(broker, _gate_call(broker, str(workspace), kind="benchmark"))
+        def program(net: _Network) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+            gates = _RecordingGates(net.threads)
+            with _serving(net, tmp_path, workspace, gates=_gates(gates, None)) as broker:
+                refused = _frames(
+                    net,
+                    broker,
+                    _gate_call(broker, str(workspace), kind="benchmark", arguments=["--x", "y"]),
+                )
+                accepted = _frames(
+                    net, broker, _gate_call(broker, str(workspace), kind="benchmark")
+                )
+            return refused, accepted
+
+        refused, accepted = _simulate(sim, program)
 
         assert "invalid arguments" in str(refused[0]["error"])
         assert accepted[-1] == {"exit": 3}
 
-    def test_closing_the_connection_cancels_the_gate(self, tmp_path: Path, workspace: Path) -> None:
-        gates = _RecordingGates(block=True)
-        with _serving(tmp_path, workspace, gates=_gates(gates)) as broker:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(HANG_GUARD_S)
-                client.connect(str(broker.socket_path))
-                client.sendall(json.dumps(_gate_call(broker, str(workspace))).encode() + b"\n")
-                with client.makefile("rb") as frames:
-                    first = json.loads(frames.readline())
-            cancelled = gates.cancelled.wait(10)
+    def test_closing_the_connection_cancels_the_gate(
+        self, sim: Sim, tmp_path: Path, workspace: Path
+    ) -> None:
+        def program(net: _Network) -> tuple[dict[str, Any], bool]:
+            gates = _RecordingGates(net.threads, block=True)
+            with _serving(net, tmp_path, workspace, gates=_gates(gates)) as broker:
+                client = _send_request(net, broker, _gate_call(broker, str(workspace)))
+                first = _read_frame(client)
+                client.close()
+                return first, gates.cancelled.wait(HANG_GUARD_S)
+
+        first, cancelled = _simulate(sim, program)
 
         assert base64.b64decode(first["output"]) == b"gate accuracy\n"
         assert cancelled
 
 
-def _frames(broker: HostCommandBroker, request: Mapping[str, object]) -> list[dict[str, Any]]:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(HANG_GUARD_S)
-        client.connect(str(broker.socket_path))
-        client.sendall(json.dumps(request).encode() + b"\n")
-        with client.makefile("rb") as stream:
-            return [json.loads(line) for line in stream]
+def _simulate_with[T](seed: int | None, program: Callable[[_Network], T]) -> T:
+    """Like :func:`_simulate`, for a property test that draws the schedule seed itself."""
+    threads = SimThreads(schedule_seed=seed)
+    net = _network(threads)
+    return threads.run(lambda: program(net))
+
+
+def _frames(
+    net: _Network, broker: HostCommandBroker, request: Mapping[str, object]
+) -> list[dict[str, Any]]:
+    """Every frame the broker sends for *request*, until it closes the connection."""
+    connection = _send_request(net, broker, request)
+    frames: list[dict[str, Any]] = []
+    buffer = b""
+    while chunk := connection.recv(65536, HANG_GUARD_S):
+        buffer += chunk
+        *lines, buffer = buffer.split(b"\n")
+        frames.extend(json.loads(line) for line in lines)
+    connection.close()
+    return frames
 
 
 class TestRoots:
+    @settings(max_examples=80, deadline=None)
+    @given(
+        seed=SEEDS,
+        base=st.sampled_from(["workspace", "worktrees", "other", "root"]),
+        parts=st.lists(st.sampled_from(["a", "b", "..", "."]), max_size=4),
+    )
     def test_a_directory_is_accepted_exactly_when_it_is_inside_the_runs_roots(
-        self, tmp_path: Path
+        self,
+        seed: int | None,
+        base: str,
+        parts: list[str],
+        tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
         """Whatever path the container names, the broker agrees with a path model of the roots."""
+        tmp_path = tmp_path_factory.mktemp("roots")
         workspace = tmp_path / "workspace"
         worktrees = tmp_path / "worktrees"
         workspace.mkdir()
@@ -488,69 +631,61 @@ class TestRoots:
             "other": str(tmp_path / "other"),
             "root": "/",
         }
-        launcher = _RecordingLauncher()
+        named = posixpath.join(starts[base], *parts)
 
-        @settings(max_examples=80, deadline=None)
-        @given(
-            base=st.sampled_from(sorted(starts)),
-            parts=st.lists(st.sampled_from(["a", "b", "..", "."]), max_size=4),
-        )
-        def check(base: str, parts: list[str]) -> None:
-            commands_before = len(launcher.commands)
-            named = posixpath.join(starts[base], *parts)
-            reply = _frames(broker, _gpu_call(broker, named))
-            cwd = posixpath.normpath(named)
-            ws, wt = str(workspace.resolve()), str(worktrees.resolve())
-            inside_workspace = cwd == ws or cwd.startswith(ws + "/")
-            inside_candidate = cwd.startswith(wt + "/")
-            started = launcher.commands[commands_before:]
-            accepted = bool(started)
-            assert accepted == (inside_workspace or inside_candidate)
-            if accepted:
-                # The job is confined to the run's workspace or to one candidate under the root.
-                confined = started[0].argv[1]
-                assert confined == ws or confined.startswith(wt + "/")
-                assert reply[-1] == {"exit": 5}
+        def program(net: _Network) -> tuple[list[dict[str, Any]], _RecordingLauncher]:
+            launcher = _RecordingLauncher(net.threads)
+            with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
+                return _frames(net, broker, _gpu_call(broker, named)), launcher
 
-        with _serving(tmp_path, workspace, gpu=_gpu(launcher)) as broker:
-            check()
+        reply, launcher = _simulate_with(seed, program)
+
+        cwd = posixpath.normpath(named)
+        ws, wt = str(workspace.resolve()), str(worktrees.resolve())
+        inside_workspace = cwd == ws or cwd.startswith(ws + "/")
+        inside_candidate = cwd.startswith(wt + "/")
+        accepted = bool(launcher.commands)
+        assert accepted == (inside_workspace or inside_candidate)
+        if accepted:
+            # The job is confined to the run's workspace or to one candidate under the root.
+            confined = launcher.commands[0].argv[1]
+            assert confined == ws or confined.startswith(wt + "/")
+            assert reply[-1] == {"exit": 5}
 
     def test_a_symlink_inside_the_workspace_cannot_reach_outside_it(
-        self, tmp_path: Path, workspace: Path
+        self, sim: Sim, tmp_path: Path, workspace: Path
     ) -> None:
         outside = tmp_path / "outside"
         outside.mkdir()
         (workspace / "link").symlink_to(outside)
-        launcher = _RecordingLauncher()
-        with _serving(tmp_path, workspace, gpu=_gpu(launcher)) as broker:
-            reply = _frames(broker, _gpu_call(broker, str(workspace / "link")))
+
+        def program(net: _Network) -> tuple[list[dict[str, Any]], _RecordingLauncher]:
+            launcher = _RecordingLauncher(net.threads)
+            with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
+                return _frames(net, broker, _gpu_call(broker, str(workspace / "link"))), launcher
+
+        reply, launcher = _simulate(sim, program)
 
         assert "inside the run's workspace" in str(reply[0]["error"])
         assert launcher.commands == []
 
 
-def _status_when_the_broker_drops(*, argument_bytes: int) -> int:
+def _status_when_the_broker_drops(
+    threads: SimThreads, net: _Network, *, argument_bytes: int, monkeypatch: pytest.MonkeyPatch
+) -> int:
     """Run the client against a broker that accepts a connection and closes it unread."""
-    with tempfile.TemporaryDirectory() as directory, pytest.MonkeyPatch.context() as env:
-        path = Path(directory) / "dead.sock"
-        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        server.bind(str(path))
-        server.listen(1)
+    listener = net.network.listen("dead.sock")
 
-        def accept_and_drop() -> None:
-            server.settimeout(HANG_GUARD_S)
-            connection, _ = server.accept()
-            connection.close()
+    def accept_and_drop() -> None:
+        listener.accept(HANG_GUARD_S).close()
 
-        thread = threading.Thread(target=accept_and_drop)
-        thread.start()
-        env.setenv(COMMAND_BROKER_SOCKET_ENV, str(path))
-        env.setenv(COMMAND_BROKER_TOKEN_ENV, "t")
-        try:
-            return client_main(["--", "x" * argument_bytes])
-        finally:
-            join_or_fail(thread)
-            server.close()
+    server = threads.spawn(accept_and_drop, name="dead-broker")
+    monkeypatch.setenv(COMMAND_BROKER_SOCKET_ENV, "dead.sock")
+    monkeypatch.setenv(COMMAND_BROKER_TOKEN_ENV, "t")
+    status = _run_client(net, ["--", "x" * argument_bytes])
+    server.join(HANG_GUARD_S)
+    listener.close()
+    return status
 
 
 class TestClient:
@@ -559,7 +694,7 @@ class TestClient:
     ) -> None:
         monkeypatch.delenv(COMMAND_BROKER_SOCKET_ENV, raising=False)
         monkeypatch.delenv(COMMAND_BROKER_TOKEN_ENV, raising=False)
-        assert client_main(["--", "nvidia-smi"]) == 2
+        assert execute(["--", "nvidia-smi"], stop=Stop()) == 2
         assert "no command broker" in capsys.readouterr().err
 
     def test_an_unknown_gate_is_a_usage_error(
@@ -567,29 +702,38 @@ class TestClient:
     ) -> None:
         monkeypatch.setenv(COMMAND_BROKER_SOCKET_ENV, "/nonexistent")
         monkeypatch.setenv(COMMAND_BROKER_TOKEN_ENV, "t")
-        assert client_main(["--gate", "profile"]) == 2
+        assert execute(["--gate", "profile"], stop=Stop()) == 2
         assert "--gate takes one of" in capsys.readouterr().err
 
     def test_a_dropped_connection_is_a_failure_not_a_success(
-        self, capsys: pytest.CaptureFixture[str]
+        self, sim: Sim, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        assert _status_when_the_broker_drops(argument_bytes=1) == 1
-        assert "closed the connection" in capsys.readouterr().err
+        threads = sim.threads()
+        net = _network(threads)
 
-    def test_a_broker_that_drops_before_reading_a_large_request_is_a_dropped_connection(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        # The request outgrows the socket buffer, so the send blocks until the
-        # broker closes and then fails with a broken pipe or reset, every time.
-        assert _status_when_the_broker_drops(argument_bytes=4 * 1024 * 1024) == 1
+        status = threads.run(
+            lambda: _status_when_the_broker_drops(
+                threads, net, argument_bytes=1, monkeypatch=monkeypatch
+            )
+        )
+
+        assert status == 1
         assert "closed the connection" in capsys.readouterr().err
 
     @settings(max_examples=25, deadline=None)
-    @given(argument_bytes=st.integers(min_value=0, max_value=2 * 1024 * 1024))
-    def test_a_dropped_connection_never_depends_on_how_much_was_sent(
-        self, argument_bytes: int
+    @given(seed=SEEDS, argument_bytes=st.integers(min_value=0, max_value=4 * 1024 * 1024))
+    def test_a_dropped_connection_never_depends_on_how_much_was_sent_or_who_runs_first(
+        self, seed: int | None, argument_bytes: int
     ) -> None:
-        assert _status_when_the_broker_drops(argument_bytes=argument_bytes) == 1
+        threads = SimThreads(schedule_seed=seed)
+        net = _network(threads)
+        with pytest.MonkeyPatch.context() as env:
+            status = threads.run(
+                lambda: _status_when_the_broker_drops(
+                    threads, net, argument_bytes=argument_bytes, monkeypatch=env
+                )
+            )
+        assert status == 1
 
     def test_the_client_imports_only_the_standard_library(self) -> None:
         """It runs as one file under the agent image's python3, with no VibeSys packages."""

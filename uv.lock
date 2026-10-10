@@ -3210,6 +3210,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "vs-evaluation" },
     { name = "vs-project" },
+    { name = "vs-sim" },
     { name = "vs-slurm" },
 ]
 
@@ -3221,6 +3222,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "vs-evaluation", editable = "libs/vs-evaluation" },
     { name = "vs-project", editable = "libs/vs-project" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
     { name = "vs-slurm", editable = "libs/vs-slurm" },
 ]
 

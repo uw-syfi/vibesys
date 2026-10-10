@@ -164,6 +164,7 @@ graph TD
     vs_runtime --> vs_slurm
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_project
+    vs_sandbox --> vs_sim
     vs_sandbox --> vs_slurm
     vs_slurm --> vs_sim
 ```
