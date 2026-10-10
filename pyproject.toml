@@ -290,6 +290,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.Outco
 "support/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 # The contract suites are test code shipped in the library so every implementation runs them:
 # their assertions are the output, as in a test module.
+"libs/vs-sandbox/src/vs_sandbox/gpu_telemetry_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/concurrency_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sandbox/src/vs_sandbox/process_contracts.py" = ["S101", "PLR2004"]

@@ -66,8 +66,6 @@
 {"path": "tests/vibesys/backends/test_cpu_backend.py", "rule": "mock", "count": 2}
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "mock", "count": 6}
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "patch", "count": 5}
-{"path": "tests/vibesys/backends/test_gpu_monitor.py", "rule": "mock", "count": 71}
-{"path": "tests/vibesys/backends/test_gpu_monitor.py", "rule": "sleep", "count": 11}
 {"path": "tests/vibesys/inputs/test_synthesis.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/loops/test_torch_inject.py", "rule": "timeout_verdict", "count": 2}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "mock", "count": 55}

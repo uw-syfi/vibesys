@@ -117,9 +117,7 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/gate_runners.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/gate_runners.py", "rule": "subprocess", "count": 6}
 {"path": "libs/vs-sandbox/src/vs_sandbox/gate_runners.py", "rule": "threading", "count": 3}
-{"path": "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py", "rule": "subprocess", "count": 3}
-{"path": "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py", "rule": "threading", "count": 4}
-{"path": "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py", "rule": "wall_clock", "count": 1}
+{"path": "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/host_command_client.py", "rule": "signal", "count": 5}
 {"path": "libs/vs-sandbox/src/vs_sandbox/host_command_client.py", "rule": "socket", "count": 4}
 {"path": "libs/vs-sandbox/src/vs_sandbox/host_command_client.py", "rule": "threading", "count": 1}
@@ -391,7 +389,6 @@
 {"path": "tests/vibesys/backends/test_backend_registry_imports.py", "rule": "process", "count": 1}
 {"path": "tests/vibesys/backends/test_cpu_backend.py", "rule": "subprocess", "count": 1}
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "subprocess", "count": 1}
-{"path": "tests/vibesys/backends/test_gpu_monitor.py", "rule": "time", "count": 11}
 {"path": "tests/vibesys/loops/test_capture_runtime.py", "rule": "process", "count": 10}
 {"path": "tests/vibesys/loops/test_capture_runtime.py", "rule": "subprocess", "count": 3}
 {"path": "tests/vibesys/loops/test_profile_requirements.py", "rule": "process", "count": 2}

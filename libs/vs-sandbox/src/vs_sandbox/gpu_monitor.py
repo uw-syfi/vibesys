@@ -16,13 +16,17 @@ from __future__ import annotations
 
 import json
 import subprocess
-import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
+
+from vs_sim.api import Clock, OsThreads, SystemClock, Threads
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
+
+    from vs_sim.api import Worker
 GPU_QUERY_COLUMN_COUNT = 6
 GPU_PROCESS_QUERY_COLUMN_COUNT = 4
 
@@ -66,26 +70,10 @@ class ContentionStatus:
 # ---------------------------------------------------------------------------
 
 
-def query_gpu_info() -> list[GpuInfo]:
-    """Query ``nvidia-smi`` for per-GPU memory and utilisation."""
-    try:
-        result = subprocess.run(
-            [  # noqa: S607  # lint-waiver: LW-009048 [S607]; invoke the administrator-installed NVIDIA CLI by its standard executable name.
-                "nvidia-smi",
-                "--query-gpu=index,uuid,name,memory.used,memory.total,utilization.gpu",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return []
-    if result.returncode != 0:
-        return []
+def parse_gpu_info_output(raw: str) -> list[GpuInfo]:
+    """Parse ``nvidia-smi --query-gpu`` CSV into one :class:`GpuInfo` per well-formed row."""
     gpus: list[GpuInfo] = []
-    for line in result.stdout.strip().splitlines():
+    for line in raw.strip().splitlines():
         parts = [p.strip() for p in line.split(",")]
         if len(parts) < GPU_QUERY_COLUMN_COUNT:
             continue
@@ -105,36 +93,67 @@ def query_gpu_info() -> list[GpuInfo]:
     return gpus
 
 
-def pick_gpu(gpus: list[GpuInfo] | None = None) -> GpuInfo | None:
-    """Return the GPU with the most free memory, or *None* if unavailable."""
-    if gpus is None:
-        gpus = query_gpu_info()
+def pick_gpu(gpus: Sequence[GpuInfo]) -> GpuInfo | None:
+    """Return the GPU with the most free memory, or *None* if there is none."""
     if not gpus:
         return None
     return max(gpus, key=lambda g: g.memory_free_mib)
 
 
 # ---------------------------------------------------------------------------
-# Per-process query
+# Telemetry source
 # ---------------------------------------------------------------------------
 
 
-def _query_gpu_procs() -> str:
-    """Run ``nvidia-smi`` and return CSV of GPU compute processes."""
-    result = subprocess.run(
-        [  # noqa: S607  # lint-waiver: LW-009049 [S607]; invoke the administrator-installed NVIDIA CLI by its standard executable name.
-            "nvidia-smi",
-            "--query-compute-apps=pid,process_name,used_gpu_memory,gpu_uuid",
-            "--format=csv,noheader,nounits",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-    if result.returncode != 0:
-        return ""
-    return result.stdout
+class GpuTelemetry(Protocol):
+    """Where GPU state comes from; both reads are best effort and never raise for a missing driver."""
+
+    def gpus(self) -> list[GpuInfo]:
+        """Every GPU's memory and utilisation; empty when no GPU or no driver is present."""
+        ...
+
+    def compute_processes(self) -> str:
+        """``pid, process_name, used_gpu_memory, gpu_uuid`` CSV rows; empty when unavailable."""
+        ...
+
+
+class NvidiaSmiTelemetry:
+    """:class:`GpuTelemetry` read by running ``nvidia-smi``."""
+
+    def __init__(self, executable: str = "nvidia-smi", timeout: float = 10.0) -> None:
+        """Run *executable* (looked up on ``PATH`` when bare), giving up after *timeout* seconds."""
+        self._executable = executable
+        self._timeout = timeout
+
+    def gpus(self) -> list[GpuInfo]:
+        """Query per-GPU memory and utilisation."""
+        return parse_gpu_info_output(
+            self._query(
+                "--query-gpu=index,uuid,name,memory.used,memory.total,utilization.gpu",
+            )
+        )
+
+    def compute_processes(self) -> str:
+        """Query the GPU compute processes."""
+        return self._query("--query-compute-apps=pid,process_name,used_gpu_memory,gpu_uuid")
+
+    def _query(self, query: str) -> str:
+        try:
+            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-009048 [S603]; the executable is configuration and the query is a constant.
+                [self._executable, query, "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=self._timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        return result.stdout if result.returncode == 0 else ""
+
+
+# ---------------------------------------------------------------------------
+# Per-process query
+# ---------------------------------------------------------------------------
 
 
 def parse_gpu_process_output(raw: str) -> list[dict[str, Any]]:
@@ -186,22 +205,35 @@ class GpuContentionMonitor:
         UUID of the GPU to monitor (from :func:`pick_gpu`).
     interval:
         Seconds between checks (default 30).
+    telemetry:
+        Where GPU state is read from (``nvidia-smi`` by default).
+    threads:
+        The thread and event provider the polling loop runs on.
+    clock:
+        The epoch clock that stamps contention events.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692101 [PLR0913]; the monitor's three collaborators are keyword-only seams on top of its three settings.
         self,
         log_dir: Path,
         gpu_uuid: str,
         interval: float = 30.0,
+        *,
+        telemetry: GpuTelemetry | None = None,
+        threads: Threads | None = None,
+        clock: Clock | None = None,
     ) -> None:
         """Configure monitoring for one GPU UUID and polling interval."""
         self._log_dir = log_dir
         self._gpu_uuid = gpu_uuid
         self._interval = interval
+        self._telemetry: GpuTelemetry = telemetry or NvidiaSmiTelemetry()
+        self._threads: Threads = threads or OsThreads()
+        self._clock: Clock = clock or SystemClock()
 
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._lock = threading.Lock()
+        self._stop_event = self._threads.event()
+        self._thread: Worker | None = None
+        self._lock = self._threads.lock()
         self._status = ContentionStatus()
         self._baseline_pids: set[int] = set()
 
@@ -211,12 +243,7 @@ class GpuContentionMonitor:
         """Snapshot the baseline and start the monitoring thread."""
         self._baseline_pids = self._current_pids_on_gpu()
         self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._run,
-            name="gpu-contention-monitor",
-            daemon=True,
-        )
-        self._thread.start()
+        self._thread = self._threads.spawn(self._run, name="gpu-contention-monitor", daemon=True)
 
     def stop(self) -> None:
         """Signal the thread to stop and wait for it to exit."""
@@ -235,7 +262,7 @@ class GpuContentionMonitor:
     def _current_pids_on_gpu(self) -> set[int]:
         """Return the set of PIDs currently on the monitored GPU."""
         try:
-            raw = _query_gpu_procs()
+            raw = self._telemetry.compute_processes()
             procs = parse_gpu_process_output(raw)
         except Exception:  # noqa: BLE001  # lint-waiver: LW-009050 [BLE001]; GPU telemetry is best effort, and any driver failure must leave monitoring available.
             return set()
@@ -246,14 +273,14 @@ class GpuContentionMonitor:
         log_path = self._log_dir / "gpu_contention.jsonl"
         while not self._stop_event.is_set():
             try:
-                raw = _query_gpu_procs()
+                raw = self._telemetry.compute_processes()
                 procs = parse_gpu_process_output(raw)
                 gpu_procs = [p for p in procs if p["gpu_uuid"] == self._gpu_uuid]
 
                 new_procs = [p for p in gpu_procs if p["pid"] not in self._baseline_pids]
 
                 # Also grab current GPU-level stats
-                gpus = query_gpu_info()
+                gpus = self._telemetry.gpus()
                 gpu_info = next(
                     (g for g in gpus if g.uuid == self._gpu_uuid),
                     None,
@@ -263,7 +290,7 @@ class GpuContentionMonitor:
                     is_contended=len(new_procs) > 0,
                     new_procs=new_procs,
                     gpu=gpu_info,
-                    timestamp=datetime.now(UTC).isoformat(),
+                    timestamp=datetime.fromtimestamp(self._clock.now(), UTC).isoformat(),
                 )
                 with self._lock:
                     self._status = contention
