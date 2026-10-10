@@ -59,6 +59,11 @@ function campaignStreamPlugin(): Plugin {
           response.end(error instanceof Error ? error.message : String(error));
           return;
         }
+        // The client may already be gone by the time the awaits above resolve;
+        // `request.on('close', ...)` below would never fire for a close that
+        // already happened, leaking the timer and writing every frame into the
+        // void for the rest of this replay.
+        if (request.destroyed) return;
 
         const interval = clampInterval(
           new URL(request.url ?? '', 'http://localhost').searchParams.get('interval'),

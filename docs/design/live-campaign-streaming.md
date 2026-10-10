@@ -131,9 +131,13 @@ the fourth surfaced on recheck):
 
 1. **Workstream state is never projected.** `dynamic` holds the full lifecycle
    in `DynamicState.workstreams` (phase, attempts, candidate, review,
-   evaluation), but `dynamic/plugin.py`'s `_project()` exports only the
-   embedded `HypothesisState` and discards `workstreams`. Settlement makes
-   this worse, not just absent: once a workstream finishes, `Rounds.record()`
+   evaluation), but the read-model projection, `project_strategy_state()` in
+   `orchestration/dynamic/core_policy/_projection.py` (wired in through
+   `dynamic_core.py`'s `dynamic_projector()`; `dynamic/plugin.py` itself is
+   just a thin re-export of `dynamic_core_registration()` today), builds its
+   `AgentRunProjection` from `state.hypotheses`/`state.attempts` only and
+   never reads `workstreams`. Settlement makes this worse, not just absent:
+   once a workstream finishes, `Rounds.record()`
    (`orchestration/dynamic/rounds.py:78,384,494`) flattens it into a
    `RoundRecord` on the shared `HypothesisState`, the same aggregate `single`
    and `multi` write to directly. `DynamicWorkstream` itself never crosses
@@ -328,11 +332,14 @@ emission chokepoints (core `EventJournal`, bridged by `project_event()` into
 the server `WireJournal`) so no print statements are added:
 
 1. **Project workstream state, including its timing.** Extend
-   `dynamic/plugin.py`'s `_project()` to emit a typed workstream-lifecycle
-   event whenever a `DynamicWorkstream` changes phase, sourced from the
-   state the plugin already holds. Populate `startedAt`/`finishedAt` from
-   the emitting event's own `timestamp` (first and last event per
-   workstream), since no core type stores wall-clock time (gap 4): derive it
+   `project_strategy_state()` in
+   `orchestration/dynamic/core_policy/_projection.py` (called from
+   `dynamic_core.py`) to emit a typed workstream-lifecycle event whenever a
+   `DynamicWorkstream` changes phase, sourced from
+   `DynamicState.workstreams`, which this layer already has access to.
+   Populate `startedAt`/`finishedAt` from the emitting event's own
+   `timestamp` (first and last event per workstream), since no core type
+   stores wall-clock time (gap 4): derive it
    at the projection boundary, the same way the live fold in this prototype
    already does, rather than adding a parallel field to `DynamicWorkstream`.
 2. **Add workstream identity to the envelope.** The cheapest start is making
