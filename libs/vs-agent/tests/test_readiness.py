@@ -1,6 +1,6 @@
 """A provider CLI that cannot start a turn is reported before its first turn.
 
-The driver probes through agentshim, on the executor and environment a session
+The launcher probes through agentshim, on the executor and environment a session
 of the same spec runs with; the client turns a missing binary or a failed login
 into :class:`ProviderNotReadyError` and lets an unknown login state proceed.
 Everything is scripted with ``agentshim.testing``, so no CLI is needed.
@@ -19,13 +19,19 @@ from hypothesis import strategies as st
 
 from vs_agent.api import (
     AgentClient,
+    AgentExecutionPolicy,
+    AgentSessionSpec,
+    AgentTurnRequest,
     AuthStatus,
     ProviderNotReadyError,
     ReadinessProblem,
 )
+
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.client import AgentDiagnosticLog
-from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
-from vs_agent.drivers.agentshim import AgentShimDriver
+
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
+from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
 
 PROVIDERS = ("claude", "codex", "gemini", "opencode")
@@ -42,11 +48,11 @@ EXPECTED_STATUS = {
 
 @pytest.fixture(scope="module")
 def home(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A throwaway operator HOME: the driver prepares provider state under it."""
+    """A throwaway operator HOME: the launcher prepares provider state under it."""
     return tmp_path_factory.mktemp("operator-home")
 
 
-def _launcher(home: Path) -> dict[str, str]:
+def _env_of(home: Path) -> dict[str, str]:
     return {"PATH": "/usr/bin:/bin", "HOME": str(home), SANDBOX_DISABLE_ENV: "off"}
 
 
@@ -60,9 +66,9 @@ def _spec(root: Path, provider: str, role: str = "implementer") -> AgentSessionS
     )
 
 
-def _driver(provider: str, fake: FakeExecutor, home: Path) -> AgentShimDriver:
-    return AgentShimDriver(
-        provider=provider, executor_factory=lambda: fake, launcher_env=lambda: _launcher(home)
+def _launcher(provider: str, fake: FakeExecutor, home: Path) -> ConfinedSessionLauncher:
+    return ConfinedSessionLauncher(
+        provider=provider, executor_factory=lambda: fake, launcher_env=lambda: _env_of(home)
     )
 
 
@@ -92,9 +98,9 @@ def test_the_probe_translates_every_status_the_library_reports(
     provider: str, auth: agentshim.AuthState, *, installed: bool, home: Path
 ) -> None:
     fake = probe_executor(provider, auth=auth, installed=installed)
-    driver = _driver(provider, fake, home)
+    launcher = _launcher(provider, fake, home)
 
-    readiness = driver.probe_readiness(_spec(Path("/work"), provider))
+    readiness = launcher.probe_readiness(_spec(Path("/work"), provider))
 
     assert readiness.provider == provider
     assert readiness.binary_found is installed
@@ -115,12 +121,12 @@ def test_the_probe_runs_with_the_environment_a_session_turn_gets(
     tmp_path: Path, provider: str, home: Path
 ) -> None:
     fake = _probe_or_turn(provider, auth=agentshim.AuthState.KNOWN_OK, installed=True)
-    driver = _driver(provider, fake, home)
+    launcher = _launcher(provider, fake, home)
     spec = _spec(tmp_path, provider)
 
-    driver.probe_readiness(spec)
+    launcher.probe_readiness(spec)
     probe_envs = [dict(request.env) for request in fake.requests]
-    driver.create_session(spec).run_turn(AgentTurnRequest(message="go"))
+    launcher.launch(spec).run_turn(AgentTurnRequest(message="go"))
     turn_env = dict(fake.requests[-1].env)
 
     assert probe_envs
@@ -131,9 +137,9 @@ def test_the_probe_runs_with_the_environment_a_session_turn_gets(
 def _client(provider: str, fake: FakeExecutor, home: Path) -> tuple[AgentClient, io.StringIO]:
     log = io.StringIO()
     client = AgentClient(
-        _driver(provider, fake, home),
+        _launcher(provider, fake, home),
         provider=provider,
-        driver_log=AgentDiagnosticLog(log),
+        diagnostic_log=AgentDiagnosticLog(log),
         check_readiness=True,
     )
     return client, log
@@ -230,12 +236,12 @@ def test_a_failure_is_not_remembered_so_a_fixed_environment_is_rechecked(
     broken = _probe_or_turn(provider, auth=agentshim.AuthState.FAILED, installed=True)
     healthy = _probe_or_turn(provider, auth=agentshim.AuthState.KNOWN_OK, installed=True)
     current = [broken]
-    driver = AgentShimDriver(
+    launcher = ConfinedSessionLauncher(
         provider=provider,
         executor_factory=lambda: current[0],
-        launcher_env=lambda: _launcher(home),
+        launcher_env=lambda: _env_of(home),
     )
-    client = AgentClient(driver, provider=provider, check_readiness=True)
+    client = AgentClient(launcher, provider=provider, check_readiness=True)
 
     with pytest.raises(ProviderNotReadyError):
         _invoke(client, tmp_path)

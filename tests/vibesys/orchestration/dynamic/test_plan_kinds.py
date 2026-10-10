@@ -12,7 +12,6 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-import agentshim
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
@@ -42,6 +41,7 @@ from vibesys.run.evaluation_backend import (
     SemanticEvaluationIdentity,
     SemanticEvaluationStage,
 )
+from vs_agent.api import native_schema_problems
 from vs_evaluation.api import (
     AvailabilitySnapshot,
     ContentDigest,
@@ -152,9 +152,7 @@ def test_an_unknown_kind_is_rejected_naming_the_kinds(
 
 def test_the_reply_schema_is_in_the_strict_provider_subset() -> None:
     """Codex's strict structured output rejects ``oneOf``; the union is ``anyOf``."""
-    schema = agentshim.normalize(PortfolioPlan.model_json_schema(), agentshim.SchemaDialect.STRICT)
-
-    assert agentshim.dialect_problems(schema, agentshim.SchemaDialect.STRICT) == []
+    assert native_schema_problems(PortfolioPlan, "codex") == []
 
 
 @given(

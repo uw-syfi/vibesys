@@ -18,7 +18,7 @@ from vs_agent.api import (
     AgentTurnRequest,
     SessionScope,
 )
-from vs_agent.api.testing import FakeAgentSessions, FakeDriver
+from vs_agent.api.testing import FakeAgentSessions, FakeProvider
 from vs_evaluation.api import (
     ContentDigest,
     EvaluationAgentRole,
@@ -421,7 +421,7 @@ def _continuation_transport(
     calls: list[AgentTurnRequest] = []
     # The resumed reply carries prose with braces on both sides, as an agent's does.
     text = f"I replaced {{}} with a list.\n{response.model_dump_json()}\n}}"
-    client = AgentClient(FakeDriver(answer=text, on_turn=calls.append))
+    client = AgentClient(FakeProvider(answer=text, on_turn=calls.append))
     key = AgentSessionKey(SessionScope.MEMBER, "profiler:conversation-1")
     spec = AgentSessionSpec(
         role=role.id,

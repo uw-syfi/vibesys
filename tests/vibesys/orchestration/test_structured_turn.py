@@ -28,7 +28,7 @@ from vs_agent.api import (
     SessionResumeError,
     Unknown,
 )
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
     AgentCapability,
@@ -55,7 +55,7 @@ def test_fake_structured_reply_serializes_nested_typed_models(
 ) -> None:
     expected = _ReplyBatch(replies=tuple(_Reply(value=value) for value in values))
     if implementation == "driver":
-        client = AgentClient(FakeDriver(answer={"replies": list(expected.replies)}))
+        client = AgentClient(FakeProvider(answer={"replies": list(expected.replies)}))
         try:
             result = client.run(
                 session_spec=AgentSessionSpec(

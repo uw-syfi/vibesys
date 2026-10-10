@@ -16,7 +16,7 @@ from vs_agent.api import (
     AgentSessionSpec,
     AgentTurnRequest,
 )
-from vs_agent.drivers.fake import FakeDriver, FakeTurnScript
+from vs_agent.api.testing import FakeProvider, FakeTurnScript
 from vs_runtime.api.core import report_turns
 from vs_runtime.api.infrastructure import (
     AgentExecutionFinished,
@@ -72,7 +72,7 @@ def test_every_dispatched_turn_is_one_start_and_one_finish(
     answer = AgentOutputSchemaError(message) if outcome == "schema_error" else {"value": 1}
     lifecycle = FakeAgentExecutionLifecycleSink()
     client = report_turns(
-        AgentClient(FakeDriver(script=FakeTurnScript((answer,)), on_turn=on_turn)), lifecycle
+        AgentClient(FakeProvider(script=FakeTurnScript((answer,)), on_turn=on_turn)), lifecycle
     )
     turn = AgentTurnRequest(
         message=message,

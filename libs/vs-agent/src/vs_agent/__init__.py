@@ -1,4 +1,4 @@
-"""``vs_agent``: driver-neutral agent execution library.
+"""``vs_agent``: provider-neutral agent execution library.
 
 This top-level package intentionally exposes nothing. Import the public
 surface from :mod:`vs_agent.api`, and the owned test doubles from

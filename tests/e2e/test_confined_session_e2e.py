@@ -1,4 +1,4 @@
-"""The AgentShim driver against the real provider CLIs.
+"""The confined session launcher against the real provider CLIs.
 
 Skipped unless ``VIBESYS_E2E_AGENTS=1`` and the provider binary is on PATH, so
 an ordinary ``pytest`` run needs no credentials and makes no network calls:
@@ -7,7 +7,7 @@ an ordinary ``pytest`` run needs no credentials and makes no network calls:
 VIBESYS_E2E_AGENTS=1 uv run pytest tests/e2e -q -p no:cacheprovider -s
 ```
 
-What is proven here is the driver's host path end to end, not the library's:
+What is proven here is the launcher's host path end to end, not the library's:
 a real conversation resumes, a real structured turn parses, and a real
 session-scoped stdio MCP server is reachable from inside host confinement.
 The prompts are deliberately tiny; each case is one or two paid turns.
@@ -37,15 +37,14 @@ from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnRequest,
-    SessionDisposition,
 )
-from vs_agent.drivers.agentshim import AgentShimDriver
+from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from vs_agent.contracts import AgentSession
+    from vs_agent.shim_turns import LaunchedSession
 
 ENABLE_ENV = "VIBESYS_E2E_AGENTS"
 
@@ -160,10 +159,10 @@ def _session(
     *,
     host_resources: tuple[HostResource, ...] = (),
     spec_fields: dict[str, Any] | None = None,
-) -> Iterator[AgentSession]:
-    """Open one driver session and close its driver afterwards."""
-    driver = AgentShimDriver(provider=provider, timeout=TURN_TIMEOUT_S, log=print)
-    session = driver.create_session(
+) -> Iterator[LaunchedSession]:
+    """Launch one session and close its launcher afterwards."""
+    launcher = ConfinedSessionLauncher(provider=provider, timeout=TURN_TIMEOUT_S, log=print)
+    session = launcher.launch(
         AgentSessionSpec(
             role="e2e",
             provider=provider,
@@ -179,7 +178,7 @@ def _session(
     try:
         yield session
     finally:
-        driver.close()
+        launcher.close()
 
 
 def _report(label: str, **values: object) -> None:
@@ -248,7 +247,7 @@ def test_a_second_turn_resumes_the_same_conversation(
         assert "juniper" in second.text.lower()
         # The conversation is what has to survive; the same id on both turns is
         # the proof the second one resumed rather than replayed.
-        assert first.disposition is SessionDisposition.REUSABLE
+        assert not first.restarted
         assert second.provider_session_id == first.provider_session_id
 
 

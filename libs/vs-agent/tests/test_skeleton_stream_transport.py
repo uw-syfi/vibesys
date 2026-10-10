@@ -1,6 +1,6 @@
 """The skeleton run, with its implementer behind a stream transport in a container.
 
-The same full run as ``test_skeleton``, but the provider is the production driver over
+The same full run as ``test_skeleton``, but the provider is the production launcher over
 agentshim's long-lived Claude and Codex transports, against scripted far ends. A fault plan
 breaks the process or replaces the container in the middle of the implementer's turn, and the
 run must still reach a typed terminal state without the provider seeing the turn twice.
@@ -26,10 +26,10 @@ from tests.support.skeleton_world import (
     finished,
     open_skeleton_world,
 )
-from tests.support.stream_peers import answering_with
 from tests.support.stream_session_world import StreamHost, open_stream_host
 
 from vs_agent.api import AgentExecutionPolicy, AgentSessionSpec
+from vs_agent.api.testing import answering_with
 from vs_faults.api import Boundary, FaultPlan, FaultRule, ProcessFault
 from vs_prompts.api import TemplateRenderer
 

@@ -21,7 +21,6 @@ from vs_agent.contracts import (
     AgentSessionSpec,
     AgentTurnRequest,
     AgentTurnResult,
-    SessionDisposition,
     session_spec_fingerprint,
 )
 from vs_agent.runner import parse_typed_response
@@ -98,7 +97,7 @@ class Completed(_InvocationObservation):
         if (
             self.session_key != self.checkpoint.session_key
             or self.result.provider_session_id != self.checkpoint.provider_session_id
-            or self.result.disposition is not SessionDisposition.REUSABLE
+            or self.result.restarted
         ):
             message = "completed invocation must preserve its checkpoint conversation"
             raise ValueError(message)

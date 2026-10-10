@@ -6,22 +6,25 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from agentshim.testing import FakeExecutor, TokenUsage, scripted_turn
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.run_execution import run_execution_record
 
 from vs_agent.api import (
     AgentClient,
-    AgentEvent,
-    AgentEventKind,
     AgentSessionKey,
     AgentSessionState,
-    AgentUsage,
     DurableSessionStore,
     SessionScope,
 )
-from vs_agent.api.testing import FakeDriver, fake_agentshim_driver
+from vs_agent.api.testing import (
+    FakeExecutor,
+    FakeProvider,
+    TokenUsage,
+    fake_agentshim_launcher,
+    scripted_turn,
+    usage,
+)
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 TOKEN_FIELDS = (
@@ -50,10 +53,8 @@ def _resumed_records(root: Path, *, cumulative: int, increment: int) -> list[dic
     slot = project.state.local_namespace("run-1", "agent").slot("sessions.json", AgentSessionState)
     store = DurableSessionStore(slot)
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
-    first_driver = FakeDriver(
-        turn=[AgentEvent(AgentEventKind.USAGE, usage=AgentUsage(input_tokens=100))]
-    )
-    with AgentClient(first_driver, provider="codex", session_store=store, log_dir=root) as client:
+    first_provider = FakeProvider(turn=[usage(input_tokens=100, output_tokens=0)])
+    with AgentClient(first_provider, provider="codex", session_store=store, log_dir=root) as client:
         _invoke(client, root, key)
     checkpoint = store.get(key)
     assert checkpoint is not None
@@ -68,8 +69,8 @@ def _resumed_records(root: Path, *, cumulative: int, increment: int) -> list[dic
             for count in (cumulative, cumulative + increment)
         ]
     )
-    driver = fake_agentshim_driver(provider="codex", executor=executor)
-    with AgentClient(driver, provider="codex", session_store=store, log_dir=root) as client:
+    launcher = fake_agentshim_launcher(provider="codex", executor=executor)
+    with AgentClient(launcher, provider="codex", session_store=store, log_dir=root) as client:
         _invoke(client, root, key)
         _invoke(client, root, key)
     assert "resume" in executor.requests[1].argv

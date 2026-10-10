@@ -3,7 +3,7 @@
 Two inputs used to leak from the operator into every agent session: their own
 CLI configuration (settings, hooks, global instructions, memory in the
 provider's state root) and their shell environment (credentials for unrelated
-services, the parent agent's session variables, sockets). The driver now asks
+services, the parent agent's session variables, sockets). The launcher now asks
 agentshim for ``ConfigScope.PROJECT`` wherever the provider supports it, gives
 a provider that can only isolate in a dedicated state root a run-owned home,
 and passes a session only an allowlisted part of the launcher environment.
@@ -24,9 +24,15 @@ from agentshim.testing import FakeExecutor, scripted_turn
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from vs_agent.api import session_env_allowlist
-from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
-from vs_agent.drivers.agentshim import AgentShimDriver
+from vs_agent.api import (
+    AgentExecutionPolicy,
+    AgentSessionSpec,
+    AgentTurnRequest,
+    session_env_allowlist,
+)
+
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
+from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
 
 if TYPE_CHECKING:
@@ -63,7 +69,7 @@ def _operator_home(root: Path) -> Path:
     return home
 
 
-def _launcher(home: Path, extra: Mapping[str, str] = OPERATOR_ONLY) -> dict[str, str]:
+def _env_of(home: Path, extra: Mapping[str, str] = OPERATOR_ONLY) -> dict[str, str]:
     return {
         "PATH": "/usr/bin:/bin",
         "HOME": str(home),
@@ -91,23 +97,23 @@ def _turn(
     spec: AgentSessionSpec,
     *,
     agent_homes: Path | None,
-    launcher: Mapping[str, str],
+    operator_env: Mapping[str, str],
     passthrough: tuple[str, ...] = (),
-) -> tuple[AgentShimDriver, agentshim.CommandRequest, list[str]]:
+) -> tuple[ConfinedSessionLauncher, agentshim.CommandRequest, list[str]]:
     provider = spec.provider
     fake = FakeExecutor(scripted_turn(provider, text="ok"))
     logs: list[str] = []
-    driver = AgentShimDriver(
+    launcher = ConfinedSessionLauncher(
         provider=provider,
         executor_factory=lambda: fake,
         agent_homes=agent_homes,
         env_passthrough=passthrough,
-        launcher_env=lambda: launcher,
+        launcher_env=lambda: operator_env,
         log=logs.append,
     )
-    session = driver.create_session(spec)
+    session = launcher.launch(spec)
     session.run_turn(AgentTurnRequest(message="go"))
-    return driver, fake.requests[-1], logs
+    return launcher, fake.requests[-1], logs
 
 
 def _scope_args(profile: agentshim.ProviderProfile, env: Mapping[str, str]) -> list[str]:
@@ -140,13 +146,15 @@ def test_every_role_loads_no_operator_configuration_where_the_provider_can_enfor
 ) -> None:
     profile = agentshim.get_provider(provider).profile
     isolates = agentshim.ConfigScope.PROJECT in profile.config_scopes
-    launcher = _launcher(_operator_home(tmp_path))
+    operator_env = _env_of(_operator_home(tmp_path))
 
-    driver, request, logs = _turn(
-        _spec(tmp_path, provider, role), agent_homes=tmp_path / "agent-homes", launcher=launcher
+    launcher, request, logs = _turn(
+        _spec(tmp_path, provider, role),
+        agent_homes=tmp_path / "agent-homes",
+        operator_env=operator_env,
     )
 
-    assert driver.capabilities.config_isolation is isolates
+    assert launcher.capabilities.config_isolation is isolates
     assert any("operator's own CLI configuration" in line for line in logs) is not isolates
     if isolates:
         added = _scope_args(profile, request.env)
@@ -166,10 +174,10 @@ def test_a_codex_home_shares_the_operators_login_and_survives_across_sessions(
 ) -> None:
     operator = _operator_home(tmp_path)
     homes = tmp_path / "agent-homes"
-    _turn(_spec(tmp_path, "codex"), agent_homes=homes, launcher=_launcher(operator))
+    _turn(_spec(tmp_path, "codex"), agent_homes=homes, operator_env=_env_of(operator))
     (homes / "codex" / "sessions" / "rollout.jsonl").write_text("{}")
 
-    _turn(_spec(tmp_path, "codex"), agent_homes=homes, launcher=_launcher(operator))
+    _turn(_spec(tmp_path, "codex"), agent_homes=homes, operator_env=_env_of(operator))
 
     login = homes / "codex" / "auth.json"
     assert login.resolve() == (operator / ".codex" / "auth.json").resolve()
@@ -179,10 +187,12 @@ def test_a_codex_home_shares_the_operators_login_and_survives_across_sessions(
 def test_codex_without_a_run_home_keeps_the_operator_configuration_and_says_so(
     tmp_path: Path,
 ) -> None:
-    launcher = _launcher(_operator_home(tmp_path))
-    driver, request, logs = _turn(_spec(tmp_path, "codex"), agent_homes=None, launcher=launcher)
+    operator_env = _env_of(_operator_home(tmp_path))
+    launcher, request, logs = _turn(
+        _spec(tmp_path, "codex"), agent_homes=None, operator_env=operator_env
+    )
 
-    assert driver.capabilities.config_isolation is False
+    assert launcher.capabilities.config_isolation is False
     assert "CODEX_HOME" not in request.env
     assert any("operator's own CLI configuration" in line for line in logs)
 
@@ -207,13 +217,13 @@ def test_no_variable_outside_the_allowlist_or_the_run_reaches_a_session(
     passthrough: list[str],
 ) -> None:
     root = tmp_path_factory.mktemp("case")
-    launcher = _launcher(_operator_home(root), {**OPERATOR_ONLY, **extra})
+    operator_env = _env_of(_operator_home(root), {**OPERATOR_ONLY, **extra})
     profile = agentshim.get_provider(provider).profile
 
-    _driver, request, _logs = _turn(
+    _launcher, request, _logs = _turn(
         _spec(root, provider),
         agent_homes=root / "agent-homes",
-        launcher=launcher,
+        operator_env=operator_env,
         passthrough=tuple(passthrough),
     )
 
@@ -222,13 +232,13 @@ def test_no_variable_outside_the_allowlist_or_the_run_reaches_a_session(
     assert leaked == set()
     # A passthrough name the launcher sets does reach the session.
     for name in passthrough:
-        if name in launcher:
-            assert request.env[name] == launcher[name] or name == profile.state_root_env
+        if name in operator_env:
+            assert request.env[name] == operator_env[name] or name == profile.state_root_env
 
 
 def test_an_env_passthrough_entry_that_is_not_a_variable_name_is_rejected() -> None:
     with pytest.raises(ValueError, match="'BAD-NAME'"):
-        AgentShimDriver(provider="claude", env_passthrough=("BAD-NAME",))
+        ConfinedSessionLauncher(provider="claude", env_passthrough=("BAD-NAME",))
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
@@ -238,10 +248,10 @@ def test_an_operator_gpu_pin_reaches_the_session(tmp_path: Path, provider: str) 
         "HIP_VISIBLE_DEVICES": "1",
         "ROCR_VISIBLE_DEVICES": "1",
     }
-    launcher = _launcher(_operator_home(tmp_path), {**OPERATOR_ONLY, **pins})
+    operator_env = _env_of(_operator_home(tmp_path), {**OPERATOR_ONLY, **pins})
 
-    _driver, request, _logs = _turn(
-        _spec(tmp_path, provider), agent_homes=tmp_path / "agent-homes", launcher=launcher
+    _launcher, request, _logs = _turn(
+        _spec(tmp_path, provider), agent_homes=tmp_path / "agent-homes", operator_env=operator_env
     )
 
     assert {name: request.env[name] for name in pins} == pins
@@ -257,20 +267,20 @@ def test_the_dropped_launcher_variable_names_are_logged_once_and_never_their_val
         "KEPT": launcher_value,
         "CUDA_VISIBLE_DEVICES": "0",
     }
-    launcher = _launcher(_operator_home(tmp_path), extra)
+    operator_env = _env_of(_operator_home(tmp_path), extra)
     spec = _spec(tmp_path, "claude")
     logs: list[str] = []
-    driver = AgentShimDriver(
+    launcher = ConfinedSessionLauncher(
         provider="claude",
         executor_factory=lambda: FakeExecutor(scripted_turn("claude", text="ok")),
         agent_homes=tmp_path / "agent-homes",
         env_passthrough=("KEPT",),
-        launcher_env=lambda: launcher,
+        launcher_env=lambda: operator_env,
         log=logs.append,
     )
 
     for _ in range(2):
-        driver.create_session(spec).run_turn(AgentTurnRequest(message="go"))
+        launcher.launch(spec).run_turn(AgentTurnRequest(message="go"))
 
     lines = [line for line in logs if line.startswith("[env]")]
     assert len(lines) == 1

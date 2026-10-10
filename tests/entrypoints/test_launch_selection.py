@@ -20,7 +20,7 @@ from launch import (
 from launch.agents import BuiltInSessionAgents
 from vibesys.api import AuxiliaryAgentLaunch, OrchestrationRegistry, RunReady
 from vs_agent.api import AgentClient
-from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDriver
+from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeProvider
 from vs_project.api import Project
 from vs_runtime.api import AgentCapability, AgentRole, OrchestrationPlugin, Run, RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend
@@ -221,7 +221,7 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool
         LaunchSettings(
             registry=registry,
             agent_client_factory=lambda **_kwargs: AgentClient(
-                FakeDriver(answer={"value": "ready"})
+                FakeProvider(answer={"value": "ready"})
             ),
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
             invocation_store_factory=factory if injected else None,

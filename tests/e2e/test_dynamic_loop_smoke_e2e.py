@@ -71,9 +71,8 @@ from vibesys.api import ComputeBackend, ProfilerKind, RunStatus
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.events import CoreEventType
 from vs_agent.api import AgentClient
-from vs_agent.drivers.fake import (
-    FAKE_CAPABILITIES,
-    FakeDriver,
+from vs_agent.api.testing import (
+    FakeProvider,
     FakeTurnScript,
     assistant_text,
     thinking,
@@ -93,7 +92,8 @@ if TYPE_CHECKING:
 
     from vibesys.api import CoreEvent, RunRequest, RunResult, Runs
     from vs_agent.api import AgentEventSink, AgentSpec, SessionStore
-    from vs_agent.contracts import AgentSession, AgentSessionSpec, AgentTurnRequest
+    from vs_agent.contracts import AgentCapabilities, AgentSessionSpec, AgentTurnRequest
+    from vs_agent.shim_turns import LaunchedSession
 
     type Events = list[dict[str, object]]
 
@@ -575,21 +575,24 @@ _IMPLEMENTED = {
 _JUDGED = {"passed": True, "analysis": "The change is correct.", "feedback": ""}
 
 
-class _RoleDrivers:
-    """An agent driver that gives each role its own scripted provider behavior.
+class _RoleLaunchers:
+    """A session launcher that gives each role its own scripted provider behavior.
 
-    Every session is a real ``FakeDriver`` session, so scripted provider events leave
+    Every session is a real ``FakeProvider`` session, so scripted provider events leave
     through the real ``AgentClient`` and its event sink, the route a production CLI
-    driver's events take. The implementer edits its workspace before it replies, so the
+    session's events take. The implementer edits its workspace before it replies, so the
     candidate differs from the baseline and the trusted benchmark can tell them apart.
     """
 
-    capabilities = FAKE_CAPABILITIES
+    @property
+    def capabilities(self) -> AgentCapabilities:
+        """What every scripted role honors; the roles share one fake's capabilities."""
+        return FakeProvider(turn=[assistant_text("")]).capabilities
 
     def __init__(self) -> None:
-        self._drivers: list[FakeDriver] = []
+        self._launchers: list[FakeProvider] = []
 
-    def create_session(self, spec: AgentSessionSpec) -> AgentSession:
+    def launch(self, spec: AgentSessionSpec) -> LaunchedSession:
         waiting: dict[str, object] = {"kind": "waiting_for_evaluation", "handles": []}
 
         def measure_own_edit(turn: AgentTurnRequest) -> None:
@@ -622,7 +625,7 @@ class _RoleDrivers:
             waiting["handles"] = [handle]
 
         scripts = {
-            ORCHESTRATOR.id: FakeDriver(
+            ORCHESTRATOR.id: FakeProvider(
                 turn=[
                     thinking("Reading the baseline."),
                     todo_write([("Find the bottleneck", "in_progress")]),
@@ -631,7 +634,7 @@ class _RoleDrivers:
                 ],
                 answer=_PLAN,
             ),
-            IMPLEMENTER.id: FakeDriver(
+            IMPLEMENTER.id: FakeProvider(
                 turn=[
                     tool_call("Bash", {"command": "sed -i s/1/2/ queue.py"}),
                     tool_result("edited queue.py"),
@@ -641,15 +644,15 @@ class _RoleDrivers:
                 script=FakeTurnScript(answers=(waiting, _IMPLEMENTED)),
                 on_turn=measure_own_edit,
             ),
-            JUDGE.id: FakeDriver(turn=[assistant_text("The change is correct.")], answer=_JUDGED),
+            JUDGE.id: FakeProvider(turn=[assistant_text("The change is correct.")], answer=_JUDGED),
         }
-        driver = scripts[spec.role]
-        self._drivers.append(driver)
-        return driver.create_session(spec)
+        launcher = scripts[spec.role]
+        self._launchers.append(launcher)
+        return launcher.launch(spec)
 
     def close(self) -> None:
-        for driver in self._drivers:
-            driver.close()
+        for launcher in self._launchers:
+            launcher.close()
 
 
 def _core_agents(
@@ -661,7 +664,7 @@ def _core_agents(
 ) -> AgentClient:
     """The production agent client over role-scripted fake providers."""
     return AgentClient(
-        _RoleDrivers(),
+        _RoleLaunchers(),
         provider=spec.provider,
         model_name=spec.model,
         session_store=session_store,

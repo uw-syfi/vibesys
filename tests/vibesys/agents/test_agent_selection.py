@@ -17,7 +17,7 @@ from vs_agent.api import (
     AgentClient,
     AgentSpec,
     ProviderNotReadyError,
-    agent_driver_supports_tool_servers,
+    agent_supports_tool_servers,
     build_agent_client,
 )
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
@@ -90,7 +90,7 @@ def test_agentshim_docker_configuration_is_preserved() -> None:
 def test_preflight_capabilities_match_constructed_driver() -> None:
     config = _config(backend="cli", cli_provider="codex")
     spec = agent_spec_from_config(config)
-    declared = agent_driver_supports_tool_servers(spec)
+    declared = agent_supports_tool_servers(spec)
     client = _build(config)
 
     assert declared is True
@@ -101,7 +101,7 @@ def test_non_cli_backend_has_no_external_driver_capabilities() -> None:
     config = _config(backend="stub")
     spec = agent_spec_from_config(config)
 
-    assert agent_driver_supports_tool_servers(spec) is None
+    assert agent_supports_tool_servers(spec) is None
 
 
 def test_agentshim_client_passes_model_and_log_dir(tmp_path: Path) -> None:

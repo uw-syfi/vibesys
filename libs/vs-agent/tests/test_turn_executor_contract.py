@@ -12,7 +12,6 @@ from vs_agent.api import (
     AgentCapabilities,
     AgentClient,
     AgentEvent,
-    AgentEventKind,
     AgentExecutionPolicy,
     AgentSessionKey,
     AgentSessionSpec,
@@ -24,7 +23,12 @@ from vs_agent.api import (
     SessionResumeError,
     SessionScope,
 )
-from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDriver
+from vs_agent.api.testing import (
+    FakeAgentClient,
+    FakeAgentInvocationStore,
+    FakeProvider,
+    assistant_text,
+)
 from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
@@ -50,10 +54,10 @@ def test_executor_initial_and_strict_continuation_share_one_conversation(
     calls: list[object] = []
     if implementation == "client":
         executor = AgentClient(
-            FakeDriver(
+            FakeProvider(
                 answer={"value": 7},
                 on_turn=calls.append,
-                turn=[AgentEvent(kind=AgentEventKind.TEXT, text='{"value":7}')],
+                turn=[assistant_text('{"value":7}')],
             )
         )
     else:
@@ -100,10 +104,8 @@ def test_executor_initial_and_strict_continuation_share_one_conversation(
         observer = Observer()
         result = executor.run(session_spec=spec, turn=strict, session_key=key, observer=observer)
         assert result.provider_session_id == first.checkpoint.provider_session_id
-        text = "".join(
-            event.text or "" for event in observer.events if event.kind is AgentEventKind.TEXT
-        )
-        assert Reply.model_validate_json(text) == Reply(value=7)
+        # A structured turn's raw payload reaches the caller as the turn result.
+        assert Reply.model_validate_json(result.text) == Reply(value=7)
         assert len(calls) == 3
     finally:
         executor.close()
@@ -114,7 +116,7 @@ def test_cancelling_and_releasing_one_key_leaves_the_client_usable_for_others(
     tmp_path: Path, implementation: str
 ) -> None:
     if implementation == "client":
-        executor: AgentTurnExecutor = AgentClient(FakeDriver(answer={"value": 7}))
+        executor: AgentTurnExecutor = AgentClient(FakeProvider(answer={"value": 7}))
     else:
         fake = FakeAgentClient(
             capabilities=AgentCapabilities(provider_session_resume=True, session_reuse=True)

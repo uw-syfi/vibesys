@@ -27,7 +27,7 @@ from vs_agent.api import (
     AgentSpec,
     AgentTurnRequest,
 )
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
 from vs_core.api import ArtifactId, ArtifactRef, CancelTurn, DispatchTurn, ObservationStatus
 from vs_runtime.api import AgentRole, ArtifactStore, RuntimeContractError, WorkspaceAccess
 from vs_runtime.api.core import (
@@ -127,7 +127,7 @@ class Run:
             session_spec=spec,
         )
         client = report_turns(
-            AgentClient(FakeDriver(answer={"value": 7}, on_turn=self.provider.on_turn)),
+            AgentClient(FakeProvider(answer={"value": 7}, on_turn=self.provider.on_turn)),
             self.lifecycle,
         )
         self.executors = open_session_requests(

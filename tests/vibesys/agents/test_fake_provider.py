@@ -1,8 +1,8 @@
-"""Contract tests for the fake agent driver.
+"""Contract tests for the fake provider.
 
 The fake is only useful if it reaches the rest of the system by the same
-route a real driver does, so these tests assert on explicitly collected core
-events while an ``AgentClient`` runs a turn, never on the driver's internals.
+route a real provider does, so these tests assert on explicitly collected core
+events while an ``AgentClient`` runs a turn, never on the provider's internals.
 """
 
 from __future__ import annotations
@@ -26,19 +26,19 @@ from vibesys.events import (
 )
 from vibesys.hypothesis import OrchestratorPlan
 from vs_agent.api import NULL_AGENT_EVENT_SINK, AgentClient
-from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
-from vs_agent.drivers.fake import (
-    FakeDriver,
-    FakeDriverError,
+from vs_agent.api.testing import (
+    FakeProvider,
+    FakeProviderError,
     assistant_text,
     thinking,
     todo_write,
     tool_call,
     tool_result,
 )
-from vs_agent.drivers.fake import (
+from vs_agent.api.testing import (
     usage as usage_event,
 )
+from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -46,25 +46,25 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def sink_events() -> list[CoreEvent]:
-    """Own the events emitted by one fake-driver test."""
+    """Own the events emitted by one fake-provider test."""
     return []
 
 
 def _invoke_plan(
-    driver: FakeDriver,
+    provider: FakeProvider,
     workspace: Path,
     *,
     round_label: str = "round 1",
     events: list[CoreEvent] | None = None,
 ) -> OrchestratorPlan:
-    """Run one orchestrator turn through the real client for ``driver``.
+    """Run one orchestrator turn through the real client for ``provider``.
 
     The client is left open: the caller may run further turns on the same
-    driver, and closing it would close the driver with it.
+    provider, and closing it would close the provider with it.
     """
     event_sink = NULL_AGENT_EVENT_SINK if events is None else CoreAgentEventSink(events.append)
     client = AgentClient(
-        driver,
+        provider,
         provider="mock",
         model_name="mock-model",
         event_sink=event_sink,
@@ -88,7 +88,7 @@ def _plan_answer(hypothesis_id: str = "H-01") -> OrchestratorPlan:
     return OrchestratorPlan(
         hypothesis_id=hypothesis_id,
         hypothesis="explicit fake hypothesis",
-        task="exercise the fake driver",
+        task="exercise the fake provider",
         pass_criteria=criteria,
         reasoning="explicit fake answer",
     )
@@ -96,7 +96,7 @@ def _plan_answer(hypothesis_id: str = "H-01") -> OrchestratorPlan:
 
 def test_scripted_mode_answers_a_structured_turn(tmp_path: Path) -> None:
     plan = _invoke_plan(
-        FakeDriver(turn=[assistant_text("planning...")], answer=_plan_answer()),
+        FakeProvider(turn=[assistant_text("planning...")], answer=_plan_answer()),
         tmp_path,
     )
 
@@ -128,12 +128,14 @@ def test_scripted_mode_publishes_the_whole_agent_event_vocabulary(
         + [usage_event(input_tokens=1200, output_tokens=300)] * usage_updates
     )
 
-    _invoke_plan(FakeDriver(turn=events, answer=_plan_answer()), tmp_path, events=sink_events)
+    _invoke_plan(FakeProvider(turn=events, answer=_plan_answer()), tmp_path, events=sink_events)
 
-    assistant = [
-        event
+    # The turn is structured, so its assistant text is the raw schema payload
+    # and production routes it to the diagnostic channel, never the assistant one.
+    streamed_text = [
+        event.data.content
         for event in _of_type(sink_events, CoreEventType.AGENT_OUTPUT_CHUNK)
-        if isinstance(event.data, AgentOutputChunkData) and event.data.channel == "assistant"
+        if isinstance(event.data, AgentOutputChunkData) and event.data.channel == "diagnostic"
     ]
     analysis = [
         event
@@ -149,7 +151,9 @@ def test_scripted_mode_publishes_the_whole_agent_event_vocabulary(
     todos = _of_type(sink_events, CoreEventType.TODO_UPDATE)
     usage = _of_type(sink_events, CoreEventType.USAGE_UPDATE)
 
-    assert len(assistant) >= text_chunks
+    assert [f"chunk {i}" for i in range(text_chunks)] == [
+        text for text in streamed_text if text.startswith("chunk ")
+    ]
     assert len(analysis) == thinking_chunks
     assert len(seen_tool_calls) == tool_calls
     assert len(tool_results) == tool_calls
@@ -161,7 +165,7 @@ def test_scripted_tool_results_carry_the_configured_payload_size(
     tmp_path: Path, sink_events: list[CoreEvent]
 ) -> None:
     _invoke_plan(
-        FakeDriver(
+        FakeProvider(
             turn=[tool_call("Bash", {"command": "x"}), tool_result("y" * 4096)],
             answer=_plan_answer(),
         ),
@@ -186,7 +190,7 @@ def test_scripted_tool_calls_and_results_are_correlated(
         for event in (tool_call("Bash", {"command": f"cmd-{i}"}), tool_result(f"out-{i}"))
     ]
 
-    _invoke_plan(FakeDriver(turn=events, answer=_plan_answer()), tmp_path, events=sink_events)
+    _invoke_plan(FakeProvider(turn=events, answer=_plan_answer()), tmp_path, events=sink_events)
 
     call_ids = [
         event.data.call_id
@@ -207,7 +211,7 @@ def test_scripted_todos_arrive_as_a_provider_plan_snapshot(
     tmp_path: Path, sink_events: list[CoreEvent]
 ) -> None:
     _invoke_plan(
-        FakeDriver(
+        FakeProvider(
             turn=[
                 todo_write(
                     [
@@ -234,7 +238,7 @@ def test_scripted_usage_reaches_the_sink_as_a_usage_update(
     tmp_path: Path, sink_events: list[CoreEvent]
 ) -> None:
     _invoke_plan(
-        FakeDriver(
+        FakeProvider(
             turn=[usage_event(input_tokens=1000, output_tokens=120)],
             answer=_plan_answer(),
         ),
@@ -251,13 +255,13 @@ def test_scripted_usage_reaches_the_sink_as_a_usage_update(
 
 
 def test_explicit_structured_answer_is_reused_across_turns(tmp_path: Path) -> None:
-    driver = FakeDriver(
+    provider = FakeProvider(
         turn=[assistant_text("planning...")],
         answer=_plan_answer("configured"),
     )
 
-    first = _invoke_plan(driver, tmp_path, round_label="round 1")
-    third = _invoke_plan(driver, tmp_path, round_label="round 3")
+    first = _invoke_plan(provider, tmp_path, round_label="round 1")
+    third = _invoke_plan(provider, tmp_path, round_label="round 3")
 
     assert first.hypothesis_id == "configured"
     assert third.hypothesis_id == "configured"
@@ -267,7 +271,7 @@ def test_events_are_scoped_to_the_invoking_role_and_round(
     tmp_path: Path, sink_events: list[CoreEvent]
 ) -> None:
     _invoke_plan(
-        FakeDriver(
+        FakeProvider(
             turn=[tool_call("Bash", {"command": "x"}), tool_result("ok")],
             answer=_plan_answer(),
         ),
@@ -287,8 +291,8 @@ def test_an_unscripted_response_schema_is_rejected_rather_than_faked(tmp_path: P
     class UnknownResponse(BaseModel):
         answer: str
 
-    driver = FakeDriver()
-    session = driver.create_session(
+    provider = FakeProvider()
+    session = provider.launch(
         AgentSessionSpec(
             role="orchestrator",
             provider="mock",
@@ -297,13 +301,13 @@ def test_an_unscripted_response_schema_is_rejected_rather_than_faked(tmp_path: P
         )
     )
 
-    with pytest.raises(FakeDriverError, match="UnknownResponse"):
+    with pytest.raises(FakeProviderError, match="UnknownResponse"):
         session.run_turn(AgentTurnRequest(message="go", output_schema=UnknownResponse))
 
 
 def test_cancel_is_idempotent_and_leaves_the_session_usable(tmp_path: Path) -> None:
-    driver = FakeDriver()
-    session = driver.create_session(
+    provider = FakeProvider()
+    session = provider.launch(
         AgentSessionSpec(
             role="orchestrator",
             provider="mock",
@@ -320,13 +324,13 @@ def test_cancel_is_idempotent_and_leaves_the_session_usable(tmp_path: Path) -> N
     assert session.run_turn(AgentTurnRequest(message="go")).text
 
 
-def test_a_closed_driver_refuses_new_sessions(tmp_path: Path) -> None:
-    driver = FakeDriver()
-    driver.close()
-    driver.close()  # idempotent
+def test_a_closed_provider_refuses_new_sessions(tmp_path: Path) -> None:
+    provider = FakeProvider()
+    provider.close()
+    provider.close()  # idempotent
 
-    with pytest.raises(FakeDriverError):
-        driver.create_session(
+    with pytest.raises(FakeProviderError):
+        provider.launch(
             AgentSessionSpec(
                 role="orchestrator",
                 provider="mock",

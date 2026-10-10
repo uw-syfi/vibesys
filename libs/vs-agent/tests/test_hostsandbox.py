@@ -5,7 +5,7 @@ Two layers:
 * Pure-Python unit tests for the policy builder and ``bwrap`` argv construction
   (no subprocess, run everywhere).
 * An end-to-end regression that drives the real agent launch chokepoint (the
-  driver's executor transform) with a stub agent binary that tries to escape
+  launcher's executor transform) with a stub agent binary that tries to escape
   its workspace. These are skipped unless a working ``bwrap`` + user-namespace
   stack is present, since that is what actually enforces the boundary.
 """
@@ -25,8 +25,11 @@ import pytest
 from agentshim.testing import FakeExecutor, FakeRun
 from tests.support import run_test_command
 
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent import host_resource_declarations
-from vs_agent.drivers.agentshim import build_host_executor, confine_to_sandbox
+
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
+from vs_agent.session_launch import build_host_executor, confine_to_sandbox
 from vs_sandbox import host_resources
 from vs_sandbox import host_sandbox as hostsandbox
 

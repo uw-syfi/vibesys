@@ -1,27 +1,29 @@
 # vs-agent
 
-Driver-neutral agent execution for VibeSys.
+Provider-neutral agent execution for VibeSys.
 
 ## Responsibility
 
 This package owns agent selection and configuration, execution sessions, typed
 events and usage, session persistence interfaces, and agent tool integration.
 Applications choose when agents run and how their events affect a workflow.
-The package adapts supported drivers behind a common client contract.
+It is the only package that imports `agentshim`: a `SessionLauncher` opens
+agentshim sessions, and `shim_translation` is the one place VibeSys and agentshim
+types convert into each other.
 
 ## Concepts
 
-- `AgentSpec` is one resolved backend, driver, provider, and model policy. It
-  rejects unsupported driver/provider pairs before client construction.
+- `AgentSpec` is one resolved backend, provider, and model policy. It
+  rejects unsupported backend/provider pairs before client construction.
 - `build_agent_client` wires that policy to an execution environment and
-  returns a driver-neutral client.
+  returns a provider-neutral client.
 - `AgentEvent` and `AgentUsage` carry execution output and accounting without
   binding consumers to a provider's event format.
 - `SessionStore` implementations control whether provider sessions can resume
   across turns or runs.
 - `MCPServerSpec` carries the tool servers that `vs_mcp` descriptors declare
   (`ToolSpec`, `serve_stdio`, `expose_as_tools`) into an agent's tool transport,
-  without putting application workflow in the driver.
+  without putting application workflow in the launcher.
 
 ## Using the API
 

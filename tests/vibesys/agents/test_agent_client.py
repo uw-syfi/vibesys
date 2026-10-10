@@ -29,14 +29,13 @@ from vs_agent.api import (
     AgentOutputSchemaError,
     AgentSessionKey,
     AgentUsage,
-    SessionDisposition,
     SessionResumeError,
     SessionScope,
 )
+from vs_agent.api.testing import HandSession
 from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentObserver,
-    AgentSession,
     AgentSessionSpec,
     AgentSkillUse,
     AgentTurnRequest,
@@ -50,19 +49,22 @@ class _Response(BaseModel):
     answer: str
 
 
-@dataclass
-class _FakeSession:
+@dataclass(eq=False)
+class _FakeSession(HandSession):
     results: list[AgentTurnResult]
     turns: list[AgentTurnRequest] = field(default_factory=list)
     close_calls: int = 0
     error: BaseException | None = None
     observers: list[AgentObserver | None] = field(default_factory=list)
-    events: list[AgentEvent] = field(default_factory=list)
+    emitted: list[AgentEvent] = field(default_factory=list)
     resumed: list[str] = field(default_factory=list)
     lifecycle_calls: list[str] = field(default_factory=list)
     cancel_error: BaseException | None = None
     started: threading.Event | None = None
     release: threading.Event | None = None
+
+    def __post_init__(self) -> None:
+        HandSession.__init__(self)
 
     def run_turn(
         self,
@@ -76,13 +78,13 @@ class _FakeSession:
         if self.release is not None:
             self.release.wait()
         if observer is not None:
-            for event in self.events:
+            for event in self.emitted:
                 observer.on_event(event)
         if self.error is not None:
             raise self.error
         return self.results.pop(0)
 
-    def resume_provider_session(self, session_id: str) -> bool:
+    def adopt(self, session_id: str) -> bool:
         """Adopt ``session_id``, recording it so tests can assert on it."""
         self.resumed.append(session_id)
         return True
@@ -100,7 +102,7 @@ class _FakeSession:
 
 
 @dataclass
-class _FakeDriver:
+class _FakeLauncher:
     queued_sessions: list[_FakeSession]
     specs: list[AgentSessionSpec] = field(default_factory=list)
     close_calls: int = 0
@@ -109,7 +111,7 @@ class _FakeDriver:
     def capabilities(self) -> AgentCapabilities:
         return AgentCapabilities()
 
-    def create_session(self, spec: AgentSessionSpec) -> AgentSession:
+    def launch(self, spec: AgentSessionSpec) -> HandSession:
         self.specs.append(spec)
         return self.queued_sessions.pop(0)
 
@@ -141,8 +143,8 @@ def test_keyed_turns_reuse_a_session() -> None:
     session = _FakeSession(
         results=[AgentTurnResult("first"), AgentTurnResult("second")],
     )
-    driver = _FakeDriver([session])
-    client = AgentClient(driver, event_sink=NULL_AGENT_EVENT_SINK)
+    launcher = _FakeLauncher([session])
+    client = AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK)
 
     assert (
         client.run(
@@ -157,7 +159,7 @@ def test_keyed_turns_reuse_a_session() -> None:
         == "second"
     )
 
-    assert len(driver.specs) == 1
+    assert len(launcher.specs) == 1
     assert session.turns == [AgentTurnRequest("one"), AgentTurnRequest("two")]
 
 
@@ -166,7 +168,7 @@ def test_session_setup_materializes_skills_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _FakeSession(results=[AgentTurnResult("first"), AgentTurnResult("second")])
-    client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
     skill = tmp_path / "source-skill"
     calls: list[tuple[Path, list[Path]]] = []
     monkeypatch.setattr(
@@ -183,8 +185,8 @@ def test_session_setup_materializes_skills_once(
 
 def test_client_forwards_turn_events_to_caller_observer() -> None:
     event = AgentEvent(AgentEventKind.TEXT, text="chunk")
-    session = _FakeSession(results=[AgentTurnResult("done")], events=[event])
-    client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    session = _FakeSession(results=[AgentTurnResult("done")], emitted=[event])
+    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
 
     @dataclass
     class Observer:
@@ -207,12 +209,12 @@ def test_invoke_preserves_streamed_text_deltas_and_paragraphs(tmp_path: Path) ->
     deltas = ["Tokens", " stay", " together.\n\n", "Next paragraph."]
     session = _FakeSession(
         results=[AgentTurnResult("".join(deltas))],
-        events=[AgentEvent(AgentEventKind.TEXT, text=delta) for delta in deltas],
+        emitted=[AgentEvent(AgentEventKind.TEXT, text=delta) for delta in deltas],
     )
     log = io.StringIO()
     seen = []
     client = AgentClient(
-        _FakeDriver([session]),
+        _FakeLauncher([session]),
         run_log_file=log,
         event_sink=CoreAgentEventSink(seen.append),
     )
@@ -240,7 +242,7 @@ def test_invoke_threads_typed_tool_result_payload_to_sink(tmp_path: Path) -> Non
     payload = CommandResultPayload(stdout="ok", stderr="warn", exit_code=1, duration=0.4)
     session = _FakeSession(
         results=[AgentTurnResult("Done")],
-        events=[
+        emitted=[
             AgentEvent(
                 AgentEventKind.TOOL_RESULT,
                 payload={
@@ -256,7 +258,7 @@ def test_invoke_threads_typed_tool_result_payload_to_sink(tmp_path: Path) -> Non
         ],
     )
     seen = []
-    client = AgentClient(_FakeDriver([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
     client.invoke_text(
         kind="implementer",
         workspace=tmp_path,
@@ -273,7 +275,7 @@ def test_invoke_threads_typed_tool_result_payload_to_sink(tmp_path: Path) -> Non
     assert [data.tool for data in results] == ["shell", "shim"]
     assert results[0].payload == payload
     assert results[0].content == "ok"
-    # A driver event without typed structure falls back to the classifier,
+    # A provider event without typed structure falls back to the classifier,
     # which leaves plain text unclassified.
     assert results[1].payload is None
 
@@ -281,7 +283,7 @@ def test_invoke_threads_typed_tool_result_payload_to_sink(tmp_path: Path) -> Non
 def test_invoke_closes_text_before_tool_event(tmp_path: Path) -> None:
     session = _FakeSession(
         results=[AgentTurnResult("Done")],
-        events=[
+        emitted=[
             AgentEvent(AgentEventKind.TEXT, text="Checking"),
             AgentEvent(AgentEventKind.TEXT, text=" now"),
             AgentEvent(AgentEventKind.TOOL_CALL, payload={"tool": "shell", "args": {}}),
@@ -289,7 +291,7 @@ def test_invoke_closes_text_before_tool_event(tmp_path: Path) -> None:
         ],
     )
     seen = []
-    client = AgentClient(_FakeDriver([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
     client.invoke_text(
         kind="implementer",
         workspace=tmp_path,
@@ -326,20 +328,20 @@ def _assistant_chunks(seen: list, kind: str = "implementer") -> list[tuple[str |
 
 
 def test_a_streamed_answer_is_rendered_once_and_stays_attributed(tmp_path: Path) -> None:
-    """The driver streams the answer; the client must not print it again.
+    """The provider streams the answer; the client must not print it again.
 
     A transcript groups assistant chunks by the invocation they name, so a
     second, unattributed copy would appear as its own orphaned entry.
     """
     session = _FakeSession(
         results=[AgentTurnResult("Hello world")],
-        events=[
+        emitted=[
             AgentEvent(AgentEventKind.TEXT, text="Hello "),
             AgentEvent(AgentEventKind.TEXT, text="world"),
         ],
     )
     seen: list = []
-    client = AgentClient(_FakeDriver([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
     answer = client.invoke_text(
         kind="implementer",
         workspace=tmp_path,
@@ -356,10 +358,10 @@ def test_a_streamed_answer_is_rendered_once_and_stays_attributed(tmp_path: Path)
 
 
 def test_an_unstreamed_answer_is_rendered_once_and_stays_attributed(tmp_path: Path) -> None:
-    """A driver that streams nothing still gets its answer rendered, once."""
+    """A provider that streams nothing still gets its answer rendered, once."""
     session = _FakeSession(results=[AgentTurnResult("Hello world")])
     seen: list = []
-    client = AgentClient(_FakeDriver([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
     client.invoke_text(
         kind="implementer",
         workspace=tmp_path,
@@ -383,7 +385,7 @@ def test_a_structured_turn_streams_nothing_on_the_assistant_channel(tmp_path: Pa
     """
     session = _FakeSession(
         results=[AgentTurnResult('{"answer":"done"}')],
-        events=[
+        emitted=[
             AgentEvent(
                 AgentEventKind.THINKING,
                 text='{"answer":"done"}',
@@ -392,7 +394,7 @@ def test_a_structured_turn_streams_nothing_on_the_assistant_channel(tmp_path: Pa
         ],
     )
     seen: list = []
-    client = AgentClient(_FakeDriver([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
     response = client.invoke(
         kind="judge",
         workspace=tmp_path,
@@ -410,7 +412,7 @@ def test_a_structured_turn_streams_nothing_on_the_assistant_channel(tmp_path: Pa
 def test_thinking_payload_channel_routes_to_the_diagnostic_channel(tmp_path: Path) -> None:
     session = _FakeSession(
         results=[AgentTurnResult("Done")],
-        events=[
+        emitted=[
             AgentEvent(AgentEventKind.THINKING, text="the hot path is the ring buffer"),
             AgentEvent(
                 AgentEventKind.THINKING,
@@ -420,7 +422,7 @@ def test_thinking_payload_channel_routes_to_the_diagnostic_channel(tmp_path: Pat
         ],
     )
     seen = []
-    client = AgentClient(_FakeDriver([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
     client.invoke_text(
         kind="implementer",
         workspace=tmp_path,
@@ -438,7 +440,7 @@ def test_thinking_payload_channel_routes_to_the_diagnostic_channel(tmp_path: Pat
     ] == [
         ("analysis", "the hot path is the ring buffer"),
         ("diagnostic", "restarting the provider process"),
-        # No driver event carried the answer, so the client renders it once at
+        # No provider event carried the answer, so the client renders it once at
         # the end, attributed to the same turn.
         ("assistant", "Done"),
         ("assistant", "\n"),
@@ -449,10 +451,12 @@ def test_invoke_closes_streamed_text_before_reporting_error(tmp_path: Path) -> N
     session = _FakeSession(
         results=[],
         error=ValueError("failed"),
-        events=[AgentEvent(AgentEventKind.TEXT, text="partial output")],
+        emitted=[AgentEvent(AgentEventKind.TEXT, text="partial output")],
     )
     log = io.StringIO()
-    client = AgentClient(_FakeDriver([session]), run_log_file=log, event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        _FakeLauncher([session]), run_log_file=log, event_sink=NULL_AGENT_EVENT_SINK
+    )
 
     with pytest.raises(ValueError, match="failed"):
         client.invoke_text(
@@ -470,10 +474,10 @@ def test_invoke_preserves_terminal_newline_on_cancellation(tmp_path: Path) -> No
     session = _FakeSession(
         results=[],
         error=KeyboardInterrupt(),
-        events=[AgentEvent(AgentEventKind.TEXT, text="partial output\n")],
+        emitted=[AgentEvent(AgentEventKind.TEXT, text="partial output\n")],
     )
     seen = []
-    client = AgentClient(_FakeDriver([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
     with pytest.raises(KeyboardInterrupt):
         client.invoke_text(
             kind="implementer",
@@ -497,8 +501,8 @@ def test_invoke_preserves_terminal_newline_on_cancellation(tmp_path: Path) -> No
 def test_changed_session_spec_closes_and_replaces_cached_session() -> None:
     old = _FakeSession(results=[AgentTurnResult("old")])
     new = _FakeSession(results=[AgentTurnResult("new")])
-    driver = _FakeDriver([old, new])
-    client = AgentClient(driver, event_sink=NULL_AGENT_EVENT_SINK)
+    launcher = _FakeLauncher([old, new])
+    client = AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK)
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
     result = client.run(
@@ -509,12 +513,12 @@ def test_changed_session_spec_closes_and_replaces_cached_session() -> None:
 
     assert result.text == "new"
     assert old.close_calls == 1
-    assert len(driver.specs) == 2
+    assert len(launcher.specs) == 2
 
 
 def test_unkeyed_turn_always_closes_ephemeral_session() -> None:
     session = _FakeSession(results=[AgentTurnResult("done")])
-    client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
 
     result = client.run(session_spec=_spec(), turn=AgentTurnRequest("one"))
 
@@ -524,19 +528,19 @@ def test_unkeyed_turn_always_closes_ephemeral_session() -> None:
 
 @pytest.mark.parametrize(
     "result",
-    [AgentTurnResult("reset", disposition=SessionDisposition.RESET_REQUIRED)],
+    [AgentTurnResult("reset", restarted=True)],
 )
-def test_reset_disposition_evicts_session(result: AgentTurnResult) -> None:
+def test_restarted_turn_evicts_session(result: AgentTurnResult) -> None:
     first = _FakeSession(results=[result])
     second = _FakeSession(results=[AgentTurnResult("recovered")])
-    driver = _FakeDriver([first, second])
-    client = AgentClient(driver, event_sink=NULL_AGENT_EVENT_SINK)
+    launcher = _FakeLauncher([first, second])
+    client = AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK)
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
     client.run(session_spec=_spec(), turn=AgentTurnRequest("two"), session_key=_key("impl"))
 
     assert first.close_calls == 1
-    assert len(driver.specs) == 2
+    assert len(launcher.specs) == 2
 
 
 @pytest.mark.parametrize(
@@ -546,7 +550,7 @@ def test_reset_disposition_evicts_session(result: AgentTurnResult) -> None:
         AgentTurnResult(
             "forced reset",
             provider_session_id="thread-1",
-            disposition=SessionDisposition.RESET_REQUIRED,
+            restarted=True,
         ),
     ],
 )
@@ -555,14 +559,14 @@ def test_checkpoint_required_turn_refuses_missing_identity_and_actual_reset(
 ) -> None:
     session = _FakeSession(results=[result])
 
-    class _DurableDriver(_FakeDriver):
+    class _DurableLauncher(_FakeLauncher):
         @property
         def capabilities(self) -> AgentCapabilities:
             return replace(super().capabilities, provider_session_resume=True)
 
-    driver = _DurableDriver([session])
+    launcher = _DurableLauncher([session])
     key = _key("impl")
-    with AgentClient(driver, event_sink=NULL_AGENT_EVENT_SINK) as client:
+    with AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK) as client:
         with pytest.raises(SessionResumeError, match="provider reset or replaced"):
             client.run(
                 session_spec=_spec(),
@@ -576,8 +580,8 @@ def test_checkpoint_required_turn_refuses_missing_identity_and_actual_reset(
 
 def test_checkpoint_required_turn_refuses_nonresumable_provider_before_dispatch() -> None:
     session = _FakeSession(results=[AgentTurnResult("accepted", provider_session_id="thread-1")])
-    driver = _FakeDriver([session])
-    with AgentClient(driver, event_sink=NULL_AGENT_EVENT_SINK) as client:
+    launcher = _FakeLauncher([session])
+    with AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK) as client:
         with pytest.raises(SessionResumeError, match="provider cannot resume"):
             client.run(
                 session_spec=_spec(),
@@ -585,14 +589,14 @@ def test_checkpoint_required_turn_refuses_nonresumable_provider_before_dispatch(
                 session_key=_key("impl"),
             )
         assert not session.turns
-        assert not driver.specs
+        assert not launcher.specs
 
 
 def test_turn_exception_evicts_session() -> None:
     failed = _FakeSession(results=[], error=ValueError("failed"))
     recovered = _FakeSession(results=[AgentTurnResult("ok")])
-    driver = _FakeDriver([failed, recovered])
-    client = AgentClient(driver, event_sink=NULL_AGENT_EVENT_SINK)
+    launcher = _FakeLauncher([failed, recovered])
+    client = AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK)
 
     with pytest.raises(ValueError, match="failed"):
         client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
@@ -606,22 +610,22 @@ def test_turn_exception_evicts_session() -> None:
 
 def test_close_is_idempotent_and_rejects_future_turns() -> None:
     session = _FakeSession(results=[AgentTurnResult("ok")])
-    driver = _FakeDriver([session])
-    client = AgentClient(driver, event_sink=NULL_AGENT_EVENT_SINK)
+    launcher = _FakeLauncher([session])
+    client = AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK)
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
 
     client.close()
     client.close()
 
     assert session.close_calls == 1
-    assert driver.close_calls == 1
+    assert launcher.close_calls == 1
     with pytest.raises(RuntimeError, match="closed"):
         client.run(session_spec=_spec(), turn=AgentTurnRequest("two"))
 
 
 def test_evicting_a_session_cancels_its_turn_before_closing_it() -> None:
     session = _FakeSession(results=[AgentTurnResult("ok")])
-    client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
 
     client.close()
@@ -635,7 +639,7 @@ def test_cancel_stops_an_active_session_without_closing_it() -> None:
     started = threading.Event()
     release = threading.Event()
     session = _FakeSession(results=[AgentTurnResult("ok")], started=started, release=release)
-    client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
     with ThreadPoolExecutor(max_workers=1) as pool:
         turn = pool.submit(
             client.run,
@@ -654,7 +658,7 @@ def test_cancel_stops_an_active_session_without_closing_it() -> None:
 
 def test_a_failing_cancel_still_closes_the_session() -> None:
     session = _FakeSession(results=[AgentTurnResult("ok")], cancel_error=ValueError("no hook"))
-    client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
 
     with pytest.raises(ValueError, match="no hook"):
@@ -666,11 +670,11 @@ def test_a_failing_cancel_still_closes_the_session() -> None:
 def test_invoke_builds_session_and_turn_contracts_and_records_usage(tmp_path: Path) -> None:
     usage = AgentUsage(input_tokens=12, output_tokens=4, total_cost_usd=0.02, duration_ms=30)
     session = _FakeSession(results=[AgentTurnResult('{"answer":"done"}', usage=usage)])
-    driver = _FakeDriver([session])
+    launcher = _FakeLauncher([session])
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
     client = AgentClient(
-        driver,
+        launcher,
         provider="codex",
         model_name="gpt-test",
         timeout=45,
@@ -692,9 +696,9 @@ def test_invoke_builds_session_and_turn_contracts_and_records_usage(tmp_path: Pa
     )
 
     assert response == _Response(answer="done")
-    assert driver.specs[0].model == "gpt-judge"
-    assert driver.specs[0].reasoning_effort == "high"
-    assert driver.specs[0].environment == (("VISIBLE", "1"),)
+    assert launcher.specs[0].model == "gpt-judge"
+    assert launcher.specs[0].reasoning_effort == "high"
+    assert launcher.specs[0].environment == (("VISIBLE", "1"),)
     assert session.turns[0].instructions == "system"
     assert session.turns[0].message == "user"
     assert session.turns[0].output_schema is _Response
@@ -717,10 +721,10 @@ def test_invoke_builds_session_and_turn_contracts_and_records_usage(tmp_path: Pa
 def test_a_skill_load_is_rendered_on_the_diagnostic_channel(tmp_path: Path) -> None:
     session = _FakeSession(
         results=[AgentTurnResult("Done")],
-        events=[AgentEvent(AgentEventKind.SKILL, text="serving-systems")],
+        emitted=[AgentEvent(AgentEventKind.SKILL, text="serving-systems")],
     )
     seen = []
-    client = AgentClient(_FakeDriver([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
     client.invoke_text(
         kind="implementer",
         workspace=tmp_path,
@@ -755,7 +759,9 @@ def test_the_usage_record_carries_the_turns_skill_use(
     tmp_path: Path, skills: AgentSkillUse, expected: dict[str, object]
 ) -> None:
     session = _FakeSession(results=[AgentTurnResult("done", skills=skills)])
-    client = AgentClient(_FakeDriver([session]), log_dir=tmp_path, event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        _FakeLauncher([session]), log_dir=tmp_path, event_sink=NULL_AGENT_EVENT_SINK
+    )
 
     client.invoke_text(
         kind="implementer",
@@ -772,7 +778,7 @@ def test_the_usage_record_carries_the_turns_skill_use(
 
 def test_runtime_accessors_expose_configured_provider_and_model() -> None:
     client = AgentClient(
-        _FakeDriver([]),
+        _FakeLauncher([]),
         provider="claude",
         model_name="claude-base",
         role_models={"judge": "claude-judge"},
@@ -785,7 +791,7 @@ def test_runtime_accessors_expose_configured_provider_and_model() -> None:
 
 
 def test_runtime_accessors_default_to_none_or_codex_when_unconfigured() -> None:
-    client = AgentClient(_FakeDriver([]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(_FakeLauncher([]), event_sink=NULL_AGENT_EVENT_SINK)
 
     assert client.provider == "codex"
     assert client.model_for_kind("implementer") is None
@@ -796,7 +802,7 @@ def test_invoke_reports_an_invalid_reply_as_a_schema_error_naming_its_fields(
 ) -> None:
     """The caller's correction needs the field-named errors, not a synthesized response."""
     session = _FakeSession(results=[AgentTurnResult('{"answer": 3}')])
-    client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
 
     with pytest.raises(AgentOutputSchemaError) as raised:
         client.invoke(
@@ -818,7 +824,7 @@ class _Plan(BaseModel):
 
 def _invoke_plan(reply: str, workspace: Path) -> _Plan:
     session = _FakeSession(results=[AgentTurnResult(reply)])
-    client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
     return client.invoke(
         kind="planner",
         workspace=workspace,
@@ -857,10 +863,10 @@ def test_invoke_says_when_a_reply_has_no_json_object(tmp_path: Path, reply: str)
         _invoke_plan(reply, tmp_path)
 
 
-def test_invoke_translates_generic_tool_server_for_the_driver(tmp_path: Path) -> None:
+def test_invoke_translates_generic_tool_server_for_the_launcher(tmp_path: Path) -> None:
     session = _FakeSession(results=[AgentTurnResult('{"answer":"done"}')])
-    driver = _FakeDriver([session])
-    client = AgentClient(driver, event_sink=NULL_AGENT_EVENT_SINK)
+    launcher = _FakeLauncher([session])
+    client = AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK)
     descriptor = StdioServerDescriptor(
         name="issues",
         command="python",
@@ -879,7 +885,7 @@ def test_invoke_translates_generic_tool_server_for_the_driver(tmp_path: Path) ->
     )
 
     assert response == _Response(answer="done")
-    assert driver.specs[0].mcp_servers == (
+    assert launcher.specs[0].mcp_servers == (
         MCPServerSpec(
             name="issues",
             command="python",

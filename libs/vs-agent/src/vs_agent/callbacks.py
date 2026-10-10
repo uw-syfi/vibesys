@@ -88,7 +88,7 @@ class AgentLogger:
         """Initialize callback state and its output destinations."""
         self._external_text_streaming = False
         # Sticky for the logger's lifetime, which is one turn: whether any
-        # assistant text reached the assistant channel from a driver's stream.
+        # assistant text reached the assistant channel from a provider's stream.
         self._streamed_external_text = False
         self._external_text_ends_with_newline = False
         self._log_file = log_file
@@ -249,9 +249,9 @@ class AgentLogger:
             self._log_file.write(text)
             self._log_file.flush()
 
-    # --- Public hooks for external-agent drivers ---
+    # --- Public hooks for provider events ---
     #
-    # Drivers publish normalized ``AgentEvent``s, which ``_LoggerObserver``
+    # The translation module publishes normalized ``AgentEvent``s, which ``_LoggerObserver``
     # calls through to on this object.
 
     def _publish_channel(self, text: str, channel: AgentOutputChannel) -> None:
@@ -265,14 +265,14 @@ class AgentLogger:
     def on_thinking(self, text: str) -> None:
         """Publish agent reasoning on the analysis channel.
 
-        Every driver marks its own plumbing with
+        Every provider event marks its own plumbing with
         ``payload={"channel": "diagnostic"}``, which the observer routes to
         :meth:`on_diagnostic`, so nothing that reaches here is inspected.
         """
         self._publish_channel(text, "analysis")
 
     def on_diagnostic(self, text: str) -> None:
-        """Publish driver plumbing on the diagnostic channel.
+        """Publish provider plumbing on the diagnostic channel.
 
         The caller has already classified ``text`` as plumbing rather than
         agent reasoning, so nothing here inspects it. The text is published
@@ -330,7 +330,7 @@ class AgentLogger:
 
         We overwrite, not accumulate, because the prefix reflects *current
         context window pressure*, not cumulative spend.  ``input_tokens``
-        includes cached tokens on every provider: the CLI drivers fold the
+        includes cached tokens on every provider: agentshim folds the
         cache counts in before reporting.
 
         A zero / missing ``input_tokens`` field is treated as "no update"
@@ -345,7 +345,7 @@ class AgentLogger:
             self._publish_usage()
 
     def streamed_external_text_this_turn(self) -> bool:
-        """Whether an external driver already streamed this turn's answer.
+        """Whether an provider already streamed this turn's answer.
 
         One logger serves exactly one invocation (``AgentClient._invoke_turn``
         builds it per turn), so this reads as "during this turn". A caller that
@@ -356,7 +356,7 @@ class AgentLogger:
         return self._streamed_external_text
 
     def log_text(self, text: str) -> None:
-        """Emit one exact assistant-text delta from an external driver."""
+        """Emit one exact assistant-text delta from an provider."""
         if not text:
             return
         status = self._status()
@@ -369,7 +369,7 @@ class AgentLogger:
         self._external_text_ends_with_newline = text.endswith("\n")
 
     def end_text(self) -> None:
-        """Close the current external-driver assistant-text segment."""
+        """Close the current provider assistant-text segment."""
         if not self._external_text_streaming:
             return
         if not self._external_text_ends_with_newline:

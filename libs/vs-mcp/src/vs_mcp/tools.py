@@ -2,7 +2,7 @@
 
 Libraries describe subprocess-hosted tools through the structural
 ``ToolServerDescriptor`` contract. The host library owns the translation to the
-transport understood by the selected driver.
+transport understood by the selected provider.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class ToolServerDescriptor(Protocol):
 
     Libraries can provide this shape without depending on the host. The
     agent runtime maps it onto the tool transport supported by the selected
-    driver.
+    provider.
     """
 
     @property

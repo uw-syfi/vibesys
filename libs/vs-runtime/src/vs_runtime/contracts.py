@@ -157,7 +157,7 @@ class WorkspaceAccess(StrEnum):
 
 
 class AgentCapability(StrEnum):
-    """Closed driver capabilities a role may require."""
+    """Closed agent capabilities a role may require."""
 
     MCP_SERVERS = "mcp_servers"
     NESTED_READ_ONLY_PATHS = "nested_read_only_paths"

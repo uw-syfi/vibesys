@@ -10,6 +10,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.docker_confinement import DockerContainerConfinement
 
 if TYPE_CHECKING:

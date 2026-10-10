@@ -28,7 +28,7 @@ from vs_agent.api import (
     DurableSessionStore,
     SessionScope,
 )
-from vs_agent.api.testing import FakeAgentClient, FakeAgentSessions, FakeDriver
+from vs_agent.api.testing import FakeAgentClient, FakeAgentSessions, FakeProvider
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_runtime.api import (
     AgentCapability,
@@ -526,7 +526,7 @@ def _resume_transport(
 ) -> tuple[FakeAgentSessions, AgentClient]:
     slot = _durable_session_slot(tmp_path)
     client = AgentClient(
-        FakeDriver(answer="done", on_turn=before_turn),
+        FakeProvider(answer="done", on_turn=before_turn),
         session_store=DurableSessionStore(slot),
     )
     key = AgentSessionKey(SessionScope.MEMBER, "worker:member")

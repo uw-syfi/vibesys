@@ -27,9 +27,9 @@ from tests.support.session_world import (
     inspect_request,
     turn_output,
 )
-from tests.support.stream_peers import answering_with
 from tests.support.stream_session_world import ContainerResolver, StreamHost, open_stream_host
 
+from vs_agent.api.testing import answering_with
 from vs_core.api import ObservationStatus
 from vs_faults.api import Boundary, FaultPlan, FaultRule, ProcessFault
 from vs_project.api import Project

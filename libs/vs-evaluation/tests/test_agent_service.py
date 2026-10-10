@@ -10,7 +10,6 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
-from agentshim.testing import FakeExecutor, FakeRun, installed_mcp_servers, scripted_turn
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.evaluation_scenarios import ScenarioSpec, build_scenario, capture_submission
@@ -30,7 +29,13 @@ from vs_agent.api import (
     MCPServerSpec,
     SessionScope,
 )
-from vs_agent.api.testing import fake_agentshim_driver
+from vs_agent.api.testing import (
+    FakeExecutor,
+    FakeRun,
+    fake_agentshim_launcher,
+    installed_mcp_servers,
+    scripted_turn,
+)
 from vs_evaluation.api import (
     MAX_AGENT_AWAIT_S,
     AvailabilityCall,
@@ -102,8 +107,9 @@ from vs_prompts.api import TemplateRenderer
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    import agentshim
     from pydantic import BaseModel
+
+    from vs_agent.api.testing import CommandRequest
 
 
 class _SemanticBackend:
@@ -1329,14 +1335,14 @@ def _restart_host(
         scratch / "evaluation.sock",
     )
 
-    def execute(request: agentshim.CommandRequest) -> FakeRun:
+    def execute(request: CommandRequest) -> FakeRun:
         config = installed_mcp_servers("claude", request, workspace)
         credentials.append(config["vs-evaluation"]["env"]["VS_EVALUATION_TOKEN"])
         return scripted_turn("claude", session_id="session-1", text="waiting")
 
-    driver = fake_agentshim_driver(provider="claude", executor=FakeExecutor(execute))
+    launcher = fake_agentshim_launcher(provider="claude", executor=FakeExecutor(execute))
     client = AgentClient(
-        driver,
+        launcher,
         provider="claude",
         session_store=DurableSessionStore(
             namespace.slot("sessions.json", AgentSessionState),

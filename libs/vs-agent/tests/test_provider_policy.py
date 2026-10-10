@@ -2,7 +2,7 @@
 
 ``vs_agent.provider_policy`` is the one place VibeSys states which CLI
 providers it ships and what it decides to do with them. Before it existed,
-the same provider-name literals were hand-copied across the AgentShim driver,
+the same provider-name literals were hand-copied across the AgentShim launcher,
 ``cli_docker``, and the headless entrypoint's ``--cli-provider`` flag, and
 those copies could silently drift from each other. This test scans the
 source for a shipped-provider literal appearing anywhere it should instead be
@@ -41,6 +41,11 @@ _ALLOWED_LITERALS_BY_PATH: dict[str, frozenset[str] | None] = {
     # The chat model picker's suggestion catalog is keyed by shipped provider.
     # It is a list of model names to offer, not a behavior branch.
     "src/server/chat/options.py": None,
+    # Test fakes that script one provider's wire format (a Claude peer, the
+    # profile a scripted session borrows, a Codex-shaped spec default). They
+    # are not production behavior branches.
+    "libs/vs-agent/src/vs_agent/scripted_provider.py": frozenset({"claude", "codex"}),
+    "libs/vs-agent/src/vs_agent/stream_peers.py": frozenset({"claude"}),
 }
 
 

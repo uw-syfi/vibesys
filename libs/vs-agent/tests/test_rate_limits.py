@@ -2,7 +2,7 @@
 
 The turn is scripted in Claude's real stream format (a ``rate_limit_event``
 frame ahead of the answer), so the whole path runs: agentshim parses the
-frame, the driver translates it, ``AgentClient`` logs it for the operator and
+frame, the launcher translates it, ``AgentClient`` logs it for the operator and
 ``CoreAgentEventSink`` records it as ``CoreEventType.RATE_LIMIT_UPDATE``.
 """
 
@@ -21,7 +21,9 @@ from hypothesis import strategies as st
 from vibesys.events import CoreEvent, CoreEventType, RateLimitUpdateData
 from vibesys.run import CoreAgentEventSink, EventJournal
 from vs_agent.api import AgentClient, AgentRateLimit
-from vs_agent.drivers.agentshim import AgentShimDriver
+
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
+from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
 
 STATUSES = ("allowed", "allowed_warning", "rejected", None)
@@ -30,7 +32,7 @@ WINDOW_NAMES = ("five_hour", "seven_day", "seven_day_opus")
 
 @pytest.fixture(scope="module")
 def home(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A throwaway operator HOME: the driver prepares provider state under it."""
+    """A throwaway operator HOME: the launcher prepares provider state under it."""
     return tmp_path_factory.mktemp("operator-home")
 
 
@@ -74,7 +76,7 @@ def _run_turn(info: dict[str, object], root: Path, home: Path) -> tuple[list[Cor
     journal.attach(root / "run", "run-1")
     log = io.StringIO()
     client = AgentClient(
-        AgentShimDriver(
+        ConfinedSessionLauncher(
             provider="claude",
             executor_factory=lambda: fake,
             launcher_env=lambda: {

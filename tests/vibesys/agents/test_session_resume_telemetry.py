@@ -16,19 +16,23 @@ from vibesys.api import (
 )
 from vs_agent.api import (
     AgentClient,
-    AgentEvent,
-    AgentEventKind,
     AgentExecutionPolicy,
     AgentSessionKey,
     AgentSessionSpec,
     AgentTurnRequest,
-    AgentUsage,
     ClientAgentSessions,
     Completed,
     SessionScope,
     Unknown,
 )
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
+from vs_agent.api.testing import (
+    FakeAgentInvocationStore,
+    FakeProvider,
+    assistant_text,
+    tool_call,
+    tool_result,
+    usage,
+)
 from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
@@ -43,18 +47,12 @@ def test_resume_publishes_turn_events_and_one_usage_record(
     tmp_path: Path, *, streamed: bool, tokens: int | None
 ) -> None:
     events: list[CoreEvent] = []
-    turn_events = [
-        AgentEvent(AgentEventKind.TOOL_CALL, payload={"tool": "Bash", "args": {"command": "ls"}}),
-        AgentEvent(
-            AgentEventKind.TOOL_RESULT, payload={"tool": "Bash", "stdout": "files", "exit_code": 0}
-        ),
-        AgentEvent(
-            AgentEventKind.USAGE, usage=AgentUsage(input_tokens=tokens, output_tokens=tokens)
-        ),
-    ]
+    turn_events = [tool_call("Bash", {"command": "ls"}), tool_result("files")]
+    if tokens is not None:
+        turn_events.append(usage(input_tokens=tokens, output_tokens=tokens))
     if streamed:
-        turn_events.append(AgentEvent(AgentEventKind.TEXT, text="continued answer"))
-    driver = FakeDriver(turns=[[], turn_events], answer="continued answer")
+        turn_events.append(assistant_text("continued answer"))
+    provider = FakeProvider(turns=[[], turn_events], answer="continued answer")
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
     spec = AgentSessionSpec(
         role="implementer",
@@ -67,7 +65,7 @@ def test_resume_publishes_turn_events_and_one_usage_record(
     (tmp_path / "resume.j2").write_text("Evaluation settled.", encoding="utf-8")
     message = TemplateRenderer(tmp_path).render_template("resume.j2")
     with AgentClient(
-        driver,
+        provider,
         provider="codex",
         log_dir=tmp_path,
         model_name="test-model",
@@ -131,7 +129,7 @@ def test_failed_resume_writes_unknown_usage_once_and_never_replays(tmp_path: Pat
             detail = "lost provider acknowledgement"
             raise LookupError(detail)
 
-    driver = FakeDriver(answer="first answer", on_turn=fail_resumed_turn)
+    provider = FakeProvider(answer="first answer", on_turn=fail_resumed_turn)
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
     spec = AgentSessionSpec(
         role="implementer",
@@ -141,7 +139,7 @@ def test_failed_resume_writes_unknown_usage_once_and_never_replays(tmp_path: Pat
     )
     (tmp_path / "resume.j2").write_text("Evaluation settled.", encoding="utf-8")
     message = TemplateRenderer(tmp_path).render_template("resume.j2")
-    with AgentClient(driver, provider="codex", log_dir=tmp_path) as client:
+    with AgentClient(provider, provider="codex", log_dir=tmp_path) as client:
         client.invoke_text(
             kind="implementer",
             workspace=tmp_path,

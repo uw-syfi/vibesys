@@ -26,8 +26,8 @@ from vs_agent.api import (
 from vs_agent.api.testing import (
     FakeAgentInvocationStore,
     FakeAgentSessions,
-    FakeDriver,
-    fake_agentshim_driver,
+    FakeProvider,
+    fake_agentshim_launcher,
 )
 from vs_prompts.api import TemplateRenderer
 
@@ -50,9 +50,9 @@ class _Execution:
 
 def _client(implementation: str, execution: _Execution) -> AgentClient:
     driver = (
-        FakeDriver(answer="done", on_turn=lambda _: execution.accept())
+        FakeProvider(answer="done", on_turn=lambda _: execution.accept())
         if implementation == "fake"
-        else fake_agentshim_driver(provider="codex", executor=FakeExecutor(execution.execute))
+        else fake_agentshim_launcher(provider="codex", executor=FakeExecutor(execution.execute))
     )
     return AgentClient(driver, provider="codex")
 

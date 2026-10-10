@@ -52,7 +52,7 @@ from vs_agent.api import (
     Unknown,
 )
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
-from vs_agent.api.testing import FakeAgentClient, FakeAgentSessions, FakeDriver
+from vs_agent.api.testing import FakeAgentClient, FakeAgentSessions, FakeProvider
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
@@ -187,11 +187,11 @@ def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: 
     )
     role = AgentRole(id="worker", system_prompt="Work carefully.")
     session_key = AgentSessionKey(SessionScope.MEMBER, "worker:candidate-1")
-    drivers: list[FakeDriver] = []
+    drivers: list[FakeProvider] = []
 
     def open_client(**kwargs: object) -> AgentClient:
         store = cast("SessionStore | None", kwargs["session_store"])
-        driver = FakeDriver(answer="done")
+        driver = FakeProvider(answer="done")
         drivers.append(driver)
         return AgentClient(
             driver,
@@ -261,11 +261,11 @@ def test_member_keyed_candidate_resumes_its_provider_session_from_a_new_revision
     slot = _durable_session_slot(tmp_path)
     role = AgentRole(id="worker", system_prompt="Work carefully.")
     session_key = AgentSessionKey(SessionScope.MEMBER, "worker:h-batched-decode")
-    drivers: list[FakeDriver] = []
+    drivers: list[FakeProvider] = []
     clients: list[AgentClient] = []
 
     def open_client(**kwargs: object) -> AgentClient:
-        driver = FakeDriver(answer="done")
+        driver = FakeProvider(answer="done")
         drivers.append(driver)
         client = AgentClient(
             driver,

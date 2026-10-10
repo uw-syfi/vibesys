@@ -285,7 +285,7 @@ class _TurnSteerTarget:
     """A turn in flight, offered to the run's steering queue while it runs.
 
     Delivery is the client's optional ``SteerableAgentClient`` capability. A
-    client without it, or a driver that cannot take a message mid-turn, declines,
+    client without it, or a provider that cannot take a message mid-turn, declines,
     and the message stays queued for the next invocation boundary: today's
     behavior, so mid-turn delivery is never worse than none.
     """

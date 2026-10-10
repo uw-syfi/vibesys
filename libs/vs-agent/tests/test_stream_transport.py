@@ -31,17 +31,17 @@ from agentshim.testing import (
 )
 from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
-from vs_agent.contracts import (
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
+from vs_agent import session_launch as subject
+from vs_agent.api import (
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnRequest,
     AgentTurnTimeoutError,
-    SteerableSession,
     SteerOutcome,
 )
-from vs_agent.drivers import agentshim as subject
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -50,6 +50,8 @@ if TYPE_CHECKING:
     from agentshim.execution.process import SpawnRequest
     from agentshim.testing import FakePeer
 
+    # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
+    from vs_agent.shim_turns import LaunchedSession
     from vs_sandbox.api import DockerSandbox
 
 STREAM_PROVIDERS = tuple(agentshim.stream_provider_names())
@@ -118,10 +120,10 @@ class _Observer:
         return [event.kind for event in self.events]
 
 
-def _driver(
+def _launcher(
     provider: str, executor: FakeExecutor, sandbox: FakeDockerSandbox
-) -> subject.AgentShimDriver:
-    return subject.AgentShimDriver(
+) -> subject.ConfinedSessionLauncher:
+    return subject.ConfinedSessionLauncher(
         provider=provider,
         docker_sandboxes={"implementer": cast("DockerSandbox", sandbox)},
         executor_factory=lambda: executor,
@@ -148,9 +150,7 @@ def test_container_turns_share_one_process_marked_for_reaping(
 ) -> None:
     sandbox = FakeDockerSandbox(workspace=tmp_path, extra_env={"ANTHROPIC_AUTH_TOKEN": LOGIN_VALUE})
     executor = FakeExecutor([], peers=_answering(provider, "one", "two"))
-    session = _driver(provider, executor, sandbox).create_session(
-        _container_spec(tmp_path, provider)
-    )
+    session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
 
     first = session.run_turn(AgentTurnRequest(message="first"))
     second = session.run_turn(AgentTurnRequest(message="second"))
@@ -174,9 +174,7 @@ def test_providers_without_a_stream_transport_stay_one_process_per_turn(
 ) -> None:
     sandbox = FakeDockerSandbox(workspace=tmp_path)
     executor = FakeExecutor(scripted_turn(provider, text="ok"))
-    session = _driver(provider, executor, sandbox).create_session(
-        _container_spec(tmp_path, provider)
-    )
+    session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
 
     session.run_turn(AgentTurnRequest(message="go"))
     session.run_turn(AgentTurnRequest(message="again"))
@@ -189,7 +187,7 @@ def test_providers_without_a_stream_transport_stay_one_process_per_turn(
 class _SteerWhenRunning:
     """Offer a steer on the turn's own thread at each event, until one is taken."""
 
-    def __init__(self, session: SteerableSession, text: str) -> None:
+    def __init__(self, session: LaunchedSession, text: str) -> None:
         self._session = session
         self._text = text
         self.outcomes: list[SteerOutcome] = []
@@ -204,10 +202,7 @@ class _SteerWhenRunning:
 def test_a_steer_is_delivered_to_the_running_container_turn(tmp_path: Path, provider: str) -> None:
     sandbox = FakeDockerSandbox(workspace=tmp_path)
     executor = FakeExecutor([], peers=_awaiting_steer(provider))
-    session = _driver(provider, executor, sandbox).create_session(
-        _container_spec(tmp_path, provider)
-    )
-    assert isinstance(session, SteerableSession)
+    session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
     steerer = _SteerWhenRunning(session, "instead, say STEERED")
 
     result = session.run_turn(AgentTurnRequest(message="work"), steerer)
@@ -222,9 +217,7 @@ def test_a_steer_is_delivered_to_the_running_container_turn(tmp_path: Path, prov
 def test_a_rate_limit_report_precedes_the_turns_close(tmp_path: Path, provider: str) -> None:
     sandbox = FakeDockerSandbox(workspace=tmp_path)
     executor = FakeExecutor([], peers=_reporting_rate_limits(provider))
-    session = _driver(provider, executor, sandbox).create_session(
-        _container_spec(tmp_path, provider)
-    )
+    session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
     observer = _Observer()
 
     session.run_turn(AgentTurnRequest(message="work"), observer)
@@ -241,9 +234,7 @@ def test_a_rate_limit_report_reaches_the_observer_while_the_turn_still_runs(
 ) -> None:
     sandbox = FakeDockerSandbox(workspace=tmp_path)
     executor = FakeExecutor([], peers=STALLING[provider]())
-    session = _driver(provider, executor, sandbox).create_session(
-        _container_spec(tmp_path, provider)
-    )
+    session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
     observer = _Observer()
     failures: list[BaseException] = []
 
@@ -271,9 +262,7 @@ def test_a_hung_turn_ends_in_the_typed_timeout_the_run_understands(
     """A long-lived process raises agentshim's `TurnTimeoutError`, not the one-shot subclass."""
     sandbox = FakeDockerSandbox(workspace=tmp_path)
     executor = FakeExecutor([], peers=_hanging(provider))
-    session = _driver(provider, executor, sandbox).create_session(
-        _container_spec(tmp_path, provider)
-    )
+    session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
 
     with pytest.raises(AgentTurnTimeoutError) as raised:
         session.run_turn(AgentTurnRequest(message="work", timeout=timedelta(seconds=5)))

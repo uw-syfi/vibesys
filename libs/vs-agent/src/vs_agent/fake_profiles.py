@@ -4,13 +4,13 @@ VibeSys derives its Docker and host-resource tables from
 ``ProviderProfile``. A test of that derivation should fail when the derivation
 changes, not when a library release edits one CLI's install recipe, so tests
 build the profiles they need here and install them through
-``vs_agent.provider_profiles``. Tests whose subject *is* a real
+``vs_agent.provider_profiles`` (``vs_agent.api.testing`` exposes both). Tests whose subject *is* a real
 provider's declared behaviour read the shipped profile instead.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING, Protocol, TypedDict, Unpack
 
 from agentshim import McpMechanism, OutputSchemaStyle, ProviderProfile, SchemaDialect
 
@@ -19,7 +19,12 @@ from vs_agent import provider_profiles
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    import pytest
+
+class _Patcher(Protocol):
+    """What `install` needs of pytest's ``monkeypatch``, so no pytest import is needed here."""
+
+    def setattr(self, target: object, name: str, value: object) -> None:
+        """Replace ``target.name`` with ``value`` until the test ends."""
 
 
 class _ProfileOptions(TypedDict, total=False):
@@ -73,7 +78,7 @@ def profile(name: str, **options: Unpack[_ProfileOptions]) -> ProviderProfile:
 
 
 def install(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: _Patcher,
     profiles: dict[str, ProviderProfile],
 ) -> None:
     """Make ``provider_profile`` answer from *profiles*, and nothing else."""

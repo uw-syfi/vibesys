@@ -9,38 +9,106 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import agentshim
+from agentshim.testing import (
+    FakeClock,
+    FakeExecutor,
+    FakeRun,
+    SequentialIds,
+    TokenUsage,
+    installed_mcp_servers,
+    scripted_turn,
+)
 
-from vs_agent.drivers.agentshim import AgentShimDriver
-from vs_agent.drivers.fake import FakeDriver, FakeTurnScript
+from vs_agent import fake_profiles
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.fake_docker_build_runner import FakeDockerBuildRunner
+from vs_agent.fault_injection import (
+    KILLED_STATUS,
+    MALFORMED_LINE,
+    NOT_A_REPLY,
+    TURN_BUDGET_S,
+    CommandExecutor,
+    ConversationFaultKind,
+    FaultingExecutor,
+    FaultingTransport,
+    ProcessFaultKind,
+    Transport,
+)
+from vs_agent.scripted_provider import (
+    FakeProvider,
+    FakeProviderError,
+    FakeTurnScript,
+    HandSession,
+    assistant_text,
+    thinking,
+    todo_write,
+    tool_call,
+    tool_result,
+    usage,
+)
+from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_agent.sessions import AgentInvocationState, ClientAgentSessions
+from vs_agent.stream_peers import StreamPeers, answering_with, stream_peers
 
 if TYPE_CHECKING:
-    from agentshim.testing import FakeExecutor
+    from collections.abc import Mapping
 
-    from vs_agent.contracts import AgentDriver, AgentSessionSpec
+    from vs_agent.contracts import AgentSessionSpec
+    from vs_agent.session_launch import SessionLauncher
     from vs_agent.sessions import AgentInvocationStore, AgentTurnExecutor
+    from vs_sandbox.api import DockerSandbox
+
+type CommandRequest = agentshim.CommandRequest
+"""The spawn request a ``FakeExecutor`` script receives."""
 
 __all__ = [
+    "KILLED_STATUS",
+    "MALFORMED_LINE",
+    "NOT_A_REPLY",
+    "TURN_BUDGET_S",
+    "CommandExecutor",
+    "CommandRequest",
+    "ConversationFaultKind",
     "FakeAgentClient",
     "FakeAgentInvocationStore",
     "FakeAgentSessions",
     "FakeDockerBuildRunner",
-    "FakeDriver",
+    "FakeExecutor",
     "FakeInvocation",
+    "FakeProvider",
+    "FakeProviderError",
+    "FakeRun",
     "FakeTurnScript",
-    "fake_agentshim_driver",
+    "FaultingExecutor",
+    "FaultingTransport",
+    "HandSession",
+    "ProcessFaultKind",
+    "StreamPeers",
+    "TokenUsage",
+    "Transport",
+    "answering_with",
+    "assistant_text",
+    "fake_agentshim_launcher",
+    "fake_profiles",
+    "fake_stream_launcher",
+    "installed_mcp_servers",
+    "scripted_turn",
+    "stream_peers",
+    "thinking",
+    "todo_write",
+    "tool_call",
+    "tool_result",
+    "usage",
 ]
 
 
-def fake_agentshim_driver(
+def fake_agentshim_launcher(
     *,
     provider: str,
     executor: FakeExecutor,
     transport: agentshim.TransportKind = agentshim.TransportKind.ONE_SHOT,
-) -> AgentDriver:
-    """Drive the real usage/policy adapter with a scripted in-memory executor.
+) -> SessionLauncher:
+    """Launch real sessions under the production policy over a scripted in-memory executor.
 
     No provider CLI or operator environment is used. The fake executor emits
     the provider's real protocol; normalization follows the production path.
@@ -48,7 +116,7 @@ def fake_agentshim_driver(
     ``transport`` is the one the scripted executor speaks: a ``STREAM`` fake
     needs an executor built with ``peers``.
     """
-    return _FakeAgentShimDriver(
+    return _FakeConfinedLauncher(
         provider=provider,
         executor_factory=lambda: executor,
         launcher_env=dict,
@@ -57,8 +125,32 @@ def fake_agentshim_driver(
     )
 
 
-class _FakeAgentShimDriver(AgentShimDriver):
-    """Keep policy/usage translation while replacing host setup with memory."""
+def fake_stream_launcher(
+    *,
+    provider: str,
+    executor: CommandExecutor,
+    sandboxes: Mapping[str, DockerSandbox],
+) -> SessionLauncher:
+    """Launch container sessions over a stream transport whose process is ``executor``.
+
+    The executor is the far end of the provider's long-lived process (for
+    example a ``FakeExecutor`` built with ``peers`` from :func:`stream_peers`,
+    possibly wrapped by a fault injector). The clock and ids are fakes, so a
+    hung turn times out on virtual time and never by waiting.
+    """
+    return ConfinedSessionLauncher(
+        provider=provider,
+        docker_sandboxes=dict(sandboxes),
+        executor_factory=lambda: executor,
+        launcher_env=dict,
+        transient_retry_delays=(),
+        clock=FakeClock(),
+        ids=SequentialIds(),
+    )
+
+
+class _FakeConfinedLauncher(ConfinedSessionLauncher):
+    """Keep the production launch policy while replacing host setup with memory."""
 
     def _sandbox_for(
         self,
@@ -74,7 +166,7 @@ class _FakeAgentShimDriver(AgentShimDriver):
 class FakeAgentSessions(ClientAgentSessions):
     """In-memory agent execution with the production durable dispatch guarantees.
 
-    The caller supplies an AgentClient over FakeDriver or a faithful executor.
+    The caller supplies an AgentClient over FakeProvider or a faithful executor.
     Reusing the dispatch mechanism keeps the Fake's identity, failure and crash
     semantics identical to production; its shared ledger retains crash evidence.
     """

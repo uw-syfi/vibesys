@@ -5,10 +5,11 @@ from types import SimpleNamespace
 
 import agentshim
 import pytest
-from tests.support import provider_profiles as fake_profiles
 
+# test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent import host_resource_declarations
 from vs_agent.api import declare_provider_state_resources
+from vs_agent.api.testing import fake_profiles
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 _SHIPPED = ("claude", "codex", "gemini", "opencode")

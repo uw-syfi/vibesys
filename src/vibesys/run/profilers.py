@@ -11,7 +11,7 @@ from vibesys.orchestration.profilers import (
     resolve_profiler_kind,
 )
 from vibesys.run.contracts import RunRequest
-from vs_agent.api import agent_driver_supports_tool_servers
+from vs_agent.api import agent_supports_tool_servers
 from vs_project.api import Project, ProjectLayoutError
 from vs_runtime.api.infrastructure import (
     NativeCpuProfilerKind,
@@ -80,7 +80,7 @@ def resolve_run_profiler(
             provider=request.cli_provider,
             model=config.model.name,
         )
-        if not agent_driver_supports_tool_servers(agent_spec):
+        if not agent_supports_tool_servers(agent_spec):
             definition = profiler_definition(resolved)
             raise ConfigurationError(
                 ConfigurationDiagnostic(

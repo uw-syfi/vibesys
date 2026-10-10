@@ -12,7 +12,7 @@ Each record stores the fingerprint of the session spec that produced it, so a
 resumed process refuses a checkpoint whose configuration has since changed,
 using the same comparison an in-process client makes before reusing a live
 session. Nothing here decides when a session is invalid: callers persist after
-each completed turn and clear when a driver reports a restart.
+each completed turn and clear when a session reports a restart.
 
 The map is keyed by the stored form of an :class:`AgentSessionKey`, and only
 keys whose scope opts into durability are ever written (see

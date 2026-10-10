@@ -61,7 +61,7 @@ from vs_agent.api import (
     AgentTurnRequest,
     SessionScope,
 )
-from vs_agent.api.testing import FakeAgentSessions, FakeDriver
+from vs_agent.api.testing import FakeAgentSessions, FakeProvider
 from vs_evaluation.api import (
     ContentDigest,
     EvaluationAgentAccessError,
@@ -124,7 +124,7 @@ def test_host_wait_spends_no_agent_calls_or_attempts(elapsed_s: int, tmp_path: P
         assert workspace.id is not None
         calls: list[AgentTurnRequest] = []
         client = AgentClient(
-            FakeDriver(
+            FakeProvider(
                 answer={
                     "summary": "Trusted result checked.",
                     "outcome": "continue",
@@ -522,7 +522,7 @@ async def _session(
     on_turn: Callable[[AgentTurnRequest], None],
     workspace: CandidateWorkspace,
 ) -> tuple[AgentConversation, AgentClient]:
-    client = AgentClient(FakeDriver(answer=answer, on_turn=on_turn))
+    client = AgentClient(FakeProvider(answer=answer, on_turn=on_turn))
     key = AgentSessionKey(SessionScope.MEMBER, f"{IMPLEMENTER.id}:held")
     spec = AgentSessionSpec(
         role=IMPLEMENTER.id,
@@ -731,7 +731,7 @@ async def test_workstream_b_joins_a_capture_and_resumes_once(
     )
     calls: list[AgentTurnRequest] = []
     client = AgentClient(
-        FakeDriver(
+        FakeProvider(
             answer={
                 "summary": "Shared result checked.",
                 "outcome": "continue",
@@ -1042,7 +1042,7 @@ async def test_parked_workstream_resumes_from_shared_capture_after_owner_settles
     )
     calls: list[AgentTurnRequest] = []
     client = AgentClient(
-        FakeDriver(
+        FakeProvider(
             answer={
                 "summary": "Shared result checked.",
                 "outcome": "continue",

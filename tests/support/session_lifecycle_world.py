@@ -21,7 +21,7 @@ from tests.support.session_world import (
 )
 
 from vs_agent.api import AgentClient, AgentSessionKey, AgentTurnRequest
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeAgentSessions, FakeDriver
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeAgentSessions, FakeProvider
 from vs_core.api import (
     CancelTurn,
     CloseSession,
@@ -53,7 +53,7 @@ CONTINUATION = ContinuationId(root="continuation-1")
 class RecordingClient(AgentClient):
     """The real client, plus the keys it was asked to cancel and release."""
 
-    def __init__(self, driver: FakeDriver, store: SessionStore) -> None:
+    def __init__(self, driver: FakeProvider, store: SessionStore) -> None:
         """Wrap the Fake driver; *store* keeps the checkpoint across a release."""
         super().__init__(driver, session_store=store)
         self.cancelled: list[AgentSessionKey] = []
@@ -105,7 +105,7 @@ def open_lifecycle_host(
             message = "provider died after accepting the turn"
             raise ConnectionError(message)
 
-    client = RecordingClient(FakeDriver(answer=answer or {"value": 7}, on_turn=on_turn), store)
+    client = RecordingClient(FakeProvider(answer=answer or {"value": 7}, on_turn=on_turn), store)
     return SessionHost(
         FakeSessionResolver(workspace, TemplateRenderer(workspace)),
         client,

@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class AgentExecutionStatus(StrEnum):
-    """Driver-neutral outcome of one agent execution."""
+    """Provider-neutral outcome of one agent execution."""
 
     COMPLETED = "completed"
     FAILED = "failed"

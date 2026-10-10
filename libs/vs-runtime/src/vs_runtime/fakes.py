@@ -391,7 +391,7 @@ class FakeWorkspaceAgentSessions:
         supported_extra_tools: Collection[str] | None = None,
         supported_agent_capabilities: Collection[AgentCapability] | None = None,
     ) -> None:
-        """Build role lookup, optionally restricting simulated driver support."""
+        """Build role lookup, optionally restricting simulated agent support."""
         self._session_transport: AgentSessions | None = None
         self._invocation_store: AgentInvocationStore = FakeAgentInvocationStore()
         self._roles = {role.id: role for role in agents}

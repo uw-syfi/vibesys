@@ -1,13 +1,19 @@
-# Agent Drivers
+# Agent Sessions
 
-`AgentClient` presents one application interface over the agent driver. It
-owns session reuse, skill setup, response parsing, logging, usage records, and
-lifecycle. A driver owns native executor setup, policy translation, turns,
-events, and cleanup. Unsupported requirements fail before a session starts.
+`AgentClient` presents one application interface over agent sessions. It owns
+session reuse, skill setup, response parsing, logging, usage records, and
+lifecycle. It is given a `SessionLauncher` (a `typing.Protocol` in
+`vs_agent/session_launch.py`) whose `launch(spec)` returns a `LaunchedSession`
+(`vs_agent/shim_turns.py`), a thin wrapper over one `agentshim.Session`. The
+production launcher is `ConfinedSessionLauncher`: it owns native executor setup,
+policy translation, and confinement, and the session runs turns, events, and
+cleanup. All conversion between VibeSys and agentshim types lives in
+`vs_agent/shim_translation.py`. Unsupported requirements fail before a session
+starts.
 
-AgentShim is the only agent driver, so there is nothing to select. The former
-`[agent].driver` key was removed: a config that still sets it, including
-`driver = "omnigent"`, is rejected with an error naming `agent.driver`, and a
+agentshim is the only agent backend, so there is nothing to select. The former
+`[agent].driver` key, which selected the removed driver layer, was removed: a
+config that still sets it, including `driver = "omnigent"`, is rejected with an error naming `agent.driver`, and a
 run manifest that records `execution.agent_driver = "omnigent"` is rejected the
 same way. Manifests of earlier runs that recorded `agentshim` still load and
 resume, and round records that carry the retired `implementer_driver` key still
@@ -40,22 +46,30 @@ config file formats, output-schema dialects, provider state directories, auth
 environment variables, skill directories, install recipes, and resume flags. A
 fact that is true because of how a CLI behaves belongs there.
 
-VibeSys owns driver policy: which provider to run, session budgets and when to
+VibeSys owns launch policy: which provider to run, session budgets and when to
 retire a conversation, host sandbox policy, Docker lifecycle, and event
 rendering. A fact that is true because of how VibeSys chooses to run agents
 belongs here.
 
-New provider behavior therefore goes upstream, not into a VibeSys driver
+New provider behavior therefore goes upstream, not into a VibeSys
 workaround.
+
+### Import boundary
+
+Only `vs_agent` imports `agentshim`. Everything else uses `vs_agent.api`, and
+tests use `vs_agent.api.testing`. Ruff's banned-api rule (`TID251` on
+`agentshim`, configured in `pyproject.toml`) enforces it, with exemptions only
+for `libs/vs-agent/**` and `tests/e2e/**`. Tests of the launcher, streaming
+transport, and related behavior live in `libs/vs-agent/tests`.
 
 ## Transports
 
 A containerized session of a provider that agentshim lists in
 `stream_provider_names()` (Claude Code and Codex today) keeps one long-lived
 process per conversation (`TransportKind.STREAM`) instead of starting a CLI per
-turn. The driver reads that registry; it never branches on a provider name.
+turn. The launcher reads that registry; it never branches on a provider name.
 Every other session (Gemini, opencode, and every host session) stays one process
-per turn (`TransportKind.ONE_SHOT`). `AgentShimDriver(transport=...)` fixes the
+per turn (`TransportKind.ONE_SHOT`). `ConfinedSessionLauncher(transport=...)` fixes the
 choice for tests.
 
 A long-lived process lets a turn receive a message while it runs
@@ -96,10 +110,10 @@ by a fresh one.
 ## Provider readiness
 
 A missing CLI or a logged-out account would otherwise surface as the first
-turn's failure. Before a role's first session, `AgentClient` asks a driver that
+turn's failure. Before a role's first session, `AgentClient` asks a launcher that
 implements `ReadinessProbe` to probe its provider with `probe_readiness(spec)`.
-The AgentShim driver calls `agentshim.probe_provider` on the executor, sandbox
-confinement and environment `create_session` builds for the same spec, so a
+`ConfinedSessionLauncher` calls `agentshim.probe_provider` on the executor, sandbox
+confinement and environment `launch` builds for the same spec, so a
 container is probed where the agent will run. No model is called.
 
 | Probe result | Outcome |
@@ -109,14 +123,14 @@ container is probed where the agent will run. No model is called.
 | login `UNKNOWN` (Gemini, Copilot, opencode have no status command) | proceeds; the run log records `[readiness] ... login state unknown` |
 | ready | proceeds; passing is remembered per role, a failure is not |
 
-`ProviderNotReadyError` is permanent (`retryable = False`). A driver with no
-probe (Omnigent) is skipped, not guessed at.
+`ProviderNotReadyError` is permanent (`retryable = False`). A launcher with no
+probe is skipped, not guessed at.
 
 ## Rate-limit reports
 
 A provider that reports its rate-limit windows (Claude Code's `rate_limit_event`,
 Codex's `account/rateLimits/updated`) reaches VibeSys as one `AgentRateLimit`
-per window, carried by an `AgentEventKind.RATE_LIMIT` driver event. `AgentLogger`
+per window, carried by an `AgentEventKind.RATE_LIMIT` event. `AgentLogger`
 writes a plain `[rate limit]` line to the run log and publishes the typed
 `rate_limit_update` event (`RateLimitUpdateData`) for frontends. `exhausted` on
 the event is resolved once, in `AgentRateLimit.is_exhausted`: the provider's own
@@ -125,7 +139,7 @@ The headless frontend prints a line only for an exhausted window.
 
 ## Quota and rate-limit stops
 
-agentshim classifies why a turn failed (`FailureKind`); the AgentShim driver
+agentshim classifies why a turn failed (`FailureKind`); `vs_agent`
 turns the two capacity cases into one typed error, `AgentQuotaError`
 (`provider`, `condition`, `detail`, `resets_at`):
 
@@ -184,11 +198,11 @@ offers a new message to the turn that began first, through the client's
 message (`ProviderProfile.supports_steer`). The one-shot transport, which reads
 no input after launch, answers `UNSUPPORTED` without asking the library, so
 steering is live only on stream transports (Claude stream-json, Codex
-app-server; selected with `AgentShimDriver(transport=TransportKind.STREAM)`).
+app-server; selected with `ConfinedSessionLauncher(transport=TransportKind.STREAM)`).
 
 Anything not delivered mid-turn keeps today's behavior: it stays queued for the
 next boundary. That includes a message offered before the provider reports the
-turn running (`NO_RUNNING_TURN`), a driver without the capability, and a message
+turn running (`NO_RUNNING_TURN`), a session without the capability, and a message
 the provider accepts and then refuses (`SteerRejected`): the channel queues it
 again at the head and journals `steer_queued` a second time. `delivered` means
 the provider accepted the message into the running turn, not that the model has
@@ -201,7 +215,7 @@ is offered the message.
 MCP session identity includes its command, arguments, stable environment, and
 launch-only environment key names. `vs_mcp`'s `StdioServerDescriptor.runtime_env` carries
 fresh credentials and service endpoints. Its values are excluded from session
-equality, fingerprints, and representations; the drivers inject them into the
+equality, fingerprints, and representations; the launcher injects them into the
 MCP process on creation. Keys may not overlap the stable environment. Grant
 principal, scope, role, and tool capabilities remain in the stable environment,
 so credential rotation preserves continuity while authority changes reject it.
@@ -224,30 +238,30 @@ in the workspace-session Fake.
 
 Two contract members carry this:
 
-- `AgentCapabilities.provider_session_resume` says whether a driver can adopt a
+- `AgentCapabilities.provider_session_resume` says whether a launcher's sessions can adopt a
   conversation created by an earlier process. `session_reuse` only promises
   reuse within one process.
-- `AgentSession.resume_provider_session(session_id) -> bool` offers one
-  checkpoint and returns whether it was adopted. A driver returns `False` when
+- `LaunchedSession.adopt(session_id) -> bool` offers one
+  checkpoint and returns whether it was adopted. It returns `False` when
   its provider cannot resume, or when the session already holds a live
   conversation whose history is newer than the checkpoint. A `False` answer
   tells the client the checkpoint is dead, so it drops it.
 
 Which providers can do it is
-declared by `ProviderProfile.supports_resume`, not by the driver: every CLI
+declared by `ProviderProfile.supports_resume`, not by `vs_agent`: every CLI
 VibeSys ships has a resume flag (`claude --resume <session>`,
 `codex exec resume <thread>`, `gemini --resume <id>`,
-`opencode run --session <id>`), so the driver reports the profile's answer
+`opencode run --session <id>`), so the session reports the profile's answer
 rather than a hard-coded provider list.
 
-### Drivers must report restarts
+### Restarts are reported
 
-A driver that drops and restarts the conversation a session names must return
-`SessionDisposition.RESET_REQUIRED` on that turn's `AgentTurnResult`. The client
-then evicts the live session and clears the checkpoint, so nothing later claims
-continuity with history that no longer exists. The AgentShim session maps agentshim's
-`Turn.continuity` (`RESET` and `REPLACED`) to a reset; `agentshim.Session` owns both
-restarts:
+A turn that drops and restarts the conversation a session names sets
+`AgentTurnResult.restarted`. `LaunchedSession` sets it whenever agentshim
+reports a `Turn.continuity` other than `CONTINUED` (`RESET` or `REPLACED`). The
+client then evicts the live session and clears the checkpoint, so nothing later
+claims continuity with history that no longer exists. `agentshim.Session` owns
+both restarts:
 
 - retiring an over-budget Codex thread (turn count or heavy-turn usage),
   evaluated after the turn so the decision reads the usage it just produced;
@@ -257,17 +271,17 @@ restarts:
   `claude --resume`). Only a resumed turn is retried, and only once, so a
   second failure is a real agent failure and propagates.
 
-The library restarts silently, so the AgentShim session logs each one (a renewed
+The library restarts silently, so `LaunchedSession` logs each one (a renewed
 thread, a replaced conversation, a dropped conversation) for the operator.
 
 A turn that merely raises is not a restart. Timeouts and cancellations (a cancelled turn raises
 `agentshim.TurnCancelledError` and keeps its conversation) say
 nothing about whether the conversation is still resumable, so the client keeps
-the checkpoint and only a driver-reported reset (or a refused adoption) clears
+the checkpoint and only a reported restart (or a refused adoption) clears
 it.
 
 Journaled turns set `AgentTurnRequest.require_provider_checkpoint`, including
-their first dispatch. The driver retains their conversation despite its renewal
+their first dispatch. The session retains their conversation despite its renewal
 budget and never retries a refused resume in a fresh conversation. The client
 requires a resumable identity and rejects actual resets or replacements. Later
 starts validate the current checkpoint against the latest invocation journal;
@@ -280,7 +294,7 @@ A resumed turn that raises a `CliExitError` whose `kind` is
 `FailureKind.OTHER` still loses the conversation it was continuing: the `agentshim.Session` forgets
 the conversation before re-raising, so the next turn on that session starts fresh.
 A raise carries no `AgentTurnResult`, so the turn cannot report
-`RESET_REQUIRED`, and forgetting is the only way the session can refuse to
+`restarted`, and forgetting is the only way the session can refuse to
 offer a conversation again.
 
 This is a backstop, not the normal path. Codex recognizes its own
@@ -298,13 +312,13 @@ is the cheaper of the two.
 The drop is session-local. `AgentClient` evicts the live session when a turn
 raises and deliberately keeps the checkpoint, so a run whose provider cannot
 report a refused resume can still re-adopt a dead conversation ID in the next
-process. Fixing that belongs with the checkpoint, not the driver.
+process. Fixing that belongs with the checkpoint, not the session.
 
 ### Transient provider errors are waited out
 
 agentshim classifies every failed turn: `CliExitError.kind` is a
-`FailureKind`, read by the provider package from what its CLI reported. The
-driver never matches provider error text. A turn whose kind is `TRANSIENT`
+`FailureKind`, read by the provider package from what its CLI reported. `vs_agent`
+never matches provider error text. A turn whose kind is `TRANSIENT`
 (an overload, a rate limit, or a server error) is retried in place after
 each delay in `TRANSIENT_RETRY_DELAYS_S`, about fifteen minutes in total,
 before the error propagates. The CLI has already retried inside the turn by
@@ -317,10 +331,9 @@ backoff here.
 
 A provider can give up producing output that matches the turn's response
 schema (agentshim `FailureKind.SCHEMA`; Claude Code exits with
-`error_max_structured_output_retries` after its own in-turn retries). The
-driver raises `AgentOutputSchemaError` with the provider's last validation
+`error_max_structured_output_retries` after its own in-turn retries). `vs_agent` raises `AgentOutputSchemaError` with the provider's last validation
 errors in `.detail`, and does not retry: repeating the same prompt meets the
-same schema. The conversation is kept, by the driver and by `AgentClient`,
+same schema. The conversation is kept, by the session and by `AgentClient`,
 which does not evict the session for this error, so a correction sent as the
 next turn continues the work. vs-runtime raises it to plugins as
 `StructuredResponseError` with the same `.detail`, the error an unparseable
@@ -443,14 +456,14 @@ command's own runtime needs, not for running agent CLIs.
 ## Container execution
 
 Docker runs the provider CLI inside the role's editor container, through
-the same path a host session runs. `create_session` looks up or builds a
+the same path a host session runs. `ConfinedSessionLauncher.launch` looks up or builds a
 `vs_sandbox.WorkspaceSandbox`, wraps a plain `agentshim.HostCommandExecutor()`
 through `confine_to_sandbox`, and hands `agentshim.Agent` the sandbox's own
 environment; nothing in it branches on which backend it has. A container
-session's sandbox is not built by the driver: it is the run environment's
+session's sandbox is not built by the launcher: it is the run environment's
 already-started `vs_sandbox.DockerSandbox`, looked up by role from the
-`docker_sandboxes` dict the driver was configured with. `sandbox.wrap` and
-`sandbox.agent_path` are the only two operations the driver calls to adapt
+`docker_sandboxes` dict the launcher was configured with. `sandbox.wrap` and
+`sandbox.agent_path` are the only two operations the launcher calls to adapt
 everything else to a container.
 
 - `confine_to_sandbox` calls `sandbox.wrap(argv, cwd)` when the sandbox's
@@ -485,7 +498,7 @@ everything else to a container.
 
 ### A failed health check is a typed agent fault
 
-`agentshim.Agent` runs `<binary> --help` when a session is constructed. The driver
+`agentshim.Agent` runs `<binary> --help` when a session is constructed. `vs_agent`
 translates failed checks, missing binaries and process execution errors into
 `AgentSpawnError`, including the provider and the original cause. This aborts
 the attempted turn before agent work starts. The fault is retryable: a caller's
@@ -493,7 +506,7 @@ bounded turn-fault policy can repeat setup, including after a dependency
 reinstall.
 
 A busy Docker daemon must not trip the check unnecessarily.
-`AgentShimDriver(check_timeout=...)` bounds it, defaulting to 60 s in container
+`ConfinedSessionLauncher(check_timeout=...)` bounds it, defaulting to 60 s in container
 mode against 15 s on the host: the container check waits on `docker exec`
 attaching as well as on the CLI answering.
 
@@ -502,7 +515,7 @@ attaching as well as on the CLI answering.
 A provider that discovers MCP servers from a config file (`claude`, `gemini`,
 `opencode`) needs a directory to write it into, and agentshim derives that
 directory from the session's `cwd`. That `cwd` is always the host workspace
-path now, in both modes, so the config lands on the host without the driver
+path now, in both modes, so the config lands on the host without the launcher
 naming a separate location, and a container CLI reads it back through the
 bind mount at `/workspace`. Codex passes its servers as `--config` flags and
 touches no workspace file either way.
@@ -516,7 +529,7 @@ inherits a login shell's PATH, where that name may resolve to an interpreter
 without the MCP dependencies. A container session leaves the command as
 written, because the image resolves its own. That distinction is one keyword
 argument (`pin_interpreter`) on `_as_mcp_server`, not a container/host branch
-elsewhere in the driver.
+elsewhere in the launcher.
 
 ## Usage records
 
@@ -545,28 +558,28 @@ loads), `skills_invoked` (their names, one per load, in order) and
 this per provider (`ProviderProfile.skill_invocation`, `skill_discovery`).
 Claude Code reports both; Codex reports loads (inferred from a shell read of a
 `SKILL.md`) but not the offered list; Gemini and opencode report neither.
-Which provider frames count as a load is agentshim's knowledge: the driver
+Which provider frames count as a load is agentshim's knowledge: `vs_agent`
 maps `agentshim.SkillInvoked` to an `AgentEventKind.SKILL` event and the
 turn's `agentshim.SkillSummary` to `AgentTurnResult.skills`, and matches no
 tool names or paths. The offered list also appears in the run log as a
 `[skills offered]` diagnostic line, and each load as `[skill] <name>`.
 
-Every session a run starts is offered only the run's skills: the driver asks
+Every session a run starts is offered only the run's skills: the launcher asks
 agentshim for `SkillScope.PROJECT`, which hides the operator's personal and
 plugin skills so a run behaves the same whoever launches it. How each CLI is
 told is agentshim's knowledge (`ProviderProfile.skill_scopes`). Claude Code's
 mechanism also skips the operator's user settings and `~/.claude/CLAUDE.md`;
 credentials still load. A provider without a mechanism (Gemini, opencode)
 keeps every skill: `AgentCapabilities.skill_isolation` is false for it and the
-driver logs that once per session.
+session logs that once.
 
-The same holds for MCP servers: the driver asks agentshim for
+The same holds for MCP servers: the launcher asks agentshim for
 `McpScope.SESSION`, so a session connects only to the servers the run
 configured (the evaluation and profiler servers), not the operator's user or
 project MCP configuration, plugin servers, or account connectors (claude.ai,
 ChatGPT apps). The CLI-specific mechanism is agentshim's
 (`ProviderProfile.mcp_scopes`). A provider without one keeps every server:
-`AgentCapabilities.mcp_isolation` is false for it and the driver logs that once
+`AgentCapabilities.mcp_isolation` is false for it and the launcher logs that once
 per session.
 
 The rest of the operator's CLI configuration (user settings, hooks, global
@@ -580,9 +593,9 @@ conversation resumes across candidates. The home's `auth.json` is a symlink to
 the operator's: Codex rotates its refresh token and writes `auth.json` in
 place, so a copy would log out whichever side did not refresh. For the same
 reason the sandbox grants the auth file read-write. A provider without a
-mechanism (Copilot, Gemini, opencode), a container session, or a driver built
+mechanism (Copilot, Gemini, opencode), a container session, or a launcher built
 without an agent-homes directory keeps `ALL`:
-`AgentCapabilities.config_isolation` is false and the driver logs it per
+`AgentCapabilities.config_isolation` is false and the launcher logs it per
 session. Managed policy settings and the workspace's own `.claude/` or
 `.codex/` configuration still apply.
 
@@ -596,7 +609,7 @@ variables are added on top. An operator adds names with `[agent]
 env_passthrough = ["NAME", ...]`; an entry that is not a variable name is
 rejected when the config loads. `CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`
 and `ROCR_VISIBLE_DEVICES` are allowlisted so an operator's GPU pin reaches the
-agents. The driver logs once per run, at the start of the first session, the
+agents. The launcher logs once per run, at the start of the first session, the
 names (never values) of launcher variables it did not pass.
 
 Variables operators commonly need to add:
@@ -611,38 +624,33 @@ Variables operators commonly need to add:
 
 `env_passthrough` takes exact names, not patterns.
 
-## Mock driver
+## FakeProvider
 
-`driver = "mock"` is test infrastructure. It satisfies the same driver
-contract while streaming an explicitly scripted turn, so tests exercise the
-real `AgentClient` -> run-owned `CoreAgentEventSink` -> `EventJournal` ->
-server integration -> transport path without an agent CLI, a model, or a
-network. It never writes events, state, or files itself.
+`FakeProvider` is test infrastructure, exposed through `vs_agent.api.testing`
+(defined in `vs_agent/scripted_provider.py`). It opens scripted sessions that
+stream an explicitly scripted turn, so tests exercise the real `AgentClient` ->
+run-owned `CoreAgentEventSink` -> `EventJournal` -> server integration ->
+transport path without an agent CLI, a model, or a network. It never writes
+events, state, or files itself. There is no config key that selects it.
 
-```toml
-[agent]
-backend = "cli"
-driver = "mock"
-```
-
-`FakeDriver`, defined in the library's internal `drivers.fake` module, takes
-an explicit `turn=[...]` (or `turns=[[...], ...]` for a sequence of distinct
-turns) built from its event-builder functions: `assistant_text`, `thinking`,
-`tool_call`, `tool_result`, `todo_write`, and `usage`.
+`FakeProvider` takes an explicit `turn=[...]` (or `turns=[[...], ...]` for a
+sequence of distinct turns) of `agentshim` events, plus `answer=` for a
+structured reply and `script=` (`FakeTurnScript`) for per-turn answers and
+scheduled conversation resets. A response schema with no scripted answer
+raises rather than being fabricated.
 
 Tests that need typed policy replies compose `FakeAgentClient` through the
-public test session factory. The mock driver is limited to the provider-driver
-adapter path, and a response schema with no scripted artifact raises rather
-than being fabricated. The mock is not offered through the client protocol:
-driver choice stays an implementation detail.
+public test session factory. Fault-injection wrappers `FaultingExecutor` and
+`FaultingTransport` also live in `vs_agent` and are re-exported from
+`vs_agent.api.testing`.
 
 ## Sandboxing
 
 Vocabulary, ownership, configuration flow, and the support matrix are in
 [Sandboxing and confinement](sandboxing.md). This section covers the agentshim
-driver only.
+launcher only.
 
-The agentshim driver applies VibeSys confinement as an executor transform:
+`ConfinedSessionLauncher` applies VibeSys confinement as an executor transform:
 `confine_to_sandbox` rewrites every command's argv through the confinement's
 `wrap`, unconditionally, the single chokepoint through which the provider CLI
 is launched on the host or in a container alike. The provider CLIs run with
@@ -659,7 +667,7 @@ confined run then loses the conversation continuity it was told it had.
 
 ## End-to-end tests
 
-`tests/e2e/test_agentshim_driver_e2e.py` drives `AgentShimDriver` against the
+`tests/e2e/test_confined_session_e2e.py` drives `ConfinedSessionLauncher` against the
 installed `claude` and `codex` binaries on the host path: one turn, a resumed
 second turn, a structured turn, and a session-scoped stdio MCP server
 (`tests/support/mcp_add_server.py`). Every case is skipped unless

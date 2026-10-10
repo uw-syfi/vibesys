@@ -1,6 +1,6 @@
 """A durable session world for the SESSIONS executor: real disk, the Fake agent client.
 
-The provider conversation lives in one ``AgentClient`` over ``FakeDriver`` and the
+The provider conversation lives in one ``AgentClient`` over ``FakeProvider`` and the
 invocation journal in one ``FakeAgentInvocationStore``; both outlive a simulated
 host restart. Each ``executor`` call builds new ``ClientAgentSessions`` and a new
 executor over the same disk, so a restart forgets exactly what a real one forgets
@@ -23,7 +23,7 @@ from vs_agent.api import (
     AgentSessionSpec,
     AgentTurnRequest,
 )
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeAgentSessions, FakeDriver
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeAgentSessions, FakeProvider
 from vs_core.api import (
     Access,
     ArtifactId,
@@ -287,7 +287,7 @@ class SessionHost:
     journal: FakeAgentInvocationStore
     turns: list[AgentTurnRequest]
     faults: ProviderFaults
-    driver: FakeDriver | None = None
+    driver: FakeProvider | None = None
     turn_started: threading.Event = field(default_factory=threading.Event)
 
     def executor(self, store: ReceiptStore) -> RuntimeSessionRequests:
@@ -354,7 +354,7 @@ def open_host(
             message = "provider died after accepting the turn"
             raise ConnectionError(message)
 
-    driver = FakeDriver(answer=answer or {"value": 7}, on_turn=on_turn)
+    driver = FakeProvider(answer=answer or {"value": 7}, on_turn=on_turn)
     client = AgentClient(driver)
     return SessionHost(
         FakeSessionResolver(workspace, TemplateRenderer(workspace)),

@@ -208,7 +208,7 @@ def _narrowed_writable_leaves(profile: ProviderProfile) -> dict[str, tuple[str, 
     the server already rejects, logging the operator out. The history leaves must
     persist too: without them the rollout a turn writes lands in the sandbox's
     ephemeral view of the state root and is gone by the next turn, so a resume
-    reports no rollout for the thread, the driver restarts the conversation, and
+    reports no rollout for the thread, the session restarts the conversation, and
     a confined run silently loses continuity it was told it had.
     """
     narrowed: dict[str, tuple[str, ...]] = {}

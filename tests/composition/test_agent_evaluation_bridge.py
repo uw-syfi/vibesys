@@ -37,7 +37,7 @@ from tests.support.skeleton_world import (
 )
 
 from vs_agent.api import AgentClient
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
@@ -233,7 +233,7 @@ async def scenario(tmp_path: Path, *, submissions: int = 1) -> AsyncIterator[Sce
             writer=writer,
         )
         resolvers.append(resolver)
-        client = AgentClient(FakeDriver(answer=writer.answer, on_turn=writer))
+        client = AgentClient(FakeProvider(answer=writer.answer, on_turn=writer))
         return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
 
     def yields(workspaces: RuntimeWorkspaces, receipts: StateNamespace) -> AgentEvaluationBridge:

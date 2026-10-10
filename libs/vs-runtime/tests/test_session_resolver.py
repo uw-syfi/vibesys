@@ -30,7 +30,7 @@ from vs_agent.api import (
     AgentSpec,
     AgentTurnRequest,
 )
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
 from vs_core.api import (
     Access,
     ArtifactId,
@@ -122,7 +122,7 @@ def open_production(env: WorkspaceEnv, declared: AgentRole) -> Production:
         ),
         session_spec=spec,
     )
-    client = AgentClient(FakeDriver(answer={"value": 7}, on_turn=turns.append))
+    client = AgentClient(FakeProvider(answer={"value": 7}, on_turn=turns.append))
     requests = open_session_requests(
         inputs, client=client, invocation_slot=FakeAgentInvocationStore(), store=store
     ).turns
