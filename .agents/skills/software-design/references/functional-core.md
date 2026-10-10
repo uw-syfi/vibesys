@@ -165,21 +165,16 @@ The core imports no I/O library or interface. Shared pure value contracts may
 live in pure libraries; do not import mixed I/O APIs for their types. Preserve
 one-way dependencies and the [placement rule](../../../../docs/contributing/architecture.md).
 
-## Worked example: HostCore
+## Worked example: DynamicStrategy
 
-Read [HostCore](../../../../src/vibesys/orchestration/dynamic/control/core.py)
-and its [property tests](../../../../tests/vibesys/orchestration/dynamic/test_host_core.py).
-Submitting two workers with one slot starts the first and queues the second.
-A `WorkerFinished` event releases the first slot and emits `StartWorker` for
-the queue head. `StopRequested` prevents new starts. Time arrives in `at_s`;
-slot and budget decisions need no async execution.
-
-`StartWorker` is a request in this vocabulary. HostCore currently mutates
-process-local state and uses older output names; it demonstrates the decision
-boundary, not the full immutable or durable contract. For a durable version,
-return new state with the start intent, commit it through `StateStore`, execute
-the start through `AgentSessions`, and feed the typed observation back. Restart
-from the committed intent and reconcile the same worker identity before replay.
+Read [DynamicStrategy](../../../../src/vibesys/orchestration/dynamic/strategy/_strategy.py)
+and its [scenario tests](../../../../tests/vibesys/orchestration/dynamic/strategy/test_scenarios.py).
+`decide` is a pure function of the strategy state, the `RunView` and the static
+config. It returns requests (start an attempt, plan, judge, stop) and never
+starts anything. `on_event` folds one typed feedback into the next state. The
+shell executes each request through its interface and feeds the observation
+back. Slot and budget decisions need no async execution, and restart replays
+the committed intent against the same identities.
 
 ## When not to use it
 

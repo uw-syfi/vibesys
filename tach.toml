@@ -93,7 +93,7 @@ depends_on = ["vibesys.api", "vibesys.api.hypothesis", "server.diagnostics", "se
 
 [[modules]]
 path = "server.chat"
-depends_on = [ "vibesys.api", "vs_prompts", "server", "server.controller", "server.run_lifecycle", "server.journal", "server.events", "server.execution", "vs_sim.api"]
+depends_on = ["vibesys.api", "vs_prompts", "server", "server.controller", "server.run_lifecycle", "server.journal", "server.events", "server.execution", "vs_sim.api"]
 
 [[modules]]
 path = "server.transport"
@@ -251,24 +251,14 @@ layer = "loops"
 depends_on = ["vibesys.run.endings", "vibesys.orchestration.attempts", "vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.domains", "vibesys.orchestration.agent_options", "vibesys.profile_focus", "vibesys.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.inputs", "vibesys.prompts", "vibesys", "vibesys.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
-path = "vibesys.orchestration.dynamic.control"
-layer = "loops"
-depends_on = []
-
-[[modules]]
-path = "vibesys.orchestration.dynamic.lifecycle"
-layer = "roles_search"
-depends_on = []
-
-[[modules]]
 path = "vibesys.orchestration.dynamic"
 layer = "loops"
-depends_on = ["vibesys.run.endings", "vibesys.dynamic_core", "vibesys.orchestration.dynamic.parents", "vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.control", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_backend", "vs_prompts", "vs_runtime", "vs_evaluation.api", "vibesys.run.dynamic_suspension", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.transitions", "vibesys.orchestration.dynamic.steers", "vibesys.orchestration.dynamic.prompts", "vibesys.orchestration.dynamic.agents", "vs_evaluator_protocol"]
+depends_on = ["vibesys.run.endings", "vibesys.dynamic_core", "vibesys.orchestration.dynamic.parents", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_backend", "vs_prompts", "vs_runtime", "vs_evaluation.api", "vibesys.orchestration.dynamic.models", "vs_evaluator_protocol"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
 layer = "loops"
-depends_on = ["vibesys.orchestration.attempts", "vibesys.orchestration.structured_turn",  "vibesys.domains", "vibesys.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.attempts", "vibesys.orchestration.structured_turn", "vibesys.domains", "vibesys.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.issue_queue"
@@ -424,7 +414,7 @@ depends_on = ["vibesys", "vs_project", "vs_runtime", "vs_prompts"]
 [[modules]]
 path = "vibesys.orchestration.evolve.population"
 layer = "roles_search"
-depends_on = [ "vibesys.metrics", "vibesys.orchestration.profilers"]
+depends_on = ["vibesys.metrics", "vibesys.orchestration.profilers"]
 
 [[modules]]
 path = "vibesys.prompts"
@@ -823,11 +813,6 @@ depends_on = ["vs_sim.concurrency"]
 # modules must import through that surface, never from the package root or
 # internal modules. Tests are outside tach scope.
 [[interfaces]]
-# The host core's public names, re-exported by its package; not its submodules.
-expose = ["[A-Z][A-Za-z]*"]
-from = ["vibesys.orchestration.dynamic.control"]
-
-[[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_async_ops"]
 
@@ -1044,10 +1029,6 @@ layer = "prompts_and_lower_libs"
 depends_on = ["vs_evaluation.state_namespace"]
 
 [[interfaces]]
-expose = ["[A-Z][A-Za-z]*", "awaiting_evaluation", "continuation_pending", "step", "withdrawing"]
-from = ["vibesys.orchestration.dynamic.lifecycle"]
-
-[[interfaces]]
 expose = ["EvaluationAdmissionStoppedError", "ScopeClosingError", "ScopeIntent", "ScopeLifecycleStore", "ScopePhase", "ScopeState", "ScopeSubmissionTracker"]
 from = ["vs_evaluation.scope_state"]
 
@@ -1147,47 +1128,11 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.dynamic.models"
 layer = "roles_search"
-depends_on = ["vs_evaluation.api", "vibesys.orchestration.dynamic.parents", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.dynamic.lifecycle", "vs_runtime"]
-
-[[modules]]
-path = "vibesys.orchestration.dynamic.transitions"
-layer = "roles_search"
-depends_on = ["vibesys.hypothesis", "vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.models"]
-
-[[modules]]
-path = "vibesys.orchestration.dynamic.steers"
-layer = "roles_search"
-depends_on = ["vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.prompts"]
-
-[[modules]]
-path = "vibesys.orchestration.dynamic.prompts"
-layer = "roles_search"
-depends_on = ["vs_prompts", "vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.models", "vs_evaluator_protocol"]
-
-[[modules]]
-path = "vibesys.run.dynamic_suspension"
-layer = "roles_search"
-depends_on = ["vibesys.orchestration.dynamic.parents", "vibesys.orchestration.dynamic.steers", "vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.prompts", "vibesys.orchestration.dynamic.transitions", "vibesys.run.evaluation_backend", "vs_evaluation.api", "vs_prompts", "vs_runtime", "vibesys.run.attempt_evaluations", "vibesys.orchestration.structured_turn", "vibesys.orchestration.dynamic.agents", "vibesys.run.validated_turn"]
+depends_on = ["vs_evaluation.api", "vibesys.orchestration.dynamic.parents", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vs_runtime"]
 
 [[interfaces]]
 expose = ["[A-Za-z][A-Za-z0-9_]*"]
 from = ["vibesys.orchestration.dynamic.models"]
-
-[[interfaces]]
-expose = ["[A-Za-z][A-Za-z0-9_]*"]
-from = ["vibesys.orchestration.dynamic.transitions"]
-
-[[interfaces]]
-expose = ["[A-Za-z][A-Za-z0-9_]*"]
-from = ["vibesys.orchestration.dynamic.steers"]
-
-[[interfaces]]
-expose = ["[A-Za-z][A-Za-z0-9_]*"]
-from = ["vibesys.orchestration.dynamic.prompts"]
-
-[[interfaces]]
-expose = ["EvaluationSuspension", "EvaluationSuspensionInvariantError", "EvaluationSuspensionUnresolvedError", "EvaluationAttemptBoundError", "EvaluationAttemptHistoryUnavailableError", "AttemptBoundKind", "repeated_evaluation_failures", "repeated_measurement_failure", "PlanningObservations", "gather_planning_observations", "ParentSnapshots", "prepare_parent_offer", "validate_parent_materialization", "PortfolioPlanning", "plan_portfolio"]
-from = ["vibesys.run.dynamic_suspension"]
 
 [[modules]]
 path = "vibesys.run.attempt_evaluations"
@@ -1197,15 +1142,6 @@ depends_on = ["vs_project", "vs_runtime"]
 [[interfaces]]
 expose = ["AttemptEvaluationCursor", "AttemptEvaluationCursorError", "AttemptEvaluationCursors"]
 from = ["vibesys.run.attempt_evaluations"]
-
-[[modules]]
-path = "vibesys.orchestration.dynamic.agents"
-layer = "roles_search"
-depends_on = ["vibesys.orchestration.dynamic.prompts", "vs_runtime"]
-
-[[interfaces]]
-expose = ["IMPLEMENTER", "JUDGE", "ORCHESTRATOR", "AGENTS", "EVALUATION"]
-from = ["vibesys.orchestration.dynamic.agents"]
 
 [[modules]]
 path = "vibesys.run.validated_turn"
