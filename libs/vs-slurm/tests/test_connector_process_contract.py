@@ -9,6 +9,7 @@ each and the observable outcome and the scheduler commands issued must agree.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from typing import TYPE_CHECKING
@@ -98,3 +99,36 @@ def test_the_in_process_fake_answers_like_the_real_connector(
 
     assert fake == real
     assert real[0] == exit_code
+
+
+def _exec_request(command: str) -> str:
+    return json.dumps({"version": 1, "operation": "exec", "command": command})
+
+
+@settings(max_examples=6, deadline=None)
+@given(text=st.text(alphabet="abcxyz012", min_size=1, max_size=8))
+def test_an_interceptor_answers_or_forwards_every_request_and_none_restores_the_cluster(
+    tmp_path_factory: pytest.TempPathFactory, text: str
+) -> None:
+    connector = FakeConnector(tmp_path_factory.mktemp("cluster") / "cluster")
+    seen: list[object] = []
+    refusal: dict[str, object] = {"version": 1, "returncode": 1, "stdout": "", "stderr": text}
+
+    def intercept(
+        request: dict[str, object], answer: Callable[[dict[str, object]], dict[str, object]]
+    ) -> dict[str, object]:
+        seen.append(request["command"])
+        return refusal if str(request["command"]).startswith("refuse") else answer(request)
+
+    connector.intercept(intercept)
+    refused = connector(["x"], stdin=_exec_request(f"refuse {text}"), timeout=1)
+    forwarded = connector(["x"], stdin=_exec_request(f"echo {text}"), timeout=1)
+
+    assert json.loads(refused.stdout) == refusal
+    assert json.loads(forwarded.stdout)["stdout"] == f"{text}\n"
+    assert seen == [f"refuse {text}", f"echo {text}"]
+    # The refused request never reached the cluster; the forwarded one did.
+    assert recorded_commands(connector.state) == [f"echo {text}"]
+    connector.intercept(None)
+    connector(["x"], stdin=_exec_request(f"echo {text}"), timeout=1)
+    assert seen == [f"refuse {text}", f"echo {text}"]

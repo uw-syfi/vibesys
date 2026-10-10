@@ -6,10 +6,10 @@ from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 from tests.vibesys.run.test_evaluation_measurement_identity import _candidate, _identity
 
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER
+from vibesys.dynamic_roles import IMPLEMENTER
+from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.run.evaluation_backend import EvidenceReusingEvaluation, SemanticEvaluationBackend
 from vs_evaluation.api import (
     EvaluationAgentRole,

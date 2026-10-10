@@ -37,8 +37,8 @@ from tests.composition.dynamic._harness import (
 )
 
 from vibesys.api import RunFailureKind, RunStatus
+from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.events import CoreEventType
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_agent.api import AgentOutputSchemaError, AgentSpawnError, AgentTurnTimeoutError
 from vs_project.api import Project
 from vs_runtime.api.core import RunStalledError

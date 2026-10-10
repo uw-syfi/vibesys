@@ -62,6 +62,13 @@ if TYPE_CHECKING:
 
     from .runner import SlurmJobStatus
 
+type ConnectorRequest = dict[str, object]
+type ConnectorResponse = dict[str, object]
+type ConnectorIntercept = Callable[
+    [ConnectorRequest, Callable[[ConnectorRequest], ConnectorResponse]], ConnectorResponse
+]
+"""Answers a request itself or through the cluster's own answer function (a fault injector)."""
+
 JOB_ID = "4242"
 REQUESTS_FILE = "requests.jsonl"
 SUBMITTED_FILE = "submitted"
@@ -463,6 +470,7 @@ class FakeConnector:
         self._accept_callbacks: dict[str, Callable[[], None]] = {}
         self._dispatch_callbacks: dict[str, Callable[[], None]] = {}
         self._dispatched: set[str] = set()
+        self._intercept: ConnectorIntercept | None = None
 
     def forget_name_history(self, operation_id: str | None = None) -> None:
         """Expire name-based scheduler history while retaining numeric job observations."""
@@ -529,6 +537,14 @@ class FakeConnector:
         if plan.rejected_reason is not None:
             raise OSError(plan.rejected_reason)
 
+    def intercept(self, intercept: ConnectorIntercept | None) -> None:
+        """Route every later request through ``intercept`` (``None``: answer directly again).
+
+        The interceptor receives the request and the cluster's own answer function, and returns
+        the response. A fault injector answers some requests itself and forwards the rest.
+        """
+        self._intercept = intercept
+
     def __call__(
         self, argv: Sequence[str], *, stdin: str | None, timeout: float
     ) -> subprocess.CompletedProcess[str]:
@@ -537,6 +553,14 @@ class FakeConnector:
         if stdin is None:
             raise ValueError(_STDIN_REQUIRED)
         request = json.loads(stdin)
+        response = (
+            self._answer(request)
+            if self._intercept is None
+            else self._intercept(request, self._answer)
+        )
+        return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
+
+    def _answer(self, request: dict[str, object]) -> dict[str, object]:
         tokens = shlex.split(str(request.get("command", "")))
         self._before_dispatch(tokens)
         response = self._scheduler(tokens) if request["operation"] == "exec" else None
@@ -551,7 +575,7 @@ class FakeConnector:
                 raise OSError(_LOST_CLAIM_REPLY)
         if "sbatch" in tokens:
             self._accepted(tokens, response)
-        return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
+        return response
 
     def _accepted(self, tokens: list[str], response: dict[str, object]) -> None:
         name = next(

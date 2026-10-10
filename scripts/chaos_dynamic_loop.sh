@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sweep the dynamic-loop chaos harness over seeds FIRST..FIRST+N-1.
+# Sweep the dynamic-search chaos harness over seeds FIRST..FIRST+N-1.
 #
 # Usage: scripts/chaos_dynamic_loop.sh N [FIRST] [WORKERS]
 # Each failing seed prints its injected faults, violations, and a repro line.
@@ -14,5 +14,5 @@ mkdir -p "$root/.logs"
 export CHAOS_SEEDS="${first}-${last}"
 export CHAOS_LOG="$root/.logs/chaos-${first}-${last}.jsonl"
 cd "$root"
-exec uv run pytest tests/vibesys/orchestration/dynamic/loop/test_chaos.py \
+exec uv run pytest tests/composition/dynamic/test_chaos.py \
   -n "$workers" -p no:randomly --no-cov -q

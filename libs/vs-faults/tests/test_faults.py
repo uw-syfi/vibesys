@@ -22,9 +22,11 @@ from vs_faults.api import (
     classify,
     connector_command,
     handle_cluster_request,
+    handle_cluster_request_with,
     injected_faults,
 )
 from vs_slurm.fake_connector import executing_cluster
+from vs_slurm.fake_connector import handle as fake_cluster_handle
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -147,6 +149,37 @@ def test_an_empty_plan_answers_every_cluster_call_like_the_inner_connector(
 
     assert json.loads(wrapped.stdout) == json.loads(direct.stdout)
     assert injected_faults(base / "faults") == []
+
+
+@given(command=st.sampled_from(["echo hi", "squeue -h -j 5000 -o %T", "sacct -n -P -j 5000"]))
+@settings(max_examples=10, deadline=None)
+def test_an_in_process_forward_is_asked_once_by_an_empty_plan_and_never_by_a_faulted_call(
+    tmp_path_factory: pytest.TempPathFactory, command: str
+) -> None:
+    """The in-process entry point answers like the process one, and a fault skips the cluster."""
+    base = tmp_path_factory.mktemp("cluster")
+    state = executing_cluster(base / "c")
+    request: dict[str, object] = {"version": 1, "operation": "exec", "command": command}
+    forwarded: list[dict[str, object]] = []
+
+    def forward(sent: dict[str, object]) -> dict[str, object]:
+        forwarded.append(sent)
+        return fake_cluster_handle(state, sent)
+
+    quiet = handle_cluster_request_with(FaultPlan(seed=0), base / "quiet", forward, request)
+
+    assert forwarded == [request]
+    assert quiet == fake_cluster_handle(state, request)
+    operation = classify(request)[0]
+    rule = FaultRule(
+        boundary=Boundary.CLUSTER, target=operation.value, at=1, fault=ClusterFault.SSH_DOWN
+    )
+    faulted = handle_cluster_request_with(
+        FaultPlan(seed=0, rules=(rule,)), base / "faulted", forward, request
+    )
+
+    assert forwarded == [request]
+    assert faulted["returncode"] != 0
 
 
 @pytest.mark.parametrize(

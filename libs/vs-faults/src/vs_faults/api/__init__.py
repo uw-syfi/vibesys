@@ -14,6 +14,9 @@ from vs_faults.connector import (
 from vs_faults.connector import (
     handle as handle_cluster_request,
 )
+from vs_faults.connector import (
+    handle_with as handle_cluster_request_with,
+)
 from vs_faults.host import Crossing, FaultGate, HostCrashError
 from vs_faults.plan import (
     AgentFault,
@@ -50,6 +53,7 @@ __all__ = [
     "classify",
     "connector_command",
     "handle_cluster_request",
+    "handle_cluster_request_with",
     "injected_faults",
     "prompt_vocabulary",
 ]
