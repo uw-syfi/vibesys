@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import signal
 import socket
-import threading
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
+
+from vs_sim.api import OsThreads, Threads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
+    from contextlib import AbstractContextManager
     from types import FrameType
 
 
@@ -25,35 +27,56 @@ def _ignore(_signum: int, _frame: FrameType | None) -> None:
     """Replace the default action; the relay thread does the work."""
 
 
-@contextmanager
+class SignalRelay(Protocol):
+    """Where a process learns, on any thread, that a termination signal arrived."""
+
+    def relay(
+        self, numbers: Iterable[int], on_signal: Callable[[int], None]
+    ) -> AbstractContextManager[None]:
+        """Call ``on_signal(number)`` off the main thread for each of *numbers* received while active.
+
+        Must be entered on the main thread; *on_signal* must be thread-safe. Leaving the
+        block restores what the process had before and ends the relay.
+        """
+        ...
+
+
+class WakeupFdSignalRelay:
+    """:class:`SignalRelay` over the interpreter's wakeup file descriptor."""
+
+    def __init__(self, threads: Threads | None = None) -> None:
+        """Run the relay thread on *threads* (operating-system threads by default)."""
+        self._threads: Threads = threads or OsThreads()
+
+    @contextmanager
+    def relay(self, numbers: Iterable[int], on_signal: Callable[[int], None]) -> Iterator[None]:
+        """Relay *numbers* to *on_signal* on a thread; handlers and the wakeup fd are restored on exit."""
+        watched = {int(number) for number in numbers}
+        reader, writer = socket.socketpair()
+        writer.settimeout(0)
+
+        def pump() -> None:
+            while data := reader.recv(64):
+                for byte in data:
+                    if byte in watched:
+                        on_signal(byte)
+
+        previous = {number: signal.signal(number, _ignore) for number in watched}
+        previous_fd = signal.set_wakeup_fd(writer.fileno(), warn_on_full_buffer=False)
+        worker = self._threads.spawn(pump, name="signal-relay", daemon=True)
+        try:
+            yield
+        finally:
+            signal.set_wakeup_fd(previous_fd)
+            for number, handler in previous.items():
+                signal.signal(number, handler)
+            writer.close()
+            worker.join()
+            reader.close()
+
+
 def relay_signals(
-    numbers: Iterable[signal.Signals], on_signal: Callable[[int], None]
-) -> Iterator[None]:
-    """Call ``on_signal(number)`` on a relay thread for each of *numbers* received.
-
-    Must be entered on the main thread. *on_signal* runs off the main thread, so
-    it must be thread-safe. Handlers and the wakeup fd are restored on exit.
-    """
-    watched = {int(number) for number in numbers}
-    reader, writer = socket.socketpair()
-    writer.settimeout(0)
-
-    def pump() -> None:
-        while data := reader.recv(64):
-            for byte in data:
-                if byte in watched:
-                    on_signal(byte)
-
-    relay = threading.Thread(target=pump, name="signal-relay", daemon=True)
-    previous = {number: signal.signal(number, _ignore) for number in watched}
-    previous_fd = signal.set_wakeup_fd(writer.fileno(), warn_on_full_buffer=False)
-    relay.start()
-    try:
-        yield
-    finally:
-        signal.set_wakeup_fd(previous_fd)
-        for number, handler in previous.items():
-            signal.signal(number, handler)
-        writer.close()
-        relay.join()
-        reader.close()
+    numbers: Iterable[int], on_signal: Callable[[int], None]
+) -> AbstractContextManager[None]:
+    """Relay *numbers* to *on_signal* through the process's real signals; see :class:`SignalRelay`."""
+    return WakeupFdSignalRelay().relay(numbers, on_signal)
