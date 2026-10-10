@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 from typing import TYPE_CHECKING
 
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from tests.support import capture_docker_start_argv
 
 from entrypoints.cli import _add_common_args
@@ -28,6 +30,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import pytest
+
+
+_DEVICE_NODES = st.sampled_from(["/dev/kfd", "/dev/dri/renderD128", "/dev/dri/renderD129"])
 
 
 def _make_backend(
@@ -131,6 +136,31 @@ class TestRocmSandbox:
         argv = capture_docker_start_argv(sb)
         groups = [argv[index + 1] for index, item in enumerate(argv[:-1]) if item == "--group-add"]
         assert groups == ["video", "render"]
+
+    @given(devices=st.lists(_DEVICE_NODES, unique=True, max_size=3), attach=st.booleans())
+    @settings(
+        max_examples=30, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    )
+    def test_docker_names_device_groups_only_when_forwarding_devices(
+        self, tmp_path: Path, *, devices: list[str], attach: bool
+    ) -> None:
+        """Docker rejects ``--group-add render`` when the image has no such group,
+        so a container that gets no device nodes must not name the groups."""
+        impl = _make_backend(tmp_path, devices=devices)
+        workspace = tmp_path / "ws"
+        workspace.mkdir(exist_ok=True)
+        sb = impl.make_sandbox(
+            SandboxKind.DOCKER,
+            host_workspace=str(workspace),
+            log_path=None,
+            attach_accelerator=attach,
+        )
+        assert isinstance(sb, DockerSandbox)
+        argv = capture_docker_start_argv(sb)
+        groups = [argv[i + 1] for i, item in enumerate(argv[:-1]) if item == "--group-add"]
+        forwarded = [argv[i + 1] for i, item in enumerate(argv[:-1]) if item == "--device"]
+        assert forwarded == (devices if attach else [])
+        assert groups == (["video", "render"] if forwarded else [])
 
     def test_torch_wheel_index_targets_rocm(self, tmp_path: Path) -> None:
         """Without this, `uv add torch` in the agent's fresh venv resolves the
