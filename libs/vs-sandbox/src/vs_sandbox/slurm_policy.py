@@ -17,7 +17,7 @@ from pydantic import (
     field_validator,
 )
 
-from vs_sandbox.slurm_gpu import AgentGpuConfig
+from vs_sandbox.agent_gpu import AgentGpuConfig
 from vs_slurm.api import (
     PORT_PLACEHOLDER,
     SlurmConfig,

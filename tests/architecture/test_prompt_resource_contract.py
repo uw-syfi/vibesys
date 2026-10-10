@@ -241,13 +241,10 @@ def representative_context() -> dict[str, object]:
         "capacity",
         "continuation_step",
         "framework_revert_round",
-        "gate_gpus",
         "in_flight",
         "iteration",
         "limit",
-        "max_gpus",
         "max_issues_per_perf_eval",
-        "max_time_minutes",
         "nodes",
         "num_failed_attempts",
         "official_eval_every",
@@ -386,6 +383,7 @@ def render_packaged_prompts(installed: Path) -> int:
         source_objective, list(resource_roots.values())
     )
     context["facts"] = RunFacts(domain_id="generic", objective=str(context["objective"]))
+    context["agent_gpu"] = {"max_gpus": 2, "max_time_minutes": 2}
     context["prompts"] = ("Review the candidate.",)
     context["inputs"] = ({"mode": "steer", "text": "Focus on the cache."},)
     hidden = (

@@ -12,14 +12,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_sandbox.api.slurm import (
+    AgentGpuConfig,
+    AgentGpuLauncher,
+    AgentGpuRequestError,
     GpuCommand,
     GpuJobRequest,
-    SlurmGpuConfig,
-    SlurmGpuConfigError,
-    SlurmGpuLauncher,
-    SlurmGpuRequestError,
     choose_partition,
-    load_slurm_gpu_config,
 )
 
 if TYPE_CHECKING:
@@ -80,7 +78,7 @@ if "--" in sys.argv:
 """
 
 
-def _config(tmp_path: Path, **updates: object) -> SlurmGpuConfig:
+def _config(tmp_path: Path, **updates: object) -> AgentGpuConfig:
     fake = tmp_path / "fake_slurm.py"
     fake.write_text(FAKE_SLURM)
     values: dict[str, object] = {
@@ -91,7 +89,7 @@ def _config(tmp_path: Path, **updates: object) -> SlurmGpuConfig:
         "scancel_command": (sys.executable, str(fake)),
     }
     values.update(updates)
-    return SlurmGpuConfig.model_validate(values)
+    return AgentGpuConfig.model_validate(values)
 
 
 @pytest.fixture
@@ -102,32 +100,12 @@ def slurm_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 class TestConfig:
-    def test_loads_the_operator_table(self, tmp_path: Path) -> None:
-        path = tmp_path / "slurm-gpu.toml"
-        path.write_text(
-            '[slurm_gpu]\npartitions = ["main", "priority"]\nmax_gpus = 8\n'
-            'max_time_minutes = 120\nwindows_command = ["slurm-windows", "--json"]\n'
-        )
-        config = load_slurm_gpu_config(path)
-        assert config.partitions == ("main", "priority")
-        assert config.windows_command == ("slurm-windows", "--json")
-
-    def test_rejects_unknown_settings_by_name(self, tmp_path: Path) -> None:
-        path = tmp_path / "slurm-gpu.toml"
-        path.write_text(
-            '[slurm_gpu]\npartitions = ["main"]\nmax_gpus = 8\nmax_time_minutes = 60\n'
-            'account = "secret-account"\n'
-        )
-        with pytest.raises(SlurmGpuConfigError, match=r"slurm_gpu\.account") as error:
-            load_slurm_gpu_config(path)
-        assert "secret-account" not in str(error.value)
-
     def test_requests_above_the_limits_are_rejected_not_clamped(self, tmp_path: Path) -> None:
-        config = _config(tmp_path, max_gpus=4, max_time_minutes=30, gate_time_minutes=30)
+        config = _config(tmp_path, max_gpus=4, max_time_minutes=30)
         assert config.request(None, None) == GpuJobRequest(gpus=1, time_minutes=30)
-        with pytest.raises(SlurmGpuRequestError, match="limit of 4"):
+        with pytest.raises(AgentGpuRequestError, match="limit of 4"):
             config.request(8, 10)
-        with pytest.raises(SlurmGpuRequestError, match="limit of 30 minutes"):
+        with pytest.raises(AgentGpuRequestError, match="limit of 30 minutes"):
             config.request(1, 31)
 
 
@@ -171,7 +149,7 @@ class TestLauncher:
         self, tmp_path: Path, slurm_log: Path
     ) -> None:
         output = bytearray()
-        status = SlurmGpuLauncher(_config(tmp_path)).run(
+        status = AgentGpuLauncher(_config(tmp_path)).run(
             GpuJobRequest(gpus=2, time_minutes=7),
             GpuCommand(
                 argv=("sh", "-c", "echo from-job; exit 3"), cwd=tmp_path, env=dict(os.environ)
@@ -192,7 +170,7 @@ class TestLauncher:
         cancel = threading.Event()
         cancel.set()
         output = bytearray()
-        SlurmGpuLauncher(_config(tmp_path)).run(
+        AgentGpuLauncher(_config(tmp_path)).run(
             GpuJobRequest(gpus=1, time_minutes=5),
             GpuCommand(argv=("sleep", "60"), cwd=tmp_path, env=dict(os.environ)),
             write=output.extend,

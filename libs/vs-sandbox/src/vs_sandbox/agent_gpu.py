@@ -1,9 +1,8 @@
-"""Run one GPU command through a local Slurm controller with ``srun``.
+"""Run one agent GPU command through a local Slurm controller with ``srun``.
 
-The ``slurm-gpu`` run environment keeps the agent on the submit host and sends
-only GPU processes to Slurm. This module owns the operator configuration, the
-partition choice, and the blocking ``srun`` launch shared by the host broker
-(agent commands) and the trusted gates (framework commands).
+The ``[vibesys.agent_gpu]`` capability keeps the agent on the submit host and
+sends only its GPU processes to Slurm. This module owns the operator limits,
+the partition choice, and the blocking ``srun`` launch the host broker uses.
 """
 
 from __future__ import annotations
@@ -15,11 +14,10 @@ import secrets
 import shutil
 import subprocess
 import threading
-import tomllib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Protocol, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from vs_sim.api import SubprocessProbe
 
@@ -37,23 +35,7 @@ _READ_BYTES = 65_536
 _MAX_QUEUE_MINUTES = 60 * 24 * 365
 
 
-class SlurmGpuConfigError(ValueError):
-    """Invalid operator-owned ``slurm-gpu`` configuration."""
-
-    @classmethod
-    def load_failed(cls, path: Path, error: Exception) -> SlurmGpuConfigError:
-        """Describe invalid settings by field without echoing their values."""
-        if isinstance(error, ValidationError):
-            fields = sorted(
-                {".".join(str(part) for part in item["loc"]) for item in error.errors()}
-            )
-            detail = f"invalid settings: {', '.join(fields)}"
-        else:
-            detail = type(error).__name__
-        return cls(f"Could not load Slurm GPU config at {path}: {detail}")
-
-
-class SlurmGpuRequestError(ValueError):
+class AgentGpuRequestError(ValueError):
     """A GPU command request outside the operator's limits."""
 
 
@@ -123,35 +105,14 @@ class AgentGpuConfig(BaseModel):
         )
         if request.gpus > self.max_gpus:
             message = f"--gpus {request.gpus} exceeds the operator limit of {self.max_gpus}"
-            raise SlurmGpuRequestError(message)
+            raise AgentGpuRequestError(message)
         if request.time_minutes > self.max_time_minutes:
             message = (
                 f"--time {request.time_minutes} exceeds the operator limit of "
                 f"{self.max_time_minutes} minutes"
             )
-            raise SlurmGpuRequestError(message)
+            raise AgentGpuRequestError(message)
         return request
-
-
-class SlurmGpuConfig(AgentGpuConfig):
-    """The ``slurm-gpu`` environment's table: the agent's limits plus its gates' size.
-
-    The ``slurm`` environment sizes its gate jobs by sbatch arguments, so these
-    two fields exist only here.
-    """
-
-    gate_gpus: Annotated[int, Field(gt=0)] = 1
-    gate_time_minutes: Annotated[int, Field(gt=0)] = 60
-
-    @model_validator(mode="after")
-    def _gate_within_limits(self) -> Self:
-        if self.gate_gpus > self.max_gpus:
-            message = "gate_gpus exceeds max_gpus"
-            raise ValueError(message)
-        if self.gate_time_minutes > self.max_time_minutes:
-            message = "gate_time_minutes exceeds max_time_minutes"
-            raise ValueError(message)
-        return self
 
 
 class GpuJobRequest(BaseModel):
@@ -170,23 +131,6 @@ class GpuCommand:
     argv: tuple[str, ...]
     cwd: Path
     env: Mapping[str, str]
-
-
-class _SlurmGpuDocument(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    slurm_gpu: SlurmGpuConfig
-
-
-def load_slurm_gpu_config(path: Path) -> SlurmGpuConfig:
-    """Load the ``[slurm_gpu]`` table from an operator-owned TOML file."""
-    config_path = path.expanduser()
-    try:
-        with config_path.open("rb") as handle:
-            document = tomllib.load(handle)
-        return _SlurmGpuDocument.model_validate(document, strict=True).slurm_gpu
-    except (OSError, tomllib.TOMLDecodeError, ValidationError) as exc:
-        raise SlurmGpuConfigError.load_failed(config_path, exc) from exc
 
 
 def _minutes(value: str) -> float:
@@ -292,7 +236,7 @@ def new_job_name(config: AgentGpuConfig) -> str:
 
 
 class GpuLauncher(Protocol):
-    """Runs one GPU command to completion; :class:`SlurmGpuLauncher` is the real one."""
+    """Runs one GPU command to completion; :class:`AgentGpuLauncher` is the real one."""
 
     def run(
         self,
@@ -306,7 +250,7 @@ class GpuLauncher(Protocol):
         ...
 
 
-class SlurmGpuLauncher:
+class AgentGpuLauncher:
     """Run commands with ``srun`` and cancel their jobs when asked to stop.
 
     *popen* starts processes and *probe* runs the scheduler report and ``scancel``;
@@ -412,15 +356,12 @@ def resolve_executable(command: tuple[str, ...]) -> tuple[str, ...]:
 
 __all__ = [
     "AgentGpuConfig",
+    "AgentGpuLauncher",
+    "AgentGpuRequestError",
     "GpuCommand",
     "GpuJobRequest",
     "GpuLauncher",
-    "SlurmGpuConfig",
-    "SlurmGpuConfigError",
-    "SlurmGpuLauncher",
-    "SlurmGpuRequestError",
     "choose_partition",
-    "load_slurm_gpu_config",
     "read_windows",
     "resolve_executable",
     "srun_argv",

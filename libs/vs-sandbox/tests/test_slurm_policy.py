@@ -11,7 +11,7 @@ from hypothesis import strategies as st
 
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
-    SlurmGpuRequestError,
+    AgentGpuRequestError,
     SlurmPolicyError,
     agent_gpu_capability,
     load_slurm_policy,
@@ -119,9 +119,9 @@ def test_a_default_time_above_the_time_limit_is_rejected_and_otherwise_requests_
     assert config is not None
     assert config.request(None, None).time_minutes == default
     assert config.request(maximum, limit).gpus == maximum
-    with pytest.raises(SlurmGpuRequestError, match="--gpus"):
+    with pytest.raises(AgentGpuRequestError, match="--gpus"):
         config.request(maximum + 1, None)
-    with pytest.raises(SlurmGpuRequestError, match="--time"):
+    with pytest.raises(AgentGpuRequestError, match="--time"):
         config.request(None, limit + 1)
 
 

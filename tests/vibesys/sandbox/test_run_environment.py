@@ -65,6 +65,7 @@ from vs_sandbox.api.evaluator_tools import (
     tool_spec_digest,
 )
 from vs_sandbox.api.slurm import (
+    SlurmGpuAliasError,
     load_slurm_operator_settings,
     read_slurm_capture_plan,
     read_slurm_evaluation_plan,
@@ -657,7 +658,7 @@ startup_timeout_seconds = 600
     assert "`benchmark`" in notes
 
 
-def test_slurm_gpu_environment_rejects_gate_gpus_above_the_operator_limit(
+def test_the_slurm_gpu_alias_rejects_task_gpus_above_the_operator_limit(
     tmp_path: Path,
 ) -> None:
     config_path = tmp_path / "slurm-gpu.toml"
@@ -671,8 +672,8 @@ def test_slurm_gpu_environment_rejects_gate_gpus_above_the_operator_limit(
         RunResourceRequest(accelerators_per_node=8, accelerator_backend="cuda"),
     )
 
-    with pytest.raises(ValueError, match="operator limit of 4"):
-        _open(build_run_environment(spec), _request(tmp_path, FakeBackend()))
+    with pytest.raises(SlurmGpuAliasError, match=r"slurm_gpu\.max_gpus.*limit is 4"):
+        build_run_environment(spec)
 
 
 def test_the_retired_local_environment_can_be_neither_built_nor_recorded() -> None:

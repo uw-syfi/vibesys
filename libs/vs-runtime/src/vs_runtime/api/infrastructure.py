@@ -231,8 +231,7 @@ from vs_runtime._skills import (
     offered_skill_facts,
     resolve_skill_resources,
 )
-from vs_runtime._slurm_environment import SlurmEnvironment
-from vs_runtime._slurm_gpu_environment import SlurmGpuEnvironment
+from vs_runtime._slurm_environment import SLURM_GPU_STAGE_ROOT, SlurmEnvironment
 from vs_runtime._state import CommittedStateObserver, create_state
 from vs_runtime._trusted_evaluation import (
     ProtocolBenchmarkContract,
@@ -463,6 +462,7 @@ __all__ = [
     "REMOTE_EVALUATOR_TOOLS_ROOT",
     "RESET_MARGIN_SECONDS",
     "SANDBOX_EVALUATOR_TOOLS_ROOT",
+    "SLURM_GPU_STAGE_ROOT",
     "TOOL_TOKEN_PREFIX",
     "AgentConfigurationResolver",
     "AgentExecutionConfiguration",
@@ -585,7 +585,6 @@ __all__ = [
     "SkyPilotEnvironmentFacts",
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
-    "SlurmGpuEnvironment",
     "StageFailureText",
     "SteerTarget",
     "StopGraceError",

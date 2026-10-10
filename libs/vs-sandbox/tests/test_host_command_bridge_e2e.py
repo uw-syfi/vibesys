@@ -31,21 +31,21 @@ from vs_sandbox.api.slurm import (
     COMMAND_BROKER_SOCKET_ENV,
     COMMAND_BROKER_TOKEN_ENV,
     HOST_COMMAND_CLIENT,
+    AgentGpuConfig,
+    AgentGpuLauncher,
     GateKind,
     Gates,
     GpuCommands,
-    GpuJobRequest,
     HostCommandBroker,
     RunRoots,
-    SlurmGpuConfig,
-    SlurmGpuLauncher,
-    SrunGateRunner,
 )
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
     from pathlib import Path
+
+    from vs_sim.api import Event
 
 _ENABLE_ENV = "VIBESYS_E2E_DOCKER"
 _IMAGE = "python:3.12-slim"
@@ -82,6 +82,32 @@ class _NoConfinement:
         return list(argv)
 
 
+class _PlannedGateRunner:
+    """Fake gate runner: runs the planned argv on the host, as the real runners do remotely."""
+
+    def __init__(self, planned: Mapping[GateKind, Sequence[str]]) -> None:
+        self._planned = planned
+
+    def run(
+        self,
+        kind: GateKind,
+        arguments: Sequence[str],
+        *,
+        cwd: Path,
+        write: Callable[[bytes], None],
+        cancel: Event,
+    ) -> int:
+        del cancel
+        done = subprocess.run(  # noqa: S603  # lint-waiver: LW-954376 [S603]; a test fake running its own fixed planned argv.
+            [*self._planned[kind], *arguments],
+            cwd=cwd,
+            capture_output=True,
+            check=False,
+        )
+        write(done.stdout + done.stderr)
+        return done.returncode
+
+
 @contextmanager
 def _broker(
     tmp_path: Path, log: Path, cancelled: Path | None = None
@@ -90,7 +116,7 @@ def _broker(
     fake.write_text(_FAKE_SLURM.format(log=str(log), cancelled=str(cancelled or "")))
     bench = tmp_path / "bench.py"
     bench.write_text(_PLANNED_BENCHMARK)
-    config = SlurmGpuConfig.model_validate(
+    config = AgentGpuConfig.model_validate(
         {
             "partitions": ("main",),
             "max_gpus": 8,
@@ -99,7 +125,7 @@ def _broker(
             "scancel_command": (sys.executable, str(fake)),
         }
     )
-    launcher = SlurmGpuLauncher(config)
+    launcher = AgentGpuLauncher(config)
     env = dict(os.environ)
     workspace = tmp_path / "workspace"
     (workspace / "sub").mkdir(parents=True)
@@ -108,12 +134,7 @@ def _broker(
         roots=RunRoots((workspace,)),
         gpu=GpuCommands(config, _NoConfinement(), env, launcher=launcher),
         gates=Gates(
-            SrunGateRunner(
-                launcher,
-                GpuJobRequest(gpus=1, time_minutes=5),
-                {GateKind.BENCHMARK: (sys.executable, str(bench))},
-                env=env,
-            ),
+            _PlannedGateRunner({GateKind.BENCHMARK: (sys.executable, str(bench))}),
             benchmark_output_argument="--vs-output",
         ),
     )

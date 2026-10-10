@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shlex
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,10 +18,10 @@ import pytest
 from vibesys.run.environment import open_run_environment
 from vs_project.api import RunResourceRequest
 from vs_runtime.api.infrastructure import (
+    SLURM_GPU_STAGE_ROOT,
     RunEnvironment,
     RunEnvironmentRequest,
     SlurmEnvironment,
-    SlurmGpuEnvironment,
     TrustedEvaluatorRequirements,
 )
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
@@ -124,10 +125,13 @@ def _environment(tmp_path: Path, name: str, backend: DaemonBackend) -> RunEnviro
         )
     config = tmp_path / "slurm-gpu.toml"
     config.write_text(_SLURM_GPU_CONFIG, encoding="utf-8")
-    return SlurmGpuEnvironment(
+    gate = tmp_path / "fake_gate.py"
+    gate.write_text(_FAKE_GATE, encoding="utf-8")
+    return SlurmEnvironment.from_slurm_gpu(
         config,
         RunResourceRequest(accelerators_per_node=1, accelerator_backend="cuda"),
         docker=docker,
+        gate_wrapper=(_PYTHON, str(gate)),
         job_confinement=_PassThroughConfinement(),
     )
 
@@ -398,3 +402,19 @@ def test_agent_gpu_commands_are_rejected_without_the_local_transport(
 
     with pytest.raises(SlurmPolicyError, match=rf"vibesys\.agent_gpu.*{transport}"):
         load_slurm_operator_settings(config)
+
+
+def test_the_slurm_gpu_alias_logs_one_deprecation_naming_the_replacement_and_the_stage_root(
+    tmp_path: Path,
+) -> None:
+    backend = DaemonBackend(daemon_engine(tmp_path))
+    logged: list[str] = []
+    request = replace(_request(tmp_path, backend), log=logged.append)
+
+    session = open_run_environment(_environment(tmp_path, "slurm-gpu", backend), request)
+    session.close()
+
+    [warning] = [line for line in logged if "deprecated" in line]
+    assert "--run-environment slurm" in warning
+    assert "[vibesys.agent_gpu]" in warning
+    assert str(SLURM_GPU_STAGE_ROOT.expanduser()) in warning

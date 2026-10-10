@@ -57,6 +57,7 @@ from vs_sandbox.api.slurm import (
     SlurmOperatorSettings,
     SlurmProcessBroker,
     configured_capture_lifecycle,
+    load_slurm_gpu_alias_settings,
     load_slurm_operator_settings,
     render_slurm_operator_toml,
     trusted_profile_command,
@@ -69,9 +70,14 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from vs_agent.api.images import DockerBuildRunner
+    from vs_project.api import RunResourceRequest
     from vs_sandbox.api.slurm import JobConfinement
 
 _GATE_LAUNCHER = "vibesys-gate"
+#: Where the deprecated ``slurm-gpu`` alias stages its gates: a directory the
+#: operator's home shares with the compute nodes, as the old environment required
+#: of the workspace.
+SLURM_GPU_STAGE_ROOT = Path("~/.cache/vibesys/slurm-gpu-stage")
 _REMOTE_PROFILER_IDS = frozenset({"auto", "none", "rocprof"})
 
 
@@ -120,6 +126,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         docker: DockerEnvironmentConfig | None = None,
         gate_wrapper: Sequence[str] = DEFAULT_WRAPPER,
         job_confinement: JobConfinement | None = None,
+        deprecation: str | None = None,
     ) -> None:
         """Bind the operator settings, parsed once, and the injection seams.
 
@@ -135,6 +142,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         self._docker = DockerEnvironment(docker or DockerEnvironmentConfig())
         self._gate_wrapper = tuple(gate_wrapper)
         self._job_confinement = job_confinement
+        self._deprecation = deprecation
 
     def _agent_gpu(self) -> AgentGpuConfig | None:
         """Return the operator's agent GPU limits, or ``None`` when the capability is off."""
@@ -186,8 +194,49 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             ),
         )
 
+    @classmethod
+    def from_slurm_gpu(
+        cls,
+        config_path: Path,
+        resources: RunResourceRequest | None,
+        *,
+        docker: DockerEnvironmentConfig | None = None,
+        gate_wrapper: Sequence[str] = DEFAULT_WRAPPER,
+        job_confinement: JobConfinement | None = None,
+    ) -> SlurmEnvironment:
+        """Open the deprecated ``slurm-gpu`` selection: its file, translated once.
+
+        The file is read and translated to ``slurm`` settings now, so a bad or
+        untranslatable file fails here, naming the key. Running a prepared
+        environment logs one deprecation warning.
+        """
+        if resources is not None and resources.nodes != 1:
+            message = "the slurm-gpu run environment runs single-node jobs only"
+            raise ValueError(message)
+        stage_root = str(SLURM_GPU_STAGE_ROOT.expanduser())
+        path = config_path.expanduser()
+        return cls(
+            load_slurm_gpu_alias_settings(
+                path,
+                task_gpus=None if resources is None else resources.accelerators_per_node,
+                stage_root=stage_root,
+            ),
+            docker=docker,
+            gate_wrapper=gate_wrapper,
+            job_confinement=job_confinement,
+            deprecation=(
+                f"--run-environment slurm-gpu is deprecated: use --run-environment slurm with "
+                f'[slurm.transport] kind = "local" and [vibesys.agent_gpu] in a slurm.toml. '
+                f"Translating {path}; trusted gates now run as sbatch jobs staged into "
+                f"{stage_root} (set remote_workspace_root in a slurm.toml to choose another "
+                f"directory shared with the compute nodes)"
+            ),
+        )
+
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Validate external policy before opening the editor container."""
+        if self._deprecation is not None and request.log is not None:
+            request.log(f"[environment] {self._deprecation}")
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="slurm")
         policy = self._settings.policy
         agent_gpu = self._settings.agent_gpu

@@ -347,7 +347,10 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help=(
             "Select where evaluation runs; the default is docker. Agents always run "
             "in a local Docker container. SkyPilot and Modal keep the agent in a "
-            "local CPU-only Docker editor and dispatch evaluation remotely."
+            "local CPU-only Docker editor and dispatch evaluation remotely. "
+            "slurm-gpu is a deprecated alias: it reads the old [slurm_gpu] file, "
+            "translates it to a slurm configuration with local transport and "
+            "[vibesys.agent_gpu], and runs the slurm environment."
         ),
     )
     parser.add_argument(
@@ -356,8 +359,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "External operator TOML for Slurm execution. Selecting this option also "
-            "selects --run-environment slurm unless --run-environment slurm-gpu is given, "
-            "which reads its GPU job limits from this file instead."
+            "selects --run-environment slurm unless the deprecated --run-environment "
+            "slurm-gpu is given, which reads the old [slurm_gpu] table from this file."
         ),
     )
     parser.add_argument(
