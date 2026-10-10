@@ -181,6 +181,9 @@ RUN set -eux; \
 # The sandbox remaps this uid to the host uid at container start, so what
 # matters here is the fixed uid (1000), not the name. Reuse a base image's
 # existing uid-1000 account by renaming it instead of failing on a collision.
+# Its primary group is renamed too: the sandbox runs `chown agent:agent`, and
+# renaming only the user leaves the base's group (`jenkins` in the ROCm
+# PyTorch image) under its old name.
 RUN set -eux; \
     if id -u agent >/dev/null 2>&1; then \
         : ; \
@@ -189,6 +192,14 @@ RUN set -eux; \
         usermod --login agent --home /home/agent --move-home --shell /bin/bash "${existing}"; \
     else \
         useradd --create-home --uid 1000 --shell /bin/bash agent; \
+    fi; \
+    gid="$(id -g agent)"; \
+    if ! getent group agent >/dev/null 2>&1; then \
+        if getent group "${gid}" >/dev/null 2>&1; then \
+            groupmod --new-name agent "$(getent group "${gid}" | cut -d: -f1)"; \
+        else \
+            groupadd --gid "${gid}" agent; \
+        fi; \
     fi
 
 RUN set -eux; \

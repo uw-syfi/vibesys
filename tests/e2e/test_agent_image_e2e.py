@@ -129,3 +129,47 @@ def test_agent_layer_builds_on_a_task_image_end_to_end(tmp_path: Path, flow: str
 
     assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
     assert result.stdout.strip() == "task-layer"
+
+
+@pytest.mark.skipif(
+    not _enabled() or shutil.which("docker") is None,
+    reason=f"set {ENABLE_ENV}=1 with docker on PATH to build the task and agent images",
+)
+def test_agent_user_and_group_are_both_named_agent_over_a_uid_1000_base(tmp_path: Path) -> None:
+    """The sandbox runs ``chown agent:agent``, so the group must carry the name too.
+
+    Regression: the ROCm PyTorch image has a ``jenkins`` user and group at id
+    1000; renaming only the user left ``chown agent:agent`` failing with
+    ``invalid group`` before the first agent turn.
+    """
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        "ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n"
+        "RUN groupadd --gid 1000 jenkins && "
+        "useradd --uid 1000 --gid 1000 --create-home jenkins\n",
+        encoding="utf-8",
+    )
+    image_id = agent_image(
+        "python:3.12-bookworm", task_dockerfile=dockerfile, timeout=_BUILD_TIMEOUT_S
+    )
+
+    result = run_test_command(
+        (
+            "docker",
+            "run",
+            "--rm",
+            "-u",
+            "root",
+            image_id,
+            "sh",
+            "-c",
+            "chown agent:agent /home/agent && id -un agent && id -gn agent",
+        ),
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=_RUN_TIMEOUT_S,
+    )
+
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    assert result.stdout.split() == ["agent", "agent"]
