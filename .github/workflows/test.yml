@@ -368,6 +368,47 @@ jobs:
       - name: Validate microservice workloads
         run: ./support/repoctl/repoctl run-checks --group microservice_workload_checks
 
+  # The qwen3.5-9b-mi210 tiny-model CPU check starts a candidate server per
+  # test (~250 s serially, issue #1675), so it is split by test across the
+  # runners in `matrix.shard` (`CPU_CHECK_SHARD`, see
+  # examples/model-serving/qwen3.5-9b-mi210/cpu_check/shard.py), balanced by
+  # recorded seconds. Each leg runs its tests serially: starting servers in
+  # parallel on one runner would compete for its two cores. The shard count is
+  # the length of the list (`strategy.job-total`). It needs no Go, root
+  # `uv sync`, or external repositories; the CPU-torch environment is the
+  # `cpu_check` project's own and takes ~3 s to build.
+  validate-examples-cpu-check:
+    needs: changes
+    if: needs.changes.outputs.examples == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go for repoctl
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
+          cache-dependency-path: support/repoctl/go.sum
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: examples/model-serving/qwen3.5-9b-mi210/cpu_check/uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Run the CPU check (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
+        env:
+          CPU_CHECK_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: ./support/repoctl/repoctl run-checks --group examples_cpu_check_shard
+
   # Builds the CPU agent image for real and runs every shipped CLI inside it
   # as the non-root `agent` user (issue #675), then reuses that same build to
   # prove the Docker sandbox backend enforces the shared resource-list
@@ -738,6 +779,7 @@ jobs:
       - queue-native
       - impact-tool
       - validate-examples
+      - validate-examples-cpu-check
       - agent-image
       - test
       - record-durations
@@ -787,6 +829,7 @@ jobs:
       - queue-native
       - impact-tool
       - validate-examples
+      - validate-examples-cpu-check
       - agent-image
       - test
       - coverage
