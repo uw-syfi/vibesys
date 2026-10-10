@@ -64,6 +64,17 @@ def _run_environment_name(value: str) -> str:
     return value
 
 
+def _parse_build_timeout_seconds(value: str) -> float:
+    try:
+        seconds = float(value)
+    except ValueError:
+        seconds = float("nan")
+    if not 0 < seconds < float("inf"):
+        message = f"must be a positive number of seconds, got {value!r}"
+        raise argparse.ArgumentTypeError(message)
+    return seconds
+
+
 def _parse_runs_dir(value: str) -> Path:
     if not value.strip():
         message = "must not be empty"
@@ -374,6 +385,18 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help=(
             "Docker image the agent runs in.  Defaults to the "
             "image the selected --backend prefers (cuda → nvcr.io/nvidia/pytorch:25.04-py3)."
+        ),
+    )
+    parser.add_argument(
+        "--agent-image-build-timeout",
+        type=_parse_build_timeout_seconds,
+        default=None,
+        metavar="SECONDS",
+        help=(
+            "Limit, in seconds, for each Docker build of the task and agent images "
+            "(docker, slurm, and slurm-gpu run environments). The default is "
+            "3600; a cold build over the ROCm PyTorch base takes about 30 minutes. "
+            "Not recorded with the run: pass it again on resume."
         ),
     )
     parser.add_argument(

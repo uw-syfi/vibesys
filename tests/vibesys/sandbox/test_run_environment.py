@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import (
@@ -19,7 +21,7 @@ from vibesys.inputs import (
 )
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.environment import open_run_environment
-from vs_agent.api.images import ImagePushError
+from vs_agent.api.images import DEFAULT_BUILD_TIMEOUT_SECONDS, ImagePushError
 from vs_agent.api.testing import FakeDockerBuildRunner, fake_profiles
 from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
 from vs_runtime._run_environment import (
@@ -30,6 +32,7 @@ from vs_runtime._run_environment import (
     _SkyPilotRunEnvironmentSession,
 )
 from vs_runtime.api.infrastructure import (
+    DockerEnvironmentConfig,
     EvaluatorPackageRequirement,
     ResolvedEvaluatorPackage,
     RunEnvironment,
@@ -270,10 +273,11 @@ def fake_agent_image(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         *,
         toolchains: Sequence[str] = (),
         pip_extras: Sequence[str] = (),
-        **_kwargs: object,
+        **kwargs: object,
     ) -> str:
         calls.append(
             {
+                "timeout": kwargs.get("timeout"),
                 "base_image": base_image,
                 "toolchains": frozenset(toolchains),
                 "pip_extras": frozenset(pip_extras),
@@ -413,6 +417,59 @@ def test_run_environment_record_captures_operator_selected_options() -> None:
     assert run_environment_record(
         RunEnvironmentSpec("slurm", {"config_path": "/operator/slurm.toml"})
     ) == RunEnvironmentRecord(name="slurm", config_path="/operator/slurm.toml")
+
+
+_MINIMAL_SLURM_CONFIG = """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+"""
+
+
+@pytest.mark.parametrize("environment", ["docker", "slurm"])
+@pytest.mark.parametrize("limit", [None, 1.0, 5400.0])
+def test_agent_image_build_limit_comes_from_the_environment_options(
+    tmp_path: Path,
+    fake_agent_image: list[dict[str, Any]],
+    environment: str,
+    limit: float | None,
+) -> None:
+    """Regression for #1632: the build limit was a fixed 1200 s no caller could change."""
+    options: dict[str, object] = {}
+    if environment == "slurm":
+        config_path = tmp_path / "slurm.toml"
+        config_path.write_text(_MINIMAL_SLURM_CONFIG, encoding="utf-8")
+        options["config_path"] = str(config_path)
+    if limit is not None:
+        options["build_timeout_seconds"] = limit
+    logged: list[str] = []
+
+    session = _open(
+        build_run_environment(RunEnvironmentSpec(environment, options)),
+        _request(tmp_path, FakeBackend(), log=logged.append),
+    )
+    session.close()
+
+    expected = DEFAULT_BUILD_TIMEOUT_SECONDS if limit is None else limit
+    assert fake_agent_image[-1]["timeout"] == expected
+    # The limit in force, and whether it is the default, is in the run log.
+    assert any(f"agent image build timeout {expected:g} s" in line for line in logged)
+
+
+@given(limit=st.one_of(st.floats(max_value=0.0), st.just(float("inf")), st.just(float("nan"))))
+def test_a_build_limit_that_cannot_finish_a_build_is_rejected_at_configuration(
+    limit: float,
+) -> None:
+    with pytest.raises(ValueError, match="agent image build timeout"):
+        DockerEnvironmentConfig(build_timeout_seconds=limit)
+    with pytest.raises(ValueError, match="agent image build timeout"):
+        build_run_environment(RunEnvironmentSpec("docker", {"build_timeout_seconds": limit}))
 
 
 def test_slurm_environment_edits_in_docker_and_routes_trusted_tools_through_the_host(
