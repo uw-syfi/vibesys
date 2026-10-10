@@ -4,6 +4,8 @@ import socket
 from itertools import pairwise
 from pathlib import Path
 
+from tests.support.bounded_waits import HANG_GUARD_S
+
 from vs_sandbox.api import (
     EnvironmentBindMount,
     HostResource,
@@ -25,6 +27,7 @@ def test_host_sandbox_creates_parent_directories_for_imported_sockets(tmp_path: 
     socket_root.mkdir(parents=True)
     socket_path = socket_root / "agent.sock"
     with socket.socket(socket.AF_UNIX) as agent_socket:
+        agent_socket.settimeout(HANG_GUARD_S)
         agent_socket.bind(str(socket_path))
         sandbox = HostSandbox(
             workspace=workspace,

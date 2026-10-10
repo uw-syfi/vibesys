@@ -1,7 +1,7 @@
 """A test never blocks without a bound on a thread, process or socket it does not control.
 
 ``thread.join()``, ``process.communicate()``, ``process.wait()`` and
-``listener.accept()`` park the whole worker when the peer never finishes, and the
+``listener.accept()`` and a read on a socket with no timeout park the whole worker when the peer never finishes, and the
 failure names nothing. Use ``tests.support.bounded_waits`` (``join_or_fail``,
 ``stop_process``, ``HANG_GUARD_S``) or pass ``timeout=``. The bound is a hang
 guard that a passing run never approaches, not a synchronization tool.
@@ -9,7 +9,9 @@ guard that a passing run never approaches, not a synchronization tool.
 The checks are syntactic: a zero-argument ``.join()`` or ``.communicate()``
 (``str.join`` always takes an argument), a zero-argument ``.wait()`` on a name
 bound to ``subprocess.Popen`` in the same function, and ``.accept()`` on a
-socket-like name with no ``settimeout`` on it in the same function.
+socket-like name with no ``settimeout`` on it in the same function, and a name bound
+to ``socket.socket`` (or ``create_connection``, ``socketpair``) with no ``settimeout`` or
+``setblocking`` on it in the same function.
 """
 
 import ast
@@ -24,6 +26,14 @@ SOCKET_NAME = re.compile(r"(server|listener|sock|socket)\w*", re.IGNORECASE)
 EXEMPT = {"tests/quality/test_no_unbounded_blocking_waits.py"}
 
 
+def _is_socket(value: ast.expr) -> bool:
+    return isinstance(value, ast.Call) and ast.unparse(value.func) in {
+        "socket.socket",
+        "socket.create_connection",
+        "socket.socketpair",
+    }
+
+
 def _is_popen(value: ast.expr) -> bool:
     return (
         isinstance(value, ast.Call)
@@ -32,30 +42,54 @@ def _is_popen(value: ast.expr) -> bool:
     )
 
 
-def _bound_names(function: ast.AST) -> tuple[set[str], set[str]]:
-    """Names bound to a ``Popen`` and names given a ``settimeout``, in *function*."""
+def _bindings(node: ast.AST) -> list[tuple[str, ast.expr, int]]:
+    """``(name, value expression, line)`` for each assignment or ``with ... as`` in *node*."""
+    if isinstance(node, ast.Assign):
+        return [(t.id, node.value, node.lineno) for t in node.targets if isinstance(t, ast.Name)]
+    if isinstance(node, ast.With | ast.AsyncWith):
+        return [
+            (item.optional_vars.id, item.context_expr, node.lineno)
+            for item in node.items
+            if isinstance(item.optional_vars, ast.Name)
+        ]
+    return []
+
+
+def _bounded_name(node: ast.AST) -> str | None:
+    """The name a ``settimeout`` or ``setblocking`` call is made on, if *node* is one."""
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"settimeout", "setblocking"}
+        and isinstance(node.func.value, ast.Name)
+    ):
+        return node.func.value.id
+    return None
+
+
+def _bound_names(function: ast.AST) -> tuple[set[str], set[str], dict[str, int]]:
+    """Names bound to a ``Popen``, names given a bound, and sockets by creation line."""
     popens: set[str] = set()
     timed: set[str] = set()
+    sockets: dict[str, int] = {}
     for node in ast.walk(function):
-        if isinstance(node, ast.Assign) and _is_popen(node.value):
-            popens.update(t.id for t in node.targets if isinstance(t, ast.Name))
-        elif isinstance(node, ast.With | ast.AsyncWith):
-            for item in node.items:
-                if _is_popen(item.context_expr) and isinstance(item.optional_vars, ast.Name):
-                    popens.add(item.optional_vars.id)
-        elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "settimeout"
-            and isinstance(node.func.value, ast.Name)
-        ):
-            timed.add(node.func.value.id)
-    return popens, timed
+        for name, value, line in _bindings(node):
+            if _is_popen(value):
+                popens.add(name)
+            elif _is_socket(value):
+                sockets[name] = line
+        if (bounded := _bounded_name(node)) is not None:
+            timed.add(bounded)
+    return popens, timed, sockets
 
 
 def _unbounded(function: ast.AST) -> list[tuple[int, str]]:
-    popens, timed = _bound_names(function)
-    found: list[tuple[int, str]] = []
+    popens, timed, sockets = _bound_names(function)
+    found: list[tuple[int, str]] = [
+        (line, f"{name} = socket without settimeout")
+        for name, line in sockets.items()
+        if name not in timed
+    ]
     for node in ast.walk(function):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
@@ -100,6 +134,13 @@ def test_the_checker_flags_each_unbounded_wait() -> None:
     ]
 
 
+def test_the_checker_flags_a_socket_without_a_bound() -> None:
+    source = "def f():\n    with socket.socket() as client:\n        client.recv(1)\n"
+    assert [what for _line, what in unbounded_waits(source)] == [
+        "client = socket without settimeout"
+    ]
+
+
 def test_the_checker_accepts_bounded_waits() -> None:
     source = (
         "def f(t, server):\n"
@@ -109,6 +150,8 @@ def test_the_checker_accepts_bounded_waits() -> None:
         "    p.communicate(timeout=5)\n"
         "    p.wait(timeout=5)\n"
         "    server.accept()\n"
+        "    with socket.socket() as client:\n"
+        "        client.settimeout(5)\n"
         "    ','.join(parts)\n"
         "    event.wait()\n"
     )

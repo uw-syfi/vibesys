@@ -574,6 +574,7 @@ def test_control_server_ignores_peer_closed_after_completed_action(
 
     with LifecycleControlServer(socket_path, {"stop": action}):
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(HANG_GUARD_S)
         client.connect(str(socket_path))
         client.sendall(b'{"action":"stop"}\n')
         assert action_started.wait(timeout=1)
@@ -589,6 +590,7 @@ def test_control_server_shutdown_is_bounded_for_incomplete_request(tmp_path: Pat
     server = LifecycleControlServer(socket_path, {})
     server.__enter__()
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(HANG_GUARD_S)
     client.connect(str(socket_path))
     client.sendall(b'{"action":"stop"')
     stopped = threading.Event()
@@ -607,6 +609,7 @@ def test_control_server_shutdown_is_bounded_for_drip_fed_request(tmp_path: Path)
     server = LifecycleControlServer(socket_path, {})
     server.__enter__()
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(HANG_GUARD_S)
     client.connect(str(socket_path))
     stop_feeding = threading.Event()
 
@@ -1098,6 +1101,7 @@ def test_candidate_image_is_built_once_and_reused_across_reset(tmp_path: Path) -
 
 def test_start_rejects_forward_port_owned_by_another_listener(tmp_path: Path) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as foreign:
+        foreign.settimeout(HANG_GUARD_S)
         foreign.bind(("0.0.0.0", 0))  # noqa: S104  # lint-waiver: LW-006013; a wildcard listener is the collision under test.
         foreign.listen()
         port = foreign.getsockname()[1]

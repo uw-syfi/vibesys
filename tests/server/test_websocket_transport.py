@@ -27,7 +27,7 @@ import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
-from tests.support.bounded_waits import join_or_fail
+from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError, InvalidStatus
@@ -831,6 +831,7 @@ def _raw_fetch(port: int, target: bytes) -> tuple[int, HTTPMessage]:
     surrogate rather than rejecting it.
     """
     with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+        client.settimeout(HANG_GUARD_S)
         client.sendall(b"GET " + target + b" HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
         response = HTTPResponse(client)
         response.begin()
@@ -913,6 +914,7 @@ async def _assert_rejected(url: str, origin: str) -> None:
 def _unused_port() -> int:
     """Return a loopback port nothing is bound to, so concurrent test processes do not collide."""
     with socket.socket() as probe:
+        probe.settimeout(HANG_GUARD_S)
         probe.bind(("127.0.0.1", 0))
         return int(probe.getsockname()[1])
 
@@ -1071,6 +1073,7 @@ def test_gateway_timeout_retires_stalled_publication_before_immediate_retry(
             assert WebInstanceClaim.is_held(instance_path) is False
             assert startup.old_port > 0
             with socket.socket() as retired_listener_probe:
+                retired_listener_probe.settimeout(HANG_GUARD_S)
                 assert (
                     retired_listener_probe.connect_ex(("127.0.0.1", startup.old_port))
                     == errno.ECONNREFUSED
