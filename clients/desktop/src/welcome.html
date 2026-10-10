@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>VibeSys</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --page: #f6f7f9; --panel: #ffffff; --line: #dfe3ea; --text: #1b2230; --muted: #5d6676;
+        --accent: #3557d6; --accent-text: #ffffff; --hover: #eef1f6; --selected: #e3e9fb;
+        --error: #b3261e; --warn: #8a5a00; --ok: #1e7d43;
+        --titlebar: 40px;
+        font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --page: #0c1018; --panel: #121826; --line: #232c3d; --text: #e9edf5; --muted: #98a2b5;
+          --accent: #6f8cff; --accent-text: #0c1018; --hover: #1a2233; --selected: #22304d;
+          --error: #ff8a80; --warn: #ffcc80; --ok: #7bd88f;
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: var(--page); color: var(--text); }
+      header { position: fixed; inset: 0 0 auto 0; height: var(--titlebar); display: flex; align-items: center; gap: 8px; padding: 0 12px 0 84px; background: var(--page); border-bottom: 1px solid var(--line); -webkit-app-region: drag; z-index: 5; }
+      html[data-platform="win32"] header, html[data-platform="linux"] header { padding-left: 12px; padding-right: 148px; }
+      header .brand { font-weight: 600; color: var(--muted); }
+      header .grow { flex: 1; }
+      button, input { font: inherit; color: inherit; -webkit-app-region: no-drag; }
+      button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+      button:hover { background: var(--hover); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+      button.link { border: none; background: none; color: var(--accent); padding: 2px 4px; }
+      button.chip { display: inline-flex; gap: 6px; align-items: center; border-radius: 999px; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+      .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.error { background: var(--error); }
+      input[type="text"], input:not([type]) { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+      input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      main { position: absolute; inset: var(--titlebar) 0 0 0; overflow-y: auto; padding: 20px 28px 40px; }
+      body.strip main, body.strip .sheet { display: none; }
+      section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 0 0 16px; max-width: 1100px; }
+      h2 { font-size: 13px; margin: 0 0 10px; display: flex; align-items: center; gap: 10px; }
+      h2 .muted { font-weight: 400; }
+      .muted { color: var(--muted); }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+      .row input { flex: 1; min-width: 260px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+      th { color: var(--muted); font-weight: 500; }
+      tr:last-child td { border-bottom: none; }
+      td.path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+      .status { min-height: 1.4em; margin: 0 0 12px; color: var(--muted); white-space: pre-wrap; }
+      .error { color: var(--error); white-space: pre-wrap; }
+      .warn { color: var(--warn); }
+      .ok { color: var(--ok); }
+      .sheet { position: fixed; inset: var(--titlebar) 0 0 0; background: color-mix(in srgb, var(--page) 70%, transparent); display: flex; justify-content: center; align-items: flex-start; padding-top: 60px; z-index: 4; }
+      .sheet[hidden] { display: none; }
+      .card { width: min(620px, 92vw); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+      .card input.search { width: 100%; font-size: 14px; padding: 8px 10px; }
+      ul.list { list-style: none; margin: 10px 0 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+      ul.list li { padding: 7px 10px; border-radius: 6px; cursor: pointer; display: flex; justify-content: space-between; }
+      ul.list li[aria-selected="true"] { background: var(--selected); }
+      ul.list li:hover { background: var(--hover); }
+      .tasks { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+      .tasks label { border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+      .tasks input { margin: 0 6px 0 0; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+      .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="brand">VibeSys</span>
+      <button id="host-chip" class="chip" type="button" hidden></button>
+      <span id="conn" class="muted"></span>
+      <span class="grow"></span>
+      <button id="retry" type="button" hidden>Retry</button>
+      <button id="back" type="button" hidden>Back to run</button>
+    </header>
+    <main>
+      <p id="banner" class="status" role="status"></p>
+      <section id="recent-section">
+        <h2>Recent</h2>
+        <div id="recent"><p class="muted">No runs yet. Runs you attach to appear here.</p></div>
+      </section>
+      <section id="host-panel"></section>
+      <section>
+        <h2>Other hosts</h2>
+        <div class="row">
+          <button id="connect" type="button">Connect to host…</button>
+          <span class="muted">Hosts from ~/.ssh/config, or type user@host.</span>
+        </div>
+      </section>
+    </main>
+    <div id="host-sheet" class="sheet" hidden>
+      <div class="card" role="dialog" aria-label="Connect to host">
+        <input id="host-search" class="search" placeholder="Search hosts, or type user@host" spellcheck="false" autocomplete="off" />
+        <ul id="host-list" class="list" role="listbox"></ul>
+      </div>
+    </div>
+    <div id="start-sheet" class="sheet" hidden>
+      <div class="card" role="dialog" aria-label="Start a run">
+        <h2 id="start-title">Start a run</h2>
+        <div class="row">
+          <input id="project" list="projects" placeholder="Project directory, e.g. /home/me/src/queue-rs" spellcheck="false" />
+          <datalist id="projects"></datalist>
+          <button id="list-tasks" type="button">List tasks</button>
+        </div>
+        <div id="tasks" class="tasks"></div>
+        <div class="row"><input id="args" placeholder="Extra run arguments, quoted like a shell (optional)" spellcheck="false" /></div>
+        <p id="start-summary" class="muted"></p>
+        <p id="start-status" class="status"></p>
+        <div class="actions">
+          <button id="start-cancel" type="button">Cancel</button>
+          <button id="start-go" class="primary" type="button" disabled>Start run</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="./welcome-page.js"></script>
+  </body>
+</html>

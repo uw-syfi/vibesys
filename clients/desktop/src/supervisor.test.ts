@@ -451,7 +451,7 @@ describe('supervisor over an SSH host', () => {
     const ssh = new FakeSsh(node);
     const host = new SshHost({
       alias: 'node-1',
-      vibesysCommand: 'vibesys',
+      checkout: '/home/user/src/vibesys',
       controlPath: '/tmp/vsd/%C',
       askpass: '/app/askpass',
       runner: ssh,

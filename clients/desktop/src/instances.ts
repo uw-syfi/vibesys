@@ -22,6 +22,8 @@ interface LiveInstance {
   readonly startedAt: number;
   readonly hostname: string;
   readonly vibesysVersion: string;
+  /** The VibeSys checkout the server runs from; null for an install, or a server too old to say. */
+  readonly vibesysRoot: string | null;
 }
 
 /** What one record says: a server this client can read, or one that speaks another protocol. */
@@ -56,6 +58,7 @@ const RECORD_KEYS = [
   'hostname',
   'protocol_version',
   'vibesys_version',
+  'vibesys_root',
 ] as const;
 const INSTANCE_ID = /^[0-9a-f]{12}$/;
 
@@ -86,6 +89,7 @@ export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRe
     throw new RecordError(`${path}.run_id must be a string or null`);
   }
   const socketPath = absolutePath(record, 'socket_path', path);
+  const vibesysRoot = nullableString(record, 'vibesys_root', path);
   const pid = number(record, 'pid', path);
   if (!Number.isInteger(pid) || pid <= 0) {
     throw new RecordError(`${path}.pid must be a positive integer`);
@@ -102,6 +106,7 @@ export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRe
       startedAt: number(record, 'started_at', path),
       hostname: string(record, 'hostname', path),
       vibesysVersion: string(record, 'vibesys_version', path),
+      vibesysRoot,
     },
   };
 }
@@ -248,6 +253,15 @@ function onlyKeys(record: Record<string, unknown>, allowed: readonly string[], p
   for (const key of Object.keys(record)) {
     if (!allowed.includes(key)) throw new RecordError(`${path}.${key} is not a known field`);
   }
+}
+
+/** `record[key]` when it is a string, null when absent or null; otherwise a `RecordError`. */
+function nullableString(record: Record<string, unknown>, key: string, path: string): string | null {
+  const value = record[key] ?? null;
+  if (value !== null && typeof value !== 'string') {
+    throw new RecordError(`${path}.${key} must be a string or null`);
+  }
+  return value;
 }
 
 function string(record: Record<string, unknown>, key: string, path: string): string {
