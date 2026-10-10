@@ -22,6 +22,7 @@ from contextlib import suppress
 from pathlib import Path
 
 import pytest
+from tests.support.bounded_waits import HANG_GUARD_S, join_or_fail
 
 from entrypoints.launcher import call_child
 
@@ -122,12 +123,12 @@ def test_the_launcher_waits_for_its_engine_to_finish_tearing_down(
         assert engine.next_event() == f"signal {int(number)}"
         with release.open("wb", buffering=0) as stream:
             stream.write(b"x")
-        assert launcher.wait() == _ENGINE_STATUS
+        assert launcher.wait(timeout=HANG_GUARD_S) == _ENGINE_STATUS
     finally:
         engine.close()
         if launcher.poll() is None:
             launcher.kill()
-            launcher.wait()
+            launcher.wait(timeout=HANG_GUARD_S)
         if engine_pid is not None:
             # At the merge base the engine outlives a SIGTERMed launcher.
             with suppress(ProcessLookupError):
@@ -184,6 +185,6 @@ def test_call_child_from_a_worker_thread_only_waits() -> None:
         target=lambda: statuses.append(call_child([sys.executable, "-c", "raise SystemExit(3)"]))
     )
     worker.start()
-    worker.join()
+    join_or_fail(worker)
 
     assert statuses == [3]

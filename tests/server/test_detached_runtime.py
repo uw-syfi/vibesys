@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
+from tests.support.bounded_waits import stop_process
 
 from launch import default_runs
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
@@ -254,8 +255,7 @@ def test_the_hold_outlives_the_record_and_the_launcher(tmp_path: Path) -> None:
         assert hold == WebInstanceHold(holders=(child.pid,), log_locked=True)
         assert hold.free is False
     finally:
-        child.terminate()
-        child.wait()
+        stop_process(child)
 
     assert WebInstanceHold.observe(instance_path).free is True
 
@@ -286,8 +286,7 @@ def test_a_process_using_the_directory_without_the_lock_is_still_reported(
             assert hold.log_locked is False
             assert hold.free is False
         finally:
-            child.terminate()
-            child.wait()
+            stop_process(child)
 
 
 _SHARED_LOCK_HOLDER = """
@@ -322,8 +321,7 @@ def test_observing_the_hold_does_not_make_the_observer_a_holder(tmp_path: Path) 
         assert hold.log_locked is False
         assert hold.holders == (reader.pid,)
     finally:
-        reader.terminate()
-        reader.wait()
+        stop_process(reader)
 
     descriptor = os.open(log_path, os.O_RDWR)
     try:

@@ -12,6 +12,8 @@ import os
 import signal
 from typing import TYPE_CHECKING
 
+from tests.support.bounded_waits import HANG_GUARD_S
+
 from vs_sandbox.api.testing import FakeDockerEngine
 
 if TYPE_CHECKING:
@@ -43,7 +45,7 @@ def test_a_stop_delivers_output_written_before_the_client_read_it(tmp_path: Path
     (workspace / "written").read_text(encoding="utf-8")
     os.kill(client.pid, signal.SIGTERM)
     os.kill(client.pid, signal.SIGCONT)
-    stdout, stderr = client.communicate()
+    stdout, stderr = client.communicate(timeout=HANG_GUARD_S)
     engine.run(("docker", "rm", "-f", container), timeout_seconds=30)
 
     assert (stdout, stderr) == ("out", "err")

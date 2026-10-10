@@ -27,6 +27,7 @@ from tests.entrypoints.support import (
     FakeDetachedGateway,
     gateway_record,
 )
+from tests.support.bounded_waits import HANG_GUARD_S, stop_process
 from tests.support.thread_signals import non_main_thread_ids, requires_tgkill, send_to_thread
 
 import entrypoints.server as server_entrypoint
@@ -296,8 +297,7 @@ def test_detached_startup_refuses_to_clobber_a_gateway_that_still_holds_the_log(
         with pytest.raises(RuntimeError, match="Another process holds") as failure:
             _spawn_detached(["--web", "--detach"], instance_path, effects)
     finally:
-        running.terminate()
-        running.wait()
+        stop_process(running)
 
     # The lock is taken before the log is truncated, so a second launch cannot
     # destroy the running gateway's output or spawn a rival child. The blocker
@@ -917,7 +917,7 @@ def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
         output, _ = child.communicate(timeout=20)
     except subprocess.TimeoutExpired:
         child.kill()
-        child.communicate()
+        child.communicate(timeout=HANG_GUARD_S)
         pytest.fail("SIGTERM did not interrupt the foreground run")
     finally:
         child.kill()

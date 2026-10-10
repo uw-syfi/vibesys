@@ -27,6 +27,7 @@ import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
+from tests.support.bounded_waits import join_or_fail
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError, InvalidStatus
@@ -1042,7 +1043,7 @@ class _StalledPublication:
     def join_first_worker(self) -> None:
         """Wait for the worker captured by the Fake's first publication barrier."""
         assert self.first_worker is not None
-        self.first_worker.join()
+        join_or_fail(self.first_worker)
 
 
 def test_gateway_timeout_retires_stalled_publication_before_immediate_retry(

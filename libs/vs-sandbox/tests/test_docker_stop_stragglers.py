@@ -13,6 +13,8 @@ import select
 import threading
 from typing import TYPE_CHECKING
 
+from tests.support.bounded_waits import join_or_fail
+
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine
 
@@ -52,7 +54,7 @@ def test_a_stop_after_a_lost_signal_request_still_ends_the_program(tmp_path: Pat
         worker.start()
         (workspace / "ready").read_text(encoding="utf-8")
         cancel.set()
-        worker.join()
+        join_or_fail(worker)
 
         readable, _, _ = select.select([alive], [], [], _EXIT_BOUND_SECONDS)
         assert outcome == [True]

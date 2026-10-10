@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.support.bounded_waits import join_or_fail
 from tests.vibesys.loops.torch_inject_fixtures import write_fake_torch
 
 if TYPE_CHECKING:
@@ -209,7 +210,7 @@ def test_wait_for_started_windows_returns_once_the_last_window_exports(
     try:
         assert capture_ops.wait_for_started_windows(tmp_path, grace_s=60, pid_alive=pid_alive) == []
     finally:
-        writer.join()
+        join_or_fail(writer)
     assert capture_ops.discover_traces(tmp_path) == [tmp_path / "4242-1.pt.trace.json.gz"]
 
 

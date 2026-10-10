@@ -12,6 +12,7 @@ from typing import cast
 
 import pytest
 from tests.entrypoints.support import IDLE_DIRECTORY, INSTANCE_PATH, FakeDetachedGateway
+from tests.support.bounded_waits import HANG_GUARD_S
 
 from entrypoints import web
 from entrypoints.server import GATEWAY_STOP_TIMEOUT_SECONDS, GatewayStopOutcome, GatewayStopResult
@@ -429,7 +430,7 @@ def test_stop_succeeds_only_after_the_gateway_releases_its_instance_files(
     finally:
         if process.poll() is None:  # pragma: no cover - only on an unexpected failure
             process.kill()
-        process.wait()
+        process.wait(timeout=HANG_GUARD_S)
 
 
 def test_stop_reports_an_instance_directory_nothing_is_using(

@@ -29,6 +29,7 @@ from agentshim.testing import (
     SequentialIds,
     scripted_turn,
 )
+from tests.support.bounded_waits import join_or_fail
 from tests.support.fake_docker_sandbox import FakeDockerSandbox
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
@@ -250,7 +251,7 @@ def test_a_rate_limit_report_reaches_the_observer_while_the_turn_still_runs(
     # The turn has not ended: the report arrived over the live process.
     assert worker.is_alive()
     session.cancel()
-    worker.join()
+    join_or_fail(worker)
 
     assert isinstance(failures[0], agentshim.TurnCancelledError)
 

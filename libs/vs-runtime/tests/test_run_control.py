@@ -7,6 +7,7 @@ import threading
 
 import pytest
 from pydantic import ValidationError
+from tests.support.bounded_waits import join_or_fail
 
 from vs_runtime.api.infrastructure import (
     BlockingOperations,
@@ -60,7 +61,7 @@ def test_pause_parks_at_a_boundary_until_resume() -> None:
     assert not released.is_set()
 
     control.resume()
-    waiter.join()
+    join_or_fail(waiter)
 
     assert released.is_set()
     assert [transition.kind for transition in events.transitions] == [
@@ -91,7 +92,7 @@ def test_stop_releases_a_paused_boundary_and_unwinds() -> None:
     waiter.start()
     paused.wait()
     control.request_stop()
-    waiter.join()
+    join_or_fail(waiter)
 
     assert [type(error) for error in raised] == [RunStopped]
     assert [transition.kind for transition in events.transitions] == [

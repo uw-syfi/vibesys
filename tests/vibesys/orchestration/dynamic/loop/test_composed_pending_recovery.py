@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 import pytest
+from tests.support.bounded_waits import join_or_fail
 from tests.vibesys.orchestration.dynamic.loop._harness import LEGACY_PLUGIN as PLUGIN
 
 from launch import LaunchSettings, create_session
@@ -201,13 +202,13 @@ def _crash(loop_input: LoopInput, phase: _Phase) -> None:
         assert received.recv() == (
             "worker-suspension-persisted" if phase == "pending" else "resume-result-persisted"
         )
-        child.join()
+        join_or_fail(child)
         assert child.exitcode == _CRASH_EXIT
     finally:
         received.close()
         if child.is_alive():
             child.kill()
-            child.join()
+            join_or_fail(child)
         child.close()
 
 

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge, capture_runtime
+from tests.support.bounded_waits import join_or_fail
 
 from vs_sandbox.api.slurm import (
     SlurmCapturePlan,
@@ -273,7 +274,7 @@ def test_remote_capture_rejects_overlap_without_submitting_another_job(
         overlap = getattr(failed.value, "report", None)
     finally:
         runner.release.set()
-        worker.join()
+        join_or_fail(worker)
 
     assert overlap == (
         "error: a remote Slurm ROCprof capture is already in progress; "
@@ -363,7 +364,7 @@ remote_python = "/remote/venv/bin/python"
         worker.start()
         submitted = (cluster / SUBMITTED_FILE).read_text(encoding="utf-8")
         cancel.set()
-        worker.join()
+        join_or_fail(worker)
     finally:
         broker.close()
 

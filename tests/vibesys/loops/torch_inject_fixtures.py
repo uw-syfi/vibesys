@@ -44,6 +44,8 @@ import threading
 from pathlib import Path
 from typing import IO
 
+from tests.support.bounded_waits import join_or_fail
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INJECT_DIR = REPO_ROOT / "resources" / "profilers" / "torch" / "inject"
 
@@ -310,5 +312,5 @@ class StderrTail:
 
     def text(self) -> str:
         """Everything the child wrote; call after the child exited."""
-        self._thread.join()
+        join_or_fail(self._thread)
         return "".join(self._lines)

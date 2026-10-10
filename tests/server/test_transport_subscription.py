@@ -13,6 +13,7 @@ from typing import Never, TypedDict, Unpack
 
 import pytest
 from tests.server.support import ServerParts, build_server_parts
+from tests.support.bounded_waits import join_or_fail
 
 from server.api.protocol import EventsQuery, SnapshotQuery, SubscribeRequest
 from server.api.service import RunApi
@@ -326,7 +327,7 @@ def test_bootstrap_tail_stays_bounded_under_concurrent_appends(tmp_path: Path) -
         _subscribed, batch = _subscribe(parts.api, SubscribeRequest(after_sequence=0, tail=tail))
     finally:
         stop.set()
-        writer.join()
+        join_or_fail(writer)
 
     floor = batch["history_after_sequence"]
     ordinary = [event for event in batch["events"] if event["sequence"] > floor]
@@ -606,7 +607,7 @@ def test_disconnect_wait_blocks_until_last_subscriber_closes(
         parts.journal.publish_output("stdout", "wake the second handler")
 
         returned.wait()
-        waiter.join()
+        join_or_fail(waiter)
         assert order == ["second client hanging up", "wait returned"]
 
 
