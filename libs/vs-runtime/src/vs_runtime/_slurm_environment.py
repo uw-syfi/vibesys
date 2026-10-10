@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession, HostBroker
+from vs_runtime._container_paths import CONTAINER_FRAMEWORK_ROOT
 from vs_runtime._container_runtime_policy import reject_docker_in_docker
 from vs_runtime._host_command_bridge import (
     bridge_editor_extras,
@@ -71,8 +72,6 @@ PROFILER_PYTHON_PACKAGES: tuple[str, ...] = (
     "vs-sandbox",
     "vs-slurm",
 )
-#: Where the framework root is mounted in an agent container that runs a CLI provider.
-_CONTAINER_FRAMEWORK_ROOT = "/opt/vibesys"
 _GATE_LAUNCHER = "vibesys-gate"
 
 
@@ -90,7 +89,7 @@ def profiler_python_path(framework_root: Path) -> str:
     also its container path.
     """
     sources = (framework_root / "libs" / name / "src" for name in PROFILER_PYTHON_PACKAGES)
-    return os.pathsep.join((_CONTAINER_FRAMEWORK_ROOT, *(str(path) for path in sources)))
+    return os.pathsep.join((CONTAINER_FRAMEWORK_ROOT, *(str(path) for path in sources)))
 
 
 @dataclass(frozen=True, slots=True)
