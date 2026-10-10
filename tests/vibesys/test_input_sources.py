@@ -8,18 +8,38 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vibesys.inputs import (
+    MANIFEST_NAME,
     InputBundle,
     WorkspaceSource,
     load_input_bundle,
     load_project_task,
 )
 from vibesys.run.workspace_policy import materialization_source
-from vs_project.api import Project
+from vs_project.api import Project, ProjectNotInitializedError
 from vs_runtime.api.infrastructure import ProjectMaterializer, SDKRoots
 from vs_runtime.api.testing import FakeGitRunner, FakeProjectMaterializationEffects
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+@pytest.fixture(scope="session")
+def example_input_bundles(repo_root: Path) -> tuple[InputBundle, ...]:
+    manifests = sorted((repo_root / "examples").glob(f"**/{MANIFEST_NAME}"))
+    bundles: list[InputBundle] = []
+    for manifest in manifests:
+        try:
+            project = Project.discover(manifest)
+        except ProjectNotInitializedError:
+            bundles.append(load_input_bundle(manifest.parent))
+            continue
+        task = next(
+            task for task in project.discover_tasks() if task.manifest_path == manifest.resolve()
+        )
+        bundles.append(load_project_task(project, task))
+
+    assert bundles, f"No example input bundles found under {repo_root / 'examples'}"
+    return tuple(bundles)
 
 
 def _write_bundle(project_root: Path, manifest_blocks: str = "", domain: str = "generic") -> Path:
