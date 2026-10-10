@@ -142,6 +142,28 @@ commands = [
 # runners: the workflow sets CPU_CHECK_SHARD=I/N (see
 # examples/model-serving/qwen3.5-9b-mi210/cpu_check/shard.py). Unset, as in a
 # local `repoctl test`, it runs every test.
+# The example evaluators' build-and-run tests (cargo, make and go compile native code, then the
+# real Go evaluator judges it): tests that request a native build fixture carry the
+# `native_build` marker (root conftest.py), which the Python shards deselect. They run here, on
+# the examples path, whenever an example, the evaluator SDK or the queue evaluator changes.
+[[check_groups]]
+name = "examples_native_evaluator_tests"
+trigger_job = "examples"
+include_in_test = true
+language = "python"
+directory = "."
+timeout_seconds = 1800
+commands = [
+  [
+    "uv", "run", "--no-sync", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--no-cov", "-m", "native_build",
+    "tests/architecture/test_stack_evaluator.py",
+    "tests/architecture/test_ordered_map_evaluator.py",
+    "tests/architecture/test_unordered_map_evaluator.py",
+    "tests/examples/test_prioqueue_evaluator.py",
+    "tests/examples/test_queue_evaluator.py",
+  ],
+]
+
 [[check_groups]]
 name = "examples_cpu_check_shard"
 trigger_job = "examples"

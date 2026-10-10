@@ -104,7 +104,7 @@ testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/te
 # Start expensive tests first and keep worker queues short so long tests do not
 # remain queued behind fast tests. CI explicitly selects loadgroup to keep
 # shared native-build fixtures on one worker.
-addopts = "-ra -p no:tach --import-mode=importlib --dist load --maxschedchunk=1 --cov --cov-report=term-missing -m 'not slow'"
+addopts = "-ra -p no:tach --import-mode=importlib --dist load --maxschedchunk=1 --cov --cov-report=term-missing -m 'not slow and not native_build'"
 pythonpath = [".", "packaging", "libs/vs-sim/pytest_plugin"]
 # A test still running after this many seconds dumps every thread's stack to
 # stderr (xdist workers inherit the controller's stderr, so it reaches the CI
@@ -136,6 +136,7 @@ markers = [
     # A Fake-vs-real contract suite run against the real implementation. Each
     # such test is skipped unless its opt-in environment variable is set.
     # The exhaustive crash-sequence sweep: deselected by default, run with `-m slow`.
+    "native_build: compiles an example evaluator's native code and runs it; applied by the root conftest.py to tests that request a native build fixture, deselected by default, run by CI's native-evaluator-examples job with -m native_build",
     "slow: an exhaustive sweep too long for every run; select it with -m slow",
     "slurm_cluster: runs the slurm and slurm-gpu environments against a real Slurm cluster in Docker; opt in with VIBESYS_SLURM_CLUSTER=1",
     "minimal_container: starts every in-container process in a real container built on each default base image, on a host without GPUs; opt in with VIBESYS_MINIMAL_CONTAINER=1",

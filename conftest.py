@@ -97,6 +97,31 @@ _BUILD_ONCE_GROUPS = {
 }
 
 
+#: Fixtures that compile native code (cargo, make, go) or build the evaluator's native runner.
+#: A test that requests one is a build-and-run test of an example evaluator: it gets the
+#: ``native_build`` marker and runs in CI's ``native-evaluator-examples`` job
+#: (``examples_native_evaluator_tests``), not in the always-on Python shards, which deselect
+#: it. The tests of the same files that need no build (manifest and shape checks) stay.
+_NATIVE_BUILD_FIXTURES = frozenset(
+    {
+        "queue_native_runner",
+        "compiled_queue_candidate",
+        "priority_queue_native_runner",
+        "compiled_priority_queue_candidate",
+        "built_priority_queue_baselines",
+        "stack_native_runner",
+        "compiled_stack_candidate",
+        "built_stack_boost_lockfree",
+        "ordered_map_native_runner",
+        "compiled_ordered_map_candidate",
+        "built_ordered_map_tbb",
+        "unordered_map_native_runner",
+        "compiled_unordered_map_candidate",
+        "built_unordered_map_tbb",
+    }
+)
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: Iterable[pytest.Item]) -> None:
     """Pin every ``serial`` test, and every consumer of a shared build fixture, to one xdist worker.
@@ -135,6 +160,8 @@ def pytest_collection_modifyitems(items: Iterable[pytest.Item]) -> None:
             item.add_marker(pytest.mark.xdist_group(_SERIAL_GROUP))
             continue
         fixturenames = getattr(item, "fixturenames", ())
+        if _NATIVE_BUILD_FIXTURES.intersection(fixturenames):
+            item.add_marker(pytest.mark.native_build)
         for fixture_name, group in _BUILD_ONCE_GROUPS.items():
             if fixture_name in fixturenames:
                 item.add_marker(pytest.mark.xdist_group(group))

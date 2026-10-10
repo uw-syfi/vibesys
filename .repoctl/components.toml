@@ -128,12 +128,26 @@ class = "manual"
 job = "examples"
 roots = ["examples", "docs"]
 files = [".gitmodules", "README.md"]
-depends_on = ["example_validation", "microservice_evaluator"]
+depends_on = ["example_validation", "microservice_evaluator", "native_evaluator_examples"]
 
 [[components]]
 id = "example_validation"
 files = ["src/entrypoints/headless.py", "src/vibesys/run/project_policy.py", "scripts/example_repositories.py", "tests/vibesys/test_microservice_inputs.py", "tests/vibesys/test_kubernetes_inputs.py", "tests/vibesys/test_kubernetes_runtime.py", "tests/vibesys/test_input_sources.py", "tests/examples/test_example_registry.py", "tests/support/example_registry.py"]
 roots = ["src/vibesys/inputs"]
+
+# The build-and-run tests of the example evaluators (the `native_build` marker) run in the
+# examples job. They read the evaluator SDK and the queue evaluator, which live outside
+# `examples`, so a change there must select the job too.
+[[components]]
+id = "native_evaluator_examples"
+files = [
+  "tests/architecture/test_stack_evaluator.py",
+  "tests/architecture/test_ordered_map_evaluator.py",
+  "tests/architecture/test_unordered_map_evaluator.py",
+  "tests/examples/test_prioqueue_evaluator.py",
+  "tests/examples/test_queue_evaluator.py",
+]
+roots = ["sdk/vs-evaluator", "resources/evaluators/queue"]
 
 [[components]]
 id = "agent_image"
