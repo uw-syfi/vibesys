@@ -15,12 +15,20 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from typing import TYPE_CHECKING
 
 from server.stdio_bridge import BridgeOutcome, BridgeResult, ClientStreams, run_bridge
 from vs_sim.api import OsThreads, UnixNetwork
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from server.stdio_bridge import ByteSink, Dialer
+    from vs_sim.api import Threads
+
 _STDIN_FD = 0
 _STDOUT_FD = 1
+_STDERR_FD = 2
 
 
 class _FdSource:
@@ -57,30 +65,44 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _report(result: BridgeResult) -> None:
+def _report(result: BridgeResult, errors: ByteSink) -> None:
     # lint-waiver: LW-178501 [PLC0415]; import the Pydantic report only when there is one to write.
     # > A module-level import costs every connection about 95ms of Pydantic startup
     # > (measured), more than the rest of the relay's imports; hand-written JSON would
     # > be a second, unvalidated definition of the contract the model owns.
     from server.stdio_bridge_report import BridgeReport  # noqa: PLC0415
 
-    os.write(2, BridgeReport.of(result).line().encode())
+    errors.write(BridgeReport.of(result).line().encode())
+
+
+def bridge(
+    argv: Sequence[str],
+    *,
+    network: Dialer,
+    client: ClientStreams,
+    errors: ByteSink,
+    threads: Threads,
+) -> int:
+    """Parse ``argv``, relay until one side ends, report an unsuccessful end; the exit status."""
+    arguments = _parser().parse_args(argv)
+    result = run_bridge(network=network, address=arguments.socket, client=client, threads=threads)
+    if result.outcome is not BridgeOutcome.CLIENT_CLOSED:
+        _report(result, errors)
+    return result.exit_status
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Relay until one side ends, then exit with the outcome's status."""
-    arguments = _parser().parse_args(sys.argv[1:] if argv is None else argv)
-    result = run_bridge(
+    """Relay this process's stdin and stdout, then exit with the outcome's status."""
+    status = bridge(
+        sys.argv[1:] if argv is None else argv,
         network=UnixNetwork(),
-        address=arguments.socket,
         client=ClientStreams(_FdSource(_STDIN_FD), _FdSink(_STDOUT_FD)),
+        errors=_FdSink(_STDERR_FD),
         threads=OsThreads(),
     )
-    if result.outcome is not BridgeOutcome.CLIENT_CLOSED:
-        _report(result)
     # A copy loop may still be blocked reading stdin or writing a stalled stdout; neither
     # can be interrupted portably, and the outcome is already decided, so leave at once.
-    os._exit(result.exit_status)
+    os._exit(status)
 
 
 if __name__ == "__main__":
