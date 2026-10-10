@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import os
 import re
 import secrets
-import select
 import shlex
 import shutil
-import socket
-import socketserver
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -45,14 +42,15 @@ from vs_sandbox.skypilot_runner import (
     SkyPilotControlPlaneError,
     SkyPilotJobStateError,
 )
+from vs_sim.api import OsThreads, UnixNetwork
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
-    from io import BufferedIOBase
 
     from vs_project.api import StateNamespace
     from vs_sandbox.skypilot_config import ResolvedSkyPilotResources
     from vs_sandbox.skypilot_runner import SkyPilotJobRunner
+    from vs_sim.api import Connection, Event, Listener, Lock, Network, Threads, Worker
 
 _MAX_REQUEST_BYTES = 4096
 _OUTPUT_CHUNK_CHARACTERS = 64 * 1024
@@ -89,9 +87,29 @@ _STAGING_EXCLUDED_NAMES = frozenset(
 )
 
 
-class _BridgeServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
-    daemon_threads = True
-    block_on_close = False
+class _Wire:
+    """Line-framed reads and whole-frame writes over one connection."""
+
+    def __init__(self, connection: Connection) -> None:
+        self._connection = connection
+        self._buffer = b""
+
+    def readline(self, limit: int) -> bytes:
+        """Up to ``limit`` bytes, ending at the first newline; fewer when the peer closes first."""
+        while b"\n" not in self._buffer[:limit] and len(self._buffer) < limit:
+            chunk = self._connection.recv(limit - len(self._buffer))
+            if not chunk:
+                break
+            self._buffer += chunk
+        end = self._buffer.find(b"\n") + 1
+        if not 0 < end <= limit:
+            end = min(limit, len(self._buffer))
+        line, self._buffer = self._buffer[:end], self._buffer[end:]
+        return line
+
+    def write(self, data: bytes) -> None:
+        """Send all of ``data``."""
+        self._connection.send(data)
 
 
 class _ArtifactStream:
@@ -247,6 +265,8 @@ class SkyPilotBridge:
         log: Callable[[str], None],
         framework_setup_command: str | None = None,
         max_infrastructure_retries: int = 1,
+        network: Network | None = None,
+        threads: Threads | None = None,
     ) -> None:
         """Bind fixed host policy and trusted evaluator commands."""
         self._runner = runner
@@ -263,22 +283,24 @@ class SkyPilotBridge:
         self.socket_path = socket_path
         self._log = log
         self._max_infrastructure_retries = max_infrastructure_retries
-        self._server: _BridgeServer | None = None
-        self._thread: threading.Thread | None = None
+        self._network: Network = network or UnixNetwork()
+        self._threads: Threads = threads or OsThreads()
+        self._listener: Listener | None = None
+        self._acceptor: Worker | None = None
         self._closed = False
         self._active_jobs: set[tuple[str, int]] = set()
-        self._active_lock = threading.Lock()
-        self._handler_condition = threading.Condition()
+        self._active_lock = self._threads.lock()
+        self._handler_condition = self._threads.condition()
         self._active_handlers = 0
-        self._evaluation_lock = threading.Lock()
-        self._closing = threading.Event()
+        self._evaluation_lock = self._threads.lock()
+        self._closing = self._threads.event()
         self._cluster_replaced_on_start = False
         self._locally_prepared_invocations: set[str] = set()
         self._touched_clusters = {cluster_name}
 
     def start(self) -> None:
         """Allocate or reuse compute, then start accepting requests."""
-        if self._server is not None:
+        if self._listener is not None:
             return
         if self._closed:
             message = "SkyPilot bridge cannot be restarted after close"
@@ -297,20 +319,15 @@ class SkyPilotBridge:
                 }
             )
             self._runner.ensure_cluster(self._cluster_name, self._resources)
-            bridge = self
-
-            class Handler(socketserver.StreamRequestHandler):
-                def handle(self) -> None:
-                    bridge._handle(self.rfile, self.wfile, self.request)
-
-            self._server = _BridgeServer(str(self.socket_path), Handler)
-            self.socket_path.chmod(0o600)
-            self._thread = threading.Thread(
-                target=self._server.serve_forever,
+            listener = self._network.listen(str(self.socket_path))
+            self._listener = listener
+            # The socket is a file only on a filesystem network; any other has nothing to restrict.
+            with contextlib.suppress(FileNotFoundError):
+                self.socket_path.chmod(0o600)
+            self._acceptor = self._threads.spawn(
+                lambda: self._accept_loop(listener),
                 name=f"skypilot-bridge-{self._cluster_name}",
-                daemon=True,
             )
-            self._thread.start()
         except BaseException:
             self.close()
             raise
@@ -321,13 +338,11 @@ class SkyPilotBridge:
             return
         self._closed = True
         self._closing.set()
-        if self._server is not None and self._thread is not None and self._thread.is_alive():
-            self._server.shutdown()
+        if self._listener is not None:
+            self._listener.close()
         self._cancel_active_jobs()
-        if self._server is not None:
-            self._server.server_close()
-        if self._thread is not None:
-            self._thread.join(timeout=5)
+        if self._acceptor is not None:
+            self._acceptor.join(timeout=5)
         with self._handler_condition:
             if not self._handler_condition.wait_for(lambda: self._active_handlers == 0, timeout=10):
                 self._log("[warn] SkyPilot bridge handler did not stop before allocation release")
@@ -341,6 +356,24 @@ class SkyPilotBridge:
                 self._log(f"[warn] SkyPilot allocation release failed: {type(exc).__name__}")
         self.socket_path.unlink(missing_ok=True)
 
+    def _accept_loop(self, listener: Listener) -> None:
+        while True:
+            try:
+                connection = listener.accept()
+            except OSError:
+                return  # the listener was closed
+            self._threads.spawn(
+                lambda c=connection: self._serve(c),
+                name=f"skypilot-bridge-request-{self._cluster_name}",
+            )
+
+    def _serve(self, connection: Connection) -> None:
+        wire = _Wire(connection)
+        try:
+            self._handle(wire, wire, connection)
+        finally:
+            connection.close()
+
     def _cancel_active_jobs(self) -> None:
         """Best-effort cancel every job known at this point in teardown."""
         with self._active_lock:
@@ -351,9 +384,7 @@ class SkyPilotBridge:
             except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-008193 [BLE001]; teardown must continue after any runner failure and reports each failed cancellation.
                 self._log(f"[warn] SkyPilot job cancellation failed: {type(exc).__name__}")
 
-    def _handle(
-        self, reader: BufferedIOBase, writer: BufferedIOBase, connection: socket.socket
-    ) -> None:
+    def _handle(self, reader: _Wire, writer: _Wire, connection: Connection) -> None:
         with self._handler_condition:
             self._active_handlers += 1
         try:
@@ -370,16 +401,14 @@ class SkyPilotBridge:
                 self._active_handlers -= 1
                 self._handler_condition.notify_all()
 
-    def _report_closing(self, writer: BufferedIOBase) -> bool:
+    def _report_closing(self, writer: _Wire) -> bool:
         """Write the existing wire error when shutdown has started."""
         if not self._closed:
             return False
         self._write(writer, ErrorFrame(error=ValueError.__name__))
         return True
 
-    def _handle_request(
-        self, reader: BufferedIOBase, writer: BufferedIOBase, connection: socket.socket
-    ) -> None:
+    def _handle_request(self, reader: _Wire, writer: _Wire, connection: Connection) -> None:
         payload = reader.readline(_MAX_REQUEST_BYTES + 1)
         if not payload or len(payload) > _MAX_REQUEST_BYTES or not payload.endswith(b"\n"):
             message = "invalid bridge request framing"
@@ -443,34 +472,26 @@ class SkyPilotBridge:
         command: tuple[str, ...],
         record: InvocationRecord,
         staging: Path,
-        reader: BufferedIOBase,
-        writer: BufferedIOBase,
-        connection: socket.socket,
+        reader: _Wire,
+        writer: _Wire,
+        connection: Connection,
     ) -> None:
         self._log(f"[skypilot] running trusted {request.kind} evaluator")
-        write_lock = threading.Lock()
-        disconnected = threading.Event()
-        finished = threading.Event()
+        write_lock = self._threads.lock()
+        disconnected = self._threads.event()
+        finished = self._threads.event()
 
         def monitor_disconnect() -> None:
             while not finished.wait(0.1):
                 if self._closing.is_set():
                     disconnected.set()
                     return
-                readable, _, _ = select.select([connection], [], [], 0)
-                if not readable:
-                    continue
-                try:
-                    if connection.recv(1, socket.MSG_PEEK):
-                        continue
-                except OSError:
-                    pass
-                disconnected.set()
-                return
+                if connection.peer_closed():
+                    disconnected.set()
+                    return
 
-        monitor = threading.Thread(target=monitor_disconnect, daemon=True)
         try:
-            monitor.start()
+            monitor = self._threads.spawn(monitor_disconnect, name="skypilot-bridge-monitor")
             active_record = record
             try:
                 while True:
@@ -690,9 +711,9 @@ class SkyPilotBridge:
     def _deliver(
         self,
         record: InvocationRecord,
-        reader: BufferedIOBase,
-        writer: BufferedIOBase,
-        lock: threading.Lock | None = None,
+        reader: _Wire,
+        writer: _Wire,
+        lock: Lock | None = None,
     ) -> None:
         """Replay a durable terminal payload and persist explicit acknowledgement."""
         result = record.result
@@ -833,7 +854,7 @@ class SkyPilotBridge:
         record: InvocationRecord,
         job_id: int,
         cluster_name: str,
-        disconnected: threading.Event,
+        disconnected: Event,
     ) -> None:
         self._journal.submitted(record, job_id, cluster_name)
         with self._active_lock:
@@ -915,16 +936,15 @@ class SkyPilotBridge:
             or any(relative == path or relative.is_relative_to(path) for path in hidden)
         )
 
-    @classmethod
     def _write_output(
-        cls,
-        writer: BufferedIOBase,
+        self,
+        writer: _Wire,
         stream: Literal["stdout", "stderr"],
         data: str,
-        lock: threading.Lock,
+        lock: Lock,
     ) -> None:
         for start in range(0, len(data), _OUTPUT_CHUNK_CHARACTERS):
-            cls._write(
+            self._write(
                 writer,
                 OutputFrame(
                     type=stream,
@@ -933,13 +953,12 @@ class SkyPilotBridge:
                 lock,
             )
 
-    @staticmethod
     def _write(
-        writer: BufferedIOBase,
+        self,
+        writer: _Wire,
         message: OutputFrame | ArtifactFrame | ResultFrame | AckedFrame | ErrorFrame,
-        lock: threading.Lock | None = None,
+        lock: Lock | None = None,
     ) -> None:
-        context = lock or threading.Lock()
+        context = lock or self._threads.lock()
         with context:
             writer.write(encode_message(message))
-            writer.flush()

@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_sandbox.api.skypilot import RemoteJobInfo
+    from vs_sim.api import Connection, Listener
 
 
 def _resources() -> ResolvedSkyPilotResources:
@@ -642,19 +643,19 @@ def _staging_fixture(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def test_bridge_releases_cluster_when_socket_startup_fails(
-    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, socket_dir: Path
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     runner = FakeRunner()
 
-    class BrokenServer:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            del args, kwargs
-            _failure_message = "bind failed"
-            raise OSError(_failure_message)
+    class BrokenNetwork:
+        def listen(self, address: str) -> Listener:
+            raise OSError("bind failed " + address)
 
-    monkeypatch.setattr(bridge_module, "_BridgeServer", BrokenServer)
+        def connect(self, address: str, timeout: float | None = None) -> Connection:
+            raise ConnectionRefusedError(address, timeout)
+
     bridge = SkyPilotBridge(
         runner=runner,
         cluster_name="lease",
@@ -667,6 +668,7 @@ def test_bridge_releases_cluster_when_socket_startup_fails(
         state_namespace=_namespace(tmp_path),
         socket_path=socket_dir / "bridge.sock",
         log=lambda _: None,
+        network=BrokenNetwork(),
     )
 
     with pytest.raises(OSError, match="bind failed"):
