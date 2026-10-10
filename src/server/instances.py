@@ -20,8 +20,10 @@ Layout under ``instance_root``::
 
 Public surface: the record and CLI result models, ``instance_root``,
 ``InstanceStore`` with its ``FileInstanceStore`` and ``FakeInstanceStore``
-implementations, the pure ``judge`` and ``survey`` decisions, and
-``LiveRegistry``, which composes them.
+implementations, ``StopRequester`` with ``ControlSocketStopRequester`` and
+the ``StopEffects`` a stop uses, the
+pure ``judge`` and ``survey`` decisions, and ``LiveRegistry``, which composes
+them.
 """
 
 from __future__ import annotations
@@ -41,13 +43,13 @@ from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, PositiveInt, StringConstraints, ValidationError
 
-from server.api.protocol import PROTOCOL_VERSION
+from server.api.protocol import PROTOCOL_VERSION, Response, StopCommand
 from server.transport.discovery import LifetimeLock, LockState, probe_lock
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Mapping
 
-    from vs_sim.api import Clock, ProcessSignaller
+    from vs_sim.api import Clock, Connection, Network, ProcessSignaller
 
 INSTANCE_ID_PATTERN = r"^[0-9a-f]{12}$"
 _INSTANCE_ID = re.compile(INSTANCE_ID_PATTERN)
@@ -60,6 +62,12 @@ _PRIVATE_DIRECTORY = 0o700
 _GROUP_OR_OTHER = 0o077
 _FALLBACK_PARENT = Path("/tmp")  # noqa: S108  # lint-waiver: LW-178202 [S108]; the per-user runtime fallback must be a short, node-local, session-independent path; `tempfile.gettempdir()` follows `$TMPDIR`, which differs between macOS GUI and SSH sessions and can be long enough to break the Unix socket path limit
 """Parent of the fallback root when ``$XDG_RUNTIME_DIR`` is unset."""
+_STOP_POLL_SECONDS = 0.05
+STOP_TIMEOUT_SECONDS = 10.0
+"""How long ``stop`` waits for a stopped server to finish its run teardown."""
+CONTROL_REPLY_TIMEOUT_SECONDS = 5.0
+"""How long a stop request waits to connect and for the server's acknowledgment."""
+_MAX_REPLY_BYTES = 1 << 20
 
 
 class InstanceStatus(StrEnum):
@@ -104,13 +112,30 @@ class StopOutcome(StrEnum):
     """What ``vibesys instances stop`` observed."""
 
     STOPPED = "stopped"
-    """The server was live, was signalled, and released its lock."""
+    """The server was live, was asked or signalled to stop, and released its lock."""
+    STOPPING = "stopping"
+    """The server accepted a stop request but its run has not reached a safe boundary yet.
+
+    Distinct from ``STILL_RUNNING``: this is the normal path for a run whose
+    active agent call outlasts the wait, and the server exits on its own once
+    the call ends. Poll ``instances list`` rather than stopping again.
+    """
     NOT_RUNNING = "not_running"
     """No live server holds this id; nothing was signalled."""
     STILL_RUNNING = "still_running"
     """The server was signalled but still held its lock when the wait ended."""
     UNSUPPORTED = "unsupported"
-    """This host cannot signal a process without risking a reused pid."""
+    """The server did not answer its control socket, and this host cannot signal
+    a process without risking a reused pid."""
+
+
+class StopRoute(StrEnum):
+    """How ``vibesys instances stop`` reached the server."""
+
+    CONTROL_SOCKET = "control_socket"
+    """A ``command.stop`` request, acknowledged on the server's control socket."""
+    SIGNAL = "signal"
+    """SIGTERM through a stable process reference, after the socket did not answer."""
 
 
 class InstanceStopResult(BaseModel):
@@ -121,6 +146,8 @@ class InstanceStopResult(BaseModel):
     version: Literal[1] = 1
     id: InstanceId
     outcome: StopOutcome
+    route: StopRoute | None = None
+    """How the server was reached; ``None`` when nothing was sent."""
 
 
 # --- pure core -------------------------------------------------------------
@@ -227,6 +254,19 @@ class InstanceStore(Protocol):
 
     def hold(self, instance_id: str) -> InstanceHold:
         """Claim ``instance_id`` for the caller's lifetime."""
+        ...
+
+
+class StopRequester(Protocol):
+    """Ask a live server, over its control socket, to stop its run.
+
+    Contract: ``request_stop`` returns True only when the server acknowledged
+    the stop; a socket that refuses, times out, closes early or answers
+    anything else is False, never an exception.
+    """
+
+    def request_stop(self, socket_path: str) -> bool:
+        """Send one stop request and report whether it was acknowledged."""
         ...
 
 
@@ -432,7 +472,64 @@ class FakeInstanceStore:
         return FakeInstanceHold(self, instance_id)
 
 
+class ControlSocketStopRequester:
+    """Send ``command.stop`` over the server's JSONL control socket.
+
+    This is the same command an attached client sends, so the run stops at its
+    next controlled boundary with its state persisted, exactly as a stop from
+    the TUI does. Only the socket's owner can dial it: the socket is ``0600``
+    inside the ``0700`` registry root.
+    """
+
+    def __init__(self, network: Network, *, timeout: float = CONTROL_REPLY_TIMEOUT_SECONDS) -> None:
+        """Dial through ``network``; wait at most ``timeout`` to connect and for the reply."""
+        self._network = network
+        self._timeout = timeout
+
+    def request_stop(self, socket_path: str) -> bool:
+        """Send the stop and read one response line."""
+        try:
+            connection = self._network.connect(socket_path, self._timeout)
+        except OSError:
+            return False
+        try:
+            connection.send(StopCommand().model_dump_json().encode() + b"\n")
+            line = _read_line(connection, self._timeout)
+        except OSError:
+            return False
+        finally:
+            connection.close()
+        try:
+            response = Response.model_validate_json(line)
+        except ValidationError:
+            return False
+        return response.ok and response.ack is not None and response.ack.action == "stop"
+
+
+def _read_line(connection: Connection, timeout: float) -> bytes:
+    """Read through the first newline, or to EOF; ``TimeoutError`` if the peer stalls."""
+    buffer = b""
+    while b"\n" not in buffer:
+        if len(buffer) > _MAX_REPLY_BYTES:
+            break
+        chunk = connection.recv(4096, timeout)
+        if not chunk:
+            break
+        buffer += chunk
+    return buffer.split(b"\n", 1)[0]
+
+
 # --- shell ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class StopEffects:
+    """The I/O one ``LiveRegistry.stop`` uses: ask, signal, and wait."""
+
+    requester: StopRequester
+    signaller: ProcessSignaller
+    clock: Clock
+    pause: Callable[[float], None]
 
 
 class LiveRegistry:
@@ -464,24 +561,31 @@ class LiveRegistry:
             hold.release()
 
     def stop(
-        self,
-        instance_id: str,
-        *,
-        signaller: ProcessSignaller,
-        clock: Clock,
-        pause: Callable[[float], None],
+        self, instance_id: str, effects: StopEffects, *, force: bool = False
     ) -> InstanceStopResult:
-        """SIGTERM a live server and wait, at most ``STOP_TIMEOUT_SECONDS``, for its lock to drop.
+        """Stop a live server and wait, at most ``STOP_TIMEOUT_SECONDS``, for its lock to drop.
 
-        The signal is sent only while the lock is still held, through a stable
-        process reference, so a pid reused after the owner died is never hit.
+        The server is first asked over its control socket, which stops the run
+        at its next safe boundary on every platform. Only a server that does
+        not acknowledge (wedged, or still binding), or a ``force`` stop, is
+        sent SIGTERM; the signal goes only while the lock is still held,
+        through a stable process reference, so a reused pid is never hit.
         """
         record = self.find(instance_id)
         if record is None:
             self._store.reap(instance_id)
             return InstanceStopResult(id=instance_id, outcome=StopOutcome.NOT_RUNNING)
+        if not force and effects.requester.request_stop(record.socket_path):
+            released = self._await_release(instance_id, effects)
+            return InstanceStopResult(
+                id=instance_id,
+                outcome=StopOutcome.STOPPED if released else StopOutcome.STOPPING,
+                route=StopRoute.CONTROL_SOCKET,
+            )
         try:
-            sent = signaller.terminate_if_current(record.pid, lambda: self._held(instance_id))
+            sent = effects.signaller.terminate_if_current(
+                record.pid, lambda: self._held(instance_id)
+            )
         except ProcessLookupError:
             sent = False
         except NotImplementedError:
@@ -489,21 +593,25 @@ class LiveRegistry:
         if not sent:
             self._store.reap(instance_id)
             return InstanceStopResult(id=instance_id, outcome=StopOutcome.NOT_RUNNING)
-        deadline = clock.now() + STOP_TIMEOUT_SECONDS
+        released = self._await_release(instance_id, effects)
+        return InstanceStopResult(
+            id=instance_id,
+            outcome=StopOutcome.STOPPED if released else StopOutcome.STILL_RUNNING,
+            route=StopRoute.SIGNAL,
+        )
+
+    def _await_release(self, instance_id: str, effects: StopEffects) -> bool:
+        """Wait, bounded, for the holder to drop its lock; reap its files if it did."""
+        deadline = effects.clock.now() + STOP_TIMEOUT_SECONDS
         while self._held(instance_id):
-            if clock.now() >= deadline:
-                return InstanceStopResult(id=instance_id, outcome=StopOutcome.STILL_RUNNING)
-            pause(_STOP_POLL_SECONDS)
+            if effects.clock.now() >= deadline:
+                return False
+            effects.pause(_STOP_POLL_SECONDS)
         self._store.reap(instance_id)
-        return InstanceStopResult(id=instance_id, outcome=StopOutcome.STOPPED)
+        return True
 
     def _held(self, instance_id: str) -> bool:
         return self._store.observe(instance_id).lock is LockState.HELD
-
-
-_STOP_POLL_SECONDS = 0.05
-STOP_TIMEOUT_SECONDS = 10.0
-"""How long ``stop`` waits for a signalled server to finish its run teardown."""
 
 
 def host_facts() -> tuple[str, str]:

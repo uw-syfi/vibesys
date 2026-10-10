@@ -2,7 +2,8 @@
 
 Both commands read the per-user live registry (``server.instances``). ``--json``
 prints one ``InstanceList`` or ``InstanceStopResult`` document on stdout; the
-human form prints one line per server.
+human form prints one line per server. ``stop`` exits 0 when the server stopped
+or accepted the stop (``stopped``, ``stopping``) and 1 otherwise.
 """
 
 from __future__ import annotations
@@ -10,23 +11,19 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from typing import TYPE_CHECKING
 
 from server.instances import (
+    ControlSocketStopRequester,
     FileInstanceStore,
     InstanceList,
     InstanceStopResult,
     LiveRegistry,
+    StopEffects,
     StopOutcome,
     instance_root,
     parse_instance_id,
 )
-from vs_sim.api import OsThreads, PidfdProcessSignaller
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from vs_sim.api import Clock, ProcessSignaller
+from vs_sim.api import OsThreads, PidfdProcessSignaller, UnixNetwork
 
 
 def _instance_id(value: str) -> str:
@@ -48,6 +45,11 @@ def _parser() -> argparse.ArgumentParser:
     stop = commands.add_parser("stop", help="stop one live detached server")
     stop.add_argument("id", type=_instance_id, help="the server's registry id")
     stop.add_argument("--json", action="store_true", help="print one JSON document")
+    stop.add_argument(
+        "--force",
+        action="store_true",
+        help="skip the control socket and send SIGTERM (interrupts the active agent call)",
+    )
     return parser
 
 
@@ -72,14 +74,19 @@ def format_stop(result: InstanceStopResult) -> str:
     match result.outcome:
         case StopOutcome.STOPPED:
             return f"Stopped {result.id}."
+        case StopOutcome.STOPPING:
+            return (
+                f"{result.id} accepted the stop and will exit after its active agent call; "
+                "check `vibesys instances list`."
+            )
         case StopOutcome.NOT_RUNNING:
             return f"No live server has id {result.id}."
         case StopOutcome.STILL_RUNNING:
             return f"Signalled {result.id}, but it is still running; try again shortly."
         case StopOutcome.UNSUPPORTED:
             return (
-                f"This host cannot signal {result.id} without risking a reused pid; "
-                "stop it from its own client instead."
+                f"{result.id} did not answer on its control socket, and this host cannot "
+                "signal it without risking a reused pid."
             )
 
 
@@ -87,17 +94,15 @@ def run(
     argv: list[str],
     *,
     registry: LiveRegistry,
-    signaller: ProcessSignaller,
-    clock: Clock,
-    pause: Callable[[float], None],
+    effects: StopEffects,
 ) -> tuple[int, str]:
     """Run one ``vibesys instances`` command; return its exit code and stdout text."""
     args = _parser().parse_args(argv)
     if args.command == "list":
         listing = registry.list()
         return 0, (listing.model_dump_json() if args.json else format_list(listing)) + "\n"
-    result = registry.stop(args.id, signaller=signaller, clock=clock, pause=pause)
-    code = 0 if result.outcome is StopOutcome.STOPPED else 1
+    result = registry.stop(args.id, effects, force=args.force)
+    code = 0 if result.outcome in {StopOutcome.STOPPED, StopOutcome.STOPPING} else 1
     return code, (result.model_dump_json() if args.json else format_stop(result)) + "\n"
 
 
@@ -112,9 +117,12 @@ def main(argv: list[str] | None = None) -> int:
     code, output = run(
         sys.argv[1:] if argv is None else argv,
         registry=LiveRegistry(FileInstanceStore(root)),
-        signaller=PidfdProcessSignaller(),
-        clock=threads,
-        pause=threads.sleep,
+        effects=StopEffects(
+            requester=ControlSocketStopRequester(UnixNetwork()),
+            signaller=PidfdProcessSignaller(),
+            clock=threads,
+            pause=threads.sleep,
+        ),
     )
     sys.stdout.write(output)
     return code

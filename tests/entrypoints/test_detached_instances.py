@@ -21,6 +21,7 @@ from entrypoints.server import (
     main,
 )
 from server.instances import (
+    ControlSocketStopRequester,
     FakeInstanceStore,
     FileInstanceStore,
     InstanceHold,
@@ -29,10 +30,11 @@ from server.instances import (
     InstanceStopResult,
     LiveInstanceRecord,
     LiveRegistry,
+    StopEffects,
     StopOutcome,
     instance_root,
 )
-from vs_sim.api.testing import FakeProcessSignaller, ManualClock
+from vs_sim.api.testing import FakeProcessSignaller, ManualClock, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -184,9 +186,14 @@ def _run(argv: list[str], store: FakeInstanceStore) -> tuple[int, str]:
     return run(
         argv,
         registry=LiveRegistry(store),
-        signaller=FakeProcessSignaller(set()),
-        clock=clock,
-        pause=clock.advance,
+        # Nothing listens on the simulated network, so every stop falls back
+        # to the signal path, as it does for a server that does not answer.
+        effects=StopEffects(
+            ControlSocketStopRequester(SimNetwork(SimThreads())),
+            FakeProcessSignaller(set()),
+            clock,
+            clock.advance,
+        ),
     )
 
 
