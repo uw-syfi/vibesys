@@ -21,7 +21,7 @@ from vs_runtime.api.testing import (
     FakeWorkspaceAgentSessions,
     FakeWorkspaces,
 )
-from vs_sim.api.testing import GatedBlockingRunner
+from vs_sim.api.testing import GatedBlockingRunner, arrival
 
 if TYPE_CHECKING:
     from contextlib import ExitStack
@@ -379,7 +379,7 @@ async def test_close_drains_blocking_work_before_capabilities_and_resources(tmp_
         operation_task = asyncio.create_task(blocking.run(operation))
         await runner.wait_in_flight(1, operation_task)
         close_task = asyncio.create_task(host.close())
-        await close_started.wait()
+        await arrival(close_started.wait(), close_task)
         assert resources.close_count == 0
         runner.release()
         assert await operation_task == "done"
