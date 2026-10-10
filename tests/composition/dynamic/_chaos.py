@@ -334,7 +334,7 @@ def _records_violations(
         envelope = load_envelope(
             Project.open(root, state_stores=loop_input.state_stores), run.run_id
         )
-    # lint-waiver: LW-150009 [BLE001]; any failure to load the state the run left is the
+    # lint-waiver: LW-150099 [BLE001]; any failure to load the state the run left is the
     # > finding; naming types would hide a new failure mode.
     except Exception as error:  # noqa: BLE001
         return [(ChaosInvariant.STATE_UNLOADABLE, repr(error))]

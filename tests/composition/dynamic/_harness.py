@@ -560,8 +560,9 @@ class AgentsSource(Protocol):
     def client(
         self,
         *,
-        session_store: SessionStore | None,
-        skill_selection: SkillSelection,
+        session_store: SessionStore | None = None,
+        skill_selection: SkillSelection = NULL_SKILL_SELECTION,
+        log_dir: Path | None = None,
         **kwargs: object,
     ) -> AgentClientProtocol:
         """Build the client one agent execution talks to."""
