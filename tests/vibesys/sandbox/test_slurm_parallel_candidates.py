@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from contextlib import suppress
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -22,11 +23,9 @@ from tests.support.workspace_world import open_workspace_env
 from vibesys.run.environment import open_run_environment
 from vs_runtime.api.infrastructure import SlurmEnvironment
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
-from vs_sandbox.api.slurm import load_slurm_operator_settings
+from vs_sandbox.api.slurm import load_slurm_operator_settings, run_brokered_process
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from vs_runtime.api.infrastructure import (
         RunEnvironmentRequest,
         RunEnvironmentSession,
@@ -67,6 +66,18 @@ def isolated_project_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "operator-state"))
 
 
+_SSH_CONFIG = """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+ssh_command = ["/usr/bin/true"]
+rsync_command = ["/bin/true"]
+"""
+
+
 def _environment(tmp_path: Path, backend: DaemonBackend) -> SlurmEnvironment:
     srun = tmp_path / "fake_srun.py"
     srun.write_text(_FAKE_SRUN, encoding="utf-8")
@@ -79,13 +90,25 @@ def _environment(tmp_path: Path, backend: DaemonBackend) -> SlurmEnvironment:
     )
 
 
-def _run(tmp_path: Path, exercise: object) -> None:
-    """Open a run whose candidates are Slurm sessions, and await *exercise* with its workspaces."""
+def _run(
+    tmp_path: Path,
+    exercise: object,
+    *,
+    environment: SlurmEnvironment | None = None,
+    opened: list[RunEnvironmentSession] | None = None,
+) -> None:
+    """Open a run whose candidates are Slurm sessions, and await *exercise* with its workspaces.
+
+    Every session the run opens (the root's first, then each candidate's) is appended to *opened*.
+    """
     backend = DaemonBackend(daemon_engine(tmp_path))
-    environment = _environment(tmp_path, backend)
+    environment = environment or _environment(tmp_path, backend)
 
     def open_session(request: RunEnvironmentRequest) -> RunEnvironmentSession:
-        return open_run_environment(environment, request)
+        session = open_run_environment(environment, request)
+        if opened is not None:
+            opened.append(session)
+        return session
 
     world = tmp_path / "world"
     world.mkdir()
@@ -164,3 +187,45 @@ def test_every_candidate_session_has_its_own_socket_and_token(tmp_path: Path) ->
         assert len({token for _, token in seen}) == len(opened)
 
     _run(tmp_path, exercise)
+
+
+def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Path) -> None:
+    """The SSH transport's broker of a candidate session is scoped like its GPU broker."""
+    config = tmp_path / "ssh.toml"
+    config.write_text(_SSH_CONFIG, encoding="utf-8")
+    backend = DaemonBackend(daemon_engine(tmp_path))
+    environment = SlurmEnvironment(
+        load_slurm_operator_settings(config), docker=daemon_docker_config(backend.engine)
+    )
+    sessions: list[RunEnvironmentSession] = []
+
+    def upload(session: RunEnvironmentSession, local: Path) -> int:
+        env = dict(session.view.profiler_mcp_env)
+        argv = (
+            "/bin/true",
+            "-a",
+            "-e",
+            "/usr/bin/true",
+            "--",
+            f"{local}/",
+            "test-cluster:/remote/vibesys/test-cluster/job/",
+        )
+        return run_brokered_process(
+            Path(env["VIBESYS_SLURM_BROKER_SOCKET"]),
+            env["VIBESYS_SLURM_BROKER_TOKEN"],
+            argv,
+            stdin=None,
+            timeout=5,
+        ).returncode
+
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        first = await workspaces.create_candidate()
+        second = await workspaces.create_candidate()
+        _root, first_session, second_session = sessions
+
+        assert upload(first_session, first.path) == 0
+        with pytest.raises(PermissionError, match="run-owned roots"):
+            upload(first_session, second.path)
+        assert upload(second_session, second.path) == 0
+
+    _run(tmp_path, exercise, environment=environment, opened=sessions)
