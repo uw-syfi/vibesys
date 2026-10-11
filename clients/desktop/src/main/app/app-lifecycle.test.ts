@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
-import {FakeClock} from '@vibesys/backend-client/testing';
 import {SEEDS, Seeded} from '@vibesys/core-state/testing';
+import {FakeClock} from '@vibesys/transport/testing';
 import {AppLifecycle, type QuitEffect, type QuitEvent, quitStep, RUNNING} from './app-lifecycle.js';
 
 /** An app whose host release the test settles by hand. */
