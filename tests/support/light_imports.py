@@ -19,7 +19,6 @@ DENIED_HEAVY = (
     "server.chat",
     "server.runtime",
     "server.transport",
-    "server.instances",
 )
 """Modules (and everything under them) that load the run engine or a transport."""
 

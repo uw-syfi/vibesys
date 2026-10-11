@@ -1,9 +1,9 @@
 """Ask a live detached server to stop over its control socket.
 
 The registry itself (records, locks, listing, the stop decision) is
-``server.registry``, which stays light. Only this requester speaks the run
-protocol, whose module imports the run engine, so a host command that lists
-servers never loads it; ``vibesys instances stop`` imports it on first use.
+``server.registry``. This requester speaks only the run protocol's control
+envelope (``server.control_envelope``), never the payload types that import the
+run engine, so ``vibesys instances stop`` stays as light as ``instances list``.
 
 Public surface: ``ControlSocketStopRequester`` and
 ``CONTROL_REPLY_TIMEOUT_SECONDS``.
@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from server.api.protocol import Response, StopCommand
+from server.control_envelope import ResponseEnvelopeReader, StopCommand
 
 if TYPE_CHECKING:
     from vs_sim.api import Connection, Network
@@ -53,7 +53,7 @@ class ControlSocketStopRequester:
         finally:
             connection.close()
         try:
-            response = Response.model_validate_json(line)
+            response = ResponseEnvelopeReader.model_validate_json(line)
         except ValidationError:
             return False
         return response.ok and response.ack is not None and response.ack.action == "stop"

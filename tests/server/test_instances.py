@@ -15,7 +15,8 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 from pydantic import ValidationError
 
-from server.api.protocol import CommandAck, Response, StopCommand
+from server.api.protocol import Response
+from server.control_envelope import CommandAck, StopCommand
 from server.host_api import (
     InstanceList,
     InstanceStatus,

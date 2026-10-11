@@ -11,9 +11,8 @@ This guard computes the *static module-level import closure* of each light
 entrypoint: every module its import statements execute when it is loaded,
 followed transitively through first-party source and the packages each dotted
 name initializes. Imports under ``if TYPE_CHECKING:`` and inside function bodies
-are excluded, because they do not run at import; a deferred import is how a
-light command reaches a heavy path it needs only sometimes (``instances stop``),
-and ``tests/e2e/test_light_host_commands.py`` checks what a real process loads.
+are excluded, because they do not run at import;
+``tests/e2e/test_light_host_commands.py`` checks what a real process loads.
 The closure must stay within ``ALLOWED``; a violation names the import chain
 that pulled the module in.
 """
@@ -50,7 +49,10 @@ ALLOWED_FIRST_PARTY = (
     "entrypoints.tasks",
     "entrypoints.stdio_bridge",
     "server",
+    "server.control_envelope",
+    "server.diagnostics",
     "server.host_api",
+    "server.instances",
     "server.registry",
     "server.stdio_bridge",
     "vs_sim",
@@ -188,15 +190,19 @@ def test_the_closure_follows_packages_and_submodules_but_not_deferred_imports() 
 
     assert closure["server.registry"] == ("entrypoints.instances", "server.registry")
     assert "server" in closure
-    # `instances stop` defers the run protocol to its function body.
-    assert "server.instances" not in closure
+    # `instances stop` reaches a server through the control envelope alone.
+    assert closure["server.control_envelope"] == (
+        "entrypoints.instances",
+        "server.instances",
+        "server.control_envelope",
+    )
 
 
 def test_a_heavy_module_is_reported_with_the_chain_that_loaded_it() -> None:
-    # The stop requester imports the run protocol, which loads the engine.
-    found = violations("server.instances")
+    # The full run protocol builds on the control envelope and loads the engine.
+    found = violations("server.api.protocol")
 
-    assert any(line.startswith("server.api: server.instances -> server.api") for line in found)
+    assert any(line.startswith("server.api: server.api.protocol -> server.api") for line in found)
     assert any(line.startswith("vibesys") for line in found)
 
 

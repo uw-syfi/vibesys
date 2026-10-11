@@ -21,7 +21,6 @@ from server.api.protocol import (
     ChatResult,
     ChatThreadCreateQuery,
     ChatThreadInfo,
-    CommandAck,
     DesignPatch,
     DesignPatchQuery,
     DesignQuery,
@@ -44,6 +43,7 @@ from server.api.protocol import (
     TuiDefaultsQuery,
 )
 from server.chat.options import ChatOptions, build_chat_options
+from server.control_envelope import CommandAck
 from server.events import EventType, RunEvent
 from vibesys.api import RunRecordReadError
 from vibesys.api.hypothesis import agent_projection

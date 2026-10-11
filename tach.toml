@@ -89,7 +89,7 @@ depends_on = ["vibesys.api"]
 
 [[modules]]
 path = "server.api"
-depends_on = ["vibesys.api", "vibesys.api.hypothesis", "server.host_api", "server.diagnostics", "server.journal", "server.execution", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle", "vs_sim.api"]
+depends_on = ["vibesys.api", "vibesys.api.hypothesis", "server.control_envelope", "server.host_api", "server.diagnostics", "server.journal", "server.execution", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle", "vs_sim.api"]
 
 [[modules]]
 path = "server.chat"
@@ -137,9 +137,15 @@ path = "server.registry"
 depends_on = ["server.host_api", "vs_sim.api"]
 
 [[modules]]
-# Asks a live server to stop over its control socket (needs the run protocol).
+# The run protocol's control envelope: request and response framing and
+# command.stop. Light; server.api builds the full protocol on it.
+path = "server.control_envelope"
+depends_on = ["server.diagnostics", "server.host_api"]
+
+[[modules]]
+# Asks a live server to stop over its control socket (control envelope only).
 path = "server.instances"
-depends_on = ["server.api", "vs_sim.api"]
+depends_on = ["server.control_envelope", "vs_sim.api"]
 
 [[modules]]
 path = "server.journal"

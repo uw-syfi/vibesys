@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-import uuid
-from datetime import UTC, datetime
 from typing import Annotated, Literal, TypeAliasType
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
+from pydantic import Field, FiniteFloat
 
 from server.chat.options import ChatOptions
+from server.control_envelope import (
+    ProtocolModel,
+    Request,
+    ResponseEnvelope,
+    StopCommand,
+)
 from server.diagnostics import Diagnostic, DiagnosticScope, exception_to_diagnostic
 from server.events import RunEvent
 from server.execution import ActiveAgentExecution
@@ -27,24 +31,6 @@ from vibesys.api.hypothesis import (
 # Naming the list keeps the generated client contract referentially identical,
 # rather than making the generator invent one alias per inline occurrence.
 ActiveExecutions = TypeAliasType("ActiveExecutions", list[ActiveAgentExecution])
-
-
-class ProtocolModel(BaseModel):
-    """Base model for versioned transport messages."""
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class Request(ProtocolModel):
-    """Common version, identity, and timestamp fields for client requests."""
-
-    protocol_version: Literal[1] = PROTOCOL_VERSION
-    request_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
-    # Stable for one frontend client across its control, subscription, and
-    # dedicated chat connections. Empty preserves compatibility with clients
-    # and servers that predate connection attribution.
-    client_id: str = ""
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class PauseCommand(Request):
@@ -68,13 +54,6 @@ class SteerCommand(Request):
 
     type: Literal["command.steer"] = "command.steer"
     text: str = Field(min_length=1)
-
-
-class StopCommand(Request):
-    """Request stopping after the active agent call."""
-
-    type: Literal["command.stop"] = "command.stop"
-    mode: Literal["after_current_agent_call"] = "after_current_agent_call"
 
 
 class SnapshotQuery(Request):
@@ -254,13 +233,6 @@ class RunSnapshot(ProtocolModel):
     # CHAT event, so a client that folds only a tail cannot rebuild the
     # registry from the events it holds.
     chat_threads: list[ChatThreadInfo] = Field(default_factory=list)
-
-
-class CommandAck(ProtocolModel):
-    """Acknowledgment of a requested run command."""
-
-    action: Literal["pause", "resume", "steer", "stop"]
-    status: Literal["pending", "consumed"]
 
 
 class ChatResult(ProtocolModel):
@@ -469,17 +441,9 @@ class DesignPatch(ProtocolModel):
     truncated: bool = False
 
 
-class Response(ProtocolModel):
+class Response(ResponseEnvelope):
     """Response envelope for all protocol requests."""
 
-    protocol_version: Literal[1] = PROTOCOL_VERSION
-    request_id: str
-    client_id: str = ""
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    ok: bool = True
-    error: str | None = None
-    diagnostic: Diagnostic | None = None
-    ack: CommandAck | None = None
     chat: ChatResult | None = None
     chat_thread: ChatThreadInfo | None = None
     # None means the run has not attached its agent selection yet, which is
