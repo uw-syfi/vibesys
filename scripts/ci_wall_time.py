@@ -144,11 +144,11 @@ def render(report: Report, warn: float, error: float) -> tuple[str, str, int]:
             f"| {job.name} | {job.conclusion or 'n/a'} | {job.runner_wait:.0f} | {job.ran:.0f}"
             f" | {finished:.0f} | {marker} |"
         )
-    last = report.critical_path[-1]
+    long_pole = max(report.critical_path, key=lambda job: job.ran)
     detail = (
         f"Elapsed {report.elapsed:.0f}s = {report.queue:.0f}s runner queue +"
-        f" {report.execution:.0f}s execution. Long pole: {last.name}"
-        f" ({last.runner_wait:.0f}s queued, {last.ran:.0f}s running)."
+        f" {report.execution:.0f}s execution. Long pole: {long_pole.name}"
+        f" ({long_pole.runner_wait:.0f}s queued, {long_pole.ran:.0f}s running)."
     )
     if report.execution > error:
         message = (

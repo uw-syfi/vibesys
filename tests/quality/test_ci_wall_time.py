@@ -208,6 +208,22 @@ def test_slow_execution_warns_then_fails_and_still_names_the_queue() -> None:
     assert "50s runner queue" in error
 
 
+def test_long_pole_is_the_slowest_executing_job_not_the_path_tail() -> None:
+    report = analyze(
+        jobs_of(
+            [
+                record("test", 0, 0, 650),
+                record("required gate", 650, 0, 2),
+            ]
+        )
+    )
+    assert report is not None
+
+    _, message, _ = render(report, warn=360, error=600)
+
+    assert "Long pole: test (0s queued, 650s running)" in message
+
+
 def test_cli_writes_the_summary_and_returns_the_verdict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
