@@ -1,17 +1,24 @@
 import {
   type ExperimentCursor,
   isServerRejection,
+  type ProtocolResponse,
   type RunEvent,
   type RunSnapshot,
   ServerError,
   type ServerMessage,
 } from '@vibesys/contracts';
-import {hasRunEnded, initialIterationNavigation, reduceIterationResult} from '@vibesys/run-state';
+import {
+  hasRunEnded,
+  type IterationNavigationState,
+  initialIterationNavigation,
+  reduceIterationResult,
+} from '@vibesys/run-state';
 import {recordsBenchmark} from '@vibesys/run-state/performance';
 import {DEFAULT_CHAT_THREAD_ID} from '@vibesys/run-state/transcript';
 import {
   closeStreamAndTransport,
   DEFAULT_RECONNECT_DELAYS_MS,
+  LatestQueryOwner,
   PersistentEventStream,
   type ScheduleTimeout,
   type ServerTransport,
@@ -80,11 +87,11 @@ import {renderCommandResponse} from './response-renderer.js';
 import {
   clearAgentSelection,
   selectAgent,
+  selectIteration,
   selectNextAgent,
   selectNextRound,
   selectPreviousAgent,
   selectPreviousRound,
-  selectIteration,
   selectRound,
 } from './round-agent-selection.js';
 import {
@@ -262,6 +269,10 @@ export interface SessionController {
 const BOOTSTRAP_TAIL = 1_000;
 const BACKFILL_CHUNK = 1_000;
 
+type IterationQueryOutcome =
+  | {readonly kind: 'unsupported'}
+  | {readonly kind: 'supported'; readonly navigation: IterationNavigationState | null};
+
 export class SocketSessionController implements SessionController {
   #state: SessionState;
   readonly #listeners = new Set<(state: SessionState) => void>();
@@ -307,12 +318,18 @@ export class SocketSessionController implements SessionController {
       this.#setState(reportCaughtError(failPane(this.#state, 'design', message), error, 'request'));
     },
   });
-  /** Optional policy-navigation capability probe and refresh. */
-  #iterationFetch: Promise<void> | null = null;
-  #iterationRefreshPending = false;
-  /** Stop is terminal for iteration queries too. */
-  #iterationRefreshAllowed = true;
   #iterationCapability: 'unknown' | 'supported' | 'unsupported' = 'unknown';
+  /** Owns the optional policy-navigation capability probe and latest refresh. */
+  readonly #iterationQuery = new LatestQueryOwner<IterationQueryOutcome>({
+    request: () => this.#requestIterations(),
+    publish: outcome => {
+      this.#iterationCapability = outcome.kind;
+      if (outcome.kind === 'supported' && outcome.navigation !== null) {
+        this.#setState({...this.#state, iterations: outcome.navigation});
+      }
+    },
+    report: error => this.#reportIterationError(error),
+  });
   readonly #reconciler = new StreamReconciler({backfillChunk: BACKFILL_CHUNK});
   /** Serializes the consumer effect of applying one shared backfill outcome. */
   #historyFetch: Promise<boolean> | null = null;
@@ -374,7 +391,7 @@ export class SocketSessionController implements SessionController {
   async start(): Promise<void> {
     await Promise.all([
       this.#loadSnapshot(),
-      this.#loadIterations().catch(error => this.#reportIterationError(error)),
+      this.#loadIterations(),
       // The log is the landing view, so it is populated before the first frame
       // rather than on demand.
       this.#loadExperiments(),
@@ -423,7 +440,7 @@ export class SocketSessionController implements SessionController {
         this.#experimentForceRefresh = true;
         if (this.#experimentFetch !== null) this.#experimentRefreshPending = true;
         void this.#loadExperiments();
-        void this.#loadIterations().catch(error => this.#reportIterationError(error));
+        void this.#loadIterations();
       }
     } else if (!this.#streamProtocolError) {
       this.#setState(
@@ -492,58 +509,38 @@ export class SocketSessionController implements SessionController {
   }
 
   #loadIterations(): Promise<void> {
-    if (!this.#iterationRefreshAllowed) return Promise.resolve();
     if (this.#iterationCapability === 'unsupported') return Promise.resolve();
-    if (this.#iterationFetch !== null) {
-      this.#iterationRefreshPending = true;
-      return this.#iterationFetch;
-    }
-    const fetch = this.#requestIterations().finally(() => {
-      this.#iterationFetch = null;
-      if (this.#iterationRefreshAllowed && this.#iterationRefreshPending) {
-        this.#iterationRefreshPending = false;
-        void this.#loadIterations().catch(error => this.#reportIterationError(error));
-      }
-    });
-    this.#iterationFetch = fetch;
-    return fetch;
+    return this.#iterationQuery.refresh();
   }
 
-  async #requestIterations(): Promise<void> {
+  async #requestIterations(): Promise<IterationQueryOutcome> {
+    let response: ProtocolResponse;
     try {
-      await this.#collectIterationPages();
+      response = await this.client.request({type: 'query.iterations'});
     } catch (error) {
       if (this.#iterationCapability === 'unknown' && isServerRejection(error)) {
-        this.#iterationCapability = 'unsupported';
-        return;
+        return {kind: 'unsupported'};
       }
       throw error;
     }
+    return {kind: 'supported', navigation: await this.#collectIterationPages(response)};
   }
 
-  async #collectIterationPages(): Promise<void> {
-    let cursor: string | null = null;
+  async #collectIterationPages(
+    response: ProtocolResponse,
+  ): Promise<IterationNavigationState | null> {
     const seen = new Set<string>();
     let staged = initialIterationNavigation();
-    do {
-      const response = await this.client.request({
-        type: 'query.iterations',
-        ...(cursor === null ? {} : {cursor}),
-      });
-      this.#iterationCapability = 'supported';
-      if (response.iterations_ready === false || response.iterations == null) return;
+    while (response.iterations_ready !== false && response.iterations != null) {
       staged = reduceIterationResult(staged, response.iterations);
-      if (!('items' in response.iterations)) {
-        this.#setState({...this.#state, iterations: staged});
-        return;
-      }
-      cursor = response.iterations.next_cursor ?? null;
-      if (cursor !== null && seen.has(cursor)) {
-        throw new Error('iteration query repeated a paging cursor');
-      }
-      if (cursor !== null) seen.add(cursor);
-    } while (cursor !== null);
-    this.#setState({...this.#state, iterations: staged});
+      if (!('items' in response.iterations)) return staged;
+      const cursor = response.iterations.next_cursor ?? null;
+      if (cursor === null) return staged;
+      if (seen.has(cursor)) throw new Error('iteration query repeated a paging cursor');
+      seen.add(cursor);
+      response = await this.client.request({type: 'query.iterations', cursor});
+    }
+    return null;
   }
 
   #reportIterationError(error: unknown): void {
@@ -584,8 +581,7 @@ export class SocketSessionController implements SessionController {
   stop(): Promise<void> {
     if (this.#closing !== null) return this.#closing;
     this.#designQuery.stop();
-    this.#iterationRefreshAllowed = false;
-    this.#iterationRefreshPending = false;
+    this.#iterationQuery.stop();
     this.#chatThreadCreateGeneration += 1;
     const closing = closeStreamAndTransport(this.#stream, this.client);
     this.#closing = closing;
@@ -1544,7 +1540,7 @@ export class SocketSessionController implements SessionController {
     if (events === null) return;
     this.#refreshExperimentsFor(events);
     if (events.some(event => event.type === 'iterations_changed')) {
-      void this.#loadIterations().catch(error => this.#reportIterationError(error));
+      void this.#loadIterations();
     }
     this.#refreshPaneFor(events);
   }

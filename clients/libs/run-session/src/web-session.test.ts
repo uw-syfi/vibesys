@@ -1,5 +1,10 @@
 import {describe, expect, test} from 'bun:test';
-import {type ProtocolResponse, type RunSnapshot, type RunStatus, ServerError} from '@vibesys/contracts';
+import {
+  type ProtocolResponse,
+  type RunSnapshot,
+  type RunStatus,
+  ServerError,
+} from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import type {BatchReconciliation, StreamMessageContext} from '@vibesys/transport';
@@ -33,8 +38,8 @@ class PendingHandleConnection implements RunConnection {
       : Promise.resolve({run_id: 'run-1', sequence: 1, status: 'running'});
   }
 
-  loadIterations(): Promise<{readonly kind: 'not-ready'}> {
-    return Promise.resolve({kind: 'not-ready'});
+  loadIterations(): Promise<{readonly kind: 'unsupported'}> {
+    return Promise.resolve({kind: 'unsupported'});
   }
 
   subscribe(handlers: RunStreamHandlers): Promise<void> {
@@ -93,8 +98,8 @@ class FaultBeforeSnapshotConnection implements RunConnection {
     });
   }
 
-  loadIterations(): Promise<{readonly kind: 'not-ready'}> {
-    return Promise.resolve({kind: 'not-ready'});
+  loadIterations(): Promise<{readonly kind: 'unsupported'}> {
+    return Promise.resolve({kind: 'unsupported'});
   }
 
   subscribe(handlers: RunStreamHandlers): Promise<void> {
@@ -354,6 +359,31 @@ describe('WebSession', () => {
     await session.close();
   });
 
+  test('waits for initial stream identity before loading iteration navigation', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.silentDials = 1;
+    transport.deferNextSubscribe();
+
+    const initialDial = transport.nextSubscription();
+    const starting = session.start();
+    const initial = await initialDial;
+
+    expect(transport.requests.some(request => request.type === 'query.iterations')).toBe(false);
+
+    transport.releasePendingSubscribe();
+    await settle();
+    expect(transport.requests.some(request => request.type === 'query.iterations')).toBe(false);
+
+    initial.onMessage(streamBatch('store-1', 1));
+    await starting;
+
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      1,
+    );
+    await session.close();
+  });
+
   test('refreshes policy navigation on a semantic iteration invalidation', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
@@ -381,12 +411,17 @@ describe('WebSession', () => {
     await session.close();
   });
 
-  test('does not miss an iteration change that races the initial query', async () => {
+  test('suppresses an initial iteration result superseded by an invalidation', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
     const initial = deferred<ProtocolResponse>();
-    transport.iterations.push(initial.promise, iterationResponse('evolve-1', 'Generation 1'));
+    const current = deferred<ProtocolResponse>();
+    transport.iterations.push(initial.promise, current.promise);
     transport.deferNextSubscribe();
+    const revisions: Array<string | null> = [];
+    const unsubscribe = session.store.subscribe(() => {
+      revisions.push(session.store.getIterations().revision);
+    });
 
     const started = session.start();
     await settle();
@@ -402,20 +437,65 @@ describe('WebSession', () => {
         {through_sequence: 2, store_id: 'store-1', history_after_sequence: 0},
       ),
     );
-    const refreshed = waitForSession(
-      session,
-      () => session.store.getIterations().revision === 'evolve-1',
-    );
-
     initial.resolve(iterationResponse('evolve-0', 'Generation 0'));
+    await settle();
+    expect(session.store.getIterations().revision).toBeNull();
+    expect(revisions).not.toContain('evolve-0');
+
+    current.resolve(iterationResponse('evolve-1', 'Generation 1'));
     transport.releasePendingSubscribe();
     await started;
-    await refreshed;
 
     expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
       2,
     );
+    expect(revisions).not.toContain('evolve-0');
     expect(session.store.getIterations().byId['generation:1']?.label).toBe('Generation 1');
+    unsubscribe();
+    await session.close();
+  });
+
+  test('suppresses an initial iteration failure superseded by a successful invalidation', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    let rejectPage!: (error: unknown) => void;
+    const failedPage = new Promise<ProtocolResponse>((_resolve, reject) => {
+      rejectPage = reject;
+    });
+    const current = deferred<ProtocolResponse>();
+    transport.iterations.push(
+      iterationPageResponse('stale', null, 0, 100, 'page-2'),
+      failedPage,
+      current.promise,
+    );
+    transport.deferNextSubscribe();
+
+    const started = session.start();
+    await settle();
+    transport.subscriptions[0]?.onMessage(
+      eventBatch(
+        [
+          event(2, 'iterations_changed', {
+            data: {kind: 'iterations_changed', revision: 'evolve-1'},
+          }),
+        ],
+        {through_sequence: 2, store_id: 'store-1', history_after_sequence: 0},
+      ),
+    );
+
+    rejectPage(new ServerError('superseded iteration failure'));
+    await settle();
+    expect(session.getState().error).toBeNull();
+
+    current.resolve(iterationResponse('evolve-1', 'Generation 1'));
+    transport.releasePendingSubscribe();
+    await started;
+
+    expect(session.getState().error).toBeNull();
+    expect(session.store.getIterations().revision).toBe('evolve-1');
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      3,
+    );
     await session.close();
   });
 

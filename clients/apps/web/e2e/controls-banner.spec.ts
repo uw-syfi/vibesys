@@ -166,7 +166,7 @@ async function injectFrames(page: Page, injection: Injection): Promise<Observed>
       let kind: SocketKind = 'unclassified';
       ws.onMessage(message => {
         if (kind === 'unclassified') {
-          kind = String(message).includes('"query.snapshot"') ? 'control' : 'stream';
+          kind = String(message).includes('"subscribe"') ? 'stream' : 'control';
           observed.kinds[index] = kind;
           if (kind === 'control') observed.closeControl = () => ws.close();
         }

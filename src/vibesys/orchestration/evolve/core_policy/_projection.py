@@ -69,6 +69,7 @@ def _iterations(state: EvolveStrategyState) -> IterationTree:
                 status=_generation_status(
                     state,
                     generation,
+                    current_generation=population.generation,
                     bootstrap_has_candidates=bool(candidates),
                 ),
                 child_count=len(candidates),
@@ -111,14 +112,12 @@ def _generation_status(
     state: EvolveStrategyState,
     generation: int,
     *,
+    current_generation: int,
     bootstrap_has_candidates: bool,
 ) -> IterationStatus:
-    population = state.population
-    assert population is not None
-    current = population.generation
-    if generation < current:
+    if generation < current_generation:
         return IterationStatus.COMPLETED
-    if generation == current and state.generation_start is not None:
+    if generation == current_generation and state.generation_start is not None:
         return IterationStatus.ACTIVE
     if generation > 0:
         return IterationStatus.COMPLETED

@@ -9,6 +9,7 @@ export {
   type ScheduleTimeout,
   sameControlChannelState,
 } from './control-channel.js';
+export {LatestQueryOwner, type LatestQueryOwnerConfig} from './latest-query-owner.js';
 export {NewlineFramer} from './newline-framer.js';
 export {
   PersistentEventStream,

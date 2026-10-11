@@ -326,8 +326,7 @@ describe('session controller', () => {
         data: {kind: 'iterations_changed', revision: 'evolve-2'},
       },
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await settleMicrotasks();
 
     expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
       2,
@@ -335,6 +334,97 @@ describe('session controller', () => {
     expect(iterationRailRounds(controller.state)).toMatchObject([
       {iterationLabel: 'Generation 2', status: 'completed'},
     ]);
+  });
+
+  it('suppresses an initial iteration result superseded by an invalidation', async () => {
+    const transport = new FakeTransport();
+    const initial = deferred<ProtocolResponse>();
+    const current = deferred<ProtocolResponse>();
+    transport.iterationResponses.push(initial.promise, current.promise);
+    const controller = new SocketSessionController(transport);
+    const revisions: Array<string | null> = [];
+    controller.subscribe(state => revisions.push(state.iterations.revision));
+
+    const started = controller.start();
+    await settleMicrotasks();
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'current'},
+      },
+    });
+    initial.resolve(iterationPageResponse('stale', null, 0, 1, null));
+    await settleMicrotasks();
+
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(revisions).not.toContain('stale');
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      2,
+    );
+
+    current.resolve(iterationPageResponse('current', null, 1, 1, null));
+    await started;
+    expect(controller.state.iterations.revision).toBe('current');
+    expect(revisions).not.toContain('stale');
+    await controller.stop();
+  });
+
+  it('suppresses an initial iteration failure superseded by a successful invalidation', async () => {
+    const transport = new FakeTransport();
+    const initial = deferred<ProtocolResponse>();
+    const current = deferred<ProtocolResponse>();
+    transport.iterationResponses.push(initial.promise, current.promise);
+    const controller = new SocketSessionController(transport);
+
+    const started = controller.start();
+    await settleMicrotasks();
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'current'},
+      },
+    });
+    initial.reject(new ServerError('superseded iteration failure'));
+    await settleMicrotasks();
+
+    expect(controller.state.errorBanner).toBeNull();
+    current.resolve(iterationPageResponse('current', null, 1, 1, null));
+    await started;
+    expect(controller.state.iterations.revision).toBe('current');
+    expect(controller.state.errorBanner).toBeNull();
+    await controller.stop();
+  });
+
+  it.each([
+    'success',
+    'failure',
+  ] as const)('retires a pending iteration %s after stop', async outcome => {
+    const transport = new FakeTransport();
+    const pending = deferred<ProtocolResponse>();
+    if (outcome === 'success') {
+      transport.iterationResponses.push(pending.promise);
+    } else {
+      transport.iterationResponses.push(
+        iterationPageResponse('late', null, 0, 100, 'page-2'),
+        pending.promise,
+      );
+    }
+    const controller = new SocketSessionController(transport);
+
+    const started = controller.start();
+    await settleMicrotasks();
+    await controller.stop();
+    if (outcome === 'success') {
+      pending.resolve(iterationPageResponse('late', null, 0, 1, null));
+    } else {
+      pending.reject(new ServerError('late iteration failure'));
+    }
+    await started;
+
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(controller.state.errorBanner).toBeNull();
   });
 
   it('publishes more than one hundred iteration roots only after the last page', async () => {
@@ -3970,10 +4060,16 @@ function iterationPageResponse(
   };
 }
 
-function deferred<T>(): {promise: Promise<T>; resolve(value: T): void} {
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+} {
   let resolvePromise: ((value: T) => void) | undefined;
-  const promise = new Promise<T>(resolve => {
+  let rejectPromise: ((error: unknown) => void) | undefined;
+  const promise = new Promise<T>((resolve, reject) => {
     resolvePromise = resolve;
+    rejectPromise = reject;
   });
   return {
     promise,
@@ -3981,12 +4077,15 @@ function deferred<T>(): {promise: Promise<T>; resolve(value: T): void} {
       if (resolvePromise === undefined) throw new Error('deferred promise is not initialized');
       resolvePromise(value);
     },
+    reject(error) {
+      if (rejectPromise === undefined) throw new Error('deferred promise is not initialized');
+      rejectPromise(error);
+    },
   };
 }
 
 async function settleMicrotasks(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 }
 
 function waitForController(
@@ -4035,17 +4134,27 @@ class FakeTransport implements ServerTransport {
     private readonly responseError?: Error,
   ) {}
 
-  async request(input: RequestInput): Promise<ProtocolResponse> {
-    this.requests.push(input);
+  #raiseConfiguredError(input: RequestInput): void {
     if (this.responseError) throw this.responseError;
     if (input.type === 'query.design_patch' && this.designPatchError) {
       throw this.designPatchError;
     }
-    if (input.type === 'query.iterations' && this.iterationResponses.length > 0) {
-      const response = this.iterationResponses.shift();
-      if (response instanceof Error) throw response;
-      if (response !== undefined) return await response;
-    }
+  }
+
+  #nextIterationResponse(
+    input: RequestInput,
+  ): ProtocolResponse | Promise<ProtocolResponse> | undefined {
+    if (input.type !== 'query.iterations' || this.iterationResponses.length === 0) return undefined;
+    const response = this.iterationResponses.shift();
+    if (response instanceof Error) throw response;
+    return response;
+  }
+
+  async request(input: RequestInput): Promise<ProtocolResponse> {
+    this.requests.push(input);
+    this.#raiseConfiguredError(input);
+    const iterationResponse = this.#nextIterationResponse(input);
+    if (iterationResponse !== undefined) return await iterationResponse;
     const response: ProtocolResponse = {
       protocol_version: 1,
       request_id: 'request',
@@ -4089,7 +4198,7 @@ class FakeTransport implements ServerTransport {
         ...(this.projectScope === undefined ? {} : {project_scope: this.projectScope}),
       },
     };
-    if (input.type !== 'query.snapshot' || !this.deferSnapshot) return Promise.resolve(response);
+    if (input.type !== 'query.snapshot' || !this.deferSnapshot) return response;
     if (this.#releaseSnapshot !== null) throw new Error('Snapshot request is already pending');
     return new Promise(resolve => {
       this.#releaseSnapshot = () => {

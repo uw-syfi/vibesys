@@ -110,9 +110,9 @@ test('page reload keeps the live run and a fresh client converges to the same st
   expect(afterSequence).toBeGreaterThanOrEqual(beforeSequence);
   await expect(page.getByText(marker, {exact: false})).toBeVisible();
   await expect(page.locator('.status')).toHaveText('running');
-  await expect(
-    page.locator('.summary > div').filter({hasText: 'Sequence'}).locator('strong'),
-  ).toHaveText(String(afterSequence));
+  await expect
+    .poll(async () => Number(await sequenceText(page)))
+    .toBeGreaterThanOrEqual(afterSequence);
   expect(await page.locator('.panel-heading span').textContent()).toBe(transcript);
 });
 
@@ -192,4 +192,12 @@ async function installCapability(page: Page, url: string): Promise<void> {
     const response = await fetch(capability, {cache: 'no-store', credentials: 'include'});
     if (!response.ok) throw new Error(`Capability exchange failed with ${response.status}`);
   }, url);
+}
+
+async function sequenceText(page: Page): Promise<string | null> {
+  return page
+    .locator('.summary > div')
+    .filter({hasText: 'Sequence'})
+    .locator('strong')
+    .textContent();
 }

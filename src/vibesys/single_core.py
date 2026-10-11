@@ -35,7 +35,11 @@ from vibesys.orchestration.single.strategy.api import (
     measurement_recipe,
     single_operation_registry,
 )
-from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
+from vibesys.plugin_registration import (
+    IterationSupport,
+    OrchestrationRegistration,
+    RuntimeRecordProjector,
+)
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
 from vibesys.single_roles import CORE_ROLES
@@ -193,6 +197,7 @@ def single_core_registration(
     return OrchestrationRegistration(
         plugin=plugin,
         projector=single_projector(plugin_id),
+        iteration_support=IterationSupport.PROJECTED,
         project_max_rounds=lambda options: (
             options_type.model_validate(options.model_dump()).max_rounds
         ),

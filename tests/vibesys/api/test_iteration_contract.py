@@ -26,7 +26,10 @@ from vibesys.orchestration.dynamic.strategy.api import (
     WorkPhase,
     WorkPlan,
 )
-from vibesys.orchestration.issue_queue.models import IssueQueueState
+from vibesys.orchestration.issue_queue.core_policy.api import (
+    project_strategy_state as project_issue_queue_state,
+)
+from vibesys.orchestration.issue_queue.strategy.api import IssueQueueStrategyState
 from vs_core.api import AttemptId, RevisionRef
 
 
@@ -95,9 +98,7 @@ def test_catalog_has_an_explicit_iteration_disposition_for_every_builtin() -> No
         if registration is not catalog.ISSUE_QUEUE
     )
 
-    issue_project = catalog.ISSUE_QUEUE.project
-    assert issue_project is not None
-    projection = issue_project(IssueQueueState())
+    projection = project_issue_queue_state(IssueQueueStrategyState(), experiment_revision=0)
     assert isinstance(projection.iterations, IterationUnavailable)
     assert projection.iterations.reason is IterationUnavailableReason.EXTERNAL_STATE_UNAVAILABLE
 

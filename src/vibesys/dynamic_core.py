@@ -43,8 +43,6 @@ from vibesys.plugin_registration import (
     RuntimeRecordProjector,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
-from vibesys.run.evaluation_backend import semantic_evaluation_identity
-from vs_core.api import ArtifactId, ArtifactRef
 from vs_runtime.api import (
     CoreOperation,
     CorePlan,
