@@ -509,6 +509,32 @@ class _ProductHostFactory:
             profiler=profiler_service,
         )
 
+    def _offered_roles(self, resources: _PreparedRun) -> tuple[AgentRole, ...]:
+        """The plugin's roles, without a stateless tool whose provider declines for this run.
+
+        A provider that declines (the selected profiler is ``none``) says the run has no such
+        tool, and a strategy only runs the turns that use it when the run offers it. A stateless
+        tool with no provider at all is a wiring mistake and stays for composition to refuse.
+        """
+        context = _tool_context(resources)
+        declined = frozenset(
+            tool
+            for tool, server in (self.stateless_tool_servers or {}).items()
+            if server(context) is None
+        )
+        return tuple(
+            role.model_copy(
+                update={
+                    "extra_tools": tuple(
+                        tool
+                        for tool in role.extra_tools
+                        if not (tool.stateless and tool.id in declined)
+                    )
+                }
+            )
+            for role in self.plugin.agents
+        )
+
     def _stateless_tool_servers(self, resources: _PreparedRun) -> dict[str, ToolServerDescriptor]:
         """The server of each stateless tool this run's environment can serve, by tool id."""
         context = _tool_context(resources)
@@ -612,7 +638,7 @@ class _ProductHostFactory:
                     else PollingEvaluationExecutor(evaluation, workspaces)
                 ),
                 environment=self._core_environment(resources),
-                roles=self.plugin.agents,
+                roles=self._offered_roles(resources),
                 agent_client=client,
                 invocation_slot=invocations,
                 configuration=configuration,
