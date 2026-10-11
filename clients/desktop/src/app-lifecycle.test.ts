@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
+import {FakeClock} from '@vibesys/backend-client/testing';
 import {AppLifecycle, type QuitEffect, type QuitEvent, quitStep, RUNNING} from './app-lifecycle.js';
-import {FakeClock} from './testing/fake-clock.js';
 import {SEEDS, Seeded} from './testing/seeded.js';
 
 /** An app whose host release the test settles by hand. */
@@ -66,9 +66,9 @@ describe('AppLifecycle', () => {
   test('a release that hangs is cut off by its bound', () => {
     const {app, clock, exits} = world(5_000);
     app.quit(0);
-    clock.advance(4_999);
+    clock.advanceBy(4_999);
     expect(exits).toEqual([]);
-    clock.advance(1);
+    clock.advanceBy(1);
     expect(exits).toEqual([0]);
     expect(clock.pending).toBe(0);
   });
