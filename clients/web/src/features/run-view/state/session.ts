@@ -8,9 +8,10 @@
  * asks the shell to apply it only for an awaited token newer than the last snapshot applied, so a
  * slow start-up snapshot cannot overwrite a newer refresh's.
  */
-import type {ControlChannelState, StreamConnectionState} from '@vibesys/backend-client';
+
 import type {RunSnapshot} from '@vibesys/contracts';
 import {only, type Step} from '@vibesys/core-state';
+import type {ControlChannelState, StreamConnectionState} from '@vibesys/transport';
 import type {WebSessionState, WebSessionStatus} from '../../../entities/connection.js';
 
 /** How a recovery restarts the event stream: resume where it was, or a fresh bootstrap. */

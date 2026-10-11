@@ -9,10 +9,6 @@ type WorkspacePolicy = NonNullable<KnipConfig['workspaces']>[string];
 // name instead of silently falling back to knip's default entry-point heuristics, which is how
 // `web` came to be audited against defaults meant for a library rather than a bundled app.
 const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
-  'backend-client': {
-    entry: ['src/**/*.test.ts'],
-    project: ['src/**/*.ts'],
-  },
   contracts: {
     entry: ['src/**/*.test.ts'],
     project: ['src/**/*.ts'],

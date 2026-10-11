@@ -1,5 +1,5 @@
 import {expect, test} from 'bun:test';
-import {event, eventBatch} from '@vibesys/backend-client/testing';
+import {event, eventBatch} from '@vibesys/contracts/testing';
 import {createRunStore} from './index.js';
 
 test('distinguishes an omitted active-execution checkpoint from an empty one', () => {

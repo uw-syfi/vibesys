@@ -1,5 +1,5 @@
-import type {ControlChannelState} from '@vibesys/backend-client';
 import {activeRunFocus, type CoreState, hasRunEnded, phaseText} from '@vibesys/core-state';
+import type {ControlChannelState} from '@vibesys/transport';
 import type {WebSessionState} from '../../../entities/connection.js';
 
 /** The control-channel outage a banner describes, once there is one to show. */

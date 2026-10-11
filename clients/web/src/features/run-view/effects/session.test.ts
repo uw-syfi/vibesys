@@ -1,14 +1,5 @@
 import {describe, expect, test} from 'bun:test';
 import {
-  type BatchReconciliation,
-  type ControlChannelState,
-  type ControlTransport,
-  type StreamMessageContext,
-  type SubscribeOptions,
-  sameControlChannelState,
-} from '@vibesys/backend-client';
-import {FakeClock} from '@vibesys/backend-client/testing';
-import {
   BackendClientError,
   type ProtocolResponse,
   type RequestInput,
@@ -19,6 +10,15 @@ import {
 } from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
 import {SEEDS, Seeded} from '@vibesys/core-state/testing';
+import {
+  type BatchReconciliation,
+  type ControlChannelState,
+  type ControlTransport,
+  type StreamMessageContext,
+  type SubscribeOptions,
+  sameControlChannelState,
+} from '@vibesys/transport';
+import {FakeClock} from '@vibesys/transport/testing';
 import {
   connectRun,
   type RunConnection,

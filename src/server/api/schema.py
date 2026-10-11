@@ -216,7 +216,7 @@ def response_payload_typescript() -> str:
     JSON import attributes only reached Node 20 partway through that release
     line. Embedding the descriptor in an ordinary TypeScript module keeps the
     browser and Node entry points on one artifact without narrowing the
-    backend-client's existing runtime contract.
+    transport packages' existing runtime contract.
     """
     return _schema_typescript("responsePayloadSchema", response_payload_json_schema())
 

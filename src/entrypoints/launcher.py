@@ -82,15 +82,18 @@ _MIN_NODE_MAJOR = 20
 #: modules feed the Pydantic models serialized into the schema, so changes to
 #: them cannot change the generated output and are deliberately excluded here.
 _REBUILD_WATCH_FILES: tuple[str, ...] = (
-    "clients/backend-client/package.json",
-    "clients/backend-client/tsconfig.json",
-    "clients/backend-client/tsconfig.lib.json",
     "clients/contracts/package.json",
     "clients/contracts/tsconfig.json",
     "clients/contracts/tsconfig.lib.json",
     "clients/core-state/package.json",
     "clients/core-state/tsconfig.json",
     "clients/core-state/tsconfig.lib.json",
+    "clients/transport/package.json",
+    "clients/transport/tsconfig.json",
+    "clients/transport/tsconfig.lib.json",
+    "clients/transport-node/package.json",
+    "clients/transport-node/tsconfig.json",
+    "clients/transport-node/tsconfig.lib.json",
     "clients/tui/package.json",
     "clients/tui/tsconfig.json",
     "clients/tui/tsconfig.check.json",
@@ -111,9 +114,10 @@ _REBUILD_WATCH_FILES: tuple[str, ...] = (
     "src/server/settings.py",
 )
 _REBUILD_WATCH_DIRS: tuple[str, ...] = (
-    "clients/backend-client/src",
     "clients/contracts/src",
     "clients/core-state/src",
+    "clients/transport/src",
+    "clients/transport-node/src",
     "clients/tui/src",
 )
 

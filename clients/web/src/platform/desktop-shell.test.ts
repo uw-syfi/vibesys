@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
-import type {ScheduleTimeout} from '@vibesys/backend-client';
 import type {RunEvent} from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
+import type {ScheduleTimeout} from '@vibesys/transport';
 import {WebSession} from '../features/run-view/index.js';
 import {
   type DesktopSocketHandlers,

@@ -4,10 +4,10 @@ import {createServer, type Server, type Socket} from 'node:net';
 import {join} from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 import {BackendClientError, ServerError} from '@vibesys/contracts';
-import type {ControlChannelState} from '../index.js';
-import {expect} from '../test-support/expect.js';
-import {FakeClock} from '../testing/index.js';
+import type {ControlChannelState} from '@vibesys/transport';
+import {FakeClock} from '@vibesys/transport/testing';
 import {ServerClient, type ServerClientOptions} from './client.js';
+import {expect} from './test-support/expect.js';
 
 /** One reported state as a short string; see `websocket.test.ts`'s `trace`. */
 function traceState(state: ControlChannelState): string {

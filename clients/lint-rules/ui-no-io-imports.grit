@@ -1,5 +1,6 @@
-// ui/ may not reach the backend or the host platform. Backend access is `backend-client` (and the
-// desktop connection layer) only; `electron` and `node:*` are shell and main-process APIs.
+// ui/ may not reach the backend or the host platform. Backend access is `@vibesys/transport` and
+// `@vibesys/transport-node` (and the desktop connection layer) only; `electron` and `node:*` are
+// shell and main-process APIs.
 language js;
 
 or {
@@ -7,10 +8,10 @@ or {
   `import * as $name from $source`,
   `import $source`
 } as $import where {
-  $source <: or { r".*@vibesys/backend-client.*", r".*electron.*", r".*node:.*" },
+  $source <: or { r".*@vibesys/transport.*", r".*electron.*", r".*node:.*" },
   register_diagnostic(
     span = $import,
-    message = "ui/ must not import @vibesys/backend-client, electron, or node:* modules. Receive data as props and emit events; the shell owns I/O.",
+    message = "ui/ must not import @vibesys/transport, @vibesys/transport-node, electron, or node:* modules. Receive data as props and emit events; the shell owns I/O.",
     severity = "error"
   )
 }

@@ -34,8 +34,8 @@ test('dependency-cruiser rejects relative paths into a package, cycles, and unre
       compilerOptions: {
         baseUrl: '.',
         paths: {
-          '@vibesys/backend-client': ['backend-client/src/index.ts'],
-          '@vibesys/backend-client/testing': ['backend-client/src/testing/index.ts'],
+          '@vibesys/transport': ['transport/src/index.ts'],
+          '@vibesys/transport/testing': ['transport/src/testing/index.ts'],
           '@vibesys/core-state': ['core-state/src/index.ts'],
           '@vibesys/core-state/testing': ['core-state/src/testing/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
@@ -46,7 +46,7 @@ test('dependency-cruiser rejects relative paths into a package, cycles, and unre
   );
   await writeSource(
     root,
-    'backend-client',
+    'transport',
     'index.ts',
     "import '../../core-state/src/index.js';\n",
   );
@@ -62,7 +62,7 @@ test('dependency-cruiser rejects relative paths into a package, cycles, and unre
   await writeSource(root, 'web', 'index.ts', "import '@vibesys/core-state';\n");
 
   const options = await extractDepcruiseOptions(CONFIG);
-  const result = await cruise(['backend-client/src', 'core-state/src', 'tui/src', 'web/src'], {
+  const result = await cruise(['transport/src', 'core-state/src', 'tui/src', 'web/src'], {
     ...options,
     baseDir: root,
     tsConfig: {fileName: join(root, 'tsconfig.architecture.json')},
@@ -86,15 +86,15 @@ test('dependency-cruiser rejects relative paths into a package, cycles, and unre
 // fixtures use the real package names, because `.dependency-cruiser.mjs` derives its path
 // patterns from the workspace on disk.
 const VALID_FILES = {
-  'backend-client/src/index.ts': '',
-  'backend-client/src/backoff.test.ts': "import './test-support/expect.js';\n",
-  'backend-client/src/test-support/expect.ts': "import 'node:module';\n",
-  'backend-client/src/testing/index.ts': "export {} from './fake-clock.js';\n",
-  'backend-client/src/testing/fake-clock.ts': '',
-  'backend-client/src/testing/fake-clock.test.ts':
+  'transport/src/index.ts': '',
+  'transport/src/backoff.test.ts': "import './test-support/expect.js';\n",
+  'transport/src/test-support/expect.ts': "import 'node:module';\n",
+  'transport/src/testing/index.ts': "export {} from './fake-clock.js';\n",
+  'transport/src/testing/fake-clock.ts': '',
+  'transport/src/testing/fake-clock.test.ts':
     "import '../test-support/expect.js';\nimport './fake-clock.js';\n",
-  'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
-  'core-state/src/shared-fixtures.test.ts': "import '@vibesys/backend-client/testing';\n",
+  'core-state/src/index.ts': "import '@vibesys/transport';\n",
+  'core-state/src/shared-fixtures.test.ts': "import '@vibesys/transport/testing';\n",
   'core-state/src/testing/index.ts': "import './model.js';\n",
   'core-state/src/testing/model.ts': "import '../index.js';\n",
   // The desktop's test support may build on core-state's.
@@ -105,7 +105,7 @@ const VALID_FILES = {
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
   // The web run page's layers, each reaching only down: the composition enters a feature through
   // its index, the feature's shell drives its pure core, and only the backend adapter imports
-  // backend-client's runtime values.
+  // transport's runtime values.
   'web/src/index.ts': "import './app/compose.js';\n",
   'web/src/app/compose.ts':
     "import '../features/replay/index.js';\nimport '../platform/backend.js';\n",
@@ -113,12 +113,12 @@ const VALID_FILES = {
   'web/src/features/replay/effects/replay.ts':
     "import '../state/replay.js';\nimport '../../../shared/store.js';\n",
   'web/src/features/replay/state/replay.ts':
-    "import '@vibesys/core-state';\nimport type {} from '@vibesys/backend-client';\nimport '../../../entities/run.js';\n",
+    "import '@vibesys/core-state';\nimport type {} from '@vibesys/transport';\nimport '../../../entities/run.js';\n",
   'web/src/features/replay/ui/view.ts': "import '../state/replay.js';\n",
   'web/src/features/replay/state/replay.test.ts':
     "import '@vibesys/core-state/testing';\nimport '../../../app/compose.js';\n",
   'web/src/entities/run.ts': "import '@vibesys/core-state';\nimport '../shared/store.js';\n",
-  'web/src/platform/backend.ts': "import '@vibesys/backend-client';\n",
+  'web/src/platform/backend.ts': "import '@vibesys/transport';\n",
   'web/src/shared/store.ts': '',
   // A leaf tool reaching its own directory is the edge `tools-are-leaves` must keep allowing, and
   // the only thing its `$1` back-reference permits.
@@ -133,7 +133,7 @@ const VALID_FILES = {
     "import '@opentui/core';\nimport type {} from '../session-controller.js';\nimport '../session-model.js';\nimport '../theme.js';\n",
   'tui/src/ui/app.test.ts': "import '../session-controller.js';\nimport '../runtime.js';\n",
   'tui/dev/harness.ts':
-    "import '@vibesys/core-state';\nimport '@vibesys/backend-client';\nimport 'declared-package';\n",
+    "import '@vibesys/core-state';\nimport '@vibesys/transport';\nimport 'declared-package';\n",
   'tui/benchmarks/bench.ts': "import '../src/session-model.js';\n",
   'scripts/check.mjs': "import 'node:fs';\nimport 'declared-package';\n",
   // The desktop app's processes and slices, each reaching only down: the composition enters each
@@ -149,9 +149,9 @@ const VALID_FILES = {
   'desktop/src/main/platform/link/shell/link.ts':
     "import 'node:child_process';\nimport '../state/machine.js';\n",
   'desktop/src/main/platform/link/state/machine.ts':
-    "import type {} from '@vibesys/backend-client';\n",
+    "import type {} from '@vibesys/transport';\n",
   'desktop/src/main/platform/link/testing/fake.ts': "import '../state/machine.js';\n",
-  'desktop/src/common/ids.ts': "import type {} from '@vibesys/backend-client';\n",
+  'desktop/src/common/ids.ts': "import type {} from '@vibesys/transport';\n",
   'desktop/src/renderer/welcome/main.tsx':
     "import './effects/stores.js';\nimport './ui/view.js';\nimport '../../common/ids.js';\n",
   'desktop/src/renderer/welcome/effects/stores.ts': "import '../state/store.js';\n",
@@ -191,7 +191,7 @@ const RULE_CASES = [
   },
   {
     rule: 'desktop-common-is-pure',
-    files: {'desktop/src/common/ids.ts': "import '@vibesys/backend-client';\n"},
+    files: {'desktop/src/common/ids.ts': "import '@vibesys/transport';\n"},
   },
   {
     rule: 'desktop-common-has-no-node-runtime',
@@ -309,8 +309,8 @@ const RULE_CASES = [
     files: {'web/src/features/replay/effects/replay.ts': "import '../ui/view.js';\n"},
   },
   {
-    rule: 'web-backend-client-only-in-backend-adapter',
-    files: {'web/src/features/replay/effects/replay.ts': "import '@vibesys/backend-client';\n"},
+    rule: 'web-transport-only-in-backend-adapter',
+    files: {'web/src/features/replay/effects/replay.ts': "import '@vibesys/transport';\n"},
   },
   {
     rule: 'web-shared-is-domain-free',
@@ -359,19 +359,19 @@ const RULE_CASES = [
     files: {'tui/src/session-model.ts': "import './ui/app.test.js';\n"},
   },
   {
-    rule: 'production-code-does-not-import-backend-client-test-support',
-    files: {'backend-client/src/index.ts': "import './test-support/expect.js';\n"},
+    rule: 'production-code-does-not-import-transport-test-support',
+    files: {'transport/src/index.ts': "import './test-support/expect.js';\n"},
   },
   {
-    rule: 'production-code-does-not-import-backend-client-test-support',
+    rule: 'production-code-does-not-import-transport-test-support',
     files: {
-      'backend-client/src/index.ts': "import './testing/fake-clock.js';\n",
+      'transport/src/index.ts': "import './testing/fake-clock.js';\n",
     },
   },
   {
-    rule: 'production-code-does-not-import-backend-client-test-support',
+    rule: 'production-code-does-not-import-transport-test-support',
     files: {
-      'core-state/src/index.ts': "import '@vibesys/backend-client/testing';\n",
+      'core-state/src/index.ts': "import '@vibesys/transport/testing';\n",
     },
   },
   {
@@ -390,8 +390,8 @@ const RULE_CASES = [
     },
   },
   {
-    rule: 'tui-ui-does-not-depend-on-backend-client',
-    files: {'tui/src/ui/app.ts': "import type {} from '@vibesys/backend-client';\n"},
+    rule: 'tui-ui-does-not-depend-on-transport',
+    files: {'tui/src/ui/app.ts': "import type {} from '@vibesys/transport';\n"},
   },
   {
     rule: 'dev-cannot-deep-import-src',
@@ -454,8 +454,8 @@ async function violatedRules(t, files) {
       compilerOptions: {
         baseUrl: '.',
         paths: {
-          '@vibesys/backend-client': ['backend-client/src/index.ts'],
-          '@vibesys/backend-client/testing': ['backend-client/src/testing/index.ts'],
+          '@vibesys/transport': ['transport/src/index.ts'],
+          '@vibesys/transport/testing': ['transport/src/testing/index.ts'],
           '@vibesys/core-state': ['core-state/src/index.ts'],
           '@vibesys/core-state/testing': ['core-state/src/testing/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
@@ -764,7 +764,7 @@ test('the architecture gate reports a workspace whose layering is clean', async 
   const {output, exitCode} = await cruiseFixture(t, {
     'tui/src/index.ts': "import '@vibesys/core-state';\n",
     'web/src/index.ts': "import '@vibesys/core-state';\n",
-    'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
+    'core-state/src/index.ts': "import '@vibesys/transport';\n",
   });
 
   assert.equal(exitCode, 0);

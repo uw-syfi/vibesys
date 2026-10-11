@@ -1,5 +1,5 @@
 // The web run page has one path to the backend: `web/src/platform/backend.ts`. It is the only
-// module that uses `fetch`; dependency-cruiser holds backend-client's runtime imports to it too.
+// module that uses `fetch`; dependency-cruiser holds @vibesys/transport's runtime imports to it too.
 // Any reference to the global `fetch` counts, not only a call: `const f = fetch; f(url)` reaches
 // the network as surely as `fetch(url)` does. A property named `fetch` (`client.fetch()`) is not
 // the global and is not matched.

@@ -13,9 +13,9 @@ describe('webBuildInputs', () => {
 
     expect(inputs).toEqual(
       [
-        'clients/backend-client/package.json',
-        'clients/backend-client/src',
-        'clients/backend-client/tsconfig.json',
+        'clients/transport/package.json',
+        'clients/transport/src',
+        'clients/transport/tsconfig.json',
         'clients/contracts/package.json',
         'clients/contracts/src',
         'clients/contracts/tsconfig.json',
