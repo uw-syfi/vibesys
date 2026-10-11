@@ -5,6 +5,7 @@ import {
   type ProtocolResponse,
   type RequestInput,
   type RunEvent,
+  type RunSnapshot,
   type ScheduleTimeout,
   ServerError,
   type ServerMessage,
@@ -292,6 +293,15 @@ export class SocketSessionController implements SessionController {
   #streamProtocolError = false;
   /** Opaque server-owned namespace for project-local client state. */
   #noteProjectScope: string | null = null;
+  /**
+   * The newest accepted snapshot's durable tail, scoped to its run. A snapshot
+   * can update lifecycle without advancing the event cursor; until the stream
+   * reaches this sequence, terminal status is not evidence that the replay is
+   * complete enough to make an ordinary disconnect harmless.
+   */
+  #snapshotWatermark: {readonly runId: string; readonly sequence: number} | null = null;
+  /** Sequence space the current stream fold belongs to; rebootstrap starts another. */
+  #streamGeneration = 0;
 
   constructor(
     private readonly client: ServerTransport,
@@ -346,11 +356,16 @@ export class SocketSessionController implements SessionController {
         // The store the folded cursor belongs to, so a resume across an outage
         // can be dropped if the run swapped its durable log while we were gone.
         storeId: () => this.#reconciler.storeId(),
-        shouldReconnect: () => !hasRunEnded(this.#state.core) && !this.#streamProtocolError,
+        shouldReconnect: () => this.#shouldReconnectStream(),
         onMessage: (message, {resumed}) => this.#onMessage(message, resumed),
         onConnectionState: state => this.#onConnectionState(state),
       }),
     ]);
+    // A quiet close and the snapshot can settle in the same turn while the
+    // initial dial still owns the stream's recovery slot. Retry once that slot
+    // is released so the later completeness evidence cannot be lost merely
+    // because its first attempt raced the handshake's promise continuation.
+    if (this.#snapshotIsAhead()) this.#stream.retryIfDisconnected();
     this.#streamConnected = this.#state.eventStreamAvailable;
   }
 
@@ -387,6 +402,7 @@ export class SocketSessionController implements SessionController {
   }
 
   async #loadSnapshot(): Promise<void> {
+    const streamGeneration = this.#streamGeneration;
     try {
       const response = await this.client.request({type: 'query.snapshot'});
       if (response.snapshot) {
@@ -394,10 +410,52 @@ export class SocketSessionController implements SessionController {
         if (next.core.runId === response.snapshot.run_id) {
           this.#noteProjectScope = response.snapshot.project_scope ?? null;
         }
+        this.#rememberSnapshotWatermark(response.snapshot, next, streamGeneration);
         this.#setState(next);
+        // The stream may have closed quietly before this concurrent answer
+        // established that its fold was incomplete. The conditional retry is
+        // inert while healthy and promotes that prior close when it is not.
+        if (this.#snapshotIsAhead()) this.#stream.retryIfDisconnected();
       }
     } catch (error) {
       this.#setState(reportCaughtError(this.#state, error, 'request'));
+    }
+  }
+
+  /** Redial live runs, and terminal runs whose snapshot proves their fold is incomplete. */
+  #shouldReconnectStream(): boolean {
+    if (this.#streamProtocolError) return false;
+    if (!hasRunEnded(this.#state.core)) return true;
+    return this.#snapshotIsAhead();
+  }
+
+  #snapshotIsAhead(): boolean {
+    const watermark = this.#snapshotWatermark;
+    return (
+      watermark !== null &&
+      watermark.runId === this.#state.core.runId &&
+      this.#state.core.sequence < watermark.sequence
+    );
+  }
+
+  /** Retain only a snapshot accepted for the run this controller currently projects. */
+  #rememberSnapshotWatermark(
+    snapshot: RunSnapshot,
+    next: SessionState,
+    streamGeneration: number,
+  ): void {
+    // A rebootstrap while the request was in flight replaced the sequence
+    // space the response could have described. Its lifecycle projection may
+    // still be useful, but its numeric cursor cannot bound the new store.
+    if (streamGeneration !== this.#streamGeneration) return;
+    if (next.core.runId !== snapshot.run_id) return;
+    const current = this.#snapshotWatermark;
+    if (
+      current === null ||
+      current.runId !== snapshot.run_id ||
+      snapshot.sequence > current.sequence
+    ) {
+      this.#snapshotWatermark = {runId: snapshot.run_id, sequence: snapshot.sequence};
     }
   }
 
@@ -1350,6 +1408,10 @@ export class SocketSessionController implements SessionController {
         return [message.event];
       case 'event_batch': {
         const reconciliation = this.#reconciler.reconcileBatch(message, {resumed});
+        if (reconciliation.kind === 'rebootstrap') {
+          this.#streamGeneration += 1;
+          this.#snapshotWatermark = null;
+        }
         this.#setState(
           (reconciliation.kind === 'rebootstrap' ? applyEventRebootstrap : applyEventBatch)(
             this.#state,

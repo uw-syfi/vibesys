@@ -875,4 +875,31 @@ describe('PersistentEventStream', () => {
     expect(states).toEqual([]);
     await stream.close();
   });
+
+  it('retry() promotes a prior quiet close when the caller later requires recovery', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 1, reconnect: false};
+    const {callbacks, states} = harness(env);
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(1, 'run_finished')]);
+
+    stream.retryIfDisconnected();
+    expect(transport.subscribeCalls).toHaveLength(1);
+
+    transport.sever();
+    expect(states).toEqual([]);
+    expect(transport.subscribeCalls).toHaveLength(1);
+
+    // A concurrent control-plane answer now proves the terminal fold was
+    // incomplete. The same public verb stays inert on healthy streams, but a
+    // remembered quiet close becomes a reported recovery.
+    env.reconnect = true;
+    stream.retryIfDisconnected();
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+
+    expect(transport.subscribeCalls).toHaveLength(2);
+    expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+    await stream.close();
+  });
 });

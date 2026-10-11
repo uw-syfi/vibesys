@@ -139,6 +139,14 @@ export class PersistentEventStream {
    * reconnect recovers, so the next outage reports again.
    */
   #disconnectedReported = false;
+  /**
+   * The close that left the stream down, including an ordinary terminal close
+   * the caller initially considered harmless. Policy can change after that
+   * close (for example, a concurrent snapshot can prove the fold incomplete),
+   * so `retry` must be able to promote it into a reported recovery without
+   * redialing a stream that is still healthy.
+   */
+  #disconnectError: Error | null = null;
   /** The one reconnect operation that currently owns the stream's dial slot. */
   #recovery: StreamRecovery = 'idle';
   /** Stronger intent retained until an in-flight cursor retry releases that slot. */
@@ -321,6 +329,7 @@ export class PersistentEventStream {
   #handleDisconnect(error: Error, token: number): void {
     // A stale subscription's late close is not this stream's outage.
     if (this.#closed || token !== this.#connectionSeq) return;
+    this.#disconnectError = error;
     const redialing = this.#active().shouldReconnect();
     // Arm the retry before the external state callback. A callback may request
     // an explicit re-bootstrap synchronously; that stronger recovery must see
@@ -369,6 +378,7 @@ export class PersistentEventStream {
       // not briefly report recovery or arm another retry in between.
       if (this.#recoverySuperseded()) return;
       if (recovered) {
+        this.#disconnectError = null;
         this.#backoff.reset();
         this.#disconnectedReported = false;
         this.#emit({status: 'connected'});
@@ -446,13 +456,31 @@ export class PersistentEventStream {
   retry(): void {
     if (this.#closed || this.#callbacks === null) return;
     if (this.#recovery !== 'idle') return;
+    const disconnectError = this.#disconnectError;
     if (!this.#active().shouldReconnect()) return;
+    if (disconnectError !== null) {
+      // The original close may have been quiet because the caller had no
+      // reason to recover then. New evidence made it actionable, so report the
+      // outage before redialing just like an immediately recoverable close.
+      this.#reportDisconnected(disconnectError);
+    }
     if (this.#cancelReconnect !== null) {
       this.#cancelReconnect();
       this.#cancelReconnect = null;
     }
     this.#backoff.reset();
     void this.#reconnectNow();
+  }
+
+  /**
+   * Reconsider a stream that may have closed while caller policy declined a
+   * redial. Unlike `retry`, this is inert while the current connection remains
+   * healthy, so an asynchronously learned recovery condition cannot replace a
+   * live subscription merely to discover whether it had dropped.
+   */
+  retryIfDisconnected(): void {
+    if (this.#disconnectError === null) return;
+    this.retry();
   }
 
   /**

@@ -332,7 +332,9 @@ describe('session controller', () => {
     const transport = new FakeTransport();
     const controller = new SocketSessionController(transport);
     await controller.start();
-    transport.emit({type: 'event', event: event(1, 'run_finished')});
+    // The transport's snapshot declares sequence 12; completing at the same
+    // cursor means the fold has reached every event that snapshot knew about.
+    transport.emit({type: 'event', event: event(12, 'run_finished')});
     transport.disconnect(new Error('closed'));
 
     expect(controller.state.core.status).toBe('completed');
@@ -2887,6 +2889,170 @@ describe('stream reconnect', () => {
     expect(controller.state.core.transcript.map(item => item.content).join('')).toContain('two\n');
   });
 
+  it('recovers terminal boot history until the event fold reaches the snapshot watermark', async () => {
+    const transport = new ReconnectTransport();
+    const scheduler = new ManualScheduler();
+    transport.snapshotStatus = 'completed';
+    transport.snapshotSequence = 3;
+    transport.deferSnapshot = true;
+    const controller = new SocketSessionController(
+      transport,
+      undefined,
+      undefined,
+      [0],
+      scheduler.scheduleTimeout,
+    );
+
+    const started = controller.start();
+    // A valid bootstrap lands before the concurrent snapshot, but only carries
+    // the first of the three events the snapshot says are durable.
+    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    transport.releaseSnapshot();
+    await started;
+    expect(controller.state.core).toMatchObject({sequence: 1, status: 'completed'});
+
+    transport.sever();
+
+    expect(controller.state.eventStreamAvailable).toBe(false);
+    expect(controller.state.errorBanner).toMatchObject({scope: 'transport'});
+    expect(scheduler.pendingCount).toBe(1);
+
+    const reconnected = new Promise<void>(resolve => {
+      let unsubscribe: (() => void) | null = null;
+      unsubscribe = controller.subscribe(state => {
+        if (!state.eventStreamAvailable || transport.subscribeCalls.length !== 2) return;
+        unsubscribe?.();
+        resolve();
+      });
+    });
+    scheduler.runNext();
+    await reconnected;
+    transport.emitBatch([
+      event(2, 'agent_output_chunk', 'two\n'),
+      event(3, 'agent_output_chunk', 'three\n'),
+    ]);
+    expect(controller.state.core.sequence).toBe(3);
+
+    // Once the fold reaches the terminal snapshot's watermark, an ordinary
+    // close is expected cleanup again: no banner and no third subscription.
+    transport.sever();
+    expect(scheduler.pendingCount).toBe(0);
+    expect(controller.state.eventStreamAvailable).toBe(true);
+    expect(controller.state.errorBanner).toBeNull();
+    expect(transport.subscribeCalls).toHaveLength(2);
+    await controller.stop();
+  });
+
+  it('recovers when a higher terminal snapshot resolves after the stream already closed', async () => {
+    const transport = new ReconnectTransport();
+    const scheduler = new ManualScheduler();
+    transport.snapshotStatus = 'completed';
+    transport.snapshotSequence = 3;
+    transport.deferSnapshot = true;
+    const controller = new SocketSessionController(
+      transport,
+      undefined,
+      undefined,
+      [0],
+      scheduler.scheduleTimeout,
+    );
+    const availability: boolean[] = [];
+    controller.subscribe(state => availability.push(state.eventStreamAvailable));
+
+    const started = controller.start();
+    transport.emitBatch([event(1, 'run_finished')]);
+    transport.sever();
+    expect(controller.state.core).toMatchObject({sequence: 1, status: 'completed'});
+    expect(transport.subscribeCalls).toHaveLength(1);
+    expect(scheduler.pendingCount).toBe(0);
+
+    const reconnected = new Promise<void>(resolve => {
+      let unsubscribe: (() => void) | null = null;
+      unsubscribe = controller.subscribe(state => {
+        if (!state.eventStreamAvailable || transport.subscribeCalls.length !== 2) return;
+        unsubscribe?.();
+        resolve();
+      });
+    });
+    transport.releaseSnapshot();
+    await started;
+    await reconnected;
+
+    expect(availability).toContain(false);
+    expect(transport.subscribeCalls).toHaveLength(2);
+    transport.emitBatch([event(2, 'agent_output_chunk', 'two\n'), event(3, 'run_finished')]);
+    transport.sever();
+    expect(scheduler.pendingCount).toBe(0);
+    expect(controller.state.eventStreamAvailable).toBe(true);
+    await controller.stop();
+  });
+
+  it('retires an in-flight snapshot watermark when a same-run store replaces its sequence space', async () => {
+    const transport = new ReconnectTransport();
+    const scheduler = new ManualScheduler();
+    transport.snapshotStatus = 'completed';
+    transport.snapshotSequence = 1_501;
+    transport.deferSnapshot = true;
+    const controller = new SocketSessionController(
+      transport,
+      undefined,
+      undefined,
+      [0],
+      scheduler.scheduleTimeout,
+    );
+
+    const started = controller.start();
+    transport.emitBatch([{...event(1_501, 'run_finished'), run_id: 'run'}], 1_500, 'server-store');
+    // The replacement carries the same run id but numbers a different, shorter
+    // store. Its terminal cursor is complete in that store's generation.
+    transport.emitBatch([{...event(301, 'run_finished'), run_id: 'run'}], 300, 'run-store');
+    expect(controller.state.core).toMatchObject({runId: 'run', sequence: 301, status: 'completed'});
+
+    // This answer started before the rebootstrap and therefore cannot make a
+    // claim about the new store's numeric tail, despite its matching run id.
+    transport.releaseSnapshot();
+    await started;
+    expect(controller.state.core.sequence).toBe(301);
+
+    transport.sever();
+    expect(scheduler.pendingCount).toBe(0);
+    expect(controller.state.eventStreamAvailable).toBe(true);
+    expect(controller.state.errorBanner).toBeNull();
+    expect(transport.subscribeCalls).toHaveLength(1);
+    await controller.stop();
+  });
+
+  it.each<RunStatus>([
+    'completed',
+    'failed',
+    'stopped',
+  ])('keeps a %s replay quiet when its fold already reaches the snapshot watermark', async status => {
+    const transport = new ReconnectTransport();
+    const scheduler = new ManualScheduler();
+    transport.snapshotStatus = status;
+    transport.snapshotSequence = 1;
+    transport.deferSnapshot = true;
+    const controller = new SocketSessionController(
+      transport,
+      undefined,
+      undefined,
+      [0],
+      scheduler.scheduleTimeout,
+    );
+
+    const started = controller.start();
+    transport.emitBatch([event(1, 'agent_output_chunk', 'complete\n')]);
+    transport.releaseSnapshot();
+    await started;
+    transport.sever();
+
+    expect(scheduler.pendingCount).toBe(0);
+    expect(controller.state.eventStreamAvailable).toBe(true);
+    expect(controller.state.errorBanner).toBeNull();
+    expect(transport.subscribeCalls).toHaveLength(1);
+    await controller.stop();
+  });
+
   /**
    * The #1044 regression on the TUI side. The controller already reports a
    * dropped stream as a transport banner without asking the run's status, so
@@ -3131,21 +3297,39 @@ class ReconnectTransport implements ServerTransport {
    * the status without folding anything.
    */
   snapshotStatus: RunStatus = 'running';
+  snapshotSequence = 0;
+  /** Hold `query.snapshot` so tests can order its answer against the bootstrap. */
+  deferSnapshot = false;
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
+  #releaseSnapshot: (() => void) | null = null;
   readonly #subscriptionWaiters: Array<() => void> = [];
 
   request(input: RequestInput): Promise<ProtocolResponse> {
     this.requests.push(input);
-    return Promise.resolve({
+    const response: ProtocolResponse = {
       protocol_version: 1,
       request_id: 'request',
       timestamp: '2026-01-01T00:00:00Z',
       ok: true,
       ...(input.type === 'query.experiments' ? {experiments: [], experiments_ready: true} : {}),
       ...(input.type === 'query.snapshot'
-        ? {snapshot: {run_id: 'run', status: this.snapshotStatus, sequence: 0}}
+        ? {
+            snapshot: {
+              run_id: 'run',
+              status: this.snapshotStatus,
+              sequence: this.snapshotSequence,
+            },
+          }
         : {}),
+    };
+    if (input.type !== 'query.snapshot' || !this.deferSnapshot) return Promise.resolve(response);
+    if (this.#releaseSnapshot !== null) throw new Error('Snapshot request is already pending');
+    return new Promise(resolve => {
+      this.#releaseSnapshot = () => {
+        this.#releaseSnapshot = null;
+        resolve(response);
+      };
     });
   }
 
@@ -3188,6 +3372,12 @@ class ReconnectTransport implements ServerTransport {
 
   sever(message = 'Server event stream disconnected'): void {
     this.#disconnect?.(new Error(message));
+  }
+
+  releaseSnapshot(): void {
+    const release = this.#releaseSnapshot;
+    if (release === null) throw new Error('No snapshot request is pending');
+    release();
   }
 
   /** Resolves when the stream makes its next dial. */
