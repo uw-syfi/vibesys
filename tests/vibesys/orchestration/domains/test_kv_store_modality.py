@@ -19,7 +19,7 @@ def test_kv_store_is_a_registered_modality() -> None:
 
 
 def test_kv_store_input_bundle_loads() -> None:
-    project = Project.open(_PROJECT_ROOT / "examples" / "kv-store")
+    project = Project.open(_PROJECT_ROOT / "examples" / "database" / "kv-store")
     bundle = load_project_task(project, project.select_task("default"))
     assert bundle.domain.value == "generic"
     assert bundle.benchmark_result is not None
