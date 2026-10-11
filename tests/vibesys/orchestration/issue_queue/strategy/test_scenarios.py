@@ -173,3 +173,23 @@ def test_a_reply_that_stays_invalid_ends_the_run_in_failure_with_nothing_adopted
     assert result.outcome == "failure"
     assert "implementer turn did not complete" in result.reason
     assert not any(isinstance(item, ProposeWinner) for item in trace.decisions)
+
+
+def test_a_run_that_spends_every_budget_stays_within_the_derived_limits() -> None:
+    """Every issue fails review to its last attempt, with a broken reply to correct each time."""
+    executors = Executors(
+        implementer=deque(reply for _ in range(12) for reply in ("not json", implemented())),
+        judge=deque(judged(passed=False) for _ in range(12)),
+        perf=deque(evaluated("again") for _ in range(4)),
+    )
+    trace = run_shell(executors, max_rounds=2, max_attempts_per_issue=2, max_issues_per_round=2)
+    core = trace.core
+    limits = core.run.limits
+    turns = sum(
+        charge.charged
+        for attempt in core.attempts.attempts
+        for charge in attempt.charges
+        if charge.kind.value == "turn"
+    )
+    assert len(core.attempts.attempts) <= limits.max_attempts
+    assert turns <= limits.max_turns
