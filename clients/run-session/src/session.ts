@@ -1,12 +1,12 @@
 /**
  * The live session's connection core: start-up (event stream, then a store-fenced snapshot), what the stream
  * and the control channel report, and the single-flight recovery that a browser wake or an
- * explicit Reattach starts. Pure: the shell (`effects/session.ts`) performs each request through
+ * explicit Reattach starts. Pure: the shell (`web-session.ts`) performs each request through
  * the transport and dispatches the reply with the request's token.
  *
- * A loaded snapshot reaches the run fold only through this core: the reply carries it, and the core
- * asks the shell to apply it only for an awaited token newer than the last snapshot applied, so a
- * slow start-up snapshot cannot overwrite a newer refresh's.
+ * The shell reports a loaded snapshot as successful only after the run fold accepted it for the
+ * reply token this core still awaits. This core can therefore treat a successful reply as proof of
+ * the current run without trusting transport success independently of projection acceptance.
  */
 
 import type {RunSnapshot} from '@vibesys/contracts';
@@ -61,7 +61,7 @@ type ReplacementSnapshot =
       readonly problemEpoch: number;
     };
 
-type StreamProblem = 'none' | 'snapshot' | 'connection';
+type StreamProblem = 'none' | 'snapshot' | 'connection' | 'projection';
 
 export type SessionState =
   | {
@@ -77,7 +77,7 @@ export type SessionState =
       /** Owner and monotone order of the newest reason the stream is stale. */
       readonly streamProblem: StreamProblem;
       readonly problemEpoch: number;
-      /** The newest snapshot token applied or superseded; 0 before the first. */
+      /** The newest snapshot token accepted or superseded; 0 before the first. */
       readonly applied: number;
       readonly next: number;
     }
@@ -116,6 +116,8 @@ export type SessionAction =
   | {readonly type: 'stream'; readonly state: StreamConnectionState}
   /** The stream reported a fault in band (a protocol error), or could not be recovered. */
   | {readonly type: 'fault'; readonly error: Error}
+  /** Core-state rejected one stream batch as belonging to another run. */
+  | {readonly type: 'projection-rejected'; readonly error: Error}
   /** The control channel changed state (the shell drops repeats of the same state). */
   | {readonly type: 'controls'; readonly state: ControlChannelState}
   /** The tab became visible or the network came back (or the machine woke). */
@@ -128,8 +130,6 @@ export type SessionAction =
   | {readonly type: 'close'};
 
 export type SessionRequest =
-  | /** Fold this snapshot into the run. */
-  {readonly kind: 'apply-snapshot'; readonly snapshot: RunSnapshot}
   | {readonly kind: 'subscribe'; readonly token: number}
   /** Redial the control channel (inert when healthy), then reload the snapshot. */
   | {readonly kind: 'refresh'; readonly token: number; readonly mode: StreamRecovery}
@@ -178,8 +178,8 @@ function withProblem(state: Open, problem: Exclude<StreamProblem, 'none'>, error
 }
 
 /**
- * The awaited snapshot reply `token` settled: on success the snapshot is applied unless a newer one
- * already was; on failure the page goes stale.
+ * The awaited snapshot reply `token` settled: on success its already-folded projection is trusted
+ * unless a newer one superseded it; on failure the page goes stale.
  */
 function snapshotSettled(
   state: Open,
@@ -207,13 +207,11 @@ function snapshotSettled(
     streamProblem: supersedesProblem ? ('none' as const) : shown.streamProblem,
     applied: token,
   };
-  return {
-    state:
-      trusted.streamProblem === 'none' && trusted.streamConnected
-        ? withStatus(trusted, 'connected', null)
-        : trusted,
-    requests: [{kind: 'apply-snapshot', snapshot: result.snapshot}],
-  };
+  return only(
+    trusted.streamProblem === 'none' && trusted.streamConnected
+      ? withStatus(trusted, 'connected', null)
+      : trusted,
+  );
 }
 
 /** Start a snapshot load only after the stream has established the store that fences it. */
@@ -348,8 +346,7 @@ function replacementSnapshotSettled(
   // Applying higher post-replacement evidence changes shouldReconnect. Ask the
   // stream owner to reevaluate even if its terminal socket closed while this
   // snapshot was in flight. A failed or superseded load carries no such proof.
-  const applied = finished.requests.some(request => request.kind === 'apply-snapshot');
-  return applied && replacement.owner !== 'startup'
+  return action.result.ok && replacement.owner !== 'startup'
     ? {...finished, requests: [...finished.requests, {kind: 'reevaluate-stream'}]}
     : finished;
 }
@@ -455,13 +452,23 @@ function refreshSettled(state: Open, token: number, outcome: RefreshOutcome): Se
   };
 }
 
-type Report = Extract<SessionAction, {type: 'stream' | 'fault' | 'controls' | 'offline'}>;
+type Report = Extract<
+  SessionAction,
+  {type: 'stream' | 'fault' | 'projection-rejected' | 'controls' | 'offline'}
+>;
 
 /** A fresh stream failed before its first batch could hand recovery to a fenced snapshot. */
 function releaseFailedEstablishment(state: Open): Open {
   return state.recovery.kind === 'refreshing' && state.recovery.phase === 'establishing'
     ? {...state, recovery: {kind: 'none'}}
     : state;
+}
+
+/** Add a transient connection fault without erasing stronger projection evidence. */
+function connectionFailed(state: Open, error: Error): Open {
+  return state.streamProblem === 'snapshot' || state.streamProblem === 'projection'
+    ? state
+    : withProblem(state, 'connection', error);
 }
 
 /** What the stream, the control channel, or the browser reported. */
@@ -472,21 +479,24 @@ function reported(state: Open, action: Report): Open {
       // and suppressing it here left an ended run's empty transcript unexplained (#1044).
       if (action.state.status === 'connected') {
         const connected = state.streamConnected ? state : {...state, streamConnected: true};
-        return state.streamSnapshot === 'trusted' && state.streamProblem !== 'snapshot'
+        return state.streamSnapshot === 'trusted' &&
+          (state.streamProblem === 'none' || state.streamProblem === 'connection')
           ? withStatus({...connected, streamProblem: 'none'}, 'connected', null)
           : connected;
       }
-      return withProblem(
+      return connectionFailed(
         releaseFailedEstablishment({...state, streamConnected: false}),
-        'connection',
         action.state.error,
       );
     case 'fault':
-      return withProblem(
+      return connectionFailed(
         releaseFailedEstablishment({...state, streamConnected: false}),
-        'connection',
         action.error,
       );
+    case 'projection-rejected':
+      // A live socket does not make discarded foreign-run data trustworthy. Only a later fenced
+      // snapshot for a fresh generation can retire this fault.
+      return withProblem(state, 'projection', action.error);
     case 'controls':
       return {...state, view: {...state.view, controls: action.state}};
     case 'offline':
@@ -494,11 +504,7 @@ function reported(state: Open, action: Report): Open {
       // transcript incomplete.
       return action.runEnded
         ? state
-        : withProblem(
-            {...state, streamConnected: false},
-            'connection',
-            new Error('Network is offline'),
-          );
+        : connectionFailed({...state, streamConnected: false}, new Error('Network is offline'));
   }
 }
 
@@ -516,6 +522,7 @@ export function sessionStep(state: SessionState, action: SessionAction): Session
       return replacementSnapshotSettled(state, action);
     case 'stream':
     case 'fault':
+    case 'projection-rejected':
     case 'controls':
     case 'offline':
       return only(reported(state, action));
@@ -553,6 +560,24 @@ export function sessionAwaited(state: SessionState): {
     refresh: recovery.kind === 'refreshing' ? recovery.token : null,
     replacement: replacement.kind === 'loading' ? replacement.token : null,
   };
+}
+
+/** Whether a successful snapshot reply still owns the right to enter the run fold. */
+export function sessionAcceptsSnapshot(
+  state: SessionState,
+  slot: 'refresh' | 'replacement',
+  token: number,
+): boolean {
+  if (state.kind === 'closed' || token <= state.applied) return false;
+  if (slot === 'replacement') {
+    return state.replacement.kind === 'loading' && state.replacement.token === token;
+  }
+  return (
+    state.recovery.kind === 'refreshing' &&
+    state.recovery.token === token &&
+    state.recovery.phase === 'preparing' &&
+    state.recovery.intent === 'retry'
+  );
 }
 
 /** Whether start-up has either completed its fenced handoff or failed. */

@@ -9,6 +9,7 @@ import {
   type SessionRequest,
   type SessionState,
   type SnapshotResult,
+  sessionAcceptsSnapshot,
   sessionAwaited,
   sessionInvariants,
   sessionStep,
@@ -46,7 +47,7 @@ function snapshotResult(random: Seeded, token: number): SnapshotResult {
 
 function randomAction(random: Seeded, issued: readonly number[]): SessionAction {
   const token = random.pick(issued);
-  switch (random.int(14)) {
+  switch (random.int(15)) {
     case 0:
       return {type: 'start'};
     case 1:
@@ -90,6 +91,8 @@ function randomAction(random: Seeded, issued: readonly number[]): SessionAction 
       return {type: 'offline', runEnded: random.bool()};
     case 12:
       return {type: 'reconnect-controls'};
+    case 13:
+      return {type: 'projection-rejected', error: random.pick(ERRORS)};
     default:
       // Rare, so most sequences stay open long enough to interleave.
       return random.int(4) === 0 ? {type: 'close'} : {type: 'start'};
@@ -114,19 +117,15 @@ function replySlot(action: SessionAction): {slot: string; token: number} | null 
   }
 }
 
-/** A snapshot is applied only from the awaited reply that carried it, and only when newer. */
+/** Snapshot proof is published only from the awaited successful fold outcome. */
 function snapshotProperties(
   before: SessionState,
   action: SessionAction,
-  requests: readonly SessionRequest[],
+  after: SessionState,
 ): void {
-  const applied = requests.flatMap(request =>
-    request.kind === 'apply-snapshot' ? [request.snapshot.sequence] : [],
-  );
-  if (applied.length === 0) return;
+  if (before.view.hasSnapshot || !after.view.hasSnapshot) return;
   const reply = replySlot(action);
   expect(reply).not.toBeNull();
-  expect(applied).toEqual([reply?.token ?? -1]);
   expect(before.kind).toBe('open');
   if (before.kind === 'open' && reply !== null) {
     expect(sessionAwaited(before)[reply.slot as 'refresh' | 'replacement']).toBe(reply.token);
@@ -191,7 +190,7 @@ function properties(
   // A closed session stays closed and asks for nothing.
   if (before.kind === 'closed') expect({after, requests}).toEqual({after: before, requests: []});
   recoveryProperties(before, action, requests);
-  snapshotProperties(before, action, requests);
+  snapshotProperties(before, action, after);
   if (action.type === 'close' && before.kind === 'open') {
     expect({kind: after.kind, requests}).toEqual({kind: 'closed', requests: [{kind: 'close'}]});
   }
@@ -215,7 +214,7 @@ describe('sessionStep', () => {
     });
   });
 
-  test('starts the stream, then applies only a snapshot fenced to its store', () => {
+  test('starts the stream, then trusts only a folded snapshot fenced to its store', () => {
     const asked = sessionStep(SESSION_INITIAL, {type: 'start'});
     expect(asked.requests).toEqual([{kind: 'subscribe', token: 1}]);
     const established = sessionStep(asked.state, {
@@ -236,7 +235,7 @@ describe('sessionStep', () => {
       storeId: 'store-a',
       result: loaded(2),
     });
-    expect(live.requests).toEqual([{kind: 'apply-snapshot', snapshot: snapshotOf(2)}]);
+    expect(live.requests).toEqual([]);
     expect(live.state.view.hasSnapshot).toBe(true);
     expect(live.state.view.status).toBe('connected');
   });
@@ -261,6 +260,7 @@ describe('sessionStep', () => {
     const reattach = sessionStep(state, {type: 'reattach', reach: visible, runEnded: false});
     expect(reattach.requests).toEqual([]);
     state = reattach.state;
+    expect(sessionAcceptsSnapshot(state, 'refresh', 1)).toBe(false);
     const settled = sessionStep(state, {
       type: 'refresh-reply',
       token: 1,
@@ -327,10 +327,41 @@ describe('sessionStep', () => {
       storeId: 'store-b',
       result: loaded(2),
     });
-    expect(accepted.requests).toEqual([
-      {kind: 'apply-snapshot', snapshot: snapshotOf(2)},
-      {kind: 'reevaluate-stream'},
-    ]);
+    expect(accepted.requests).toEqual([{kind: 'reevaluate-stream'}]);
+  });
+
+  test('keeps a rejected stream projection stale until newer snapshot proof succeeds', () => {
+    const visible = {visible: true, online: true};
+    let state = sessionStep(SESSION_INITIAL, {type: 'start'}).state;
+    state = sessionStep(state, {type: 'stream-established', storeId: 'store-a'}).state;
+    state = sessionStep(state, {type: 'subscribe-reply', token: 1, error: null}).state;
+    state = sessionStep(state, {
+      type: 'replacement-snapshot-reply',
+      token: 2,
+      storeId: 'store-a',
+      result: loaded(2),
+    }).state;
+    expect(state.view.status).toBe('connected');
+
+    const rejection = new Error('event stream crossed run identities');
+    state = sessionStep(state, {type: 'projection-rejected', error: rejection}).state;
+    state = sessionStep(state, {type: 'stream', state: {status: 'connected'}}).state;
+    expect(state.view).toMatchObject({status: 'stale', error: rejection});
+
+    state = sessionStep(state, {
+      type: 'stream',
+      state: {status: 'disconnected', error: new Error('socket closed')},
+    }).state;
+    state = sessionStep(state, {type: 'stream', state: {status: 'connected'}}).state;
+    expect(state.view).toMatchObject({status: 'stale', error: rejection});
+
+    state = sessionStep(state, {type: 'wake', reach: visible}).state;
+    const recovered = sessionStep(state, {
+      type: 'refresh-reply',
+      token: 3,
+      outcome: {kind: 'snapshot', result: loaded(3)},
+    });
+    expect(recovered.state.view).toMatchObject({status: 'connected', error: null});
   });
 
   test('a superseded fenced snapshot keeps recovery owned until a fresh store is established', () => {
