@@ -26,7 +26,7 @@ import {type AttachedRun, checkAttachment, observedDial} from './attachment.js';
 import {CONNECT_CHANNEL, WAKE_CHANNEL} from './bridge-protocol.js';
 import type {HostPool} from './host-pool.js';
 import {type HostId, type HostKey, hostFromKey, hostKey, hostLabel} from './host-settings.js';
-import {type InstanceRecord, versionSkewMessage} from './instances.js';
+import {type InstanceListing, instanceObservation, versionSkewMessage} from './instances.js';
 import type {LaunchPlan} from './launch-args.js';
 import {
   launchedRunId,
@@ -313,13 +313,14 @@ export class DesktopApp {
 
   /** The record of `instanceId` on `id`; a version mismatch is refused with its message. */
   async #compatibleRecord(id: HostId, instanceId: string) {
-    const records = await this.#deps.pool.records(id);
-    const record = records.find(candidate =>
-      candidate.kind === 'compatible'
-        ? candidate.instance.id === instanceId
-        : candidate.id === instanceId,
-    );
-    if (record === undefined) throw new Error(`no live run ${instanceId} on ${hostLabel(id)}`);
+    const listing = await this.#deps.pool.records(id);
+    const record = instanceObservation(listing, instanceId);
+    if (record.kind === 'unverified') {
+      throw new Error(`the host could not confirm whether run ${instanceId} is still running`);
+    }
+    if (record.kind === 'absent') {
+      throw new Error(`no live run ${instanceId} on ${hostLabel(id)}`);
+    }
     if (record.kind === 'incompatible') throw await this.#versionSkew(id, record);
     return record.instance;
   }
@@ -555,15 +556,16 @@ export class DesktopApp {
   async #recentStatus(id: HostId): Promise<Record<string, WelcomeRecentStatus>> {
     const pool = this.#deps.pool;
     const runs = (await pool.recent()).runs.filter(run => run.host === hostKey(id));
-    let records: InstanceRecord[] | {error: string};
+    const context = {hostName: hostLabel(id), vibesysCommand: await pool.command(id)};
+    let listing: InstanceListing | {error: string};
     try {
-      records = await pool.records(id);
+      listing = await pool.records(id);
     } catch (error) {
-      records = {error: (error as Error).message};
+      listing = {error: (error as Error).message};
     }
     const statuses: Record<string, WelcomeRecentStatus> = {};
-    for (const run of runs) statuses[run.instanceId] = recentStatus(run, records);
-    if (Array.isArray(records)) this.#observe(hostKey(id), records);
+    for (const run of runs) statuses[run.instanceId] = recentStatus(run, listing, context);
+    if (!('error' in listing)) this.#observe(hostKey(id), listing);
     return statuses;
   }
 
@@ -580,30 +582,27 @@ export class DesktopApp {
         projects: suggestProjects([], recent, hostKey(id)),
       };
     }
-    const records = await pool.records(id);
-    this.#observe(hostKey(id), records);
+    const listing = await pool.records(id);
+    this.#observe(hostKey(id), listing);
     return {
       ...named,
-      suggestedCheckout: suggestCheckout(records),
-      runs: await pool.runs(id, records),
-      projects: suggestProjects(records, recent, hostKey(id)),
+      suggestedCheckout: suggestCheckout(listing.records),
+      runs: await pool.runs(id, listing),
+      projects: suggestProjects(listing.records, recent, hostKey(id)),
     };
   }
 
   /** Tell the stop flows of `host` which runs its registry lists. */
-  #observe(host: HostKey, records: readonly InstanceRecord[]): void {
+  #observe(host: HostKey, listing: InstanceListing): void {
     const run = this.#run;
     if (run !== null && hostKey(run.hostId) === host) {
-      const runId = learnedRunId(run.runId, run.run.instanceId, records);
+      const runId = learnedRunId(run.runId, run.run.instanceId, listing.records);
       if (runId !== null && run.run.instanceId !== null) {
         run.runId = runId;
         void this.#remember(run.hostId, run.project, run.task, run.run.instanceId, runId);
         this.#sendChrome();
       }
     }
-    const ids = records.map(record =>
-      record.kind === 'compatible' ? record.instance.id : (record.id ?? ''),
-    );
-    this.#stops.observeRegistry(host, new Set(ids));
+    this.#stops.observeRegistry(host, listing);
   }
 }

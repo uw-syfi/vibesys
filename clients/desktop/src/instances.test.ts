@@ -14,6 +14,26 @@ import {fakeRecord} from './testing/fake-record.js';
 const ID = '0123456789ab';
 const SOCKET = '/run/user/1000/vibesys/runs/0123456789ab/control.sock';
 
+/** A small seeded generator (fast-check is not a dependency; see the testing skill). */
+function generator(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
+    return state / 2 ** 32;
+  };
+}
+
+function generatedInstanceId(random: () => number, valid: boolean): string {
+  const alphabet = valid ? '0123456789abcdef' : '0123456789abcdefABCDEFgh-';
+  const length = valid ? 12 : Math.floor(random() * 18);
+  let candidate = Array.from(
+    {length},
+    () => alphabet[Math.floor(random() * alphabet.length)] ?? '-',
+  ).join('');
+  if (!valid && /^[0-9a-f]{12}$/.test(candidate)) candidate = `${candidate.slice(0, 11)}G`;
+  return candidate;
+}
+
 describe('registry records', () => {
   test('a record of this protocol parses into the instance', () => {
     const record = parseInstanceRecord(fakeRecord(ID, SOCKET));
@@ -67,7 +87,7 @@ describe('registry records', () => {
   test('a malformed record of this protocol names the offending field', () => {
     const cases: [Record<string, unknown>, string][] = [
       [{extra: 1}, 'record.extra is not a known field'],
-      [{id: 'ZZ'}, 'record.id must be 12 hex digits'],
+      [{id: 'ZZ'}, 'record.id must be 12 lowercase hex digits'],
       [{status: 'gone'}, 'record.status'],
       [{pid: -1}, 'record.pid must be a positive integer'],
       [{socket_path: 3}, 'record.socket_path must be a string'],
@@ -77,14 +97,48 @@ describe('registry records', () => {
     }
     expect(() => parseInstanceList({version: 1, instances: {}})).toThrow(RecordError);
   });
+
+  test('unverified entries are authoritative instance ids and name their indexed error path', () => {
+    const valid = 'ba9876543210';
+    expect(parseInstanceList({version: 1, instances: [], unverified: [ID, valid]})).toEqual({
+      records: [],
+      unverified: [ID, valid],
+    });
+    for (const invalid of ['ABCDEF123456', '123', 'gggggggggggg', 12, null]) {
+      expect(() =>
+        parseInstanceList({version: 1, instances: [], unverified: [ID, invalid]}),
+      ).toThrow('listing.unverified[1] must be 12 lowercase hex digits');
+    }
+  });
+
+  test('every generated unverified value is accepted exactly when it is 12 lowercase hex digits', () => {
+    const random = generator(1_833);
+    for (let sample = 0; sample < 300; sample += 1) {
+      const valid = random() < 0.5;
+      const candidate = generatedInstanceId(random, valid);
+      const document = {version: 1, instances: [], unverified: [ID, candidate]};
+      if (valid) {
+        expect(parseInstanceList(document).unverified).toEqual([ID, candidate]);
+      } else {
+        expect(() => parseInstanceList(document)).toThrow('listing.unverified[1]');
+      }
+    }
+  });
 });
 
 describe('version gate', () => {
-  function attached(protocolVersion: number) {
+  function attached(
+    protocolVersion: number,
+    options: {readonly instances?: readonly object[]; readonly unverified?: readonly string[]} = {},
+  ) {
     const host = new FakeHost({
       command: () => ({
         code: 0,
-        stdout: JSON.stringify({version: 1, instances: [fakeRecord(ID, SOCKET, protocolVersion)]}),
+        stdout: JSON.stringify({
+          version: 1,
+          instances: options.instances ?? [fakeRecord(ID, SOCKET, protocolVersion)],
+          unverified: options.unverified ?? [],
+        }),
         stderr: '',
       }),
     });
@@ -115,6 +169,21 @@ describe('version gate', () => {
       ok: false,
       cause: 'run-gone',
     });
+  });
+
+  test('compatible evidence wins an overlap; otherwise unverified stays unknown', async () => {
+    expect(await checkAttachment(attached(PROTOCOL_VERSION, {unverified: [ID]}), false)).toEqual({
+      ok: true,
+    });
+    expect(
+      await checkAttachment(
+        attached(PROTOCOL_VERSION, {
+          instances: [fakeRecord(ID, SOCKET, PROTOCOL_VERSION + 1)],
+          unverified: [ID],
+        }),
+        false,
+      ),
+    ).toEqual({ok: false, cause: 'link', detail: `the host could not confirm run ${ID}`});
   });
 });
 

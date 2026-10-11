@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {parseInstanceRecord} from './instances.js';
+import {type InstanceListing, parseInstanceRecord} from './instances.js';
 import {
   EMPTY_RECENT,
   launchedRunId,
@@ -24,6 +24,10 @@ function generator(seed: number): () => number {
 const HOSTS = ['local', 'ssh:gpu-box', 'ssh:me@node-1'];
 const IDS = ['0123456789ab', 'ba9876543210', 'aaaaaaaaaaaa', 'bbbbbbbbbbbb'];
 const RUNS = [null, 'run-1', 'run-2'];
+const STATUS_CONTEXT = {
+  hostName: 'gpu-box',
+  vibesysCommand: 'uv run --project ~/src/vibesys vibesys',
+};
 
 function pick<T>(random: () => number, items: readonly T[]): T {
   return items[Math.floor(random() * items.length)] as T;
@@ -50,6 +54,13 @@ function run(overrides: Partial<RecentRun> = {}): RecentRun {
     attachedAt: 1,
     ...overrides,
   };
+}
+
+function listing(
+  records: InstanceListing['records'] = [],
+  unverified: InstanceListing['unverified'] = [],
+): InstanceListing {
+  return {records, unverified};
 }
 
 describe('remember', () => {
@@ -159,7 +170,7 @@ describe('recentStatus', () => {
     });
 
   test('live while its server is listed', () => {
-    expect(recentStatus(run(), [live('0123456789ab', null)])).toEqual({
+    expect(recentStatus(run(), listing([live('0123456789ab', null)]), STATUS_CONTEXT)).toEqual({
       kind: 'live',
       instanceId: '0123456789ab',
       status: 'serving',
@@ -167,20 +178,82 @@ describe('recentStatus', () => {
   });
 
   test('a resumed run is live on its new server', () => {
-    expect(recentStatus(run(), [live('ba9876543210', 'run-1')])).toMatchObject({
+    expect(
+      recentStatus(run(), listing([live('ba9876543210', 'run-1')]), STATUS_CONTEXT),
+    ).toMatchObject({
       kind: 'live',
       instanceId: 'ba9876543210',
     });
-    expect(recentStatus(run(), [live('ba9876543210', 'run-1', '/other')])).toEqual({
-      kind: 'ended',
-    });
+    expect(
+      recentStatus(run(), listing([live('ba9876543210', 'run-1', '/other')]), STATUS_CONTEXT),
+    ).toEqual({kind: 'ended'});
   });
 
   test('ended when no server drives it, unknown when the host could not say', () => {
-    expect(recentStatus(run(), [])).toEqual({kind: 'ended'});
-    expect(recentStatus(run(), {error: 'the connection to gpu-box is down'})).toEqual({
+    expect(recentStatus(run(), listing(), STATUS_CONTEXT)).toEqual({kind: 'ended'});
+    expect(
+      recentStatus(run(), {error: 'the connection to gpu-box is down'}, STATUS_CONTEXT),
+    ).toEqual({kind: 'unknown', detail: 'the connection to gpu-box is down'});
+  });
+
+  test('regression: an unverified registry entry stays unknown, never ended', () => {
+    expect(recentStatus(run(), listing([], ['0123456789ab']), STATUS_CONTEXT)).toEqual({
       kind: 'unknown',
-      detail: 'the connection to gpu-box is down',
+      detail: 'the host could not confirm whether this run is still running',
     });
+  });
+
+  test('regression: a matching incompatible server is unknown, not ended or resumable', () => {
+    const incompatible = parseInstanceRecord({...fakeRecord('0123456789ab', '/run/old', 2)});
+    const status = recentStatus(run(), listing([incompatible]), STATUS_CONTEXT);
+    expect(status.kind).toBe('unknown');
+    if (status.kind !== 'unknown') return;
+    expect(status.detail).toContain('gpu-box');
+    expect(status.detail).toContain(STATUS_CONTEXT.vibesysCommand);
+    expect(status.detail).toContain('protocol version 2');
+  });
+
+  test('a compatible match wins; only this run being unverified changes its status', () => {
+    const random = generator(1_833);
+    for (let sample = 0; sample < 300; sample += 1) {
+      const current = arbitraryRun(random, sample);
+      const otherIds = IDS.filter(id => id !== current.instanceId);
+      const unrelated = otherIds.filter(() => random() < 0.5);
+      const matchingRecord = live(current.instanceId, current.runId, current.project);
+      const incompatible = parseInstanceRecord({
+        ...fakeRecord(current.instanceId, '/run/incompatible', 2),
+      });
+      expect(
+        recentStatus(
+          current,
+          listing([incompatible, matchingRecord], [current.instanceId, ...unrelated]),
+          STATUS_CONTEXT,
+        ),
+      ).toMatchObject({
+        kind: 'live',
+        instanceId: current.instanceId,
+      });
+      const unverifiedStatus = recentStatus(
+        current,
+        listing([incompatible], [current.instanceId, ...unrelated]),
+        STATUS_CONTEXT,
+      );
+      expect(unverifiedStatus.kind).toBe('unknown');
+      if (unverifiedStatus.kind === 'unknown') {
+        expect(unverifiedStatus.detail).toContain('host could not confirm');
+      }
+      const incompatibleStatus = recentStatus(
+        current,
+        listing([incompatible], unrelated),
+        STATUS_CONTEXT,
+      );
+      expect(incompatibleStatus.kind).toBe('unknown');
+      if (incompatibleStatus.kind === 'unknown') {
+        expect(incompatibleStatus.detail).toContain('protocol version 2');
+      }
+      expect(recentStatus(current, listing([], unrelated), STATUS_CONTEXT)).toEqual({
+        kind: 'ended',
+      });
+    }
   });
 });

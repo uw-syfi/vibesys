@@ -23,6 +23,10 @@ function pool(
     readonly rootsError?: HostError;
     /** What `vibesys tasks` prints on stderr when it fails; it succeeds when absent. */
     readonly tasksStderr?: string;
+    readonly listing?: {
+      readonly instances: readonly object[];
+      readonly unverified: readonly string[];
+    };
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), 'vsd-pool-'));
@@ -58,9 +62,10 @@ function pool(
                   code: 0,
                   stdout: JSON.stringify({
                     version: 1,
-                    instances: [
+                    instances: options.listing?.instances ?? [
                       {...fakeRecord('0123456789ab', '/run/s', 1), vibesys_root: checkout},
                     ],
+                    unverified: options.listing?.unverified ?? [],
                   }),
                   stderr: '',
                 },
@@ -154,6 +159,47 @@ describe('HostPool', () => {
     );
     await listing.catch((error: Error) => expect(error.message).not.toContain('--json'));
     expect(logged.join('\n')).toContain('exited with 1');
+  });
+
+  test('regression: preserves unverified registry entries and blocks their lifecycle actions', async () => {
+    const id = 'ba9876543210';
+    const {hosts} = pool('', null, {listing: {instances: [], unverified: [id]}});
+    const listing = await hosts.records({kind: 'local'});
+    expect(listing).toEqual({records: [], unverified: [id]});
+    expect(await hosts.runs({kind: 'local'}, listing)).toEqual([
+      {
+        id,
+        projectRoot: '',
+        runId: null,
+        status: 'unverified',
+        startedAt: 0,
+        blocked: 'The host could not confirm whether this run is still running.',
+      },
+    ]);
+  });
+
+  test('compatible rows win overlaps; remaining unverified rows are unique and sorted', async () => {
+    const compatible = '0123456789ab';
+    const uncertainA = 'aaaaaaaaaaaa';
+    const uncertainB = 'ba9876543210';
+    const {hosts} = pool('', null, {
+      listing: {
+        instances: [
+          fakeRecord(compatible, '/run/compatible'),
+          fakeRecord(uncertainB, '/run/incompatible', 2),
+        ],
+        unverified: [uncertainB, uncertainA, compatible, uncertainB],
+      },
+    });
+    const listing = await hosts.records({kind: 'local'});
+    const rows = await hosts.runs({kind: 'local'}, listing);
+    expect(
+      rows.map(row => ({id: row.id, status: row.status, blocked: row.blocked !== null})),
+    ).toEqual([
+      {id: compatible, status: 'serving', blocked: false},
+      {id: uncertainA, status: 'unverified', blocked: true},
+      {id: uncertainB, status: 'unverified', blocked: true},
+    ]);
   });
 
   test('remembers attached runs, most recent first', async () => {

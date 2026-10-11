@@ -92,7 +92,7 @@ export interface WelcomeRun {
   readonly runId: string | null;
   readonly status: string;
   readonly startedAt: number;
-  /** Null when the app can attach; otherwise why not (a version mismatch). */
+  /** Null when the app can attach; otherwise why lifecycle actions are unsafe. */
   readonly blocked: string | null;
 }
 
@@ -104,7 +104,7 @@ export interface WelcomeHost {
   readonly checkout: string | null;
   /** A checkout to pre-fill, from the host's live records; null when none says. */
   readonly suggestedCheckout: string | null;
-  /** The live runs; empty until a checkout is set. */
+  /** The registry's live and unverified run entries; empty until a checkout is set. */
   readonly runs: readonly WelcomeRun[];
   /** Project directories to offer when starting a run. */
   readonly projects: readonly string[];

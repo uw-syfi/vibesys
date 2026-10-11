@@ -43,6 +43,30 @@ export interface InstanceListing {
   readonly unverified: readonly string[];
 }
 
+/** What the registry established about one id, in decreasing order of authority. */
+export type InstanceObservation =
+  | InstanceRecord
+  | {readonly kind: 'unverified'}
+  | {readonly kind: 'absent'};
+
+/**
+ * The registry's observation for `id`. A compatible record is authoritative even when an
+ * overlapping listing also calls the id unverified. Without one, unverified wins over an incompatible record:
+ * neither the incompatible record nor its absence proves that the run ended.
+ */
+export function instanceObservation(listing: InstanceListing, id: string): InstanceObservation {
+  const compatible = listing.records.find(
+    record => record.kind === 'compatible' && record.instance.id === id,
+  );
+  if (compatible !== undefined) return compatible;
+  if (listing.unverified.includes(id)) return {kind: 'unverified'};
+  return (
+    listing.records.find(record => record.kind === 'incompatible' && record.id === id) ?? {
+      kind: 'absent',
+    }
+  );
+}
+
 export class RecordError extends Error {
   override name = 'RecordError';
 }
@@ -78,8 +102,7 @@ export function parseInstanceRecord(value: unknown, path = 'record'): InstanceRe
   }
   onlyKeys(record, RECORD_KEYS, path);
   if (record['version'] !== 1) throw new RecordError(`${path}.version must be 1`);
-  const id = string(record, 'id', path);
-  if (!INSTANCE_ID.test(id)) throw new RecordError(`${path}.id must be 12 hex digits`);
+  const id = instanceId(record['id'], `${path}.id`);
   const status = record['status'];
   if (status !== 'starting' && status !== 'serving') {
     throw new RecordError(`${path}.status must be "starting" or "serving"`);
@@ -119,14 +142,12 @@ export function parseInstanceList(value: unknown): InstanceListing {
   const instances = listing['instances'];
   if (!Array.isArray(instances)) throw new RecordError('listing.instances must be a list');
   const unverified = listing['unverified'] ?? [];
-  if (!Array.isArray(unverified) || !unverified.every(id => typeof id === 'string')) {
-    throw new RecordError('listing.unverified must be a list of ids');
-  }
+  if (!Array.isArray(unverified)) throw new RecordError('listing.unverified must be a list of ids');
   return {
     records: instances.map((record, index) =>
       parseInstanceRecord(record, `listing.instances[${index}]`),
     ),
-    unverified,
+    unverified: unverified.map((id, index) => instanceId(id, `listing.unverified[${index}]`)),
   };
 }
 
@@ -267,6 +288,13 @@ function nullableString(record: Record<string, unknown>, key: string, path: stri
 function string(record: Record<string, unknown>, key: string, path: string): string {
   const value = record[key];
   if (typeof value !== 'string') throw new RecordError(`${path}.${key} must be a string`);
+  return value;
+}
+
+function instanceId(value: unknown, path: string): string {
+  if (typeof value !== 'string' || !INSTANCE_ID.test(value)) {
+    throw new RecordError(`${path} must be 12 lowercase hex digits`);
+  }
   return value;
 }
 

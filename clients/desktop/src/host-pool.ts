@@ -20,7 +20,7 @@ import {
   withHostSettings,
 } from './host-settings.js';
 import {
-  type InstanceRecord,
+  type InstanceListing,
   parseInstanceList,
   type StopResult,
   versionSkewMessage,
@@ -165,39 +165,61 @@ export class HostPool {
     }
   }
 
-  /** The live records on `id`. */
-  async records(id: HostId): Promise<InstanceRecord[]> {
+  /** The registry's complete observation on `id`, including entries it could not verify. */
+  async records(id: HostId): Promise<InstanceListing> {
     const host = await this.host(id);
-    return [...parseInstanceList(await host.invoke(['instances', 'list', '--json'])).records];
+    return parseInstanceList(await host.invoke(['instances', 'list', '--json']));
   }
 
-  /** The detached runs live on `id`, as the welcome view lists them. */
-  async runs(id: HostId, records: readonly InstanceRecord[]): Promise<WelcomeRun[]> {
+  /** The detached registry entries on `id`, as the welcome view lists them. */
+  async runs(id: HostId, listing: InstanceListing): Promise<WelcomeRun[]> {
     const command = await this.command(id);
-    return records.map(record =>
-      record.kind === 'compatible'
-        ? {
-            id: record.instance.id,
-            projectRoot: record.instance.projectRoot,
-            runId: record.instance.runId,
-            status: record.instance.status,
-            startedAt: record.instance.startedAt,
-            blocked: null,
-          }
-        : {
-            id: record.id ?? 'unknown',
-            projectRoot: '',
-            runId: null,
-            status: 'incompatible',
-            startedAt: 0,
-            blocked: versionSkewMessage({
-              hostName: hostLabel(id),
-              vibesysCommand: command,
-              protocolVersion: record.protocolVersion,
-              vibesysVersion: record.vibesysVersion,
-            }),
-          },
+    const compatibleIds = new Set(
+      listing.records.flatMap(record => (record.kind === 'compatible' ? [record.instance.id] : [])),
     );
+    const unverifiedIds = new Set(
+      listing.unverified.filter(instanceId => !compatibleIds.has(instanceId)),
+    );
+    const records = listing.records
+      .filter(
+        record =>
+          record.kind === 'compatible' ||
+          record.id === null ||
+          (!compatibleIds.has(record.id) && !unverifiedIds.has(record.id)),
+      )
+      .map(record =>
+        record.kind === 'compatible'
+          ? {
+              id: record.instance.id,
+              projectRoot: record.instance.projectRoot,
+              runId: record.instance.runId,
+              status: record.instance.status,
+              startedAt: record.instance.startedAt,
+              blocked: null,
+            }
+          : {
+              id: record.id ?? 'unknown',
+              projectRoot: '',
+              runId: null,
+              status: 'incompatible',
+              startedAt: 0,
+              blocked: versionSkewMessage({
+                hostName: hostLabel(id),
+                vibesysCommand: command,
+                protocolVersion: record.protocolVersion,
+                vibesysVersion: record.vibesysVersion,
+              }),
+            },
+      );
+    const unverified = [...unverifiedIds].sort().map(id => ({
+      id,
+      projectRoot: '',
+      runId: null,
+      status: 'unverified',
+      startedAt: 0,
+      blocked: 'The host could not confirm whether this run is still running.',
+    }));
+    return [...records, ...unverified];
   }
 
   /** Ask `instanceId` on `id` to stop; `force` adds `--force`. */
