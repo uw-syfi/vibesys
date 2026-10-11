@@ -1,6 +1,6 @@
 import {writeFile} from 'node:fs/promises';
 import {createCliRenderer} from '@opentui/core';
-import {ServerClient} from '@vibesys/backend-client/node';
+import {ServerClient} from '@vibesys/transport-node';
 import {resolveStartupTrace} from './boot-trace.js';
 import {runTuiSession} from './runtime.js';
 import {SocketSessionController} from './session-controller.js';

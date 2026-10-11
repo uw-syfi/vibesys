@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import type {ScheduleTimeout} from '@vibesys/backend-client';
+import type {ScheduleTimeout} from '@vibesys/transport';
 import {bootstrapGateway, type Fetch} from './backend.js';
 
 const CAPABILITY = 'http://127.0.0.1:8765/?token=secret';

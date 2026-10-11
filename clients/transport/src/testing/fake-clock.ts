@@ -9,7 +9,7 @@ interface ScheduledEntry {
 
 /**
  * The one deterministic timer Fake for every client package, exported through
- * `@vibesys/backend-client/testing`.
+ * `@vibesys/transport/testing`.
  *
  * It behaves like `setTimeout` over a virtual `now()`: a timer is due at the
  * time it was scheduled plus its delay, and timers fire earliest-due first,

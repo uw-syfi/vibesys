@@ -1,11 +1,19 @@
 /**
  * The run page's one path to the backend. It is the only module of `clients/web` that imports
- * backend-client's runtime values or calls `fetch` (`clients/.dependency-cruiser.mjs` and
+ * @vibesys/transport's runtime values or calls `fetch` (`clients/.dependency-cruiser.mjs` and
  * `clients/lint-rules/web-fetch-only-in-backend.grit` hold it to that): the control transport
  * (a WebSocket, or the desktop shell's bridge shaped as one), the run's event stream and snapshot
  * over it, the gateway's capability exchange, and the replay fixture. It is also the entry of the
  * browser transport bundle that `check:web-browser-bundle` keeps free of Node builtins.
  */
+
+import {
+  type EventBatchMessage,
+  type RunEvent,
+  type RunSnapshot,
+  ServerError,
+  validateRunEvent,
+} from '@vibesys/contracts';
 import {
   type BatchReconciliation,
   type ControlChannelState,
@@ -16,15 +24,8 @@ import {
   type StreamConnectionState,
   StreamReconciler,
   sameControlChannelState,
-} from '@vibesys/backend-client';
-import {type WebSocketLike, WebSocketTransport} from '@vibesys/backend-client/websocket';
-import {
-  type EventBatchMessage,
-  type RunEvent,
-  type RunSnapshot,
-  ServerError,
-  validateRunEvent,
-} from '@vibesys/contracts';
+} from '@vibesys/transport';
+import {type WebSocketLike, WebSocketTransport} from '@vibesys/transport/websocket';
 
 export type {ControlTransport, WebSocketLike};
 

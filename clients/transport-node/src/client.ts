@@ -9,17 +9,21 @@ import {
   streamFailure,
 } from '@vibesys/contracts';
 import {
+  type AbortSignalLike,
+  abortReason,
   ControlChannel,
   type ControlChannelState,
   type ControlConnection,
   type ControlConnectionHandlers,
   defaultScheduleTimeout,
+  type EventSubscription,
   type IssuedRequest,
+  NewlineFramer,
+  type RequestOptions,
   type ScheduleTimeout,
-} from '../control-channel.js';
-import {NewlineFramer} from '../newline-framer.js';
-import {type AbortSignalLike, abortReason, type RequestOptions} from '../request-policy.js';
-import {type EventSubscription, type SubscribeOptions, subscribeRequest} from '../transport.js';
+  type SubscribeOptions,
+  subscribeRequest,
+} from '@vibesys/transport';
 
 export interface ServerClientOptions {
   /** Stable frontend identity reflected by server acknowledgements. */

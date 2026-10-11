@@ -1,2 +1,1 @@
-/** The @vibesys/transport-node entry (node). */
-export const transportNode = 'transport-node';
+export {type ClientClock, ServerClient, type ServerClientOptions} from './client.js';

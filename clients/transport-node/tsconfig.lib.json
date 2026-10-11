@@ -12,11 +12,18 @@
     "tsBuildInfoFile": "dist/.lib.tsbuildinfo"
   },
   "include": [
-    "src/**/*.ts",
-    "src/**/*.tsx"
+    "src/**/*.ts"
   ],
   "exclude": [
     "src/**/*.test.ts",
-    "src/**/*.test.tsx"
+    "src/test-support/**"
+  ],
+  "references": [
+    {
+      "path": "../contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../transport/tsconfig.lib.json"
+    }
   ]
 }

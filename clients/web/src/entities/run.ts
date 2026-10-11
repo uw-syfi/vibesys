@@ -2,7 +2,7 @@
  * The run fold: the run's `CoreState`, advanced by core-state's reducers. A snapshot, a batch the
  * stream reconciler placed, or a replayed run's events each fold in one step that asks for no I/O.
  */
-import type {BatchReconciliation} from '@vibesys/backend-client';
+
 import type {EventBatchMessage, RunEvent, RunSnapshot} from '@vibesys/contracts';
 import {
   type CoreState,
@@ -12,6 +12,7 @@ import {
   reduceSnapshot,
   type Step,
 } from '@vibesys/core-state';
+import type {BatchReconciliation} from '@vibesys/transport';
 
 export type RunAction =
   /** A replayed run's events, in order. */

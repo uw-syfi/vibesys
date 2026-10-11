@@ -10,11 +10,20 @@
   },
   "include": [
     "src/**/*.test.ts",
-    "src/**/*.test.tsx"
+    "src/test-support/**/*.ts"
   ],
   "references": [
     {
       "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "../contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../transport/tsconfig.lib.json"
+    },
+    {
+      "path": "../transport/tsconfig.testing.json"
     }
   ]
 }

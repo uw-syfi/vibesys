@@ -38,10 +38,9 @@ const FORBIDDEN = {
   websocket: "export const open = () => new WebSocket('ws://x');\n",
   timeout: 'export const later = () => setTimeout(() => {}, 1);\n',
   interval: 'export const every = () => setInterval(() => {}, 1);\n',
-  'backend-client import':
-    "import {createClient} from '@vibesys/backend-client';\nexport {createClient};\n",
-  'backend-client subpath import':
-    "import type {Foo} from '@vibesys/backend-client/generated';\nexport type {Foo};\n",
+  'transport import': "import {createClient} from '@vibesys/transport';\nexport {createClient};\n",
+  'transport-node import':
+    "import type {Foo} from '@vibesys/transport-node';\nexport type {Foo};\n",
   'namespace import': "import * as fs from 'node:fs';\nexport {fs};\n",
   'side-effect import': "import 'node:os';\n",
   'electron import': "import {ipcRenderer} from 'electron';\nexport {ipcRenderer};\n",

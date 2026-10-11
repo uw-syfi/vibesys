@@ -10,11 +10,17 @@
     "tsBuildInfoFile": "dist/.lib.tsbuildinfo"
   },
   "include": [
-    "src/**/*.ts",
-    "src/**/*.tsx"
+    "src/**/*.ts"
   ],
   "exclude": [
     "src/**/*.test.ts",
-    "src/**/*.test.tsx"
+    "src/testing/**",
+    "src/test-support/**",
+    "src/websocket.ts"
+  ],
+  "references": [
+    {
+      "path": "../contracts/tsconfig.lib.json"
+    }
   ]
 }

@@ -1,12 +1,5 @@
 import {describe, expect, test} from 'bun:test';
 import {
-  type ControlChannelState,
-  type ControlTransport,
-  type SubscribeOptions,
-  sameControlChannelState,
-} from '@vibesys/backend-client';
-import {FakeClock} from '@vibesys/backend-client/testing';
-import {
   BackendClientError,
   type ProtocolResponse,
   type RequestInput,
@@ -15,6 +8,13 @@ import {
   type ServerMessage,
 } from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
+import {
+  type ControlChannelState,
+  type ControlTransport,
+  type SubscribeOptions,
+  sameControlChannelState,
+} from '@vibesys/transport';
+import {FakeClock} from '@vibesys/transport/testing';
 import {connectRun, type TransportHooks, type TransportTiming} from '../../../platform/backend.js';
 import type {BrowserLifecycle} from '../../../platform/lifecycle.js';
 import {connectionBanners, STREAM_BANNER_COPY} from '../state/banners.js';

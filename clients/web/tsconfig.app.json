@@ -14,7 +14,8 @@
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/shared/testing/**"],
   "references": [
     {"path": "../contracts/tsconfig.lib.json"},
-    {"path": "../backend-client/tsconfig.lib.json"},
+    {"path": "../transport/tsconfig.lib.json"},
+    {"path": "../transport/tsconfig.websocket.json"},
     {"path": "../core-state/tsconfig.lib.json"}
   ]
 }

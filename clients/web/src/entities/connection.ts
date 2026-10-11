@@ -1,5 +1,5 @@
 /** What a live page knows about its connection to the server: a value, no I/O. */
-import type {ControlChannelState} from '@vibesys/backend-client';
+import type {ControlChannelState} from '@vibesys/transport';
 
 export type WebSessionStatus = 'connecting' | 'connected' | 'stale';
 

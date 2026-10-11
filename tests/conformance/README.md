@@ -6,7 +6,7 @@ socket and a WebSocket gateway (#811). Both must reproduce the framing and conne
 written down in [`docs/contributing/wire-protocol.md`](../../docs/contributing/wire-protocol.md).
 This corpus is the fixtures that hold them to it.
 
-There is exactly one copy. The client-side fold suite (`@vibesys/backend-client`, #812) and the
+There is exactly one copy. The client-side fold suite (`@vibesys/transport`, #812) and the
 server-side scenario suite (`src/server`, #811) both read the files here. Neither keeps a private
 copy, so a fixture change moves both suites at once.
 

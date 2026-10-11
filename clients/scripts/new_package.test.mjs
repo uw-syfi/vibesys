@@ -70,14 +70,48 @@ test('every scaffolded package type-checks and passes its own tests', t => {
   }
 });
 
-test('a renderer entry of a scaffolded feature rejects a Node import at compile time', t => {
-  const root = fixtureWorkspace(t);
-  const directory = join(root, createPackage(root, ['feature', 'stop-run']));
-  writeFileSync(join(directory, 'src/renderer/fs.ts'), "export {readFileSync} from 'node:fs';\n");
-  const check = spawnSync(process.execPath, [TSC, '-b'], {cwd: directory, encoding: 'utf8'});
-  assert.notEqual(check.status, 0);
-  assert.match(check.stdout, /src\/renderer\/fs\.ts.*TS2307/);
-});
+// Each case writes one module the entry's runtime does not provide and expects `tsc -b` to name it.
+const CAPABILITY_VIOLATIONS = [
+  {
+    name: 'a renderer (dom) entry rejects a Node import',
+    argv: ['feature', 'stop-run'],
+    file: 'src/renderer/leak.ts',
+    source: "export {readFileSync} from 'node:fs';\n",
+    error: 'TS2307',
+  },
+  {
+    name: 'a neutral entry rejects a Node import',
+    argv: ['core', 'core-thing'],
+    file: 'src/leak.ts',
+    source: "export {readFileSync} from 'node:fs';\n",
+    error: 'TS2307',
+  },
+  {
+    name: 'a neutral entry rejects a Node global',
+    argv: ['core', 'core-thing'],
+    file: 'src/leak.ts',
+    source: 'export const pid = process.pid;\n',
+    error: 'TS2591',
+  },
+  {
+    name: 'a neutral entry rejects a DOM global',
+    argv: ['core', 'core-thing'],
+    file: 'src/leak.ts',
+    source: 'export const title = document.title;\n',
+    error: 'TS2584',
+  },
+];
+
+for (const {name, argv, file, source, error} of CAPABILITY_VIOLATIONS) {
+  test(`${name} at compile time`, t => {
+    const root = fixtureWorkspace(t);
+    const directory = join(root, createPackage(root, argv));
+    writeFileSync(join(directory, file), source);
+    const check = spawnSync(process.execPath, [TSC, '-b'], {cwd: directory, encoding: 'utf8'});
+    assert.notEqual(check.status, 0);
+    assert.match(check.stdout, new RegExp(`${file.replace(/[./]/g, '\\$&')}.*${error}`));
+  });
+}
 
 const REFUSALS = {
   'an unknown layer': ['widgets', 'thing'],

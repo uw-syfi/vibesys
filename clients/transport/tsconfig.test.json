@@ -2,18 +2,31 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "types": [
-      "bun"
+      "bun",
+      "node"
     ],
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
   },
   "include": [
     "src/**/*.test.ts",
-    "src/**/*.test.tsx"
+    "src/test-support/**/*.ts"
   ],
   "references": [
     {
       "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.testing.json"
+    },
+    {
+      "path": "./tsconfig.websocket.json"
+    },
+    {
+      "path": "../contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../contracts/tsconfig.testing.json"
     }
   ]
 }

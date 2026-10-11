@@ -1,12 +1,4 @@
 import {
-  DEFAULT_RECONNECT_DELAYS_MS,
-  PersistentEventStream,
-  type ScheduleTimeout,
-  type ServerTransport,
-  type StreamConnectionState,
-  StreamReconciler,
-} from '@vibesys/backend-client';
-import {
   type ExperimentCursor,
   type ProtocolResponse,
   type RequestInput,
@@ -20,6 +12,14 @@ import {
   projectPerformance,
   recordsBenchmark,
 } from '@vibesys/core-state';
+import {
+  DEFAULT_RECONNECT_DELAYS_MS,
+  PersistentEventStream,
+  type ScheduleTimeout,
+  type ServerTransport,
+  type StreamConnectionState,
+  StreamReconciler,
+} from '@vibesys/transport';
 import type {StartupTrace} from './boot-trace.js';
 import {
   chatMenuCustomModel,
