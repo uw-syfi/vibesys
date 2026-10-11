@@ -12,6 +12,7 @@ import {
   suggestProjects,
 } from '@vibesys/entities';
 import type {ChromeState} from '@vibesys/ipc';
+import {Button} from '@vibesys/ui';
 import type {FormEvent, JSX, KeyboardEvent, ReactNode} from 'react';
 import type {CompletionState} from '../state/completion.js';
 import {type CheckoutForm, type HostAction, type HostState, hostLabelOf} from '../state/host.js';
@@ -33,13 +34,12 @@ function RunRow(props: {
       <td>{run.reason === null ? run.status : `${run.status}: ${run.reason}`}</td>
       <td>{run.startedAt === 0 ? '' : new Date(run.startedAt * 1000).toLocaleString()}</td>
       <td className="actions-cell">
-        <button
-          type="button"
-          className="primary"
+        <Button
+          variant="primary"
           onClick={() => dispatch({kind: 'attach', host, instance: run.id})}
         >
           Attach
-        </button>
+        </Button>
         <StopControls
           view={chrome.stops[stopKey(host, run.id)]}
           stop={force => dispatch({kind: 'stop', host, instance: run.id, force})}
@@ -103,13 +103,9 @@ function Unavailable(props: {
       return (
         <>
           <p className="error">{connection.detail}</p>
-          <button
-            type="button"
-            className="primary"
-            onClick={() => props.send.host({type: 'sign-in'})}
-          >
+          <Button variant="primary" onClick={() => props.send.host({type: 'sign-in'})}>
             Sign in
-          </button>
+          </Button>
         </>
       );
     case 'offline':
@@ -165,13 +161,11 @@ function CheckoutQuestion(props: {
           change={value => host({type: 'checkout-input', value})}
           placeholder="/home/me/src/vibesys"
         />
-        <button type="submit" className="primary" disabled={form.checking !== null}>
+        <Button type="submit" variant="primary" disabled={form.checking !== null}>
           Check and save
-        </button>
+        </Button>
         {form.cancellable ? (
-          <button type="button" onClick={() => host({type: 'cancel-checkout'})}>
-            Cancel
-          </button>
+          <Button onClick={() => host({type: 'cancel-checkout'})}>Cancel</Button>
         ) : null}
       </div>
       <p className={form.error === null ? 'status' : 'status error'}>{formStatus(form, data)}</p>
@@ -198,9 +192,9 @@ function Ready(props: {
         <div className="row">
           <span className="muted">VibeSys checkout:</span>
           <code>{data.checkout}</code>
-          <button type="button" className="link" onClick={() => host({type: 'edit-checkout'})}>
+          <Button variant="link" onClick={() => host({type: 'edit-checkout'})}>
             Change
-          </button>
+          </Button>
         </div>
       ) : (
         <CheckoutQuestion
@@ -216,9 +210,8 @@ function Ready(props: {
         <>
           <RunTable data={data} listing={listing} chrome={chrome} send={send} />
           <div className="row">
-            <button
-              type="button"
-              className="primary"
+            <Button
+              variant="primary"
               onClick={() =>
                 send.start({
                   type: 'open',
@@ -228,7 +221,7 @@ function Ready(props: {
               }
             >
               Start a run…
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -254,9 +247,9 @@ function SignIn(props: {
   return (
     <>
       {note}
-      <button type="button" className="primary" onClick={() => props.host({type: 'sign-in'})}>
+      <Button variant="primary" onClick={() => props.host({type: 'sign-in'})}>
         Sign in to {label}
-      </button>
+      </Button>
     </>
   );
 }
@@ -282,9 +275,7 @@ export function HostPanel(props: {
         {panel.authNeeded ? (
           signIn
         ) : (
-          <button type="button" onClick={() => send.host({type: 'reload'})}>
-            Try again
-          </button>
+          <Button onClick={() => send.host({type: 'reload'})}>Try again</Button>
         )}
       </>
     );
@@ -305,13 +296,9 @@ export function HostPanel(props: {
       <h2>
         {label}
         {state.host === 'local' ? null : (
-          <button
-            type="button"
-            className="link"
-            onClick={() => send.host({type: 'show', host: 'local'})}
-          >
+          <Button variant="link" onClick={() => send.host({type: 'show', host: 'local'})}>
             Back to This Mac
-          </button>
+          </Button>
         )}
       </h2>
       {body}

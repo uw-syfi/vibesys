@@ -11,7 +11,7 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.cts"],
-  "exclude": ["src/**/*.test.ts", "src/**/testing/**", "src/renderer/welcome/**"],
+  "exclude": ["src/**/*.test.ts", "src/**/testing/**", "src/renderer/welcome/**", "src/renderer/index.ts"],
   "references": [
     {"path": "../transport/tsconfig.lib.json"},
     {"path": "../contracts/tsconfig.lib.json"},

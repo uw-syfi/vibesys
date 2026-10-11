@@ -1,4 +1,6 @@
 /** The replay page's "Live gateway URL" form. Presentational: the form's store drives it. */
+
+import {Button} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {GatewayConnectAction, GatewayConnectState} from '../state/gateway-connect.js';
 
@@ -39,8 +41,7 @@ export function GatewayForm({
           spellCheck={false}
         />
         {connecting ? (
-          <button
-            type="button"
+          <Button
             onClick={event => {
               // This button becomes the form's submit button during the same click. Prevent the
               // browser's post-handler default action from submitting the newly rendered Retry.
@@ -49,11 +50,11 @@ export function GatewayForm({
             }}
           >
             Cancel
-          </button>
+          </Button>
         ) : (
-          <button type="submit" disabled={connected}>
+          <Button type="submit" disabled={connected}>
             {connected ? 'Connected' : canRetry ? 'Retry' : 'Connect'}
-          </button>
+          </Button>
         )}
       </div>
       <p

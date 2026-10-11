@@ -1,3 +1,4 @@
+import {Button} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {ConnectionBanners} from '../state/banners.js';
 
@@ -45,11 +46,7 @@ export function Banners({
           data-testid="stream-banner"
         >
           <span>{banners.stream.message}</span>
-          {banners.stream.reattach && (
-            <button type="button" onClick={onReattach}>
-              Reattach
-            </button>
-          )}
+          {banners.stream.reattach && <Button onClick={onReattach}>Reattach</Button>}
         </div>
       )}
       {banners.controls !== null && (
@@ -65,9 +62,9 @@ export function Banners({
             enabled button would swallow clicks for the whole connect-timeout window and change
             nothing on screen. Hiding it instead would make the affordance flicker in and out.
           */}
-          <button type="button" disabled={banners.controls.retrying} onClick={onReconnectControls}>
+          <Button disabled={banners.controls.retrying} onClick={onReconnectControls}>
             {banners.controls.retrying ? 'Reconnecting…' : 'Reconnect now'}
-          </button>
+          </Button>
         </div>
       )}
       {replayFailure !== null && (
@@ -78,9 +75,7 @@ export function Banners({
           data-testid="replay-banner"
         >
           <span>Replay failed to load: {replayFailure}</span>
-          <button type="button" onClick={onRetryReplay}>
-            Retry
-          </button>
+          <Button onClick={onRetryReplay}>Retry</Button>
         </div>
       )}
     </>

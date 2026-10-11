@@ -2,6 +2,7 @@
 
 import {type RecentRun, type RecentStatus, resumeDecision, stopKey} from '@vibesys/entities';
 import type {ChromeState} from '@vibesys/ipc';
+import {Button} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {type ListsState, statusOf} from '../state/lists.js';
 import {commands, StopControls, type WelcomeSenders} from './common.js';
@@ -32,13 +33,12 @@ function RowActions(props: {
       const instance = status.instanceId;
       return (
         <>
-          <button
-            type="button"
-            className="primary"
+          <Button
+            variant="primary"
             onClick={() => dispatch({kind: 'attach', host: run.host, instance})}
           >
             Reattach
-          </button>
+          </Button>
           <StopControls
             view={chrome.stops[stopKey(run.host, instance)]}
             stop={force => dispatch({kind: 'stop', host: run.host, instance, force})}
@@ -50,18 +50,10 @@ function RowActions(props: {
       const decision = resumeDecision(run.runId);
       if (decision.kind === 'unavailable') return <span className="muted">{decision.reason}</span>;
       const resume = {host: run.host, project: run.project, run: decision.runId};
-      return (
-        <button type="button" onClick={() => dispatch({kind: 'resume', ...resume})}>
-          Resume…
-        </button>
-      );
+      return <Button onClick={() => dispatch({kind: 'resume', ...resume})}>Resume…</Button>;
     }
     case 'unknown':
-      return (
-        <button type="button" onClick={() => send.host({type: 'show', host: run.host})}>
-          Open host
-        </button>
-      );
+      return <Button onClick={() => send.host({type: 'show', host: run.host})}>Open host</Button>;
   }
 }
 

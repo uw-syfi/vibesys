@@ -12,6 +12,10 @@
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/welcome.tsbuildinfo"
   },
-  "include": ["src/renderer/welcome/**/*.ts", "src/renderer/welcome/**/*.tsx"],
+  "include": [
+    "src/renderer/index.ts",
+    "src/renderer/welcome/**/*.ts",
+    "src/renderer/welcome/**/*.tsx"
+  ],
   "exclude": ["src/renderer/welcome/**/*.test.ts"]
 }

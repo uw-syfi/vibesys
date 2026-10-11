@@ -4,6 +4,7 @@ import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 import test from 'node:test';
 import {
+  domainWords,
   owningEntry,
   packageGraphErrors,
   RULES,
@@ -59,12 +60,17 @@ function validWorkspace() {
     ui: {
       manifest: {
         name: '@vibesys/ui',
-        vibesys: {layer: 'foundation', entries: {'.': 'dom'}},
-        exports: {'.': source('index')},
+        vibesys: {layer: 'foundation', entries: {'.': 'dom', './tokens.css': 'dom'}},
+        exports: {
+          '.': source('index'),
+          './tokens.css': {'@vibesys/source': './src/tokens.css', default: './src/tokens.css'},
+        },
         dependencies: {react: '19.1.1'},
       },
       files: {
         'src/index.ts': "import 'react';\nexport const button = 1;\n",
+        'src/index.test.ts': "test('a button for any run', () => {});\n",
+        'src/tokens.css': ':root { --accent: blue; }\n',
         'tsconfig.lib.json': project({lib: ['ES2022', 'DOM'], include: ['src']}),
       },
     },
@@ -218,6 +224,10 @@ const RULE_CASES = {
   'references-match-dependencies': workspace => {
     workspace.connection.files['tsconfig.lib.json'].references = [];
   },
+  'domain-free': workspace => {
+    workspace.ui.files['src/index.ts'] += 'export const runStatus = 2;\n';
+    workspace.ui.files['src/tokens.css'] += '.host-row { color: red; }\n';
+  },
 };
 
 test('every package-graph rule has a failing fixture', () => {
@@ -315,4 +325,23 @@ test('a file belongs to its exact entry, else the deepest index directory', () =
   assert.equal(owningEntry(entries, 'src/node/client.ts').subpath, './node');
   assert.equal(owningEntry(entries, 'src/websocket.ts').subpath, './websocket');
   assert.equal(owningEntry(entries, 'src/framer.ts').subpath, '.');
+});
+
+test('domain words are matched per word, across case changes and plurals', () => {
+  assert.deepEqual(domainWords('const runStatus = hostKeys; // starting tasks'), [
+    'run',
+    'host',
+    'task',
+  ]);
+  assert.deepEqual(domainWords('const trunk = ghost; brunch; Dialog; tokens'), []);
+});
+
+test('a stylesheet entry is a dom asset with no project', async t => {
+  const workspace = validWorkspace();
+  workspace.ui.manifest.vibesys.entries['./tokens.css'] = 'neutral';
+  const errors = packageGraphErrors(await materialize(t, workspace));
+  assert.deepEqual(
+    errors.map(error => error.split(':')[0]),
+    ['entry-capability'],
+  );
 });

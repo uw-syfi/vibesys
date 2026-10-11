@@ -1,11 +1,12 @@
 /**
- * What the welcome view's presentational components share: where their events go, and the modal
- * sheet. Components render the state they are given and report events; they perform no I/O and
+ * What the welcome view's presentational components share: where their events go, the stop
+ * controls, and the path field. Components render the state they are given and report events; they perform no I/O and
  * hold no state that changes behavior.
  */
 
 import type {HostKey, StopView} from '@vibesys/entities';
-import type {InputHTMLAttributes, JSX, MouseEvent, ReactNode, SyntheticEvent} from 'react';
+import {Button, Combobox} from '@vibesys/ui';
+import type {InputHTMLAttributes, JSX} from 'react';
 import {
   type CompletionAction,
   type CompletionField,
@@ -33,57 +34,6 @@ export function commands(send: WelcomeSenders): Dispatch {
   return command => send.welcome({type: 'command', command});
 }
 
-/** Make `dialog`'s native open state match `open`. */
-function syncDialog(dialog: HTMLDialogElement, open: boolean): void {
-  if (open && !dialog.open) dialog.showModal();
-  if (!open && dialog.open) dialog.close();
-}
-
-/**
- * A modal `<dialog>` shown while `open`. `showModal()` gives focus containment, an inert page
- * behind, Esc (the `cancel` event), and focus back to the opener on close. Esc and a press on the
- * backdrop ask to `close`; the store decides whether the sheet closes.
- *
- * The ref callback is a new function on every render, so React calls it after every commit: the
- * dialog follows the store without an effect hook. A dialog the browser closed on its own
- * (Chromium closes it on a second Esc with no user activation in between) opens again while the
- * store still holds the sheet open.
- */
-export function Sheet(props: {
-  readonly open: boolean;
-  readonly label: string;
-  readonly close: () => void;
-  readonly children: ReactNode;
-}): JSX.Element {
-  const follow = (dialog: HTMLDialogElement | null): void => {
-    if (dialog !== null) syncDialog(dialog, props.open);
-  };
-  const onCancel = (event: SyntheticEvent<HTMLDialogElement>): void => {
-    event.preventDefault();
-    props.close();
-  };
-  const onClose = (event: SyntheticEvent<HTMLDialogElement>): void => {
-    if (!props.open) return;
-    props.close();
-    syncDialog(event.currentTarget, true);
-  };
-  const onMouseDown = (event: MouseEvent<HTMLDialogElement>): void => {
-    if (event.target === event.currentTarget) props.close();
-  };
-  return (
-    <dialog
-      ref={follow}
-      className="sheet"
-      aria-label={props.label}
-      onCancel={onCancel}
-      onClose={onClose}
-      onMouseDown={onMouseDown}
-    >
-      <div className="card">{props.open ? props.children : null}</div>
-    </dialog>
-  );
-}
-
 /** A live run's stop controls: Stop, "Stopping…", or the failure with Force stop. */
 export function StopControls(props: {
   readonly view: StopView | undefined;
@@ -96,20 +46,16 @@ export function StopControls(props: {
     <>
       {failed === null ? null : <span className="error">{failed.text}</span>}
       {failed?.canForce === true ? (
-        <button type="button" onClick={() => props.stop(true)}>
-          Force stop
-        </button>
+        <Button onClick={() => props.stop(true)}>Force stop</Button>
       ) : null}
-      <button type="button" onClick={() => props.stop(false)}>
-        Stop run
-      </button>
+      <Button onClick={() => props.stop(false)}>Stop run</Button>
     </>
   );
 }
 
 /**
- * A host path field that completes as the user types: a native combobox (`<input list>`) whose
- * options are the directories the host listed for the typed directory (`completion.ts`).
+ * A host path field that completes as the user types: a `Combobox` whose options are the
+ * directories the host listed for the typed directory (`completion.ts`).
  */
 export function PathInput(
   props: {
@@ -124,27 +70,17 @@ export function PathInput(
   } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'list'>,
 ): JSX.Element {
   const {field, host, value, completion, complete, change, offers = [], ...input} = props;
-  const listId = `${field}-completions`;
-  const options = [...new Set([...suggestions(completion, field), ...offers])];
   return (
-    <>
-      <input
-        {...input}
-        value={value}
-        list={listId}
-        spellCheck={false}
-        autoComplete="off"
-        onFocus={() => complete({type: 'input', field, host, value})}
-        onChange={event => {
-          change(event.target.value);
-          complete({type: 'input', field, host, value: event.target.value});
-        }}
-      />
-      <datalist id={listId}>
-        {options.map(path => (
-          <option key={path} value={path} />
-        ))}
-      </datalist>
-    </>
+    <Combobox
+      {...input}
+      listId={`${field}-completions`}
+      value={value}
+      options={[...suggestions(completion, field), ...offers]}
+      onFocus={() => complete({type: 'input', field, host, value})}
+      change={next => {
+        change(next);
+        complete({type: 'input', field, host, value: next});
+      }}
+    />
   );
 }

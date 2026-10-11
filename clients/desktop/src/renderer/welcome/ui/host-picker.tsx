@@ -1,7 +1,8 @@
 /** "Connect to host": search `~/.ssh/config` aliases or type a destination; arrows and Enter pick. */
+
+import {Button, Dialog} from '@vibesys/ui';
 import type {JSX, KeyboardEvent} from 'react';
 import {type PickerAction, type PickerState, pickerChoices} from '../state/picker.js';
-import {Sheet} from './common.js';
 
 function emptyText(state: Extract<PickerState, {kind: 'open'}>): string {
   return state.aliases.kind === 'loading' ? 'Reading ~/.ssh/config…' : 'No matching hosts.';
@@ -17,9 +18,8 @@ function Choices(props: {
   return (
     <div className="list" role="listbox" aria-label="Hosts">
       {choices.map((choice, index) => (
-        <button
+        <Button
           key={`${choice.typed ? 'typed' : 'config'}:${choice.alias}`}
-          type="button"
           role="option"
           tabIndex={-1}
           aria-selected={index === state.selected}
@@ -30,7 +30,7 @@ function Choices(props: {
           <span className="muted">
             {choice.typed ? 'connect to this destination' : 'ssh config'}
           </span>
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -52,10 +52,10 @@ export function HostPicker(props: {
     }
   };
   return (
-    <Sheet
+    <Dialog
       open={state.kind === 'open' && props.visible}
       label="Connect to host"
-      close={() => picker({type: 'close'})}
+      dismiss={() => picker({type: 'close'})}
     >
       {state.kind !== 'open' ? null : (
         <>
@@ -74,6 +74,6 @@ export function HostPicker(props: {
           <Choices state={state} picker={picker} />
         </>
       )}
-    </Sheet>
+    </Dialog>
   );
 }
