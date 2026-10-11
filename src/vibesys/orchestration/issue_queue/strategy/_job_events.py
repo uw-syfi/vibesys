@@ -65,6 +65,7 @@ from vs_core.api import (
 from vs_issue_tracker.api import AppliedChanges, IssueType
 
 _ERROR_LIMIT = 2000
+_WRITE_PHASES = (Phase.CLAIM, Phase.RECORD, Phase.FILE, Phase.BLOCK)
 _ROLE_NAME: dict[Role, Literal["implementer", "judge", "perf-evaluator"]] = {
     Role.IMPLEMENTER: "implementer",
     Role.JUDGE: "judge",
@@ -163,7 +164,7 @@ def retry_blocked(
     decision identity and the same keys, so a write that did land is not repeated.
     """
     job = state.job
-    if job is None or job.phase is Phase.DONE or job.awaiting is None:
+    if job is None or job.phase not in _WRITE_PHASES or job.awaiting is None:
         return state
     if job.awaiting.root not in blocked:
         return state
