@@ -92,6 +92,8 @@ const VALID_FILES = {
   'core-state/src/shared-fixtures.test.ts': "import '@vibesys/transport/testing';\n",
   'core-state/src/testing/index.ts': "import './model.js';\n",
   'core-state/src/testing/model.ts': "import '../index.js';\n",
+  // A feature's Node entry (`src/main/`) is not held to its browser parts' rules.
+  'features/replay/src/main/index.ts': "import 'net';\nimport '@vibesys/transport';\n",
   // The desktop's test support may build on core-state's.
   'desktop/src/testing/fake-chrome.ts': "import type {} from '@vibesys/core-state/testing';\n",
   'desktop/src/renderer/welcome/state/store.test.ts':

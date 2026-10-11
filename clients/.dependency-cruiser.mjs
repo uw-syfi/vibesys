@@ -41,7 +41,8 @@ const LEAF_TOOL_IMPORTER = `^(${LEAF_TOOL_DIRECTORIES})/|${PACKAGES}`;
 // `renderer/` (its `./renderer` entry) of presentational `ui/` and an `effects/` shell that calls
 // the interfaces the app injects. Which packages a feature may reach is the package-graph
 // checker's; these rules hold the layers inside one feature package.
-const FEATURE = '^features/[^/]+/src/';
+// Only a feature's browser parts: a later `main/` (Node) entry is not held to the renderer rules.
+const FEATURE = '^features/[^/]+/src/(?:state|renderer)/';
 const RENDERER_PART = part => `^features/[^/]+/src/renderer/${part}/`;
 // The web app (`apps/web/src`) is composition only: `app/` (the entries and the composition) over
 // `platform/` (the browser's services: the one backend adapter, lifecycle, storage, the desktop
