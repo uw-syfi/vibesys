@@ -15,11 +15,11 @@ data; this module never imports an owner.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
 import tempfile
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from vs_sandbox.feature_dockerfile import (
     BASE_IMAGE_ARG,
+    BuildPlan,
     FeatureInstall,
     FeatureSpec,
     FeatureSpecError,
@@ -117,7 +118,7 @@ class FinalImage:
 
 @dataclass(frozen=True)
 class FeatureImage:
-    """A built image: its unique local tag and its immutable ID."""
+    """A built image: its local tag, derived from the build inputs, and its immutable ID."""
 
     tag: str
     image_id: str
@@ -197,10 +198,13 @@ def build_feature_image(
 
     One ``docker build`` runs the Dockerfile that
     :func:`~vs_sandbox.feature_dockerfile.plan_feature_build` generates. The
-    image has a unique local tag under ``final.image_repository`` and is
-    identified by its immutable ID, which is content-addressed: the same inputs
-    on the same base give the same ID from Docker's layer cache, whatever the
-    temporary build directory is called.
+    image has one local tag under ``final.image_repository``, derived from the
+    build inputs (the base image, the ordered Features with their options and
+    files, the user, and the working directory), so rebuilding the same
+    selection moves the same tag instead of adding another. Different inputs
+    get different tags. The image is identified by its immutable ID, which is
+    content-addressed: the same inputs on the same base give the same ID from
+    Docker's layer cache, whatever the temporary build directory is called.
 
     Raises:
         FeatureImageBuildError: Docker is missing, a command fails or times out,
@@ -229,7 +233,8 @@ def build_feature_image(
             (context / relative).write_text(text, encoding="utf-8")
         dockerfile = context / "Dockerfile"
         dockerfile.write_text(plan.dockerfile, encoding="utf-8")
-        tag = f"{final.image_repository}:{uuid.uuid4().hex}"
+        base_identity = _base_identity(run, base_image, cwd=context)
+        tag = f"{final.image_repository}:{_input_digest(base_identity, plan, context)}"
         run.checked(
             (
                 "docker",
@@ -256,6 +261,35 @@ def build_feature_image(
         message = f"Docker returned an invalid image ID for {tag}: {image_id[:_DIAGNOSTIC_LIMIT]!r}"
         raise FeatureImageBuildError(message)
     return FeatureImage(tag=tag, image_id=image_id)
+
+
+def _base_identity(run: _Docker, base_image: str, *, cwd: Path) -> str:
+    """Return the base image's ID when Docker has it locally, else its name.
+
+    A base that is a freshly built local tag (a task image) changes name on every
+    build while its ID stays the same; keying on the ID keeps the result's tag
+    stable. A base that is not local (a registry name) keys on its name.
+    """
+    result = run.attempt(("docker", "image", "inspect", "--format", "{{.Id}}", base_image), cwd=cwd)
+    image_id = result.stdout.strip()
+    if result.returncode == 0 and _IMAGE_ID.fullmatch(image_id) is not None:
+        return image_id
+    return base_image
+
+
+def _input_digest(base_identity: str, plan: BuildPlan, context: Path) -> str:
+    """Hash everything that determines the built image into a 32-character tag."""
+    digest = hashlib.sha256()
+    for part in (base_identity, plan.dockerfile, *sorted(plan.generated_files.items())):
+        digest.update(repr(part).encode())
+        digest.update(b"\0")
+    for destination in sorted(plan.copied_folders):
+        for path in sorted(p for p in (context / destination).rglob("*") if p.is_file()):
+            digest.update(str(path.relative_to(context)).encode())
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()[:32]
 
 
 class _Docker:

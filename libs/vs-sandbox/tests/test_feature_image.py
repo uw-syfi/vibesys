@@ -60,7 +60,14 @@ class _Seen:
 class _Runner:
     """Records Docker commands; reads the build context when `docker build` is "run"."""
 
-    def __init__(self, *, fail_on: str | None = None, error: BaseException | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_on: str | None = None,
+        error: BaseException | None = None,
+        image_ids: dict[str, str] | None = None,
+    ) -> None:
+        self.image_ids = image_ids or {}
         self.calls: list[tuple[str, ...]] = []
         self.seen: list[_Seen] = []
         self.fail_on = fail_on
@@ -88,7 +95,7 @@ class _Runner:
             )
         if self.fail_on == call[1]:
             return _Outcome(3, "", "boom")
-        stdout = _ID if call[1:3] == ("image", "inspect") else ""
+        stdout = self.image_ids.get(call[-1], _ID) if call[1:3] == ("image", "inspect") else ""
         return _Outcome(0, stdout, "")
 
 
@@ -109,10 +116,11 @@ def test_build_is_one_docker_build_then_an_inspect(tmp_path: Path) -> None:
     assert _build(runner, features) == _ID
 
     assert [call[1:3] if call[1] == "image" else call[1:2] for call in runner.calls] == [
+        ("image", "inspect"),
         ("build",),
         ("image", "inspect"),
     ]
-    build = runner.calls[0]
+    build = runner.calls[1]
     (seen,) = runner.seen
     assert build[build.index("--build-arg") + 1] == "BASE_IMAGE=base:1"
     assert build[build.index("--tag") + 1].startswith("demo-build:")
@@ -121,6 +129,83 @@ def test_build_is_one_docker_build_then_an_inspect(tmp_path: Path) -> None:
     assert seen.dockerfile.index("tool-a") < seen.dockerfile.index("tool-b")
     assert seen.dockerfile.splitlines()[-2:] == ["WORKDIR /workspace", "USER agent"]
     assert not seen.context.exists()
+
+
+def _tags(runner: _Runner) -> list[str]:
+    return [c[c.index("--tag") + 1] for c in runner.calls if c[1] == "build"]
+
+
+def test_rebuilding_the_same_inputs_reuses_one_tag(tmp_path: Path) -> None:
+    runner = _Runner()
+    features = [_local(tmp_path, "tool-a", {"v": "1"}), _local(tmp_path, "tool-b", {})]
+
+    _build(runner, features)
+    _build(runner, features)
+    elsewhere = _Runner()
+    _build(
+        elsewhere,
+        [
+            _local(tmp_path / "other", "tool-a", {"v": "1"}),
+            _local(tmp_path / "other", "tool-b", {}),
+        ],
+    )
+
+    first, second = _tags(runner)
+    assert first == second
+    assert _tags(elsewhere) == [first]
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["option", "order", "feature", "user", "workdir", "base", "content", "repository"],
+)
+def test_different_inputs_get_different_tags(tmp_path: Path, variant: str) -> None:
+    def tag_for(root: Path, **changes: object) -> str:
+        runner = _Runner(image_ids={"base:1": "sha256:" + "a" * 64, "base:2": "sha256:" + "b" * 64})
+        a = _local(root, "tool-a", {"v": changes.get("option", "1")})  # type: ignore[arg-type]
+        b = _local(root, "tool-b", {})
+        if changes.get("content"):
+            (a.directory / "install.sh").write_text("#!/bin/sh\necho changed\n")
+        features = {
+            "order": [b, a],
+            "feature": [a],
+        }.get(str(changes.get("shape")), [a, b])
+        build_feature_image(
+            str(changes.get("base", "base:1")),
+            features,
+            FinalImage(
+                user=str(changes.get("user", "agent")),
+                workdir=str(changes.get("workdir", "/workspace")),
+                image_repository=str(changes.get("repository", "demo-build")),
+            ),
+            command_runner=runner,
+            timeout=7,
+        )
+        return _tags(runner)[0]
+
+    changes: dict[str, dict[str, object]] = {
+        "option": {"option": "2"},
+        "order": {"shape": "order"},
+        "feature": {"shape": "feature"},
+        "user": {"user": "root"},
+        "workdir": {"workdir": "/other"},
+        "base": {"base": "base:2"},
+        "content": {"content": True},
+        "repository": {"repository": "other-build"},
+    }
+    assert tag_for(tmp_path / "x") != tag_for(tmp_path / "y", **changes[variant])
+
+
+def test_a_base_with_a_new_name_but_the_same_id_keeps_the_tag(tmp_path: Path) -> None:
+    runner = _Runner()
+    features = [_local(tmp_path, "tool-a", {})]
+    final = FinalImage(user="agent", workdir="/workspace", image_repository="demo-build")
+
+    for base in ("task-build:1", "task-build:2"):
+        build_feature_image(base, features, final, command_runner=runner, timeout=7)
+
+    first, second = _tags(runner)
+    assert first == second
 
 
 def test_a_build_never_mounts_the_docker_socket_or_runs_a_container(tmp_path: Path) -> None:
