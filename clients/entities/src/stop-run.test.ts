@@ -101,9 +101,9 @@ describe('stop flow', () => {
   });
 
   test('withdrawing an unsent stop returns to idle but cannot retract an accepted stop', () => {
-    const confirming = stopStep(IDLE, {type: 'request', force: false}).state;
+    const confirming = stopStep(STOP_IDLE, {type: 'request', force: false}).state;
     const sending = stopStep(confirming, {type: 'confirm'}).state;
-    expect(stopStep(sending, {type: 'abandon'})).toEqual({state: IDLE, effect: null});
+    expect(stopStep(sending, {type: 'abandon'})).toEqual({state: STOP_IDLE, effect: null});
     const accepted = stopStep(sending, {type: 'result', outcome: 'stopping'}).state;
     expect(stopStep(accepted, {type: 'abandon'}).state).toBe(accepted);
   });
