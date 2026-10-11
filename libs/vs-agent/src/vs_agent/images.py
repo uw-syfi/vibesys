@@ -515,7 +515,7 @@ class _ProgressLines:
         if sink is not None:
             try:
                 sink(self._prefix.removesuffix("\r"))
-            except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010243 [BLE001]; progress observer failures are reported after both process pipes have been drained, so callbacks cannot deadlock the child.
+            except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-994700 [BLE001]; progress observer failures are reported after both process pipes have been drained, so callbacks cannot deadlock the child.
                 self._errors.put(exc)
                 self._sink = None
         self._prefix = ""
