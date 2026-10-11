@@ -8,7 +8,7 @@
  */
 
 import {only, type Step} from '@vibesys/core-state';
-import type {HostKey} from '../../../common/hosts.js';
+import type {HostKey} from '@vibesys/entities';
 import type {PathCompletion, WelcomeResult} from '../../../common/welcome-protocol.js';
 
 /** How long typing must pause before a directory is listed. */

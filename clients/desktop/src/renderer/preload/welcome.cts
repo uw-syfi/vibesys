@@ -9,19 +9,8 @@
  * in step.
  */
 import electron = require('electron');
-import type {HostKey} from '../../common/hosts.js';
-import type {ResumeRunId} from '../../common/resume-run.js';
-import type {
-  ChromeState,
-  HostListing,
-  PathCompletion,
-  StartOutcome,
-  WelcomeBridge,
-  WelcomeHost,
-  WelcomeOverview,
-  WelcomeRecent,
-  WelcomeResult,
-} from '../../common/welcome-protocol.js';
+import type {HostKey, HostListing, HostSummary, RecentRun, ResumeRunId} from '@vibesys/entities';
+import type {ChromeState, PathCompletion, StartOutcome, WelcomeBridge, WelcomeOverview, WelcomeResult} from '../../common/welcome-protocol.js';
 
 type Channels = typeof import('../../common/welcome-protocol.js').WELCOME_CHANNELS;
 type Events = typeof import('../../common/welcome-protocol.js').WELCOME_EVENTS;
@@ -62,7 +51,7 @@ const bridge: WelcomeBridge = {
   platform: process.platform,
   overview: () => call<WelcomeOverview>(CHANNELS.overview),
   hosts: () => call<string[]>(CHANNELS.hosts),
-  host: (host: HostKey) => call<WelcomeHost>(CHANNELS.host, host),
+  host: (host: HostKey) => call<HostSummary>(CHANNELS.host, host),
   setCheckout: (host: HostKey, path: string) => call<string>(CHANNELS.setCheckout, host, path),
   signIn: (host: HostKey) => call<null>(CHANNELS.signIn, host),
   tasks: (host: HostKey, project: string) => call<string[]>(CHANNELS.tasks, host, project),
@@ -80,7 +69,7 @@ const bridge: WelcomeBridge = {
   stop: (host: HostKey, instance: string, force: boolean) =>
     call<null>(CHANNELS.stop, host, instance, force),
   onChrome: (listener: (state: ChromeState) => void) => on(EVENTS.chrome, listener),
-  onRecent: (listener: (recent: readonly WelcomeRecent[]) => void) => on(EVENTS.recent, listener),
+  onRecent: (listener: (recent: readonly RecentRun[]) => void) => on(EVENTS.recent, listener),
   onShowHost: (listener: (host: HostKey) => void) => on(EVENTS.showHost, listener),
   onListing: (listener: (listing: HostListing) => void) => on(EVENTS.listing, listener),
 };

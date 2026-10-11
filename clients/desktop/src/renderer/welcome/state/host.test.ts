@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {checkModel, Seeded} from '@vibesys/core-state/testing';
-import type {HostKey} from '../../../common/hosts.js';
-import type {ChromeState, WelcomeHost, WelcomeResult} from '../../../common/welcome-protocol.js';
+import type {HostKey, HostSummary} from '@vibesys/entities';
+import type {ChromeState, WelcomeResult} from '../../../common/welcome-protocol.js';
 import {randomChrome} from '../../../testing/fake-chrome.js';
 import {
   type HostAction,
@@ -15,7 +15,7 @@ import {
 
 const HOSTS: readonly HostKey[] = ['local', 'ssh:gpu-box', 'ssh:login-node'];
 
-function hostData(key: HostKey, checkout: string | null): WelcomeHost {
+function hostData(key: HostKey, checkout: string | null): HostSummary {
   return {key, label: key, checkout};
 }
 

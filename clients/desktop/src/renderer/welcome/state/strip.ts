@@ -3,9 +3,12 @@
  * window state allows. Retry shows only on a link a retry can fix, never on an ended run.
  */
 
-import type {ConnectionStatus} from '../../../common/connection-status.js';
-import {type ResumeDecision, resumeDecision} from '../../../common/resume-run.js';
-import {stopKey} from '../../../common/stop-run.js';
+import {
+  type ConnectionStatus,
+  type ResumeDecision,
+  resumeDecision,
+  stopKey,
+} from '@vibesys/entities';
 import type {ChromeState} from '../../../common/welcome-protocol.js';
 
 /** The attached run's link as the strip shows it. */

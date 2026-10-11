@@ -2,8 +2,9 @@
  * The title strip: the attached run's host and link, and the controls its state allows
  * (`stripControls`). While a run fills the window, only this strip of the welcome view shows.
  */
+
+import type {ResumeRunId} from '@vibesys/entities';
 import type {JSX} from 'react';
-import type {ResumeRunId} from '../../../common/resume-run.js';
 import type {ChromeState} from '../../../common/welcome-protocol.js';
 import {
   connectionText,

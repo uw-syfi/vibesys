@@ -1,0 +1,36 @@
+{
+  "name": "@vibesys/entities",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibesys": {
+    "layer": "domain",
+    "entries": {
+      ".": "neutral"
+    }
+  },
+  "exports": {
+    ".": {
+      "@vibesys/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.*.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.lib.json",
+    "check": "tsc -b",
+    "test": "node ../scripts/run_bun_tests.mjs ./src"
+  },
+  "devDependencies": {
+    "@vibesys/core-state": "workspace:*",
+    "@types/bun": "1.4.2",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@vibesys/contracts": "workspace:*"
+  }
+}

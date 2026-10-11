@@ -10,10 +10,15 @@
  * Host data reaches the view as pushes (`listing`), folded from the host helper's
  * `instances.watch`: there is no refresh request to forget, and no timer.
  */
-import type {ConnectionStatus} from './connection-status.js';
-import type {HostKey} from './hosts.js';
-import type {ResumeRunId} from './resume-run.js';
-import type {StopView} from './stop-run.js';
+import type {
+  ConnectionStatus,
+  HostKey,
+  HostListing,
+  HostSummary,
+  RecentRun,
+  ResumeRunId,
+  StopView,
+} from '@vibesys/entities';
 
 export const WELCOME_CHANNELS = {
   overview: 'vibesys:welcome:overview',
@@ -37,7 +42,7 @@ export const WELCOME_CHANNELS = {
 export const WELCOME_EVENTS = {
   /** The window's state changed (`ChromeState`). */
   chrome: 'vibesys:welcome:chrome',
-  /** The recent runs changed (`WelcomeRecent[]`): the settings store wrote them. */
+  /** The recent runs changed (`RecentRun[]`): the settings store wrote them. */
   recent: 'vibesys:welcome:recent',
   /** Show a host's panel (`HostKey`): a launch or a second launch asked for it. */
   showHost: 'vibesys:welcome:show-host',
@@ -65,60 +70,13 @@ export interface ChromeState {
   readonly stops: Readonly<Record<string, StopView>>;
 }
 
-/** A recent run as the welcome view lists it. */
-export interface WelcomeRecent {
-  readonly host: HostKey;
-  readonly hostLabel: string;
-  readonly project: string;
-  readonly task: string | null;
-  readonly runId: string;
-  readonly attachedAt: number;
-}
-
 export interface WelcomeOverview {
   /** Why the app's settings file was ignored, when it was. */
   readonly settingsProblem: string | null;
-  readonly recent: readonly WelcomeRecent[];
+  readonly recent: readonly RecentRun[];
   readonly chrome: ChromeState;
   /** The host whose panel to show first (a launch may name one). */
   readonly host: HostKey;
-}
-
-/** One run a host's registry lists: a live server, or an ended one kept as a tombstone. */
-export interface WelcomeRun {
-  /** The registry id of the server. */
-  readonly id: string;
-  readonly projectRoot: string;
-  readonly runId: string;
-  /** The run's phase (`RunStatus`), with its startup stage while starting. */
-  readonly status: string;
-  readonly startedAt: number;
-  /** Why the run failed, when it did. */
-  readonly reason: string | null;
-}
-
-/** A host's registry as the welcome view shows it, or why it cannot be read now. */
-export type HostListing =
-  | {
-      readonly kind: 'listed';
-      readonly host: HostKey;
-      readonly live: readonly WelcomeRun[];
-      readonly ended: readonly WelcomeRun[];
-      /** Records this app cannot read (another VibeSys version), by id. */
-      readonly unreadable: readonly string[];
-    }
-  | {
-      readonly kind: 'unavailable';
-      readonly host: HostKey;
-      readonly connection: ConnectionStatus;
-    };
-
-/** One host as the welcome view shows it. */
-export interface WelcomeHost {
-  readonly key: HostKey;
-  readonly label: string;
-  /** The saved checkout (This Mac: the app's own checkout by default); null until set. */
-  readonly checkout: string | null;
 }
 
 /** Directories that complete a typed path on a host (`paths.complete`). */
@@ -149,7 +107,7 @@ export interface WelcomeBridge {
   readonly platform: string;
   overview(): Promise<WelcomeResult<WelcomeOverview>>;
   hosts(): Promise<WelcomeResult<string[]>>;
-  host(host: HostKey): Promise<WelcomeResult<WelcomeHost>>;
+  host(host: HostKey): Promise<WelcomeResult<HostSummary>>;
   setCheckout(host: HostKey, path: string): Promise<WelcomeResult<string>>;
   signIn(host: HostKey): Promise<WelcomeResult<null>>;
   tasks(host: HostKey, project: string): Promise<WelcomeResult<string[]>>;
@@ -171,7 +129,7 @@ export interface WelcomeBridge {
   retry(): Promise<WelcomeResult<null>>;
   stop(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
   onChrome(listener: (state: ChromeState) => void): void;
-  onRecent(listener: (recent: readonly WelcomeRecent[]) => void): void;
+  onRecent(listener: (recent: readonly RecentRun[]) => void): void;
   onShowHost(listener: (host: HostKey) => void): void;
   onListing(listener: (listing: HostListing) => void): void;
 }

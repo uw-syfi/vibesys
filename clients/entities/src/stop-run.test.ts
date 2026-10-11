@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {StopOutcome} from '@vibesys/contracts/host-helper';
 import {
   confirmText,
-  IDLE,
+  STOP_IDLE,
   type StopEvent,
   type StopState,
   type StopStep,
@@ -50,7 +50,7 @@ function arbitraryEvent(random: () => number): StopEvent {
   }
 }
 
-function run(events: readonly StopEvent[], from: StopState = IDLE): StopState {
+function run(events: readonly StopEvent[], from: StopState = STOP_IDLE): StopState {
   let state = from;
   for (const event of events) state = stopStep(state, event).state;
   return state;
@@ -71,8 +71,8 @@ function checkStep(before: StopState, event: StopEvent, next: StopStep, accepted
 describe('stop flow', () => {
   test('a graceful stop that is accepted waits for the run to end and never asks again', () => {
     const phases: string[] = [];
-    let state: StopState = IDLE;
-    let afterAccept: StopState = IDLE;
+    let state: StopState = STOP_IDLE;
+    let afterAccept: StopState = STOP_IDLE;
     const events: StopEvent[] = [
       {type: 'request', force: false},
       {type: 'confirm'},
@@ -94,8 +94,8 @@ describe('stop flow', () => {
   });
 
   test('cancelling the confirmation sends nothing and returns to idle', () => {
-    const confirming = stopStep(IDLE, {type: 'request', force: false}).state;
-    expect(stopStep(confirming, {type: 'cancel'})).toEqual({state: IDLE, effect: null});
+    const confirming = stopStep(STOP_IDLE, {type: 'request', force: false}).state;
+    expect(stopStep(confirming, {type: 'cancel'})).toEqual({state: STOP_IDLE, effect: null});
   });
 
   test('unsupported and still_running offer a force stop, once', () => {
@@ -115,13 +115,16 @@ describe('stop flow', () => {
   });
 
   test('a force stop cannot be requested without a failed graceful stop', () => {
-    expect(stopStep(IDLE, {type: 'request', force: true})).toEqual({state: IDLE, effect: null});
+    expect(stopStep(STOP_IDLE, {type: 'request', force: true})).toEqual({
+      state: STOP_IDLE,
+      effect: null,
+    });
   });
 
   test('properties over generated event sequences', () => {
     const random = generator(20_261_010);
     for (let sequence = 0; sequence < 300; sequence += 1) {
-      let state: StopState = IDLE;
+      let state: StopState = STOP_IDLE;
       let accepted = false;
       for (let step = 0; step < 40; step += 1) {
         const event = arbitraryEvent(random);

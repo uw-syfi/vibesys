@@ -1,7 +1,6 @@
 import {describe, expect, test} from 'bun:test';
+import {type ConnectionStatus, exactResumeRunId} from '@vibesys/entities';
 import {FakeClock} from '@vibesys/transport/testing';
-import type {ConnectionStatus} from '../../../common/connection-status.js';
-import {exactResumeRunId} from '../../../common/resume-run.js';
 import {DEFAULT_CONNECTION_CONFIG, HostConnection} from '../../platform/connection/index.js';
 import {FakeLink, record} from '../../platform/connection/testing/fake-helper.js';
 import type {RecentRun} from '../../platform/settings/index.js';

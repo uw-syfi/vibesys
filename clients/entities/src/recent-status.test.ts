@@ -1,9 +1,10 @@
 import {describe, expect, test} from 'bun:test';
 import {SEEDS, Seeded} from '@vibesys/core-state/testing';
+import type {HostListing, HostRun} from './listing.js';
+import type {RecentRun} from './recent-status.js';
 import {recentStatus} from './recent-status.js';
-import type {HostListing, WelcomeRecent, WelcomeRun} from './welcome-protocol.js';
 
-const RECENT: WelcomeRecent = {
+const RECENT: RecentRun = {
   host: 'ssh:gpu',
   hostLabel: 'gpu',
   project: '/p',
@@ -12,7 +13,7 @@ const RECENT: WelcomeRecent = {
   attachedAt: 1,
 };
 
-function server(id: number, startedAt: number, status: string, runId = 'run-1'): WelcomeRun {
+function server(id: number, startedAt: number, status: string, runId = 'run-1'): HostRun {
   return {
     id: id.toString(16).padStart(12, '0'),
     projectRoot: '/p',

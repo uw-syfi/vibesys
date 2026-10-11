@@ -1,12 +1,39 @@
 /**
- * Pure projections of what a host's helper reports into what the views show: a registry listing
- * into a `HostListing`, and a connection phase into a `ConnectionStatus`.
+ * A host's runs, as its registry lists them, and the pure projection of what a host's helper
+ * reports into that model.
  */
 import type {InstanceList, LiveInstanceRecord, RunPhase} from '@vibesys/contracts/host-helper';
-import type {ConnectionStatus} from '../../common/connection-status.js';
-import type {HostKey} from '../../common/hosts.js';
-import type {HostListing, WelcomeRun} from '../../common/welcome-protocol.js';
-import type {Phase} from '../platform/connection/index.js';
+import type {ConnectionStatus} from './connection-status.js';
+import type {HostKey} from './host.js';
+
+/** One run a host's registry lists: a live server, or an ended one kept as a tombstone. */
+export interface HostRun {
+  /** The registry id of the server. */
+  readonly id: string;
+  readonly projectRoot: string;
+  readonly runId: string;
+  /** The run's phase (`RunStatus`), with its startup stage while starting. */
+  readonly status: string;
+  readonly startedAt: number;
+  /** Why the run failed, when it did. */
+  readonly reason: string | null;
+}
+
+/** A host's registry as the views show it, or why it cannot be read now. */
+export type HostListing =
+  | {
+      readonly kind: 'listed';
+      readonly host: HostKey;
+      readonly live: readonly HostRun[];
+      readonly ended: readonly HostRun[];
+      /** Records this app cannot read (another VibeSys version), by id. */
+      readonly unreadable: readonly string[];
+    }
+  | {
+      readonly kind: 'unavailable';
+      readonly host: HostKey;
+      readonly connection: ConnectionStatus;
+    };
 
 const STAGES: Readonly<Record<NonNullable<RunPhase['stage']>, string>> = {
   resolving: 'Resolving',
@@ -29,7 +56,7 @@ export function phaseText(phase: RunPhase): string {
     : `${stage} ${count}: ${progress.label}`;
 }
 
-function welcomeRun(record: LiveInstanceRecord): WelcomeRun {
+function hostRun(record: LiveInstanceRecord): HostRun {
   const {phase} = record;
   return {
     id: record.id,
@@ -41,13 +68,13 @@ function welcomeRun(record: LiveInstanceRecord): WelcomeRun {
   };
 }
 
-/** `listing` from `host`'s registry, as the welcome view lists it. */
+/** `listing` from `host`'s registry, as the views list it. */
 export function hostListing(host: HostKey, listing: InstanceList): HostListing {
   return {
     kind: 'listed',
     host,
-    live: listing.instances.map(welcomeRun),
-    ended: (listing.ended ?? []).map(welcomeRun),
+    live: listing.instances.map(hostRun),
+    ended: (listing.ended ?? []).map(hostRun),
     unreadable: [
       ...(listing.unreadable ?? []).map(entry => entry.id),
       ...(listing.unverified ?? []),
@@ -58,26 +85,4 @@ export function hostListing(host: HostKey, listing: InstanceList): HostListing {
 /** The live record of `instanceId` in `listing`, if there is one. */
 export function liveRecord(listing: InstanceList, instanceId: string): LiveInstanceRecord | null {
   return listing.instances.find(record => record.id === instanceId) ?? null;
-}
-
-/** How a host connection's phase reads in the views. */
-export function connectionStatus(phase: Phase): ConnectionStatus {
-  switch (phase.kind) {
-    case 'idle':
-    case 'linking':
-    case 'handshaking':
-      return {kind: 'connecting'};
-    case 'ready':
-      return {kind: 'connected'};
-    case 'reconnecting':
-      return {kind: 'reconnecting', attempt: phase.attempt};
-    case 'offline':
-      return {kind: 'offline', detail: phase.detail};
-    case 'auth-needed':
-      return {kind: 'auth-needed', detail: phase.detail};
-    case 'incompatible':
-      return {kind: 'incompatible', detail: phase.detail};
-    case 'closed':
-      return {kind: 'closed'};
-  }
 }

@@ -10,8 +10,8 @@
  */
 
 import {only, type Step} from '@vibesys/core-state';
-import type {HostKey} from '../../../common/hosts.js';
-import type {ChromeState, WelcomeHost, WelcomeResult} from '../../../common/welcome-protocol.js';
+import type {HostKey, HostSummary} from '@vibesys/entities';
+import type {ChromeState, WelcomeResult} from '../../../common/welcome-protocol.js';
 
 /** The checkout form: "Where is your VibeSys checkout on HOST?". */
 export interface CheckoutForm {
@@ -32,7 +32,7 @@ type Panel =
     }
   | {
       readonly kind: 'ready';
-      readonly data: WelcomeHost;
+      readonly data: HostSummary;
       /** A reload in flight that keeps the panel drawn meanwhile. */
       readonly reloading: number | null;
       readonly checkout: CheckoutForm | null;
@@ -59,7 +59,7 @@ export type HostAction =
   | {
       readonly type: 'host-reply';
       readonly token: number;
-      readonly result: WelcomeResult<WelcomeHost>;
+      readonly result: WelcomeResult<HostSummary>;
     }
   | {
       readonly type: 'checkout-reply';
@@ -139,7 +139,7 @@ function load(state: HostState, host: HostKey, quiet: boolean): Step<HostState, 
 
 function withForm(
   state: HostState,
-  change: (form: CheckoutForm, data: WelcomeHost) => CheckoutForm | null,
+  change: (form: CheckoutForm, data: HostSummary) => CheckoutForm | null,
 ): HostState {
   const panel = state.panel;
   if (panel.kind !== 'ready' || panel.checkout === null) return state;
@@ -155,12 +155,12 @@ function blankForm(value: string, cancellable: boolean): CheckoutForm {
  * The form a reply's host shows: an open form survives a quiet reload, and a host without a
  * checkout always shows the (uncancellable) one asking for it.
  */
-function formFor(data: WelcomeHost, kept: CheckoutForm | null): CheckoutForm | null {
+function formFor(data: HostSummary, kept: CheckoutForm | null): CheckoutForm | null {
   if (data.checkout !== null) return kept?.cancellable === true ? kept : null;
   return kept?.cancellable === false ? kept : blankForm('', false);
 }
 
-function hostReply(state: HostState, token: number, result: WelcomeResult<WelcomeHost>): HostState {
+function hostReply(state: HostState, token: number, result: WelcomeResult<HostSummary>): HostState {
   const panel = state.panel;
   if (hostAwaited(state).host !== token) return state;
   if (!result.ok) {

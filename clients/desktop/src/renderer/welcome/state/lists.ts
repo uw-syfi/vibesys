@@ -6,24 +6,28 @@
  */
 
 import {only, type Step} from '@vibesys/core-state';
-import type {HostKey} from '../../../common/hosts.js';
-import {type RecentStatus, recentStatus} from '../../../common/recent-status.js';
-import type {HostListing, WelcomeRecent} from '../../../common/welcome-protocol.js';
+import {
+  type HostKey,
+  type HostListing,
+  type RecentRun,
+  type RecentStatus,
+  recentStatus,
+} from '@vibesys/entities';
 
 export interface ListsState {
-  readonly runs: readonly WelcomeRecent[];
+  readonly runs: readonly RecentRun[];
   /** The latest listing of each host the main process watches, by host key. */
   readonly listings: Readonly<Record<HostKey, HostListing>>;
 }
 
 export type ListsAction =
-  | {readonly type: 'runs'; readonly runs: readonly WelcomeRecent[]}
+  | {readonly type: 'runs'; readonly runs: readonly RecentRun[]}
   | {readonly type: 'listing'; readonly listing: HostListing};
 
 export const LISTS_EMPTY: ListsState = {runs: [], listings: {}};
 
 /** A recent run's status, from its host's latest listing. */
-export function statusOf(state: ListsState, run: WelcomeRecent): RecentStatus {
+export function statusOf(state: ListsState, run: RecentRun): RecentStatus {
   return recentStatus(run, state.listings[run.host]);
 }
 

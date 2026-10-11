@@ -1,12 +1,22 @@
 /**
- * What the welcome view derives from a host's listing (`HostListing`) and the recent runs: each
- * recent run's status, and the project directories to offer. Pure functions of pushed data; the
- * host is never asked again for them.
+ * The runs the user attached to recently, and what the views derive from a host's listing
+ * (`HostListing`) and those runs: each recent run's status, and the project directories to offer.
+ * Pure functions of pushed data; the host is never asked again for them.
  */
-import type {HostKey} from './hosts.js';
-import type {HostListing, WelcomeRecent, WelcomeRun} from './welcome-protocol.js';
+import type {HostKey} from './host.js';
+import type {HostListing, HostRun} from './listing.js';
 
-/** What the welcome view says about a recent run. */
+/** A run the user attached to, as the views list it. */
+export interface RecentRun {
+  readonly host: HostKey;
+  readonly hostLabel: string;
+  readonly project: string;
+  readonly task: string | null;
+  readonly runId: string;
+  readonly attachedAt: number;
+}
+
+/** What the views say about a recent run. */
 export type RecentStatus =
   /** A live server drives it; attach to `instanceId`. */
   | {readonly kind: 'live'; readonly instanceId: string; readonly status: string}
@@ -16,7 +26,7 @@ export type RecentStatus =
   | {readonly kind: 'unknown'};
 
 /** `run`'s status in its host's `listing` (undefined: no listing yet). */
-export function recentStatus(run: WelcomeRecent, listing: HostListing | undefined): RecentStatus {
+export function recentStatus(run: RecentRun, listing: HostListing | undefined): RecentStatus {
   if (listing?.kind !== 'listed') return {kind: 'unknown'};
   const live = listing.live.find(
     entry => entry.runId === run.runId && entry.projectRoot === run.project,
@@ -25,7 +35,7 @@ export function recentStatus(run: WelcomeRecent, listing: HostListing | undefine
   // A run resumed and ended again has several tombstones: its latest server says how it ended.
   const ended = listing.ended
     .filter(entry => entry.runId === run.runId)
-    .reduce<WelcomeRun | undefined>(
+    .reduce<HostRun | undefined>(
       (latest, entry) =>
         latest === undefined || entry.startedAt > latest.startedAt ? entry : latest,
       undefined,
@@ -39,7 +49,7 @@ export function recentStatus(run: WelcomeRecent, listing: HostListing | undefine
  */
 export function suggestProjects(
   listing: HostListing | undefined,
-  recent: readonly WelcomeRecent[],
+  recent: readonly RecentRun[],
   host: HostKey,
 ): string[] {
   const projects: string[] = [];

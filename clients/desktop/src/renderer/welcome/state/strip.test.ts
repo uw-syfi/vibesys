@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {Seeded} from '@vibesys/core-state/testing';
-import {resumeDecision} from '../../../common/resume-run.js';
+import {resumeDecision} from '@vibesys/entities';
 import type {ChromeState} from '../../../common/welcome-protocol.js';
 import {randomChrome} from '../../../testing/fake-chrome.js';
 import {runLink, stripControls} from './strip.js';

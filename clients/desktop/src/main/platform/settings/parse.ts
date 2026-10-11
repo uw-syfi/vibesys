@@ -1,5 +1,5 @@
 /** The settings files' shared parsing: objects with known keys only, failing with the path. */
-import {SettingsError} from '../../../common/hosts.js';
+import {SettingsError} from '@vibesys/entities';
 
 export {SettingsError};
 

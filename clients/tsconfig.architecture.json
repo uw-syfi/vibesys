@@ -7,11 +7,14 @@
       "@vibesys/contracts/testing": ["contracts/src/testing/index.ts"],
       "@vibesys/core-state": ["core-state/src/index.ts"],
       "@vibesys/core-state/testing": ["core-state/src/testing/index.ts"],
+      "@vibesys/entities": ["entities/src/index.ts"],
+      "@vibesys/ipc": ["ipc/src/index.ts"],
       "@vibesys/transport": ["transport/src/index.ts"],
       "@vibesys/transport-node": ["transport-node/src/index.ts"],
       "@vibesys/transport/testing": ["transport/src/testing/index.ts"],
       "@vibesys/transport/websocket": ["transport/src/websocket.ts"],
       "@vibesys/tui": ["tui/src/index.ts"],
+      "@vibesys/ui": ["ui/src/index.ts"],
       "@vibesys/web": ["web/src/index.ts"]
     }
   }

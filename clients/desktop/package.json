@@ -20,9 +20,10 @@
     "start": "pnpm build && electron ."
   },
   "dependencies": {
-    "@vibesys/transport": "workspace:*",
     "@vibesys/contracts": "workspace:*",
     "@vibesys/core-state": "workspace:*",
+    "@vibesys/entities": "workspace:*",
+    "@vibesys/transport": "workspace:*",
     "react": "19.1.1",
     "react-dom": "19.1.1"
   },
