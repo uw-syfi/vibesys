@@ -387,6 +387,9 @@ Docker's layer cache is what makes a repeat build of either image cheap;
 `vs_agent.api.images` builds an image once per launch and resolves its
 immutable manifest ID rather than keeping a manifest of its own.
 
+The roadmap moves this image to Dev Container Features; the phase 1 spike and
+its measurements are in [devcontainer-features.md](devcontainer-features.md).
+
 CLI and toolchain versions are not in the Dockerfile: they are build args
 supplied through the library's public API, `vs_agent.api` (`NODE_VERSION`,
 `CLI_VERSIONS`, `RUST_TOOLCHAIN_VERSION`, `GO_TOOLCHAIN_VERSION`; defined in the

@@ -10,11 +10,17 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from vs_agent import provider_policy
-from vs_agent.container_python import CONTAINER_PYTHON_HOME, CONTAINER_PYTHON_VERSION
+from vs_agent.api import (
+    CLI_VERSIONS,
+    CONTAINER_PYTHON_HOME,
+    CONTAINER_PYTHON_VERSION,
+    NODE_VERSION,
+    RUST_TOOLCHAIN_VERSION,
+)
 
 FEATURES_SRC = Path(__file__).parents[1] / "src" / "vs_agent" / "images" / "features" / "src"
 FEATURE_DIRS = sorted(path for path in FEATURES_SRC.iterdir() if path.is_dir())
@@ -27,17 +33,17 @@ _ALLOWED_KEYS = {
 }  # fmt: skip
 
 
-def _metadata(feature_dir: Path) -> dict[str, object]:
+def _metadata(feature_dir: Path) -> dict[str, Any]:
     loaded = json.loads((feature_dir / "devcontainer-feature.json").read_text())
     assert isinstance(loaded, dict)
     return loaded
 
 
-def _declared_ids(metadata: dict[str, object]) -> set[str]:
+def _declared_ids(metadata: dict[str, Any]) -> set[str]:
     declared: set[str] = set()
     for key in _ORDERING_KEYS:
         value = metadata.get(key, [])
-        declared |= set(value)  # type: ignore[call-overload]  # dependsOn is a mapping, installsAfter a list; both iterate ids
+        declared |= set(value)
     return declared
 
 
@@ -81,12 +87,12 @@ def test_option_defaults_mirror_provider_policy() -> None:
     """The one source of each pin is ``provider_policy``; Feature defaults must equal it."""
     agent = _metadata(FEATURES_SRC / "vibesys-agent")["options"]
     rust = _metadata(FEATURES_SRC / "vibesys-rust")["options"]
-    defaults = {name: spec["default"] for name, spec in {**agent, **rust}.items()}  # type: ignore[union-attr]
+    defaults = {name: spec["default"] for name, spec in {**agent, **rust}.items()}
     expected = {
-        "node_version": provider_policy.NODE_VERSION,
+        "node_version": NODE_VERSION,
         "python_version": CONTAINER_PYTHON_VERSION,
         "python_home": CONTAINER_PYTHON_HOME,
-        "rust_version": provider_policy.RUST_TOOLCHAIN_VERSION,
-        **{f"{p}_version": v for p, v in provider_policy.CLI_VERSIONS.items()},
+        "rust_version": RUST_TOOLCHAIN_VERSION,
+        **{f"{p}_version": v for p, v in CLI_VERSIONS.items()},
     }
     assert {k: defaults[k] for k in expected} == expected
