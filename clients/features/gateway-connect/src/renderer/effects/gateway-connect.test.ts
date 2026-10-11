@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import type {GatewayConnection} from '../../../entities/gateway.js';
+import type {GatewayConnection} from '../state/gateway.js';
 import {createGatewayConnectStore} from './gateway-connect.js';
 
 const PAGE = 'http://127.0.0.1:5173/';
