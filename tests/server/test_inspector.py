@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from tests.server.support import agent_descriptor, build_server_parts, run_record
+from tests.support.legacy_single_state import SingleState
 
 from server.diagnostics import DiagnosticScope
 from server.events import ConfigurationFailedData, EventStatus, EventType
@@ -10,7 +11,6 @@ from server.read_model import RunInspector
 from vibesys.api.hypothesis import RoundRecord
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
-from vibesys.orchestration.single.models import SingleState
 from vs_project.api import Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 

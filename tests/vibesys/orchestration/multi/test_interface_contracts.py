@@ -28,7 +28,6 @@ from vibesys.orchestration.profilers import (
     profiler_definition,
     require_profiler_kind,
 )
-from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.prompts import render_template
 
 if TYPE_CHECKING:
@@ -255,72 +254,3 @@ def test_service_judge_drops_direct_import_contract() -> None:
     output = _render_judge("service")
     assert "VibeServeModel" not in output
     assert "Decode invariants" in output
-
-
-def _render_single_agent(
-    interface: str,
-    *,
-    profiler_kind: ProfilerKind = ProfilerKind.TORCH,
-    supports_torch_profiler: bool = False,
-) -> str:
-    effective_profiler = (
-        _effective_profiler_definition(
-            profiler_kind,
-            supports_torch_profiler=supports_torch_profiler,
-        )
-        if profiler_kind is not ProfilerKind.NONE
-        else None
-    )
-    return render_template(
-        "single_agent_round_prompt.j2",
-        template_dir=SINGLE_PROMPT_DIR,
-        modality=None,
-        interface=interface,
-        profile_execution="local",
-        domain_single_agent="",
-        domain_profiler="",
-        task="TASK",
-        pass_criteria=_CRITERION_TEXT,
-        retry=1,
-        feedback=None,
-        objective="OBJ",
-        profile_focus="focus",
-        profiler_kind=profiler_kind,
-        profiler_support_name=(effective_profiler.support_name if effective_profiler else None),
-        profiler_mcp_name=(effective_profiler.mcp_name if effective_profiler else None),
-        supports_torch_profiler=supports_torch_profiler,
-        benchmark_command="benchmark",
-        accuracy_command="accuracy-checker",
-        reference_path="/ref",
-        runtime_notes="",
-    )
-
-
-def test_inprocess_single_agent_uses_torch_only_for_supporting_domain() -> None:
-    supported = _render_single_agent(
-        "inprocess",
-        supports_torch_profiler=True,
-    )
-    assert "torch.profiler" in supported
-    with pytest.raises(ValueError, match="does not provide Torch profiler support"):
-        _render_single_agent(
-            "inprocess",
-            supports_torch_profiler=False,
-        )
-
-
-def test_service_single_agent_honors_environment_resolved_torch() -> None:
-    output = _render_single_agent(
-        "service",
-        supports_torch_profiler=True,
-    )
-    assert "torch.profiler" in output
-    assert "nsys" not in output
-
-
-def test_single_agent_profiler_none_avoids_profiler_tools() -> None:
-    output = _render_single_agent("inprocess", profiler_kind=ProfilerKind.NONE)
-    assert "Standalone profiling is disabled" in output
-    assert "nsys_profiler" not in output
-    assert "torch_profiler" not in output
-    assert "neuron_profiler" not in output

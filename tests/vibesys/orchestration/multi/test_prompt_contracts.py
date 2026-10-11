@@ -29,9 +29,6 @@ from vibesys.orchestration.multi.contracts import (
     PreRoundDecision,
 )
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
-from vibesys.orchestration.profilers import ProfilerKind, profiler_definition
-from vibesys.orchestration.single.models import SingleAgentRoundResponse
-from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.prompts import render_template
 from vs_agent.cli_common import build_schema_hint
 
@@ -39,7 +36,7 @@ _ROOT = Path(__file__).resolve().parents[4]
 _TEMPLATE_DIR = MULTI_PROMPT_DIR
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompt_snapshots"
 
-_ROLES = ("implementer", "implementer_continuation", "judge", "single_agent", "orchestrator")
+_ROLES = ("implementer", "implementer_continuation", "judge", "orchestrator")
 
 _BASE_CONTEXT: dict[str, object] = {
     "modality": "text_generation",
@@ -115,7 +112,7 @@ _CONTEXTS = {
 
 
 def test_templates_have_only_canonical_memory_defaults() -> None:
-    templates = tuple(_TEMPLATE_DIR.glob("*.j2")) + tuple(SINGLE_PROMPT_DIR.glob("*.j2"))
+    templates = tuple(_TEMPLATE_DIR.glob("*.j2"))
 
     for template in templates:
         source = template.read_text()
@@ -216,29 +213,6 @@ def _render_prompt(domain: DomainName, role: str, context: dict[str, object]) ->
             gate_revalidation_pending=context.get("gate_revalidation_pending", False),
             pareto_archive_conflict=context.get("pareto_archive_conflict"),
         )
-    if role == "single_agent":
-        profiler = profiler_definition(ProfilerKind.NSYS)
-        return render_template(
-            "single_agent_round_prompt.j2",
-            template_dir=SINGLE_PROMPT_DIR,
-            **common,
-            modality=context["modality"],
-            interface=context["interface"],
-            profile_execution=context["profile_execution"],
-            retry=context.get("retry", 1),
-            feedback=context.get("feedback"),
-            reference_path=context["reference_path"],
-            profiler_kind=ProfilerKind.NSYS,
-            profiler_support_name=profiler.support_name,
-            profiler_mcp_name=profiler.mcp_name,
-            domain_single_agent=_domain_section(domain, "single_agent", context),
-            domain_profiler=_domain_section(domain, "profiler", context),
-            benchmark_command=context["benchmark_command"],
-            accuracy_command=context["accuracy_command"],
-            framework_benchmark_enabled=context.get("framework_benchmark_enabled", False),
-            official_evaluation_due=context.get("official_evaluation_due", False),
-            official_evaluation_reason=context.get("official_evaluation_reason"),
-        )
     if role == "orchestrator":
         return render_template(
             "orchestrator_plan_prompt.j2",
@@ -303,7 +277,7 @@ def test_multi_agent_prompts_use_paths_without_embedding_durable_content() -> No
     for prompt in prompts.values():
         assert all(sentinel not in prompt for sentinel in forbidden)
         assert _text(context, "objective_location") in prompt
-    for role in ("implementer", "implementer_continuation", "judge", "single_agent"):
+    for role in ("implementer", "implementer_continuation", "judge"):
         assert _text(context, "plan_artifact_location") in prompts[role]
     for role in ("implementer", "implementer_continuation", "judge"):
         assert _text(context, "validation_recipe_contract_location") in prompts[role]
@@ -311,7 +285,7 @@ def test_multi_agent_prompts_use_paths_without_embedding_durable_content() -> No
     assert _text(context, "progress_location") in prompts["orchestrator"]
     assert _text(context, "roadmap_location") in prompts["orchestrator"]
     assert _text(context, "pareto_archive_location") in prompts["orchestrator"]
-    for role in ("implementer", "implementer_continuation", "judge", "single_agent"):
+    for role in ("implementer", "implementer_continuation", "judge"):
         assert _text(context, "validation_location") in prompts[role]
 
     assert "reproducible production selector" in prompts["implementer"]
@@ -352,18 +326,12 @@ def test_llm_serving_prompts_preserve_irreducible_contracts() -> None:
     assert "same selected row" in prompts["judge"]
     assert "reward hacking" in prompts["judge"]
     assert "Completed output/token replay for later arrivals is model bypass" in prompts["judge"]
-    assert "dense KV reconstruction" in prompts["single_agent"]
-    assert "Perturbed captures are qualitative" in prompts["single_agent"]
-    assert "live exact cohorts may share one active model execution" in prompts["single_agent"]
-    assert "target-read build/provenance/gate" in prompts["single_agent"]
-    assert "resolved target package/mount plan" in prompts["single_agent"]
-    assert "same scope/owner" in prompts["single_agent"]
 
 
 def test_seeded_llm_serving_prompts_require_adaptation_without_fixed_filename() -> None:
     prompts = {
         role: _render_prompt(DomainName.LLM_SERVING, role, _CONTEXTS["seeded"])
-        for role in ("implementer", "judge", "orchestrator", "single_agent")
+        for role in ("implementer", "judge", "orchestrator")
     }
 
     for prompt in prompts.values():
@@ -372,7 +340,6 @@ def test_seeded_llm_serving_prompts_require_adaptation_without_fixed_filename() 
     assert "Inspect and adapt" in prompts["implementer"]
     assert "concrete inspection evidence" in prompts["judge"]
     assert "implementation starting point" in prompts["orchestrator"]
-    assert "Inspect and adapt" in prompts["single_agent"]
 
 
 def test_implementer_continuation_is_delta_only_and_fresh_session_safe() -> None:
@@ -569,12 +536,9 @@ def test_official_evaluation_due_changes_agent_measurement_contract() -> None:
 def test_minimal_llm_serving_prompt_omits_optional_checker_paths() -> None:
     context = _CONTEXTS["minimal"]
     judge = _render_prompt(DomainName.LLM_SERVING, "judge", context)
-    single_agent = _render_prompt(DomainName.LLM_SERVING, "single_agent", context)
 
     assert "/workspace/bench/benchmark.py" not in judge
     assert "/workspace/acc_checker/checker.py" not in judge
-    assert "/workspace/bench/benchmark.py" not in single_agent
-    assert "/workspace/acc_checker/checker.py" not in single_agent
 
 
 def test_generic_prompts_do_not_receive_llm_serving_domain_content() -> None:
@@ -584,7 +548,6 @@ def test_generic_prompts_do_not_receive_llm_serving_domain_content() -> None:
     assert "whole-decode roofline" not in prompts["orchestrator"]
     assert "LLM-serving implementation invariants" not in prompts["implementer"]
     assert "LLM-serving review invariants" not in prompts["judge"]
-    assert "LLM-serving combined-round invariants" not in prompts["single_agent"]
 
 
 _RESPONSE_TYPES = {
@@ -592,7 +555,6 @@ _RESPONSE_TYPES = {
     "implementer": ImplementerResponse,
     "implementer_continuation": ImplementerResponse,
     "judge": JudgeResponse,
-    "single_agent": SingleAgentRoundResponse,
 }
 
 # Codex carries its schema through native ``--output-schema``. Providers without
@@ -603,7 +565,6 @@ _NATIVE_PROMPT_BYTE_BUDGETS = {
     "implementer": 9_500,
     "implementer_continuation": 3_100,
     "judge": 8_000,
-    "single_agent": 7_000,
 }
 
 _FALLBACK_PROMPT_BYTE_BUDGETS = {
@@ -611,7 +572,6 @@ _FALLBACK_PROMPT_BYTE_BUDGETS = {
     "implementer": 17_000,
     "implementer_continuation": 10_000,
     "judge": 11_000,
-    "single_agent": 15_000,
 }
 
 

@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from vibesys.hypothesis import rounds
 from vibesys.hypothesis.readmodel import project_hypothesis_state
-from vibesys.metrics import MetricSpace
 
 if TYPE_CHECKING:
     from vibesys.orchestration.single.strategy.api import SingleStrategyState
@@ -19,7 +18,6 @@ def project_strategy_state(
     """Project one strategy state; `experiment_revision` is the core revision it was read at."""
     del experiment_revision
     ledger = rounds.decode(
-        rounds.EncodedLedger(search_json=state.search_json, carry_json=state.carry_json),
-        MetricSpace(),
+        rounds.EncodedLedger(search_json=state.search_json, carry_json=state.carry_json)
     )
     return project_hypothesis_state(ledger.search)

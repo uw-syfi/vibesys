@@ -1,4 +1,2 @@
 {"path": "src/vibesys/orchestration/multi/orchestration.py", "module": "vibesys.orchestration.multi.models", "symbol": "PaidAttempt", "count": 1}
-{"path": "src/vibesys/orchestration/single/orchestration.py", "module": "vibesys.orchestration.single.models", "symbol": "PaidAttempt", "count": 1}
 {"path": "tests/vibesys/orchestration/multi/test_plugin.py", "module": "vibesys.orchestration.multi.models", "symbol": "PaidAttempt", "count": 1}
-{"path": "tests/vibesys/orchestration/single/test_plugin.py", "module": "vibesys.orchestration.single.models", "symbol": "PaidAttempt", "count": 1}

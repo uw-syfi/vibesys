@@ -37,8 +37,6 @@ from vibesys.orchestration.multi.contracts import (
     PreRoundDecision,
 )
 from vibesys.orchestration.profilers import ProfilerSummary
-from vibesys.orchestration.single import agents as single
-from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_agent.api import AgentClient, AgentOutputSchemaError, DurableSessionStore
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider, FakeTurnScript
@@ -150,25 +148,6 @@ CASES = (
         multi.PROFILER,
         ProfilerSummary(analysis="Measured", bottlenecks="CPU", suggestions="Batch"),
         id="multi-profiler",
-    ),
-    pytest.param(
-        single.DESIGNER,
-        OrchestratorPlan(task="Implement", pass_criteria=VERIFIED_CRITERIA, reasoning="Plan"),
-        id="single-planner",
-    ),
-    pytest.param(
-        single.IMPLEMENTER,
-        SingleAgentRoundResponse(
-            summary="Implemented",
-            expected_behavior="Faster",
-            self_review="Reviewed",
-            feedback="",
-            verdict="pass",
-            bottlenecks="CPU",
-            suggestions="Batch",
-            profile_analysis="Measured",
-        ),
-        id="single-combined",
     ),
     pytest.param(
         evolve.MUTATOR,

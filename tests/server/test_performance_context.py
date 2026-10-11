@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from tests.server.support import agent_descriptor, build_server_parts, run_record
+from tests.support.legacy_single_state import SingleState
 
 from server.api.performance import build_performance_context, summarize_objective
 from server.api.protocol import PerformanceQuery
@@ -19,7 +20,6 @@ from vibesys.hypothesis.state import (
     HypothesisState,
 )
 from vibesys.hypothesis.transitions import reproject_run_evidence
-from vibesys.orchestration.single.models import SingleState
 from vs_project.api import Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 

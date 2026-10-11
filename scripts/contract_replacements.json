@@ -1267,7 +1267,7 @@
           "AnnAssign(target=Name(id='turn_number', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='gt', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True)), keyword(arg='strict', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     }
   ]

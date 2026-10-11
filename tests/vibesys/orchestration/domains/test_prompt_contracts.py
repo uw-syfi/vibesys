@@ -15,8 +15,6 @@ from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
-from vibesys.orchestration.profilers import ProfilerKind, profiler_definition
-from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.prompts import render_template
 
 _TEMPLATE_DIR = MULTI_PROMPT_DIR
@@ -122,50 +120,6 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             domain_judge=_domain_section(domain, "judge", context),
             pareto_archive_conflict=None,
         ),
-        "single_agent_nsys": render_template(
-            "single_agent_round_prompt.j2",
-            template_dir=SINGLE_PROMPT_DIR,
-            modality=context["modality"],
-            interface=context["interface"],
-            profile_execution=context["profile_execution"],
-            objective=context["objective"],
-            runtime_notes=context["runtime_notes"],
-            task=context["task"],
-            pass_criteria=context["pass_criteria"],
-            benchmark_command=context["benchmark_command"],
-            accuracy_command=context["accuracy_command"],
-            retry=1,
-            feedback=None,
-            reference_path=context["reference_path"],
-            profiler_kind=ProfilerKind.NSYS,
-            profiler_support_name=profiler_definition(ProfilerKind.NSYS).support_name,
-            profiler_mcp_name=profiler_definition(ProfilerKind.NSYS).mcp_name,
-            profile_focus="",
-            domain_single_agent=_domain_section(domain, "single_agent", context),
-            domain_profiler=_domain_section(domain, "profiler", context),
-        ),
-        "single_agent_torch": render_template(
-            "single_agent_round_prompt.j2",
-            template_dir=SINGLE_PROMPT_DIR,
-            modality=context["modality"],
-            interface=context["interface"],
-            profile_execution=context["profile_execution"],
-            objective=context["objective"],
-            runtime_notes=context["runtime_notes"],
-            task=context["task"],
-            pass_criteria=context["pass_criteria"],
-            benchmark_command=context["benchmark_command"],
-            accuracy_command=context["accuracy_command"],
-            retry=1,
-            feedback=None,
-            reference_path=context["reference_path"],
-            profiler_kind=ProfilerKind.TORCH,
-            profiler_support_name=profiler_definition(ProfilerKind.TORCH).support_name,
-            profiler_mcp_name=profiler_definition(ProfilerKind.TORCH).mcp_name,
-            profile_focus="",
-            domain_single_agent=_domain_section(domain, "single_agent", context),
-            domain_profiler=_domain_section(domain, "profiler", context),
-        ),
         "orchestrator_pre_round": render_template(
             "orchestrator_pre_round_prompt.j2",
             template_dir=_TEMPLATE_DIR,
@@ -255,8 +209,6 @@ def test_profiler_prompts_calibrate_observer_effects() -> None:
     prompts = _render_prompt_bundle(DomainName.LLM_SERVING, modality="text_generation")
 
     for prompt_name in (
-        "single_agent_nsys",
-        "single_agent_torch",
         "profiler_nsys",
         "profiler_torch",
         "profiler_neuron",

@@ -29,7 +29,6 @@ from vibesys.hypothesis import (
 )
 from vibesys.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi import prompts as multi_prompts
-from vibesys.orchestration.single import prompts as single_prompts
 from vibesys.prompts import PROMPTS_DIR, render_template
 
 if TYPE_CHECKING:
@@ -474,7 +473,7 @@ def test_notice_matches_golden_text(name: str) -> None:
     assert rendered == golden.read_text(encoding="utf-8")
 
 
-_PLUGIN_PROMPTS = {"multi": multi_prompts, "single": single_prompts}
+_PLUGIN_PROMPTS = {"multi": multi_prompts}
 
 
 @pytest.mark.parametrize("plugin", sorted(_PLUGIN_PROMPTS))

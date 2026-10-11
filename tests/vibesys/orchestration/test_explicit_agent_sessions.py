@@ -29,7 +29,6 @@ from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_task
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.profilers import ProfilerKind
-from vibesys.orchestration.single import PLUGIN
 from vibesys.run.contracts import RunRequest
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
@@ -955,62 +954,6 @@ def test_canceled_session_construction_closes_the_opened_agent(tmp_path: Path) -
         declaration=(role,),
         configuration=_RunConfiguration(client_factory=create_client),
     )
-
-
-def test_plugin_orchestrates_through_the_live_host(tmp_path: Path) -> None:
-    designer = FakeAgentClient(session_reuse=True).enqueue(
-        "orchestrator",
-        {
-            "hypothesis_id": "batch-prefill",
-            "hypothesis": "batching removes launch overhead",
-            "task": "batch prefill",
-            "pass_criteria": "throughput improves without an accuracy regression",
-            "reasoning": "launch overhead dominates",
-        },
-    )
-    implementer = FakeAgentClient(
-        capabilities=AgentCapabilities(
-            session_reuse=True,
-            provider_session_resume=True,
-        )
-    ).enqueue(
-        "implementer",
-        {
-            "summary": "implemented batching",
-            "expected_behavior": "higher throughput",
-            "self_review": "reviewed the diff and ran checks",
-            "feedback": "",
-            "verdict": "pass",
-            "bottlenecks": "launch overhead",
-            "suggestions": "batch prefill",
-            "profile_analysis": "batching should reduce launches",
-        },
-    )
-
-    async def body(ctx: Run) -> None:
-        status = await PLUGIN.orchestrate(
-            ctx,
-            PLUGIN.options.model_validate(
-                {
-                    "interface": "inprocess",
-                    "max_rounds": 1,
-                    "max_retries_per_round": 1,
-                    "judge_every": 1,
-                    "official_eval_every": 1,
-                }
-            ),
-        )
-        # The host measures nothing in this fixture, so the run keeps no result.
-        assert status.value == "failed"
-
-    _run_with_clients(
-        tmp_path,
-        [designer, implementer],
-        body,
-        declaration=PLUGIN,
-    )
-    assert [call.kind for call in designer.calls] == ["orchestrator"]
-    assert [call.kind for call in implementer.calls] == ["implementer"]
 
 
 def test_plugin_command_execution_quotes_argv_and_scopes_to_workspace(tmp_path: Path) -> None:

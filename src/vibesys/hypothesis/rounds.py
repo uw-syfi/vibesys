@@ -66,15 +66,19 @@ class EncodedLedger:
     carry_json: str = ""
 
 
-def decode(encoded: EncodedLedger, space: MetricSpace) -> Ledger:
-    """The ledger of ``encoded`` projected onto the run's metric space (empty text is a new run)."""
+def decode(encoded: EncodedLedger, space: MetricSpace | None = None) -> Ledger:
+    """The ledger of ``encoded``, projected onto the run's metric space when one is given.
+
+    Empty text is a new run. A read-only view (the run's projection) passes no space and sees
+    the ledger exactly as it was saved.
+    """
     search = (
         HypothesisState.model_validate_json(encoded.search_json)
         if encoded.search_json
         else HypothesisState()
     )
-    machine = HypothesisSearch(HypothesisConfig(max_rounds=1))
-    search = machine.resume(search, space)
+    if space is not None:
+        search = HypothesisSearch(HypothesisConfig(max_rounds=1)).resume(search, space)
     carry = _CARRY.validate_json(encoded.carry_json) if encoded.carry_json else CarryOver()
     return Ledger(search, carry)
 

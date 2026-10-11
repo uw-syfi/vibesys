@@ -29,7 +29,6 @@ from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.multi.contracts import ImplementerResponse, PreRoundDecision
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestration.profilers import ProfilerSummary
-from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
@@ -164,6 +163,7 @@ def test_orchestration_descriptor_contains_only_policy_settings() -> None:
         "operator_constraints": ["Preserve ordering"],
         "metric_space": MetricSpace().model_dump(mode="json"),
         "profile_guided": None,
+        "turn_drop_backoff_seconds": 5.0,
     }
 
 
@@ -902,9 +902,8 @@ def test_outer_prompts_reference_memory_paths_without_embedding_contents() -> No
     assert "progress_location" in pre_prompt
     assert "recent_progress_text" not in pre_prompt
 
-    for name in ("implementer_prompt.j2", "judge_prompt.j2", "single_agent_round_prompt.j2"):
-        role_dir = SINGLE_PROMPT_DIR if name == "single_agent_round_prompt.j2" else template_dir
-        role_prompt = (role_dir / name).read_text()
+    for name in ("implementer_prompt.j2", "judge_prompt.j2"):
+        role_prompt = (template_dir / name).read_text()
         assert "pareto_archive_location" in role_prompt
         assert "pareto_archive_summary" not in role_prompt
 

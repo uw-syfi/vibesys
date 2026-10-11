@@ -71,18 +71,18 @@ stop), `RunEnded`.
 | Tests of assumptions A1 to A4 (section 11) | built; A2 and A4 hold since B16, A3 holds since B15 (section 11.1) | 2 |
 | Decision transcript test of `dynamic` (3.4) | built (`test_decision_transcript.py`, 96 scenarios) | 2 |
 | Exclusive-root executor fixes (B16, section 3.1) | built (`test_exclusive_root_attempts.py`); prerequisite of every port that runs without candidate sandboxes | 2 |
-| Shared building blocks B1 to B15 (section 3) | built except B9 and B13, with `dynamic` moved onto each (section 3.6) | 2 |
+| Shared building blocks B1 to B15 (section 3) | built, with `dynamic` moved onto each (section 3.6); B9 and B13 were built with the `single` port | 2, 3 |
 | Promoted runtime shell test kit (T1) and plugin-keyed loop harness (T2) | T1 built (`vs_runtime.api.testing`); T2 is a seam (3.6) | 2 |
-| Strategy conformance suite C1 to C5 (9.2) | unbuilt | 2 |
+| Strategy conformance suite C1 to C9 (9.2) | built (`tests/composition/_loop`); `dynamic` and `single` are its subjects | 3 |
 | `CaptureCommand` operation (profile-guided attribution, B14) | contract and owner built; no strategy uses it yet | 3 |
-| Immutable hypothesis state, or the JSON-field bridge (8.4) | unbuilt | 3 |
-| `single` and `profile-guided single` strategy | unbuilt | 3 |
+| Immutable hypothesis state, or the JSON-field bridge (8.4) | JSON-field bridge built (`vibesys.hypothesis.rounds`); immutable state is phase 6 | 3 |
+| `single` and `profile-guided single` strategy | built (section 9.3 records the outcome) | 3 |
 | Issue-tracker operations and `FakeIssueTracker` contract suite | unbuilt | 3 |
 | `issue_queue` strategy | unbuilt | 3 |
 | `ValidateLocal` operation, `multi` strategy (stateless tool admission, B15, is built) | unbuilt | 4 |
 | Immutable population state, `ExportPatch` operation, `evolve` strategy | unbuilt | 5 |
 | Removal of the legacy loop runtime and evaluation service | unbuilt | 6 |
-| Limits extension for a resumed run with a larger round budget | undecided (Q3) | n/a |
+| Limits extension for a resumed run with a larger round budget | issue #2013 (Q3) | n/a |
 
 ### 1.4 Rules every port follows
 
@@ -270,11 +270,11 @@ transcript golden (3.4) at the commit that introduced it.
 | B6b | built | `vibesys.metrics`: `MetricRow`, `PartialRow`, `EvidenceReading`, `AcceptedReading`, `reading_of`, `accept_readings` (new `tach` edge to `vs_core`) | #1983 |
 | B7 | built, owner moved | `vs_core.api`: `StrategyOperations`, the `*Base` request models and shared outcomes; `vs_runtime.api.core.operation_roles` maps them to `OperationRole`s | #1983 |
 | B8 | built | `vibesys.candidates.api`: `CandidateConfig`, settlement (`settle_for`, `FinishedAttempt`), the input baseline (`propose`, `on_*`), the run phases (`choose_winner`, `proposal`, `stop`, `after_adoption`) | #1984 |
-| B9 | not built | The glue is inline in the two legacy loops, entangled with workspace and file effects, and `dynamic` is not a user. It is extracted as a pure round machine when `single` ports, against its first core-path consumer | n/a |
+| B9 | built with `single` | `vibesys.hypothesis.rounds`: `Ledger`/`EncodedLedger` (two JSON strings in the strategy state), `next_round`, `planning`, `start`, `official_reason`, `pareto_conflict`, `note_attempt_failure`, `close_round(ClosingFacts)`, `archive_view`, `validate_plan` | #2022 |
 | B10 | built, owner moved | `vs_core.api`: `Waitable[R]`, `WaitingForEvaluation`, `WaitingForDependency`; the agent-visible JSON schemas are unchanged | #1983 |
 | B11 | built | `vibesys.core_roles`: capability sets, `RoleKind` presets, `core_role` | #1985 |
 | B12 | built | `vibesys.core_wiring`: `ResolvedRun`, `EvaluationInputs`, `evaluation_inputs`, `agent_evaluation_policy`, `operation_catalog`, `require_candidate_sandboxes` | #1985 |
-| B13 | not built | The six core-protocol templates are pinned by the prompt-folder registry and layout architecture tests (one folder per plugin) and by a renderer with one root; moving them needs the renderer's fallback roots in `CorePolicy` and those tests changed. Done with the first port that needs a second user of them | n/a |
+| B13 | built with `single` | `vibesys.prompts.core_protocol`: the six templates, `_revision.j2`, and the contexts `ResumePrompt`, `ReplyCorrectionPrompt`, `WaitUnrecordedPrompt`; `CorePolicy.prompt_fallback_roots`; `CORE_PROTOCOL_DIR` | #2022 |
 | B14 | built | Contract `vs_core.api.CaptureCommandBase`, `CommandCapture` (optional member of `StrategyOperations`); owner `vs_runtime.api.core.CaptureCommandOwner`; role `OperationRole.CAPTURE_COMMAND` | #1992 |
 | B15 | built | `AgentTool.stateless`; `StatelessToolServers`, `CombinedToolServers`; `CoreResources.stateless_tool_servers`; admission in `vibesys.run.core_services` | #1992 |
 | B16 | built | by the workspace executor change that preceded this list | n/a |
@@ -859,6 +859,29 @@ and before dispatch, and after dispatch and before the observation is committed.
   stop ends `cancelled` with no leaked job or container; on Slurm at least one mid-turn
   `AgentMeasurementRequested` is admitted; wall time and cost are within 1.5 times of the
   legacy loop on the same example (a proposed bound, one summary line as in the smoke tier).
+
+#### 9.3.1 Outcome of the `single` port
+
+`single` and `profile-guided single` run as `vibesys.orchestration.single` (`strategy/` pure,
+`core_policy/` limits, replies, projection and templates) wired by `vibesys.single_core` and
+`vibesys.single_roles` (roles `single-orchestrator`, `single-implementer`). Deviations from the
+mapping above, each deliberate:
+
+- The final winner is `candidates.choose_winner` over the rounds core settled eligible, not
+  `HypothesisSearch.best` over the records, so the adopted settlement is always one core can
+  adopt. The ledger still decides hypothesis lifecycle, cadence, plateau and carry-over.
+- A round that passed review but was not measured settles `candidate`, ineligible; a failed round
+  that left a checkpoint settles `wip`, so a continued hypothesis builds on it.
+- Prompts are domain-agnostic like `dynamic`'s (domain sections live in the bundle's objective),
+  and the evidence the agent used to find in progress files is rendered from typed rows.
+- Dropped because core has no service for them: skill-recommendation resolution and accuracy
+  receipt reuse. The implementer attribution is a constant `core` (official evaluation was gated
+  on a non-stub backend).
+- Q3 (raising `--max-rounds` on resume) waits for the limits-extension control event, issue #2013.
+- S4 (a dominated Pareto claim flips PASS to FAIL) is the existing `HypothesisSearch.pareto_conflict`
+  contract tests plus the strategy's single call site; S2 (a differential test against legacy
+  transcripts) was not built because the legacy loop was removed in the same change and its
+  rendering differs by design (Q10).
 
 ### 9.4 Phase 3: issue_queue
 
