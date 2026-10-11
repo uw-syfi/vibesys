@@ -2,7 +2,7 @@
  * The detached-run registry as the desktop reads it: `vibesys --detach` prints one
  * `LiveInstanceRecord` (or one `DetachedLaunchFailure`), `vibesys instances list --json` prints an
  * `InstanceList`, and `vibesys instances stop ID --json` an `InstanceStopResult`
- * (`src/server/instances.py` is the authoritative definition).
+ * (`src/server/host_api.py` is the authoritative definition).
  *
  * Parsing is strict (unknown keys and wrong types are rejected, naming the path), with one
  * deliberate order: the record's `protocol_version` is read first. A server that speaks another

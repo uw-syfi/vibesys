@@ -12,6 +12,7 @@ from server.chat.options import ChatOptions
 from server.diagnostics import Diagnostic, DiagnosticScope, exception_to_diagnostic
 from server.events import RunEvent
 from server.execution import ActiveAgentExecution
+from server.host_api import PROTOCOL_VERSION
 from server.run_lifecycle import RunStatus
 from server.settings import InteractiveSetupDefaults
 from vibesys.api.hypothesis import (
@@ -21,8 +22,6 @@ from vibesys.api.hypothesis import (
     JudgeVerdict,
     PerfDeltaReason,
 )
-
-PROTOCOL_VERSION = 1
 
 # Both snapshots and streamed batches publish the same execution checkpoint.
 # Naming the list keeps the generated client contract referentially identical,

@@ -119,7 +119,7 @@ const VERIFY_SCRIPT = [
 ].join(' ');
 
 /**
- * Print every record file of the live registry (`server.instances.instance_root`), one per line,
+ * Print every record file of the live registry (`server.registry.instance_root`), one per line,
  * without checking liveness: the app reads only their `vibesys_root` to suggest a checkout.
  */
 const REGISTRY_SCRIPT = [

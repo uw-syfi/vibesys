@@ -1,9 +1,14 @@
 """``vibesys instances``: list and stop the detached servers live on this node.
 
-Both commands read the per-user live registry (``server.instances``). ``--json``
+Both commands read the per-user live registry (``server.registry``). ``--json``
 prints one ``InstanceList`` or ``InstanceStopResult`` document on stdout; the
 human form prints one line per server. ``stop`` exits 0 when the server stopped
 or accepted the stop (``stopped``, ``stopping``) and 1 otherwise.
+
+This is a light host command: its module-level imports stay within the
+allowlist ``tests/architecture/test_light_entrypoints.py`` enforces, so
+``instances list`` never imports the run engine. Only a stop that asks a server
+over its control socket needs the run protocol, and imports it then.
 """
 
 from __future__ import annotations
@@ -11,19 +16,20 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from typing import TYPE_CHECKING
 
-from server.instances import (
-    ControlSocketStopRequester,
+from server.host_api import InstanceList, InstanceStopResult, StopOutcome
+from server.registry import (
     FileInstanceStore,
-    InstanceList,
-    InstanceStopResult,
     LiveRegistry,
     StopEffects,
-    StopOutcome,
     instance_root,
     parse_instance_id,
 )
 from vs_sim.api import OsThreads, PidfdProcessSignaller, UnixNetwork
+
+if TYPE_CHECKING:
+    from vs_sim.api import Network
 
 
 def _instance_id(value: str) -> str:
@@ -106,6 +112,29 @@ def run(
     return code, (result.model_dump_json() if args.json else format_stop(result)) + "\n"
 
 
+class _ControlSocketOnFirstStop:
+    """A ``StopRequester`` that loads the control-socket requester when first asked.
+
+    The requester speaks the run protocol, and ``server.api.protocol`` imports
+    the run engine (about 1.7 s). Deferring it keeps ``instances list`` light
+    while ``instances stop`` behaves exactly as before.
+    """
+
+    def __init__(self, network: Network) -> None:
+        """Dial through ``network`` once a stop is requested."""
+        self._network = network
+
+    def request_stop(self, socket_path: str) -> bool:
+        """Send one stop request through ``server.instances``' requester."""
+        # lint-waiver: LW-182901 [PLC0415]; keep the run protocol (and the engine it imports) out of `instances list`.
+        # > A module-level import costs every light command about 1.7 s. Splitting the
+        # > stop envelope out of the run protocol is the phase 4 follow-up in
+        # > docs/contributing/desktop-connection.md, not this change.
+        from server.instances import ControlSocketStopRequester  # noqa: PLC0415
+
+        return ControlSocketStopRequester(self._network).request_stop(socket_path)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run ``vibesys instances`` against this node's registry."""
     threads = OsThreads()
@@ -118,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.argv[1:] if argv is None else argv,
         registry=LiveRegistry(FileInstanceStore(root)),
         effects=StopEffects(
-            requester=ControlSocketStopRequester(UnixNetwork()),
+            requester=_ControlSocketOnFirstStop(UnixNetwork()),
             signaller=PidfdProcessSignaller(),
             clock=threads,
             pause=threads.sleep,

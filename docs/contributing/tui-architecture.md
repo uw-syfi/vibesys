@@ -167,7 +167,9 @@ connections, and prints the child's `LiveInstanceRecord` as one JSON line on std
 keeps running with or without clients and exits when the run ends; a finished run is reopened
 read-only from its stored events with `--web-reopen`.
 
-Each detached server registers in a per-user, node-local registry owned by `server.instances`:
+Each detached server registers in a per-user, node-local registry owned by `server.registry` (its
+record and result models are in `server.host_api`; both stay light, see
+`tests/architecture/test_light_entrypoints.py`):
 
 ```text
 $XDG_RUNTIME_DIR/vibesys/            (else /tmp/vibesys-<uid>/), mode 0700
@@ -186,8 +188,8 @@ The root is never under `$HOME`, which may be on NFS. Liveness is proven, not re
 the server holds an exclusive `flock` on its lock file for its lifetime, and the kernel releases it
 on any exit, `kill -9` included. `vibesys instances list [--json]` reports a record only while its
 lock is held and removes the files of every id whose lock is free. The web gateway's project-local
-record keeps its own format; its claim and startup-log hold use the same lock primitives
-(`server.transport.discovery`).
+record keeps its own format (`server.transport.discovery`); its claim and startup-log hold use the
+same lock primitives from `server.registry`.
 
 #### Stopping and resuming a detached run
 

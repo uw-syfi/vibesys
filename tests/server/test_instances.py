@@ -16,22 +16,24 @@ from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, 
 from pydantic import ValidationError
 
 from server.api.protocol import CommandAck, Response, StopCommand
-from server.instances import (
-    CONTROL_REPLY_TIMEOUT_SECONDS,
+from server.host_api import (
+    InstanceList,
+    InstanceStatus,
+    LiveInstanceRecord,
+    StopOutcome,
+    StopRoute,
+)
+from server.instances import CONTROL_REPLY_TIMEOUT_SECONDS, ControlSocketStopRequester
+from server.registry import (
     STOP_TIMEOUT_SECONDS,
-    ControlSocketStopRequester,
     FakeInstanceHold,
     FakeInstanceStore,
     FileInstanceHold,
     FileInstanceStore,
-    InstanceList,
     InstanceObservation,
-    InstanceStatus,
-    LiveInstanceRecord,
     LiveRegistry,
+    LockState,
     StopEffects,
-    StopOutcome,
-    StopRoute,
     Verdict,
     instance_root,
     instance_socket_path,
@@ -39,14 +41,14 @@ from server.instances import (
     new_instance_id,
     parse_instance_id,
 )
-from server.transport.discovery import LockState
 from server.transport.unix_jsonl import MAX_SOCKET_PATH_BYTES
 from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from server.instances import InstanceHold, InstanceStopResult, InstanceStore
+    from server.host_api import InstanceStopResult
+    from server.registry import InstanceHold, InstanceStore
     from vs_sim.api import Listener
 
 IDS = [f"{index:012x}" for index in range(1, 6)]

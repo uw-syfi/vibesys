@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from entrypoints.launcher import _headless_requested
+from entrypoints import launcher
 from entrypoints.tasks import TaskList, TaskSummary, run
+from vs_sim.api.testing import FakeForegroundLauncher, ForegroundScript
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -93,5 +94,17 @@ def test_invalid_task_exits_1_naming_it(tmp_path: Path) -> None:
     assert "broken" in stderr
 
 
-def test_launcher_routes_tasks_to_the_engine_without_a_tui() -> None:
-    assert _headless_requested(["tasks", "--json"])
+def test_launcher_runs_tasks_in_process_without_a_child(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _task(tmp_path, "spsc")
+    children = FakeForegroundLauncher(lambda _argv: ForegroundScript(exits_immediately=True))
+
+    code = launcher.main(
+        ["tasks", str(tmp_path), "--json"], launcher.LauncherHost(children=children)
+    )
+
+    assert code == 0
+    assert children.children == []
+    listing = TaskList.model_validate_json(capsys.readouterr().out)
+    assert listing.tasks == (TaskSummary(name="spsc"),)

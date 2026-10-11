@@ -20,13 +20,15 @@ from entrypoints import cli
 from entrypoints.launcher import source_checkout_root
 from entrypoints.web_assets import WebAssetBundle
 from launch import default_runs
-from server.instances import (
+from server.host_api import (
     DetachedLaunchErrorCode,
     DetachedLaunchFailure,
-    FileInstanceStore,
-    InstanceHold,
     InstanceStatus,
     LiveInstanceRecord,
+)
+from server.registry import (
+    FileInstanceStore,
+    InstanceHold,
     LiveRegistry,
     driving,
     host_facts,

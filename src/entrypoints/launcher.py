@@ -24,6 +24,12 @@ The headless path runs ``python -m entrypoints.headless`` in a subprocess.
 Interactive paths run the compiled launcher with ``VIBESYS_PYTHON`` set so it
 drives the current interpreter. Every child runs through :func:`call_child`,
 which never kills the child: the child owns its run's teardown.
+
+The light host commands (``instances``, ``tasks``) run in this process, routed
+on ``argv`` before anything heavy is imported. This module's own imports stay
+light for that reason (``tests/architecture/test_light_entrypoints.py``); the
+boot trace, which lives behind ``vibesys.api``, is loaded only on the paths that
+start the engine or the TUI.
 """
 
 from __future__ import annotations
@@ -43,7 +49,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
-from vibesys.api import boot_trace
+from entrypoints import instances, tasks
 from vs_sim.api import (
     InheritedStdioLauncher,
     LoopSignalSource,
@@ -53,6 +59,8 @@ from vs_sim.api import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_sim.api import (
         Clock,
         ForegroundChild,
@@ -187,17 +195,13 @@ def _headless_requested(args: list[str]) -> bool:
         or "-h" in args
     ):
         return True
-    if args and args[0] in {"tui-defaults", "validate", "web", "instances", "tasks"}:
+    if args and args[0] in {"tui-defaults", "validate", "web"}:
         return True
     return not (sys.stdin.isatty() and sys.stdout.isatty())
 
 
 def _run_headless(args: list[str], host: LauncherHost) -> int:
-    subcommands = {
-        "web": "entrypoints.web",
-        "instances": "entrypoints.instances",
-        "tasks": "entrypoints.tasks",
-    }
+    subcommands = {"web": "entrypoints.web"}
     module = (
         subcommands[args[0]]
         if args and args[0] in subcommands
@@ -317,7 +321,9 @@ def _bundled_runtime_missing_message() -> str:
     )
 
 
-def _run_bundled_tui(bundle: BundledTui, args: list[str], host: LauncherHost) -> int:
+def _run_bundled_tui(
+    bundle: BundledTui, args: list[str], host: LauncherHost, trace_env: dict[str, str]
+) -> int:
     if not bundle.runtime.is_file() or not os.access(bundle.runtime, os.X_OK):
         sys.stderr.write(_bundled_runtime_missing_message() + "\n")
         return 1
@@ -333,7 +339,7 @@ def _run_bundled_tui(bundle: BundledTui, args: list[str], host: LauncherHost) ->
         # Launch anchor and stderr-trace request. The launcher (launcher.ts)
         # forwards its own environment to the frontend it spawns, so these
         # reach clients/tui/src/boot-trace.ts unchanged.
-        **boot_trace.child_env(),
+        **trace_env,
     }
     return call_child(
         [str(bundle.runtime), str(bundle.launcher), *args],
@@ -525,7 +531,9 @@ def _ensure_source_tui_built(root: Path, host: LauncherHost) -> bool:
     return _run_pnpm_install(pnpm, root, host) and _run_codegen_and_build(pnpm, root, host)
 
 
-def _run_source_tui(root: Path, args: list[str], host: LauncherHost) -> int:
+def _run_source_tui(
+    root: Path, args: list[str], host: LauncherHost, trace_env: dict[str, str]
+) -> int:
     bun = _bun_executable()
     if bun is None:
         sys.stderr.write(
@@ -559,32 +567,59 @@ def _run_source_tui(root: Path, args: list[str], host: LauncherHost) -> int:
         # lives under ~/.bun/bin.
         "PATH": os.pathsep.join([str(bun.parent), os.environ.get("PATH", "")]),
         # Launch anchor and stderr-trace request; see _run_bundled_tui.
-        **boot_trace.child_env(),
+        **trace_env,
     }
     return call_child(
         [str(node), str(launcher), *args], env=env, children=host.children, signals=host.signals
     )
 
 
+#: Host commands that run in this process. Each module imports only light
+#: contracts, so the command answers in the interpreter's startup time instead
+#: of paying for the engine twice (here and in a child).
+_LIGHT_COMMANDS: dict[str, Callable[[list[str]], int]] = {
+    "instances": instances.main,
+    "tasks": tasks.main,
+}
+
+
+def _launch_trace_env() -> dict[str, str]:
+    """Anchor the boot trace's launch time now; return the env a frontend child needs."""
+    # lint-waiver: LW-182902 [PLC0415]; light host commands are routed before the engine facade loads.
+    # > The boot trace is reached through `vibesys.api`, which imports the engine
+    # > (about 1.7 s). A module-level import charges that to `vibesys instances`
+    # > and `vibesys tasks`; a separate light launcher module would split one
+    # > routing decision across two files without removing this deferred import.
+    from vibesys.api import boot_trace  # noqa: PLC0415
+
+    boot_trace.mark_launch()
+    return boot_trace.child_env()
+
+
 def main(argv: list[str] | None = None, host: LauncherHost | None = None) -> int:
     """Entry point for the ``vibesys`` console script; *host* is the real system by default."""
     host = LauncherHost() if host is None else host
+    args = list(sys.argv[1:] if argv is None else argv)
+
+    light = _LIGHT_COMMANDS.get(args[0]) if args else None
+    if light is not None:
+        return light(args[1:])
+
     # Anchored before any doctor check, staleness check, or rebuild, so the
     # frontend's boot trace reports wall time since the user actually ran the
     # command, including a source-checkout rebuild.
-    boot_trace.mark_launch()
-    args = list(sys.argv[1:] if argv is None else argv)
+    trace_env = _launch_trace_env()
 
     if _headless_requested(args):
         return _run_headless(args, host)
 
     bundle = bundled_tui()
     if bundle is not None:
-        return _run_bundled_tui(bundle, args, host)
+        return _run_bundled_tui(bundle, args, host, trace_env)
 
     root = source_checkout_root()
     if root is not None:
-        return _run_source_tui(root, args, host)
+        return _run_source_tui(root, args, host, trace_env)
 
     sys.stderr.write(
         "vibesys: interactive TUI is not bundled and no source checkout was found; "

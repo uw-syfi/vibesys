@@ -6,10 +6,9 @@ import os
 import sys
 from pathlib import Path
 
-from server.instances import (
+from server.host_api import InstanceStatus, LiveInstanceRecord
+from server.registry import (
     FileInstanceStore,
-    InstanceStatus,
-    LiveInstanceRecord,
     LiveRegistry,
     host_facts,
     instance_root,

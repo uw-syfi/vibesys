@@ -14,6 +14,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from entrypoints import launcher
 from entrypoints.instances import main as instances_main
 from entrypoints.instances import run
 from entrypoints.launcher import _headless_requested, source_checkout_root
@@ -25,27 +26,36 @@ from entrypoints.server import (
     _spawn_detached_instance,
     main,
 )
-from server.instances import (
-    ControlSocketStopRequester,
+from server.host_api import (
     DetachedLaunchErrorCode,
     DetachedLaunchFailure,
-    FakeInstanceStore,
-    FileInstanceStore,
-    InstanceHold,
     InstanceList,
     InstanceStatus,
     InstanceStopResult,
     LiveInstanceRecord,
+    StopOutcome,
+)
+from server.instances import ControlSocketStopRequester
+from server.registry import (
+    FakeInstanceStore,
+    FileInstanceStore,
+    InstanceHold,
     LiveRegistry,
     StopEffects,
-    StopOutcome,
     driving,
     instance_root,
 )
 from vibesys.orchestration.dynamic import DynamicOptions
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
-from vs_sim.api.testing import FakeProcessSignaller, ManualClock, SimNetwork, SimThreads
+from vs_sim.api.testing import (
+    FakeForegroundLauncher,
+    FakeProcessSignaller,
+    ForegroundScript,
+    ManualClock,
+    SimNetwork,
+    SimThreads,
+)
 
 if TYPE_CHECKING:
     from typing import BinaryIO
@@ -314,9 +324,21 @@ def test_driving_finds_exactly_a_live_server_with_that_run(
     assert found is None or found.run_id == wanted
 
 
-def test_the_launcher_routes_detached_runs_and_instances_to_python() -> None:
+def test_the_launcher_routes_detached_runs_to_python() -> None:
     assert _headless_requested(["--detach"]) is True
-    assert _headless_requested(["instances", "list"]) is True
+
+
+def test_the_launcher_lists_instances_in_process_without_a_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    children = FakeForegroundLauncher(lambda _argv: ForegroundScript(exits_immediately=True))
+
+    code = launcher.main(["instances", "list", "--json"], launcher.LauncherHost(children=children))
+
+    assert code == 0
+    assert children.children == []
+    assert InstanceList.model_validate_json(capsys.readouterr().out) == InstanceList(instances=())
 
 
 # --- vibesys instances ----------------------------------------------------------

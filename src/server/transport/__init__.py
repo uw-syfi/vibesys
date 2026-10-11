@@ -1,6 +1,6 @@
-"""Server transports."""
+"""Server transports.
 
-from server.transport.unix_jsonl import UnixJsonlServer
-from server.transport.websocket import WebSocketGateway
-
-__all__ = ["UnixJsonlServer", "WebSocketGateway"]
+The package has no eager re-exports: importing one submodule (for example
+``server.transport.discovery``) must not load both transports. Import each
+transport from its own module.
+"""

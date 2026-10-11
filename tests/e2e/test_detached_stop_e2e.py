@@ -21,15 +21,12 @@ import pytest
 
 from launch import default_runs
 from server.api.protocol import SubscribeRequest
-from server.instances import (
-    ControlSocketStopRequester,
+from server.host_api import InstanceStatus, LiveInstanceRecord, StopOutcome, StopRoute
+from server.instances import ControlSocketStopRequester
+from server.registry import (
     FileInstanceStore,
-    InstanceStatus,
-    LiveInstanceRecord,
     LiveRegistry,
     StopEffects,
-    StopOutcome,
-    StopRoute,
     host_facts,
     instance_root,
     instance_socket_path,

@@ -11,15 +11,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from entrypoints.server import _DetachedGatewayEffects
-from server.instances import (
-    ControlSocketStopRequester,
-    FileInstanceStore,
-    LiveRegistry,
-    StopEffects,
-    StopOutcome,
-    StopRoute,
-    instance_root,
-)
+from server.host_api import StopOutcome, StopRoute
+from server.instances import ControlSocketStopRequester
+from server.registry import FileInstanceStore, LiveRegistry, StopEffects, instance_root
 from vs_sim.api import OsThreads, PidfdProcessSignaller, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S, stop_process
 
