@@ -167,7 +167,7 @@ A package that declares one of them in `dependencies` must have an entry allowed
 imports of packages not declared, so between the two a dependency is declared exactly when it is
 used, and used only where its runtime allows.
 
-**Legacy packages.** `backend-client`, `desktop`, `web`, and `tui` predate the per-entry layout,
+**Legacy packages.** `desktop`, `web`, and `tui` predate the per-entry layout,
 so `LEGACY_EXEMPTIONS` in the checker lets them skip the per-entry project rules (and lets desktop,
 whose one `node` entry still holds the React welcome view, skip `external-dependencies`). Every
 other rule applies to them. The table only shrinks as the migration items move them.
@@ -252,15 +252,15 @@ names a missing or extra one.
 | `@vibesys/contracts` | foundation | exists (pilot: generated run-protocol and host-helper types, the one schema walker, error taxonomy, `./host-helper` validation, `./testing` fixtures) | foundation item (#1869) |
 | `@vibesys/ui` | foundation | planned | web feature-folder refactor, then package extraction |
 | `@vibesys/core-state` | core | exists, on the per-entry layout, depends on `contracts` only | foundation item (#1869) |
-| `@vibesys/transport` | core | planned (split from `backend-client`) | backend-client split |
-| `@vibesys/transport-node` | domain | planned (split from `backend-client/node` and desktop's links) | backend-client split |
+| `@vibesys/transport` | core | exists: `.` and `./testing` (the shared `FakeClock`) are `neutral`, `./websocket` is `dom` | backend-client split (#1910) |
+| `@vibesys/transport-node` | domain | exists: the Unix-socket `ServerClient`; desktop's ssh and local-host links join it with the connection manager | backend-client split (#1910) |
 | `@vibesys/entities` | domain | planned | desktop and web model extraction |
 | `@vibesys/ipc` | service | planned (from desktop's bridge and preload messages) | desktop main/renderer split |
 | `@vibesys/connection` | service | planned (desktop's connection manager) | desktop main/renderer split |
 | `@vibesys/settings` | service | planned (desktop's settings store) | desktop main/renderer split |
 | `@vibesys/feature-*` | feature | planned: run-view, connect-host, start-run, stop-run, resume-run, recent-runs, path-autocomplete | feature extraction, after the web feature-folder refactor lands |
 | `apps/desktop-main`, `apps/desktop-renderer`, `apps/web` | app | planned | app composition, last |
-| `@vibesys/backend-client` | core | exists; split into `transport` and `transport-node`, then deleted | backend-client split |
+| `@vibesys/backend-client` | core | deleted: split into `transport` and `transport-node` | backend-client split (#1910) |
 | `@vibesys/desktop`, `@vibesys/web` | app | exist; emptied into features and apps, then deleted | app composition |
 | `@vibesys/tui` | app | deprecated; kept building, not migrated | none |
 

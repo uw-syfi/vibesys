@@ -6,7 +6,7 @@ Runner: `bun:test`, driven through pnpm workspaces under `clients/`. Lint: Biome
 
 | Rule | TypeScript |
 | --- | --- |
-| Public API | A package's exported entry point (`clients/backend-client`, `clients/core-state`), and published protocol event data as the frontend contract. Do not import a package's internal files from its tests |
+| Public API | A package's exported entry point (`clients/transport`, `clients/core-state`), and published protocol event data as the frontend contract. Do not import a package's internal files from its tests |
 | No patching | Banned: `mock`, `mock.module`, `spyOn`, and assigning over an imported function or object member. Allowed: environment variables and temp directories as inputs |
 | Fakes | An in-memory implementation of the same interface, kept beside the interface and shared by consumers |
 | Exemption | `// test-isolation: <reason>` on the site's line or the line above |

@@ -77,7 +77,7 @@ transports; a reader that requires one is Unix specific and wrong.
 
 ### WP-FRAMER: NewlineFramer is Unix only
 
-`NewlineFramer` (`clients/backend-client/src/newline-framer.ts`) reassembles messages from a byte
+`NewlineFramer` (`clients/transport/src/newline-framer.ts`) reassembles messages from a byte
 stream that may split a message across reads or pack several into one read. That problem exists only
 on a stream transport. WebSocket delivers whole messages, so the framer does not run on the
 WebSocket path. Framing lives in the transport adapter, below the shared client, so each transport
@@ -217,7 +217,7 @@ There is no capability advertisement. A client discovers whether the server supp
 subscribe field by sending it and reading the result: acceptance means the field works, a
 `extra="forbid"` rejection means the server predates it. `tail` and `store_id` are the two fields
 this already governs (`SubscribeRequest` in `protocol.py`; the client's probe-and-fallback in
-`clients/backend-client/src/persistent-event-stream.ts`).
+`clients/transport/src/persistent-event-stream.ts`).
 
 The recorded consequence, accepted deliberately: a browser resume that carries `store_id` against a
 server that lacks it costs one extra speculative dial (the rejected probe, then the cursor-only
