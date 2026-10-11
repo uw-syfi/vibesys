@@ -79,7 +79,8 @@ stop), `RunEnded`.
 | `single` and `profile-guided single` strategy | built (section 9.3 records the outcome) | 3 |
 | Issue-tracker operations and `FakeIssueTracker` contract suite | unbuilt | 3 |
 | `issue_queue` strategy | unbuilt | 3 |
-| `ValidateLocal` operation, `multi` strategy (stateless tool admission, B15, is built) | unbuilt | 4 |
+| `ValidateLocal` operation (`vs_core.api.ValidateLocalBase`, owner `ValidateLocalOwner`) | built | 4 |
+| `multi` strategy (stateless tool admission, B15, is built) | unbuilt | 4 |
 | Immutable population state, `ExportPatch` operation, `evolve` strategy | unbuilt | 5 |
 | Removal of the legacy loop runtime and evaluation service | unbuilt | 6 |
 | Limits extension for a resumed run with a larger round budget | issue #2013 (Q3) | n/a |

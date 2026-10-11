@@ -203,6 +203,7 @@ from vs_runtime._session_resolver import (
 )
 from vs_runtime._tool_servers import CombinedToolServers, StatelessToolServers
 from vs_runtime._turn_lifecycle import LifecycleReportingExecutor, report_turns
+from vs_runtime._validate_local_operation import ValidateLocalOwner
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
 from vs_runtime._workspace_receipts import (
@@ -370,6 +371,7 @@ __all__ = [
     "Transient",
     "TurnDispatcher",
     "TurnYields",
+    "ValidateLocalOwner",
     "VerifyRevisionOwner",
     "WorkspaceReceipts",
     "WorkspaceRequests",

@@ -44,6 +44,7 @@ VERIFY_SUFFIX = "verify_parent_revision"
 INTERPRET_SUFFIX = "interpret_evidence"
 RETAIN_SUFFIX = "retain_verified_revision"
 CAPTURE_SUFFIX = "capture_command"
+VALIDATE_LOCAL_SUFFIX = "validate_local"
 
 
 class RenderedArtifacts(Value):
@@ -157,6 +158,41 @@ class CaptureCommandBase(OperationRequest):
     timeout_seconds: int = Field(gt=0)
 
 
+class LocalValidationReport(Value):
+    """How the candidate-authored validation recipes ended, with the durable report.
+
+    ``recipe``, ``error`` and ``output`` describe the first recipe that failed (empty when all
+    passed): data for the strategy's feedback template, never prompt text. ``recipe_unusable``
+    marks an input error in the agent's own reply (the recipe file is missing or malformed), not
+    a failure of the candidate. ``report`` names the stored JSON report of every recipe's result.
+    """
+
+    status: Status
+    passed: bool = False
+    recipe_unusable: bool = False
+    recipe: str = ""
+    error: str = ""
+    output: str = ""
+    report: ArtifactRef | None = None
+    detail: str = ""
+
+
+class ValidateLocalBase(OperationRequest):
+    """Run an agent-authored validation recipe file against a retained revision.
+
+    The recipes are trusted commands the runtime executes in a throwaway isolated workspace
+    holding exactly ``revision``; a recipe that changes that workspace fails. The workspace is
+    discarded afterwards and the JSON report of the results is stored as an artifact, so the
+    operation changes nothing in the run's workspaces and a replay may run it again.
+    """
+
+    lifecycle: Literal[LifecycleClass.QUERY] = LifecycleClass.QUERY
+    outcome_model: ClassVar[type[BaseModel]] = LocalValidationReport
+    revision: RevisionRef
+    recipe_artifact: str = Field(min_length=1)
+    """Workspace-relative path of the recipe file in the revision, as the agent reported it."""
+
+
 class OperationKindError(ValueError):
     """A strategy's operation does not carry the kind its namespace prescribes."""
 
@@ -176,6 +212,8 @@ class StrategyOperations:
     retain: type[RetainVerifiedRevisionBase]
     capture: type[CaptureCommandBase] | None = None
     """The optional command capture a profile-guided strategy declares."""
+    validate_local: type[ValidateLocalBase] | None = None
+    """The optional validation of an agent-authored recipe file a reviewing strategy declares."""
 
     def __post_init__(self) -> None:
         for suffix, model in self._by_suffix():
@@ -191,9 +229,20 @@ class StrategyOperations:
             (INTERPRET_SUFFIX, self.interpret),
             (RETAIN_SUFFIX, self.retain),
         )
-        if self.capture is None:
-            return required
-        return (*required, (CAPTURE_SUFFIX, self.capture))
+        capture = ((CAPTURE_SUFFIX, self.capture),) if self.capture is not None else ()
+        validate = (
+            ((VALIDATE_LOCAL_SUFFIX, self.validate_local),)
+            if self.validate_local is not None
+            else ()
+        )
+        return (*required, *capture, *validate)
+
+    def registration_of(self, suffix: str) -> OperationRegistration | None:
+        """The registration of the operation with this suffix, or None when not declared."""
+        for registration in self.registrations():
+            if registration.descriptor.kind == f"{self.namespace}.{suffix}":
+                return registration
+        return None
 
     def registrations(self) -> tuple[OperationRegistration, ...]:
         """Codec registrations the launch assembles beside other libraries' operations."""

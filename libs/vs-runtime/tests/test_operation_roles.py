@@ -11,6 +11,7 @@ from vs_core.api import (
     RenderRoleArtifactsBase,
     RetainVerifiedRevisionBase,
     StrategyOperations,
+    ValidateLocalBase,
     Value,
     VerifyParentRevisionBase,
 )
@@ -54,8 +55,14 @@ class Capture(CaptureCommandBase):
     kind: Literal["demo.capture_command"] = "demo.capture_command"
 
 
+class Validate(ValidateLocalBase):
+    kind: Literal["demo.validate_local"] = "demo.validate_local"
+
+
 def test_an_optional_capture_maps_to_its_own_role_and_is_refused_without_a_runner() -> None:
-    operations = StrategyOperations("demo", Render, Verify, Interpret, Retain, capture=Capture)
+    operations = StrategyOperations(
+        "demo", Render, Verify, Interpret, Retain, capture=Capture, validate_local=Validate
+    )
     roles = operation_roles(operations)
     assert list(roles) == list(OperationRole)
     catalog = build_operation_catalog(
@@ -74,3 +81,29 @@ def test_every_runtime_role_gets_the_operation_of_its_name() -> None:
         OperationRole.INTERPRET_EVIDENCE: "demo.interpret_evidence",
         OperationRole.RETAIN_REVISION: "demo.retain_verified_revision",
     }
+
+
+def test_each_optional_operation_maps_to_its_own_role_whichever_others_are_declared() -> None:
+    only_validate = operation_roles(
+        StrategyOperations("demo", Render, Verify, Interpret, Retain, validate_local=Validate)
+    )
+    assert only_validate[OperationRole.VALIDATE_LOCAL].descriptor.kind == "demo.validate_local"
+    assert OperationRole.CAPTURE_COMMAND not in only_validate
+    only_capture = operation_roles(
+        StrategyOperations("demo", Render, Verify, Interpret, Retain, capture=Capture)
+    )
+    assert only_capture[OperationRole.CAPTURE_COMMAND].descriptor.kind == "demo.capture_command"
+    assert OperationRole.VALIDATE_LOCAL not in only_capture
+
+
+def test_validation_is_refused_without_a_runner_and_isolated_candidates() -> None:
+    operations = StrategyOperations(
+        "demo", Render, Verify, Interpret, Retain, validate_local=Validate
+    )
+    roles = operation_roles(operations)
+    catalog = build_operation_catalog(
+        {OperationRole.VALIDATE_LOCAL: roles[OperationRole.VALIDATE_LOCAL]}, {}
+    )
+    (entry,) = catalog.entries
+    assert entry.owner is None
+    assert entry.refusal is RefusalReason.NO_COMMAND_RUNNER
