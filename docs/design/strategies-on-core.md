@@ -1003,8 +1003,7 @@ of the committed strategy state. Deviations from the mapping above, each deliber
   it grows linearly in individuals and never in patch size (`test_properties.py`). Moving the database
   to content-addressed artifacts needs the selection step itself to become an operation, which is a
   follow-up.
-- A child that retained no changed checkpoint is a failed individual (there is nothing to review or
-  measure), where the legacy loop evaluated the unchanged tree. A failed cold start that left a
+- A mutation whose checkpoint core declines is a failed child (`TurnCandidateFailed`); a mutation that changed nothing checkpoints the unchanged tree and is reviewed and measured, as the legacy loop did. A failed cold start that left a
   checkpoint settles `wip`, and the next cold start builds on it (`repair_seed`).
 - The mutator's failure lessons come from the population at the time the slot is asked (only a cold
   start reads them); the proposals come from `generation_start`.

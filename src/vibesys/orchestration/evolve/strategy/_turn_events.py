@@ -42,6 +42,9 @@ from vs_core.api import (
     RevisionRef,
     RunView,
     Step,
+    TurnCandidate,
+    TurnCandidateFailed,
+    TurnCandidatePending,
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
@@ -71,11 +74,15 @@ def _decode(
         return str(error)
 
 
-def candidate_of(view: RunView, slot: SlotState, invocation: InvocationRef) -> RevisionRef | None:
-    """The revision the reply's turn chain retained, by core's one rule (`TurnChain.candidate`)."""
-    if slot.turn is None:
-        return None
-    return slot.turn.candidate(view, slot.attempt, invocation)
+def candidate_of(view: RunView, slot: SlotState, invocation: InvocationRef) -> TurnCandidate | None:
+    """Resolve the current invocation's checkpoint through its logical turn chain."""
+    return (
+        None if slot.turn is None else slot.turn.candidate_outcome(view, slot.attempt, invocation)
+    )
+
+
+def _checkpoint_failure(candidate: TurnCandidateFailed) -> str:
+    return f"mutator checkpoint declined ({candidate.reason.value})"
 
 
 def turn_slot(state: EvolveStrategyState, event: TurnResult) -> SlotState | None:
@@ -143,30 +150,30 @@ def _mutator_replied(
 ) -> EvolveStrategyState:
     """A mutation: judge its candidate, or hold the reply until core reads the checkpoint."""
     candidate = candidate_of(view, slot, event.invocation)
-    if candidate is None:
+    if candidate is None or isinstance(candidate, TurnCandidatePending):
         return put(state, slot.holding(event.output_json or "", event.invocation))
-    return _mutated(state, slot, reply, candidate)
+    if isinstance(candidate, TurnCandidateFailed):
+        return fail(state, slot, _checkpoint_failure(candidate))
+    return _mutated(state, slot, reply, candidate.revision)
 
 
 def settle_retained(state: EvolveStrategyState, view: RunView) -> EvolveStrategyState:
-    """Fold a held mutator reply once core has retained or declined its checkpoint."""
+    """Fold a held mutator reply once core has recorded the outcome of its checkpoint."""
     for slot in state.slots:
         if not slot.holds_reply or slot.held_invocation is None or slot.held_reply is None:
             continue
-        invocation = slot.held_invocation
-        live = next((item for item in view.attempts if item.attempt_id == slot.attempt), None)
-        candidate = candidate_of(view, slot, invocation)
-        declined = live is not None and any(
-            row.invocation == invocation for row in live.checkpoint_declines
-        )
-        if candidate is None and not declined:
+        candidate = candidate_of(view, slot, slot.held_invocation)
+        if candidate is None or isinstance(candidate, TurnCandidatePending):
             continue
         reply = _decode(Role.MUTATOR, slot.held_reply)
         released = slot.released()
-        if isinstance(reply, MutatorResponse):
-            state = _mutated(put(state, released), released, reply, candidate)
+        released_state = put(state, released)
+        if isinstance(candidate, TurnCandidateFailed):
+            state = fail(released_state, released, _checkpoint_failure(candidate))
+        elif isinstance(reply, MutatorResponse):
+            state = _mutated(released_state, released, reply, candidate.revision)
         else:
-            state = put(state, released)
+            state = released_state
     return state
 
 
@@ -262,22 +269,9 @@ def _no_answer(
 
 
 def _mutated(
-    state: EvolveStrategyState,
-    slot: SlotState,
-    reply: MutatorResponse,
-    candidate: RevisionRef | None,
+    state: EvolveStrategyState, slot: SlotState, reply: MutatorResponse, candidate: RevisionRef
 ) -> EvolveStrategyState:
     """Accept a valid mutator reply: review the candidate it left."""
-    if candidate is None:
-        # Nothing to review or measure: the mutation changed nothing the run retained.
-        return put(
-            state,
-            to_settle(
-                slot,
-                summary=reply.summary,
-                feedback="framework: the mutator retained no changed candidate",
-            ),
-        )
     return put(
         state,
         slot.model_copy(
