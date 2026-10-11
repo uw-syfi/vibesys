@@ -65,6 +65,7 @@ LEGAL: dict[tuple[RunState, RunTrigger], RunState] = {
     (_HOLDING_PAUSE, RunTrigger.COMPLETED): RunState(RunStatus.COMPLETED),
     (_HOLDING_PAUSE, RunTrigger.FAILED): RunState(RunStatus.FAILED),
     (_HOLDING_STOP, RunTrigger.READY): RunState(RunStatus.STOPPING),
+    (_HOLDING_STOP, RunTrigger.INVOCATION_FINISHED): RunState(RunStatus.STOPPED),
     (_HOLDING_STOP, RunTrigger.PAUSE_REQUESTED): _HOLDING_STOP,
     (_HOLDING_STOP, RunTrigger.STOP_REQUESTED): _HOLDING_STOP,
     (_HOLDING_STOP, RunTrigger.RESUMED): _STARTING_STATE,
@@ -129,11 +130,33 @@ def test_illegal_transition_raises(current: RunState, trigger: RunTrigger) -> No
 
 
 def test_illegal_pairs_are_the_ones_we_expect() -> None:
-    """No invocation can finish before the run is ready.
+    """No invocation can finish before the run is ready, except where a held stop lands.
 
     Pinned so widening the table stays a deliberate edit.
     """
-    assert set(ILLEGAL) == {(state, RunTrigger.INVOCATION_FINISHED) for state in _STARTING_STATES}
+    assert set(ILLEGAL) == {
+        (_STARTING_STATE, RunTrigger.INVOCATION_FINISHED),
+        (_HOLDING_PAUSE, RunTrigger.INVOCATION_FINISHED),
+    }
+
+
+@pytest.mark.parametrize("state", LIVE_STATES, ids=str)
+def test_a_pending_pause_or_stop_is_one_held_or_entered(state: RunState) -> None:
+    assert state.pause_pending == (
+        state.status is RunStatus.PAUSING or state.requested is RunRequest.PAUSE
+    )
+    assert state.stop_pending == (
+        state.status is RunStatus.STOPPING or state.requested is RunRequest.STOP
+    )
+
+
+def test_a_stop_held_while_starting_can_land_before_ready() -> None:
+    """Core may abandon a startup at a held stop; the run then ends ``stopped``."""
+    status = _status_after(
+        RunStatus.STARTING, RunTrigger.STOP_REQUESTED, RunTrigger.INVOCATION_FINISHED
+    )
+    assert status is RunStatus.STOPPED
+    assert _status_after(status, RunTrigger.READY) is RunStatus.STOPPED
 
 
 @pytest.mark.parametrize("ended", ENDED, ids=str)
@@ -377,3 +400,26 @@ def test_startup_reports_starting_with_monotone_progress_until_ready(
         fold.apply(item)
         assert fold.state.status is not RunStatus.STARTING
         assert fold.phase.status is not RunStatus.STARTING
+
+
+@given(before=st.lists(st.one_of(_STARTUP, _CONTROL), max_size=16))
+def test_core_landing_a_held_stop_before_ready_ends_the_run_stopped(
+    before: list[StartupFact | RunTrigger],
+) -> None:
+    """Core lands a stop while starting only if one is held; the run then ends ``stopped``.
+
+    The controller fires the landing only while a stop is pending, as
+    ``RunController.land_stop_at_boundary`` does.
+    """
+    fold = _Fold()
+    for item in before:
+        fold.apply(item)
+    held = fold.state.stop_pending
+    assert held == (fold.request is RunTrigger.STOP_REQUESTED)
+    if held:
+        fold.apply(RunTrigger.INVOCATION_FINISHED)
+        assert fold.state == RunState(RunStatus.STOPPED)
+        assert fold.phase == RunPhase(status=RunStatus.STOPPED)
+    expected = RunStatus.STOPPED if held else _LANDS_AS[fold.request]
+    fold.apply(RunTrigger.READY)
+    assert fold.state.status is expected

@@ -274,7 +274,7 @@ class RunController:
         earlier entry landing) already applied it.
         """
         with self._condition:
-            if self._state.status is not RunStatus.PAUSING:
+            if not self._state.pause_pending:
                 return
             self._apply_locked(RunTrigger.INVOCATION_FINISHED)
             self._journal.record(EventType.CONTROL, "/pause", status=EventStatus.CONSUMED)
@@ -286,7 +286,7 @@ class RunController:
         earlier entry landing, already reached `STOPPED`.
         """
         with self._condition:
-            if self._state.status is not RunStatus.STOPPING:
+            if not self._state.stop_pending:
                 return
             self._apply_locked(RunTrigger.INVOCATION_FINISHED)
             self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.CONSUMED)

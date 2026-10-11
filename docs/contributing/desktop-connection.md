@@ -296,7 +296,8 @@ Facts enter once:
   until its session reports it ready (`RunTrigger.READY`); attaching the journal is not readiness.
   A pause or stop requested while starting is held (`RunState.requested`), not entered: the run
   keeps reporting `starting` with its stage and progress, a resume drops the held request, and
-  `READY` lands the run in `pausing` or `stopping` if one is still held. A failure while starting past `resolving` names the startup stage it failed in.
+  `READY` lands the run in `pausing` or `stopping` if one is still held. Core may land a held stop
+  before `READY`, abandoning the startup; the run then goes from `starting` straight to `stopped`. A failure while starting past `resolving` names the startup stage it failed in.
 - **Record**: the server rewrites its record atomically (temp file, rename) on each phase change;
   a change of progress alone is written at most once per second, the latest one when the second
   ends.

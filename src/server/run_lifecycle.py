@@ -93,6 +93,16 @@ class RunState:
             message = f"only a starting run holds a request, not a {self.status.value!r} one"
             raise ValueError(message)
 
+    @property
+    def pause_pending(self) -> bool:
+        """A pause waits for its boundary: requested after readiness, or held while starting."""
+        return self.status is RunStatus.PAUSING or self.requested is RunRequest.PAUSE
+
+    @property
+    def stop_pending(self) -> bool:
+        """A stop waits for its boundary: requested after readiness, or held while starting."""
+        return self.status is RunStatus.STOPPING or self.requested is RunRequest.STOP
+
 
 _STARTING = RunState(RunStatus.STARTING)
 _STARTING_PAUSE = RunState(RunStatus.STARTING, RunRequest.PAUSE)
@@ -132,6 +142,10 @@ _TRANSITIONS: Final[MappingProxyType[tuple[RunState, RunTrigger], RunState]] = M
         **_starting_moves(_STARTING, ready=_RUNNING),
         **_starting_moves(_STARTING_PAUSE, ready=_PAUSING),
         **_starting_moves(_STARTING_STOP, ready=_STOPPING),
+        # Core may land a held stop before the run is ready, which abandons the
+        # startup: the run ends ``stopped`` without ever having run. A held
+        # pause has no such boundary; it lands only after ``READY``.
+        (_STARTING_STOP, RunTrigger.INVOCATION_FINISHED): _STOPPED,
         (_RUNNING, RunTrigger.READY): _RUNNING,
         (_RUNNING, RunTrigger.PAUSE_REQUESTED): _PAUSING,
         (_RUNNING, RunTrigger.INVOCATION_FINISHED): _RUNNING,
