@@ -1,73 +1,18 @@
-"""Explicit declarations of the single-agent orchestration presets."""
+"""Plugin registrations for the single-agent search presets: the core path.
 
-from functools import partial
+Every entrypoint resolves `single-agent` and `profile-guided-single-agent` to these
+registrations. The run is a vs-core step function driven by the vs-runtime shell;
+`single_core` composes it.
+"""
 
-from pydantic import BaseModel
+from vibesys.orchestration.single.models import ProfileGuidedSingleOptions, SingleOptions
+from vibesys.single_core import single_core_registration
 
-from vibesys.hypothesis.readmodel import project_hypothesis_state
-from vibesys.orchestration.memory import declared_memory_paths
-from vibesys.orchestration.resume import compare_round_budget, project_round_budget
-from vibesys.orchestration.single.agents import AGENTS
-from vibesys.orchestration.single.models import (
-    ProfileGuidedSingleOptions,
-    SingleOptions,
-    SingleState,
+REGISTRATION = single_core_registration("single-agent", SingleOptions)
+PLUGIN = REGISTRATION.plugin
+PROFILE_GUIDED_REGISTRATION = single_core_registration(
+    "profile-guided-single-agent", ProfileGuidedSingleOptions
 )
-from vibesys.orchestration.single.orchestration import orchestrate, orchestrate_profile_guided
-from vibesys.plugin_registration import OrchestrationRegistration
-from vibesys.run.contracts import PluginProjection
-from vs_runtime.api import OrchestrationPlugin
+PROFILE_GUIDED_PLUGIN = PROFILE_GUIDED_REGISTRATION.plugin
 
-
-def _project(raw_state: BaseModel) -> PluginProjection:
-    """Project the single-agent aggregate into its public policy view."""
-    return project_hypothesis_state(SingleState.model_validate(raw_state).search)
-
-
-PLUGIN = OrchestrationPlugin(
-    id="single-agent",
-    agents=AGENTS,
-    options=SingleOptions,
-    state=SingleState,
-    orchestrate=orchestrate,
-    memory_paths=declared_memory_paths(),
-)
-REGISTRATION = OrchestrationRegistration(
-    plugin=PLUGIN,
-    project=_project,
-    resume_policy=partial(
-        compare_round_budget,
-        plugin_id="single-agent",
-        options_type=SingleOptions,
-    ),
-    project_max_rounds=partial(project_round_budget, options_type=SingleOptions),
-)
-
-PROFILE_GUIDED_PLUGIN = OrchestrationPlugin(
-    id="profile-guided-single-agent",
-    agents=AGENTS,
-    options=ProfileGuidedSingleOptions,
-    state=SingleState,
-    orchestrate=orchestrate_profile_guided,
-    memory_paths=declared_memory_paths(),
-)
-PROFILE_GUIDED_REGISTRATION = OrchestrationRegistration(
-    plugin=PROFILE_GUIDED_PLUGIN,
-    project=_project,
-    resume_policy=partial(
-        compare_round_budget,
-        plugin_id="profile-guided-single-agent",
-        options_type=ProfileGuidedSingleOptions,
-    ),
-    project_max_rounds=partial(
-        project_round_budget,
-        options_type=ProfileGuidedSingleOptions,
-    ),
-)
-
-__all__ = [
-    "PLUGIN",
-    "PROFILE_GUIDED_PLUGIN",
-    "PROFILE_GUIDED_REGISTRATION",
-    "REGISTRATION",
-]
+__all__ = ["PLUGIN", "PROFILE_GUIDED_PLUGIN", "PROFILE_GUIDED_REGISTRATION", "REGISTRATION"]

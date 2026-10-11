@@ -44,9 +44,6 @@ class DynamicOptions(AgentOrchestrationOptions):
     # Turns of one workstream that may end without a candidate reaching measurement before
     # it settles as failed and its slot returns to the planner.
     max_unmeasured_turns: Annotated[int, Field(gt=0, le=32)] = 2
-    # Seconds to wait before asking an agent again after the provider connection dropped
-    # its turn; doubles with each further drop of the same turn.
-    turn_drop_backoff_seconds: Annotated[float, Field(gt=0, le=600)] = 5.0
 
     @model_validator(mode="after")
     def _supported_interface(self) -> DynamicOptions:

@@ -30,15 +30,16 @@ from vibesys.hypothesis.attempts import (
 )
 from vibesys.hypothesis.config import HypothesisConfig
 from vibesys.hypothesis.record import AgentAttribution, RecordInput, build_round_record
+from vibesys.hypothesis.results import Finished
 from vibesys.hypothesis.search import HypothesisSearch
 from vibesys.hypothesis.state import HypothesisState
 from vibesys.hypothesis.transitions import CarryOver
 
 if TYPE_CHECKING:
     from vibesys.hypothesis.history import RoundRecord
-    from vibesys.hypothesis.notices import ArchiveConflict
+    from vibesys.hypothesis.notices import ArchiveConflict, ParetoArchiveView
     from vibesys.hypothesis.plan import OrchestratorPlan
-    from vibesys.hypothesis.results import NextRoundDecision, StartedHypothesis
+    from vibesys.hypothesis.results import NextRoundDecision, PlanningContext, StartedHypothesis
     from vibesys.metrics import FrameworkBenchmarkOutcome, MetricSpace
 
 _CARRY = TypeAdapter(CarryOver)
@@ -271,3 +272,17 @@ def note_attempt_failure(
         updated.gate_accuracy_passed = gate.accuracy_passed
     state = HypothesisSearch(config).update_active(ledger.search, updated)
     return Ledger(state, ledger.carry)
+
+
+def archive_view(config: HypothesisConfig, ledger: Ledger) -> ParetoArchiveView:
+    """The Pareto archive's trusted parents and pending claims over the ledger's rounds."""
+    return HypothesisSearch(config).archive_view(ledger.records, space=ledger.search.metrics)
+
+
+def planning(config: HypothesisConfig, ledger: Ledger, round_number: int) -> PlanningContext:
+    """The evidence a designer turn needs for ``round_number``: plateau, provisional count, carry."""
+    decision = next_round(config, ledger, round_number)
+    if isinstance(decision, Finished):
+        message = "no round to plan past the round budget"
+        raise ValueError(message)
+    return decision.context

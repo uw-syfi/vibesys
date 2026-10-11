@@ -251,10 +251,10 @@ def _agent_policy_descriptor(
         "max_retries_per_round": args.max_retries_per_round,
         "judge_every": args.judge_every,
         "official_eval_every": args.official_eval_every,
+        "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
         **(
             {
                 "max_in_flight": args.max_in_flight,
-                "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
                 "max_unmeasured_turns": args.max_unmeasured_turns,
             }
             if args.outer_loop == "dynamic"
