@@ -293,6 +293,29 @@ def test_interior_edit_with_growth_is_rejected(tmp_path: Path) -> None:
     assert load_event_index(path) is None
 
 
+def test_unsampled_historical_edit_with_growth_rebuilds_public_headers(tmp_path: Path) -> None:
+    path = tmp_path / "events.jsonl"
+    _write(path, list(range(1, 12_001)))
+    EventStore(path, run_id="first")
+    lines = path.read_bytes().splitlines(keepends=True)
+    original = b'"run_id":"persisted-run"'
+    replacement = b'"run_id":"mutated---run"'
+    assert len(original) == len(replacement)
+    target = lines[1_000]
+    position = sum(len(line) for line in lines[:1_000]) + target.index(original)
+    with path.open("r+b") as stream:
+        stream.seek(position)
+        assert stream.write(replacement) == len(replacement)
+    _append(path, 12_001, "appended")
+
+    store = EventStore(path, run_id="second")
+    header = next(item for item in store.event_headers() if item.sequence == 1_001)
+    event = store.read_sequences([1_001])[0]
+
+    assert header.run_id == event.run_id == "mutated---run"
+    assert store.last_sequence == 12_001
+
+
 def test_different_file_at_the_same_path_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2, 3])
