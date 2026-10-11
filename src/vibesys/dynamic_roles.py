@@ -13,48 +13,38 @@ host declares cannot drift apart.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from vibesys.core_roles import (
+    CONTINUING_READER,
+    MEASURING_READER,
+    MEASURING_WRITER,
+    READER,
+    RoleKind,
+    core_role,
+)
 from vibesys.orchestration.dynamic.core_policy.api import prompts
 from vibesys.orchestration.dynamic.strategy.api import Role, role_id
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api import AgentCapability, AgentRole, AgentTool, WorkspaceAccess
-from vs_runtime.api.core import EVALUATION_TOOL_ID
+
+if TYPE_CHECKING:
+    from vs_runtime.api import AgentRole
 
 _RENDERER = TemplateRenderer(Path(prompts.__file__).parent)
 
-# A turn that ends in a reply the host may re-dispatch needs the provider to resume it.
-_CONTINUATION = frozenset(
-    {
-        AgentCapability.SESSION_REUSE,
-        AgentCapability.PROVIDER_SESSION_RESUME,
-        AgentCapability.DURABLE_TURN_CONTINUATION,
-    }
-)
-# The implementer and the judge may also submit a measurement of their own workspace through
-# the bridged evaluation tool; core decides admission and budget, so the tool has no status or
-# wait. Reaching the tool server needs MCP.
-_MEASURING = _CONTINUATION | {AgentCapability.MCP_SERVERS}
-_EVALUATION = AgentTool(id=EVALUATION_TOOL_ID)
 
-
-def _role(
-    role: Role,
-    access: WorkspaceAccess,
-    capabilities: frozenset[AgentCapability],
-    tools: tuple[AgentTool, ...] = (),
-) -> AgentRole:
-    return AgentRole(
-        id=role_id(role.value).root,
-        system_prompt=_RENDERER.render_template(f"{role.value}_system.j2"),
-        extra_tools=tools,
-        workspace_access=access,
-        required_capabilities=capabilities,
+def _role(role: Role, kind: RoleKind) -> AgentRole:
+    return core_role(
+        _RENDERER,
+        role_id=role_id(role.value).root,
+        system_template=f"{role.value}_system.j2",
+        kind=kind,
     )
 
 
-ORCHESTRATOR = _role(Role.PLANNER, WorkspaceAccess.READ_ONLY, frozenset())
-IMPLEMENTER = _role(Role.IMPLEMENTER, WorkspaceAccess.READ_WRITE, _MEASURING, (_EVALUATION,))
-JUDGE = _role(Role.JUDGE, WorkspaceAccess.READ_ONLY, _MEASURING, (_EVALUATION,))
-PROFILER = _role(Role.PROFILER, WorkspaceAccess.READ_ONLY, _CONTINUATION)
+ORCHESTRATOR = _role(Role.PLANNER, READER)
+IMPLEMENTER = _role(Role.IMPLEMENTER, MEASURING_WRITER)
+JUDGE = _role(Role.JUDGE, MEASURING_READER)
+PROFILER = _role(Role.PROFILER, CONTINUING_READER)
 
 CORE_ROLES = (ORCHESTRATOR, IMPLEMENTER, JUDGE, PROFILER)

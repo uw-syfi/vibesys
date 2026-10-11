@@ -8,12 +8,18 @@ a run's committed record.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vibesys.core_wiring import (
+    ResolvedRun,
+    agent_evaluation_policy,
+    evaluation_inputs,
+    operation_catalog,
+    require_candidate_sandboxes,
+)
 from vibesys.dynamic_roles import CORE_ROLES
-from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration.dynamic.core_policy.api import (
     PolicyInputs,
     RunBounds,
@@ -31,8 +37,6 @@ from vibesys.orchestration.dynamic.strategy.api import (
     measurement_recipe,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
-from vibesys.run.evaluation_backend import semantic_evaluation_identity
-from vs_core.api import ArtifactId, ArtifactRef
 from vs_runtime.api import (
     CoreOperation,
     CorePlan,
@@ -44,72 +48,37 @@ from vs_runtime.api.core import (
     OperationCatalog,
     OperationPorts,
     RuntimeRecord,
-    build_operation_catalog,
     operation_roles,
-    production_owners,
 )
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.orchestration.dynamic.core_policy.api import DynamicCorePolicy
-    from vs_runtime.api import ArtifactStore, CoreRunContext, RunFacts
-    from vs_runtime.api.infrastructure import RunEnvironmentView, TrustedEvaluationPlan
+    from vs_runtime.api import CoreRunContext
 
 _PLUGIN_ID = STATE_SCHEMA.name.removesuffix(".strategy-state")
-
-
-@dataclass(frozen=True)
-class ResolvedRun:
-    """What the host resolved about a run before the core starts."""
-
-    facts: RunFacts
-    evaluation_plan: TrustedEvaluationPlan
-    environment: RunEnvironmentView
-    baseline_commit: str
-    artifacts: ArtifactStore
 
 
 def resolve_core_policy(
     options: DynamicOptions, bounds: RunBounds, run: ResolvedRun
 ) -> DynamicCorePolicy:
-    """The core policy of one run: stores the evaluation recipe, then builds the pure policy.
-
-    The recipe is the evaluation plan as a content-addressed artifact, and the
-    three digests are the ones the evaluation backend computes for the same run.
-    """
-    plan = run.evaluation_plan
-    content = plan.model_dump_json().encode()
-    receipt = run.artifacts.write(content)
-    identity = semantic_evaluation_identity(plan, run.facts, run.environment)
+    """The core policy of one run: stores the evaluation recipe, then builds the pure policy."""
+    evaluation = evaluation_inputs(run)
     return build_core_policy(
         options,
         bounds,
         PolicyInputs(
             objective=run.facts.objective,
             baseline_commit=run.baseline_commit,
-            evaluator_digest=identity.evaluator.value,
-            workload_digest=identity.workload.value,
-            environment_digest=identity.environment.value,
-            recipe=ArtifactRef(
-                artifact_id=ArtifactId(root="recipe:evaluation-plan"), digest=receipt.sha256
-            ),
-            accuracy_configured=run.facts.accuracy_configured,
-            benchmark_configured=run.facts.benchmark_configured,
-            profiling=run.facts.profiler_id != "none",
-            profile_measurement=run.facts.profiler_id != "none"
-            and plan.profile_command is not None,
-            accuracy_seconds=plan.accuracy_timeout_seconds,
-            benchmark_seconds=plan.benchmark_timeout_seconds,
-            profile_seconds=plan.profile_timeout_seconds,
+            **asdict(evaluation),
         ),
     )
 
 
 def dynamic_operation_catalog(ports: OperationPorts) -> OperationCatalog:
     """The operations the dynamic strategy requires, each owned by the production owner of its role."""
-    registrations = operation_roles(OPERATIONS)
-    return build_operation_catalog(registrations, production_owners(registrations, ports))
+    return operation_catalog(OPERATIONS, ports)
 
 
 def dynamic_projector() -> RuntimeRecordProjector[DynamicStrategyState]:
@@ -127,31 +96,9 @@ def dynamic_projector() -> RuntimeRecordProjector[DynamicStrategyState]:
 RETENTION_LABEL = "verified"
 
 
-def _require_candidate_sandboxes(environment: RunEnvironmentView) -> None:
-    """Refuse a run environment that cannot open isolated candidate sandboxes.
-
-    Every workstream runs in its own candidate sandbox, so without them the input
-    measurement would fail and the planner would be paid for work that cannot start.
-    """
-    obstacle = environment.parallel_candidate_obstacle
-    if obstacle is not None:
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="dynamic_run_environment_unsupported",
-                stage="run_environment_validation",
-                message=(
-                    f"the dynamic loop cannot run on the {environment.env_kind!r} run "
-                    "environment: it cannot open isolated candidate sandboxes (parallel "
-                    f"candidate evaluation) because {obstacle}; choose a run environment "
-                    "that can, such as docker, slurm or modal"
-                ),
-            )
-        )
-
-
 def _core_plan(context: CoreRunContext) -> CorePlan:
     """The plan of one run: the policy resolved from what the host opened for it."""
-    _require_candidate_sandboxes(context.environment)
+    require_candidate_sandboxes(context.environment, loop="dynamic")
     options = DynamicOptions.model_validate(context.options)
     commit = context.baseline.git_commit
     if commit is None:
@@ -191,22 +138,12 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
 
 
 def _agent_evaluation(policy: DynamicCorePolicy) -> AgentEvaluationPolicy:
-    """The plan an implementer or judge measures with: the run's configured gates, once each.
-
-    It reads the same digests, recipe and stage budgets as the strategy's own trusted
-    measurement plans, so an agent measurement and a trusted one share one identity.
-    """
+    """The plan an implementer or judge measures with: the run's configured gates, once each."""
     config = policy.strategy.config
-    configured = tuple(
-        name
-        for name, enabled in (
-            ("accuracy", config.accuracy_configured),
-            ("benchmark", config.benchmark_configured),
-        )
-        if enabled
-    )
-    return AgentEvaluationPolicy.from_recipe(
-        measurement_recipe(config, policy.facts).only(configured)
+    return agent_evaluation_policy(
+        measurement_recipe(config, policy.facts),
+        accuracy=config.accuracy_configured,
+        benchmark=config.benchmark_configured,
     )
 
 

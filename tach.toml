@@ -1280,18 +1280,39 @@ expose = ["ResolvedRun", "dynamic_core_registration", "dynamic_operation_catalog
 # place that stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.dynamic_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.dynamic_roles", "vibesys.errors", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.run.evaluation_backend"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.dynamic_roles", "vibesys.errors", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.run.evaluation_backend"]
 
 [[interfaces]]
 from = ["vibesys.dynamic_roles"]
 expose = ["CORE_ROLES", "IMPLEMENTER", "JUDGE", "ORCHESTRATOR", "PROFILER"]
 
 [[modules]]
+# Host wiring every strategy on the core lifecycle shares: the evaluation recipe and identity,
+# the production owner of each operation role, and the sandbox check.
+path = "vibesys.core_wiring"
+layer = "loops"
+depends_on = ["vs_core", "vs_runtime", "vibesys.errors", "vibesys.run.evaluation_backend"]
+
+[[interfaces]]
+from = ["vibesys.core_wiring"]
+expose = ["ParallelCandidateFacts", "EvaluationInputs", "ResolvedRun", "agent_evaluation_policy", "evaluation_inputs", "operation_catalog", "require_candidate_sandboxes"]
+
+[[modules]]
+# The capability sets and the factory of the agent roles of a strategy on the core lifecycle.
+path = "vibesys.core_roles"
+layer = "loops"
+depends_on = ["vs_prompts", "vs_runtime"]
+
+[[interfaces]]
+from = ["vibesys.core_roles"]
+expose = ["CONTINUATION", "CONTINUING_READER", "EVALUATION_TOOL", "MEASURING", "MEASURING_READER", "MEASURING_WRITER", "READER", "RoleKind", "core_role"]
+
+[[modules]]
 # The agent roles of a core dynamic run: host wiring (vs_runtime values, template file
 # paths) that the pure core_policy may not hold.
 path = "vibesys.dynamic_roles"
 layer = "loops"
-depends_on = ["vs_prompts", "vs_runtime", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.strategy"]
+depends_on = ["vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.strategy"]
 
 [[modules]]
 path = "vs_core._session_scope"
