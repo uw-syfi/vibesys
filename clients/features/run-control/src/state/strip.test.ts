@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {Seeded} from '@vibesys/core-state/testing';
 import {resumeDecision} from '@vibesys/entities';
 import type {ChromeState} from '@vibesys/ipc';
-import {randomChrome} from '../../../testing/fake-chrome.js';
+import {randomChrome} from '@vibesys/ipc/testing';
 import {runLink, stripControls} from './strip.js';
 
 /** The strip's controls agree with the window state they come from. */

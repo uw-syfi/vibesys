@@ -1,6 +1,6 @@
 /**
- * The welcome screen's own store: the window state the main process pushes (`chrome`, which the
- * title strip renders), the banner line, and the run actions that do not belong to one sheet:
+ * The run-control store: the window state the main process pushes (`chrome`, which the title
+ * strip renders), the banner line, and the run actions that do not belong to one sheet:
  * attach, resume, stop, retry, and switching between the run and the welcome view.
  *
  * The banner answers the latest action only: each action's request carries a token, and a reply
