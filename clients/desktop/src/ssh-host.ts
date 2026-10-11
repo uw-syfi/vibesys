@@ -35,8 +35,19 @@
 import {spawn} from 'node:child_process';
 import {Duplex} from 'node:stream';
 import {DetachedHost, type HostAccess} from './detached-host.js';
-import {HostError, type HostErrorKind} from './host.js';
-import {type CommandOutput, finish, fromChild, type SpawnedProcess} from './process.js';
+import {
+  HOST_COMMAND_OUTPUT_LIMIT_BYTES,
+  HostError,
+  type HostErrorKind,
+  hostCommandOutputLimitError,
+} from './host.js';
+import {
+  type CommandOutput,
+  finish,
+  fromChild,
+  ProcessOutputLimitError,
+  type SpawnedProcess,
+} from './process.js';
 
 /** Runs the system `ssh` client with `args` and extra environment variables. */
 export interface SshRunner {
@@ -282,7 +293,7 @@ class SshAccess implements HostAccess {
   async run(argv: readonly string[], cwd: string | undefined): Promise<CommandOutput> {
     await this.#ensure(false);
     const {vibesys} = await this.#resolve();
-    const output = await finish(
+    const output = await this.#finish(
       this.#channel(RUN_SCRIPT, 'vibesys-run', [cwd ?? '', vibesys, ...argv]),
     );
     if (output.code === SSH_FAILED) throw this.#sshError(output.stderr);
@@ -308,13 +319,13 @@ class SshAccess implements HostAccess {
   }
 
   async close(): Promise<void> {
-    await finish(
+    await this.#finish(
       this.#runner.spawn([...this.#common(), '-O', 'exit', '--', this.#options.alias], {}),
     );
   }
 
   async #establish(interactive: boolean): Promise<void> {
-    const check = await finish(
+    const check = await this.#finish(
       this.#runner.spawn([...this.#common(), '-O', 'check', '--', this.#options.alias], {}),
     );
     if (check.code === 0) return;
@@ -324,7 +335,7 @@ class SshAccess implements HostAccess {
       env['SSH_ASKPASS'] = this.#options.askpass;
       env['SSH_ASKPASS_REQUIRE'] = 'force';
     }
-    const master = await finish(
+    const master = await this.#finish(
       this.#runner.spawn(
         [
           ...this.#common(),
@@ -356,7 +367,7 @@ class SshAccess implements HostAccess {
   }
 
   async #probe(): Promise<Resolved> {
-    const output = await finish(this.#channel(PROBE_SCRIPT, 'vibesys-probe', ['uv']));
+    const output = await this.#finish(this.#channel(PROBE_SCRIPT, 'vibesys-probe', ['uv']));
     if (output.code === SSH_FAILED) throw this.#sshError(output.stderr);
     const found = output.stdout
       .split('\n')
@@ -383,7 +394,7 @@ class SshAccess implements HostAccess {
 
   async registryRoots(): Promise<string[]> {
     await this.#ensure(false);
-    const output = await finish(this.#channel(REGISTRY_SCRIPT, 'vibesys-registry', []));
+    const output = await this.#finish(this.#channel(REGISTRY_SCRIPT, 'vibesys-registry', []));
     if (output.code === SSH_FAILED) throw this.#sshError(output.stderr);
     return registryRoots(output.stdout);
   }
@@ -391,7 +402,7 @@ class SshAccess implements HostAccess {
   async verifyCheckout(): Promise<string> {
     await this.#ensure(false);
     const {alias, checkout} = this.#options;
-    const output = await finish(this.#channel(VERIFY_SCRIPT, 'vibesys-verify', [checkout]));
+    const output = await this.#finish(this.#channel(VERIFY_SCRIPT, 'vibesys-verify', [checkout]));
     if (output.code === SSH_FAILED) throw this.#sshError(output.stderr);
     const line = output.stdout.split('\n')[0]?.trim() ?? '';
     const where = `${checkout} on ${alias}`;
@@ -418,6 +429,17 @@ class SshAccess implements HostAccess {
       ],
       {},
     );
+  }
+
+  async #finish(process: SpawnedProcess): Promise<CommandOutput> {
+    try {
+      return await finish(process, HOST_COMMAND_OUTPUT_LIMIT_BYTES);
+    } catch (error) {
+      if (error instanceof ProcessOutputLimitError) {
+        throw hostCommandOutputLimitError(error.stream, {cause: error});
+      }
+      throw error;
+    }
   }
 
   #common(): string[] {

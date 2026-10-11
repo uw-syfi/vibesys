@@ -1,8 +1,12 @@
+import {describe, expect, test} from 'bun:test';
+import type {Host} from './host.js';
+import {HOST_COMMAND_OUTPUT_LIMIT_BYTES, HostError} from './host.js';
 import {LocalHost} from './local-host.js';
 import {SshHost} from './ssh-host.js';
 import type {CommandResult, ServerScript} from './testing/fake-host.js';
 import {FakeHost} from './testing/fake-host.js';
 import {fakeLocalSystem} from './testing/fake-local-system.js';
+import {fakeProcess} from './testing/fake-process.js';
 import {FakeSsh} from './testing/fake-ssh.js';
 import {FakeVibesysNode} from './testing/fake-vibesys-node.js';
 import {describeHostContract, type HostWorld} from './testing/host-contract.js';
@@ -78,3 +82,41 @@ describeHostContract(
     return {host, network: machine.network};
   }),
 );
+
+async function failureOf(promise: Promise<unknown>): Promise<HostError> {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof HostError) return error;
+    throw error;
+  }
+  throw new Error('expected a HostError');
+}
+
+describe('Host command output bound', () => {
+  for (const stream of ['stdout', 'stderr'] as const) {
+    test(`crossing the ${stream} bound kills the process once and reports a bounded error`, async () => {
+      const result: CommandResult = {
+        code: 0,
+        stdout: stream === 'stdout' ? `"${'x'.repeat(HOST_COMMAND_OUTPUT_LIMIT_BYTES - 1)}"` : '{}',
+        stderr: stream === 'stderr' ? 'e'.repeat(HOST_COMMAND_OUTPUT_LIMIT_BYTES + 1) : '',
+      };
+      const signals: (NodeJS.Signals | number)[] = [];
+      const machine = new FakeVibesysNode({server: () => () => {}, command: () => result});
+      const system = fakeLocalSystem(machine, output => {
+        const child = fakeProcess(signal => signals.push(signal));
+        child.stdout.write(output.stdout);
+        child.stderr.write(output.stderr);
+        return child.process;
+      });
+      const host: Host = new LocalHost({python: ['python3'], system});
+
+      const error = await failureOf(host.invoke(['large-output']));
+      expect(error.kind).toBe('failed');
+      expect(error.message).toContain(`${HOST_COMMAND_OUTPUT_LIMIT_BYTES} bytes to ${stream}`);
+      expect(error.message.length).toBeLessThan(200);
+      expect(signals).toEqual(['SIGKILL']);
+      await host.close();
+    });
+  }
+});

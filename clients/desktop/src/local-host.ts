@@ -11,8 +11,14 @@ import {createConnection} from 'node:net';
 import {homedir} from 'node:os';
 import type {Duplex} from 'node:stream';
 import {DetachedHost, type HostAccess} from './detached-host.js';
-import {HostError} from './host.js';
-import {type CommandOutput, finish, fromChild, type SpawnedProcess} from './process.js';
+import {HOST_COMMAND_OUTPUT_LIMIT_BYTES, HostError, hostCommandOutputLimitError} from './host.js';
+import {
+  type CommandOutput,
+  finish,
+  fromChild,
+  ProcessOutputLimitError,
+  type SpawnedProcess,
+} from './process.js';
 import {checkoutProblem, localCheckArgs, PROBED_DIRECTORIES} from './ssh-host.js';
 
 /** The operating-system effects `LocalHost` performs. */
@@ -48,9 +54,9 @@ class LocalAccess implements HostAccess {
 
   async ensureLink(): Promise<void> {}
 
-  run(argv: readonly string[], cwd: string | undefined): Promise<CommandOutput> {
+  async run(argv: readonly string[], cwd: string | undefined): Promise<CommandOutput> {
     const [command, ...prefix] = this.#python;
-    return finish(
+    return finishHostCommand(
       this.#system.spawn(command, [...prefix, '-m', 'entrypoints.launcher', ...argv], cwd),
     );
   }
@@ -64,6 +70,17 @@ class LocalAccess implements HostAccess {
   }
 
   async close(): Promise<void> {}
+}
+
+async function finishHostCommand(process: SpawnedProcess): Promise<CommandOutput> {
+  try {
+    return await finish(process, HOST_COMMAND_OUTPUT_LIMIT_BYTES);
+  } catch (error) {
+    if (error instanceof ProcessOutputLimitError) {
+      throw hostCommandOutputLimitError(error.stream, {cause: error});
+    }
+    throw error;
+  }
 }
 
 /** A checkout on this machine, checked: its physical path and the `uv` that runs it. */
@@ -81,14 +98,16 @@ export async function checkLocalCheckout(
   system: LocalSystem = nodeSystem,
 ): Promise<LocalCheckout> {
   const where = `${checkout} on This Mac`;
-  const verify = await finish(
+  const verify = await finishHostCommand(
     system.spawn('/bin/sh', localCheckArgs('verify', checkout), undefined),
   );
   const verdict = verify.stdout.split('\n')[0]?.trim() ?? '';
   if (verify.code !== 0 || !verdict.startsWith('root ')) {
     throw new HostError('failed', checkoutProblem(verdict, where, verify.stderr));
   }
-  const probe = await finish(system.spawn('/bin/sh', localCheckArgs('probe', 'uv'), undefined));
+  const probe = await finishHostCommand(
+    system.spawn('/bin/sh', localCheckArgs('probe', 'uv'), undefined),
+  );
   const uv = probe.stdout
     .split('\n')
     .find(line => line.startsWith('found '))

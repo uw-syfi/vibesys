@@ -12,6 +12,9 @@
 import type {Duplex} from 'node:stream';
 import type {InstanceRecord, StopOutcome, StopResult} from './instances.js';
 
+/** Maximum UTF-8 bytes a completed host command may write to either output stream. */
+export const HOST_COMMAND_OUTPUT_LIMIT_BYTES = 4 * 1024 * 1024;
+
 /** A server's control endpoint, named in the host's own terms. */
 export interface Endpoint {
   /** The server's Unix-socket path, as a path on the host (not necessarily on this machine). */
@@ -79,6 +82,19 @@ export class HostError extends Error {
   }
 }
 
+/** The public Host failure for a command that crosses its per-stream output bound. */
+export function hostCommandOutputLimitError(
+  stream: 'stdout' | 'stderr',
+  options?: ErrorOptions,
+): HostError {
+  return new HostError(
+    'failed',
+    `the host command wrote more than ${HOST_COMMAND_OUTPUT_LIMIT_BYTES} bytes to ${stream}; ` +
+      'check the configured VibeSys command',
+    options,
+  );
+}
+
 export interface Host {
   /**
    * Make sure the link to the host is up, establishing it (and authenticating) when it is not.
@@ -101,8 +117,10 @@ export interface Host {
   dial(endpoint: Endpoint): Promise<Duplex>;
   /**
    * Run the `vibesys` command line with `argv` and parse its standard output as one JSON document.
-   * Rejects with `failed` on a non-zero exit (the message carries its standard error), with
-   * `malformed` when the output is not JSON, and with `link` when the host cannot be reached.
+   * Each output stream is limited to `HOST_COMMAND_OUTPUT_LIMIT_BYTES`; crossing either limit
+   * rejects with `failed` without parsing truncated output. Also rejects with `failed` on a
+   * non-zero exit (the message carries its standard error), with `malformed` when the output is not
+   * JSON, and with `link` when the host cannot be reached.
    */
   invoke(argv: readonly string[]): Promise<unknown>;
   /**

@@ -5,7 +5,12 @@
  */
 import {describe, expect, test} from 'bun:test';
 import type {Duplex} from 'node:stream';
-import {type Host, HostError, type HostErrorKind} from '../host.js';
+import {
+  HOST_COMMAND_OUTPUT_LIMIT_BYTES,
+  type Host,
+  HostError,
+  type HostErrorKind,
+} from '../host.js';
 import type {CommandResult, ServerScript} from './fake-host.js';
 
 export interface HostWorld {
@@ -162,6 +167,36 @@ function describeCommandContract(makeWorld: () => HostWorld): void {
     await expectKind(world.host.invoke(['x']), 'malformed');
     await world.host.close();
   });
+
+  test('invoke accepts each output stream exactly at its byte bound', async () => {
+    const world = makeWorld();
+    const value = 'é'.repeat((HOST_COMMAND_OUTPUT_LIMIT_BYTES - 2) / 2);
+    const stdout = `"${value}"`;
+    const stderr = 'e'.repeat(HOST_COMMAND_OUTPUT_LIMIT_BYTES);
+    expect(Buffer.byteLength(stdout)).toBe(HOST_COMMAND_OUTPUT_LIMIT_BYTES);
+    world.scriptCommand(() => ({code: 0, stdout, stderr}));
+
+    expect(await world.host.invoke(['large-json'])).toBe(value);
+    await world.host.close();
+  });
+
+  for (const stream of ['stdout', 'stderr'] as const) {
+    test(`invoke measures ${stream} in bytes and reports bounded overflow`, async () => {
+      const world = makeWorld();
+      const result = {
+        code: 0,
+        stdout: stream === 'stdout' ? `"${'é'.repeat(HOST_COMMAND_OUTPUT_LIMIT_BYTES / 2)}"` : '{}',
+        stderr: stream === 'stderr' ? 'é'.repeat(HOST_COMMAND_OUTPUT_LIMIT_BYTES / 2 + 1) : '',
+      };
+      expect(Buffer.byteLength(result[stream])).toBe(HOST_COMMAND_OUTPUT_LIMIT_BYTES + 2);
+      world.scriptCommand(() => result);
+
+      const error = await expectKind(world.host.invoke(['large-output']), 'failed');
+      expect(error.message).toContain(`${HOST_COMMAND_OUTPUT_LIMIT_BYTES} bytes to ${stream}`);
+      expect(error.message.length).toBeLessThan(200);
+      await world.host.close();
+    });
+  }
 }
 
 /** The cases about what outlives a host and what a start publishes. */

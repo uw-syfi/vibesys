@@ -4,10 +4,16 @@
  * them (`python -m entrypoints.launcher ARGV`), and answered by the node; sockets are its network.
  */
 import type {LocalSystem} from '../local-host.js';
+import type {SpawnedProcess} from '../process.js';
+import type {CommandResult} from './fake-host.js';
 import {finishedProcess} from './fake-process.js';
 import type {FakeVibesysNode} from './fake-vibesys-node.js';
 
-export function fakeLocalSystem(node: FakeVibesysNode): LocalSystem {
+export function fakeLocalSystem(
+  node: FakeVibesysNode,
+  process: (result: CommandResult) => SpawnedProcess = result =>
+    finishedProcess(result.code, result.stdout, result.stderr),
+): LocalSystem {
   return {
     connect: path => node.network.connect(path),
     spawn: (_command, args, cwd) => {
@@ -16,7 +22,7 @@ export function fakeLocalSystem(node: FakeVibesysNode): LocalSystem {
         throw new Error(`unexpected command: ${args.join(' ')}`);
       }
       const result = node.run(args.slice(module + 2), cwd);
-      return finishedProcess(result.code, result.stdout, result.stderr);
+      return process(result);
     },
   };
 }

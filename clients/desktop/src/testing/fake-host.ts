@@ -7,7 +7,15 @@
  * `failed`, and nothing works after `close()`.
  */
 import type {Duplex} from 'node:stream';
-import {type Endpoint, type Host, HostError, type ServerExit, type ServerHandle} from '../host.js';
+import {
+  type Endpoint,
+  HOST_COMMAND_OUTPUT_LIMIT_BYTES,
+  type Host,
+  HostError,
+  hostCommandOutputLimitError,
+  type ServerExit,
+  type ServerHandle,
+} from '../host.js';
 import {parseInstanceRecord, type StopResult} from '../instances.js';
 import {type ConnectionHandler, FakeNetwork} from './fake-network.js';
 import {fakeRecord} from './fake-record.js';
@@ -93,6 +101,11 @@ export class FakeHost implements Host {
   async invoke(argv: readonly string[]): Promise<unknown> {
     this.#assertOpen();
     const result = this.#command(argv);
+    for (const stream of ['stdout', 'stderr'] as const) {
+      if (Buffer.byteLength(result[stream]) > HOST_COMMAND_OUTPUT_LIMIT_BYTES) {
+        throw hostCommandOutputLimitError(stream);
+      }
+    }
     if (result.code !== 0) {
       throw new HostError(
         'failed',

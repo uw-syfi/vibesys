@@ -5,6 +5,8 @@
 import {PassThrough} from 'node:stream';
 import type {SpawnedProcess} from '../process.js';
 
+type KillSignal = Parameters<SpawnedProcess['kill']>[0];
+
 export interface FakeProcess {
   readonly process: SpawnedProcess;
   /** What the host wrote to the process's stdin. */
@@ -15,7 +17,7 @@ export interface FakeProcess {
   end(code: number | null, stdout?: string, stderr?: string): void;
 }
 
-export function fakeProcess(onKill: () => void = () => {}): FakeProcess {
+export function fakeProcess(onKill: (signal: KillSignal) => void = () => {}): FakeProcess {
   const input = new PassThrough();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -44,9 +46,9 @@ export function fakeProcess(onKill: () => void = () => {}): FakeProcess {
       stdout,
       stderr,
       exit,
-      kill: () => {
+      kill: signal => {
         if (ended) return;
-        onKill();
+        onKill(signal);
         end(null);
       },
     },
