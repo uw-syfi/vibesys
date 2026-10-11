@@ -10,7 +10,7 @@ import type {HostKey} from '../../host-settings.js';
 import type {ChromeState, WelcomeResult} from '../../welcome-protocol.js';
 import {only, type Step} from './step.js';
 
-export interface Banner {
+interface Banner {
   readonly text: string;
   readonly error: boolean;
 }

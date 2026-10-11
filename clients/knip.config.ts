@@ -27,9 +27,9 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       'src/**/*.test.ts',
       'src/preload.cts',
       'src/welcome-preload.cts',
-      'src/welcome-page.ts',
+      'src/welcome/main.tsx',
     ],
-    project: ['src/**/*.ts', 'src/**/*.cts'],
+    project: ['src/**/*.ts', 'src/**/*.tsx', 'src/**/*.cts'],
   },
   tui: {
     entry: [

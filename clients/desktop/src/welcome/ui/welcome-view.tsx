@@ -17,8 +17,6 @@ import {RecentPanel} from './recent-panel.js';
 import {StartSheet} from './start-sheet.js';
 import {TitleStrip} from './title-strip.js';
 
-export type {WelcomeSenders} from './common.js';
-
 /** The view's whole input: each screen's state, and where its events go. */
 export interface WelcomeViewProps {
   readonly welcome: WelcomeState;

@@ -16,7 +16,7 @@ import type {
 } from '../../welcome-protocol.js';
 import {only, type Step} from './step.js';
 
-export interface HostStatuses {
+interface HostStatuses {
   /** The status request awaited, or null. */
   readonly awaiting: number | null;
   /** Statuses by instance id, from the last reply; null before one arrived. */

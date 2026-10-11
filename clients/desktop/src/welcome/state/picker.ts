@@ -8,7 +8,7 @@ import {filterHosts, type HostChoice, moveSelection} from '../../welcome-model.j
 import type {WelcomeResult} from '../../welcome-protocol.js';
 import {only, type Step} from './step.js';
 
-export type Aliases =
+type Aliases =
   | {readonly kind: 'loading'; readonly token: number}
   | {readonly kind: 'loaded'; readonly list: readonly string[]}
   | {readonly kind: 'failed'; readonly error: string};

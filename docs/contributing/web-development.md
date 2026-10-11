@@ -377,8 +377,9 @@ forbids connections. Its only way to the server is the preload bridge,
 binds the run view to one run.
 
 The app has one window with two views. It opens on the welcome view
-(`clients/desktop/src/welcome.html`, served from the same origin with its own
-narrow preload, `welcome-preload.cts`): recent runs (status refreshed from each
+(`clients/desktop/welcome.html`, a React bundle built by
+`vite.welcome.config.ts` apart from the run view's, served from the same origin
+with its own narrow preload, `welcome-preload.cts`): recent runs (status refreshed from each
 host's registry, one click to reattach), This Mac's live runs and "Start a
 run", and "Connect to host", a searchable list of the concrete `Host` aliases
 in `~/.ssh/config` that also accepts a typed `user@host` (arrows, Enter, Esc).
@@ -465,6 +466,37 @@ streams and SSH masters, never a run (`vibesys instances stop ID` does).
 Every implementation, including the in-memory `FakeHost`, passes the contract
 suite in `clients/desktop/src/testing/host-contract.ts`; `SshHost` runs it over
 `FakeSsh`, an in-memory ssh client and machine.
+
+The welcome view (`clients/desktop/src/welcome/`) is layered like the TUI, and
+`clients/.dependency-cruiser.mjs` enforces it:
+
+- `state/` is the functional core: one store per screen (welcome and title
+  strip, Recent, host panel, "Start a run", "Connect to host"), each a single
+  state union and a pure `step(state, action) -> {state, requests}` with its
+  `invariants`. Every request that awaits a reply carries a token held by the
+  state that awaits it; a reply with any other token is dropped. No React, DOM,
+  Electron, Node, or backend-client.
+- `ui/` is presentational: React components, props in and events out. Sheets
+  are native `<dialog>`s (`showModal()`), so focus containment, Esc, and focus
+  return come from the platform. No bridge, Electron, or I/O.
+- `effects/` is the shell: it performs the core's requests through the welcome
+  bridge and dispatches each reply as an action. It never imports `ui/`.
+- `main.tsx` is the composition root.
+
+The stores are tested model-based: seeded random sequences of user actions and
+replies (stale, duplicated, reordered) folded through each reducer, checking
+its invariants and that no stale reply is applied after every step
+(`clients/desktop/src/testing/model.ts`).
+
+The main process has one owner of process-wide state, `AppLifecycle`
+(`clients/desktop/src/app-lifecycle.ts`): a single-instance lock (a second
+launch focuses the first instance's window and opens what it was asked to), and
+a pure quit machine (release the hosts once, bounded, then exit through the one
+`app.exit` call site). `SettingsStore` is the only writer of `hosts.json` and
+`recent.json`: it serializes updates, replaces each file atomically, and pushes
+every change of the recent runs to the welcome view. "Start a run" can be
+cancelled while it starts: the main process stops the run as soon as its record
+appears instead of attaching, and the window stays on the welcome view.
 
 ### Gateway window
 

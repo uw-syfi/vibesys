@@ -21,7 +21,7 @@ export interface CheckoutForm {
   readonly authNeeded: boolean;
 }
 
-export type Panel =
+type Panel =
   | {readonly kind: 'loading'; readonly token: number}
   | {
       readonly kind: 'failed';

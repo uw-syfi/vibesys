@@ -291,6 +291,69 @@ export default {
       from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
       to: {path: '^tui/src/session-controller\\.ts$', dependencyTypesNot: ['type-only']},
     },
+    // The desktop welcome view mirrors the TUI's layers: `state/` is the functional core (pure
+    // reducers, selectors, invariants), `ui/` is presentational (props in, events out), and
+    // `effects/` is the shell that performs the core's requests over the welcome bridge;
+    // `main.tsx` is the composition root.
+    {
+      name: 'desktop-welcome-state-is-pure',
+      severity: 'error',
+      from: {path: '^desktop/src/welcome/state/', pathNot: TEST_FILE},
+      to: {
+        path: [
+          '^desktop/src/welcome/(?:ui|effects)/',
+          '^desktop/src/welcome/main\\.tsx$',
+          '(?:^|/)node_modules/(?:react|react-dom|electron)/',
+          '^backend-client/',
+          '/node_modules/@vibesys/backend-client/',
+        ],
+        dependencyTypesNot: ['type-only'],
+      },
+    },
+    {
+      name: 'desktop-welcome-core-and-ui-have-no-node-runtime',
+      severity: 'error',
+      from: {path: '^desktop/src/welcome/(?:state|ui)/', pathNot: TEST_FILE},
+      to: {dependencyTypes: ['core']},
+    },
+    {
+      name: 'desktop-welcome-ui-does-not-depend-on-shell',
+      severity: 'error',
+      from: {path: '^desktop/src/welcome/ui/', pathNot: TEST_FILE},
+      to: {
+        path: [
+          '^desktop/src/welcome/effects/',
+          '^desktop/src/welcome/main\\.tsx$',
+          '^backend-client/',
+          '/node_modules/@vibesys/backend-client/',
+          '(?:^|/)node_modules/electron/',
+        ],
+      },
+    },
+    {
+      name: 'desktop-welcome-effects-do-not-import-ui',
+      severity: 'error',
+      from: {path: '^desktop/src/welcome/effects/', pathNot: TEST_FILE},
+      to: {path: ['^desktop/src/welcome/ui/', '^desktop/src/welcome/main\\.tsx$']},
+    },
+    {
+      // Renderer code (the welcome view, the web run page) reaches the main process only
+      // through its preload's bridge.
+      name: 'renderers-do-not-import-electron',
+      severity: 'error',
+      from: {path: ['^desktop/src/welcome/', '^web/src/'], pathNot: TEST_FILE},
+      to: {path: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
+    },
+    {
+      // Sockets and processes belong to backend-client and the desktop's connection layer.
+      name: 'desktop-and-web-confine-sockets-and-processes',
+      severity: 'error',
+      from: {
+        path: ['^desktop/src/', '^web/src/'],
+        pathNot: [TEST_FILE, '^desktop/src/(?:ssh-host|local-host|process)\\.ts$'],
+      },
+      to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
+    },
     {
       // `index.ts` (the frontend process) and `launcher.ts` (the `vibesys` bin) run on import,
       // so nothing may import them.
