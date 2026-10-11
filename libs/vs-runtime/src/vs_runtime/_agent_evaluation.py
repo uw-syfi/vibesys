@@ -425,21 +425,14 @@ class AgentEvaluationBridge:
         finally:
             writer.close()
 
-    async def handle(self, frame: bytes) -> bytes:
-        """Answer one wire frame: a typed success, or a typed failure naming the problem.
-
-        The caller receives the bytes directly, so a submission they carry is acknowledged.
-        """
-        reply, acknowledge = await self.answer(frame)
-        acknowledge()
-        return reply
-
     async def answer(self, frame: bytes) -> tuple[bytes, Callable[[], None]]:
         """The reply to one frame, and the call that records that the agent received it.
 
         A transport calls the second value once the client confirmed it read the whole
         reply. A submission whose reply was never confirmed stays owed to the agent (see
-        the module docstring); ``handle`` is for a caller that has the bytes in hand.
+        the module docstring). There is deliberately no entry point that confirms on the
+        caller's behalf: acknowledging before the caller holds the bytes would clear the
+        owed record while the reply could still be lost.
         """
         acknowledge = _nothing
         try:

@@ -1213,6 +1213,30 @@ describe('WebSession', () => {
     await session.close();
   });
 
+  test('allows another Reattach after a fresh bootstrap fails before its first batch', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    await session.start();
+
+    transport.silentDials = 2;
+    const failedDial = transport.nextSubscription();
+    session.reattach();
+    const failed = await failedDial;
+    failed.onDisconnect(disconnect('fresh bootstrap failed'));
+    expect(session.getState()).toMatchObject({
+      status: 'stale',
+      error: {message: 'fresh bootstrap failed'},
+    });
+
+    const retriedDial = transport.nextSubscription();
+    session.reattach();
+    const retried = await retriedDial;
+    expect(retried).toMatchObject({afterSequence: 0, options: undefined});
+    expect(transport.subscriptions).toHaveLength(3);
+
+    await session.close();
+  });
+
   test('coalesces reattach with a pending initial stream bootstrap', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});

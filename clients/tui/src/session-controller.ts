@@ -2,8 +2,6 @@ import {
   DEFAULT_RECONNECT_DELAYS_MS,
   type ExperimentCursor,
   PersistentEventStream,
-  type ProtocolResponse,
-  type RequestInput,
   type RunEvent,
   type RunSnapshot,
   type ScheduleTimeout,
@@ -13,12 +11,7 @@ import {
   type StreamConnectionState,
   StreamReconciler,
 } from '@vibesys/backend-client';
-import {
-  DEFAULT_CHAT_THREAD_ID,
-  hasRunEnded,
-  projectPerformance,
-  recordsBenchmark,
-} from '@vibesys/core-state';
+import {DEFAULT_CHAT_THREAD_ID, hasRunEnded, recordsBenchmark} from '@vibesys/core-state';
 import type {StartupTrace} from './boot-trace.js';
 import {
   chatMenuCustomModel,
@@ -76,7 +69,7 @@ import {
   openPalette,
   setPaletteQuery,
 } from './palette-model.js';
-import {renderPerformanceCurve} from './performance-chart.js';
+import {renderCommandResponse} from './response-renderer.js';
 import {
   clearAgentSelection,
   selectAgent,
@@ -299,6 +292,7 @@ export class SocketSessionController implements SessionController {
   /** Serializes the consumer effect of applying one shared backfill outcome. */
   #historyFetch: Promise<boolean> | null = null;
   #streamProtocolError = false;
+  #chatThreadCreateGeneration = 0;
   /** Opaque server-owned namespace for project-local client state. */
   #noteProjectScope: string | null = null;
   /**
@@ -502,6 +496,7 @@ export class SocketSessionController implements SessionController {
   async stop(): Promise<void> {
     this.#designRefreshAllowed = false;
     this.#designRefreshPending = false;
+    this.#chatThreadCreateGeneration += 1;
     await this.#stream.close();
     await this.client.close();
   }
@@ -780,14 +775,17 @@ export class SocketSessionController implements SessionController {
   }
 
   switchChatThread(threadId: string): void {
+    this.#chatThreadCreateGeneration += 1;
     this.#setState(switchChatThread(this.#state, threadId));
   }
 
   openChatResumeMenu(): void {
+    this.#chatThreadCreateGeneration += 1;
     this.#setState(openChatResumeMenu(this.#state));
   }
 
   async openChatModelMenu(): Promise<void> {
+    this.#chatThreadCreateGeneration += 1;
     this.#setState(openChatModelMenu(this.#state));
     const ownedMenu = this.#state.chatMenu;
     try {
@@ -838,6 +836,7 @@ export class SocketSessionController implements SessionController {
   }
 
   closeChatMenu(): void {
+    this.#chatThreadCreateGeneration += 1;
     this.#setState(closeChatMenu(this.#state));
   }
 
@@ -857,16 +856,24 @@ export class SocketSessionController implements SessionController {
    * replayed events carry the authoritative thread record.
    */
   async #createChatThread(settings: ChatThreadSettings | null): Promise<void> {
+    const generation = ++this.#chatThreadCreateGeneration;
     try {
       const response = await this.client.request({
         type: 'query.chat_thread_create',
         ...(settings === null ? {} : {provider: settings.provider, model: settings.model}),
       });
-      const state = applyResponseEvents(closeChatMenu(this.#state), response.events ?? []);
+      const state = applyResponseEvents(this.#state, response.events ?? []);
+      if (this.#chatThreadCreateGeneration !== generation) {
+        if (state !== this.#state) this.#setState(state);
+        return;
+      }
+      const navigated = closeChatMenu(state);
       const threadId = response.chat_thread?.thread_id;
-      this.#setState(threadId === undefined ? state : switchChatThread(state, threadId));
+      this.#setState(threadId === undefined ? navigated : switchChatThread(navigated, threadId));
     } catch (error) {
-      this.#setState(reportCaughtError(this.#state, error, 'request'));
+      if (this.#chatThreadCreateGeneration === generation) {
+        this.#setState(reportCaughtError(this.#state, error, 'request'));
+      }
     }
   }
 
@@ -1464,7 +1471,7 @@ export class SocketSessionController implements SessionController {
         if (action.paneView !== undefined) return this.openPane(action.paneView);
         try {
           const response = await this.client.request(action.request);
-          const rendered = renderResponse(action.request, response, action.responseView);
+          const rendered = renderCommandResponse(action.request, response, action.responseView);
           if (rendered !== null) this.#setState(showDetail(this.#state, rendered));
         } catch (error) {
           this.#setState(reportCaughtError(this.#state, error, 'request'));
@@ -1618,23 +1625,4 @@ function errorMessage(error: unknown): string {
 /** Proves a switch over a discriminated union handles every case at compile time. */
 function assertNever(value: never): never {
   throw new Error(`Unhandled command action: ${JSON.stringify(value)}`);
-}
-
-function renderResponse(
-  request: RequestInput,
-  response: ProtocolResponse,
-  responseView?: 'perf',
-): string | null {
-  if (response.ack) return `${response.ack.action}: ${response.ack.status}`;
-  if (request.type === 'query.performance' || responseView === 'perf') {
-    return renderPerformanceCurve(
-      projectPerformance({
-        performance: response.performance,
-        events: response.events,
-        objectiveDirection: response.performance_context?.objective_direction,
-      }),
-      response.performance_context,
-    );
-  }
-  return null;
 }

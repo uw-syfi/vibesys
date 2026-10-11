@@ -459,6 +459,13 @@ function refreshSettled(state: Open, token: number, outcome: RefreshOutcome): Se
 
 type Report = Extract<SessionAction, {type: 'stream' | 'fault' | 'controls' | 'offline'}>;
 
+/** A fresh stream failed before its first batch could hand recovery to a fenced snapshot. */
+function releaseFailedEstablishment(state: Open): Open {
+  return state.recovery.kind === 'refreshing' && state.recovery.phase === 'establishing'
+    ? {...state, recovery: {kind: 'none'}}
+    : state;
+}
+
 /** What the stream, the control channel, or the browser reported. */
 function reported(state: Open, action: Report): Open {
   switch (action.type) {
@@ -471,9 +478,17 @@ function reported(state: Open, action: Report): Open {
           ? withStatus({...connected, streamProblem: 'none'}, 'connected', null)
           : connected;
       }
-      return withProblem({...state, streamConnected: false}, 'connection', action.state.error);
+      return withProblem(
+        releaseFailedEstablishment({...state, streamConnected: false}),
+        'connection',
+        action.state.error,
+      );
     case 'fault':
-      return withProblem({...state, streamConnected: false}, 'connection', action.error);
+      return withProblem(
+        releaseFailedEstablishment({...state, streamConnected: false}),
+        'connection',
+        action.error,
+      );
     case 'controls':
       return {...state, view: {...state.view, controls: action.state}};
     case 'offline':

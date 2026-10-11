@@ -341,7 +341,9 @@ async def _synthesized(tmp_path: Path, calls: list[tuple[Any, ...]]) -> None:
                 case (_, raw):
                     frame = raw
             before = process.shell.storage_revision
-            reply = SOCKET_REPLY.validate_json(await bridge.handle(frame))
+            raw_reply, confirm = await bridge.answer(frame)
+            reply = SOCKET_REPLY.validate_json(raw_reply)
+            confirm()
             if isinstance(reply, SocketSuccess):
                 assert call[0] in ("submit", "wait")
                 assert len(call) < 2 or call[1] == "own", "only the issued token is honoured"

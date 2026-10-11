@@ -2000,6 +2000,101 @@ describe('session controller', () => {
     expect(transport.requests.at(-1)).toEqual({type: 'query.chat_thread_create'});
   });
 
+  it('keeps the newest thread-create selection when an older reply arrives last', async () => {
+    const transport = new DeferredThreadCreateTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const older = controller.clearChatThread();
+    const newer = controller.clearChatThread();
+    transport.resolveCreate(1, 'thread-newer', 2);
+    await newer;
+    expect(controller.state.activeChatThreadId).toBe('thread-newer');
+
+    transport.resolveCreate(0, 'thread-older', 1);
+    await older;
+
+    expect(controller.state.activeChatThreadId).toBe('thread-newer');
+    expect(controller.state.core.chatThreads.map(thread => thread.id)).toEqual([
+      'default',
+      'thread-older',
+      'thread-newer',
+    ]);
+  });
+
+  it('does not publish a pending thread-create failure while stopping', async () => {
+    const transport = new DeferredThreadCreateTransport();
+    transport.rejectCreatesOnClose = new Error('Client closed');
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const creating = controller.clearChatThread();
+    await controller.stop();
+    await creating;
+
+    expect(controller.state.errorBanner).toBeNull();
+    expect(controller.state.activeChatThreadId).toBe('default');
+  });
+
+  it('does not give a thread-create reply navigation ownership after stopping', async () => {
+    const transport = new DeferredThreadCreateTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const creating = controller.clearChatThread();
+    await controller.stop();
+    transport.resolveCreate(0, 'thread-created', 1);
+    await creating;
+
+    expect(controller.state.activeChatThreadId).toBe('default');
+    expect(controller.state.core.chatThreads.map(thread => thread.id)).toContain('thread-created');
+  });
+
+  it('does not let a pending thread-create reply override manual thread navigation', async () => {
+    const transport = new DeferredThreadCreateTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const creating = controller.clearChatThread();
+    controller.switchChatThread('default');
+    transport.resolveCreate(0, 'thread-created', 1);
+    await creating;
+
+    expect(controller.state.activeChatThreadId).toBe('default');
+    expect(controller.state.core.chatThreads.map(thread => thread.id)).toContain('thread-created');
+  });
+
+  it('keeps a newer thread menu open when a pending thread-create reply settles', async () => {
+    const transport = new DeferredThreadCreateTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const creating = controller.clearChatThread();
+    controller.openChatResumeMenu();
+    transport.resolveCreate(0, 'thread-created', 1);
+    await creating;
+
+    expect(controller.state.activeChatThreadId).toBe('default');
+    expect(controller.state.chatMenu?.kind).toBe('resume');
+    expect(controller.state.chatMenu?.rows.map(row => row.kind)).toContain('thread');
+  });
+
+  it('does not report an older thread-create failure over a newer success', async () => {
+    const transport = new DeferredThreadCreateTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    const older = controller.clearChatThread();
+    const newer = controller.clearChatThread();
+    transport.resolveCreate(1, 'thread-newer', 1);
+    await newer;
+    transport.rejectCreate(0, new Error('older create failed'));
+    await older;
+
+    expect(controller.state.activeChatThreadId).toBe('thread-newer');
+    expect(controller.state.errorBanner).toBeNull();
+  });
+
   it('answers unknown slash input in the composer with the chat help', async () => {
     const transport = new ThreadTransport();
     const controller = new SocketSessionController(transport);
@@ -4137,6 +4232,69 @@ class ThreadTransport implements ServerTransport {
   }
 
   close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+/** Thread-create replies settle only when the test chooses, in any order. */
+class DeferredThreadCreateTransport extends ThreadTransport {
+  rejectCreatesOnClose: Error | null = null;
+  readonly #pending: Array<{
+    input: Extract<RequestInput, {type: 'query.chat_thread_create'}>;
+    resolve: (response: ProtocolResponse) => void;
+    reject: (error: Error) => void;
+  }> = [];
+
+  override request(input: RequestInput): Promise<ProtocolResponse> {
+    if (input.type !== 'query.chat_thread_create') return super.request(input);
+    this.requests.push(input);
+    return new Promise((resolve, reject) => this.#pending.push({input, resolve, reject}));
+  }
+
+  resolveCreate(index: number, threadId: string, sequence: number): void {
+    const pending = this.#pending[index];
+    if (pending === undefined) throw new Error(`No pending thread-create request ${index}`);
+    const settings = {
+      provider: pending.input.provider ?? 'codex',
+      model: pending.input.model ?? 'gpt-run',
+    };
+    pending.resolve({
+      protocol_version: 1,
+      request_id: `request-${index}`,
+      timestamp: '2026-01-01T00:00:01Z',
+      ok: true,
+      chat_thread: {thread_id: threadId, title: '', ...settings},
+      events: [
+        {
+          sequence,
+          timestamp: '2026-01-01T00:00:01Z',
+          type: 'chat_thread_created',
+          agent_kind: 'chat',
+          round_label: 'experiment-chat',
+          chat_thread_id: threadId,
+          data: {
+            kind: 'chat_thread_created',
+            thread_id: threadId,
+            title: '',
+            ...settings,
+            created_at: '2026-01-01T00:00:01Z',
+          },
+        },
+      ],
+    });
+  }
+
+  rejectCreate(index: number, error: Error): void {
+    const pending = this.#pending[index];
+    if (pending === undefined) throw new Error(`No pending thread-create request ${index}`);
+    pending.reject(error);
+  }
+
+  override close(): Promise<void> {
+    const error = this.rejectCreatesOnClose;
+    if (error !== null) {
+      for (const pending of this.#pending) pending.reject(error);
+    }
     return Promise.resolve();
   }
 }
