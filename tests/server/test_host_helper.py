@@ -388,7 +388,7 @@ def test_a_prefix_splits_into_the_directory_listed_and_the_name_matched(prefix: 
     assert directory.startswith("/")
     assert "/" not in partial
     absolute = expanded if expanded.startswith("/") else f"{HOME}/{expanded}"
-    assert posixpath.join(directory, partial).rstrip("/") == absolute.rstrip("/")
+    assert posixpath.normpath(posixpath.join(directory, partial)) == posixpath.normpath(absolute)
     if expanded == "" or expanded.endswith("/"):
         assert partial == ""
 

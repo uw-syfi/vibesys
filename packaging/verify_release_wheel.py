@@ -132,6 +132,7 @@ _REQUIRED_TUI_FILES = (
 )
 _EXPECTED_ENTRY_POINTS = {
     "vibesys": "entrypoints.launcher:main",
+    "vibesys-host-helper": "entrypoints.host_helper:main",
 }
 _DIST_INFO_FILES = frozenset(
     {
