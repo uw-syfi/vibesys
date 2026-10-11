@@ -23,7 +23,7 @@ def __getattr__(name: str) -> object:
     if name in _LAZY:
         # Eager wiring imports create a cycle through the execution shell;
         # importlib would hide the declared dependency behind runtime loading.
-        from vibesys.orchestration.multi.plugin import (  # noqa: PLC0415  # lint-waiver: LW-641005 [PLC0415]; eager wiring creates a shell cycle; importlib hides the declared dependency.
+        from vibesys.orchestration.multi.plugin import (  # noqa: PLC0415  # lint-waiver: LW-641107 [PLC0415]; eager wiring creates a shell cycle; importlib hides the declared dependency.
             PLUGIN,
             PROFILE_GUIDED_PLUGIN,
             PROFILE_GUIDED_REGISTRATION,

@@ -327,7 +327,7 @@ internals or replace private functions.
 Useful focused commands:
 
 ```bash
-uv run pytest tests/vibesys/orchestration/multi/test_plugin.py
+uv run pytest tests/vibesys/orchestration/multi/strategy
 uv run pytest tests/vibesys/orchestration/single/strategy tests/composition/_loop
 uv run pytest tests/vibesys/orchestration/test_explicit_agent_sessions.py
 uv run pytest tests/vibesys/architecture

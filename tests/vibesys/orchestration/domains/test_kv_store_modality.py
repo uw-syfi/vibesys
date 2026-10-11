@@ -4,13 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import vibesys.orchestration.multi.core_policy.prompts as multi_templates
 from entrypoints.cli import _MODALITIES
 from vibesys.inputs import load_project_task
-from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
+from vibesys.orchestration.multi.core_policy.api import run_prompt_variables
+from vibesys.orchestration.multi.strategy.api import (
+    GateFacts,
+    HypothesisPlan,
+    ImplementerClaims,
+    JudgePrompt,
+)
 from vibesys.prompts import render_template
 from vs_project.api import Project
 
-_TEMPLATE_DIR = MULTI_PROMPT_DIR
+_TEMPLATE_DIR = Path(multi_templates.__file__).parent
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -28,20 +35,34 @@ def test_kv_store_input_bundle_loads() -> None:
 
 def test_kv_store_judge_prompt_mentions_resp2_not_http() -> None:
     criteria_text = "PC"
-    output = render_template(
-        "judge_prompt.j2",
-        template_dir=_TEMPLATE_DIR,
+    context = JudgePrompt(
+        round_number=1,
+        retry=1,
+        plan=HypothesisPlan(
+            hypothesis_id="h1", hypothesis="claim", task="task", pass_criteria=criteria_text
+        ),
+        claims=ImplementerClaims(
+            summary="s",
+            expected_behavior="e",
+            hypothesis_outcome="nominated",
+            candidate_disposition="unassessed",
+        ),
+        framework=GateFacts(),
         modality="kv_store",
         interface="service",
-        domain_judge="",
-        accuracy_command="uv run python accuracy_checker/checker.py",
-        benchmark_command="uv run python benchmark/benchmark.py",
-        pass_criteria=criteria_text,
-        retry=1,
-        runtime_notes="",
-        profile_execution="local",
-        objective="OBJ",
-        pareto_archive_conflict=None,
+    )
+    variables = {name: getattr(context, name) for name in type(context).model_fields}
+    variables.pop("template")
+    output = render_template(
+        "judge.j2",
+        template_dir=_TEMPLATE_DIR,
+        **run_prompt_variables(
+            objective="OBJ",
+            environment_notes="",
+            agent_evaluation=False,
+            validation_recipe_schema="{}",
+        ),
+        **variables,
     )
     assert "RESP2" in output
     assert "HTTP server" in output

@@ -8,16 +8,17 @@ packs against an existing keyword set.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
+import vibesys.orchestration.multi.core_policy.prompts as multi_templates
 from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
-from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.prompts import render_template
 
-_TEMPLATE_DIR = MULTI_PROMPT_DIR
+_TEMPLATE_DIR = Path(multi_templates.__file__).parent
 
 
 @dataclass(frozen=True)
@@ -93,53 +94,6 @@ def _domain_section(domain: DomainName, role: str, context: dict[str, object]) -
 def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[str, str]:
     context = _NEUTRAL_CONTEXT | {"modality": modality}
     return {
-        "implementer": render_template(
-            "implementer_prompt.j2",
-            template_dir=_TEMPLATE_DIR,
-            modality=context["modality"],
-            interface=context["interface"],
-            reference_path=context["reference_path"],
-            runtime_notes=context["runtime_notes"],
-            task=context["task"],
-            pass_criteria=context["pass_criteria"],
-            feedback=None,
-            prior_attempt_artifact_locations=(),
-            recommended_skills=[],
-            domain_implementer=_domain_section(domain, "implementer", context),
-        ),
-        "judge": render_template(
-            "judge_prompt.j2",
-            template_dir=_TEMPLATE_DIR,
-            modality=context["modality"],
-            interface=context["interface"],
-            objective=context["objective"],
-            pass_criteria=context["pass_criteria"],
-            runtime_notes=context["runtime_notes"],
-            benchmark_command=context["benchmark_command"],
-            accuracy_command=context["accuracy_command"],
-            domain_judge=_domain_section(domain, "judge", context),
-            pareto_archive_conflict=None,
-        ),
-        "orchestrator_pre_round": render_template(
-            "orchestrator_pre_round_prompt.j2",
-            template_dir=_TEMPLATE_DIR,
-            objective=context["objective"],
-            regression_entry=None,
-            exhaustion_entry=None,
-        ),
-        "orchestrator_plan": render_template(
-            "orchestrator_plan_prompt.j2",
-            template_dir=_TEMPLATE_DIR,
-            objective=context["objective"],
-            profiler_entry=None,
-            regression_entry=None,
-            exhaustion_entry=None,
-            roadmap_text=context["roadmap_text"],
-            plateau_warning=None,
-            runtime_notes=context["runtime_notes"],
-            profile_execution=context["profile_execution"],
-            domain_orchestrator=_domain_section(domain, "orchestrator", context),
-        ),
         "profiler_nsys": render_template(
             "profilers/nsys.j2",
             template_dir=_TEMPLATE_DIR,

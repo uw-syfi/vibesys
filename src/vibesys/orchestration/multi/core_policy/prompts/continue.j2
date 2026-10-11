@@ -71,15 +71,15 @@ Repair only the affected local contract.
 {% include "_notices/archive_conflict.j2" +%}
 {% endif %}
 
-{% if gates.revert_applied %}
-The framework already materialized the parent{% if gates.revert_round is not none %} from round {{ gates.revert_round }}{% endif %}{% if gates.revert_commit %} at
-`{{ gates.revert_commit }}`{% endif %}. Do not repeat restoration or parent
+{% if framework.revert_applied %}
+The framework already materialized the parent{% if framework.revert_round is not none %} from round {{ framework.revert_round }}{% endif %}{% if framework.revert_commit %} at
+`{{ framework.revert_commit }}`{% endif %}. Do not repeat restoration or parent
 measurement without concrete drift evidence.
 {% endif %}
 
-{% if gates.revalidation_pending %}
+{% if framework.revalidation_pending %}
 This is gate-only revalidation after reviewed evidence
-`{{ gates.approved_evaluation_artifact or '(missing)' }}` failed a framework
+`{{ framework.approved_evaluation_artifact or '(missing)' }}` failed a framework
 gate. Repair only that path and do not duplicate canonical measurement. A
 behavior-affecting repair invalidates stale metrics for the changed arm; retain
 an earlier row only when its measured path and mode are unchanged.

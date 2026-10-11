@@ -41,7 +41,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys.events import CommandResultPayload
-from vibesys.orchestration.multi.contracts import ImplementerResponse, JudgeResponse
+from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent import session_launch as subject

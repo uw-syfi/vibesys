@@ -46,7 +46,7 @@ from vibesys.hypothesis.attempts import (
 )
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import MetricComparison, MetricSpace, Objective
-from vibesys.orchestration.multi.contracts import ImplementerResponse
+from vibesys.orchestration.multi.models import ImplementerResponse
 
 # --- helpers -----------------------------------------------------------
 

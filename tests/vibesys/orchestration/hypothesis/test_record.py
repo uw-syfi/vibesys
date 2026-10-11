@@ -19,7 +19,7 @@ from vibesys.hypothesis.attempts import (
 from vibesys.hypothesis.record import RecordInput, build_round_record
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import FrameworkBenchmarkOutcome, MetricSpace, Objective
-from vibesys.orchestration.multi.contracts import ImplementerResponse
+from vibesys.orchestration.multi.models import ImplementerResponse
 
 
 def _record_input() -> RecordInput:

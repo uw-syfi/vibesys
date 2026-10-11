@@ -26,8 +26,7 @@ from vibesys.hypothesis.transitions import (
 )
 from vibesys.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.multi.contracts import ImplementerResponse, PreRoundDecision
-from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
+from vibesys.orchestration.multi.models import ImplementerResponse, PreRoundDecision
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_project.api import OrchestrationDescriptor
@@ -882,30 +881,6 @@ def test_profiler_summary_perf_metric_optional() -> None:
     )
     assert p2.perf_metric == 12.5
     assert p2.perf_unit == "tok/s"
-
-
-def test_outer_prompts_reference_memory_paths_without_embedding_contents() -> None:
-    template_dir = MULTI_PROMPT_DIR
-    plan_prompt = (template_dir / "orchestrator_plan_prompt.j2").read_text()
-    pre_prompt = (template_dir / "orchestrator_pre_round_prompt.j2").read_text()
-
-    assert "progress_location" in plan_prompt
-    assert "roadmap_location" in plan_prompt
-    assert "pareto_archive_location" in plan_prompt
-    assert "recent_progress_text" not in plan_prompt
-    assert "roadmap_text" not in plan_prompt
-    assert "pareto_archive_summary" not in plan_prompt
-    assert "Cite" in plan_prompt
-    assert "not stable text" in plan_prompt
-    assert "under 4,000 output tokens" in plan_prompt
-    assert "Once evidence clearly ranks one parent and mechanism" in plan_prompt
-    assert "progress_location" in pre_prompt
-    assert "recent_progress_text" not in pre_prompt
-
-    for name in ("implementer_prompt.j2", "judge_prompt.j2"):
-        role_prompt = (template_dir / name).read_text()
-        assert "pareto_archive_location" in role_prompt
-        assert "pareto_archive_summary" not in role_prompt
 
 
 def _record(round_number: int, perf: float | None, unit: str = "tok/s") -> RoundRecord:

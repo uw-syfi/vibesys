@@ -1,17 +1,18 @@
 """Tests for registered domains, the manifest-selected pluggable context.
 
 Covers the resolver (registered name / error), the role-file renderer (present,
-empty, missing, ``single_agent`` derivation, context branching), and end-to-end
-injection into the base prompts for both registered domains (``llm-serving``
-carries serving prose; ``generic`` injects nothing of its own).
+empty, missing, ``single_agent`` derivation, context branching) and the profiler templates the
+sections are passed to. No core strategy prompt renders a domain section itself.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from pathlib import Path
+from typing import cast
 
 import pytest
 
+import vibesys.orchestration.multi.core_policy.prompts as multi_templates
 from vibesys.constants import DomainName
 from vibesys.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
 from vibesys.domains.registry import (
@@ -19,12 +20,9 @@ from vibesys.domains.registry import (
     resolve_domain,
 )
 from vibesys.domains.rendering import render_domain_section
-from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.prompts import render_template
 
-if TYPE_CHECKING:
-    from pathlib import Path
-_TEMPLATE_DIR = MULTI_PROMPT_DIR
+_TEMPLATE_DIR = Path(multi_templates.__file__).parent
 
 
 def _temporary_domain(prompt_dir: Path) -> DomainDefinition:
@@ -279,85 +277,11 @@ def test_single_agent_derives_from_implementer_and_judge(tmp_path: Path) -> None
 # --------------------------------------------------------------------------- #
 # end-to-end injection into base prompts
 # --------------------------------------------------------------------------- #
-def _render_implementer(domain: DomainName) -> str:
-    d = resolve_domain(domain)
-    section = render_domain_section(
-        d,
-        DomainRole.IMPLEMENTER,
-        modality="text_generation",
-        reference_path="/ref",
-        workspace_sources=(),
-    )
-    criteria_text = "PC"
-    return render_template(
-        "implementer_prompt.j2",
-        template_dir=_TEMPLATE_DIR,
-        modality="text_generation",
-        interface="inprocess",
-        domain_implementer=section,
-        task="TASK",
-        pass_criteria=criteria_text,
-        reference_path="/ref",
-        runtime_notes="",
-        feedback=None,
-        prior_attempt_artifact_locations=(),
-        recommended_skills=[],
-    )
-
-
-def test_llm_serving_injects_into_implementer() -> None:
-    out = _render_implementer(DomainName.LLM_SERVING)
-    # serving-specific prose from the domain package is present
-    assert "serving" in out.lower()
-    assert "## Progress tracking" in out  # base skeleton intact
-
-
-def test_generic_injects_nothing_extra() -> None:
-    generic = _render_implementer(DomainName.GENERIC)
-    # the only serving refs left are from the modality include, not the domain;
-    # the generic render must be strictly shorter than llm-serving's.
-    serving = _render_implementer(DomainName.LLM_SERVING)
-    assert len(generic) < len(serving)
-    assert "## Progress tracking" in generic  # base skeleton intact
-
-
-def test_no_triple_blank_at_injection_point() -> None:
-    """Generic (empty injection) must not leave a triple newline gap."""
-    out = _render_implementer(DomainName.GENERIC)
-    # The injection point itself ({% if %}...{% endif %}) must collapse cleanly.
-    # Locate the workspace->progress transition that brackets the injection.
-    idx = out.index("## Progress tracking")
-    window = out[max(0, idx - 6) : idx]
-    assert "\n\n\n" not in window
-
-
 # --------------------------------------------------------------------------- #
 # orchestrator role
 # --------------------------------------------------------------------------- #
 def test_orchestrator_is_a_domain_role() -> None:
     assert DomainRole.ORCHESTRATOR in DOMAIN_ROLES
-
-
-def _render_orchestrator(domain: DomainName) -> str:
-    section = render_domain_section(
-        resolve_domain(domain),
-        DomainRole.ORCHESTRATOR,
-        modality="text_generation",
-        workspace_sources=(),
-    )
-    return render_template(
-        "orchestrator_plan_prompt.j2",
-        template_dir=_TEMPLATE_DIR,
-        objective="OBJ",
-        profiler_entry=None,
-        regression_entry=None,
-        exhaustion_entry=None,
-        roadmap_text="ROADMAP",
-        plateau_warning=None,
-        domain_orchestrator=section,
-        runtime_notes="",
-        profile_execution="local",
-    )
 
 
 def test_llm_serving_provides_evidence_led_orchestrator_method() -> None:
@@ -374,20 +298,6 @@ def test_llm_serving_provides_evidence_led_orchestrator_method() -> None:
     assert "current-architecture ceiling" in section
 
 
-def test_llm_serving_method_is_injected_into_plan() -> None:
-    out = _render_orchestrator(DomainName.LLM_SERVING)
-    assert "Evidence-led optimization method" in out
-    assert "measured end-to-end evidence" in out
-
-
-def test_generic_orchestrator_has_no_llm_serving_method() -> None:
-    out = _render_orchestrator(DomainName.GENERIC)
-    assert "Evidence-led optimization method" not in out
-    assert "Continuous batching" not in out
-    assert "the optimization-floor section below" not in out
-    assert "## Task granularity" in out  # base skeleton intact
-
-
 def test_database_provides_in_place_orchestrator_method() -> None:
     section = render_domain_section(
         resolve_domain(DomainName.DATABASE),
@@ -400,12 +310,6 @@ def test_database_provides_in_place_orchestrator_method() -> None:
     assert "micro-optimization" in section.lower()
     assert "one micro-optimization per round" in section.lower()
     assert "output-equivalence" in section.lower()
-
-
-def test_database_method_is_injected_into_plan() -> None:
-    out = _render_orchestrator(DomainName.DATABASE)
-    assert "In-place optimization planning guidance" in out
-    assert "## Task granularity" in out  # base skeleton intact
 
 
 def test_llm_serving_profiler_branches_on_remote_execution_not_provider() -> None:

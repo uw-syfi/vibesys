@@ -7,10 +7,6 @@ from tests.server.support import agent_descriptor, build_server_parts, run_recor
 from server.diagnostics import DiagnosticScope
 from server.events import ConfigurationFailedData, EventStatus, EventType
 from server.read_model import RunInspector
-from vibesys.api.hypothesis import RoundRecord
-from vibesys.hypothesis import OrchestratorPlan
-from vibesys.hypothesis.state import Hypothesis, HypothesisState
-from vibesys.orchestration.multi.models import MultiState
 from vs_project.api import Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 
@@ -36,42 +32,14 @@ def _project_run(root: Path) -> tuple[Project, str]:
 
 def test_inspector_answers_round_and_failure_queries(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    project.state.portable_namespace(run_id, "multi-agent").slot("state.json", MultiState).save(
-        MultiState(
-            search=HypothesisState(
-                hypotheses=[
-                    Hypothesis(
-                        hypothesis_id="H-01",
-                        plan=OrchestratorPlan(
-                            hypothesis_id="H-01",
-                            hypothesis="Improve the queue",
-                            task="Tune the queue",
-                            pass_criteria="",
-                            reasoning="",
-                        ),
-                        started_round=1,
-                        rounds=[
-                            RoundRecord(
-                                round_number=1,
-                                hypothesis_id="H-01",
-                                commit="1" * 40,
-                                perf_metric=1100.0,
-                                perf_unit="total_ops_per_sec",
-                                perf_provenance="implementer",
-                                passed=False,
-                                judge_verdict="fail",
-                                profile_skipped=False,
-                                official_evaluation_reason="Judge FAIL: latency regressed",
-                            )
-                        ],
-                    )
-                ]
-            )
-        ),
+    log_dir = project.state.log_directory(run_id)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / "run-1.log").write_text(
+        "starting\n"
+        '{"round_number": 1, "commit": "' + "1" * 40 + '", "passed": false,\n'
+        ' "judge_verdict": "fail", "official_evaluation_reason": "Judge FAIL: latency regressed"}\n'
     )
-    parts = build_server_parts(
-        project.state.log_directory(run_id), record=run_record(project, run_id)
-    )
+    parts = build_server_parts(log_dir, record=run_record(project, run_id))
     inspector = RunInspector(parts.integration)
 
     assert '"round_number": 1' in inspector.round_detail(1)

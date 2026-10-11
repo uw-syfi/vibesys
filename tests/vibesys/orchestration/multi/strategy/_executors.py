@@ -96,7 +96,11 @@ class Executors:
     judge: deque[str | Answer] = field(default_factory=deque)
     # What the trusted run of the implementer's validation recipes reports.
     validation: Callable[[ValidateLocal], LocalValidationReport] = lambda _request: (
-        LocalValidationReport(status="succeeded", passed=True)
+        LocalValidationReport(
+            status="succeeded",
+            passed=True,
+            report=ArtifactRef(artifact_id=ArtifactId(root="validation:report"), digest="report"),
+        )
     )
     # False retains one commit per attempt, whatever its turns did. True retains a new commit
     # after every turn, as a worktree that changed between turns would.
@@ -256,7 +260,7 @@ class Executors:
     def _queue(self, role: str, invocation: str) -> deque[str | Answer]:
         """The scripted replies of the role (the designer's two subjects have one queue each)."""
         if role == "orchestrator":
-            return self.pre_round if ":preround." in invocation else self.planner
+            return self.pre_round if ":preround:" in invocation else self.planner
         return {
             "profiler": self.profiler,
             "implementer": self.implementer,

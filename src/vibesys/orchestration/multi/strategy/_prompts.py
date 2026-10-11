@@ -155,7 +155,7 @@ class ImplementPrompt(Value):
     retry: int = Field(ge=1)
     plan: HypothesisPlan
     base_revision: RevisionRef
-    gates: GateFacts
+    framework: GateFacts
     feedback: str | None = None
     validation_failure: ValidationFailure | None = None
     no_valid_reply: str | None = None
@@ -165,6 +165,7 @@ class ImplementPrompt(Value):
     benchmark_enabled: bool = True
     active_component: str | None = None
     modality: str | None = None
+    reference_path: str = "."
     interface: str = "inprocess"
 
 
@@ -177,7 +178,7 @@ class ContinuePrompt(Value):
     plan: HypothesisPlan
     base_revision: RevisionRef
     continuation_step: str
-    gates: GateFacts
+    framework: GateFacts
     feedback: str | None = None
     validation_failure: ValidationFailure | None = None
     no_valid_reply: str | None = None
@@ -192,7 +193,7 @@ class JudgePrompt(Value):
     retry: int = Field(ge=1)
     plan: HypothesisPlan
     claims: ImplementerClaims
-    gates: GateFacts
+    framework: GateFacts
     pareto_archive_conflict: ArchiveConflictView | None = None
     official_due: bool = False
     official_reason: str | None = None

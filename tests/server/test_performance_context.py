@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from tests.server.support import agent_descriptor, build_server_parts, run_record
+from tests.support.multi_search import SearchRecord
 
 from server.api.performance import build_performance_context, summarize_objective
 from server.api.protocol import PerformanceQuery
@@ -19,7 +20,6 @@ from vibesys.hypothesis.state import (
     HypothesisState,
 )
 from vibesys.hypothesis.transitions import reproject_run_evidence
-from vibesys.orchestration.multi.models import MultiState
 from vs_project.api import Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 
@@ -142,9 +142,7 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
         )
     )
 
-    project.state.portable_namespace(run_id, "multi-agent").slot("state.json", MultiState).save(
-        MultiState(search=state)
-    )
+    SearchRecord(project, run_id).save(state)
     response = _service(project, run_id).execute(PerformanceQuery())
 
     context = response.performance_context
@@ -162,8 +160,8 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
 
 def test_service_names_the_objective_before_the_first_measurement(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project", ("total_ops_per_sec:max",))
-    project.state.portable_namespace(run_id, "multi-agent").slot("state.json", MultiState).save(
-        MultiState(search=HypothesisState(metrics=_configuration(("total_ops_per_sec:max",))))
+    SearchRecord(project, run_id).save(
+        HypothesisState(metrics=_configuration(("total_ops_per_sec:max",)))
     )
 
     response = _service(project, run_id).execute(PerformanceQuery())

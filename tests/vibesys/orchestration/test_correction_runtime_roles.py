@@ -9,7 +9,6 @@ import pytest
 from pydantic import BaseModel, RootModel
 
 from vibesys import dynamic_roles as dynamic
-from vibesys.hypothesis import OrchestratorPlan
 from vibesys.orchestration.dynamic.models import (
     ImplementerReply,
     JudgeReply,
@@ -29,12 +28,6 @@ from vibesys.orchestration.issue_queue.models import (
     IssueJudgeResponse,
     IssuePerfEvalResponse,
     PerfMetrics,
-)
-from vibesys.orchestration.multi import agents as multi
-from vibesys.orchestration.multi.contracts import (
-    ImplementerResponse,
-    JudgeResponse,
-    PreRoundDecision,
 )
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.structured_turn import structured_turn
@@ -123,31 +116,6 @@ CASES = (
             ),
         ),
         id="dynamic-planner",
-    ),
-    pytest.param(
-        multi.DESIGNER,
-        OrchestratorPlan(task="Implement", pass_criteria=VERIFIED_CRITERIA, reasoning="Plan"),
-        id="multi-planner",
-    ),
-    pytest.param(
-        multi.DESIGNER,
-        PreRoundDecision(need_profile=True, reasoning="Measure"),
-        id="multi-profile-decision",
-    ),
-    pytest.param(
-        multi.IMPLEMENTER,
-        ImplementerResponse(summary="Implemented", expected_behavior="Faster"),
-        id="multi-implementer",
-    ),
-    pytest.param(
-        multi.JUDGE,
-        JudgeResponse(analysis="Reviewed", feedback="", verdict="pass"),
-        id="multi-judge",
-    ),
-    pytest.param(
-        multi.PROFILER,
-        ProfilerSummary(analysis="Measured", bottlenecks="CPU", suggestions="Batch"),
-        id="multi-profiler",
     ),
     pytest.param(
         evolve.MUTATOR,

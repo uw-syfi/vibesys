@@ -67,6 +67,7 @@ class PolicyInputs(_Value):
     profiler_id: str = "none"
     profile_execution: str = "local"
     benchmark_command: str | None = None
+    reference_path: str = "."
     accuracy_seconds: Annotated[float, Field(gt=0)] | None = None
     benchmark_seconds: Annotated[float, Field(gt=0)] | None = None
 
@@ -149,6 +150,7 @@ def config_for(
             "profile_execution": inputs.profile_execution,
             "benchmark_command": inputs.benchmark_command,
             "modality": _modality(options, inputs),
+            "reference_path": inputs.reference_path,
             "interface": options.interface,
             "benchmark_configured": inputs.benchmark_configured,
             "accuracy_configured": inputs.accuracy_configured,

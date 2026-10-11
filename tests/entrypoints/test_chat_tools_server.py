@@ -15,6 +15,7 @@ from uuid import UUID
 
 import pytest
 from mcp.server.fastmcp import FastMCP
+from tests.support.multi_search import SearchRecord
 
 from entrypoints.chat_tools_server import build_parser, build_tools
 from launch import open_run_store
@@ -23,7 +24,6 @@ from vibesys.api.hypothesis import RoundRecord
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.multi.models import MultiState
 from vs_mcp.api import register_tool
 from vs_project.api import (
     AgentRoleExecutionRecord,
@@ -125,9 +125,8 @@ def _hypothesis() -> Hypothesis:
 
 
 def _seed_agent_state(project: Project, run_id: str) -> None:
-    portable = project.state.portable_namespace(run_id, "multi-agent")
-    portable.slot("state.json", MultiState).save(
-        MultiState(search=HypothesisState(hypotheses=[_hypothesis()], active_hypothesis_id="H-01"))
+    SearchRecord(project, run_id).save(
+        HypothesisState(hypotheses=[_hypothesis()], active_hypothesis_id="H-01")
     )
 
 
@@ -276,14 +275,16 @@ class TestEndToEnd:
         assert "round 1: passed=True" in out
         assert "commit=c1" in out
 
-    def test_list_state_files_includes_the_manifest_and_agent_state(self, tmp_path: Path) -> None:
+    def test_list_state_files_includes_the_manifest_and_the_core_record(
+        self, tmp_path: Path
+    ) -> None:
         tools, _run_id = _tools(tmp_path)
         server = _server(tools)
 
         out = asyncio.run(_call(server, "list_state_files"))
 
         assert "run.json" in out
-        assert "multi-agent/state.json" in out
+        assert "core-store/store.json" in out
 
     def test_read_state_file_returns_the_run_manifest_contents(self, tmp_path: Path) -> None:
         tools, run_id = _tools(tmp_path)

@@ -36,10 +36,10 @@ This is retry {{ retry }}. Re-check the changed source/evidence and affected
 invariants; do not repeat unrelated expensive suites from the earlier review.
 {% endif %}
 
-{% if gates.revert_applied %}
-The framework authoritatively materialized the parent{% if gates.revert_round is not none %}
-from round {{ gates.revert_round }}{% endif %}{% if gates.revert_commit %} at
-`{{ gates.revert_commit }}`{% endif %}. Do not demand candidate-supplied Git
+{% if framework.revert_applied %}
+The framework authoritatively materialized the parent{% if framework.revert_round is not none %}
+from round {{ framework.revert_round }}{% endif %}{% if framework.revert_commit %} at
+`{{ framework.revert_commit }}`{% endif %}. Do not demand candidate-supplied Git
 proof or duplicate measurement of a trustworthy retained parent row.
 {% endif %}
 
@@ -90,10 +90,10 @@ Fail the unsupported disposition and request a report-only correction without
 another unchanged performance run.
 {% endif %}
 
-{% if gates.revalidation_pending %}
+{% if framework.revalidation_pending %}
 A prior attempt passed review before a framework gate failed. The approved
-evidence is `{{ gates.approved_evaluation_artifact or '(missing)' }}`{% if gates.approved_perf_metric is not none %}
-with `{{ gates.approved_perf_metric }}{{ (' ' ~ gates.approved_perf_unit) if gates.approved_perf_unit else '' }}`{% endif %}.
+evidence is `{{ framework.approved_evaluation_artifact or '(missing)' }}`{% if framework.approved_perf_metric is not none %}
+with `{{ framework.approved_perf_metric }}{{ (' ' ~ framework.approved_perf_unit) if framework.approved_perf_unit else '' }}`{% endif %}.
 Verify identity and the gate-path repair; do not require a duplicate run solely
 because fresh canonical fields are null. If behavior changed, reject stale
 metrics for that arm while preserving independently unchanged retained rows.

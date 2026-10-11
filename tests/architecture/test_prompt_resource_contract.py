@@ -30,20 +30,22 @@ from vibesys.hypothesis import (
 from vibesys.metrics import Objective
 from vibesys.orchestration.dynamic.strategy.api import PlannerPrompt, ReviewEvaluation
 from vibesys.orchestration.evolve.population import Individual
-from vibesys.orchestration.multi.contracts import (
+from vibesys.orchestration.multi.models import (
     ImplementerResponse,
     JudgeResponse,
     PreRoundDecision,
-    ProfilerCampaign,
 )
-from vibesys.orchestration.multi.files import MultiFiles
+from vibesys.orchestration.multi.strategy.api import (
+    GateFacts,
+    ImplementerClaims,
+    ValidationFailure,
+)
 from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
     ProfilerSummary,
     profiler_definition,
     profiler_support_extra,
 )
-from vibesys.orchestration.progress import ProgressLog
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.skill_selection import (
     PLATFORM_SKELETON,
@@ -52,7 +54,7 @@ from vibesys.orchestration.skill_selection import (
     resolve_agent_resource_paths,
 )
 from vibesys.profile_focus import FocusLedger
-from vibesys.prompts import PROMPTS_DIR, render_template
+from vibesys.prompts import render_template
 from vibesys.run.contracts import ProfilerKind
 from vibesys.run.project_policy import build_project_path_policy
 from vibesys.run.workspace_policy import (
@@ -64,7 +66,7 @@ from vs_evaluation.api import EvaluationOperationSnapshot, EvaluationState, Prof
 from vs_issue_tracker.api import Issue, IssueStatus, IssueType
 from vs_project.api import Project
 from vs_prompts.api import resolve_free_variables
-from vs_runtime.api import LocalValidationEvaluation, ResolvedSkillResources, RunFacts, SkillFact
+from vs_runtime.api import LocalValidationEvaluation, RunFacts, SkillFact
 from vs_runtime.api.infrastructure import (
     ModalEnvironmentFacts,
     ProjectMaterializer,
@@ -534,6 +536,18 @@ def core_policy_context() -> dict[str, object]:
         "blocker": "tests/test_engine.py::test_decode fails to import",
         "narrowed_step": "Make the import resolve first.",
         "turns_without_candidate": 2,
+        # The multi strategy's prompt fields (`ImplementPrompt`, `JudgePrompt`, `ProfilerPrompt`).
+        "framework": GateFacts(),
+        "claims": ImplementerClaims(
+            summary="fixture",
+            expected_behavior="fixture",
+            hypothesis_outcome="nominated",
+            candidate_disposition="unassessed",
+        ),
+        "validation_failure": ValidationFailure(recipe="unit", error="boom", output="tail"),
+        "validation_recipe_schema": '{"version": 1}',
+        "evidence_directory": "profile/round-0001/",
+        "profiler_kind": "linux_cpu",
         # The single strategy's plan prompt (`PlanPrompt`) fields.
         "benchmark_enabled": True,
         "exhaustion_feedback": "fixture feedback",
@@ -705,38 +719,6 @@ def stage_prompt_workspace(
 
 def rich_path_context(workspace: Path) -> dict[str, object]:
     """Use real artifact writers and typed collections for cited role inputs."""
-    files = MultiFiles.open(workspace)
-    archive = ParetoArchiveView(axes=(), relative_noise=0.05, latest=None)
-    files.write_pareto(archive)
-    plan = OrchestratorPlan.model_validate(
-        {
-            "task": "Batch requests.",
-            "pass_criteria": "Correct.",
-            "reasoning": "Reduce overhead.",
-        }
-    )
-    plan_location = files.write_plan(1, plan)
-    implementation_location = files.write_implementer(
-        1,
-        1,
-        ImplementerResponse.model_validate(
-            {
-                "summary": "Implemented.",
-                "expected_behavior": "Correct.",
-            }
-        ),
-    )
-    entry = ProgressLog(workspace, files.progress).append(
-        1,
-        render_template(
-            "_progress/profile.j2",
-            template_dir=PROMPTS_DIR / "shared",
-            round_number=1,
-            summary=ProfilerSummary(
-                analysis="Measured queue.", bottlenecks="Queue.", suggestions="Batch."
-            ),
-        ),
-    )
     reference = workspace / "reference"
     reference.mkdir()
     (workspace / "progress.md").write_text("Issue progress ledger.")
@@ -749,42 +731,13 @@ def rich_path_context(workspace: Path) -> dict[str, object]:
     sessions.mkdir()
     (sessions / "conversation.jsonl").write_text("{}\n")
     return {
-        "plan": plan,
-        "plan_artifact_location": plan_location,
-        "implementer_artifact_location": implementation_location,
-        "prior_attempt_artifact_locations": (implementation_location,),
-        "roadmap_location": files.roadmap_location,
-        "progress_location": files.progress_location,
-        "pareto_archive_location": files.pareto_location,
-        "validation_location": files.validation_location,
-        "validation_recipe_contract_location": files.validation_schema_location,
-        "current_round_location": entry.location,
-        "regression_entry": entry,
-        "exhaustion_entry": entry,
-        "profiler_entry": entry,
-        "campaign": ProfilerCampaign(
-            progress_location=files.progress_location, evidence_location=files.profiler_location(1)
-        ),
         "read_only_paths": ("reference",),
         "gates": ("accuracy", "benchmark"),
         "seeded_workspace_paths": ("reference/model.py",),
-        "history_root": files.progress_location,
-        "recommended_skills": (
-            ResolvedSkillResources(
-                name="serving-systems",
-                router_path="serving-systems/SKILL.md",
-                resource_paths=("serving-systems/references/tooling/openai-api.md",),
-                purpose="Follow the API contract.",
-            ),
-        ),
         "objective_location": "OBJECTIVE.md",
         "reference_path": "reference",
-        "gate_approved_evaluation_artifact": "artifacts/evaluation.json",
         "session_state_dir": "sessions",
         "profiling": True,
-        "framework_revert_applied": True,
-        "gate_revalidation_pending": True,
-        "official_evaluation_due": True,
     }
 
 
@@ -826,29 +779,12 @@ def assert_resource_citations(
 
 def runtime_path_context(context: dict[str, object]) -> frozenset[str]:
     """Collect known existing paths from actual artifact writers and typed receipts."""
-    names = (
-        "objective_location",
-        "reference_path",
-        "progress_location",
-        "roadmap_location",
-        "pareto_archive_location",
-        "plan_artifact_location",
-        "plan_example",
-        "implementer_artifact_location",
-        "current_round_location",
-        "validation_location",
-        "validation_recipe_contract_location",
-        "gate_approved_evaluation_artifact",
-        "session_state_dir",
-    )
-    campaign = context["campaign"]
-    assert isinstance(campaign, ProfilerCampaign)
+    names = ("objective_location", "reference_path", "session_state_dir")
     return frozenset(str(context[name]) for name in names) | {
         "reference/meta.json",
         "reference/config.json",
         "reference/reference.py",
         "progress.md",
-        campaign.evidence_location,
     }
 
 

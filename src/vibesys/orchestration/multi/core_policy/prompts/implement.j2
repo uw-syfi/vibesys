@@ -58,10 +58,10 @@ gain. Preserve one restorable identity for every measured candidate: exact
 behavior-affecting source/build/runtime bytes or a recoverable checkpoint and
 machine-readable diff, captured before paid measurement.
 
-{% if gates.revert_applied %}
-The framework already materialized the plan's parent{% if gates.revert_round is not none %}
-from round {{ gates.revert_round }}{% endif %}{% if gates.revert_commit %} at
-commit `{{ gates.revert_commit }}`{% endif %}. Treat this as authoritative;
+{% if framework.revert_applied %}
+The framework already materialized the plan's parent{% if framework.revert_round is not none %}
+from round {{ framework.revert_round }}{% endif %}{% if framework.revert_commit %} at
+commit `{{ framework.revert_commit }}`{% endif %}. Treat this as authoritative;
 do not re-run checkout or reconstruct Git provenance. Reuse valid retained
 parent rows unless concrete drift or comparability evidence requires otherwise.
 {% endif %}
@@ -95,12 +95,12 @@ parent rows unless concrete drift or comparability evidence requires otherwise.
   test positive, zero, and mixed cases pre-target.
 - Keep long work observable; clean up local and target resources on every exit.
 
-{% if gates.revalidation_pending %}
+{% if framework.revalidation_pending %}
 ## Framework gate revalidation
 
 The retained evidence previously passed independent review before a framework
-gate failed: `{{ gates.approved_evaluation_artifact or '(missing)' }}`{% if gates.approved_perf_metric is not none %}
-with `{{ gates.approved_perf_metric }}{{ (' ' ~ gates.approved_perf_unit) if gates.approved_perf_unit else '' }}`{% endif %}.
+gate failed: `{{ framework.approved_evaluation_artifact or '(missing)' }}`{% if framework.approved_perf_metric is not none %}
+with `{{ framework.approved_perf_metric }}{{ (' ' ~ framework.approved_perf_unit) if framework.approved_perf_unit else '' }}`{% endif %}.
 Repair only the failed gate path and do not duplicate the canonical run. A
 behavior-affecting repair invalidates stale metrics for the changed arm; retain
 an earlier row only when its measured path and mode are unchanged. Return null

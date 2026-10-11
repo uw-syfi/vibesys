@@ -351,12 +351,25 @@ def _ended(state: MultiStrategyState, detail: str) -> MultiStrategyState:
 
 
 def _corrected(
-    state: MultiStrategyState, config: MultiConfig, event: TurnResult, error: str
+    state: MultiStrategyState,
+    config: MultiConfig,
+    event: TurnResult,
+    error: str,
+    *,
+    explain: bool = True,
 ) -> MultiStrategyState:
-    """Ask the role to fix its reply once; past the bound the track ends."""
+    """Ask the role to fix its reply once; past the bound the track ends.
+
+    ``explain`` tells the role what was wrong with a parsed reply; a turn that ended without a
+    reply (the session refused output that broke its schema) is asked again as it was.
+    """
     design = state.design
     turn = design.turn
-    correction = ReplyCorrectionPrompt(role=_CORRECTION_ROLES[design.track], error=error)
+    correction = (
+        ReplyCorrectionPrompt(role=_CORRECTION_ROLES[design.track], error=error)
+        if explain
+        else None
+    )
     corrected = (
         None
         if turn is None
@@ -383,7 +396,7 @@ def on_turn(
         return _lost(state, view, config, event)
     if event.observation.status is not ObservationStatus.SUCCEEDED or event.output_json is None:
         detail = event.detail or f"the turn did not complete ({event.observation.status.value})"
-        return _ended(state, detail)
+        return _corrected(state, config, event, detail, explain=False)
     if design.track is Track.PRE_ROUND:
         return _routed(state, config, event)
     if design.track is Track.PROFILE:
@@ -401,8 +414,8 @@ def _routed(
     focus = None
     if decision.need_profile:
         focus = decision.profile_focus or "general steady-state benchmark hotspots"
-    moved = _moved(state.design, after(Track.PRE_ROUND, config, state.design), profile_focus=focus)
-    return _put(state, moved)
+    routed = state.design.model_copy(update={"profile_focus": focus})
+    return _put(state, _moved(routed, after(Track.PRE_ROUND, config, routed)))
 
 
 def _profiled(

@@ -8,6 +8,7 @@ and read a run's committed record.
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -38,7 +39,13 @@ from vibesys.orchestration.multi.strategy.api import (
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
 from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
-from vs_runtime.api import CoreOperation, CorePlan, CorePolicy, OrchestrationPlugin
+from vs_runtime.api import (
+    CoreOperation,
+    CorePlan,
+    CorePolicy,
+    OrchestrationPlugin,
+    ValidationRecipeArtifact,
+)
 from vs_runtime.api.core import (
     OperationCatalog,
     OperationPorts,
@@ -83,6 +90,7 @@ def resolve_core_policy(
             profiler_id=run.facts.profiler_id,
             profile_execution=run.facts.profile_execution.value,
             benchmark_command=run.facts.benchmark_command,
+            reference_path=run.facts.reference_location,
             accuracy_seconds=evaluation.accuracy_seconds,
             benchmark_seconds=evaluation.benchmark_seconds,
         ),
@@ -141,6 +149,9 @@ def _plan_for(options_type: type[MultiRunOptions]) -> Callable[[CoreRunContext],
                 objective=policy.facts.objective,
                 environment_notes=context.facts.environment_notes,
                 agent_evaluation=True,
+                validation_recipe_schema=json.dumps(
+                    ValidationRecipeArtifact.model_json_schema(), indent=2
+                ),
             ),
             requirements=policy.requirements,
             agent_evaluation=agent_evaluation_policy(

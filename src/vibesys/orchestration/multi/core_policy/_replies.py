@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, RootModel
@@ -18,7 +17,6 @@ from vibesys.orchestration.multi.strategy.api import (
 )
 from vibesys.orchestration.profilers import ProfilerSummary
 from vs_core.api import Waitable
-from vs_runtime.api import ValidationRecipeArtifact
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -46,14 +44,16 @@ def reply_schemas() -> Mapping[SchemaRef, type[BaseModel]]:
 
 
 def run_prompt_variables(
-    *, objective: str, environment_notes: str, agent_evaluation: bool
+    *,
+    objective: str,
+    environment_notes: str,
+    agent_evaluation: bool,
+    validation_recipe_schema: str,
 ) -> dict[str, object]:
     """The run-level variables every multi template reads, besides its own context's fields."""
     return {
         "objective": objective,
         "environment_notes": environment_notes,
         "agent_evaluation": agent_evaluation,
-        "validation_recipe_schema": json.dumps(
-            ValidationRecipeArtifact.model_json_schema(), indent=2
-        ),
+        "validation_recipe_schema": validation_recipe_schema,
     }

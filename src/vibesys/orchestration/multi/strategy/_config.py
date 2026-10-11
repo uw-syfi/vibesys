@@ -47,6 +47,8 @@ class MultiConfig(CandidateConfig):
     profile_execution: str = "local"
     benchmark_command: str | None = None
     modality: str | None = None
+    # Where the input's reference material is, as the run states it (`.` when there is none).
+    reference_path: str = "."
     interface: str = "inprocess"
     orchestrator_turn_seconds: Duration = 1800.0
     profiler_turn_seconds: Duration = 3600.0

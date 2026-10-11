@@ -10,7 +10,7 @@ import pytest
 
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan, PortfolioPlan
-from vibesys.orchestration.multi.contracts import PreRoundDecision
+from vibesys.orchestration.multi.models import PreRoundDecision
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeExecutor, fake_agentshim_launcher, scripted_turn
 
