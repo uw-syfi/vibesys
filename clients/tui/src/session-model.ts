@@ -263,13 +263,17 @@ interface ThemePicker {
  * operator's freeform scratch note for the active run, kept across a close so
  * `Esc` never loses a draft. `createdAt`/`updatedAt` are null until the first
  * keystroke, matching a run that has never had a note written for it
- * (`notes-store.ts#readNote` returns `null` in that case too).
+ * (`notes-store.ts#readNote` returns `null` in that case too). `persistence`
+ * records whether the controller has bound this draft to a run/project
+ * identity. A conflict keeps an early startup draft in memory while leaving
+ * an already-saved note untouched.
  */
 interface NotepadState {
   open: boolean;
   text: string;
   createdAt: string | null;
   updatedAt: string | null;
+  persistence: 'pending_identity' | 'ready' | 'conflict';
 }
 
 /**
@@ -421,7 +425,13 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     chatDockFits: true,
     themePicker: null,
     palette: null,
-    notepad: {open: false, text: '', createdAt: null, updatedAt: null},
+    notepad: {
+      open: false,
+      text: '',
+      createdAt: null,
+      updatedAt: null,
+      persistence: 'pending_identity',
+    },
     errorBanner: null,
     inputError: null,
   };
@@ -832,22 +842,32 @@ function visiblePaneOrder(state: SessionState): PaneFocus[] {
 }
 
 /**
- * Loads whatever this run's note already held (from `notes-store.ts`, if the
- * run has one) before the modal opens, so a note written before a TUI
- * restart, or before the current process's `/note` was first pressed, is
- * there rather than blank. `record` is `null` for a run with no saved note.
+ * Binds the notepad to its resolved identity and loads whatever that run's
+ * note already held. This may happen while the modal is open if startup
+ * identity arrived after the operator opened it. `record` is `null` for a run
+ * with no saved note, which still completes the identity binding.
  */
 export function hydrateNotepad(state: SessionState, record: NoteRecord | null): SessionState {
-  if (record === null) return state;
   return {
     ...state,
     notepad: {
       ...state.notepad,
-      text: record.text,
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
+      ...(record === null
+        ? {}
+        : {
+            text: record.text,
+            createdAt: record.createdAt,
+            updatedAt: record.updatedAt,
+          }),
+      persistence: 'ready',
     },
   };
+}
+
+/** Keep a pre-identity draft in memory without granting it write ownership. */
+export function markNotepadConflict(state: SessionState): SessionState {
+  if (state.notepad.persistence === 'conflict') return state;
+  return {...state, notepad: {...state.notepad, persistence: 'conflict'}};
 }
 
 /**
@@ -873,6 +893,26 @@ export function openNotepad(state: SessionState): SessionState {
 export function closeNotepad(state: SessionState): SessionState {
   if (!state.notepad.open) return state;
   return {...state, notepad: {...state.notepad, open: false}};
+}
+
+/**
+ * A promotion action explicitly resolves a conflicted startup draft. A
+ * nonblank draft has already been copied to a composer; an empty draft has no
+ * payload to preserve. Either way, a later open may hydrate the saved note
+ * that was deliberately left untouched.
+ */
+export function closeNotepadAfterPromotion(state: SessionState): SessionState {
+  if (state.notepad.persistence !== 'conflict') return closeNotepad(state);
+  return {
+    ...state,
+    notepad: {
+      open: false,
+      text: '',
+      createdAt: null,
+      updatedAt: null,
+      persistence: 'ready',
+    },
+  };
 }
 
 /** Every keystroke in the notepad's editor lands here. */

@@ -100,6 +100,7 @@ import {
   clearEntrySelection,
   clearInputError,
   closeNotepad,
+  closeNotepadAfterPromotion,
   closeOverlays,
   closePane,
   cyclePaneFocus,
@@ -111,6 +112,7 @@ import {
   initialSessionState,
   markEventStreamAvailable,
   markEventStreamUnavailable,
+  markNotepadConflict,
   normalizeFocus,
   notepadPromotionText,
   openChat,
@@ -235,11 +237,12 @@ export interface SessionController {
   setNoteText(text: string): void;
   /**
    * Closes the notepad and returns its text for the caller to drop, unsent,
-   * into the command bar's `/steer` draft. Returns null for an empty note, so
-   * the caller has nothing to pre-fill and the notepad is left open.
+   * into the command bar's `/steer` draft. Returns null for an empty note. An
+   * ordinary empty note stays open; this action closes an empty conflicted
+   * draft so the preserved saved note becomes accessible again.
    */
   promoteNoteToSteerDraft(): {text: string} | null;
-  /** As `promoteNoteToSteerDraft`, but for the chat composer's draft; also opens chat. */
+  /** As `promoteNoteToSteerDraft`, but a nonblank result opens and fills the chat draft. */
   promoteNoteToChatDraft(): {text: string} | null;
   /** Loads the chunk of history just older than what is folded. Resolves false when history is already complete. */
   loadOlderHistory(): Promise<boolean>;
@@ -416,6 +419,7 @@ export class SocketSessionController implements SessionController {
         }
         this.#rememberSnapshotWatermark(response.snapshot, next, streamGeneration);
         this.#setState(next);
+        this.#reconcileNotepadIdentity();
         // The stream may have closed quietly before this concurrent answer
         // established that its fold was incomplete. The conditional retry is
         // inert while healthy and promotes that prior close when it is not.
@@ -643,15 +647,19 @@ export class SocketSessionController implements SessionController {
   }
 
   /**
-   * Opens the notepad, hydrated from `notes-store.ts` on the first open of a
-   * run that already has a saved note (a restart, or a reconnect that landed
-   * on the same run). Later opens in the same process reuse in-memory state,
-   * so a read here never clobbers text the operator is mid-edit on.
+   * Opens the notepad, hydrated from `notes-store.ts` once its run/project
+   * identity is known. A conflicted startup draft stays in memory across
+   * closes instead of being replaced by the older durable note.
    */
   openNotepad(): void {
+    if (this.#state.notepad.persistence === 'conflict') {
+      this.#setState(openNotepad(this.#state));
+      return;
+    }
     const identity = this.#noteIdentity();
-    const record = identity === null ? null : readNote(identity);
-    this.#setState(openNotepad(hydrateNotepad(this.#state, record)));
+    const hydrated =
+      identity === null ? this.#state : hydrateNotepad(this.#state, readNote(identity));
+    this.#setState(openNotepad(hydrated));
   }
 
   closeNotepad(): void {
@@ -670,7 +678,11 @@ export class SocketSessionController implements SessionController {
     const next = setNotepadText(this.#state, text, timestamp);
     this.#setState(next);
     const identity = this.#noteIdentity();
-    if (identity !== null && next.notepad.createdAt !== null) {
+    if (
+      identity !== null &&
+      next.notepad.persistence === 'ready' &&
+      next.notepad.createdAt !== null
+    ) {
       writeNote({
         ...identity,
         text: next.notepad.text,
@@ -687,6 +699,35 @@ export class SocketSessionController implements SessionController {
   }
 
   /**
+   * Bind a startup notepad to the identity learned from the first accepted
+   * snapshot. An untouched pad adopts the durable record. A touched pad may
+   * claim an empty slot, but it never overwrites a record that predates its
+   * identity: that crossing becomes an explicit in-memory conflict instead.
+   */
+  #reconcileNotepadIdentity(): void {
+    if (this.#state.notepad.persistence !== 'pending_identity') return;
+    const identity = this.#noteIdentity();
+    if (identity === null) return;
+    const record = readNote(identity);
+    if (this.#state.notepad.createdAt === null) {
+      this.#setState(hydrateNotepad(this.#state, record));
+      return;
+    }
+    if (record !== null) {
+      this.#setState(markNotepadConflict(this.#state));
+      return;
+    }
+    const {text, createdAt, updatedAt} = this.#state.notepad;
+    writeNote({
+      ...identity,
+      text,
+      createdAt,
+      updatedAt: updatedAt ?? createdAt,
+    });
+    this.#setState(hydrateNotepad(this.#state, null));
+  }
+
+  /**
    * Hands the note's text to the caller and closes the notepad; the caller
    * (`app.ts`) drops it into the command bar's buffer, unsent, the same way
    * the palette's own text-taking commands are pre-filled. Never submits on
@@ -695,16 +736,26 @@ export class SocketSessionController implements SessionController {
    */
   promoteNoteToSteerDraft(): {text: string} | null {
     const text = notepadPromotionText(this.#state);
-    if (text === null) return null;
-    this.#setState(closeNotepad(this.#state));
+    if (text === null) {
+      if (this.#state.notepad.persistence === 'conflict') {
+        this.#setState(closeNotepadAfterPromotion(this.#state));
+      }
+      return null;
+    }
+    this.#setState(closeNotepadAfterPromotion(this.#state));
     return {text};
   }
 
-  /** As `promoteNoteToSteerDraft`, but for the chat composer; also opens chat. */
+  /** As `promoteNoteToSteerDraft`, but a nonblank result opens and fills the chat draft. */
   promoteNoteToChatDraft(): {text: string} | null {
     const text = notepadPromotionText(this.#state);
-    if (text === null) return null;
-    this.#setState(openChat(closeNotepad(this.#state)));
+    if (text === null) {
+      if (this.#state.notepad.persistence === 'conflict') {
+        this.#setState(closeNotepadAfterPromotion(this.#state));
+      }
+      return null;
+    }
+    this.#setState(openChat(closeNotepadAfterPromotion(this.#state)));
     return {text};
   }
 

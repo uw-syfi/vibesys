@@ -2386,6 +2386,141 @@ describe('notepad', () => {
     expect(controller.state.notepad.text).toBe('from a previous session');
   });
 
+  it('hydrates an untouched notepad opened before startup learns its identity', async () => {
+    writeNote({
+      projectScope: NOTE_PROJECT_SCOPE,
+      runId: 'run',
+      text: 'saved before restart',
+      createdAt: 't0',
+      updatedAt: 't0',
+    });
+    const transport = new FakeTransport();
+    transport.deferSnapshot = true;
+    const controller = new SocketSessionController(transport);
+
+    const starting = controller.start();
+    controller.openNotepad();
+    expect(controller.state.notepad).toMatchObject({
+      open: true,
+      text: '',
+      persistence: 'pending_identity',
+    });
+
+    transport.releaseSnapshot();
+    await starting;
+
+    expect(controller.state.notepad).toMatchObject({
+      open: true,
+      text: 'saved before restart',
+      createdAt: 't0',
+      updatedAt: 't0',
+      persistence: 'ready',
+    });
+  });
+
+  it('preserves a touched startup draft without overwriting an existing saved note', async () => {
+    writeNote({
+      projectScope: NOTE_PROJECT_SCOPE,
+      runId: 'run',
+      text: 'saved before restart',
+      createdAt: 'saved-t0',
+      updatedAt: 'saved-t1',
+    });
+    const transport = new FakeTransport();
+    transport.deferSnapshot = true;
+    const controller = new SocketSessionController(transport);
+
+    const starting = controller.start();
+    controller.openNotepad();
+    controller.setNoteText('draft written during startup');
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+      'saved before restart',
+    );
+
+    transport.releaseSnapshot();
+    await starting;
+
+    expect(controller.state.notepad).toMatchObject({
+      open: true,
+      text: 'draft written during startup',
+      persistence: 'conflict',
+    });
+    controller.setNoteText('edited conflict draft');
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+      'saved before restart',
+    );
+
+    controller.closeNotepad();
+    controller.openNotepad();
+    expect(controller.state.notepad).toMatchObject({
+      text: 'edited conflict draft',
+      persistence: 'conflict',
+    });
+
+    expect(controller.promoteNoteToSteerDraft()).toEqual({text: 'edited conflict draft'});
+    controller.openNotepad();
+    expect(controller.state.notepad).toMatchObject({
+      text: 'saved before restart',
+      persistence: 'ready',
+    });
+  });
+
+  it('lets either promotion action retire a conflicted draft that was edited to blank', async () => {
+    for (const promotion of ['steer', 'chat'] as const) {
+      writeNote({
+        projectScope: NOTE_PROJECT_SCOPE,
+        runId: 'run',
+        text: 'saved before restart',
+        createdAt: 'saved-t0',
+        updatedAt: 'saved-t1',
+      });
+      const transport = new FakeTransport();
+      transport.deferSnapshot = true;
+      const controller = new SocketSessionController(transport);
+
+      const starting = controller.start();
+      controller.openNotepad();
+      controller.setNoteText('startup draft');
+      transport.releaseSnapshot();
+      await starting;
+      controller.setNoteText('   ');
+      expect(controller.state.notepad.persistence).toBe('conflict');
+
+      const prefill =
+        promotion === 'steer'
+          ? controller.promoteNoteToSteerDraft()
+          : controller.promoteNoteToChatDraft();
+
+      expect(prefill).toBeNull();
+      expect(controller.state.notepad.open).toBe(false);
+      expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+        'saved before restart',
+      );
+      controller.openNotepad();
+      expect(controller.state.notepad).toMatchObject({
+        text: 'saved before restart',
+        persistence: 'ready',
+      });
+    }
+  });
+
+  it('persists a touched startup draft when its resolved identity has no saved note', async () => {
+    const transport = new FakeTransport();
+    transport.deferSnapshot = true;
+    const controller = new SocketSessionController(transport);
+
+    const starting = controller.start();
+    controller.openNotepad();
+    controller.setNoteText('first note for this run');
+    transport.releaseSnapshot();
+    await starting;
+
+    expect(controller.state.notepad.persistence).toBe('ready');
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+      'first note for this run',
+    );
+  });
+
   it('persists every keystroke, surviving a restart against the same run', async () => {
     const controller = new SocketSessionController(new FakeTransport());
     await controller.start();
@@ -3226,6 +3361,7 @@ describe('stream reconnect', () => {
 
 class FakeTransport implements ServerTransport {
   closed = false;
+  deferSnapshot = false;
   /** Mutable so a test can change what a refetch returns mid-run. */
   experiments: NonNullable<ProtocolResponse['experiments']> = [];
   experimentsReady = true;
@@ -3240,6 +3376,7 @@ class FakeTransport implements ServerTransport {
   readonly requests: RequestInput[] = [];
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
+  #releaseSnapshot: (() => void) | null = null;
 
   constructor(
     private readonly responseEvents: RunEvent[] = [],
@@ -3254,7 +3391,7 @@ class FakeTransport implements ServerTransport {
     if (input.type === 'query.design_patch' && this.designPatchError) {
       return Promise.reject(this.designPatchError);
     }
-    return Promise.resolve({
+    const response: ProtocolResponse = {
       protocol_version: 1,
       request_id: 'request',
       timestamp: '2026-01-01T00:00:00Z',
@@ -3293,6 +3430,14 @@ class FakeTransport implements ServerTransport {
         sequence: 12,
         ...(this.projectScope === undefined ? {} : {project_scope: this.projectScope}),
       },
+    };
+    if (input.type !== 'query.snapshot' || !this.deferSnapshot) return Promise.resolve(response);
+    if (this.#releaseSnapshot !== null) throw new Error('Snapshot request is already pending');
+    return new Promise(resolve => {
+      this.#releaseSnapshot = () => {
+        this.#releaseSnapshot = null;
+        resolve(response);
+      };
     });
   }
 
@@ -3324,6 +3469,12 @@ class FakeTransport implements ServerTransport {
 
   disconnect(error: Error): void {
     this.#disconnect?.(error);
+  }
+
+  releaseSnapshot(): void {
+    const release = this.#releaseSnapshot;
+    if (release === null) throw new Error('No snapshot request is pending');
+    release();
   }
 }
 

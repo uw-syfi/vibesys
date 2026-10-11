@@ -13,6 +13,11 @@ const MIN_ROWS = 6;
 // `{date}-{time}-{8-hex-suffix}-{slug}`: sortable and collision-safe, not
 // meant for a person to read at a glance.
 const RUN_ID_PATTERN = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})\d{2}-[0-9a-f]{8}-(.+)$/;
+const PERSISTENCE_STATUS: Record<SessionState['notepad']['persistence'], string> = {
+  pending_identity: 'Waiting for run identity · edits stay in memory',
+  ready: 'Saved locally · kept out of run-events.jsonl',
+  conflict: 'Not saved: a saved note exists · F6/F7: copy text; discard if blank',
+};
 
 /**
  * Where a run id matches the generator's shape, show the slug (the one part
@@ -54,8 +59,13 @@ export class NotepadView {
   readonly #hint: TextRenderable;
   #renderedText: string | null = null;
   #renderedRunId: string | null = null;
+  #renderedPersistence: SessionState['notepad']['persistence'] | null = null;
+  #statusColor: string;
+  #conflictColor: string;
 
   constructor(renderer: CliRenderer, theme: Theme) {
+    this.#statusColor = theme.textMuted;
+    this.#conflictColor = theme.warning;
     this.output = new BoxRenderable(renderer, {
       id: 'notepad',
       width: '70%',
@@ -133,7 +143,10 @@ export class NotepadView {
     this.output.borderColor = theme.info;
     this.output.backgroundColor = theme.canvas;
     this.#metaRun.fg = theme.textPrimary;
-    this.#metaNote.fg = theme.textMuted;
+    this.#statusColor = theme.textMuted;
+    this.#conflictColor = theme.warning;
+    this.#metaNote.fg =
+      this.#renderedPersistence === 'conflict' ? this.#conflictColor : this.#statusColor;
     this.#hint.fg = theme.textSubtle;
     this.#editor.textColor = theme.textPrimary;
     this.#editor.focusedTextColor = theme.textStrong;
@@ -167,6 +180,12 @@ export class NotepadView {
       this.#renderedRunId = state.core.runId;
       const run = state.core.runId === null ? 'unknown run' : formatRunLabel(state.core.runId);
       this.#metaRun.content = `Run ${run}`;
+    }
+    if (this.#renderedPersistence !== notepad.persistence) {
+      this.#renderedPersistence = notepad.persistence;
+      this.#metaNote.content = PERSISTENCE_STATUS[notepad.persistence];
+      this.#metaNote.fg =
+        notepad.persistence === 'conflict' ? this.#conflictColor : this.#statusColor;
     }
   }
 

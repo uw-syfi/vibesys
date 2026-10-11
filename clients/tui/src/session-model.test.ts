@@ -31,6 +31,7 @@ import {
   chatPaneVisible,
   clearInputError,
   closeNotepad,
+  closeNotepadAfterPromotion,
   closePane,
   cyclePaneFocus,
   dismissErrorBanner,
@@ -41,6 +42,7 @@ import {
   hydrateNotepad,
   initialSessionState,
   markEventStreamUnavailable,
+  markNotepadConflict,
   notepadPromotionText,
   openChat,
   openNotepad,
@@ -2395,7 +2397,13 @@ describe('notepad', () => {
   it('opens closed, empty, and unstamped', () => {
     const state = initialSessionState();
 
-    expect(state.notepad).toEqual({open: false, text: '', createdAt: null, updatedAt: null});
+    expect(state.notepad).toEqual({
+      open: false,
+      text: '',
+      createdAt: null,
+      updatedAt: null,
+      persistence: 'pending_identity',
+    });
   });
 
   it('opens over the palette and theme picker, leaving the run underneath alone', () => {
@@ -2460,8 +2468,30 @@ describe('notepad', () => {
     expect(hydrated.notepad.text).toBe('from disk');
     expect(hydrated.notepad.createdAt).toBe('t0');
     expect(hydrated.notepad.updatedAt).toBe('t1');
+    expect(hydrated.notepad.persistence).toBe('ready');
 
-    expect(hydrateNotepad(opened, null)).toBe(opened);
+    expect(hydrateNotepad(opened, null).notepad).toEqual({
+      ...opened.notepad,
+      persistence: 'ready',
+    });
+  });
+
+  it('keeps a conflicted draft until promotion copies it to a composer', () => {
+    const drafted = setNotepadText(openNotepad(initialSessionState()), 'startup draft', 't0');
+    const conflicted = markNotepadConflict(drafted);
+
+    expect(closeNotepad(conflicted).notepad).toMatchObject({
+      open: false,
+      text: 'startup draft',
+      persistence: 'conflict',
+    });
+    expect(closeNotepadAfterPromotion(conflicted).notepad).toEqual({
+      open: false,
+      text: '',
+      createdAt: null,
+      updatedAt: null,
+      persistence: 'ready',
+    });
   });
 
   it('promotes trimmed text, and nothing for an empty or whitespace-only note', () => {
@@ -2557,7 +2587,13 @@ describe('notepad', () => {
     );
 
     expect(changed.core.runId).toBe('run-b');
-    expect(changed.notepad).toEqual({open: false, text: '', createdAt: null, updatedAt: null});
+    expect(changed.notepad).toEqual({
+      open: false,
+      text: '',
+      createdAt: null,
+      updatedAt: null,
+      persistence: 'pending_identity',
+    });
     expect(changed.selectedRound).toBeNull();
     expect(changed.selectedAgentKind).toBeNull();
     expect(changed.selectedEntryId).toBeNull();
