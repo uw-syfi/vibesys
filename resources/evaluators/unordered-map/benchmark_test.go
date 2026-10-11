@@ -75,6 +75,29 @@ func TestNativeReferenceMixedBenchmark(t *testing.T) {
 	}
 }
 
+func TestBenchmarkCompletesInitialBatchWhenDurationExpiresImmediately(t *testing.T) {
+	result, err := runBenchmark(benchmarkConfig{
+		candidateConfig: candidateConfig{
+			workspace:    t.TempDir(),
+			useReference: true,
+			scenario:     scenarioMW,
+			keySize:      8,
+			valueSize:    8,
+			clientCount:  1,
+		},
+		duration:    time.Nanosecond,
+		repetitions: 1,
+		keySpace:    16,
+		checkBudget: defaultCheckBudget,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Puts == 0 || result.Gets == 0 || result.Removes == 0 {
+		t.Fatalf("initial benchmark batch did not exercise the workload mix: %+v", result)
+	}
+}
+
 func TestMedianBenchmarkResultPreservesMedianSampleAndAllRates(t *testing.T) {
 	results := []benchmarkResult{
 		{Scenario: "swmr", Puts: 10, TotalOpsPerSec: 30},

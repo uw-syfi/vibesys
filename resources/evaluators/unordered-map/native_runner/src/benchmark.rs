@@ -1,9 +1,10 @@
 use crate::abi::{Api, Client, STATUS_MISSING, STATUS_OK};
+use crate::phase_start::PhaseStart;
 use crate::value::{prepare_payload, validate_payload};
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, OnceLock};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -175,15 +176,13 @@ fn run_phase(
     let clients = (0..config.client_count)
         .map(|id| map.create_client(id))
         .collect::<Result<Vec<_>, _>>()?;
-    let barrier = Arc::new(Barrier::new(config.client_count as usize + 1));
-    let start = Arc::new(OnceLock::new());
+    let phase_start = PhaseStart::new(config.client_count as usize);
     let stop = Arc::new(AtomicBool::new(false));
 
     let (mut clients, counts, elapsed) = thread::scope(|scope| {
         let mut workers = Vec::with_capacity(clients.len());
         for (lane, client) in clients.into_iter().enumerate() {
-            let barrier = barrier.clone();
-            let start = start.clone();
+            let phase_start = phase_start.clone();
             let stop = stop.clone();
             let role = client_role(&config.scenario, lane, config.client_count as usize)?;
             let key_size = config.max_key_size;
@@ -191,16 +190,22 @@ fn run_phase(
             let key_space = config.key_space;
             workers.push(scope.spawn(move || {
                 run_client(
-                    client, lane, role, key_size, value_size, key_space, duration, barrier, start,
+                    client,
+                    lane,
+                    role,
+                    key_size,
+                    value_size,
+                    key_space,
+                    duration,
+                    phase_start,
                     stop,
                 )
             }));
         }
 
-        start
-            .set(Instant::now())
-            .map_err(|_| "benchmark start was already initialized".to_string())?;
-        barrier.wait();
+        // A readiness proof is recorded only after thread configuration returns. The coordinator
+        // cannot publish the measurement epoch until every worker has supplied one.
+        let start = phase_start.publish_when_ready()?;
 
         let mut returned = Vec::with_capacity(workers.len());
         let mut counts = Counts::default();
@@ -219,7 +224,7 @@ fn run_phase(
                 }
             };
         }
-        let elapsed = start.get().expect("benchmark start missing").elapsed();
+        let elapsed = start.elapsed();
         if let Some(error) = first_error {
             return Err(error);
         }
@@ -257,8 +262,7 @@ fn run_client(
     value_size: usize,
     key_space: u64,
     duration: Duration,
-    barrier: Arc<Barrier>,
-    start: Arc<OnceLock<Instant>>,
+    phase_start: Arc<PhaseStart>,
     stop: Arc<AtomicBool>,
 ) -> Result<(Client, Counts), String> {
     let mut counts = Counts::default();
@@ -266,12 +270,14 @@ fn run_client(
     let mut value = vec![0_u8; value_size];
     let mut output = vec![0_u8; value_size];
     let thread_configuration = configure_benchmark_thread(lane);
-    barrier.wait();
+    let start = phase_start.worker_ready()?.wait_for_epoch()?;
     thread_configuration?;
-    let deadline = *start.get().expect("benchmark start missing") + duration;
+    let deadline = start + duration;
     let mut attempts = 0_u64;
     while !stop.load(Ordering::Relaxed) {
-        if clock_check_due(attempts) && Instant::now() >= deadline {
+        // A phase always completes one whole workload batch before sampling its deadline.
+        // This makes the sample meaningful even when a ready worker is descheduled at release.
+        if attempts > 0 && clock_check_due(attempts) && Instant::now() >= deadline {
             break;
         }
         let sequence = attempts.wrapping_add(1);

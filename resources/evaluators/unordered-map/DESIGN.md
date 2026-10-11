@@ -55,6 +55,9 @@ each thread choosing get 70%, put 20%, and remove 10%.
 
 The benchmark command runs the linearizability gate first. Repeated
 measurements report the median completed operation rate as `total_ops_per_sec`.
+Workers configure and rendezvous before the coordinator publishes the measurement
+epoch. Each worker completes one 64-operation workload batch before consulting the
+deadline, so scheduler delay at release cannot produce an empty or partial-mix sample.
 
 ## Worker protocol
 
