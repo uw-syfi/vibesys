@@ -170,9 +170,19 @@ accelerator_backend = "rocm"
     assert spec.resources.accelerators_per_node == 4
 
 
+def _write_slurm_operator_config(path: Path) -> Path:
+    """Write the smallest operator file that the CLI's profiler validation can load."""
+    path.write_text(
+        '[slurm]\nname = "cluster"\nremote_workspace_root = "/remote/runs"\n'
+        '[slurm.transport]\nkind = "ssh"\nhost = "cluster"\n',
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_cli_selects_slurm_with_external_operator_config(tmp_path: Path) -> None:
     project = _write_input_project(tmp_path)
-    config_path = _write_operator_slurm_file(tmp_path / "operator-slurm.toml")
+    config_path = _write_slurm_operator_config(tmp_path / "operator-slurm.toml")
 
     invocation = parse_cli_invocation(["--input", str(project), "--slurm-config", str(config_path)])
     spec = run_environment_spec_from_args(invocation.args)
@@ -214,20 +224,6 @@ _MODAL_ENVIRONMENT = RunEnvironmentRecord(
     model_volume="weights",
     app="run-app",
 )
-_OPERATOR_SLURM_FILE = """[slurm]
-name = "test-cluster"
-remote_workspace_root = "/remote/vibesys"
-
-[slurm.transport]
-kind = "ssh"
-host = "test-cluster"
-"""
-
-
-def _write_operator_slurm_file(path: Path) -> Path:
-    """Write a valid operator file: the CLI parses it once when it builds the environment."""
-    path.write_text(_OPERATOR_SLURM_FILE, encoding="utf-8")
-    return path
 
 
 def _common_configuration() -> _CommonConfiguration:
@@ -1836,7 +1832,7 @@ def test_resume_restores_the_external_slurm_config_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = _write_input_project(tmp_path)
-    slurm_config = _write_operator_slurm_file(tmp_path / "slurm.toml")
+    slurm_config = _write_slurm_operator_config(tmp_path / "operator-slurm.toml")
     run_id = "20260811-120000-11111111-agent"
     _write_project_run(
         project,
