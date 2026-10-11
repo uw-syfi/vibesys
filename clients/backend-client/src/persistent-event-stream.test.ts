@@ -66,11 +66,15 @@ interface Env {
 
 function harness(env: Env): {
   callbacks: PersistentEventStreamCallbacks;
-  messages: Array<{message: ServerMessage; resumed: boolean}>;
+  messages: Array<{message: ServerMessage; resumed: boolean; connectionGeneration: number}>;
   states: StreamConnectionState[];
   nextState(): Promise<StreamConnectionState>;
 } {
-  const messages: Array<{message: ServerMessage; resumed: boolean}> = [];
+  const messages: Array<{
+    message: ServerMessage;
+    resumed: boolean;
+    connectionGeneration: number;
+  }> = [];
   const states: StreamConnectionState[] = [];
   const stateWaiters: Array<(state: StreamConnectionState) => void> = [];
   return {
@@ -81,7 +85,7 @@ function harness(env: Env): {
       cursor: () => env.cursor,
       storeId: () => env.storeId ?? '',
       shouldReconnect: () => env.reconnect,
-      onMessage: (message, {resumed}) => messages.push({message, resumed}),
+      onMessage: (message, context) => messages.push({message, ...context}),
       onConnectionState: state => {
         states.push(state);
         stateWaiters.shift()?.(state);
@@ -310,6 +314,8 @@ describe('PersistentEventStream', () => {
       event(1, 'agent_output_chunk', 'one\n'),
       event(2, 'agent_output_chunk', 'two\n'),
     ]);
+    const bootstrapGeneration = messages.at(-1)?.connectionGeneration;
+    if (bootstrapGeneration === undefined) throw new Error('Bootstrap batch was not delivered');
     env.cursor = 2;
 
     transport.sever();
@@ -327,6 +333,9 @@ describe('PersistentEventStream', () => {
     // The resumed stream's batches are tagged resumed.
     transport.emitBatch([event(3, 'agent_output_chunk', 'three\n')], 0, false);
     expect(messages[messages.length - 1]?.resumed).toBe(true);
+    expect(messages[messages.length - 1]?.connectionGeneration).toBeGreaterThan(
+      bootstrapGeneration,
+    );
 
     // A success gives the next outage the full schedule again.
     env.cursor = 3;
@@ -352,12 +361,18 @@ describe('PersistentEventStream', () => {
 
     transport.sever();
     await stream.settle();
+    transport.emitBatch([event(7, 'agent_output_chunk', 'seven\n')]);
+    const resumedGeneration = messages.at(-1)?.connectionGeneration;
+    if (resumedGeneration === undefined) throw new Error('Resumed batch was not delivered');
     // The new socket resumed from cursor 6, but its already-open subscription
     // later overflowed its tail and sent a second bootstrap. This marker is
     // therefore the one batch that must not inherit the dial's resumed flag.
     transport.emitBatch([event(20, 'agent_output_chunk', 'twenty\n')], 19, true);
 
-    expect(messages[messages.length - 1]).toMatchObject({resumed: false});
+    expect(messages[messages.length - 1]).toMatchObject({
+      resumed: false,
+      connectionGeneration: resumedGeneration,
+    });
     expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
 
     // A fresh batch also establishes a bootstrap for the current stream, so a
@@ -685,13 +700,79 @@ describe('PersistentEventStream', () => {
     ]);
 
     const recovered = nextState();
-    stream.rebootstrap();
-    stream.rebootstrap();
+    expect(stream.rebootstrap()).toBe('transitioning');
+    expect(stream.rebootstrap()).toBe('transitioning');
     transport.releasePendingSubscribe();
     await expect(recovered).resolves.toMatchObject({status: 'connected'});
 
     expect(transport.subscribeCalls).toHaveLength(2);
     expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+    await stream.close();
+  });
+
+  it('identifies a coalesced fresh recovery whose first batch already landed', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 0, reconnect: true};
+    const {callbacks, messages, nextState} = harness(env);
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(5, 'agent_output_chunk', 'old\n')]);
+    env.cursor = 5;
+
+    // The replacement delivers its first batch synchronously, but its
+    // subscription handle remains pending. The batch, not handle settlement,
+    // is the boundary visible to consumers.
+    transport.deferNextSubscribe();
+    transport.deliverOnNextSubscribe([event(1, 'run_finished')], 0);
+    expect(stream.rebootstrap()).toBe('transitioning');
+    expect(stream.rebootstrap()).toBe('transitioning');
+    await stream.settle();
+    expect(messages.at(-1)).toMatchObject({resumed: false});
+    expect(stream.rebootstrap()).toBe('current');
+    expect(stream.rebootstrap()).toBe('current');
+    expect(transport.subscribeCalls).toHaveLength(2);
+
+    const recovered = nextState();
+    transport.releasePendingSubscribe();
+    await expect(recovered).resolves.toMatchObject({status: 'connected'});
+    await stream.close();
+    expect(stream.rebootstrap()).toBe('inactive');
+  });
+
+  it('retains one cursor retry requested while a fresh handshake is still settling', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 5, reconnect: false, storeId: 'replacement'};
+    const {callbacks, messages, nextState} = harness(env);
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(5, 'agent_output_chunk', 'old\n')]);
+
+    // The fresh generation has already delivered its first batch, but its
+    // subscription handle is still pending. A snapshot may now prove that the
+    // terminal batch stopped short of durable history and request a cursor
+    // retry before the fresh recovery releases the single dial slot.
+    transport.deferNextSubscribe();
+    transport.deliverOnNextSubscribe([event(1, 'agent_output_chunk', 'replacement\n')], 0);
+    expect(stream.rebootstrap()).toBe('transitioning');
+    await stream.settle();
+    expect(messages.at(-1)).toMatchObject({resumed: false});
+    const terminalClose = new Error('replacement closed before the snapshot settled');
+    transport.sever(terminalClose);
+    env.reconnect = true;
+    const reported = nextState();
+    stream.retryIfDisconnected();
+    stream.retryIfDisconnected();
+    expect(transport.subscribeCalls).toHaveLength(2);
+
+    const retainedRetry = transport.nextSubscribe();
+    transport.releasePendingSubscribe();
+    await expect(reported).resolves.toEqual({status: 'disconnected', error: terminalClose});
+    expect(await retainedRetry).toEqual({
+      afterSequence: 5,
+      tail: undefined,
+      storeId: 'replacement',
+    });
+    expect(transport.subscribeCalls).toHaveLength(3);
     await stream.close();
   });
 
@@ -706,7 +787,7 @@ describe('PersistentEventStream', () => {
 
     // The pending attempt is already a fresh bootstrap. Neither the stronger
     // public recovery verb nor a lifecycle retry may open a competing socket.
-    stream.rebootstrap();
+    expect(stream.rebootstrap()).toBe('transitioning');
     stream.retry();
     expect(transport.subscribeCalls).toHaveLength(1);
 
@@ -857,6 +938,27 @@ describe('PersistentEventStream', () => {
     transport.releasePendingSubscribe();
     await expect(recovered).resolves.toMatchObject({status: 'connected'});
     expect(transport.subscribeCalls).toHaveLength(2);
+    await stream.close();
+  });
+
+  it('reports a failed replacement dial when retry retires a healthy stream', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 0, reconnect: true};
+    const {callbacks, states} = harness(env);
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    env.cursor = 1;
+
+    const failure = new BackendClientError('disconnected', 'replacement dial failed');
+    transport.scriptedDialFailures.push(failure);
+    stream.retry();
+    await stream.settle();
+
+    // A lifecycle wake can proactively replace a live stream. If that dial fails, the old socket
+    // is already retired, so silence would leave the caller claiming it is still connected.
+    expect(transport.subscribeCalls).toHaveLength(2);
+    expect(states).toEqual([{status: 'disconnected', error: failure}]);
     await stream.close();
   });
 

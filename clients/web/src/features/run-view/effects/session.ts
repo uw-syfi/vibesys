@@ -13,7 +13,11 @@ import {
 } from '@vibesys/core-state';
 import type {WebSessionState} from '../../../entities/connection.js';
 import {type RunAction, runStep} from '../../../entities/run.js';
-import type {RunConnection, TransportHooks} from '../../../platform/backend.js';
+import {
+  isSnapshotStoreReplaced,
+  type RunConnection,
+  type TransportHooks,
+} from '../../../platform/backend.js';
 import type {BrowserLifecycle} from '../../../platform/lifecycle.js';
 import {
   type Reachability,
@@ -22,6 +26,7 @@ import {
   type SessionRequest,
   type SessionState,
   type SnapshotResult,
+  sessionStartupSettled,
   sessionStep,
 } from '../state/session.js';
 
@@ -52,6 +57,14 @@ export class WebSession {
   readonly #core: Store<SessionState, SessionAction>;
   readonly #connection: RunConnection;
   readonly #lifecycle: BrowserLifecycle;
+  /** The latest accepted control snapshot, which may prove the event fold is incomplete. */
+  #snapshotWatermark: {readonly runId: string; readonly sequence: number} | null = null;
+  /** The event store whose batches currently own the run fold. */
+  #streamStoreId: string | null = null;
+  /** Last dial generation from which a batch entered the fold. */
+  #lastBatchConnection: number | null = null;
+  /** Active fresh-bootstrap boundary, absent when no recovery owns one. */
+  #freshBoundaryAfterConnection: number | null | undefined;
   #started: Promise<void> | null = null;
   #startupSettled: () => void = () => undefined;
   #closed: Promise<void> | null = null;
@@ -71,7 +84,7 @@ export class WebSession {
 
   subscribe = (listener: () => void): (() => void) => this.#core.subscribe(listener);
 
-  /** Load the snapshot, then subscribe to the stream; settles once the first subscription does. */
+  /** Establish the stream store, then load its fenced snapshot; settles after both complete. */
   start(): Promise<void> {
     if (this.#started === null) {
       this.#started = new Promise(resolve => {
@@ -105,30 +118,96 @@ export class WebSession {
     return hasRunEnded(this.store.getState());
   }
 
+  #snapshotIsAhead(): boolean {
+    const run = this.store.getState();
+    const watermark = this.#snapshotWatermark;
+    return watermark !== null && watermark.runId === run.runId && run.sequence < watermark.sequence;
+  }
+
+  /** Whether the run can still emit, or its accepted snapshot is ahead of the event cursor. */
+  #streamNeedsRecovery(): boolean {
+    return !this.#runEnded() || this.#snapshotIsAhead();
+  }
+
   #wake = (): void => this.#core.dispatch({type: 'wake', reach: this.#reach()});
 
   #offline = (): void => this.#core.dispatch({type: 'offline', runEnded: this.#runEnded()});
 
+  #applySnapshot(request: Extract<SessionRequest, {kind: 'apply-snapshot'}>): void {
+    const {snapshot} = request;
+    this.store.dispatch({type: 'snapshot', snapshot});
+    // A snapshot carries a journal position but no events, so it must not advance the event
+    // cursor. Retain that position only when core-state accepted its run identity. Within one
+    // stream-store generation the evidence is monotone: core-state can reject a stale same-run
+    // snapshot's liveness, and that response must not erase a newer known journal position.
+    if (this.store.getState().runId !== snapshot.run_id) return;
+    const current = this.#snapshotWatermark;
+    this.#snapshotWatermark = {
+      runId: snapshot.run_id,
+      sequence:
+        current?.runId === snapshot.run_id
+          ? Math.max(current.sequence, snapshot.sequence)
+          : snapshot.sequence,
+    };
+  }
+
+  #recoverStream(request: Extract<SessionRequest, {kind: 'recover-stream'}>): void {
+    try {
+      if (request.mode === 'rebootstrap') {
+        const disposition = this.#connection.rebootstrap();
+        if (disposition === 'transitioning') {
+          this.#freshBoundaryAfterConnection = this.#lastBatchConnection;
+        } else if (disposition === 'current' && this.#streamStoreId !== null) {
+          // The fresh generation delivered its first batch before its handle
+          // settled. It is already the stream owner, so retry its fenced
+          // snapshot instead of waiting for a generation change that will not
+          // occur.
+          this.#core.dispatch({type: 'stream-established', storeId: this.#streamStoreId});
+        }
+      } else {
+        this.#connection.retry();
+      }
+    } catch (error) {
+      this.#core.dispatch({type: 'fault', error: toError(error)});
+    }
+  }
+
   #perform(request: SessionRequest): void {
     const dispatch = this.#core.dispatch;
     switch (request.kind) {
-      case 'load-snapshot': {
-        const {token} = request;
-        void this.#loadSnapshot().then(result => dispatch({type: 'snapshot-reply', token, result}));
+      case 'apply-snapshot':
+        this.#applySnapshot(request);
         return;
-      }
-      case 'apply-snapshot': {
-        this.store.dispatch({type: 'snapshot', snapshot: request.snapshot});
-        return;
-      }
       case 'subscribe': {
         const {token} = request;
         void this.#connection
           .subscribe({
             cursor: () => this.store.getState().sequence,
-            shouldReconnect: () => !this.#runEnded(),
-            onBatch: (message, reconciliation) =>
-              this.store.dispatch({type: 'batch', message, reconciliation}),
+            shouldReconnect: () => this.#streamNeedsRecovery(),
+            onBatch: (message, reconciliation, context) => {
+              const storeId = message.store_id ?? '';
+              const previousStoreId = this.#streamStoreId;
+              const boundary = this.#freshBoundaryAfterConnection;
+              const requestedFreshGeneration =
+                boundary !== undefined &&
+                !context.resumed &&
+                (boundary === null || context.connectionGeneration > boundary);
+              const firstGeneration = previousStoreId === null;
+              const storeReplaced = previousStoreId !== null && storeId !== previousStoreId;
+              this.store.dispatch({type: 'batch', message, reconciliation});
+              this.#streamStoreId = storeId;
+              if (storeReplaced) {
+                // Store identity, not connection or chunk identity, proves a
+                // replacement. Retire old evidence, then query through the
+                // server's atomic store precondition.
+                this.#snapshotWatermark = null;
+              }
+              if (firstGeneration || requestedFreshGeneration || storeReplaced) {
+                this.#core.dispatch({type: 'stream-established', storeId});
+              }
+              if (requestedFreshGeneration) this.#freshBoundaryAfterConnection = undefined;
+              this.#lastBatchConnection = context.connectionGeneration;
+            },
             onFault: error => dispatch({type: 'fault', error}),
             onConnectionState: state => dispatch({type: 'stream', state}),
           })
@@ -138,12 +217,12 @@ export class WebSession {
           )
           .then(error => {
             dispatch({type: 'subscribe-reply', token, error});
-            this.#startupSettled();
+            this.#settleStartup();
           });
         return;
       }
       case 'refresh': {
-        const {token} = request;
+        const {token, mode} = request;
         // A browser wake is stronger evidence than either reconnect timer: a background tab may
         // have had both coalesced indefinitely. The redial is inert on a healthy or dialing
         // channel, and otherwise dials before the snapshot request is queued.
@@ -157,18 +236,30 @@ export class WebSession {
           });
           return;
         }
-        void this.#loadSnapshot().then(result =>
-          dispatch({type: 'refresh-reply', token, outcome: {kind: 'snapshot', result}}),
-        );
+        if (mode === 'rebootstrap') {
+          void Promise.resolve().then(() =>
+            dispatch({type: 'refresh-reply', token, outcome: {kind: 'ready'}}),
+          );
+        } else {
+          void this.#loadSnapshot(this.#streamStoreId ?? undefined).then(result =>
+            dispatch({type: 'refresh-reply', token, outcome: {kind: 'snapshot', result}}),
+          );
+        }
+        return;
+      }
+      case 'load-replacement-snapshot': {
+        const {token, storeId} = request;
+        void this.#loadSnapshot(storeId).then(result => {
+          dispatch({type: 'replacement-snapshot-reply', token, storeId, result});
+          this.#settleStartup();
+        });
         return;
       }
       case 'recover-stream':
-        try {
-          if (request.mode === 'rebootstrap') this.#connection.rebootstrap();
-          else this.#connection.retry();
-        } catch (error) {
-          dispatch({type: 'fault', error: toError(error)});
-        }
+        this.#recoverStream(request);
+        return;
+      case 'reevaluate-stream':
+        if (this.#snapshotIsAhead()) this.#connection.retryIfDisconnected();
         return;
       case 'redial-controls':
         this.#connection.redialControls();
@@ -183,11 +274,18 @@ export class WebSession {
     }
   }
 
+  #settleStartup(): void {
+    if (sessionStartupSettled(this.#core.getState())) this.#startupSettled();
+  }
+
   /** Load the snapshot; the core decides whether the run fold applies it. */
-  async #loadSnapshot(): Promise<SnapshotResult> {
+  async #loadSnapshot(storeId?: string): Promise<SnapshotResult> {
     try {
-      return {ok: true, snapshot: await this.#connection.loadSnapshot()};
+      return {ok: true, snapshot: await this.#connection.loadSnapshot(storeId)};
     } catch (error) {
+      if (isSnapshotStoreReplaced(error)) {
+        return {ok: false, error, reason: 'store-replaced'};
+      }
       return {ok: false, error: toError(error)};
     }
   }

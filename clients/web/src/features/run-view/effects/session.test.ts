@@ -1,18 +1,28 @@
 import {describe, expect, test} from 'bun:test';
 import {
   BackendClientError,
+  type BatchReconciliation,
   type ControlChannelState,
   type ControlTransport,
   type ProtocolResponse,
   type RequestInput,
+  type RunSnapshot,
   type RunStatus,
   ServerError,
   type ServerMessage,
+  type StreamMessageContext,
   type SubscribeOptions,
   sameControlChannelState,
 } from '@vibesys/backend-client';
 import {event, eventBatch, FakeClock, snapshotResponse} from '@vibesys/backend-client/testing';
-import {connectRun, type TransportHooks, type TransportTiming} from '../../../platform/backend.js';
+import {SEEDS, Seeded} from '@vibesys/core-state/testing';
+import {
+  connectRun,
+  type RunConnection,
+  type RunStreamHandlers,
+  type TransportHooks,
+  type TransportTiming,
+} from '../../../platform/backend.js';
 import type {BrowserLifecycle} from '../../../platform/lifecycle.js';
 import {connectionBanners, STREAM_BANNER_COPY} from '../state/banners.js';
 import {WebSession} from './session.js';
@@ -208,7 +218,722 @@ class FakeTransport implements ControlTransport {
   }
 }
 
+/** A connection whose replacement batch arrives before its subscription handle is adopted. */
+class PendingHandleConnection implements RunConnection {
+  readonly failure = new Error('replacement snapshot failed');
+  #snapshot = 0;
+  #release: (() => void) | null = null;
+
+  loadSnapshot(): Promise<RunSnapshot> {
+    this.#snapshot += 1;
+    return this.#snapshot === 1
+      ? Promise.reject(this.failure)
+      : Promise.resolve({run_id: 'run-1', sequence: 1, status: 'running'});
+  }
+
+  subscribe(handlers: RunStreamHandlers): Promise<void> {
+    const reconciliation: BatchReconciliation = {kind: 'rebootstrap', historyFloor: 0};
+    const context: StreamMessageContext = {resumed: false, connectionGeneration: 1};
+    handlers.onBatch(
+      eventBatch([event(1, 'server_ready')], {
+        store_id: 'replacement-store',
+        through_sequence: 1,
+        history_after_sequence: 0,
+      }),
+      reconciliation,
+      context,
+    );
+    return new Promise(resolve => {
+      this.#release = resolve;
+    });
+  }
+
+  retry(): void {}
+  retryIfDisconnected(): void {}
+  rebootstrap(): 'current' {
+    return 'current';
+  }
+  redialControls(): void {}
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  release(): void {
+    this.#release?.();
+  }
+}
+
+/** A replacement that faults after connecting but before its fenced snapshot settles. */
+class FaultBeforeSnapshotConnection implements RunConnection {
+  readonly firstFailure = new Error('first fenced snapshot failed');
+  readonly streamFault = new Error('replacement stream sent an invalid frame');
+  readonly rebootstrapStarted: Promise<void>;
+  #announceRebootstrap: () => void = () => undefined;
+  #handlers: RunStreamHandlers | null = null;
+  #snapshots = 0;
+  #resolveSnapshot: (snapshot: RunSnapshot) => void = () => undefined;
+
+  constructor() {
+    this.rebootstrapStarted = new Promise(resolve => {
+      this.#announceRebootstrap = resolve;
+    });
+  }
+
+  loadSnapshot(): Promise<RunSnapshot> {
+    this.#snapshots += 1;
+    if (this.#snapshots === 1) return Promise.reject(this.firstFailure);
+    return new Promise(resolve => {
+      this.#resolveSnapshot = resolve;
+    });
+  }
+
+  subscribe(handlers: RunStreamHandlers): Promise<void> {
+    this.#handlers = handlers;
+    this.#batch('store-a', 1);
+    return Promise.resolve();
+  }
+
+  retry(): void {}
+  retryIfDisconnected(): void {}
+  rebootstrap(): 'transitioning' {
+    this.#announceRebootstrap();
+    return 'transitioning';
+  }
+  redialControls(): void {}
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  establishFaultedReplacement(): void {
+    this.#batch('store-b', 2);
+    this.#handlers?.onConnectionState({status: 'connected'});
+    this.#handlers?.onFault(this.streamFault);
+  }
+
+  resolveReplacementSnapshot(): void {
+    this.#resolveSnapshot({run_id: 'run-1', sequence: 1, status: 'running'});
+  }
+
+  #batch(storeId: string, connectionGeneration: number): void {
+    const reconciliation: BatchReconciliation = {kind: 'rebootstrap', historyFloor: 0};
+    this.#handlers?.onBatch(
+      eventBatch([event(1, 'server_ready')], {
+        store_id: storeId,
+        through_sequence: 1,
+        history_after_sequence: 0,
+      }),
+      reconciliation,
+      {resumed: false, connectionGeneration},
+    );
+  }
+}
+
 describe('WebSession', () => {
+  test('keeps a newer terminal watermark when a stale same-run refresh is rejected', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new FakeClock();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    transport.snapshots.push(snapshotResponse({sequence: 5, status: 'completed'}));
+
+    await session.start();
+    expect(session.store.getState()).toMatchObject({sequence: 1, status: 'completed'});
+    const initial = transport.subscriptions[0];
+    if (initial === undefined) throw new Error('Initial subscription did not open');
+
+    // Core-state rejects this same-run response's stale liveness: it cannot un-end a fold at the
+    // same cursor. It must not lower the separate evidence that sequence 5 exists in this log.
+    const stale = deferred<ProtocolResponse>();
+    transport.snapshots.push(stale.promise);
+    transport.silentDials = 1;
+    lifecycle.emit('online');
+    const refreshed = nextSessionChange(session);
+    stale.resolve(snapshotResponse({sequence: 1, status: 'running'}));
+    await refreshed;
+    await Promise.resolve();
+
+    expect(session.store.getState()).toMatchObject({sequence: 1, status: 'completed'});
+    expect(initial.closed).toBe(true);
+    expect(transport.subscriptions).toHaveLength(2);
+    const resumed = transport.subscriptions[1];
+    if (resumed === undefined) throw new Error('Lifecycle recovery did not resume the stream');
+    expect(resumed).toMatchObject({afterSequence: 1, options: {storeId: 'store-1'}});
+
+    resumed.onDisconnect(disconnect('stream ended before the known tail'));
+    expect(session.getState().status).toBe('stale');
+    expect(scheduler.pendingDelays()).toEqual([0]);
+    await session.close();
+  });
+
+  test('keeps the old watermark until a fresh batch proves the stream store changed', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new FakeClock();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    transport.snapshots.push(snapshotResponse({sequence: 5, status: 'completed'}));
+    await session.start();
+
+    const initial = transport.subscriptions[0];
+    if (initial === undefined) throw new Error('Initial subscription did not open');
+    initial.onMessage({type: 'protocol_error', code: 'stream_failed', message: 'Replay failed'});
+    expect(session.getState().status).toBe('stale');
+
+    transport.snapshots.push(snapshotResponse({sequence: 1, status: 'running'}));
+    transport.silentDials = 1;
+    const redialed = transport.nextSubscription();
+    session.reattach();
+    const replacement = await redialed;
+    expect(replacement).toMatchObject({afterSequence: 0, options: undefined});
+
+    // A fresh connection is not necessarily a fresh store. A whole-backlog WebSocket bootstrap
+    // may be split into complete event batches, so this first same-store batch can end before the
+    // accepted snapshot watermark. Losing the connection here must retain that evidence and retry.
+    const connected = waitForSession(session, () => session.getState().status === 'connected');
+    replacement.onMessage(streamBatch('store-1', 1));
+    await connected;
+    replacement.onDisconnect(disconnect('same store ended before sequence 5'));
+
+    expect(session.store.getState()).toMatchObject({sequence: 1, status: 'completed'});
+    expect(session.getState().status).toBe('stale');
+    expect(scheduler.pendingDelays()).toEqual([0]);
+    await session.close();
+  });
+
+  test('accepts a lower watermark after the stream store re-bootstraps', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new FakeClock();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    transport.snapshots.push(snapshotResponse({sequence: 5, status: 'completed'}));
+
+    await session.start();
+    const subscription = transport.subscriptions[0];
+    if (subscription === undefined) throw new Error('Initial subscription did not open');
+    const replacementSnapshot = deferred<ProtocolResponse>();
+    transport.snapshots.push(replacementSnapshot.promise);
+    subscription.onMessage(
+      eventBatch([event(1, 'server_ready')], {
+        store_id: 'replacement-store',
+        through_sequence: 1,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    expect(session.store.getState()).toMatchObject({sequence: 1, status: 'connecting'});
+
+    // The pre-rebootstrap sequence-5 snapshot cannot describe the replacement. Its own
+    // post-rebootstrap sequence-1 snapshot is authoritative and may lower the watermark.
+    const refreshed = nextSessionChange(session);
+    replacementSnapshot.resolve(snapshotResponse({sequence: 1, status: 'completed'}));
+    await refreshed;
+
+    expect(session.store.getState()).toMatchObject({sequence: 1, status: 'completed'});
+    expect(subscription.closed).toBe(false);
+    expect(transport.subscriptions).toHaveLength(1);
+    subscription.onDisconnect(disconnect('replacement store complete'));
+    expect(session.getState()).toEqual(healthy());
+    expect(scheduler.pendingDelays()).toEqual([]);
+    await session.close();
+  });
+
+  test('does not assign a pre-bootstrap snapshot to the replacement store', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new FakeClock();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    transport.snapshots.push(snapshotResponse({sequence: 5, status: 'completed'}));
+
+    await session.start();
+    const initial = transport.subscriptions[0];
+    if (initial === undefined) throw new Error('Initial subscription did not open');
+    initial.onMessage({
+      type: 'protocol_error',
+      code: 'stream_failed',
+      message: 'Replay failed',
+    });
+
+    // Reattach establishes its stream store before issuing any snapshot query,
+    // so neither an old-store nor an early new-store response can be guessed
+    // into the generation from cross-socket delivery order.
+    const postReplacement = deferred<ProtocolResponse>();
+    transport.snapshots.push(postReplacement.promise);
+    transport.silentDials = 1;
+    const replacementDial = transport.nextSubscription();
+    const connected = waitForSession(session, () => session.getState().status === 'connected');
+    session.reattach();
+    const replacement = await replacementDial;
+    expect(transport.requests).toHaveLength(1);
+    replacement.onMessage(
+      eventBatch([event(1, 'run_finished', {run_id: 'run-1'})], {
+        store_id: 'replacement-store',
+        through_sequence: 1,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    await connected;
+    expect(transport.requests.at(-1)).toMatchObject({
+      type: 'query.snapshot',
+      expected_store_id: 'replacement-store',
+    });
+    expect(session.store.getState()).toMatchObject({sequence: 1, status: 'completed'});
+
+    const validated = nextSessionChange(session);
+    postReplacement.resolve(snapshotResponse({sequence: 1, status: 'completed'}));
+    await validated;
+    replacement.onDisconnect(disconnect('replacement store complete'));
+    expect(session.getState()).toEqual(healthy());
+    expect(scheduler.pendingDelays()).toEqual([]);
+    await session.close();
+  });
+
+  test('retains post-replacement evidence without replacing a live stream', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new FakeClock();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    transport.snapshots.push(snapshotResponse({sequence: 5, status: 'completed'}));
+    await session.start();
+    const initial = transport.subscriptions[0];
+    if (initial === undefined) throw new Error('Initial subscription did not open');
+    initial.onMessage({type: 'protocol_error', code: 'stream_failed', message: 'Replay failed'});
+
+    // The reverse cross-socket ordering has the same handoff: the query still
+    // begins only after the replacement batch, fenced to its store.
+    const postReplacement = deferred<ProtocolResponse>();
+    transport.snapshots.push(postReplacement.promise);
+    transport.silentDials = 1;
+    const replacementDial = transport.nextSubscription();
+    const connected = waitForSession(session, () => session.getState().status === 'connected');
+    session.reattach();
+    const replacement = await replacementDial;
+    expect(transport.requests).toHaveLength(1);
+    replacement.onMessage(
+      eventBatch([event(1, 'run_finished', {run_id: 'run-1'})], {
+        store_id: 'replacement-store',
+        through_sequence: 1,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    await connected;
+    expect(transport.requests.at(-1)).toMatchObject({
+      type: 'query.snapshot',
+      expected_store_id: 'replacement-store',
+    });
+
+    const snapshotApplied = nextSessionChange(session);
+    postReplacement.resolve(snapshotResponse({sequence: 3, status: 'completed'}));
+    await snapshotApplied;
+    expect(replacement.closed).toBe(false);
+    expect(transport.subscriptions).toHaveLength(2);
+
+    // The stream can deliver the durable suffix itself. Higher snapshot
+    // evidence must not proactively retire a healthy socket just to discover
+    // whether it had closed.
+    replacement.onMessage(outputBatch('replacement-store', 2, 'second\n'));
+    replacement.onMessage(outputBatch('replacement-store', 3, 'third\n'));
+    replacement.onDisconnect(disconnect('replacement store complete'));
+    expect(session.getState()).toEqual(healthy());
+    expect(scheduler.pendingDelays()).toEqual([]);
+    await session.close();
+  });
+
+  test('retries a terminal close when its post-replacement snapshot later proves a gap', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new FakeClock();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    transport.snapshots.push(snapshotResponse({sequence: 5, status: 'completed'}));
+    await session.start();
+    const initial = transport.subscriptions[0];
+    if (initial === undefined) throw new Error('Initial subscription did not open');
+    initial.onMessage({type: 'protocol_error', code: 'stream_failed', message: 'Replay failed'});
+
+    const postReplacement = deferred<ProtocolResponse>();
+    transport.snapshots.push(postReplacement.promise);
+    transport.silentDials = 1;
+    const replacementDial = transport.nextSubscription();
+    const connected = waitForSession(session, () => session.getState().status === 'connected');
+    session.reattach();
+    const replacement = await replacementDial;
+    replacement.onMessage(
+      eventBatch([event(1, 'run_finished', {run_id: 'run-1'})], {
+        store_id: 'replacement-store',
+        through_sequence: 1,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    await connected;
+
+    // Before the generation-fenced snapshot returns, the sequence-1 terminal fold is all the
+    // client can prove. Its close is quiet. Higher evidence arriving afterward must wake the dead
+    // stream immediately instead of waiting for another browser lifecycle event.
+    replacement.onDisconnect(disconnect('replacement closed before snapshot'));
+    expect(session.getState()).toEqual(healthy());
+    expect(scheduler.pendingDelays()).toEqual([]);
+
+    transport.silentDials = 1;
+    const resumedDial = transport.nextSubscription();
+    postReplacement.resolve(snapshotResponse({sequence: 3, status: 'completed'}));
+    const resumed = await resumedDial;
+    expect(replacement.closed).toBe(true);
+    expect(resumed).toMatchObject({
+      afterSequence: 1,
+      options: {storeId: 'replacement-store'},
+    });
+
+    resumed.onDisconnect(disconnect('replacement still ends before sequence 3'));
+    expect(session.getState().status).toBe('stale');
+    expect(scheduler.pendingDelays()).toEqual([0]);
+    await session.close();
+  });
+
+  test('rebootstraps when the fenced store is replaced before snapshot acquisition', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    transport.snapshots.push(snapshotResponse({sequence: 5, status: 'completed'}));
+    await session.start();
+    transport.subscriptions[0]?.onMessage({
+      type: 'protocol_error',
+      code: 'stream_failed',
+      message: 'Replay failed',
+    });
+
+    const storeB = deferred<ProtocolResponse>();
+    transport.snapshots.push(storeB.promise);
+    transport.silentDials = 1;
+    const bDial = transport.nextSubscription();
+    session.reattach();
+    const b = await bDial;
+    b.onMessage(streamBatch('store-b', 1));
+    expect(transport.requests.at(-1)).toMatchObject({
+      type: 'query.snapshot',
+      expected_store_id: 'store-b',
+    });
+
+    const storeC = deferred<ProtocolResponse>();
+    transport.snapshots.push(storeC.promise);
+    transport.silentDials = 1;
+    const cDial = transport.nextSubscription();
+    storeB.resolve(storeReplacedResponse());
+    const c = await cDial;
+    c.onMessage(streamBatch('store-c', 1));
+    expect(transport.requests.at(-1)).toMatchObject({
+      type: 'query.snapshot',
+      expected_store_id: 'store-c',
+    });
+
+    const accepted = waitForSession(session, () => session.store.getState().status === 'completed');
+    storeC.resolve(snapshotResponse({sequence: 1, status: 'completed'}));
+    await accepted;
+    expect(b.closed).toBe(true);
+    expect(session.store.getState()).toMatchObject({sequence: 1, status: 'completed'});
+    expect(transport.requests).toHaveLength(3);
+    await waitForSession(session, () => session.getState().status === 'connected');
+    await session.close();
+  });
+
+  test('drops an older fenced reply when the replacement batch arrives first', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    transport.snapshots.push(snapshotResponse({sequence: 5, status: 'completed'}));
+    await session.start();
+    transport.subscriptions[0]?.onMessage({
+      type: 'protocol_error',
+      code: 'stream_failed',
+      message: 'Replay failed',
+    });
+
+    const storeB = deferred<ProtocolResponse>();
+    transport.snapshots.push(storeB.promise);
+    transport.silentDials = 1;
+    const bDial = transport.nextSubscription();
+    session.reattach();
+    const stream = await bDial;
+    stream.onMessage(streamBatch('store-b', 1));
+
+    const storeC = deferred<ProtocolResponse>();
+    transport.snapshots.push(storeC.promise);
+    stream.onMessage(streamBatch('store-c', 1));
+    expect(transport.requests.slice(-2)).toMatchObject([
+      {type: 'query.snapshot', expected_store_id: 'store-b'},
+      {type: 'query.snapshot', expected_store_id: 'store-c'},
+    ]);
+
+    const accepted = nextSessionChange(session);
+    storeC.resolve(snapshotResponse({sequence: 1, status: 'completed'}));
+    await accepted;
+    storeB.resolve(storeReplacedResponse());
+    await Promise.resolve();
+    expect(transport.subscriptions).toHaveLength(2);
+    expect(session.store.getState()).toMatchObject({sequence: 1, status: 'completed'});
+    await waitForSession(session, () => session.getState().status === 'connected');
+    await session.close();
+  });
+
+  test('keeps one generation monotone while its fresh subscription handle is pending', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new FakeClock();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    transport.snapshots.push(snapshotResponse({sequence: 5, status: 'completed'}));
+    await session.start();
+
+    const initial = transport.subscriptions[0];
+    if (initial === undefined) throw new Error('Initial subscription did not open');
+    initial.onMessage({type: 'protocol_error', code: 'stream_failed', message: 'Replay failed'});
+
+    // The first explicit recovery gets a fresh sequence-zero batch before its
+    // subscription handle settles. That batch is already the visible generation.
+    const replacementSnapshot = deferred<ProtocolResponse>();
+    transport.snapshots.push(replacementSnapshot.promise);
+    transport.silentDials = 1;
+    transport.deferNextSubscribe();
+    const replacementDial = transport.nextSubscription();
+    session.reattach();
+    const replacement = await replacementDial;
+    replacement.onMessage(
+      eventBatch([event(1, 'run_finished', {run_id: 'run-1'})], {
+        store_id: 'replacement-store',
+        through_sequence: 1,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    expect(session.store.getState()).toMatchObject({sequence: 1, status: 'completed'});
+    expect(transport.requests.at(-1)).toMatchObject({
+      type: 'query.snapshot',
+      expected_store_id: 'replacement-store',
+    });
+
+    // Repeated Reattach requests share the established generation and its
+    // fenced snapshot while the subscription handle is still pending.
+    session.reattach();
+    session.reattach();
+    expect(transport.subscriptions).toHaveLength(2);
+    expect(transport.requests).toHaveLength(2);
+
+    const replacementValidated = nextSessionChange(session);
+    replacementSnapshot.resolve(snapshotResponse({sequence: 1, status: 'completed'}));
+    await replacementValidated;
+
+    const connected = waitForSession(session, () => session.getState().status === 'connected');
+    transport.releasePendingSubscribe();
+    await connected;
+
+    // A later in-loop store replacement owns a distinct fenced query.
+    const laterSnapshot = deferred<ProtocolResponse>();
+    transport.snapshots.push(laterSnapshot.promise);
+    replacement.onMessage(
+      eventBatch([event(1, 'run_finished', {run_id: 'run-1'})], {
+        store_id: 'later-store',
+        through_sequence: 1,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    expect(transport.requests.at(-1)).toMatchObject({
+      type: 'query.snapshot',
+      expected_store_id: 'later-store',
+    });
+    const laterValidated = nextSessionChange(session);
+    laterSnapshot.resolve(snapshotResponse({sequence: 1, status: 'completed'}));
+    await laterValidated;
+    replacement.onDisconnect(disconnect('later store complete'));
+    expect(session.getState()).toEqual(healthy());
+    expect(scheduler.pendingDelays()).toEqual([]);
+
+    await session.close();
+    replacement.onDisconnect(disconnect('closed session'));
+    expect(scheduler.runNext()).toBe(false);
+  });
+
+  test('resumes when a lifecycle snapshot ends ahead of the event stream', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new FakeClock();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    transport.snapshots.push(snapshotResponse({sequence: 1, status: 'running'}));
+
+    await session.start();
+    expect(session.store.getState()).toMatchObject({sequence: 1, status: 'running'});
+    const initial = transport.subscriptions[0];
+    if (initial === undefined) throw new Error('Initial subscription did not open');
+
+    transport.snapshots.push(snapshotResponse({sequence: 3, status: 'completed'}));
+    transport.silentDials = 1;
+    const resumed = transport.nextSubscription();
+    const observedTerminal = waitForSession(
+      session,
+      () => session.store.getState().status === 'completed',
+    );
+    lifecycle.emit('online');
+    await observedTerminal;
+
+    // The accepted snapshot proves that the current subscription has not delivered the tail.
+    // Retire it during lifecycle recovery instead of treating terminal status as complete.
+    expect(initial.closed).toBe(true);
+    const subscription = await resumed;
+    expect(subscription).toMatchObject({afterSequence: 1, options: {storeId: 'store-1'}});
+
+    const recovered = waitForSession(session, () => {
+      return session.getState().status === 'connected' && session.store.getState().sequence === 3;
+    });
+    subscription.onMessage(outputBatch('store-1', 2, 'last output\n'));
+    subscription.onMessage(outputBatch('store-1', 3, 'terminal output\n'));
+    await recovered;
+    expect(session.store.getState().transcript.map(entry => entry.content)).toEqual([
+      'last output\n',
+      'terminal output\n',
+    ]);
+
+    // Once the fold reaches the accepted snapshot, an ordinary terminal close stays quiet and
+    // does not start a reconnect loop.
+    subscription.onDisconnect(disconnect('gateway exited'));
+    expect(session.getState()).toEqual(healthy());
+    expect(scheduler.pendingDelays()).toEqual([]);
+    expect(transport.subscriptions).toHaveLength(2);
+
+    await session.close();
+    subscription.onDisconnect(disconnect('closed session'));
+    expect(scheduler.runNext()).toBe(false);
+    expect(transport.subscriptions).toHaveLength(2);
+  });
+
+  test('terminal stream closes redial exactly while the snapshot watermark is ahead', async () => {
+    const terminalStatuses = [
+      'completed',
+      'failed',
+      'stopped',
+    ] as const satisfies readonly RunStatus[];
+
+    for (const seed of SEEDS.slice(0, 12)) {
+      const random = new Seeded(seed);
+      const status = random.pick(terminalStatuses);
+      const snapshotSequence = random.int(6) + 2;
+      const lifecycle = new FakeLifecycle();
+      const scheduler = new FakeClock();
+      const {session, transport} = sessionWith(lifecycle, {
+        reconnectDelaysMs: [0],
+        scheduleTimeout: scheduler.scheduleTimeout,
+      });
+      transport.snapshots.push(snapshotResponse({sequence: snapshotSequence, status}));
+
+      await session.start();
+      expect(session.store.getState()).toMatchObject({sequence: 1, status});
+      const initial = transport.subscriptions[0];
+      if (initial === undefined) throw new Error(`Seed ${seed}: initial subscription did not open`);
+      const failure = disconnect(`seed ${seed}: stream closed`);
+
+      transport.silentDials = 1;
+      const retrying = transport.nextSubscription();
+      initial.onDisconnect(failure);
+      expect({
+        seed,
+        status: session.getState().status,
+        pending: scheduler.pendingDelays(),
+      }).toEqual({seed, status: 'stale', pending: [0]});
+
+      expect(scheduler.runNext()).toBe(true);
+      const subscription = await retrying;
+      expect(subscription).toMatchObject({afterSequence: 1, options: {storeId: 'store-1'}});
+
+      // A resumed delivery at the existing cursor is ignored, and each missing event is folded
+      // once in sequence. The snapshot watermark never advances the event cursor itself.
+      subscription.onMessage(outputBatch('store-1', 1, 'duplicate output\n'));
+      const recovered = waitForSession(session, () => {
+        return (
+          session.getState().status === 'connected' &&
+          session.store.getState().sequence === snapshotSequence
+        );
+      });
+      const expected: string[] = [];
+      for (let sequence = 2; sequence <= snapshotSequence; sequence += 1) {
+        const content = `seed ${seed}, event ${sequence}\n`;
+        expected.push(content);
+        subscription.onMessage(outputBatch('store-1', sequence, content));
+      }
+      await recovered;
+      expect({
+        seed,
+        transcript: session.store.getState().transcript.map(entry => entry.content),
+      }).toEqual({seed, transcript: expected});
+
+      subscription.onDisconnect(disconnect(`seed ${seed}: terminal close`));
+      expect({seed, state: session.getState(), pending: scheduler.pendingDelays()}).toEqual({
+        seed,
+        state: healthy(),
+        pending: [],
+      });
+
+      await session.close();
+      subscription.onDisconnect(disconnect(`seed ${seed}: closed session`));
+      expect({
+        seed,
+        timerRan: scheduler.runNext(),
+        subscriptions: transport.subscriptions.length,
+      }).toEqual({seed, timerRan: false, subscriptions: 2});
+    }
+  });
+
+  test('lets an in-flight initial bootstrap satisfy a terminal refresh watermark', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    transport.snapshots.push(snapshotResponse({sequence: 1, status: 'running'}));
+    transport.deferNextSubscribe();
+
+    const initialDial = transport.nextSubscription();
+    const starting = session.start();
+    const initial = await initialDial;
+    await waitForSession(session, () => session.store.getState().status === 'running');
+    expect(session.store.getState()).toMatchObject({sequence: 1, status: 'running'});
+
+    transport.snapshots.push(snapshotResponse({sequence: 3, status: 'completed'}));
+    const observedTerminal = waitForSession(
+      session,
+      () => session.store.getState().status === 'completed',
+    );
+    lifecycle.emit('online');
+    await observedTerminal;
+
+    // The initial dial already owns a fresh bootstrap. The lifecycle retry coalesces with it
+    // instead of retiring it or opening a parallel socket, and its remaining events can satisfy
+    // the snapshot watermark before the handshake returns.
+    expect(initial.closed).toBe(false);
+    expect(transport.subscriptions).toHaveLength(1);
+    initial.onMessage(outputBatch('store-1', 2, 'penultimate output\n'));
+    initial.onMessage(outputBatch('store-1', 3, 'last output\n'));
+    transport.releasePendingSubscribe();
+    await starting;
+
+    expect(session.getState()).toEqual(healthy());
+    expect(session.store.getState()).toMatchObject({sequence: 3, status: 'completed'});
+    expect(session.store.getState().transcript.map(entry => entry.content)).toEqual([
+      'penultimate output\n',
+      'last output\n',
+    ]);
+    expect(transport.subscriptions).toHaveLength(1);
+    await session.close();
+  });
+
   test('wakes after an OS sleep with an exhausted schedule and catches up exactly', async () => {
     const lifecycle = new FakeLifecycle();
     const scheduler = new FakeClock();
@@ -319,6 +1044,7 @@ describe('WebSession', () => {
     session.reattach();
     expect(transport.reconnectCalls).toBe(2);
     await expect(recovered).resolves.toMatchObject({afterSequence: 0, options: undefined});
+    await waitForSession(session, () => session.getState().status === 'connected');
     await session.close();
   });
 
@@ -326,16 +1052,14 @@ describe('WebSession', () => {
     // The shell used to fold each loaded snapshot before the core checked its reply, so the
     // start-up snapshot, answered after an overlapping refresh's, rolled the run's status back.
     // Both are at one sequence, where the run fold itself cannot tell which is newer.
-    const older = snapshotResponse({sequence: 0, status: 'running'});
-    const newer = snapshotResponse({sequence: 0, status: 'paused'});
+    const older = snapshotResponse({sequence: 1, status: 'running'});
+    const newer = snapshotResponse({sequence: 1, status: 'paused'});
     for (const startupFirst of [false, true]) {
       const lifecycle = new FakeLifecycle();
       const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
       const startup = deferred<ProtocolResponse>();
       const refresh = deferred<ProtocolResponse>();
       transport.snapshots.push(startup.promise, refresh.promise);
-      // The stream subscribes without a bootstrap batch, so only the snapshots move the fold.
-      transport.silentDials = 1;
       const started = session.start();
       lifecycle.emit('online');
       expect(transport.requests).toHaveLength(2);
@@ -349,6 +1073,10 @@ describe('WebSession', () => {
         refresh.resolve(newer);
         await waitForSession(session, () => status() === 'paused');
       };
+      // The refresh's stream retry is not part of this ordering assertion.
+      // Keep its bootstrap silent so only the two fenced snapshot replies can
+      // change the fold.
+      transport.silentDials = 1;
       if (startupFirst) {
         await answerStartup();
         await answerRefresh();
@@ -423,8 +1151,7 @@ describe('WebSession', () => {
     );
     session.reattach();
     session.reattach();
-    expect(transport.requests).toHaveLength(3);
-    await refreshed;
+    expect(transport.requests).toHaveLength(2);
 
     const resumed = await retrying;
     expect(resumed).toMatchObject({afterSequence: 1, options: {storeId: 'store-1'}});
@@ -436,6 +1163,7 @@ describe('WebSession', () => {
     const fresh = transport.nextSubscription();
     transport.releasePendingSubscribe();
     await expect(fresh).resolves.toMatchObject({afterSequence: 0, options: undefined});
+    await refreshed;
 
     expect(
       transport.subscriptions.slice(1).map(({afterSequence, options}) => ({
@@ -450,7 +1178,7 @@ describe('WebSession', () => {
     await session.close();
   });
 
-  test('coalesces reattach with a recovery bootstrap before the first batch', async () => {
+  test('queues one reattach behind a recovery cursor dial before its first batch', async () => {
     const lifecycle = new FakeLifecycle();
     const scheduler = new FakeClock();
     const {session, transport} = sessionWith(lifecycle, {
@@ -458,23 +1186,30 @@ describe('WebSession', () => {
       scheduleTimeout: scheduler.scheduleTimeout,
     });
     transport.silentDials = 2;
-    await session.start();
+    const initialDial = transport.nextSubscription();
+    const starting = session.start();
+    const initial = await initialDial;
+    initial.onMessage(streamBatch('store-1', 1));
+    await starting;
 
     transport.deferNextSubscribe();
     const retrying = transport.nextSubscription();
     transport.subscriptions[0]?.onDisconnect(disconnect('gateway restarted'));
     expect(scheduler.runNext()).toBe(true);
-    expect(await retrying).toMatchObject({afterSequence: 0, options: undefined});
+    expect(await retrying).toMatchObject({
+      afterSequence: 1,
+      options: {storeId: 'store-1'},
+    });
 
     session.reattach();
     session.reattach();
     expect(transport.subscriptions).toHaveLength(2);
 
-    const recovered = waitForSession(session, () => session.getState().status === 'connected');
+    const fresh = transport.nextSubscription();
     transport.releasePendingSubscribe();
-    await recovered;
+    await expect(fresh).resolves.toMatchObject({afterSequence: 0, options: undefined});
 
-    expect(transport.subscriptions).toHaveLength(2);
+    expect(transport.subscriptions).toHaveLength(3);
     await session.close();
   });
 
@@ -486,8 +1221,8 @@ describe('WebSession', () => {
     const starting = session.start();
     const initial = await initialSubscription;
 
-    // start() has completed its snapshot but still owns the first sequence-zero
-    // handshake. Reattach is the same fresh intent, so it must not create a
+    // start() has completed its fenced snapshot but still owns the first
+    // sequence-zero handshake. Reattach is the same fresh intent, so it must not create a
     // second socket whose handle could later be orphaned by the first one.
     session.reattach();
     session.reattach();
@@ -498,6 +1233,129 @@ describe('WebSession', () => {
     await session.close();
     expect(initial.closed).toBe(true);
     expect(transport.subscriptions.every(subscription => subscription.closed)).toBe(true);
+  });
+
+  test('retires recovery when its replacement generation completes startup', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    transport.silentDials = 2;
+    const initialDial = transport.nextSubscription();
+    const starting = session.start();
+    const initial = await initialDial;
+    await settle();
+
+    initial.onDisconnect(disconnect('lost before the first batch'));
+    expect(session.getState().status).toBe('stale');
+
+    const replacementDial = transport.nextSubscription();
+    session.reattach();
+    const replacement = await replacementDial;
+    replacement.onMessage(streamBatch('replacement-store', 1));
+    await starting;
+    await settle();
+    expect(session.getState().status).toBe('connected');
+
+    // The replacement generation satisfied both startup and the overlapping
+    // recovery. A later explicit recovery must not be suppressed by a stale
+    // recovery owner left in the core.
+    session.reattach();
+    await settle();
+    expect(transport.subscriptions).toHaveLength(3);
+    await session.close();
+  });
+
+  test('retries a failed startup replacement whose subscription handle is pending', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    transport.silentDials = 2;
+    const initialDial = transport.nextSubscription();
+    const starting = session.start();
+    const initial = await initialDial;
+    await settle();
+
+    initial.onDisconnect(disconnect('lost before the first batch'));
+    const failure = new Error('replacement snapshot failed');
+    transport.snapshots.push(failure);
+    transport.deferNextSubscribe();
+    const replacementDial = transport.nextSubscription();
+    session.reattach();
+    const replacement = await replacementDial;
+
+    // The replacement batch is observable before subscribe() returns its
+    // handle. Its fenced snapshot fails while that fresh dial still owns the
+    // stream.
+    replacement.onMessage(streamBatch('replacement-store', 1));
+    await waitForSession(session, () => session.getState().error === failure);
+    await starting;
+
+    // Reattach coalesces with that already-established generation, but still
+    // owns a new fenced snapshot. Adopting the late handle cannot erase the
+    // first failure while the replacement proof is pending.
+    const retrySnapshot = deferred<ProtocolResponse>();
+    transport.snapshots.push(retrySnapshot.promise);
+    session.reattach();
+    await settle();
+    expect(transport.requests).toHaveLength(2);
+    expect(transport.requests.at(-1)).toMatchObject({
+      type: 'query.snapshot',
+      expected_store_id: 'replacement-store',
+    });
+    transport.releasePendingSubscribe();
+    await settle();
+    expect(session.getState()).toMatchObject({status: 'stale', error: failure});
+
+    const recovered = waitForSession(session, () => session.getState().status === 'connected');
+    retrySnapshot.resolve(snapshotResponse({sequence: 1}));
+    await recovered;
+
+    // Both the startup and the retry owner have settled, so a later explicit
+    // Reattach can establish another fresh generation.
+    session.reattach();
+    await settle();
+    expect(transport.subscriptions).toHaveLength(3);
+    await session.close();
+  });
+
+  test('accepts a successful recovery snapshot before its pending handle is adopted', async () => {
+    const connection = new PendingHandleConnection();
+    const session = new WebSession({
+      lifecycle: new FakeLifecycle(),
+      connect: () => connection,
+    });
+    const starting = session.start();
+    await waitForSession(session, () => session.getState().error === connection.failure);
+    session.reattach();
+    await waitForSession(session, () => session.getState().hasSnapshot);
+    expect(session.getState()).toMatchObject({status: 'stale', error: connection.failure});
+
+    // The successful fenced retry is authoritative, but only adopting the same stream generation
+    // supplies the connection proof needed to clear the earlier snapshot failure.
+    connection.release();
+    await starting;
+    expect(session.getState()).toMatchObject({status: 'connected', error: null});
+    await session.close();
+  });
+
+  test('does not let a snapshot success erase a newer stream fault', async () => {
+    const connection = new FaultBeforeSnapshotConnection();
+    const session = new WebSession({
+      lifecycle: new FakeLifecycle(),
+      connect: () => connection,
+    });
+    await session.start();
+    expect(session.getState()).toMatchObject({status: 'stale', error: connection.firstFailure});
+
+    session.reattach();
+    await connection.rebootstrapStarted;
+    connection.establishFaultedReplacement();
+    expect(session.getState()).toMatchObject({status: 'stale', error: connection.streamFault});
+
+    const applied = waitForSession(session, () => session.getState().hasSnapshot);
+    connection.resolveReplacementSnapshot();
+    await applied;
+
+    expect(session.getState()).toMatchObject({status: 'stale', error: connection.streamFault});
+    await session.close();
   });
 
   test('re-bootstraps when one store raises its declared history floor', async () => {
@@ -522,6 +1380,10 @@ describe('WebSession', () => {
     transport.subscriptions[0]?.onMessage(streamBatch('', 2));
 
     expect(session.store.getState().sequence).toBe(2);
+    expect(transport.requests.at(-1)).toEqual({
+      type: 'query.snapshot',
+      expected_store_id: '',
+    });
     await session.close();
   });
 
@@ -688,7 +1550,7 @@ describe('WebSession', () => {
   test('publishes an outage on an ended run rather than judging it', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
-    transport.snapshots.push(snapshotResponse({status: 'completed'}));
+    transport.snapshots.push(snapshotResponse({sequence: 1, status: 'completed'}));
 
     await session.start();
     expect(session.store.getState().status).toBe('completed');
@@ -718,10 +1580,16 @@ describe('WebSession', () => {
   test('says the transcript stopped short when the stream faults on an ended run', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
-    transport.snapshots.push(snapshotResponse({status: 'completed'}));
+    transport.snapshots.push(snapshotResponse({sequence: 0, status: 'completed'}));
     transport.silentDials = 1;
 
-    await session.start();
+    const initialDial = transport.nextSubscription();
+    const starting = session.start();
+    const initial = await initialDial;
+    initial.onMessage(
+      eventBatch([], {store_id: 'store-1', through_sequence: 0, history_after_sequence: 0}),
+    );
+    await starting;
     expect(session.store.getState().status).toBe('completed');
     // Terminal status, nothing folded: a snapshot carries the status and no
     // events, so `reduceSnapshot` never advances the cursor or the transcript.
@@ -750,10 +1618,10 @@ describe('WebSession', () => {
     });
 
     // Automatic redial policy for an ended run is unchanged. The user action
-    // is different: refresh the snapshot, then force a fresh bootstrap instead
-    // of asking the terminal-status predicate for permission to resume.
+    // is different: establish a fresh bootstrap, then load its fenced snapshot
+    // instead of asking the terminal-status predicate for permission to resume.
     expect(transport.subscriptions).toHaveLength(1);
-    transport.snapshots.push(snapshotResponse({status: 'completed'}));
+    transport.snapshots.push(snapshotResponse({sequence: 1, status: 'completed'}));
     const recovered = waitForSession(session, () => {
       return (
         session.getState().status === 'connected' &&
@@ -772,10 +1640,16 @@ describe('WebSession', () => {
   test('surfaces a stream protocol error and re-bootstraps an ended run on request', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
-    transport.snapshots.push(snapshotResponse({status: 'completed'}));
+    transport.snapshots.push(snapshotResponse({sequence: 0, status: 'completed'}));
     transport.silentDials = 1;
 
-    await session.start();
+    const initialDial = transport.nextSubscription();
+    const starting = session.start();
+    const initial = await initialDial;
+    initial.onMessage(
+      eventBatch([], {store_id: 'store-1', through_sequence: 0, history_after_sequence: 0}),
+    );
+    await starting;
     transport.subscriptions[0]?.onMessage({
       type: 'protocol_error',
       code: 'stream_failed',
@@ -802,7 +1676,7 @@ describe('WebSession', () => {
       controls: null,
     });
 
-    transport.snapshots.push(snapshotResponse({status: 'completed'}));
+    transport.snapshots.push(snapshotResponse({sequence: 1, status: 'completed'}));
     const recovered = waitForSession(session, () => {
       return (
         session.getState().status === 'connected' &&
@@ -821,10 +1695,9 @@ describe('WebSession', () => {
   test('offers a reattach for the same fault while the run can still stream', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
-    transport.silentDials = 1;
 
     await session.start();
-    expect(session.store.getState().sequence).toBe(0);
+    expect(session.store.getState().sequence).toBe(1);
 
     transport.subscriptions[0]?.onDisconnect(
       new BackendClientError('parse', 'Invalid event batch message'),
@@ -845,7 +1718,7 @@ describe('WebSession', () => {
     // re-bootstrap folded the batch the faulted dial never delivered.
     expect(transport.subscriptions.length).toBeGreaterThan(1);
     expect(session.getState()).toEqual(healthy());
-    expect(session.store.getState().sequence).toBe(1);
+    expect(session.store.getState().sequence).toBe(2);
 
     await session.close();
   });
@@ -857,8 +1730,9 @@ describe('WebSession', () => {
       reconnectDelaysMs: [0],
       scheduleTimeout: scheduler.scheduleTimeout,
     });
-    transport.snapshots.push(snapshotResponse({status: 'waiting_for_capacity' as RunStatus}));
-    transport.silentDials = 1;
+    transport.snapshots.push(
+      snapshotResponse({sequence: 1, status: 'waiting_for_capacity' as RunStatus}),
+    );
 
     await session.start();
     const resumed = transport.nextSubscription();
@@ -919,6 +1793,20 @@ describe('WebSession', () => {
 /** A typed transport failure, which is all the channel ever reports. */
 function disconnect(message: string): BackendClientError {
   return new BackendClientError('disconnected', message);
+}
+
+/** The typed server refusal for an expected-store snapshot fence. */
+function storeReplacedResponse(): ProtocolResponse {
+  return {
+    ok: false,
+    request_id: 'request-store-replaced',
+    error: 'Request failed',
+    diagnostic: {
+      code: 'snapshot_store_replaced',
+      summary: 'Request failed',
+      scope: 'request',
+    },
+  };
 }
 
 /** The state a channel reports after losing a connection it had. */
@@ -994,6 +1882,16 @@ function waitForSession(session: WebSession, predicate: () => boolean): Promise<
     };
     unsubscribeSession = session.subscribe(observe);
     unsubscribeStore = session.store.subscribe(observe);
+  });
+}
+
+/** Resolves after the session core next publishes a distinct state. */
+function nextSessionChange(session: WebSession): Promise<void> {
+  return new Promise(resolve => {
+    const unsubscribe = session.subscribe(() => {
+      unsubscribe();
+      resolve();
+    });
   });
 }
 

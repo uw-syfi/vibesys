@@ -18,6 +18,8 @@ import {
   type ScheduleTimeout,
   ServerError,
   type StreamConnectionState,
+  type StreamMessageContext,
+  type StreamRebootstrapDisposition,
   StreamReconciler,
   sameControlChannelState,
   validateRunEvent,
@@ -25,6 +27,11 @@ import {
 import {type WebSocketLike, WebSocketTransport} from '@vibesys/backend-client/websocket';
 
 export type {ControlTransport, WebSocketLike};
+
+/** Whether a fenced snapshot failed because its stream store was replaced. */
+export function isSnapshotStoreReplaced(error: unknown): error is Error {
+  return error instanceof ServerError && error.diagnostic?.code === 'snapshot_store_replaced';
+}
 
 /** Where a transport reports control-channel connectivity. */
 export interface TransportHooks {
@@ -61,9 +68,13 @@ export function openTransport(
 export interface RunStreamHandlers {
   /** The last sequence folded, where a resumed subscription continues. */
   cursor(): number;
-  /** Whether a dropped stream is worth redialing (false once the run has ended). */
+  /** Whether the caller's fold can still be incomplete, so a dropped stream is worth redialing. */
   shouldReconnect(): boolean;
-  onBatch(message: EventBatchMessage, reconciliation: BatchReconciliation): void;
+  onBatch(
+    message: EventBatchMessage,
+    reconciliation: BatchReconciliation,
+    context: StreamMessageContext,
+  ): void;
   /** An in-band protocol error; the transport suppresses the close that follows it. */
   onFault(error: Error): void;
   onConnectionState(state: StreamConnectionState): void;
@@ -71,13 +82,16 @@ export interface RunStreamHandlers {
 
 /** The run behind one control transport: its snapshot and its persistent event stream. */
 export interface RunConnection {
-  loadSnapshot(): Promise<RunSnapshot>;
+  /** Load an unfenced snapshot, or require the event store established by a stream batch. */
+  loadSnapshot(storeId?: string): Promise<RunSnapshot>;
   /** Subscribe once; settles when the first subscription does. */
   subscribe(handlers: RunStreamHandlers): Promise<void>;
   /** Resume the stream where it was. */
   retry(): void;
+  /** Retry only when the currently owned stream has already disconnected. */
+  retryIfDisconnected(): void;
   /** Restart the stream from a fresh bootstrap. */
-  rebootstrap(): void;
+  rebootstrap(): StreamRebootstrapDisposition;
   /** Cancel an armed control-channel redial and dial now (inert when healthy or dialing). */
   redialControls(): void;
   close(): Promise<void>;
@@ -123,10 +137,16 @@ function openRunConnection(
   // dormant; it follows the configured tail so a future history action cannot drift from it.
   const reconciler = new StreamReconciler({backfillChunk: tail ?? 1});
   return {
-    async loadSnapshot() {
-      const response = await transport.request({type: 'query.snapshot'});
+    async loadSnapshot(storeId) {
+      const response = await transport.request({
+        type: 'query.snapshot',
+        ...(storeId === undefined ? {} : {expected_store_id: storeId}),
+      });
       if (response.ok !== true || response.snapshot === null || response.snapshot === undefined) {
-        throw new Error(response.error ?? 'Server did not return a run snapshot');
+        throw new ServerError(
+          response.error ?? 'Server did not return a run snapshot',
+          response.diagnostic ?? null,
+        );
       }
       return response.snapshot;
     },
@@ -135,9 +155,9 @@ function openRunConnection(
         cursor: handlers.cursor,
         storeId: () => reconciler.storeId(),
         shouldReconnect: handlers.shouldReconnect,
-        onMessage: (message, {resumed}) => {
+        onMessage: (message, context) => {
           if (message.type === 'event_batch') {
-            handlers.onBatch(message, reconciler.reconcileBatch(message, {resumed}));
+            handlers.onBatch(message, reconciler.reconcileBatch(message, context), context);
           } else if (message.type === 'protocol_error') {
             handlers.onFault(new ServerError(message.message, message.diagnostic ?? null));
           }
@@ -146,6 +166,7 @@ function openRunConnection(
       });
     },
     retry: () => stream.retry(),
+    retryIfDisconnected: () => stream.retryIfDisconnected(),
     rebootstrap: () => stream.rebootstrap(),
     redialControls: () => transport.reconnect(),
     async close() {

@@ -85,6 +85,16 @@ class RunReadOnlyError(RuntimeError):
         super().__init__("This finished run is read-only")
 
 
+class SnapshotStoreReplacedError(RuntimeError):
+    """A fenced snapshot request whose event store is no longer current."""
+
+    diagnostic_code = "snapshot_store_replaced"
+
+    def __init__(self) -> None:
+        """Keep the public failure independent of opaque store identifiers."""
+        super().__init__("The run event store changed before the snapshot was captured")
+
+
 class _RunControlState(StrEnum):
     """Lifecycle of the one control session owned by a server runtime."""
 
@@ -317,7 +327,10 @@ class RunApi:
                 design_patch=self.design_patch(request.base, request.head, request.path),
             )
         if isinstance(request, SnapshotQuery):
-            return Response(request_id=request.request_id, snapshot=self.snapshot())
+            return Response(
+                request_id=request.request_id,
+                snapshot=self.snapshot(expected_store_id=request.expected_store_id),
+            )
         if isinstance(request, EventsQuery):
             timeout = request.timeout_ms / 1000 if request.timeout_ms else None
             events = (
@@ -380,9 +393,14 @@ class RunApi:
                 self._tui_defaults = self._tui_defaults_provider()
             return self._tui_defaults
 
-    def snapshot(self) -> RunSnapshot:
-        """Return a consistent snapshot of run and frontend-facing state."""
+    def snapshot(self, *, expected_store_id: str | None = None) -> RunSnapshot:
+        """Return state from the expected store, or fail if that sequence space is gone."""
         with self._condition:
+            if (
+                expected_store_id is not None
+                and self._journal.store_id_locked() != expected_store_id
+            ):
+                raise SnapshotStoreReplacedError
             kind, round_label = self._executions.current_locked()
             return RunSnapshot(
                 run_id=self._journal.run_id_locked(),
