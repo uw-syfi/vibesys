@@ -15,21 +15,21 @@ correctness (candidate vs a real Redis oracle) and scored by real YCSB.
 
 ```bash
 uv sync
-uv pip install -r examples/kv-store/requirements.txt
+uv pip install -r examples/database/kv-store/requirements.txt
 ```
 
 The benchmark auto-downloads YCSB 0.17.0 (Redis binding) on first run into
 `~/.cache/vibesys/kv-store/ycsb` (override with `KV_STORE_YCSB_HOME`); no manual setup.
 `agent.toml` is optional; the command below selects Claude Code explicitly.
 
-Verify the harness end-to-end against the seed: `examples/kv-store/.vibesys/tasks/default/run_test.sh`.
+Verify the harness end-to-end against the seed: `examples/database/kv-store/.vibesys/tasks/default/run_test.sh`.
 
 ## Run
 
 ```bash
 vibesys --outer-loop agent \
   --headless \
-  --input examples/kv-store \
+  --input examples/database/kv-store \
   --runs-dir /work/vibesys-runs --local \
   --exp-name kv-store-opt \
   --backend cpu \
@@ -48,12 +48,12 @@ that pass the accuracy checker advance.
 
 ## Files
 
-The example has one task, `default`, so `--input examples/kv-store` selects it
+The example has one task, `default`, so `--input examples/database/kv-store` selects it
 without `--task`. Everything the evaluator owns lives under `.vibesys/tasks/`,
 which is read-only during a run.
 
 ```
-examples/kv-store/
+examples/database/kv-store/
 ├── requirements.txt                          # Python deps for the checker (redis client)
 └── .vibesys/tasks/default/
     ├── OBJECTIVE.md                          # Target spec (read by the orchestrator)

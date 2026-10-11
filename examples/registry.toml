@@ -50,7 +50,7 @@ path = "examples/database/differential-dataflow"
 layout = "task"
 
 [[example]]
-path = "examples/kv-store"
+path = "examples/database/kv-store"
 layout = "task"
 
 [[example]]
