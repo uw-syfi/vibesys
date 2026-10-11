@@ -21,8 +21,8 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     project: ['src/**/*.ts', 'bench/**/*.ts'],
   },
   desktop: {
-    // The Electron main process, the welcome view, and the two sandboxed preloads (loaded by
-    // path from `main/app/app-security.ts`) are the package's exports, entries by default.
+    // The Electron main process and the two sandboxed preloads (loaded by path from
+    // `main/app/app-security.ts`) are the package's exports, entries by default.
     entry: ['src/**/*.test.ts'],
     project: ['src/**/*.ts', 'src/**/*.tsx', 'src/**/*.cts'],
   },
@@ -54,6 +54,11 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       'e2e/gateway-form-harness.ts',
     ],
     project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.ts'],
+  },
+  'apps/desktop-renderer': {
+    // The welcome page's entry (`welcome.html`, built by `vite.config.ts`).
+    entry: ['src/main.tsx', 'src/**/*.test.ts', 'src/**/*.test.tsx'],
+    project: ['src/**/*.ts', 'src/**/*.tsx'],
   },
 };
 

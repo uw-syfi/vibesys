@@ -3,8 +3,12 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "dependsOn": ["^build", "@vibesys/app-web#build:desktop"],
-      "outputs": ["dist/**", ".welcome-dist/**"]
+      "dependsOn": [
+        "^build",
+        "@vibesys/app-web#build:desktop",
+        "@vibesys/app-desktop-renderer#build"
+      ],
+      "outputs": ["dist/**"]
     },
     "test": {
       // The connection suite reads the shared corpus in ../tests/conformance and, with

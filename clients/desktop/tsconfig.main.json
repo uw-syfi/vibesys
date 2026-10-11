@@ -11,11 +11,10 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.cts"],
-  "exclude": ["src/**/*.test.ts", "src/**/testing/**", "src/renderer/welcome/**", "src/renderer/index.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/testing/**"],
   "references": [
     {"path": "../transport/tsconfig.lib.json"},
     {"path": "../contracts/tsconfig.lib.json"},
-    {"path": "../core-state/tsconfig.lib.json"},
     {"path": "../entities/tsconfig.lib.json"},
     {"path": "../ipc/tsconfig.lib.json"}
   ]
