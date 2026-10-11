@@ -30,6 +30,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from tests.composition._loop.spec import loop_spec
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.slurm_environment import with_fake_image_build
@@ -47,13 +48,8 @@ from vibesys.api import (
     RunStopped,
 )
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vibesys.orchestration.dynamic.strategy.api import (
-    DynamicStrategyState,
-    dynamic_operation_registry,
-)
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
-from vs_core.api import RunEnvelope
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_project.api import FakeStateStores, Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
@@ -417,6 +413,8 @@ class LoopInput:
     Pass it to :func:`run_request` as ``state_stores``. The Fake commits and fences exactly as
     the local store does (both pass ``test_state_store_contract``), without an fsync per read.
     """
+    plugin_id: str = "dynamic"
+    """The strategy under test, a key of `tests.composition._loop.spec.LOOPS`."""
 
     @classmethod
     def create(
@@ -507,7 +505,7 @@ class LoopInput:
             **flags,
         }
         argv = [
-            "--outer-loop", "dynamic",
+            "--outer-loop", loop_spec(self.plugin_id).outer_loop,
             "--input", str(self.root),
             "--config", str(self.agent_config),
             "--profiler", "none",
@@ -659,17 +657,22 @@ def _assert_invariants(
     assert not violations, [f"{v.invariant}: {v.detail}" for v in violations]
     ended = terminal_event(records)
     stopped = ended is not None and ended.get("status") == "interrupted"
-    assert_run_live(records.envelope, End.STOPPED if stopped else End.TERMINAL)
+    assert_run_live(
+        records.envelope,
+        End.STOPPED if stopped else End.TERMINAL,
+        plugin_id=request.orchestration.id,
+    )
 
 
-def assert_run_live(envelope: Mapping[str, Any] | None, end: End = End.TERMINAL) -> None:
+def assert_run_live(
+    envelope: Mapping[str, Any] | None, end: End = End.TERMINAL, *, plugin_id: str = "dynamic"
+) -> None:
     """Fail when the committed core record shows a run that did not make bounded progress.
 
     The record is the run's intent ledger and final state (`vs_core.testing.liveness`).
     """
     assert envelope is not None, "a run that ended committed no core record"
-    codec = dynamic_operation_registry()
-    core = codec.decode_envelope(RunEnvelope[DynamicStrategyState], json.dumps(envelope)).core
+    core = loop_spec(plugin_id).decode_core(json.dumps(envelope))
     assert_live(Journal.from_ledger(core), core, Budget(retries=core.run.limits.max_retries), end)
 
 
