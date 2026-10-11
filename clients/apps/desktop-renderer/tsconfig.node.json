@@ -1,6 +1,6 @@
 {
-  // The welcome bundle's Vite configuration, which runs under Node.
-  "extends": "../tsconfig.base.json",
+  // The bundle's Vite configuration, which runs under Node.
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"],
     "module": "ESNext",
@@ -8,5 +8,5 @@
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/node.tsbuildinfo"
   },
-  "include": ["vite.welcome.config.ts"]
+  "include": ["vite.config.ts"]
 }

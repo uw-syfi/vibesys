@@ -402,9 +402,10 @@ pnpm --dir clients --filter @vibesys/desktop start -- --host HOST [--instance ID
 pnpm --dir clients --filter @vibesys/desktop start -- --project ~/proj [-- RUN_ARGS...]
 ```
 
-`start` builds the app, including the UI bundle (`@vibesys/app-web`'s
-`build:desktop`, from `clients/apps/web/desktop.html`), which the window loads from
-the `app://vibesys` origin. The page has no network access: the main process
+`start` builds the app, including the two page bundles the window loads from the
+`app://vibesys` origin: the run view (`@vibesys/app-web`'s `build:desktop`, from
+`clients/apps/web/desktop.html`) and the welcome view (`@vibesys/app-desktop-renderer`'s
+`build`, from `clients/apps/desktop-renderer/welcome.html`). The page has no network access: the main process
 cancels every http(s) and ws(s) request and the page's Content Security Policy
 forbids connections. Its only way to the server is the preload bridge,
 `window.vibesysDesktop.connect()`, which takes no host or path: the main process
@@ -412,8 +413,9 @@ binds the run view to one run.
 
 ### Layout
 
-`clients/desktop/src` is split by process, then sliced by feature, so each slice can become its
-own package; `clients/.dependency-cruiser.mjs` enforces it:
+`clients/desktop/src` holds the main process and the preloads, sliced by feature so each slice
+can become its own package; the renderers are apps of their own. `clients/.dependency-cruiser.mjs`
+enforces the layout:
 
 - `main/` is the Electron main process, in layers that point down: `app/` (the composition root,
   the window, the lifecycle, page confinement, launch arguments, the welcome IPC boundary) ->
@@ -423,17 +425,25 @@ own package; `clients/.dependency-cruiser.mjs` enforces it:
   and `recent.json` with `SettingsStore` as their one writer). A slice is entered through its
   `index.ts`, features never import each other, and a stateful platform slice is a pure `state/`
   core and a `shell/`; only a shell starts processes or opens sockets.
-- `renderer/` is renderer code: the welcome view (`renderer/welcome/`) and the two sandboxed
-  preloads (`renderer/preload/`). It never imports `main/`.
-- The two processes share only workspace packages: `@vibesys/entities` (host naming, ids, a
-  host's listed runs, recent runs, the stop and resume decisions) and `@vibesys/ipc` (the run
-  page's bridge and the typed welcome IPC). The welcome view draws its dialogs, path fields,
-  status chip, and buttons with `@vibesys/ui`.
+- `renderer/preload/` holds the two sandboxed preloads, each a single file. It never imports
+  `main/`.
+- The welcome view is `clients/apps/desktop-renderer` (`@vibesys/app-desktop-renderer`),
+  composition only: `main.tsx` (the entry) over `wiring/` (each feature's store over the welcome
+  bridge, and the main process's events fanned out to them) and `ui/` (the view, composed from the
+  features' views, with the flows that cross features). The features are
+  `@vibesys/feature-hosts` (the host panel, checkout form, sign-in, "Connect to host", and path
+  completion), `@vibesys/feature-start-run` (the "Start a run" sheet),
+  `@vibesys/feature-run-control` (the title strip, stop and force stop, resume, the banner), and
+  `@vibesys/feature-recent-runs` (Recent). Each feature's effects call only the slice of the
+  welcome bridge its `./state` declares (`HostsBridge`, `StartRunBridge`, `RunControlBridge`).
+- The processes share only workspace packages: `@vibesys/entities` (host naming, ids, a host's
+  listed runs, recent runs, the stop and resume decisions) and `@vibesys/ipc` (the run page's
+  bridge and the typed welcome IPC). The welcome view draws its dialogs, path fields, status chip,
+  and buttons with `@vibesys/ui`.
 
-The package declares one entry per process: `.` (`node`, `src/main/index.ts`, the Electron main),
-`./renderer` (`dom`, `src/renderer/index.ts`, the welcome bundle), and `./preload/run` and
-`./preload/welcome` (`node`, the two preload files), so the package-graph checker holds each side
-to its runtime and its third-party imports.
+The desktop package declares one entry per process: `.` (`node`, `src/main/index.ts`, the
+Electron main) and `./preload/run` and `./preload/welcome` (`node`, the two preload files), so the
+package-graph checker holds each side to its runtime and its third-party imports.
 
 ### Connections
 
@@ -475,8 +485,8 @@ conformance scenarios, and the real helper of this checkout (`VIBESYS_REAL_CONTR
 
 ### Welcome view and run view
 
-The window opens on the welcome view (`clients/desktop/welcome.html`, a React bundle built by
-`vite.welcome.config.ts` apart from the run view's, with its own narrow preload): recent runs with
+The window opens on the welcome view (`clients/apps/desktop-renderer/welcome.html`, a React
+bundle built apart from the run view's, with its own narrow preload): recent runs with
 their status, one host's panel (its checkout, its live runs, "Start a run"), and "Connect to host",
 a searchable list of the concrete `Host` aliases in `~/.ssh/config` that also accepts a typed
 `user@host`. The main process answers its requests only for that view's web contents and
@@ -501,9 +511,10 @@ connections with the browser's `WebSocketTransport` and `WebSession`, which keep
 reconciliation logic but no retry timer of their own: the shell wakes the page when the host
 connection recovers.
 
-The welcome view's stores (`renderer/welcome/state/`) are pure reducers on core-state's store
-kernel; `ui/` is presentational, `effects/` the shell, `main.tsx` the composition root. They are
-tested model-based with `checkModel` from `@vibesys/core-state/testing`.
+The welcome view's stores (each feature's `state/`) are pure reducers on core-state's store
+kernel; each feature's `renderer/ui/` is presentational and `renderer/effects/` its shell, and the
+app's `main.tsx` is the composition root. They are tested model-based with `checkModel` from
+`@vibesys/core-state/testing`, with random window states from `@vibesys/ipc/testing`.
 
 `AppLifecycle` (`main/app/app-lifecycle.ts`) is the one owner of process-wide state: a
 single-instance lock (a second launch focuses the first window and opens what it was asked to)

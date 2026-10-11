@@ -1,8 +1,8 @@
 /**
  * How the window loads the bundled web UI, as pure functions of URLs and paths.
  *
- * The UI ships inside the app (`dist/ui`, built by `@vibesys/app-web`'s `build:desktop`) and is served
- * from the privileged `app://vibesys` origin. That origin is the only one the window may navigate
+ * The UI ships inside the app (`dist/ui`, the page bundles `scripts/copy-ui.mjs` copies in) and is
+ * served from the privileged `app://vibesys` origin. That origin is the only one the window may navigate
  * to; it has no network access at all (`CONTENT_SECURITY_POLICY` here, and the main process cancels
  * every http(s) and ws(s) request), because the page reaches its server only through the preload
  * bridge.

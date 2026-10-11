@@ -46,9 +46,8 @@ clients/
   ipc/              @vibesys/ipc              typed main <-> renderer messages   -> contracts, entities
   connection/       @vibesys/connection       host connection manager            -> contracts, transport-node
   settings/         @vibesys/settings         settings store, atomic files       -> entities
-  features/<x>/     @vibesys/feature-<x>      run-view, gateway-connect, replay, connect-host,
-                                              start-run, stop-run, resume-run, recent-runs,
-                                              path-autocomplete
+  features/<x>/     @vibesys/feature-<x>      run-view, gateway-connect, replay, hosts,
+                                              start-run, run-control, recent-runs
   apps/desktop-main      @vibesys/app-desktop-main      composition only (Electron main)
   apps/desktop-renderer  @vibesys/app-desktop-renderer  composition only (Electron renderer)
   apps/web               @vibesys/app-web               composition only (browser, and the
@@ -180,10 +179,13 @@ used, and used only where its runtime allows.
 
 **Legacy packages.** `desktop` and `tui` predate the per-entry layout,
 so `LEGACY_EXEMPTIONS` in the checker lets them skip the per-entry project rules. Every other rule
-applies to them. Desktop declares an entry per process: `.` is the `node` main process,
-`./renderer` the `dom` welcome bundle, and `./preload/run` and `./preload/welcome` the `node`
-sandboxed preloads (each a single file), so runtime reachability and the third-party allowlist hold
-on each side. The table only shrinks as the migration items move them.
+applies to them. Desktop now holds only the Electron main process and its preloads, and declares
+an entry per process: `.` is the `node` main process, and `./preload/run` and `./preload/welcome`
+the `node` sandboxed preloads (each a single file), so runtime reachability and the third-party
+allowlist hold on each side. It keeps its exemption until `apps/desktop-main` replaces it: the
+main process and both preloads compile in one project (`tsconfig.main.json`, emitting the
+`dist/` that Electron loads by path), and a preload subpath names no per-entry project file. The
+table only shrinks as the migration items move them.
 
 ## Build model
 
@@ -263,20 +265,21 @@ names a missing or extra one.
 | Package | Layer | Status | Item that creates or moves it |
 | --- | --- | --- | --- |
 | `@vibesys/contracts` | foundation | exists (pilot: generated run-protocol and host-helper types, the one schema walker, error taxonomy, `./host-helper` validation, `./testing` fixtures) | foundation item (#1869) |
-| `@vibesys/ui` | foundation | exists: `Button`, `Combobox`, `Dialog`, `StatusChip` (`.`, `dom`) and the design tokens (`./tokens.css`); desktop's welcome view and web render them | domain packages (phase 5 of #1878) |
+| `@vibesys/ui` | foundation | exists: `Button`, `Combobox`, `Dialog`, `StatusChip` (`.`, `dom`) and the design tokens (`./tokens.css`); the desktop and web features render them | domain packages (phase 5 of #1878) |
 | `@vibesys/core-state` | core | exists, on the per-entry layout, depends on `contracts` only | foundation item (#1869) |
 | `@vibesys/transport` | core | exists: `.` and `./testing` (the shared `FakeClock`) are `neutral`, `./websocket` is `dom` | backend-client split (#1910) |
 | `@vibesys/transport-node` | domain | exists: the Unix-socket `ServerClient`; desktop's ssh and local-host links join it with the connection manager | backend-client split (#1910) |
 | `@vibesys/entities` | domain | exists: hosts and their connection status, run, task, and instance ids, a host's listed runs with the run phase text (startup stage and progress), recent runs, the stop flow, the exact-resume policy, task arguments; depends on `contracts`. The run fold over transport's reconciliation and the page's session status live in `@vibesys/feature-run-view/state`, and the gateway URL policy in `@vibesys/feature-gateway-connect`, the only features that use them | domain packages (phase 5 of #1878) |
-| `@vibesys/ipc` | service | exists: the run page's bridge (port messages, their validation, the preload contract web's desktop shell reads) and the welcome view's channels, events, and payloads; depends on `entities` | domain packages (phase 5 of #1878) |
+| `@vibesys/ipc` | service | exists: the run page's bridge (port messages, their validation, the preload contract web's desktop shell reads) and the welcome view's channels, events, and payloads, with `./testing` (random window states for store models); depends on `entities` | domain packages (phase 5 of #1878) |
 | `@vibesys/connection` | service | planned (desktop's connection manager) | desktop main/renderer split |
 | `@vibesys/settings` | service | planned (desktop's settings store) | desktop main/renderer split |
 | `@vibesys/feature-run-view`, `@vibesys/feature-gateway-connect`, `@vibesys/feature-replay` | feature | exist: the run page's transcript, rounds, status, banners, and live session (`./state`, `./renderer`); the browser's gateway connect form (`./renderer`); the recorded-run load (`./state`, `./renderer`) | feature packages (phase 6 of #1878) |
-| `@vibesys/feature-*` (desktop) | feature | planned: connect-host, start-run, stop-run, resume-run, recent-runs, path-autocomplete | desktop main/renderer split |
-| `apps/web` | app | exists: composition only, on the per-entry layout (one `dom` entry, no exports): the browser entry and boot decision, the desktop shell's run page (`desktop-main.tsx` and the bridge transport, until `apps/desktop-renderer` exists), the one backend adapter, storage and lifecycle | feature packages (phase 6 of #1878) |
-| `apps/desktop-main`, `apps/desktop-renderer` | app | planned | app composition, last |
+| `@vibesys/feature-hosts`, `@vibesys/feature-start-run`, `@vibesys/feature-run-control`, `@vibesys/feature-recent-runs` | feature | exist, renderer side (`./state`, `./renderer`): the host panel, checkout form, sign-in, "Connect to host", and path completion; the "Start a run" sheet; the title strip, stop, force stop, resume, and the banner; Recent. Each feature's effects call only the slice of `@vibesys/ipc`'s welcome bridge its `./state` declares. Their main-process controllers (`./main`) are still in `@vibesys/desktop` | desktop renderer (phase 7 of #1878); `./main` with the main-process split (phase 8) |
+| `apps/web` | app | exists: composition only, on the per-entry layout (one `dom` entry, no exports): the browser entry and boot decision, the desktop shell's run page (`desktop-main.tsx` and the bridge transport), the one backend adapter, storage and lifecycle. The run page stays here while its run connection (`platform/backend.ts`'s `connectRun`) has no home below the apps: moving it to `apps/desktop-renderer` would copy that adapter and the run page's stylesheet into a second app | feature packages (phase 6 of #1878) |
+| `apps/desktop-renderer` | app | exists: composition only (one `dom` entry, no exports): the welcome view's entry, its stores wired to the welcome preload's bridge, and the view composed from the desktop features | desktop renderer (phase 7 of #1878) |
+| `apps/desktop-main` | app | planned | desktop main process (phase 8 of #1878) |
 | `@vibesys/backend-client` | core | deleted: split into `transport` and `transport-node` | backend-client split (#1910) |
-| `@vibesys/desktop` | app | exists; emptied into features and apps, then deleted | app composition |
+| `@vibesys/desktop` | app | exists: the Electron main process and the preloads; the welcome view moved to `apps/desktop-renderer` and the desktop features. Emptied into features and `apps/desktop-main`, then deleted | desktop main process (phase 8 of #1878) |
 | `@vibesys/web` | app | moved: features into `features/*`, the composition into `apps/web` | feature packages (phase 6 of #1878) |
 | `@vibesys/tui` | app | deprecated; kept building, not migrated | none |
 

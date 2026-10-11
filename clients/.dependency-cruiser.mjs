@@ -130,14 +130,18 @@ function webAppRules() {
 //   (composition) -> `features/<name>/` -> `entities/` (pure projections) -> `platform/<name>/`
 //   (system services: the connection manager, the settings) -> `shared/`. A stateful platform
 //   slice is a pure `state/` core and a `shell/` that owns its processes, sockets, and timers.
-// - `src/renderer/` is the renderer code (the welcome view and the sandboxed preloads); it reaches
-//   the main process only through its preload's bridge.
+// - `src/renderer/preload/` holds the sandboxed preloads, the renderers' only way to the main
+//   process. The renderers themselves are `apps/desktop-renderer` (the welcome view) and
+//   `apps/web` (the run page).
 // - The two processes share only workspace packages: the models in `@vibesys/entities` and the
 //   typed messages in `@vibesys/ipc`, whose `neutral` runtime the package-graph checker holds.
 const DESKTOP = '^desktop/src/';
 const DESKTOP_MAIN = `${DESKTOP}main/`;
 const DESKTOP_MAIN_LAYERS = ['app', 'features', 'entities', 'platform', 'shared'];
-const DESKTOP_WELCOME = `${DESKTOP}renderer/welcome/`;
+// The desktop renderer app (`apps/desktop-renderer/src`) is composition only: `main.tsx` (the
+// entry) over `wiring/` (the feature stores over the welcome bridge) and `ui/` (the view composed
+// from the features' views), which never reach each other.
+const DESKTOP_RENDERER = '^apps/desktop-renderer/src/';
 const DESKTOP_SLICE = '(?:features|platform)/[^/]+';
 const DESKTOP_SLICE_SUPPORT = [TEST_FILE, `${DESKTOP}.*/testing/`];
 const UI_RUNTIME = '(?:^|/)node_modules/(?:react|react-dom|electron)/';
@@ -164,29 +168,20 @@ function desktopRules() {
       to: {path: `${DESKTOP}renderer/`},
     },
     {
-      // A functional core (a platform slice's `state/`, a welcome store) folds events into state
-      // and requests: no Node or Electron, no shell, no view.
+      // A platform slice's functional core folds events into state and requests: no Node or
+      // Electron, no shell, no view.
       name: 'desktop-state-is-pure',
       severity: 'error',
-      from: {path: [`${DESKTOP_MAIN}.+/state/`, `${DESKTOP_WELCOME}state/`], pathNot: TEST_FILE},
+      from: {path: `${DESKTOP_MAIN}.+/state/`, pathNot: TEST_FILE},
       to: {
-        path: [
-          `${DESKTOP_MAIN}.+/shell/`,
-          `${DESKTOP_WELCOME}(?:ui|effects)/`,
-          UI_RUNTIME,
-          ...TRANSPORT,
-          ...CONTRACTS,
-        ],
+        path: [`${DESKTOP_MAIN}.+/shell/`, UI_RUNTIME, ...TRANSPORT, ...CONTRACTS],
         dependencyTypesNot: ['type-only'],
       },
     },
     {
       name: 'desktop-state-has-no-node-runtime',
       severity: 'error',
-      from: {
-        path: [`${DESKTOP_MAIN}.+/state/`, `${DESKTOP_WELCOME}(?:state|ui)/`],
-        pathNot: TEST_FILE,
-      },
+      from: {path: `${DESKTOP_MAIN}.+/state/`, pathNot: TEST_FILE},
       to: {dependencyTypes: ['core']},
     },
     {
@@ -220,42 +215,37 @@ function desktopRules() {
   ];
 }
 
-/** The renderers' rules: the welcome view's layers, and what no renderer may reach. */
+/** The renderers' rules: the desktop renderer app's layers, and what no renderer may reach. */
 function rendererRules() {
   return [
     {
-      name: 'desktop-welcome-ui-does-not-depend-on-shell',
+      // The view renders the stores' state and reports events; the stores and the bridge are the
+      // wiring's.
+      name: 'desktop-renderer-ui-does-not-import-wiring',
       severity: 'error',
-      from: {path: `${DESKTOP_WELCOME}ui/`, pathNot: TEST_FILE},
-      to: {
-        path: [
-          `${DESKTOP_WELCOME}effects/`,
-          `${DESKTOP_WELCOME}main\\.tsx$`,
-          ...TRANSPORT,
-          ...CONTRACTS,
-          '(?:^|/)node_modules/electron/',
-        ],
-      },
+      from: {path: `${DESKTOP_RENDERER}ui/`, pathNot: TEST_FILE},
+      to: {path: [`${DESKTOP_RENDERER}wiring/`, `${DESKTOP_RENDERER}main\\.tsx$`]},
     },
     {
-      name: 'desktop-welcome-effects-do-not-import-ui',
+      name: 'desktop-renderer-wiring-does-not-import-ui',
       severity: 'error',
-      from: {path: `${DESKTOP_WELCOME}effects/`, pathNot: TEST_FILE},
-      to: {path: [`${DESKTOP_WELCOME}ui/`, `${DESKTOP_WELCOME}main\\.tsx$`]},
+      from: {path: `${DESKTOP_RENDERER}wiring/`, pathNot: TEST_FILE},
+      to: {path: [`${DESKTOP_RENDERER}ui/`, `${DESKTOP_RENDERER}main\\.tsx$`]},
     },
     {
-      // Renderer code (the welcome view, the web app, the features) reaches the main process only
-      // through its preload's bridge.
+      // Renderer code (the renderer apps and the features) reaches the main process only through
+      // its preload's bridge.
       name: 'renderers-do-not-import-electron',
       severity: 'error',
-      from: {path: [DESKTOP_WELCOME, WEB, FEATURE], pathNot: TEST_FILE},
+      from: {path: [DESKTOP_RENDERER, WEB, FEATURE], pathNot: TEST_FILE},
       to: {path: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
     },
     {
-      // The web app and the features reach the server only through @vibesys/transport.
+      // The renderer apps and the features reach the server only through @vibesys/transport or
+      // the preload's bridge.
       name: 'web-opens-no-sockets-or-processes',
       severity: 'error',
-      from: {path: [WEB, FEATURE], pathNot: TEST_FILE},
+      from: {path: [DESKTOP_RENDERER, WEB, FEATURE], pathNot: TEST_FILE},
       to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
     },
   ];

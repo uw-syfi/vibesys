@@ -1,17 +1,17 @@
 /**
- * The welcome view's composition root: it builds the screen stores over the welcome preload's
- * bridge (`effects/`), subscribes React to them, and renders the presentational view (`ui/`) with
- * each store's state and dispatcher.
+ * The desktop renderer's entry, the welcome view's composition root: it builds the feature stores
+ * over the welcome preload's bridge (`wiring/`), subscribes React to them, and renders the view
+ * (`ui/`) with each store's state and dispatcher.
  */
 
 import type {Store} from '@vibesys/core-state';
 import type {WelcomeBridge} from '@vibesys/ipc';
 import {type JSX, StrictMode, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
-import {loadWelcomeStores, type WelcomeStores} from './effects/stores.js';
 import {WelcomeView} from './ui/welcome-view.js';
+import {loadWelcomeStores, type WelcomeStores} from './wiring/stores.js';
 import '@vibesys/ui/tokens.css';
-import './ui/welcome.css';
+import './welcome.css';
 
 declare global {
   interface Window {

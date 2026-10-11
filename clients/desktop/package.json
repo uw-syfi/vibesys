@@ -9,7 +9,6 @@
     "layer": "app",
     "entries": {
       ".": "node",
-      "./renderer": "dom",
       "./preload/run": "node",
       "./preload/welcome": "node"
     }
@@ -19,9 +18,6 @@
     ".": {
       "@vibesys/source": "./src/main/index.ts",
       "default": "./dist/main/index.js"
-    },
-    "./renderer": {
-      "@vibesys/source": "./src/renderer/index.ts"
     },
     "./preload/run": {
       "@vibesys/source": "./src/renderer/preload/run.cts",
@@ -33,27 +29,21 @@
     }
   },
   "scripts": {
-    "build": "tsc -b tsconfig.main.json && vite build --config vite.welcome.config.ts && node scripts/copy-ui.mjs",
-    "check": "tsc -b && tsc -p tsconfig.welcome.json",
+    "build": "tsc -b tsconfig.main.json && node scripts/copy-ui.mjs",
+    "check": "tsc -b",
     "test": "node ../scripts/run_bun_tests.mjs ./src",
     "start": "pnpm build && electron ."
   },
   "dependencies": {
     "@vibesys/contracts": "workspace:*",
-    "@vibesys/core-state": "workspace:*",
     "@vibesys/entities": "workspace:*",
     "@vibesys/ipc": "workspace:*",
-    "@vibesys/transport": "workspace:*",
-    "@vibesys/ui": "workspace:*",
-    "react": "19.1.1",
-    "react-dom": "19.1.1"
+    "@vibesys/transport": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
     "@types/node": "^24.0.0",
-    "@types/react": "19.1.13",
-    "@types/react-dom": "19.1.9",
-    "@vitejs/plugin-react": "5.0.4",
+    "@vibesys/core-state": "workspace:*",
     "electron": "44.6.0",
     "typescript": "^5.8.3"
   }

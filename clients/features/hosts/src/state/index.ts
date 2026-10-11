@@ -9,7 +9,7 @@ import type {WelcomeBridge} from '@vibesys/ipc';
 /** The welcome bridge's requests the hosts feature makes. */
 export type HostsBridge = Pick<
   WelcomeBridge,
-  'host' | 'setCheckout' | 'signIn' | 'hosts' | 'complete'
+  'host' | 'setCheckout' | 'cancelCheckout' | 'signIn' | 'hosts' | 'complete'
 >;
 
 export {

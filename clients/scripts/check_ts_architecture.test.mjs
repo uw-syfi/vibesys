@@ -94,10 +94,10 @@ const VALID_FILES = {
   'core-state/src/testing/model.ts': "import '../index.js';\n",
   // A feature's Node entry (`src/main/`) is not held to its browser parts' rules.
   'features/replay/src/main/index.ts': "import 'net';\nimport '@vibesys/transport';\n",
-  // The desktop's test support may build on core-state's.
-  'desktop/src/testing/fake-chrome.ts': "import type {} from '@vibesys/core-state/testing';\n",
-  'desktop/src/renderer/welcome/state/store.test.ts':
-    "import '@vibesys/core-state/testing';\nimport '../../../testing/fake-chrome.js';\nimport 'node:fs';\n",
+  // A package's test support may build on core-state's.
+  'ipc/src/testing/chrome.ts': "import type {} from '@vibesys/core-state/testing';\n",
+  'apps/desktop-renderer/src/wiring/stores.test.ts':
+    "import '@vibesys/core-state/testing';\nimport '../ui/welcome-view.js';\nimport 'node:fs';\n",
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
   // The web app's composition enters a feature through its entries, and only the backend adapter
@@ -145,11 +145,13 @@ const VALID_FILES = {
     "import 'node:child_process';\nimport '../state/machine.js';\n",
   'desktop/src/main/platform/link/state/machine.ts': "import type {} from '@vibesys/transport';\n",
   'desktop/src/main/platform/link/testing/fake.ts': "import '../state/machine.js';\n",
-  'desktop/src/renderer/welcome/main.tsx':
-    "import './effects/stores.js';\nimport './ui/view.js';\n",
-  'desktop/src/renderer/welcome/effects/stores.ts': "import '../state/store.js';\n",
-  'desktop/src/renderer/welcome/state/store.ts': '',
-  'desktop/src/renderer/welcome/ui/view.ts': "import '../state/store.js';\n",
+  'desktop/src/renderer/preload/bridge.ts': '',
+  // The desktop renderer app: its entry composes the wiring and the view, each entering the
+  // features through their entries.
+  'apps/desktop-renderer/src/main.tsx':
+    "import './wiring/stores.js';\nimport './ui/welcome-view.js';\n",
+  'apps/desktop-renderer/src/wiring/stores.ts': "import '@vibesys/feature-replay/renderer';\n",
+  'apps/desktop-renderer/src/ui/welcome-view.ts': "import '@vibesys/feature-replay/renderer';\n",
 };
 
 const RULE_CASES = [
@@ -174,21 +176,16 @@ const RULE_CASES = [
   {
     rule: 'desktop-renderer-does-not-import-main',
     files: {
-      'desktop/src/renderer/welcome/state/store.ts':
-        "import '../../../main/entities/listing.js';\n",
+      'desktop/src/renderer/preload/bridge.ts': "import '../../main/entities/listing.js';\n",
     },
   },
   {
     rule: 'desktop-main-does-not-import-renderer',
-    files: {'desktop/src/main/app/main.ts': "import '../../renderer/welcome/state/store.js';\n"},
+    files: {'desktop/src/main/app/main.ts': "import '../../renderer/preload/bridge.js';\n"},
   },
   {
     rule: 'desktop-state-is-pure',
     files: {'desktop/src/main/platform/link/state/machine.ts': "import '../shell/link.js';\n"},
-  },
-  {
-    rule: 'desktop-state-is-pure',
-    files: {'desktop/src/renderer/welcome/state/store.ts': "import '../effects/stores.js';\n"},
   },
   {
     rule: 'desktop-state-has-no-node-runtime',
@@ -215,17 +212,21 @@ const RULE_CASES = [
     files: {'desktop/src/main/app/main.ts': "import '../features/runs/runs.js';\n"},
   },
   {
-    rule: 'desktop-welcome-ui-does-not-depend-on-shell',
-    files: {'desktop/src/renderer/welcome/ui/view.ts': "import '../effects/stores.js';\n"},
+    rule: 'desktop-renderer-ui-does-not-import-wiring',
+    files: {'apps/desktop-renderer/src/ui/welcome-view.ts': "import '../wiring/stores.js';\n"},
   },
   {
-    rule: 'desktop-welcome-effects-do-not-import-ui',
-    files: {'desktop/src/renderer/welcome/effects/stores.ts': "import '../ui/view.js';\n"},
+    rule: 'desktop-renderer-ui-does-not-import-wiring',
+    files: {'apps/desktop-renderer/src/ui/welcome-view.ts': "import '../main.js';\n"},
+  },
+  {
+    rule: 'desktop-renderer-wiring-does-not-import-ui',
+    files: {'apps/desktop-renderer/src/wiring/stores.ts': "import '../ui/welcome-view.js';\n"},
   },
   {
     rule: 'renderers-do-not-import-electron',
     files: {
-      'desktop/src/renderer/welcome/state/store.ts': "import 'electron';\n",
+      'apps/desktop-renderer/src/wiring/stores.ts': "import 'electron';\n",
       'node_modules/electron/package.json': '{"name":"electron","main":"index.js"}',
       'node_modules/electron/index.js': 'export {};\n',
     },
@@ -244,6 +245,10 @@ const RULE_CASES = [
   },
   {
     rule: 'web-opens-no-sockets-or-processes',
+    files: {'apps/desktop-renderer/src/wiring/stores.ts': "import 'node:child_process';\n"},
+  },
+  {
+    rule: 'web-opens-no-sockets-or-processes',
     files: {'features/replay/src/renderer/effects/replay.ts': "import 'net';\n"},
   },
   {
@@ -253,7 +258,7 @@ const RULE_CASES = [
   {
     rule: 'production-code-does-not-import-core-state-test-support',
     files: {
-      'desktop/src/renderer/welcome/state/store.ts': "import '@vibesys/core-state/testing';\n",
+      'apps/desktop-renderer/src/wiring/stores.ts': "import '@vibesys/core-state/testing';\n",
     },
   },
   {
