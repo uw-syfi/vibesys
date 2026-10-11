@@ -1500,6 +1500,19 @@ describe('events delivered in an RPC response', () => {
     expect(live.sequence).toBe(5);
   });
 
+  it('keeps server creation order when independent responses arrive in reverse', () => {
+    const older = threadCreatedEvent(4, 'thread-older', 'anthropic');
+    const newer = threadCreatedEvent(5, 'thread-newer', 'codex');
+    const canonical = reduceEventBatch(initialCoreState(), [older, newer]);
+
+    let raced = reduceResponseEvents(initialCoreState(), [newer]);
+    raced = reduceResponseEvents(raced, [older]);
+    raced = reduceEvent(raced, older);
+    raced = reduceEvent(raced, newer);
+
+    expect(raced.chatThreads).toEqual(canonical.chatThreads);
+  });
+
   it('reproduces a whole-stream fold however the two routes race', () => {
     const events = racedRunEvents();
     const streamOnly = reduceEventBatch(initialCoreState(), events);
