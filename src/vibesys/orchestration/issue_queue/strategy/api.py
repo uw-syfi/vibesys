@@ -31,6 +31,7 @@ from vibesys.orchestration.issue_queue.strategy._schemas import (
 )
 from vibesys.orchestration.issue_queue.strategy._state import (
     STATE_SCHEMA,
+    BoardState,
     Cursor,
     IssueQueueStrategyState,
     Job,
@@ -51,6 +52,7 @@ __all__ = [
     "PERF_REPLY",
     "STATE_SCHEMA",
     "STRATEGY_ID",
+    "BoardState",
     "Cursor",
     "ImplementPrompt",
     "IssueBrief",

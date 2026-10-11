@@ -65,6 +65,7 @@ from vs_runtime.api.core import (
     ReceiptStore,
     RegisteredOperationRequests,
     build_operation_catalog,
+    handle_for,
     operation_roles,
 )
 from vs_runtime.api.testing import ScriptedExecutors
@@ -83,6 +84,13 @@ class Texts:
 
     def progress_entry(self, request: LogProgress) -> str:
         return f"{request.step} {request.iteration}"
+
+
+_KINDS = {
+    "accuracy": EvidenceKind.CORRECTNESS,
+    "benchmark": EvidenceKind.BENCHMARK,
+    "profile": EvidenceKind.PROFILING,
+}
 
 
 class FakeRenderer:
@@ -162,8 +170,11 @@ class Executors:
             case ObserveOwnedJob():
                 return self._observe(request, core)
             case SubmitMeasurement():
+                # A job is named by its request, as the agent evaluation bridge names the
+                # handle it gives the agent.
+                assert request.request_id is not None
                 self.jobs += 1
-                return Running(resource_id=ResourceId(root=f"job:{self.jobs}"))
+                return Running(resource_id=ResourceId(root=handle_for(request.request_id)))
             case _:
                 return self._answer(request)
 
@@ -208,7 +219,11 @@ class Executors:
             refs.append(
                 EvidenceRef(
                     evidence_id=identifier,
-                    kind=EvidenceKind.CORRECTNESS,
+                    kind=(
+                        EvidenceKind.LOCAL_VALIDATION
+                        if plan.purpose == "local-validation"
+                        else _KINDS[stage.stage_id]
+                    ),
                     purpose=plan.purpose,
                     scope=job.scope,
                     source_request=job.submission_id,
