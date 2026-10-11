@@ -1,3 +1,2 @@
-// The replay demo's fixture load. The only public surface of this slice.
+// The replay demo's fixture load, through the loader the composition injects.
 export {createReplayStore} from './effects/replay.js';
-export {type ReplayAction, type ReplayState, replayFailure} from './state/replay.js';
