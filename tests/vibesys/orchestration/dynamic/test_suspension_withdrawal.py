@@ -43,7 +43,15 @@ def test_withdrawal_while_suspended_preserves_the_charged_attempt(
         options = dynamic_options(max_in_flight=1)
         gate = InputGate(opened.runtime, options, state, lock=lock, commit=commit)
         rounds = Rounds(options, state, gate, lock, commit, clock=lambda: 0.0)
-        workers = Workstreams(opened.runtime, options, state, rounds, lock, commit)
+        workers = Workstreams(
+            opened.runtime,
+            options,
+            state,
+            rounds,
+            lock,
+            commit,
+            emit_judge_result=opened.runtime.observations.judge_result,
+        )
         shell = EvaluationSuspension(opened.runtime, state, lock, commit)
         opened.evaluations.executor.wait_started.clear()
         task = asyncio.create_task(workers.execute(state.workstreams[0].plan))

@@ -240,21 +240,26 @@ class RunApi:
         if self._controller.is_read_only():
             raise RunReadOnlyError
         control = self._session_provider()
+        # Normalize the Request's compatibility default ("") to None so the
+        # emitted control transition's optional client_id matches a caller
+        # that never attributed itself, rather than carrying a meaningless
+        # empty string onto the wire event.
+        client_id = request.client_id or None
         if isinstance(request, PauseCommand):
             if control is not None:
-                control.pause()
+                control.pause(client_id=client_id)
             ack = CommandAck(action="pause", status="pending")
         elif isinstance(request, ResumeCommand):
             if control is not None:
-                control.resume()
+                control.resume(client_id=client_id)
             ack = CommandAck(action="resume", status="consumed")
         elif isinstance(request, StopCommand):
             if control is not None:
-                control.stop()
+                control.stop(client_id=client_id)
             ack = CommandAck(action="stop", status="pending")
         else:
             if control is not None:
-                control.steer(request.text)
+                control.steer(request.text, client_id=client_id)
             ack = CommandAck(action="steer", status="pending")
         return Response(request_id=request.request_id, ack=ack)
 

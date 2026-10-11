@@ -57,6 +57,7 @@ from vs_agent.session_environment import (
     validate_env_names,
 )
 from vs_agent.session_errors import SessionResumeError
+from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_sandbox.api import build_host_sandbox
 
 if TYPE_CHECKING:
@@ -64,6 +65,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vs_agent.sink import AgentEventSink
     from vs_sandbox.api import DockerSandbox, WorkspaceSandbox
 
 AGENTSHIM_CAPABILITIES = AgentCapabilities(
@@ -415,6 +417,7 @@ class AgentShimSession:
         sandbox: _ConfinableSandbox | None,
         log: Callable[[str], None],
         transient_retry_delays: Sequence[float] = TRANSIENT_RETRY_DELAYS_S,
+        events: AgentEventSink = NULL_AGENT_EVENT_SINK,
     ) -> None:
         """Bind one library session to the VibeSys policy that drives it."""
         self._session = session
@@ -424,6 +427,7 @@ class AgentShimSession:
         self._event_handler = event_handler
         self._sandbox = sandbox
         self._log = log
+        self._events = events
         self._mcp_servers = tuple(
             _as_mcp_server(server, sandbox, pin_interpreter=not spec.policy.containerized)
             for server in spec.mcp_servers
@@ -637,6 +641,7 @@ class AgentShimSession:
                     f"(attempt {attempt}): {error.detail or error}; "
                     f"retrying this turn in {delay:g}s."
                 )
+                self._events.retry_wait(attempt, delay, error.kind.value)
                 if self._cancelled.wait(delay):
                     raise
         return self._turn(request)
@@ -814,6 +819,7 @@ class AgentShimDriver:
         agent_homes: Path | None = None,
         env_passthrough: Sequence[str] = (),
         launcher_env: Callable[[], Mapping[str, str]] = agentshim.interactive_env,
+        events: AgentEventSink = NULL_AGENT_EVENT_SINK,
     ) -> None:
         """Configure one provider; ``executor_factory`` replaces the base executor.
 
@@ -841,7 +847,9 @@ class AgentShimDriver:
 
         ``transient_retry_delays`` are the waits before each retry of a turn
         that failed on a transient provider error; see
-        :data:`TRANSIENT_RETRY_DELAYS_S`.
+        :data:`TRANSIENT_RETRY_DELAYS_S`. ``events`` receives a
+        ``retry_wait`` call for each of those waits; every session this
+        driver creates shares it.
         """
         if provider not in SHIPPED_PROVIDERS:
             message = (
@@ -868,6 +876,7 @@ class AgentShimDriver:
         self._dropped_names_logged = False
         self._dropped_names_lock = threading.Lock()
         self._launcher_env = launcher_env
+        self._events = events
         self._sessions: WeakSet[AgentShimSession] = WeakSet()
         self._closed = False
 
@@ -985,6 +994,7 @@ class AgentShimDriver:
             sandbox=sandbox,
             log=self._log,
             transient_retry_delays=self._transient_retry_delays,
+            events=self._events,
         )
         self._sessions.add(session)
         return session

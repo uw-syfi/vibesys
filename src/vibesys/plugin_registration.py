@@ -89,6 +89,7 @@ def _plugin_run_view(
         status=status,
         projection=projection.payload,
         rounds=projection.rounds,
+        workstreams=projection.workstreams,
         experiment_revision=projection.experiment_revision,
     )
 

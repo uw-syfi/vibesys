@@ -514,6 +514,7 @@ class AgentClient:
             self._write_usage_record(
                 kind=spec.role,
                 round_label=turn.label,
+                invocation_id=turn.invocation_id,
                 model=spec.model,
                 reasoning_effort=spec.reasoning_effort,
                 result=result,
@@ -523,18 +524,25 @@ class AgentClient:
             raise AssertionError(message)
         return result, logger
 
-    def _write_usage_record(
+    def _write_usage_record(  # noqa: PLR0913  # lint-waiver: LW-182940 [PLR0913]; mirrors the independent audit-row fields this one call site assembles; a parameter object would just rename the same unpacking at its single caller.
         self,
         *,
         kind: str,
         round_label: str | None,
+        invocation_id: str | None,
         model: str | None,
         reasoning_effort: str | None,
         result: AgentTurnResult | None,
     ) -> None:
+        usage = result.usage if result is not None else AgentUsage()
+        self._sink.turn_usage(
+            agent_kind=kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+            **_usage_dict(usage),
+        )
         if self._log_dir is None:
             return
-        usage = result.usage if result is not None else AgentUsage()
         skills = result.skills if result is not None else AgentSkillUse()
         record = {
             "timestamp": datetime.now(UTC).isoformat(),

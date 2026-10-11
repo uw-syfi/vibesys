@@ -18,6 +18,7 @@ from vibesys.events import (
     GateFinishedData,
     GateKind,
     GateStartedData,
+    LocalValidationSummaryData,
 )
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
@@ -73,12 +74,24 @@ class _BlockingEvaluationSandbox(FakeSandbox):
         return super().execute(command, timeout=timeout)
 
 
+_DEFAULT_RECIPES = [
+    {
+        "name": "queue-contract",
+        "command": "python -m py_compile queue.py",
+        "input_paths": ["queue.py"],
+        "timeout_seconds": 30,
+        "purpose": "check the edited queue module",
+    }
+]
+
+
 def _write_project(
     root: Path,
     *,
     accuracy_command: str = "true",
     benchmark_command: tuple[str, ...] = ("python", "benchmark.py"),
     protocol_row: dict[str, float] | None = None,
+    recipes: list[dict[str, object]] | None = None,
 ) -> None:
     root.mkdir(parents=True)
     (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
@@ -105,20 +118,7 @@ def _write_project(
     )
     (root / "validation").mkdir()
     (root / "validation" / "recipes.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "recipes": [
-                    {
-                        "name": "queue-contract",
-                        "command": "python -m py_compile queue.py",
-                        "input_paths": ["queue.py"],
-                        "timeout_seconds": 30,
-                        "purpose": "check the edited queue module",
-                    }
-                ],
-            }
-        )
+        json.dumps({"version": 1, "recipes": recipes if recipes is not None else _DEFAULT_RECIPES})
     )
     (root / "vibesys.input.toml").write_text(
         'version = 1\n[agent]\ndomain = "generic"\n'
@@ -202,6 +202,29 @@ def test_adapter_returns_semantic_results_and_events(tmp_path: Path) -> None:
             GateStartedData,
             GateFinishedData,
         ]
+    finally:
+        integration.close()
+
+
+def test_adapter_correlates_gate_events_with_the_caller_round(tmp_path: Path) -> None:
+    async def body(ctx: Run) -> tuple[AccuracyEvaluation, BenchmarkEvaluation]:
+        accuracy = await ctx.evaluation.accuracy(ctx.workspaces.root, round_label="round-3")
+        benchmark = await ctx.evaluation.benchmark(
+            ctx.workspaces.root,
+            objectives=(BenchmarkObjective(name="throughput", direction=MetricDirection.MAXIMIZE),),
+            round_label="round-3",
+        )
+        return accuracy, benchmark
+
+    _, integration = _run(tmp_path, body)
+    try:
+        gate_events = [
+            event
+            for event in integration.events.read()
+            if event.type in {CoreEventType.GATE_STARTED, CoreEventType.GATE_FINISHED}
+        ]
+        assert len(gate_events) == 4
+        assert all(event.round_label == "round-3" for event in gate_events)
     finally:
         integration.close()
 
@@ -315,6 +338,87 @@ def test_local_validation_maps_runtime_result_and_gate_events(tmp_path: Path) ->
         assert isinstance(finished, GateFinishedData)
         assert finished.recipe == "queue-contract"
         assert events[1].status is EventStatus.COMPLETED
+    finally:
+        integration.close()
+
+
+def test_local_validation_summary_counts_survive_an_early_failure(tmp_path: Path) -> None:
+    """A failing recipe stops the batch; the summary must still count what ran, not the catalog."""
+    recipes = [
+        {
+            "name": "passing-recipe",
+            "command": "true",
+            "input_paths": ["queue.py"],
+            "purpose": "a recipe that always succeeds",
+        },
+        {
+            "name": "failing-recipe",
+            "command": "false",
+            "input_paths": ["queue.py"],
+            "purpose": "a recipe that always fails",
+        },
+        {
+            "name": "unreached-recipe",
+            "command": "true",
+            "input_paths": ["queue.py"],
+            "purpose": "a recipe the early failure must prevent from running",
+        },
+    ]
+
+    async def body(ctx: Run) -> LocalValidationEvaluation:
+        return await ctx.evaluation.validate_local(
+            ctx.workspaces.root,
+            recipe_artifact="validation/recipes.json",
+            report_location="validation/report.json",
+        )
+
+    project_root = tmp_path / "project"
+    _write_project(project_root, recipes=recipes)
+    result, integration = _run_project(project_root, body)
+    try:
+        assert not result.passed
+        # Two recipes ran (the pass, then the fail); the third never started.
+        assert result.recipes_attempted == 2
+        assert result.recipes_succeeded == 1
+        summaries = [
+            event.data
+            for event in integration.events.read()
+            if event.type is CoreEventType.LOCAL_VALIDATION_SUMMARY
+        ]
+        assert len(summaries) == 1
+        summary = summaries[0]
+        assert isinstance(summary, LocalValidationSummaryData)
+        assert summary.attempted == 2
+        assert summary.succeeded == 1
+        assert not summary.passed
+    finally:
+        integration.close()
+
+
+def test_local_validation_summary_reports_a_fully_passing_batch(tmp_path: Path) -> None:
+    async def body(ctx: Run) -> LocalValidationEvaluation:
+        return await ctx.evaluation.validate_local(
+            ctx.workspaces.root,
+            recipe_artifact="validation/recipes.json",
+            report_location="validation/report.json",
+        )
+
+    result, integration = _run(tmp_path, body)
+    try:
+        assert result.passed
+        assert result.recipes_attempted == 1
+        assert result.recipes_succeeded == 1
+        summaries = [
+            event.data
+            for event in integration.events.read()
+            if event.type is CoreEventType.LOCAL_VALIDATION_SUMMARY
+        ]
+        assert len(summaries) == 1
+        summary = summaries[0]
+        assert isinstance(summary, LocalValidationSummaryData)
+        assert summary.attempted == 1
+        assert summary.succeeded == 1
+        assert summary.passed
     finally:
         integration.close()
 

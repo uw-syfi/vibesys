@@ -17,6 +17,7 @@ from vs_sandbox.compute_backends import (
     make_local_shell_sandbox,
 )
 from vs_sandbox.gpu_monitor import (
+    NULL_CONTENTION_EVENT_SINK,
     GpuContentionMonitor,
     GpuInfo,
     pick_gpu,
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
 
     from vs_sandbox.docker_sandbox import DockerSandbox as DockerSandboxType
     from vs_sandbox.execution import Sandbox
+    from vs_sandbox.gpu_monitor import ContentionEventSink
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
     from vs_sandbox.local_shell import LocalShellSandbox
@@ -52,11 +54,18 @@ class CudaBackend:
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
+        events: ContentionEventSink = NULL_CONTENTION_EVENT_SINK,
     ) -> None:
-        """Configure CUDA execution with its log directory and image override."""
+        """Configure CUDA execution with its log directory and image override.
+
+        ``events`` receives a contention-status transition from every
+        contention monitor this backend creates (initial ``make_monitor``
+        and any later ``reselect_device``).
+        """
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image or _DEFAULT_IMAGE
+        self._events = events
         self.selected_device: GpuInfo | None = None
         self._monitor: GpuContentionMonitor | None = None
         # Sandboxes built so far, so maybe_rebalance can find them without
@@ -139,6 +148,7 @@ class CudaBackend:
         self._monitor = GpuContentionMonitor(
             log_dir=log_dir,
             gpu_uuid=self.selected_device.uuid,
+            events=self._events,
         )
         return self._monitor
 
@@ -190,6 +200,7 @@ class CudaBackend:
         self._monitor = GpuContentionMonitor(
             log_dir=self.log_dir,
             gpu_uuid=new_gpu.uuid,
+            events=self._events,
         )
         self._monitor.start()
 

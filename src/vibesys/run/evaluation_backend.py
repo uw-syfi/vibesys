@@ -1670,17 +1670,18 @@ class EvidenceReusingEvaluation:
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
+        round_label: str | None = None,
     ) -> AccuracyEvaluation:
         """Return exact accepted accuracy evidence, or execute through the delegate."""
         if reuse is not None:
-            return await self._delegate.accuracy(workspace, reuse=reuse)
+            return await self._delegate.accuracy(workspace, reuse=reuse, round_label=round_label)
         evidence = await self._backend.evidence_for(workspace, (EvidenceKind.ACCURACY,))
         if not evidence:
-            return await self._delegate.accuracy(workspace)
+            return await self._delegate.accuracy(workspace, round_label=round_label)
         accepted = evidence[-1]
         revision = workspace.revision
         if revision is None:
-            return await self._delegate.accuracy(workspace)
+            return await self._delegate.accuracy(workspace, round_label=round_label)
         feedback = (
             None
             if accepted.outcome is EvidenceOutcome.PASSED
@@ -1705,15 +1706,20 @@ class EvidenceReusingEvaluation:
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
+        round_label: str | None = None,
     ) -> BenchmarkEvaluation:
         """Return exact accepted benchmark evidence, or execute through the delegate."""
         evidence = await self._backend.evidence_for(workspace, (EvidenceKind.BENCHMARK,))
         if not evidence:
-            return await self._delegate.benchmark(workspace, objectives=objectives)
+            return await self._delegate.benchmark(
+                workspace, objectives=objectives, round_label=round_label
+            )
         accepted = evidence[-1]
         row = {metric.name: metric.value for metric in accepted.metrics}
         if objectives and objectives[0].name not in row:
-            return await self._delegate.benchmark(workspace, objectives=objectives)
+            return await self._delegate.benchmark(
+                workspace, objectives=objectives, round_label=round_label
+            )
         headline = objectives[0].name if objectives else next(iter(row), None)
         metric = next((item for item in accepted.metrics if item.name == headline), None)
         feedback = (

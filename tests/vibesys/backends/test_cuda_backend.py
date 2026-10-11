@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vs_sandbox.api import (
+    ContentionStatus,
     CudaBackend,
     DockerSandbox,
     GpuInfo,
@@ -12,6 +13,16 @@ from vs_sandbox.api import (
     HostResourceAccess,
     SandboxKind,
 )
+
+
+class _FakeContentionEventSink:
+    """Records every contention transition published to it."""
+
+    def __init__(self) -> None:
+        self.calls: list[ContentionStatus] = []
+
+    def contention_changed(self, status: ContentionStatus) -> None:
+        self.calls.append(status)
 
 
 def _docker_run_command(sandbox: DockerSandbox) -> list[str]:
@@ -76,6 +87,53 @@ def test_ephemeral_setup_sandbox_is_not_restarted_on_reselection(
     start.assert_not_called()
     stop.assert_not_called()
     monitor.start.assert_called_once()
+
+
+def test_make_monitor_forwards_the_injected_event_sink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sink = _FakeContentionEventSink()
+    backend = CudaBackend(tmp_path, events=sink)
+    backend.selected_device = GpuInfo(0, "GPU-aaaa", "H100", 0, 100, 0)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "vs_sandbox.cuda_backend.GpuContentionMonitor",
+        lambda **kwargs: captured.update(kwargs) or MagicMock(),
+    )
+
+    backend.make_monitor(tmp_path)
+
+    assert captured["events"] is sink
+
+
+def test_reselect_device_forwards_the_injected_event_sink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sink = _FakeContentionEventSink()
+    backend = CudaBackend(tmp_path, events=sink)
+    monkeypatch.setattr(
+        "vs_sandbox.cuda_backend.pick_gpu",
+        lambda: GpuInfo(1, "GPU-bbbb", "H100", 0, 100, 0),
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "vs_sandbox.cuda_backend.GpuContentionMonitor",
+        lambda **kwargs: captured.update(kwargs) or MagicMock(),
+    )
+
+    backend.reselect_device()
+
+    assert captured["events"] is sink
+
+
+def test_default_events_sink_is_a_no_op(tmp_path: Path) -> None:
+    """Constructing a backend with no `events=` argument must not raise."""
+    backend = CudaBackend(tmp_path)
+    backend.selected_device = GpuInfo(0, "GPU-aaaa", "H100", 0, 100, 0)
+
+    monitor = backend.make_monitor(tmp_path)
+
+    assert monitor is not None
 
 
 def test_docker_forwards_resources_to_the_sandbox(tmp_path: Path) -> None:

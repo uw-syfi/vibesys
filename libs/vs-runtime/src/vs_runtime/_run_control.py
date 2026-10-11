@@ -34,6 +34,13 @@ class RunControlTransition(BaseModel):
     agent_kind: str | None = None
     round_label: str | None = None
     execution_id: str | None = None
+    # Stable identity of the frontend connection whose request caused a
+    # request-time transition (`STEER_QUEUED`/`PAUSE_REQUESTED`/`RESUMED`/
+    # `STOP_REQUESTED`). ``None`` for boundary-consume-time transitions
+    # (`PAUSED`/`STOPPED`/`STEER_CONSUMED`), which land on the run thread with
+    # no requesting client in scope, and for any caller that predates
+    # attribution.
+    client_id: str | None = None
 
 
 class RunControlEventSink(Protocol):
@@ -47,19 +54,19 @@ class RunControlEventSink(Protocol):
 class RunControlChannel(Protocol):
     """Cooperative control mailbox shared by callers and the run thread."""
 
-    def queue_steer(self, text: str) -> None:
+    def queue_steer(self, text: str, *, client_id: str | None = None) -> None:
         """Queue steering for the next invocation boundary."""
         ...
 
-    def request_pause(self) -> None:
+    def request_pause(self, *, client_id: str | None = None) -> None:
         """Request a pause at the next cooperative boundary."""
         ...
 
-    def resume(self) -> None:
+    def resume(self, *, client_id: str | None = None) -> None:
         """Cancel a pause or stop request and release a parked run."""
         ...
 
-    def request_stop(self) -> None:
+    def request_stop(self, *, client_id: str | None = None) -> None:
         """Request an unwind at the next cooperative boundary."""
         ...
 
@@ -114,33 +121,33 @@ class RuntimeRunControlChannel:
         self._stop_requested = False
         self._stop_listeners: list[Callable[[], object]] = []
 
-    def queue_steer(self, text: str) -> None:
+    def queue_steer(self, text: str, *, client_id: str | None = None) -> None:
         """Queue free-text steering for the next invocation boundary."""
         with self._lock:
             self._pending_steer.append(text)
-        self._emit(RunControlTransitionKind.STEER_QUEUED, text=text)
+        self._emit(RunControlTransitionKind.STEER_QUEUED, text=text, client_id=client_id)
 
-    def request_pause(self) -> None:
+    def request_pause(self, *, client_id: str | None = None) -> None:
         """Request that the run park at its next cooperative boundary."""
         with self._lock:
             self._paused = True
-        self._emit(RunControlTransitionKind.PAUSE_REQUESTED)
+        self._emit(RunControlTransitionKind.PAUSE_REQUESTED, client_id=client_id)
 
-    def resume(self) -> None:
+    def resume(self, *, client_id: str | None = None) -> None:
         """Cancel a pending pause or stop and release a parked run."""
         with self._lock:
             self._paused = False
             self._stop_requested = False
             self._lock.notify_all()
-        self._emit(RunControlTransitionKind.RESUMED)
+        self._emit(RunControlTransitionKind.RESUMED, client_id=client_id)
 
-    def request_stop(self) -> None:
+    def request_stop(self, *, client_id: str | None = None) -> None:
         """Request that the run unwind at its next cooperative boundary."""
         with self._lock:
             self._stop_requested = True
             self._lock.notify_all()
             listeners = tuple(self._stop_listeners)
-        self._emit(RunControlTransitionKind.STOP_REQUESTED)
+        self._emit(RunControlTransitionKind.STOP_REQUESTED, client_id=client_id)
         for listener in listeners:
             listener()
 
@@ -204,8 +211,10 @@ class RuntimeRunControlChannel:
         self._emit(RunControlTransitionKind.STOPPED)
         raise RunStopped
 
-    def _emit(self, kind: RunControlTransitionKind, *, text: str = "") -> None:
-        self._events(RunControlTransition(kind=kind, text=text))
+    def _emit(
+        self, kind: RunControlTransitionKind, *, text: str = "", client_id: str | None = None
+    ) -> None:
+        self._events(RunControlTransition(kind=kind, text=text, client_id=client_id))
 
 
 __all__ = [

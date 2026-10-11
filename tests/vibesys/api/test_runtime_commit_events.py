@@ -20,11 +20,18 @@ from pydantic import BaseModel
 
 from launch import create_session
 from vibesys.api import ComputeBackend, Config, OrchestrationRegistry, PluginProjection
-from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData
+from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData, WorkstreamAttemptData
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_catalog import OrchestrationRegistration
-from vibesys.run.contracts import ResumeRef, RoundSummary, RunRequest, RunStatus, RunView
+from vibesys.run.contracts import (
+    ResumeRef,
+    RoundSummary,
+    RunRequest,
+    RunStatus,
+    RunView,
+    WorkstreamAttemptSummary,
+)
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
@@ -42,6 +49,7 @@ class _FakeAgentState(BaseModel):
     round_numbers: tuple[int, ...] = ()
     experiment_revision: int = 0
     profile_skipped: bool = False
+    workstreams: tuple[WorkstreamAttemptSummary, ...] = ()
 
 
 class _Options(BaseModel):
@@ -76,6 +84,7 @@ def _project_state(state: BaseModel) -> PluginProjection:
             )
             for number in typed.round_numbers
         ),
+        workstreams=typed.workstreams,
         experiment_revision=typed.experiment_revision,
     )
 
@@ -104,6 +113,7 @@ class _FakeProjector:
             state.experiment_revision,
             run_id=run_id,
             profile_skipped=state.profile_skipped,
+            workstreams=state.workstreams,
         )
 
 
@@ -233,6 +243,7 @@ def _agent_view(
     *,
     run_id: str = "probe",
     profile_skipped: bool = False,
+    workstreams: tuple[WorkstreamAttemptSummary, ...] = (),
 ) -> RunView:
     return RunView(
         run_id=run_id,
@@ -248,6 +259,7 @@ def _agent_view(
             )
             for number in round_numbers
         ),
+        workstreams=workstreams,
         experiment_revision=revision,
     )
 
@@ -352,3 +364,117 @@ def test_commit_projection_preserves_profile_skip_and_publication_order() -> Non
     assert round_finished.data.kind == "round_finished"
     assert round_finished.data.profile_skipped is True
     assert order[:2] == ["state_published", CoreEventType.ROUND_FINISHED.value]
+
+
+def test_commit_emits_workstream_attempt_updated_only_when_diagnostics_change() -> None:
+    """A workstream's attempt/refunded/last_error/setup_failure diff drives one emission.
+
+    Exercises the same chokepoint (`_emit_commit_events`/`_emit_workstream_attempt`
+    in `run/integration.py`) the real `dynamic` plugin's projection
+    (`orchestration/dynamic/plugin.py`) feeds in production, strategy-agnostically
+    via the synthetic `_FakeAgentState` projector already used above.
+    """
+    integration = LocalRunIntegration()
+    captured: list[CoreEvent] = []
+    integration.events.subscribe(captured.append)
+    observer = integration.state_commit_observer("probe", _FakeProjector(), "commit-probe")
+
+    first = WorkstreamAttemptSummary(
+        hypothesis_id="ws-1",
+        attempt=1,
+        attempt_limit=3,
+        refunded=0,
+        last_error=None,
+        setup_failure=False,
+    )
+    # The first-ever observation of a workstream has no prior summary to diff
+    # against, so it is reported once rather than silently dropped.
+    observer.committed(None, _FakeAgentState(workstreams=(first,)))
+
+    # Re-committing identical diagnostics: nothing changed, no new emission.
+    observer.committed(
+        _FakeAgentState(workstreams=(first,)),
+        _FakeAgentState(workstreams=(first,)),
+    )
+
+    second = WorkstreamAttemptSummary(
+        hypothesis_id="ws-1",
+        attempt=2,
+        attempt_limit=3,
+        refunded=1,
+        last_error="boom",
+        setup_failure=True,
+    )
+    observer.committed(
+        _FakeAgentState(workstreams=(first,)),
+        _FakeAgentState(workstreams=(second,)),
+    )
+
+    events = [e.data for e in captured if e.type is CoreEventType.WORKSTREAM_ATTEMPT_UPDATED]
+    assert len(events) == 2  # the first-ever observation, then the real diagnostics change
+    assert isinstance(events[0], WorkstreamAttemptData)
+    assert events[0].attempt == 1
+    assert events[0].repeated_error is False
+    assert isinstance(events[1], WorkstreamAttemptData)
+    assert events[1].attempt == 2
+    assert events[1].refunded == 1
+    assert events[1].last_error == "boom"
+    assert events[1].setup_failure is True
+    # Not "repeated": the previous summary was not itself a setup failure.
+    assert events[1].repeated_error is False
+
+
+def test_commit_marks_a_setup_failure_repeated_only_against_an_identical_prior_one() -> None:
+    """`repeated_error` mirrors `Workstreams._record_failure`'s own comparison:
+
+    true only when the previous summary was itself a setup failure with
+    identical error text, the deterministic case where retrying spends budget
+    on the same outcome every time.
+    """
+    integration = LocalRunIntegration()
+    captured: list[CoreEvent] = []
+    integration.events.subscribe(captured.append)
+    observer = integration.state_commit_observer("probe", _FakeProjector(), "commit-probe")
+
+    first_failure = WorkstreamAttemptSummary(
+        hypothesis_id="ws-1",
+        attempt=1,
+        attempt_limit=3,
+        refunded=0,
+        last_error="boom",
+        setup_failure=True,
+    )
+    observer.committed(None, _FakeAgentState(workstreams=(first_failure,)))
+
+    same_failure_again = WorkstreamAttemptSummary(
+        hypothesis_id="ws-1",
+        attempt=2,
+        attempt_limit=3,
+        refunded=0,
+        last_error="boom",
+        setup_failure=True,
+    )
+    observer.committed(
+        _FakeAgentState(workstreams=(first_failure,)),
+        _FakeAgentState(workstreams=(same_failure_again,)),
+    )
+
+    different_failure = WorkstreamAttemptSummary(
+        hypothesis_id="ws-1",
+        attempt=3,
+        attempt_limit=3,
+        refunded=0,
+        last_error="different boom",
+        setup_failure=True,
+    )
+    observer.committed(
+        _FakeAgentState(workstreams=(same_failure_again,)),
+        _FakeAgentState(workstreams=(different_failure,)),
+    )
+
+    events = [e.data for e in captured if e.type is CoreEventType.WORKSTREAM_ATTEMPT_UPDATED]
+    assert len(events) == 3
+    assert isinstance(events[1], WorkstreamAttemptData)
+    assert events[1].repeated_error is True
+    assert isinstance(events[2], WorkstreamAttemptData)
+    assert events[2].repeated_error is False

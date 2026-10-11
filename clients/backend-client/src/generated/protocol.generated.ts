@@ -259,7 +259,13 @@ export type EventType =
   | "gate_finished"
   | "workspace_snapshot"
   | "run_configured"
-  | "framework_warning";
+  | "framework_warning"
+  | "async_operation_lifecycle"
+  | "workstream_attempt_updated"
+  | "retry_wait_started"
+  | "gpu_contention_changed"
+  | "local_validation_summary"
+  | "turn_usage_recorded";
 export type Text2 = string;
 /**
  * Lifecycle and command states reported in events.
@@ -271,6 +277,7 @@ export type AgentKind2 = string | null;
 export type InvocationId = string | null;
 export type ExecutionId1 = string | null;
 export type ChatThreadId = string | null;
+export type ClientId17 = string | null;
 export type Data =
   | (
       | ChatData
@@ -302,6 +309,12 @@ export type Data =
       | WorkspaceSnapshotData
       | RunConfiguredData
       | FrameworkWarningData
+      | AsyncOperationLifecycleData
+      | WorkstreamAttemptData
+      | RetryWaitData
+      | GpuContentionData
+      | LocalValidationSummaryData
+      | TurnUsageData
     )
   | null;
 export type Kind1 = "chat";
@@ -371,9 +384,11 @@ export type ProcessKind = string;
 export type Stream1 = "stdout" | "stderr";
 export type Content2 = string;
 export type Kind17 = "judge_result";
-export type Verdict = "pass" | "fail";
+export type Verdict = "pass" | "fail" | "skipped";
+export type Analysis = string;
 export type Feedback = string;
-export type Attempt3 = number;
+export type SkipReason = ("blocked" | "unchanged" | "not_due") | null;
+export type ImplementerOutcome = string;
 export type Kind18 = "benchmark_result";
 export type Metric = string;
 export type Value = number;
@@ -465,11 +480,69 @@ export type Detail1 = string | null;
  */
 export type FrameworkSource4 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel2 = string | null;
+export type Kind31 = "async_operation_lifecycle";
+/**
+ * Framework-owned categories of asynchronous operation.
+ */
+export type AsyncOperationKind = "evaluation" | "profiler";
+export type OperationId = string;
+/**
+ * Union of backend-neutral lifecycle states published by operation services.
+ */
+export type AsyncOperationState =
+  | "submitted"
+  | "queued"
+  | "starting"
+  | "running"
+  | "succeeded"
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "interrupted"
+  | "superseded"
+  | "timed_out";
+export type Revision2 = number | null;
+export type ScopeId = string | null;
+export type CurrentStage = string | null;
+/**
+ * Closed set of framework subsystems that emit framework events.
+ */
+export type FrameworkSource5 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
+export type Kind32 = "workstream_attempt_updated";
+export type HypothesisId = string;
+export type Attempt3 = number;
+export type AttemptLimit = number;
+export type Refunded = number;
+export type LastError = string | null;
+export type SetupFailure = boolean;
+export type RepeatedError = boolean;
+export type Kind33 = "retry_wait_started";
+export type Attempt4 = number;
+export type DelayS = number;
+export type ErrorKind = string;
+export type Kind34 = "gpu_contention_changed";
+export type IsContended = boolean;
+export type NewProcessCount = number;
+export type GpuIndex = number | null;
+export type MemoryUsedMib = number | null;
+export type MemoryTotalMib = number | null;
+export type UtilizationPct = number | null;
+export type Kind35 = "local_validation_summary";
+export type Attempted = number;
+export type Succeeded = number;
+export type Passed = boolean;
+export type Kind36 = "turn_usage_recorded";
+export type InputTokens2 = number | null;
+export type CacheCreationInputTokens = number | null;
+export type CacheReadInputTokens = number | null;
+export type OutputTokens = number | null;
+export type TotalCostUsd = number | null;
+export type DurationMs = number | null;
 export type Events = RunEvent[];
 export type Round = number;
 export type PerfMetric1 = number;
 export type PerfUnit1 = string;
-export type Passed = boolean;
+export type Passed1 = boolean;
 export type ProfileSkipped1 = boolean;
 export type Performance = PerformanceRound[];
 export type ObjectiveMetric = string | null;
@@ -479,7 +552,7 @@ export type ObjectiveBaselineValue = number | null;
 export type ObjectiveBaselineRound = number | null;
 export type ObjectiveBaselineCommit = string | null;
 export type ObjectiveDescription = string | null;
-export type HypothesisId = string;
+export type HypothesisId1 = string;
 export type Identified = boolean;
 export type Title3 = string | null;
 export type Claim = string | null;
@@ -487,7 +560,7 @@ export type Action1 = string | null;
 export type FirstRound = number;
 export type LastRound = number;
 export type Round1 = number;
-export type Passed1 = boolean;
+export type Passed2 = boolean;
 export type Reviewed = boolean;
 export type HypothesisOutcome = HypothesisOutcome1 | HypothesisResolution | null;
 /**
@@ -573,7 +646,7 @@ export type Truncated = boolean;
 export type ServerMessage = SubscribedMessage | EventMessage | EventBatchMessage | ProtocolErrorMessage;
 export type Type16 = "subscribed";
 export type RequestId17 = string;
-export type ClientId17 = string;
+export type ClientId18 = string;
 export type RunId4 = string;
 export type LatestSequence = number;
 export type Type17 = "event";
@@ -585,7 +658,7 @@ export type StoreId1 = string;
 export type HistoryAfterSequence = number;
 export type Type19 = "protocol_error";
 export type RequestId18 = string | null;
-export type ClientId18 = string;
+export type ClientId19 = string;
 export type Code2 = string;
 export type Message1 = string;
 
@@ -972,6 +1045,7 @@ export interface RunEvent {
   invocation_id?: InvocationId;
   execution_id?: ExecutionId1;
   chat_thread_id?: ChatThreadId;
+  client_id?: ClientId17;
   data?: Data;
 }
 /**
@@ -1168,13 +1242,23 @@ export interface SubprocessOutputData {
   [k: string]: unknown;
 }
 /**
- * Verdict and feedback returned by the judge.
+ * One workstream's review assessment: a judge verdict or a skip reason.
+ *
+ * ``skipped`` means no judge turn ran this assessment (the workstream's own
+ * correlation, carried by the event envelope's ``round_label``, is what
+ * repeat assessments of the same workstream share); ``skip_reason`` then
+ * names why. ``implementer_outcome`` is the implementer's own self-declared
+ * readiness for this attempt, present regardless of whether a review ran.
+ * It defaults to empty so a journal record written before this field
+ * existed still parses; a reader should treat an empty string as unknown.
  */
 export interface JudgeResultData {
   kind: Kind17;
   verdict: Verdict;
-  feedback: Feedback;
-  attempt: Attempt3;
+  analysis?: Analysis;
+  feedback?: Feedback;
+  skip_reason?: SkipReason;
+  implementer_outcome?: ImplementerOutcome;
   [k: string]: unknown;
 }
 /**
@@ -1350,13 +1434,87 @@ export interface FrameworkWarningData {
   [k: string]: unknown;
 }
 /**
+ * Backend-neutral lifecycle fact for host-owned asynchronous work.
+ */
+export interface AsyncOperationLifecycleData {
+  kind: Kind31;
+  operation_kind: AsyncOperationKind;
+  operation_id: OperationId;
+  state: AsyncOperationState;
+  revision?: Revision2;
+  scope_id?: ScopeId;
+  current_stage?: CurrentStage;
+  source?: FrameworkSource5;
+  [k: string]: unknown;
+}
+/**
+ * Live retry-budget diagnostics for one dynamic-portfolio workstream.
+ */
+export interface WorkstreamAttemptData {
+  kind: Kind32;
+  hypothesis_id: HypothesisId;
+  attempt: Attempt3;
+  attempt_limit: AttemptLimit;
+  refunded: Refunded;
+  last_error?: LastError;
+  setup_failure?: SetupFailure;
+  repeated_error?: RepeatedError;
+  [k: string]: unknown;
+}
+/**
+ * One wait before retrying an agent turn that failed on a transient provider error.
+ */
+export interface RetryWaitData {
+  kind: Kind33;
+  attempt: Attempt4;
+  delay_s: DelayS;
+  error_kind: ErrorKind;
+  [k: string]: unknown;
+}
+/**
+ * One contention-state transition observed by a GPU contention monitor.
+ */
+export interface GpuContentionData {
+  kind: Kind34;
+  is_contended: IsContended;
+  new_process_count: NewProcessCount;
+  gpu_index?: GpuIndex;
+  memory_used_mib?: MemoryUsedMib;
+  memory_total_mib?: MemoryTotalMib;
+  utilization_pct?: UtilizationPct;
+  [k: string]: unknown;
+}
+/**
+ * Recipe pass-fraction for one ``validate_local`` call.
+ */
+export interface LocalValidationSummaryData {
+  kind: Kind35;
+  attempted: Attempted;
+  succeeded: Succeeded;
+  passed: Passed;
+  [k: string]: unknown;
+}
+/**
+ * Token and cost accounting for one completed agent turn.
+ */
+export interface TurnUsageData {
+  kind: Kind36;
+  input_tokens?: InputTokens2;
+  cache_creation_input_tokens?: CacheCreationInputTokens;
+  cache_read_input_tokens?: CacheReadInputTokens;
+  output_tokens?: OutputTokens;
+  total_cost_usd?: TotalCostUsd;
+  duration_ms?: DurationMs;
+  [k: string]: unknown;
+}
+/**
  * One measured performance result in a run.
  */
 export interface PerformanceRound {
   round: Round;
   perf_metric: PerfMetric1;
   perf_unit: PerfUnit1;
-  passed: Passed;
+  passed: Passed1;
   profile_skipped?: ProfileSkipped1;
 }
 /**
@@ -1383,7 +1541,7 @@ export interface PerformanceContext {
  * never recomputed by the server or client.
  */
 export interface HypothesisEntry {
-  hypothesis_id: HypothesisId;
+  hypothesis_id: HypothesisId1;
   identified?: Identified;
   title?: Title3;
   claim?: Claim;
@@ -1422,7 +1580,7 @@ export interface HypothesisEntry {
  */
 export interface HypothesisRound {
   round: Round1;
-  passed: Passed1;
+  passed: Passed2;
   reviewed: Reviewed;
   hypothesis_outcome?: HypothesisOutcome;
   judge_verdict?: JudgeVerdict1;
@@ -1503,7 +1661,7 @@ export interface DesignPatch {
 export interface SubscribedMessage {
   type: Type16;
   request_id: RequestId17;
-  client_id?: ClientId17;
+  client_id?: ClientId18;
   run_id: RunId4;
   latest_sequence: LatestSequence;
 }
@@ -1531,7 +1689,7 @@ export interface EventBatchMessage {
 export interface ProtocolErrorMessage {
   type: Type19;
   request_id?: RequestId18;
-  client_id?: ClientId18;
+  client_id?: ClientId19;
   code: Code2;
   message: Message1;
   diagnostic?: Diagnostic | null;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 
 import pytest
@@ -176,6 +177,56 @@ def test_cancelled_runtime_checkpoint_drains_its_paused_worker() -> None:
         RunControlTransitionKind.PAUSED,
         RunControlTransitionKind.RESUMED,
     ]
+
+
+def test_request_time_transitions_carry_the_issuing_client_id() -> None:
+    events = FakeRunControlEventSink()
+    control = create_run_control_channel(events)
+
+    control.queue_steer("focus on latency", client_id="tab-a")
+    control.request_pause(client_id="tab-a")
+    control.resume(client_id="tab-b")
+    control.request_stop(client_id="tab-b")
+
+    assert [transition.client_id for transition in events.transitions] == [
+        "tab-a",
+        "tab-a",
+        "tab-b",
+        "tab-b",
+    ]
+
+
+def test_boundary_consume_time_transitions_carry_no_client_id() -> None:
+    # PAUSED and STOPPED land on the run thread at an invocation boundary, not
+    # from a request, so they have no requesting client to attribute:
+    # `client_id` stays None regardless of which client issued the
+    # request-time transition that led to this boundary.
+    paused = threading.Event()
+    events = FakeRunControlEventSink(
+        on_transition=lambda transition: (
+            paused.set() if transition.kind is RunControlTransitionKind.PAUSED else None
+        )
+    )
+    control = create_run_control_channel(events)
+    control.request_pause(client_id="tab-a")
+
+    def wait_at_boundary() -> None:
+        with contextlib.suppress(RunStopped):
+            control.wait_while_paused()
+
+    waiter = threading.Thread(target=wait_at_boundary)
+    waiter.start()
+    paused.wait()
+    control.request_stop(client_id="tab-a")
+    waiter.join()
+
+    boundary_kinds = {RunControlTransitionKind.PAUSED, RunControlTransitionKind.STOPPED}
+    boundary_client_ids = [
+        transition.client_id
+        for transition in events.transitions
+        if transition.kind in boundary_kinds
+    ]
+    assert boundary_client_ids == [None, None]
 
 
 def test_consumed_steering_records_the_landing_invocation() -> None:

@@ -1,5 +1,40 @@
-export {App, createDemoApp, createLiveApp} from './App.js';
+export {App, createDemoApp, createLiveApp, createLiveCampaignApp} from './App.js';
+export {
+  type FoldState,
+  foldCampaignFrame,
+  foldFrames,
+  foldStateToRecord,
+  initialFoldState,
+  latestMoment,
+} from './campaign-fold.js';
+export {
+  type CampaignFrame,
+  type CampaignHeader,
+  type FrameOperatorAction,
+  type FrameWorkstream,
+  isTerminalPhase,
+  type OperatorAction,
+  parseCampaignFrame,
+  type WorkstreamPhase,
+} from './campaign-frames.js';
 export type {CampaignRecord} from './campaign-record.js';
+export {framesFromRecord} from './campaign-replay.js';
+export {
+  type CampaignStream,
+  EventSourceCampaignStream,
+  FakeCampaignStream,
+} from './campaign-stream.js';
+export {type LiveCampaignState, useLiveCampaign} from './live-campaign.js';
+export {
+  type DwellInfo,
+  type DwellSeverity,
+  dwellMessage,
+  dwellTime,
+  type ExecutionStarted,
+  formatDwell,
+  steeredPromptTail,
+  type WaitingAction,
+} from './operator-timeline.js';
 export {loadReplayFixture} from './replay.js';
 export {
   loadReplayScenario,

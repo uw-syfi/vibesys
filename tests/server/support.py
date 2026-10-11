@@ -51,17 +51,17 @@ class _ControlBridge:
     def __init__(self, channel: RunControlChannel) -> None:
         self._channel = channel
 
-    def steer(self, text: str) -> None:
-        self._channel.queue_steer(text)
+    def steer(self, text: str, *, client_id: str | None = None) -> None:
+        self._channel.queue_steer(text, client_id=client_id)
 
-    def pause(self) -> None:
-        self._channel.request_pause()
+    def pause(self, *, client_id: str | None = None) -> None:
+        self._channel.request_pause(client_id=client_id)
 
-    def resume(self) -> None:
-        self._channel.resume()
+    def resume(self, *, client_id: str | None = None) -> None:
+        self._channel.resume(client_id=client_id)
 
-    def stop(self) -> None:
-        self._channel.request_stop()
+    def stop(self, *, client_id: str | None = None) -> None:
+        self._channel.request_stop(client_id=client_id)
 
 
 def _record_control_transition(
@@ -74,6 +74,7 @@ def _record_control_transition(
         agent_kind=transition.agent_kind,
         round_label=transition.round_label,
         execution_id=transition.execution_id,
+        client_id=transition.client_id,
     )
 
 

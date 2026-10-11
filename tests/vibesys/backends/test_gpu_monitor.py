@@ -24,6 +24,8 @@ from vs_sandbox.api import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vs_sandbox.api import ContentionStatus
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
@@ -281,6 +283,97 @@ class TestMonitorLifecycle:
     def test_stop_without_start(self, tmp_path: Path) -> None:
         mon = GpuContentionMonitor(log_dir=tmp_path, gpu_uuid=GPU_A)
         mon.stop()  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# contention event sink
+# ---------------------------------------------------------------------------
+
+
+class _FakeContentionEventSink:
+    """Records every contention transition published to it."""
+
+    def __init__(self) -> None:
+        self.calls: list[ContentionStatus] = []
+
+    def contention_changed(self, status: ContentionStatus) -> None:
+        self.calls.append(status)
+
+
+class TestContentionEventSink:
+    """`GpuContentionMonitor` notifies its sink only when `is_contended` flips.
+
+    Exercises `_poll_once` directly rather than `start()`/`stop()` plus a real
+    sleep: the transition-detection logic is otherwise only reachable through
+    a background thread on a wall-clock interval, which would make this
+    property untestable without a flaky timing-based test.
+    """
+
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs")
+    def test_first_poll_with_no_contention_does_not_notify(
+        self, mock_procs: MagicMock, mock_query: MagicMock, tmp_path: Path
+    ) -> None:
+        del mock_query
+        mock_procs.return_value = f"100, python, 4096, {GPU_A}\n"
+        sink = _FakeContentionEventSink()
+        mon = GpuContentionMonitor(log_dir=tmp_path, gpu_uuid=GPU_A, events=sink)
+        mon._baseline_pids = {100}
+
+        mon._poll_once(tmp_path / "gpu_contention.jsonl")
+
+        assert sink.calls == []
+
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs")
+    def test_notifies_once_when_contention_starts(
+        self, mock_procs: MagicMock, mock_query: MagicMock, tmp_path: Path
+    ) -> None:
+        del mock_query
+        sink = _FakeContentionEventSink()
+        mon = GpuContentionMonitor(log_dir=tmp_path, gpu_uuid=GPU_A, events=sink)
+        mon._baseline_pids = {100}
+        log_path = tmp_path / "gpu_contention.jsonl"
+
+        mock_procs.return_value = f"100, python, 4096, {GPU_A}\n"
+        mon._poll_once(log_path)
+        mock_procs.return_value = f"100, python, 4096, {GPU_A}\n200, train.py, 8192, {GPU_A}\n"
+        mon._poll_once(log_path)  # new pid: contention starts
+        mon._poll_once(log_path)  # still contended: no further notification
+
+        assert [call.is_contended for call in sink.calls] == [True]
+
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs")
+    def test_notifies_again_when_contention_clears(
+        self, mock_procs: MagicMock, mock_query: MagicMock, tmp_path: Path
+    ) -> None:
+        del mock_query
+        sink = _FakeContentionEventSink()
+        mon = GpuContentionMonitor(log_dir=tmp_path, gpu_uuid=GPU_A, events=sink)
+        mon._baseline_pids = {100}
+        log_path = tmp_path / "gpu_contention.jsonl"
+
+        mock_procs.return_value = f"100, python, 4096, {GPU_A}\n200, train.py, 8192, {GPU_A}\n"
+        mon._poll_once(log_path)
+        mock_procs.return_value = f"100, python, 4096, {GPU_A}\n"
+        mon._poll_once(log_path)
+
+        assert [call.is_contended for call in sink.calls] == [True, False]
+
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs")
+    def test_default_sink_is_a_no_op(
+        self, mock_procs: MagicMock, mock_query: MagicMock, tmp_path: Path
+    ) -> None:
+        """No `events=` argument must not raise, and contention still records."""
+        del mock_query
+        mock_procs.return_value = f"100, python, 4096, {GPU_A}\n200, train.py, 8192, {GPU_A}\n"
+        mon = GpuContentionMonitor(log_dir=tmp_path, gpu_uuid=GPU_A)
+
+        mon._poll_once(tmp_path / "gpu_contention.jsonl")
+
+        assert mon.status.is_contended
 
 
 # ---------------------------------------------------------------------------

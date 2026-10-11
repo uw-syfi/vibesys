@@ -14,6 +14,7 @@ from vibesys.events import (
     GateFinishedData,
     GateKind,
     GateStartedData,
+    LocalValidationSummaryData,
     SubprocessOutputData,
 )
 from vs_evaluation.api import AccessErrorCode, EvaluationAgentAccessError, TrustedEvidence
@@ -187,9 +188,24 @@ async def _validate_local(
             recipe_unusable=True,
         )
 
+    attempted = len(results)
+    succeeded = sum(1 for result in results if result.passed)
     failed = next((result for result in results if not result.passed), None)
+    events.emit(
+        CoreEventType.LOCAL_VALIDATION_SUMMARY,
+        data=LocalValidationSummaryData(
+            attempted=attempted,
+            succeeded=succeeded,
+            passed=failed is None,
+        ),
+    )
     if failed is None:
-        return LocalValidationEvaluation(passed=True, report_location=report_location)
+        return LocalValidationEvaluation(
+            passed=True,
+            report_location=report_location,
+            recipes_attempted=attempted,
+            recipes_succeeded=succeeded,
+        )
     detail = failed.error or failed.output or "unknown failure"
     return LocalValidationEvaluation(
         passed=False,
@@ -198,6 +214,8 @@ async def _validate_local(
             f"Inspect `{report_location}` and repair only the affected local contract."
         ),
         report_location=report_location,
+        recipes_attempted=attempted,
+        recipes_succeeded=succeeded,
     )
 
 
@@ -229,12 +247,18 @@ class _EvaluationAdapter:
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
+        round_label: str | None = None,
     ) -> AccuracyEvaluation:
         """Run or explicitly reuse trusted accuracy for one candidate."""
         live = self._live_workspace(workspace)
         spec = self._runtime_evaluation.spec(live)
         if reuse is not None:
-            emit_gate_started(self._events, GateKind.ACCURACY, command=spec.accuracy_command)
+            emit_gate_started(
+                self._events,
+                GateKind.ACCURACY,
+                command=spec.accuracy_command,
+                round_label=round_label,
+            )
             try:
                 run = await self._runtime_evaluation.accuracy(
                     self._run_id,
@@ -242,15 +266,20 @@ class _EvaluationAdapter:
                     reuse=reuse,
                 )
             except asyncio.CancelledError:
-                self._finish_gate_error(GateKind.ACCURACY, "evaluation cancelled")
+                self._finish_gate_error(
+                    GateKind.ACCURACY, "evaluation cancelled", round_label=round_label
+                )
                 raise
             except Exception as error:
-                self._finish_gate_error(GateKind.ACCURACY, self._error_text(error))
+                self._finish_gate_error(
+                    GateKind.ACCURACY, self._error_text(error), round_label=round_label
+                )
                 raise
             emit_gate_finished(
                 self._events,
                 GateFinishedData(gate=GateKind.ACCURACY, reused=True),
                 passed=True,
+                round_label=round_label,
             )
             return AccuracyEvaluation(executed=False, receipt=run.receipt)
         if self._request.agent_backend == "stub":
@@ -260,7 +289,9 @@ class _EvaluationAdapter:
         release = (
             bundle.benchmark_result is None and bundle.benchmark_result_protocol is None
         ) or not spec.benchmark_command
-        emit_gate_started(self._events, GateKind.ACCURACY, command=spec.accuracy_command)
+        emit_gate_started(
+            self._events, GateKind.ACCURACY, command=spec.accuracy_command, round_label=round_label
+        )
         try:
             run = await self._runtime_evaluation.accuracy(
                 self._run_id,
@@ -281,12 +312,16 @@ class _EvaluationAdapter:
                 receipt=run.receipt if result.passed else None,
             )
         except asyncio.CancelledError:
-            self._finish_gate_error(GateKind.ACCURACY, "evaluation cancelled")
+            self._finish_gate_error(
+                GateKind.ACCURACY, "evaluation cancelled", round_label=round_label
+            )
             raise
         except Exception as error:
-            self._finish_gate_error(GateKind.ACCURACY, self._error_text(error))
+            self._finish_gate_error(
+                GateKind.ACCURACY, self._error_text(error), round_label=round_label
+            )
             raise
-        self._finish_accuracy(result)
+        self._finish_accuracy(result, round_label=round_label)
         return evaluation
 
     async def benchmark(
@@ -294,6 +329,7 @@ class _EvaluationAdapter:
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
+        round_label: str | None = None,
     ) -> BenchmarkEvaluation:
         """Run the benchmark and apply policy-selected headline semantics."""
         self._validate_objectives(objectives)
@@ -301,7 +337,12 @@ class _EvaluationAdapter:
         if self._request.agent_backend == "stub":
             return BenchmarkEvaluation(executed=False)
         spec = self._runtime_evaluation.spec(live)
-        emit_gate_started(self._events, GateKind.BENCHMARK, command=spec.benchmark_command)
+        emit_gate_started(
+            self._events,
+            GateKind.BENCHMARK,
+            command=spec.benchmark_command,
+            round_label=round_label,
+        )
         try:
             run = await self._runtime_evaluation.benchmark(
                 live,
@@ -321,12 +362,16 @@ class _EvaluationAdapter:
                 "benchmark",
             )
         except asyncio.CancelledError:
-            self._finish_gate_error(GateKind.BENCHMARK, "evaluation cancelled")
+            self._finish_gate_error(
+                GateKind.BENCHMARK, "evaluation cancelled", round_label=round_label
+            )
             raise
         except Exception as error:
-            self._finish_gate_error(GateKind.BENCHMARK, self._error_text(error))
+            self._finish_gate_error(
+                GateKind.BENCHMARK, self._error_text(error), round_label=round_label
+            )
             raise
-        self._finish_benchmark(result, evaluation)
+        self._finish_benchmark(result, evaluation, round_label=round_label)
         return evaluation
 
     async def validate_local(
@@ -468,7 +513,9 @@ class _EvaluationAdapter:
             first_release=first_release,
         )
 
-    def _finish_accuracy(self, result: TrustedAccuracyResult) -> None:
+    def _finish_accuracy(
+        self, result: TrustedAccuracyResult, *, round_label: str | None = None
+    ) -> None:
         emit_gate_finished(
             self._events,
             GateFinishedData(
@@ -476,6 +523,7 @@ class _EvaluationAdapter:
                 output_tail=(result.output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None),
             ),
             passed=result.passed,
+            round_label=round_label,
         )
 
     @staticmethod
@@ -491,6 +539,8 @@ class _EvaluationAdapter:
         self,
         result: TrustedBenchmarkResult,
         evaluation: BenchmarkEvaluation,
+        *,
+        round_label: str | None = None,
     ) -> None:
         emit_gate_finished(
             self._events,
@@ -504,13 +554,17 @@ class _EvaluationAdapter:
                 output_tail=(result.output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None),
             ),
             passed=result.passed,
+            round_label=round_label,
         )
 
-    def _finish_gate_error(self, gate: GateKind, output: str) -> None:
+    def _finish_gate_error(
+        self, gate: GateKind, output: str, *, round_label: str | None = None
+    ) -> None:
         emit_gate_finished(
             self._events,
             GateFinishedData(gate=gate, output_tail=output[-GATE_LOG_TAIL_CHARS:]),
             passed=False,
+            round_label=round_label,
         )
 
     @staticmethod

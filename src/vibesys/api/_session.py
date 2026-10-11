@@ -338,21 +338,21 @@ class _LocalRunSession:
             loop=self._request.orchestration.id,
         )
 
-    def steer(self, text: str) -> None:
+    def steer(self, text: str, *, client_id: str | None = None) -> None:
         """Send free-text steering input to the active run."""
-        self._integration.control.queue_steer(text)
+        self._integration.control.queue_steer(text, client_id=client_id)
 
-    def pause(self) -> None:
+    def pause(self, *, client_id: str | None = None) -> None:
         """Request the run reach its next safe boundary and release the write lease."""
-        self._integration.control.request_pause()
+        self._integration.control.request_pause(client_id=client_id)
 
-    def resume(self) -> None:
+    def resume(self, *, client_id: str | None = None) -> None:
         """Request the run acquire the write lease and continue from checkpoint."""
-        self._integration.control.resume()
+        self._integration.control.resume(client_id=client_id)
 
-    def stop(self) -> None:
+    def stop(self, *, client_id: str | None = None) -> None:
         """Request the run terminate."""
-        self._integration.control.request_stop()
+        self._integration.control.request_stop(client_id=client_id)
 
     def close(self) -> None:
         """Close the run-owned auxiliary scope, preserving transferred scopes."""

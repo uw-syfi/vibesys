@@ -274,7 +274,12 @@ def test_semantic_failure_events_do_not_require_diagnostics(tmp_path: Path) -> N
     judge = parts.journal.record(
         EventType.JUDGE_RESULT,
         status=EventStatus.FAILED,
-        data=JudgeResultData(verdict="fail", feedback="incorrect", attempt=1),
+        data=JudgeResultData(
+            verdict="fail",
+            analysis="incorrect",
+            feedback="incorrect",
+            implementer_outcome="nominated",
+        ),
     )
     round_finished = parts.journal.record(
         EventType.ROUND_FINISHED,

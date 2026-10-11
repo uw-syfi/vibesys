@@ -184,6 +184,7 @@ def event(  # noqa: PLR0913
         "invocation_id": None if agent_kind is None else EXECUTION_ID,
         "execution_id": None if agent_kind is None else EXECUTION_ID,
         "chat_thread_id": None,
+        "client_id": None,
         "data": data,
     }
 

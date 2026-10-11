@@ -24,6 +24,7 @@ from server.events import (
     RunStartedData,
 )
 from server.integration import (
+    _CONTROL_EVENT_TYPES,
     _CORE_FAILURE_CONTEXTS,
     _EVENT_DATA_ADAPTER,
 )
@@ -35,6 +36,9 @@ from vibesys.events import (
     AgentExecutionFinishedData,
     AgentExecutionStartedData,
     AgentOutputChunkData,
+    AsyncOperationKind,
+    AsyncOperationLifecycleData,
+    AsyncOperationState,
     CoreEventType,
     FrameworkSource,
     FrameworkWarningData,
@@ -42,7 +46,9 @@ from vibesys.events import (
     GateKind,
     InvocationFinishedData,
     PhaseData,
+    RetryWaitData,
     ToolCallData,
+    WorkstreamAttemptData,
 )
 from vibesys.events import (
     EventStatus as CoreEventStatus,
@@ -196,6 +202,83 @@ def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path: Pa
     assert activity.mode == "tool"
     assert activity.tool == "Bash"
     assert (tmp_path / "core-events.jsonl").is_file()
+
+
+def test_an_async_operation_lifecycle_event_reaches_the_wire_journal_with_its_scope(
+    tmp_path: Path,
+) -> None:
+    """A profiler or evaluation lifecycle fact projects onto the wire with its `scope_id` intact.
+
+    Regression test: `ASYNC_OPERATION_LIFECYCLE` had no `EventType` counterpart,
+    so `project_event` raised `ValueError` from `EventType(event.type.value)`
+    for every profiler or evaluation lifecycle fact a run emitted.
+    """
+    parts = build_server_parts(tmp_path)
+
+    parts.core_events.emit(
+        CoreEventType.ASYNC_OPERATION_LIFECYCLE,
+        data=AsyncOperationLifecycleData(
+            operation_kind=AsyncOperationKind.PROFILER,
+            operation_id="profiler-op-1",
+            state=AsyncOperationState.RUNNING,
+            scope_id="hypothesis-7",
+        ),
+    )
+
+    event = next(e for e in parts.journal.read() if e.type is EventType.ASYNC_OPERATION_LIFECYCLE)
+    assert event.data is not None
+    assert event.data.kind == "async_operation_lifecycle"
+    assert event.data.operation_kind == "profiler"
+    assert event.data.state == "running"
+    assert event.data.scope_id == "hypothesis-7"
+
+
+def test_a_workstream_attempt_event_reaches_the_wire_journal_with_its_diagnostics(
+    tmp_path: Path,
+) -> None:
+    """A dynamic-portfolio workstream's live retry-budget diagnostics project onto the wire intact."""
+    parts = build_server_parts(tmp_path)
+
+    parts.core_events.emit(
+        CoreEventType.WORKSTREAM_ATTEMPT_UPDATED,
+        data=WorkstreamAttemptData(
+            hypothesis_id="hypothesis-3",
+            attempt=2,
+            attempt_limit=3,
+            refunded=1,
+            last_error="boom",
+            setup_failure=True,
+            repeated_error=True,
+        ),
+    )
+
+    event = next(e for e in parts.journal.read() if e.type is EventType.WORKSTREAM_ATTEMPT_UPDATED)
+    assert event.data is not None
+    assert event.data.kind == "workstream_attempt_updated"
+    assert event.data.hypothesis_id == "hypothesis-3"
+    assert event.data.attempt == 2
+    assert event.data.attempt_limit == 3
+    assert event.data.refunded == 1
+    assert event.data.last_error == "boom"
+    assert event.data.setup_failure is True
+    assert event.data.repeated_error is True
+
+
+def test_a_retry_wait_event_reaches_the_wire_journal_with_its_delay(tmp_path: Path) -> None:
+    """A retry wait before resuming a turn after a transient provider error reaches the wire."""
+    parts = build_server_parts(tmp_path)
+
+    parts.core_events.emit(
+        CoreEventType.RETRY_WAIT_STARTED,
+        data=RetryWaitData(attempt=1, delay_s=2.5, error_kind="overloaded"),
+    )
+
+    event = next(e for e in parts.journal.read() if e.type is EventType.RETRY_WAIT_STARTED)
+    assert event.data is not None
+    assert event.data.kind == "retry_wait_started"
+    assert event.data.attempt == 1
+    assert event.data.delay_s == 2.5
+    assert event.data.error_kind == "overloaded"
 
 
 def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: Path) -> None:
@@ -357,6 +440,24 @@ def test_core_failure_synthesis_covers_the_journal_failure_invariant() -> None:
     # Every event the journal refuses without a diagnostic must have a
     # synthesis entry, or a diagnostic-less core failure would crash append.
     assert set(_CORE_FAILURE_CONTEXTS) == DIAGNOSTIC_FAILURE_EVENTS
+
+
+def test_every_non_control_core_event_type_has_a_wire_event_counterpart() -> None:
+    """`project_event` needs `EventType(event.type.value)` to succeed for every event it does not
+    hand to `_project_control_event`, or the run coroutine crashes on an uncaught `ValueError`.
+
+    `ASYNC_OPERATION_LIFECYCLE` violated this until it gained an `EventType` counterpart; this
+    sweeps the whole enum so the same asymmetry cannot reappear for a future `CoreEventType`.
+    """
+    missing = []
+    for core_type in CoreEventType:
+        if core_type in _CONTROL_EVENT_TYPES:
+            continue
+        try:
+            EventType(core_type.value)
+        except ValueError:
+            missing.append(core_type.value)
+    assert not missing, f"CoreEventType members with no EventType counterpart: {missing}"
 
 
 def test_track_started_does_not_double_track_a_repeated_start_event(

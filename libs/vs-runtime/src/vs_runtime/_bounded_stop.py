@@ -155,16 +155,22 @@ class _StopGatedEvaluation:
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
+        round_label: str | None = None,
     ) -> AccuracyEvaluation:
-        return await self.until_stop(self._inner.accuracy(workspace, reuse=reuse))
+        return await self.until_stop(
+            self._inner.accuracy(workspace, reuse=reuse, round_label=round_label)
+        )
 
     async def benchmark(
         self,
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
+        round_label: str | None = None,
     ) -> BenchmarkEvaluation:
-        return await self.until_stop(self._inner.benchmark(workspace, objectives=objectives))
+        return await self.until_stop(
+            self._inner.benchmark(workspace, objectives=objectives, round_label=round_label)
+        )
 
     async def validate_local(
         self,

@@ -33,19 +33,19 @@ class RunControl(Protocol):
     `Runs.resume(RunRequest(resume=ResumeRef(run_id), ...))`.
     """
 
-    def steer(self, text: str) -> None:
+    def steer(self, text: str, *, client_id: str | None = None) -> None:
         """Send free-text steering input to the active run."""
         ...
 
-    def pause(self) -> None:
+    def pause(self, *, client_id: str | None = None) -> None:
         """Request the run reach its next safe boundary and release the write lease."""
         ...
 
-    def resume(self) -> None:
+    def resume(self, *, client_id: str | None = None) -> None:
         """Request the run acquire the write lease and continue from checkpoint."""
         ...
 
-    def stop(self) -> None:
+    def stop(self, *, client_id: str | None = None) -> None:
         """Request the run terminate."""
         ...
 

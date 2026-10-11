@@ -19,6 +19,7 @@ from vibesys.events import (
     InvocationStartedData,
     PhaseData,
     RoundFinishedData,
+    WorkstreamAttemptData,
     json_value,
 )
 from vibesys.run.agent_events import CoreAgentEventSink
@@ -98,6 +99,7 @@ class _CoreRunControlEvents:
             agent_kind=transition.agent_kind,
             round_label=transition.round_label,
             execution_id=transition.execution_id,
+            client_id=transition.client_id,
         )
 
 
@@ -126,11 +128,36 @@ class _RoundProjection(Protocol):
     def profile_skipped(self) -> bool: ...
 
 
+class _WorkstreamProjection(Protocol):
+    """Product facts needed to translate one workstream's attempt diagnostics."""
+
+    @property
+    def hypothesis_id(self) -> str: ...
+
+    @property
+    def attempt(self) -> int: ...
+
+    @property
+    def attempt_limit(self) -> int: ...
+
+    @property
+    def refunded(self) -> int: ...
+
+    @property
+    def last_error(self) -> str | None: ...
+
+    @property
+    def setup_failure(self) -> bool: ...
+
+
 class _RunProjection(Protocol):
     """Product facts needed to diff two committed state projections."""
 
     @property
     def rounds(self) -> tuple[_RoundProjection, ...]: ...
+
+    @property
+    def workstreams(self) -> tuple[_WorkstreamProjection, ...]: ...
 
     @property
     def experiment_revision(self) -> int | None: ...
@@ -187,6 +214,19 @@ def _round_entries(view: _RunProjection | None) -> dict[int, _RoundProjection]:
     return {round_summary.number: round_summary for round_summary in view.rounds}
 
 
+def _workstream_entries(view: _RunProjection | None) -> dict[str, _WorkstreamProjection]:
+    if view is None:
+        return {}
+    return {item.hypothesis_id: item for item in view.workstreams}
+
+
+def _workstream_diagnostics_key(
+    item: _WorkstreamProjection,
+) -> tuple[int, int, str | None, bool]:
+    """Return the fields whose change means this workstream's diagnostics moved."""
+    return (item.attempt, item.refunded, item.last_error, item.setup_failure)
+
+
 def _emit_commit_events(
     events: EventJournal,
     before: _RunProjection | None,
@@ -200,6 +240,14 @@ def _emit_commit_events(
     new_round_numbers = sorted(number for number in after_rounds if number not in before_rounds)
     for number in new_round_numbers:
         _emit_round_finished(events, after_rounds[number])
+    before_workstreams = _workstream_entries(before)
+    for hypothesis_id, item in _workstream_entries(after).items():
+        previous = before_workstreams.get(hypothesis_id)
+        if previous is not None and _workstream_diagnostics_key(
+            previous
+        ) == _workstream_diagnostics_key(item):
+            continue
+        _emit_workstream_attempt(events, item, previous)
     if before is None:
         return
     before_revision = before.experiment_revision
@@ -224,6 +272,41 @@ def _emit_round_finished(events: EventJournal, round_summary: _RoundProjection) 
             perf_metric=round_summary.perf_metric,
             perf_unit=round_summary.perf_unit,
             profile_skipped=round_summary.profile_skipped,
+        ),
+    )
+
+
+def _emit_workstream_attempt(
+    events: EventJournal,
+    item: _WorkstreamProjection,
+    previous: _WorkstreamProjection | None,
+) -> None:
+    """Emit one workstream's current attempt diagnostics.
+
+    ``repeated_error`` is true only when the previous summary was itself a
+    setup failure with identical error text: the deterministic case where
+    retrying spends budget on the same outcome every time (see
+    ``Workstreams._record_failure`` in ``orchestration/dynamic/workstream.py``,
+    whose own ``repeated`` computation this mirrors from durable state
+    instead of threading the transient local through the event).
+    """
+    repeated = (
+        previous is not None
+        and previous.setup_failure
+        and item.setup_failure
+        and previous.last_error is not None
+        and previous.last_error == item.last_error
+    )
+    events.emit(
+        CoreEventType.WORKSTREAM_ATTEMPT_UPDATED,
+        data=WorkstreamAttemptData(
+            hypothesis_id=item.hypothesis_id,
+            attempt=item.attempt,
+            attempt_limit=item.attempt_limit,
+            refunded=item.refunded,
+            last_error=item.last_error,
+            setup_failure=item.setup_failure,
+            repeated_error=repeated,
         ),
     )
 

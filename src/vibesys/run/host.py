@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from vibesys.composition import AgentToolContext, resolve_agent_specs
 from vibesys.events import (
@@ -19,6 +19,7 @@ from vibesys.events import (
     CoreEventType,
     FrameworkSource,
     FrameworkWarningData,
+    JudgeResultData,
 )
 from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.run.agent_events import CoreAgentEventSink
@@ -132,6 +133,29 @@ class _ProductObservations:
         self.events.emit(
             CoreEventType.FRAMEWORK_WARNING,
             data=FrameworkWarningData(summary=message, source=FrameworkSource.LOOP),
+        )
+
+    def judge_result(  # noqa: PLR0913  # lint-waiver: LW-234810 [PLR0913]; mirrors `Observations.judge_result`, which takes the same arguments for the same reason.
+        self,
+        *,
+        round_label: str,
+        verdict: Literal["pass", "fail", "skipped"],
+        analysis: str,
+        feedback: str,
+        skip_reason: Literal["blocked", "unchanged", "not_due"] | None,
+        implementer_outcome: str,
+    ) -> None:
+        """Publish one workstream's review assessment, correlated to its round."""
+        self.events.emit(
+            CoreEventType.JUDGE_RESULT,
+            data=JudgeResultData(
+                verdict=verdict,
+                analysis=analysis,
+                feedback=feedback,
+                skip_reason=skip_reason,
+                implementer_outcome=implementer_outcome,
+            ),
+            round_label=round_label,
         )
 
 

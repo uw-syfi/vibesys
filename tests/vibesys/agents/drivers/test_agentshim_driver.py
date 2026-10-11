@@ -48,6 +48,7 @@ from vs_agent.api import (
     AgentClient,
     AgentEvent,
     AgentEventKind,
+    AgentEventSink,
     AgentOutputSchemaError,
     AgentSessionKey,
     AgentTurnTimeoutError,
@@ -101,6 +102,46 @@ class _DriverOptions(TypedDict, total=False):
     docker_sandboxes: dict[str, Any] | None
     check_timeout: float | None
     transient_retry_delays: Sequence[float]
+    events: AgentEventSink
+
+
+@dataclass
+class _RetryWaitCall:
+    attempt: int
+    delay_s: float
+    error_kind: str
+
+
+class _RetryWaitCapturingSink(AgentEventSink):
+    """An :class:`AgentEventSink` that records every ``retry_wait`` call and
+    ignores everything else, for asserting the agentshim retry loop reports
+    its own waits rather than only logging them as plain text."""
+
+    def __init__(self) -> None:
+        self.retry_waits: list[_RetryWaitCall] = []
+
+    def agent_output(self, content: str, **kwargs: object) -> None:
+        del content, kwargs
+
+    def tool_call(self, tool: str, args: dict[str, Any], **kwargs: object) -> None:
+        del tool, args, kwargs
+
+    def tool_result(self, tool: str, content: str, **kwargs: object) -> None:
+        del tool, content, kwargs
+
+    def todo_update(self, todos: list[Any], **kwargs: object) -> None:
+        del todos, kwargs
+
+    def usage_update(self, input_tokens: int, **kwargs: object) -> None:
+        del input_tokens, kwargs
+
+    def turn_usage(self, **kwargs: object) -> None:
+        del kwargs
+
+    def retry_wait(self, attempt: int, delay_s: float, error_kind: str) -> None:
+        self.retry_waits.append(
+            _RetryWaitCall(attempt=attempt, delay_s=delay_s, error_kind=error_kind)
+        )
 
 
 @dataclass
@@ -229,6 +270,7 @@ def _driver(
         executor_factory=lambda: fake,
         # Zero waits keep the retry tests instant; the schedule is the knob.
         transient_retry_delays=options.get("transient_retry_delays", (0.0, 0.0)),
+        events=options.get("events", NULL_AGENT_EVENT_SINK),
     )
     return driver, fake
 
@@ -1382,6 +1424,43 @@ def test_a_transient_provider_error_is_retried(
     assert result.disposition is SessionDisposition.REUSABLE
     assert len(fake.requests) == 2
     assert any("transient provider error" in line for line in logs)
+
+
+@pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
+def test_a_transient_provider_error_reports_its_wait_to_the_event_sink(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The retry wait reaches an injected event sink, not only the plain-text log.
+
+    Regression: the retry loop previously only logged
+    "retrying this turn in ...s"; a caller with no log callback (or one that
+    wants structured data, like the live campaign dashboard) had no way to
+    observe a retry happening at all.
+    """
+    del sandbox_builds
+    events = _RetryWaitCapturingSink()
+    session, fake = _session(
+        tmp_path,
+        provider,
+        [
+            scripted_failure(provider, _TRANSIENT),
+            scripted_turn(provider, text="ok", session_id="s-1"),
+        ],
+        transient_retry_delays=(0.0,),
+        events=events,
+    )
+
+    result = session.run_turn(AgentTurnRequest(message="one"))
+
+    assert result.text == "ok"
+    assert len(fake.requests) == 2
+    assert len(events.retry_waits) == 1
+    call = events.retry_waits[0]
+    assert call.attempt == 1
+    assert call.delay_s == 0.0
+    assert call.error_kind == _TRANSIENT.value
 
 
 @pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)

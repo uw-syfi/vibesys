@@ -56,3 +56,26 @@ def test_control_transitions_keep_the_existing_persisted_event_format(
     assert persisted[1]["round_label"] == "round-1"
     assert persisted[1]["execution_id"] == "execution-1"
     assert all(event["run_id"] == "run-1" for event in persisted)
+
+
+def test_request_time_control_transitions_persist_the_issuing_client_id(
+    tmp_path: Path,
+) -> None:
+    integration = LocalRunIntegration()
+    integration.attach(tmp_path, run_id="run-1")
+    try:
+        integration.control.queue_steer("focus on latency", client_id="tab-a")
+        integration.control.request_pause(client_id="tab-a")
+        integration.control.resume(client_id="tab-a")
+    finally:
+        integration.close()
+
+    persisted = [
+        json.loads(line) for line in (tmp_path / "core-events.jsonl").read_text().splitlines()
+    ]
+    assert [event["type"] for event in persisted] == [
+        "steer_queued",
+        "pause_requested",
+        "resumed",
+    ]
+    assert [event["client_id"] for event in persisted] == ["tab-a", "tab-a", "tab-a"]

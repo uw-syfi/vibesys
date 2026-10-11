@@ -286,7 +286,7 @@ function resultTranscriptEntry(
       kind: 'result',
       content: data.feedback || `Judge returned ${data.verdict}.`,
       label: `Judge · ${data.verdict.toUpperCase()}`,
-      tone: data.verdict === 'pass' ? 'success' : 'failure',
+      tone: data.verdict === 'pass' ? 'success' : data.verdict === 'fail' ? 'failure' : 'normal',
       ...fields.agentFields,
       ...fields.roundFields,
     };

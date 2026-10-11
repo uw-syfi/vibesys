@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.execution import Sandbox
+    from vs_sandbox.gpu_monitor import ContentionEventSink
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
@@ -173,13 +174,24 @@ def create_compute_backend(
     *,
     log: Callable[[str], None] | None = None,
     image: str | None = None,
+    events: ContentionEventSink | None = None,
 ) -> ComputeBackendImpl:
-    """Construct the registered implementation for one compute stack."""
+    """Construct the registered implementation for one compute stack.
+
+    ``events`` is forwarded only to the CUDA backend, the only one that
+    constructs a contention monitor today; every other registered factory
+    takes the common ``(log_dir, log, image)`` construction contract without
+    it, so this wiring code is where that asymmetry is resolved rather than
+    pushing an unused parameter onto every backend.
+    """
     _ensure_defaults()
     if backend not in _REGISTRY:
         message = f"No backend impl registered for {backend!r}"
         raise ValueError(message)
-    return _REGISTRY[backend](log_dir=log_dir, log=log, image=image)
+    kwargs: dict[str, object] = {"log_dir": log_dir, "log": log, "image": image}
+    if backend is ComputeBackend.CUDA and events is not None:
+        kwargs["events"] = events
+    return _REGISTRY[backend](**kwargs)
 
 
 def _register_defaults() -> None:

@@ -137,6 +137,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
             log=driver_log,
             agent_homes=agent_homes_dir,
             env_passthrough=spec.env_passthrough,
+            events=events,
         )
 
     return AgentClient(

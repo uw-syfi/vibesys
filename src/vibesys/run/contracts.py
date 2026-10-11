@@ -163,6 +163,24 @@ class RoundSummary(BaseModel):
     profile_skipped: bool = False
 
 
+class WorkstreamAttemptSummary(BaseModel):
+    """One workstream's live retry-budget diagnostics, strategy-neutral.
+
+    Projects durable facts only (no transition semantics): whether a change
+    represents a repeated failure is derived by the caller that diffs two
+    successive summaries for the same ``hypothesis_id``, not stored here.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    hypothesis_id: str
+    attempt: int
+    attempt_limit: int
+    refunded: int
+    last_error: str | None = None
+    setup_failure: bool = False
+
+
 class PluginProjection(BaseModel):
     """Policy-owned JSON plus product-generic facts exposed by VibeSys."""
 
@@ -170,6 +188,7 @@ class PluginProjection(BaseModel):
 
     payload: dict[str, JsonValue] | None
     rounds: tuple[RoundSummary, ...] = ()
+    workstreams: tuple[WorkstreamAttemptSummary, ...] = ()
     experiment_revision: int | None = None
 
 
@@ -183,6 +202,7 @@ class RunView(BaseModel):
     status: RunStatus
     projection: dict[str, JsonValue] | None = None
     rounds: tuple[RoundSummary, ...] = ()
+    workstreams: tuple[WorkstreamAttemptSummary, ...] = ()
     experiment_revision: int | None = None
 
 
@@ -195,4 +215,5 @@ __all__ = [
     "RunResult",
     "RunStatus",
     "RunView",
+    "WorkstreamAttemptSummary",
 ]

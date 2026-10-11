@@ -716,6 +716,14 @@ class DynamicWorkstream(BaseModel):
     # Whether an implementer turn of this workstream has started. A setup
     # failure charges the budget without a turn, so the budget cannot say.
     implementer_started: bool = False
+    # Snapshot of the run's configured ``max_retries_per_round`` when this
+    # workstream was created, so a live projection of this one entity can
+    # report "attempt N of M" without the run's options in hand (the
+    # projection pipeline that turns durable state into live events reads
+    # only ``DynamicState``, never ``DynamicOptions``). The run's options are
+    # immutable for its lifetime, so this is a cached fact, not a second
+    # source of truth. 0 for workstreams durable before this field existed.
+    retry_limit: Annotated[int, Field(ge=0)] = 0
     # The latest revision of this hypothesis whose content passed accuracy in
     # an agent-submitted evaluation; a new workstream may build on it.
     verified: VerifiedCandidate | None = None

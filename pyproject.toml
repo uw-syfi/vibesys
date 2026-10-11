@@ -269,6 +269,12 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.Outco
 # module-level _HERE for profile_ops delegation tests, means touching its
 # underscore-prefixed names directly; there is no other entry point.
 "tests/vibesys/loops/test_rocprof_capture.py" = ["SLF001"]
+# TestContentionEventSink exercises GpuContentionMonitor's per-poll transition
+# logic (_poll_once, _baseline_pids) directly rather than through start()/stop()
+# plus a real sleep: that background-thread entry point only runs on a
+# wall-clock interval, which would make the "notify only on flip" property
+# untestable without a flaky timing-based test.
+"tests/vibesys/backends/test_gpu_monitor.py" = ["SLF001"]
 # capture_runtime.py is staged standalone (stdlib only) into arbitrary agent
 # workspaces and must run under Python 3.10+, so it avoids enum.StrEnum,
 # added in 3.11.

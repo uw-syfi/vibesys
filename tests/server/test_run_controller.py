@@ -138,6 +138,48 @@ def test_api_control_commands_ack_and_reach_controller(tmp_path: Path) -> None:
     assert "prioritize latency" in _enter_boundary(parts, "implementer", "round 1", "Work")
 
 
+def test_api_control_commands_attribute_their_client_id_onto_the_wire_event(
+    tmp_path: Path,
+) -> None:
+    """A command's `client_id` must survive onto the `CONTROL`/status event it causes.
+
+    Regression: `RunApi._execute_command` read `request.client_id` only to echo
+    it back on the `Response` (see `RunApi.execute`), then called
+    `RunControl.pause`/`resume`/`stop`/`steer` with no way to carry that id any
+    further. The issuing client was discarded between the request and the
+    event every other connected client observes.
+    """
+    parts = build_server_parts(tmp_path)
+
+    parts.api.execute(PauseCommand(client_id="tab-a"))
+    parts.api.execute(ResumeCommand(client_id="tab-b"))
+    parts.api.execute(SteerCommand(text="prioritize latency", client_id="tab-c"))
+
+    control_events = [event for event in parts.journal.read() if event.type is EventType.CONTROL]
+    assert [event.client_id for event in control_events] == ["tab-a", "tab-b", "tab-c"]
+    # The run's own ATTACHED-triggered status change (STARTING -> RUNNING) has
+    # no requesting client and precedes both of these; only the pause/resume
+    # transitions themselves are asserted here.
+    status_changes = [
+        (event.data.previous, event.data.status, event.client_id)
+        for event in parts.journal.read()
+        if isinstance(event.data, RunStatusChangedData)
+    ]
+    assert (RunStatus.RUNNING, RunStatus.PAUSING, "tab-a") in status_changes
+    assert (RunStatus.PAUSING, RunStatus.RUNNING, "tab-b") in status_changes
+
+
+def test_api_control_command_with_no_client_id_leaves_the_event_unattributed(
+    tmp_path: Path,
+) -> None:
+    parts = build_server_parts(tmp_path)
+
+    parts.api.execute(PauseCommand())
+
+    control_event = next(event for event in parts.journal.read() if event.type is EventType.CONTROL)
+    assert control_event.client_id is None
+
+
 def test_finish_is_idempotent_and_interrupts_controlled_executions(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.start_execution("implementer", "round 1", "work")

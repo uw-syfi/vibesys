@@ -83,6 +83,12 @@ class EventType(StrEnum):
     WORKSPACE_SNAPSHOT = "workspace_snapshot"
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
+    ASYNC_OPERATION_LIFECYCLE = "async_operation_lifecycle"
+    WORKSTREAM_ATTEMPT_UPDATED = "workstream_attempt_updated"
+    RETRY_WAIT_STARTED = "retry_wait_started"
+    GPU_CONTENTION_CHANGED = "gpu_contention_changed"
+    LOCAL_VALIDATION_SUMMARY = "local_validation_summary"
+    TURN_USAGE_RECORDED = "turn_usage_recorded"
 
 
 class EventStatus(StrEnum):
@@ -119,6 +125,29 @@ class FrameworkSource(StrEnum):
     GPU = "gpu"
     SKYPILOT = "skypilot"
     OTHER = "other"
+
+
+class AsyncOperationKind(StrEnum):
+    """Framework-owned categories of asynchronous operation."""
+
+    EVALUATION = "evaluation"
+    PROFILER = "profiler"
+
+
+class AsyncOperationState(StrEnum):
+    """Union of backend-neutral lifecycle states published by operation services."""
+
+    SUBMITTED = "submitted"
+    QUEUED = "queued"
+    STARTING = "starting"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELED = "canceled"
+    INTERRUPTED = "interrupted"
+    SUPERSEDED = "superseded"
+    TIMED_OUT = "timed_out"
 
 
 class EventPayload(BaseModel):
@@ -350,12 +379,23 @@ class SubprocessOutputData(EventPayload):
 
 
 class JudgeResultData(EventPayload):
-    """Verdict and feedback returned by the judge."""
+    """One workstream's review assessment: a judge verdict or a skip reason.
+
+    ``skipped`` means no judge turn ran this assessment (the workstream's own
+    correlation, carried by the event envelope's ``round_label``, is what
+    repeat assessments of the same workstream share); ``skip_reason`` then
+    names why. ``implementer_outcome`` is the implementer's own self-declared
+    readiness for this attempt, present regardless of whether a review ran.
+    It defaults to empty so a journal record written before this field
+    existed still parses; a reader should treat an empty string as unknown.
+    """
 
     kind: Literal["judge_result"] = "judge_result"
-    verdict: Literal["pass", "fail"]
-    feedback: str
-    attempt: int
+    verdict: Literal["pass", "fail", "skipped"]
+    analysis: str = ""
+    feedback: str = ""
+    skip_reason: Literal["blocked", "unchanged", "not_due"] | None = None
+    implementer_outcome: str = ""
 
 
 class BenchmarkResultData(EventPayload):
@@ -462,6 +502,74 @@ class FrameworkWarningData(EventPayload):
     source_label: str | None = None
 
 
+class AsyncOperationLifecycleData(EventPayload):
+    """Backend-neutral lifecycle fact for host-owned asynchronous work."""
+
+    kind: Literal["async_operation_lifecycle"] = "async_operation_lifecycle"
+    operation_kind: AsyncOperationKind
+    operation_id: str = Field(min_length=1)
+    state: AsyncOperationState
+    revision: int | None = Field(default=None, ge=0)
+    scope_id: str | None = None
+    current_stage: str | None = None
+    source: FrameworkSource = FrameworkSource.LOOP
+
+
+class WorkstreamAttemptData(EventPayload):
+    """Live retry-budget diagnostics for one dynamic-portfolio workstream."""
+
+    kind: Literal["workstream_attempt_updated"] = "workstream_attempt_updated"
+    hypothesis_id: str
+    attempt: int
+    attempt_limit: int
+    refunded: int
+    last_error: str | None = None
+    setup_failure: bool = False
+    repeated_error: bool = False
+
+
+class RetryWaitData(EventPayload):
+    """One wait before retrying an agent turn that failed on a transient provider error."""
+
+    kind: Literal["retry_wait_started"] = "retry_wait_started"
+    attempt: int
+    delay_s: FiniteFloat
+    error_kind: str
+
+
+class GpuContentionData(EventPayload):
+    """One contention-state transition observed by a GPU contention monitor."""
+
+    kind: Literal["gpu_contention_changed"] = "gpu_contention_changed"
+    is_contended: bool
+    new_process_count: int = Field(ge=0)
+    gpu_index: int | None = None
+    memory_used_mib: int | None = None
+    memory_total_mib: int | None = None
+    utilization_pct: int | None = None
+
+
+class LocalValidationSummaryData(EventPayload):
+    """Recipe pass-fraction for one ``validate_local`` call."""
+
+    kind: Literal["local_validation_summary"] = "local_validation_summary"
+    attempted: int = Field(ge=0)
+    succeeded: int = Field(ge=0)
+    passed: bool
+
+
+class TurnUsageData(EventPayload):
+    """Token and cost accounting for one completed agent turn."""
+
+    kind: Literal["turn_usage_recorded"] = "turn_usage_recorded"
+    input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_cost_usd: float | None = None
+    duration_ms: int | None = None
+
+
 EventData = Annotated[
     ChatData
     | ChatThreadCreatedData
@@ -491,7 +599,13 @@ EventData = Annotated[
     | GateFinishedData
     | WorkspaceSnapshotData
     | RunConfiguredData
-    | FrameworkWarningData,
+    | FrameworkWarningData
+    | AsyncOperationLifecycleData
+    | WorkstreamAttemptData
+    | RetryWaitData
+    | GpuContentionData
+    | LocalValidationSummaryData
+    | TurnUsageData,
     Field(discriminator="kind"),
 ]
 
@@ -521,6 +635,12 @@ class RunEvent(BaseModel):
     # Which experiment-chat thread a chat event belongs to. None is the
     # default thread, preserving events written before threads existed.
     chat_thread_id: str | None = None
+    # Stable identity of the frontend connection whose request caused a
+    # request-time control transition (`CONTROL`/`RUN_STATUS_CHANGED` events
+    # from `/pause`, `/resume`, `/stop`, `/steer`). ``None`` for events with
+    # no requesting client, mirroring `Request.client_id`'s empty-string
+    # compatibility default (see `server.api.protocol.Request`).
+    client_id: str | None = None
     data: EventData | None = None
 
     @model_validator(mode="before")

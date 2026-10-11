@@ -51,6 +51,12 @@ def test_version_6_golden_migrates_without_changing_planner_data(
     new_data.pop("agent", None)
     for item in new_data["workstreams"]:
         assert item.pop("invocation_sequence") == 0
+        # retry_limit postdates v6; migration's early-version branch does not
+        # rewrite per-workstream fields, so Pydantic fills the class default
+        # (0) on load. orchestration.py reconstructs every workstream with
+        # the live retry_limit on its next round regardless of origin, the
+        # same self-healing precedent as invocation_sequence above.
+        assert item.pop("retry_limit") == 0
     new_data["schema_version"] = 6
     assert new_data == old_data
     if fixture == "completed":

@@ -89,6 +89,7 @@ class RunController:
         agent_kind: str | None = None,
         round_label: str | None = None,
         execution_id: str | None = None,
+        client_id: str | None = None,
     ) -> RunStatus:
         """Apply one lifecycle trigger and publish the change it caused.
 
@@ -109,32 +110,44 @@ class RunController:
             agent_kind=agent_kind,
             round_label=round_label,
             execution_id=execution_id,
+            client_id=client_id,
         )
         self._condition.notify_all()
         return current
 
-    def pause_after_call(self) -> None:
+    def pause_after_call(self, *, client_id: str | None = None) -> None:
         """Request a pause after the current controlled invocation finishes."""
         with self._condition:
-            self._apply_locked(RunTrigger.PAUSE_REQUESTED)
-            self._journal.record(EventType.CONTROL, "/pause", status=EventStatus.PENDING)
+            self._apply_locked(RunTrigger.PAUSE_REQUESTED, client_id=client_id)
+            self._journal.record(
+                EventType.CONTROL, "/pause", status=EventStatus.PENDING, client_id=client_id
+            )
 
-    def stop_after_call(self) -> None:
+    def stop_after_call(self, *, client_id: str | None = None) -> None:
         """Request a stop at the next controlled invocation boundary."""
         with self._condition:
-            self._apply_locked(RunTrigger.STOP_REQUESTED)
-            self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.PENDING)
+            self._apply_locked(RunTrigger.STOP_REQUESTED, client_id=client_id)
+            self._journal.record(
+                EventType.CONTROL, "/stop", status=EventStatus.PENDING, client_id=client_id
+            )
 
-    def resume(self) -> None:
+    def resume(self, *, client_id: str | None = None) -> None:
         """Resume controlled invocations and clear a pending pause or stop."""
         with self._condition:
-            self._apply_locked(RunTrigger.RESUMED)
-            self._journal.record(EventType.CONTROL, "/resume", status=EventStatus.CONSUMED)
+            self._apply_locked(RunTrigger.RESUMED, client_id=client_id)
+            self._journal.record(
+                EventType.CONTROL, "/resume", status=EventStatus.CONSUMED, client_id=client_id
+            )
 
-    def steer(self, text: str) -> None:
+    def steer(self, text: str, *, client_id: str | None = None) -> None:
         """Queue operator guidance for the next controlled invocation."""
         with self._condition:
-            self._journal.record(EventType.CONTROL, f"/steer: {text}", status=EventStatus.PENDING)
+            self._journal.record(
+                EventType.CONTROL,
+                f"/steer: {text}",
+                status=EventStatus.PENDING,
+                client_id=client_id,
+            )
 
     def start_agent_execution(
         self,

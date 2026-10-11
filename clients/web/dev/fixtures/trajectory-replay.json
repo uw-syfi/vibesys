@@ -3837,5 +3837,67 @@
         }
       ]
     }
+  ],
+  "judgeResults": [
+    {
+      "id": "judge-engine-integration-1",
+      "sequence": 1,
+      "workstreamId": "engine-integration",
+      "verdict": "pass",
+      "analysis": "The integration composes accepted kernels, graph capture, and scheduling without regressing correctness checks.",
+      "feedback": "",
+      "skipReason": null,
+      "implementerOutcome": "nominated"
+    },
+    {
+      "id": "judge-prefix-state-reuse-2",
+      "sequence": 2,
+      "workstreamId": "prefix-state-reuse",
+      "verdict": "fail",
+      "analysis": "Reused state diverges from a full recompute on multi-turn conversations with a system prompt change.",
+      "feedback": "Invalidate reused state when the system prompt changes between turns.",
+      "skipReason": null,
+      "implementerOutcome": "nominated"
+    },
+    {
+      "id": "judge-graph-runtime-4",
+      "sequence": 4,
+      "workstreamId": "graph-runtime",
+      "verdict": "skipped",
+      "analysis": "",
+      "feedback": "",
+      "skipReason": "blocked",
+      "implementerOutcome": "blocked"
+    },
+    {
+      "id": "judge-hot-expert-paths-12",
+      "sequence": 12,
+      "workstreamId": "hot-expert-paths",
+      "verdict": "skipped",
+      "analysis": "",
+      "feedback": "",
+      "skipReason": "unchanged",
+      "implementerOutcome": "nominated"
+    },
+    {
+      "id": "judge-hot-expert-paths-13",
+      "sequence": 13,
+      "workstreamId": "hot-expert-paths",
+      "verdict": "fail",
+      "analysis": "Expert routing cache invalidation misses the hot-path update for newly promoted experts.",
+      "feedback": "Invalidate the routing cache entry for an expert when its weights are hot-swapped.",
+      "skipReason": null,
+      "implementerOutcome": "nominated"
+    },
+    {
+      "id": "judge-engine-integration-30",
+      "sequence": 30,
+      "workstreamId": "engine-integration",
+      "verdict": "skipped",
+      "analysis": "",
+      "feedback": "",
+      "skipReason": "not_due",
+      "implementerOutcome": "nominated"
+    }
   ]
 }

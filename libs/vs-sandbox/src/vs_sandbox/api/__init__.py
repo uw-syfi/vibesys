@@ -32,6 +32,8 @@ if TYPE_CHECKING:
     from vs_sandbox.docker_sandbox import AGENT_HOME, DockerSandbox
     from vs_sandbox.execution import Sandbox, SandboxExecutionResult
     from vs_sandbox.gpu_monitor import (
+        ContentionEventSink,
+        ContentionStatus,
         GpuContentionMonitor,
         GpuInfo,
         parse_gpu_process_output,
@@ -82,7 +84,9 @@ __all__ = [
     "BeforeReadyContext",
     "ComputeBackend",
     "ComputeBackendImpl",
+    "ContentionEventSink",
     "ContentionMonitor",
+    "ContentionStatus",
     "CudaBackend",
     "Device",
     "DeviceLease",
@@ -145,6 +149,8 @@ _LAZY_EXPORTS = {
     "register_compute_backend": ("compute_backends", "register_compute_backend"),
     "CudaBackend": ("cuda_backend", "CudaBackend"),
     "DeviceLease": ("device_lease", "DeviceLease"),
+    "ContentionEventSink": ("gpu_monitor", "ContentionEventSink"),
+    "ContentionStatus": ("gpu_monitor", "ContentionStatus"),
     "GpuContentionMonitor": ("gpu_monitor", "GpuContentionMonitor"),
     "GpuInfo": ("gpu_monitor", "GpuInfo"),
     "parse_gpu_process_output": ("gpu_monitor", "parse_gpu_process_output"),

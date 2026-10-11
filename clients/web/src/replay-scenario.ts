@@ -8,6 +8,8 @@
 export type MetricDirection = 'maximize' | 'minimize';
 export type WorkstreamOutcome = 'accepted' | 'rejected';
 export type MeasurementDisposition = 'accepted' | 'rejected' | 'inconclusive';
+export type JudgeVerdict = 'pass' | 'fail' | 'skipped';
+export type JudgeSkipReason = 'blocked' | 'unchanged' | 'not_due';
 type MeasurementKind = 'official' | 'candidate' | 'control' | 'diagnostic' | 'quick';
 type GateStatus = 'passed' | 'failed' | 'skipped';
 export type TurnMessage =
@@ -93,6 +95,22 @@ export interface CampaignRecord {
       messages: TurnMessage[];
     }[];
   }[];
+  /**
+   * The review assessments of each workstream attempt, in arrival order: a
+   * judge verdict when a review ran, or a skip reason (with empty analysis
+   * and feedback) when it did not. A workstream may have several, one per
+   * `_assess` pass over its lifetime.
+   */
+  judgeResults: {
+    id: string;
+    sequence: number;
+    workstreamId: string;
+    verdict: JudgeVerdict;
+    analysis: string;
+    feedback: string;
+    skipReason: JudgeSkipReason | null;
+    implementerOutcome: string;
+  }[];
 }
 
 /** Compatibility name for the original fixture parser API. */
@@ -159,6 +177,12 @@ type JsonObject = Record<string, unknown> & {
   toolName?: unknown;
   arguments?: unknown;
   isError?: unknown;
+  judgeResults?: unknown;
+  verdict?: unknown;
+  analysis?: unknown;
+  feedback?: unknown;
+  skipReason?: unknown;
+  implementerOutcome?: unknown;
 };
 type ReplayFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -186,6 +210,7 @@ export function parseReplayScenario(value: unknown): ReplayScenario {
     'agents',
     'measurements',
     'trajectories',
+    'judgeResults',
   ]);
   if (root.schemaVersion !== 1) fail('$.schemaVersion', 'expected 1');
 
@@ -223,6 +248,10 @@ export function parseReplayScenario(value: unknown): ReplayScenario {
   uniqueBy(trajectories, '$.trajectories', trajectory => trajectory.agentId);
   validateTrajectories(trajectories, agentIds, workstreams);
 
+  const judgeResults = arrayAt(root.judgeResults, '$.judgeResults', parseJudgeResult);
+  uniqueIds(judgeResults, '$.judgeResults');
+  validateJudgeResults(judgeResults, workstreams);
+
   return {
     schemaVersion: 1,
     id: stringAt(root.id, '$.id'),
@@ -236,6 +265,7 @@ export function parseReplayScenario(value: unknown): ReplayScenario {
     agents,
     measurements,
     trajectories,
+    judgeResults,
   };
 }
 
@@ -480,6 +510,40 @@ function parseTrajectory(value: unknown, path: string): ReplayScenario['trajecto
   if (turns.some((turn, index) => turn.ordinal !== index + 1))
     fail(`${path}.turns`, 'ordinals must be contiguous and ordered from 1');
   return {agentId: stringAt(object.agentId, `${path}.agentId`), turns};
+}
+
+function parseJudgeResult(value: unknown, path: string): ReplayScenario['judgeResults'][number] {
+  const object = objectAt(value, path);
+  exactKeys(object, path, [
+    'id',
+    'sequence',
+    'workstreamId',
+    'verdict',
+    'analysis',
+    'feedback',
+    'skipReason',
+    'implementerOutcome',
+  ]);
+  const verdict = enumAt(object.verdict, `${path}.verdict`, ['pass', 'fail', 'skipped'] as const);
+  const skipReasonPath = `${path}.skipReason`;
+  const skipReason =
+    object.skipReason === null
+      ? null
+      : enumAt(object.skipReason, skipReasonPath, ['blocked', 'unchanged', 'not_due'] as const);
+  if (verdict === 'skipped' && skipReason === null)
+    fail(skipReasonPath, 'required when verdict is skipped');
+  if (verdict !== 'skipped' && skipReason !== null)
+    fail(skipReasonPath, 'must be null unless verdict is skipped');
+  return {
+    id: stringAt(object.id, `${path}.id`),
+    sequence: positiveIntegerAt(object.sequence, `${path}.sequence`),
+    workstreamId: stringAt(object.workstreamId, `${path}.workstreamId`),
+    verdict,
+    analysis: textAt(object.analysis, `${path}.analysis`),
+    feedback: textAt(object.feedback, `${path}.feedback`),
+    skipReason,
+    implementerOutcome: stringAt(object.implementerOutcome, `${path}.implementerOutcome`),
+  };
 }
 
 function parseTurnMessage(value: unknown, path: string): TurnMessage {
@@ -737,6 +801,25 @@ function validateTrajectories(
   }
 }
 
+function validateJudgeResults(
+  judgeResults: ReplayScenario['judgeResults'],
+  workstreams: ReplayScenario['workstreams'],
+): void {
+  const workstreamMap = new Map(workstreams.map(workstream => [workstream.id, workstream]));
+  for (const [index, result] of judgeResults.entries()) {
+    const path = `$.judgeResults[${index}]`;
+    const workstream = requiredReference(
+      workstreamMap,
+      result.workstreamId,
+      `${path}.workstreamId`,
+      'unknown workstream',
+    );
+    if (result.sequence < workstream.firstSequence || result.sequence > workstream.lastSequence) {
+      fail(`${path}.sequence`, 'outside workstream lifecycle interval');
+    }
+  }
+}
+
 function objectAt(value: unknown, path: string): JsonObject {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     return fail(path, 'expected object');
@@ -758,6 +841,14 @@ function stringAt(value: unknown, path: string): string {
 
 function nullableStringAt(value: unknown, path: string): string | null {
   return value === null ? null : stringAt(value, path);
+}
+
+/** Like `stringAt`, but accepts an empty string: for prose fields that are
+ * legitimately blank, such as a judge result's `analysis`/`feedback` when no
+ * review ran (see `JudgeResultData` on the backend). */
+function textAt(value: unknown, path: string): string {
+  if (typeof value !== 'string') return fail(path, 'expected a string');
+  return value;
 }
 
 function numberAt(value: unknown, path: string): number {

@@ -76,6 +76,7 @@ from vs_runtime.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
+    from typing import Literal, Protocol
 
     from vibesys.orchestration.dynamic.models import (
         DynamicOptions,
@@ -95,6 +96,26 @@ if TYPE_CHECKING:
         CandidateWorkspace,
         Run,
     )
+
+    # Why a review was not run this assessment; mirrors `Observations.judge_result`'s
+    # `skip_reason` on the lower `vs_runtime` contract (plain strings there, since
+    # that Protocol must not import this package's domain types).
+    SkipReason = Literal["blocked", "unchanged", "not_due"]
+
+    class JudgeResultEmitter(Protocol):
+        """Publish one workstream's review assessment; matches `Observations.judge_result`."""
+
+        def __call__(  # noqa: PLR0913  # lint-waiver: LW-821523 [PLR0913]; mirrors `Observations.judge_result`, which takes the same arguments for the same reason.
+            self,
+            *,
+            round_label: str,
+            verdict: Literal["pass", "fail", "skipped"],
+            analysis: str,
+            feedback: str,
+            skip_reason: SkipReason | None,
+            implementer_outcome: str,
+        ) -> None: ...
+
 
 _READY_OUTCOMES = frozenset({HypothesisOutcome.NOMINATED, HypothesisOutcome.SUPPORTED})
 # Phases with a retained implementation; an attempt resumes after it.
@@ -191,6 +212,10 @@ class Workstreams:
     rounds: Rounds
     lock: asyncio.Lock
     commit: Callable[[str], Awaitable[None]]
+    # Publishes one workstream's review assessment (a judge verdict or a skip
+    # reason); ultimately `Run.observations.judge_result`, injected so this
+    # module never imports the concrete event-writer mechanism.
+    emit_judge_result: JudgeResultEmitter
     # Agent turns started per hypothesis in this process; an attempt that
     # started none failed in setup, before any agent could act.
     _agent_turns: dict[str, int] = field(default_factory=dict)
@@ -696,16 +721,19 @@ class Workstreams:
         review = item.review
         if item.phase is WorkstreamPhase.IMPLEMENTED:
             try:
-                review = await self._maybe_review(
+                review, skip_reason = await self._maybe_review(
                     plan, implementation, workspace, revision, item.sequence
                 )
             except EvaluationAttemptBoundError as error:
                 return False, str(error)
+            self._emit_judge_result(item.sequence, implementation, review, skip_reason)
             if review is not None:
                 await self._update(index, phase=WorkstreamPhase.REVIEWED, review=review)
         if review is not None and not review.passed:
             return False, review.feedback
-        evaluation = await self._maybe_evaluate(implementation, review, workspace, revision)
+        evaluation = await self._maybe_evaluate(
+            implementation, review, workspace, revision, f"round-{item.sequence}"
+        )
         final_phase = (
             WorkstreamPhase.EVALUATED
             if evaluation is not None
@@ -717,6 +745,23 @@ class Workstreams:
         if evaluation is not None and not evaluation.accepted:
             return False, _evaluation_feedback(evaluation)
         return True, None
+
+    def _emit_judge_result(
+        self,
+        sequence: int,
+        implementation: ImplementerResult,
+        review: ReviewResult | None,
+        skip_reason: SkipReason | None,
+    ) -> None:
+        """Publish this assessment's review outcome or skip reason, correlated to its round."""
+        self.emit_judge_result(
+            round_label=f"round-{sequence}",
+            verdict="skipped" if review is None else ("pass" if review.passed else "fail"),
+            analysis="" if review is None else review.analysis,
+            feedback="" if review is None else review.feedback,
+            skip_reason=skip_reason,
+            implementer_outcome=implementation.outcome.value,
+        )
 
     async def _implement(
         self,
@@ -918,17 +963,22 @@ class Workstreams:
         workspace: CandidateWorkspace,
         revision: str,
         sequence: int,
-    ) -> ReviewResult | None:
-        # A blocked attempt or an unchanged tree leaves nothing to assess;
-        # reviewing it spends a judge turn on an empty candidate.
+    ) -> tuple[ReviewResult | None, SkipReason | None]:
+        # A blocked attempt leaves nothing to assess regardless of whether the
+        # tree changed; an unaltered tree with another outcome likewise has
+        # nothing new for a judge turn to look at. Checked in that order so a
+        # blocked attempt is always reported as `blocked`, its more specific,
+        # self-declared reason, even when it also left the tree unchanged.
+        if implementation.outcome is HypothesisOutcome.BLOCKED:
+            return None, "blocked"
         unchanged = (
             revision
             == self.state.workstreams[
                 workstream_index(self.state, plan.hypothesis_id)
             ].parent_revision
         )
-        if implementation.outcome is HypothesisOutcome.BLOCKED or unchanged:
-            return None
+        if unchanged:
+            return None, "unchanged"
         # A candidate that may be promoted is always reviewed. Another
         # terminal outcome is reviewed on every `judge_every`-th workstream,
         # counted by its sequence (its round number), as a sequential loop
@@ -939,7 +989,7 @@ class Workstreams:
             and sequence % self.options.judge_every == 0
         )
         if not due:
-            return None
+            return None, "not_due"
         submitted = await self.run.evaluation.agent_evaluations(workspace)
         index = workstream_index(self.state, plan.hypothesis_id)
         suspended = awaiting_evaluation(self.state.lifecycle, plan.hypothesis_id, sequence)
@@ -960,7 +1010,7 @@ class Workstreams:
             index = workstream_index(self.state, plan.hypothesis_id)
             if suspended:
                 reply = await self._resume_suspended(index, workspace, session)
-                return ReviewResult.model_validate(reply)
+                return ReviewResult.model_validate(reply), None
             notes = await self._dispatch_turn(index, JUDGE)
 
             validated = self._suspension().validated_session(session, RootModel[JudgeReply])
@@ -986,7 +1036,7 @@ class Workstreams:
                 reply = await self._suspend(index, workspace, session, reply)
             else:
                 await self._acknowledge_turn(index)
-            return ReviewResult.model_validate(reply)
+            return ReviewResult.model_validate(reply), None
         finally:
             session = original_session
             authority = None if suspended else self._release_authority(index)
@@ -1002,6 +1052,7 @@ class Workstreams:
         review: ReviewResult | None,
         workspace: CandidateWorkspace,
         revision: str,
+        round_label: str,
     ) -> EvaluationResult | None:
         # Every review-passed ready candidate is evaluated; `official_eval_every`
         # does not apply. Workstreams are parallel branches, so an unevaluated
@@ -1016,14 +1067,18 @@ class Workstreams:
         try:
             async with asyncio.TaskGroup() as evaluations:
                 accuracy_task = (
-                    evaluations.create_task(self.run.evaluation.accuracy(workspace))
+                    evaluations.create_task(
+                        self.run.evaluation.accuracy(workspace, round_label=round_label)
+                    )
                     if self.run.facts.accuracy_configured
                     else None
                 )
                 benchmark_task = (
                     evaluations.create_task(
                         self.run.evaluation.benchmark(
-                            workspace, objectives=benchmark_objectives(self.options)
+                            workspace,
+                            objectives=benchmark_objectives(self.options),
+                            round_label=round_label,
                         ),
                     )
                     if self.run.facts.benchmark_configured

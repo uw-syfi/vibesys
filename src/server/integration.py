@@ -403,13 +403,13 @@ class RunIntegrationAdapter:
         bookkeeping methods -- it does not append a second wire event.
         """
         if event.type is CoreEventType.STEER_QUEUED:
-            self.controller.steer(event.text)
+            self.controller.steer(event.text, client_id=event.client_id)
         elif event.type is CoreEventType.PAUSE_REQUESTED:
-            self.controller.pause_after_call()
+            self.controller.pause_after_call(client_id=event.client_id)
         elif event.type is CoreEventType.RESUMED:
-            self.controller.resume()
+            self.controller.resume(client_id=event.client_id)
         elif event.type is CoreEventType.STOP_REQUESTED:
-            self.controller.stop_after_call()
+            self.controller.stop_after_call(client_id=event.client_id)
         elif event.type is CoreEventType.STEER_CONSUMED:
             self.controller.record_steer_consumed(
                 agent_kind=event.agent_kind,

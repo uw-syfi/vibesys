@@ -1,6 +1,15 @@
+import type {
+  FrameOperatorAction,
+  WorkstreamActivityState,
+  WorkstreamAttemptState,
+} from './campaign-frames.js';
 import type {CampaignRecord} from './campaign-record.js';
 
 export type CampaignView = 'dashboard' | 'objective';
+/** Whether the view model's source is receiving frames promptly. A fixture
+ * clock has no notion of staleness and always reports `fresh`; a live fold
+ * derives it from the time since the last frame arrived. */
+export type ConnectionFreshness = 'fresh' | 'stale';
 export type CampaignTimeline = 'workstreams' | 'agents';
 export type WorkstreamLayout = 'kanban' | 'table';
 export type WorkstreamSort =
@@ -19,10 +28,12 @@ export type WorkstreamSort =
  */
 export interface CampaignViewModel {
   readonly activeMeasurement: CampaignRecord['measurements'][number] | undefined;
+  readonly connectionFreshness: ConnectionFreshness;
   readonly cursorSequence: number;
   readonly latestTimestamp: string;
   readonly metric: CampaignRecord['objective']['metrics'][number] | undefined;
   readonly metricId: string;
+  readonly operatorActions: readonly FrameOperatorAction[];
   readonly orderedMeasurements: CampaignRecord['measurements'];
   readonly playing: boolean;
   readonly pointIndex: number;
@@ -33,6 +44,8 @@ export interface CampaignViewModel {
   readonly timelineMode: CampaignTimeline;
   readonly view: CampaignView;
   readonly visibleWorkstreamCount: number;
+  readonly workstreamActivity: Readonly<Record<string, WorkstreamActivityState>>;
+  readonly workstreamAttempts: Readonly<Record<string, WorkstreamAttemptState>>;
   readonly workstreamLayout: WorkstreamLayout;
   readonly workstreamSort: WorkstreamSort;
   readonly workstreamTokenSpend: Readonly<Record<string, number>>;

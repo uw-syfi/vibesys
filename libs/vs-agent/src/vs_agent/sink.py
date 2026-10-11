@@ -89,6 +89,36 @@ class AgentEventSink(Protocol):
         """Publish token usage from the current model response."""
         ...
 
+    def retry_wait(self, attempt: int, delay_s: float, error_kind: str) -> None:
+        """Publish one wait before retrying a turn that hit a transient provider error.
+
+        No ``agent_kind``/``round_label``/``invocation_id``: the retry loop
+        wraps a whole turn, before any per-turn context is bound, the same
+        limitation the plain-text driver log already has for this notice.
+        """
+        ...
+
+    def turn_usage(  # noqa: PLR0913  # lint-waiver: LW-615743 [PLR0913]; Preserve AgentEventSink.turn_usage's named-argument contract because callers pass these independent settings directly.
+        self,
+        *,
+        input_tokens: int | None = None,
+        cache_creation_input_tokens: int | None = None,
+        cache_read_input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        total_cost_usd: float | None = None,
+        duration_ms: int | None = None,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Publish one completed turn's token and cost accounting.
+
+        Fires alongside the durable ``usage.jsonl`` row ``AgentClient``
+        already writes, with the same accounting and routing metadata, not
+        instead of it.
+        """
+        ...
+
 
 class NullAgentEventSink:
     """No-op :class:`AgentEventSink` — the default when no sink is injected.
@@ -164,6 +194,36 @@ class NullAgentEventSink:
     ) -> None:
         """Ignore usage updates when no event sink was injected."""
         del input_tokens, context_window, model, agent_kind, round_label, invocation_id
+
+    def retry_wait(self, attempt: int, delay_s: float, error_kind: str) -> None:
+        """Ignore a retry wait when no event sink was injected."""
+        del attempt, delay_s, error_kind
+
+    def turn_usage(  # noqa: PLR0913  # lint-waiver: LW-463450 [PLR0913]; Preserve NullAgentEventSink.turn_usage's named-argument contract because callers pass these independent settings directly.
+        self,
+        *,
+        input_tokens: int | None = None,
+        cache_creation_input_tokens: int | None = None,
+        cache_read_input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        total_cost_usd: float | None = None,
+        duration_ms: int | None = None,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Ignore turn usage accounting when no event sink was injected."""
+        del (
+            input_tokens,
+            cache_creation_input_tokens,
+            cache_read_input_tokens,
+            output_tokens,
+            total_cost_usd,
+            duration_ms,
+            agent_kind,
+            round_label,
+            invocation_id,
+        )
 
 
 NULL_AGENT_EVENT_SINK = NullAgentEventSink()

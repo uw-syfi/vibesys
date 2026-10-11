@@ -349,6 +349,104 @@
       "title": "AgentStatusData",
       "type": "object"
     },
+    "AsyncOperationKind": {
+      "description": "Framework-owned categories of asynchronous operation.",
+      "enum": [
+        "evaluation",
+        "profiler"
+      ],
+      "title": "AsyncOperationKind",
+      "type": "string"
+    },
+    "AsyncOperationLifecycleData": {
+      "description": "Backend-neutral lifecycle fact for host-owned asynchronous work.",
+      "properties": {
+        "kind": {
+          "const": "async_operation_lifecycle",
+          "default": "async_operation_lifecycle",
+          "title": "Kind",
+          "type": "string"
+        },
+        "operation_kind": {
+          "$ref": "#/$defs/AsyncOperationKind"
+        },
+        "operation_id": {
+          "minLength": 1,
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/AsyncOperationState"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        },
+        "scope_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scope Id"
+        },
+        "current_stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Stage"
+        },
+        "source": {
+          "$ref": "#/$defs/FrameworkSource",
+          "default": "loop"
+        }
+      },
+      "required": [
+        "kind",
+        "operation_kind",
+        "operation_id",
+        "state"
+      ],
+      "title": "AsyncOperationLifecycleData",
+      "type": "object"
+    },
+    "AsyncOperationState": {
+      "description": "Union of backend-neutral lifecycle states published by operation services.",
+      "enum": [
+        "submitted",
+        "queued",
+        "starting",
+        "running",
+        "succeeded",
+        "completed",
+        "failed",
+        "canceled",
+        "interrupted",
+        "superseded",
+        "timed_out"
+      ],
+      "title": "AsyncOperationState",
+      "type": "string"
+    },
     "BenchmarkResultData": {
       "description": "Metric result emitted by a benchmark stage.",
       "properties": {
@@ -1419,7 +1517,13 @@
         "gate_finished",
         "workspace_snapshot",
         "run_configured",
-        "framework_warning"
+        "framework_warning",
+        "async_operation_lifecycle",
+        "workstream_attempt_updated",
+        "retry_wait_started",
+        "gpu_contention_changed",
+        "local_validation_summary",
+        "turn_usage_recorded"
       ],
       "title": "EventType",
       "type": "string"
@@ -1882,6 +1986,81 @@
         "gate"
       ],
       "title": "GateStartedData",
+      "type": "object"
+    },
+    "GpuContentionData": {
+      "description": "One contention-state transition observed by a GPU contention monitor.",
+      "properties": {
+        "kind": {
+          "const": "gpu_contention_changed",
+          "default": "gpu_contention_changed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "is_contended": {
+          "title": "Is Contended",
+          "type": "boolean"
+        },
+        "new_process_count": {
+          "minimum": 0,
+          "title": "New Process Count",
+          "type": "integer"
+        },
+        "gpu_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Index"
+        },
+        "memory_used_mib": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Used Mib"
+        },
+        "memory_total_mib": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Total Mib"
+        },
+        "utilization_pct": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Utilization Pct"
+        }
+      },
+      "required": [
+        "kind",
+        "is_contended",
+        "new_process_count"
+      ],
+      "title": "GpuContentionData",
       "type": "object"
     },
     "HistoryQuery": {
@@ -2467,7 +2646,7 @@
       "type": "object"
     },
     "JudgeResultData": {
-      "description": "Verdict and feedback returned by the judge.",
+      "description": "One workstream's review assessment: a judge verdict or a skip reason.\n\n``skipped`` means no judge turn ran this assessment (the workstream's own\ncorrelation, carried by the event envelope's ``round_label``, is what\nrepeat assessments of the same workstream share); ``skip_reason`` then\nnames why. ``implementer_outcome`` is the implementer's own self-declared\nreadiness for this attempt, present regardless of whether a review ran.\nIt defaults to empty so a journal record written before this field\nexisted still parses; a reader should treat an empty string as unknown.",
       "properties": {
         "kind": {
           "const": "judge_result",
@@ -2478,27 +2657,83 @@
         "verdict": {
           "enum": [
             "pass",
-            "fail"
+            "fail",
+            "skipped"
           ],
           "title": "Verdict",
           "type": "string"
         },
+        "analysis": {
+          "default": "",
+          "title": "Analysis",
+          "type": "string"
+        },
         "feedback": {
+          "default": "",
           "title": "Feedback",
           "type": "string"
         },
-        "attempt": {
-          "title": "Attempt",
-          "type": "integer"
+        "skip_reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "blocked",
+                "unchanged",
+                "not_due"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skip Reason"
+        },
+        "implementer_outcome": {
+          "default": "",
+          "title": "Implementer Outcome",
+          "type": "string"
         }
       },
       "required": [
         "kind",
-        "verdict",
-        "feedback",
-        "attempt"
+        "verdict"
       ],
       "title": "JudgeResultData",
+      "type": "object"
+    },
+    "LocalValidationSummaryData": {
+      "description": "Recipe pass-fraction for one ``validate_local`` call.",
+      "properties": {
+        "kind": {
+          "const": "local_validation_summary",
+          "default": "local_validation_summary",
+          "title": "Kind",
+          "type": "string"
+        },
+        "attempted": {
+          "minimum": 0,
+          "title": "Attempted",
+          "type": "integer"
+        },
+        "succeeded": {
+          "minimum": 0,
+          "title": "Succeeded",
+          "type": "integer"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "attempted",
+        "succeeded",
+        "passed"
+      ],
+      "title": "LocalValidationSummaryData",
       "type": "object"
     },
     "OutputData": {
@@ -3102,6 +3337,37 @@
         "type"
       ]
     },
+    "RetryWaitData": {
+      "description": "One wait before retrying an agent turn that failed on a transient provider error.",
+      "properties": {
+        "kind": {
+          "const": "retry_wait_started",
+          "default": "retry_wait_started",
+          "title": "Kind",
+          "type": "string"
+        },
+        "attempt": {
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "delay_s": {
+          "title": "Delay S",
+          "type": "number"
+        },
+        "error_kind": {
+          "title": "Error Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "attempt",
+        "delay_s",
+        "error_kind"
+      ],
+      "title": "RetryWaitData",
+      "type": "object"
+    },
     "RoundFinishedData": {
       "description": "Summary of attempt, judge, and performance outcomes for a round.",
       "properties": {
@@ -3361,6 +3627,18 @@
           "default": null,
           "title": "Chat Thread Id"
         },
+        "client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Id"
+        },
         "data": {
           "anyOf": [
             {
@@ -3370,6 +3648,7 @@
                   "agent_execution_finished": "#/$defs/AgentExecutionFinishedData",
                   "agent_execution_started": "#/$defs/AgentExecutionStartedData",
                   "agent_output_chunk": "#/$defs/AgentOutputChunkData",
+                  "async_operation_lifecycle": "#/$defs/AsyncOperationLifecycleData",
                   "benchmark_result": "#/$defs/BenchmarkResultData",
                   "chat": "#/$defs/ChatData",
                   "chat_thread_created": "#/$defs/ChatThreadCreatedData",
@@ -3378,11 +3657,14 @@
                   "framework_warning": "#/$defs/FrameworkWarningData",
                   "gate_finished": "#/$defs/GateFinishedData",
                   "gate_started": "#/$defs/GateStartedData",
+                  "gpu_contention_changed": "#/$defs/GpuContentionData",
                   "invocation_finished": "#/$defs/InvocationFinishedData",
                   "invocation_started": "#/$defs/InvocationStartedData",
                   "judge_result": "#/$defs/JudgeResultData",
+                  "local_validation_summary": "#/$defs/LocalValidationSummaryData",
                   "output": "#/$defs/OutputData",
                   "phase": "#/$defs/PhaseData",
+                  "retry_wait_started": "#/$defs/RetryWaitData",
                   "round_finished": "#/$defs/RoundFinishedData",
                   "run_configured": "#/$defs/RunConfiguredData",
                   "run_interrupted": "#/$defs/RunInterruptedData",
@@ -3393,8 +3675,10 @@
                   "todo_update": "#/$defs/TodoUpdateData",
                   "tool_call": "#/$defs/ToolCallData",
                   "tool_result": "#/$defs/ToolResultData",
+                  "turn_usage_recorded": "#/$defs/TurnUsageData",
                   "usage_update": "#/$defs/UsageUpdateData",
-                  "workspace_snapshot": "#/$defs/WorkspaceSnapshotData"
+                  "workspace_snapshot": "#/$defs/WorkspaceSnapshotData",
+                  "workstream_attempt_updated": "#/$defs/WorkstreamAttemptData"
                 },
                 "propertyName": "kind"
               },
@@ -3485,6 +3769,24 @@
                 },
                 {
                   "$ref": "#/$defs/FrameworkWarningData"
+                },
+                {
+                  "$ref": "#/$defs/AsyncOperationLifecycleData"
+                },
+                {
+                  "$ref": "#/$defs/WorkstreamAttemptData"
+                },
+                {
+                  "$ref": "#/$defs/RetryWaitData"
+                },
+                {
+                  "$ref": "#/$defs/GpuContentionData"
+                },
+                {
+                  "$ref": "#/$defs/LocalValidationSummaryData"
+                },
+                {
+                  "$ref": "#/$defs/TurnUsageData"
                 }
               ]
             },
@@ -4184,6 +4486,94 @@
       "title": "TuiTheme",
       "type": "string"
     },
+    "TurnUsageData": {
+      "description": "Token and cost accounting for one completed agent turn.",
+      "properties": {
+        "kind": {
+          "const": "turn_usage_recorded",
+          "default": "turn_usage_recorded",
+          "title": "Kind",
+          "type": "string"
+        },
+        "input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Tokens"
+        },
+        "cache_creation_input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Creation Input Tokens"
+        },
+        "cache_read_input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Read Input Tokens"
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Tokens"
+        },
+        "total_cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Cost Usd"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        }
+      },
+      "title": "TurnUsageData",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
     "UsageUpdateData": {
       "description": "Token usage reported by the active model.",
       "properties": {
@@ -4285,6 +4675,64 @@
       "required": [
         "kind"
       ]
+    },
+    "WorkstreamAttemptData": {
+      "description": "Live retry-budget diagnostics for one dynamic-portfolio workstream.",
+      "properties": {
+        "kind": {
+          "const": "workstream_attempt_updated",
+          "default": "workstream_attempt_updated",
+          "title": "Kind",
+          "type": "string"
+        },
+        "hypothesis_id": {
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "attempt": {
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "attempt_limit": {
+          "title": "Attempt Limit",
+          "type": "integer"
+        },
+        "refunded": {
+          "title": "Refunded",
+          "type": "integer"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Error"
+        },
+        "setup_failure": {
+          "default": false,
+          "title": "Setup Failure",
+          "type": "boolean"
+        },
+        "repeated_error": {
+          "default": false,
+          "title": "Repeated Error",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "hypothesis_id",
+        "attempt",
+        "attempt_limit",
+        "refunded"
+      ],
+      "title": "WorkstreamAttemptData",
+      "type": "object"
     }
   },
   "description": "Root schema document for the public server protocol.",

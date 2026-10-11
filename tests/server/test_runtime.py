@@ -66,17 +66,17 @@ class _SessionControlStub:
     def __init__(self, control: RunControlChannel) -> None:
         self._control = control
 
-    def steer(self, text: str) -> None:
-        self._control.queue_steer(text)
+    def steer(self, text: str, *, client_id: str | None = None) -> None:
+        self._control.queue_steer(text, client_id=client_id)
 
-    def pause(self) -> None:
-        self._control.request_pause()
+    def pause(self, *, client_id: str | None = None) -> None:
+        self._control.request_pause(client_id=client_id)
 
-    def resume(self) -> None:
-        self._control.resume()
+    def resume(self, *, client_id: str | None = None) -> None:
+        self._control.resume(client_id=client_id)
 
-    def stop(self) -> None:
-        self._control.request_stop()
+    def stop(self, *, client_id: str | None = None) -> None:
+        self._control.request_stop(client_id=client_id)
 
 
 def _await_socket(socket_path: Path) -> None:

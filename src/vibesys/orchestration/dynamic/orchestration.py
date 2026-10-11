@@ -372,6 +372,7 @@ class _DynamicRun:
             self.rounds,
             lock=self._state_lock,
             commit=self._commit_labeled,
+            emit_judge_result=self.run.observations.judge_result,
         )
         self.profiles = Profiles(
             self.run, self.state, lock=self._state_lock, commit=self._commit_labeled
@@ -1039,6 +1040,7 @@ class _DynamicRun:
                     sequence=sequence,
                     planning_call=call,
                     plan=plan,
+                    retry_limit=self.options.max_retries_per_round,
                     measured_iterations=(
                         self.rounds.measured_iterations(self.state.workstreams[index])
                         if index is not None

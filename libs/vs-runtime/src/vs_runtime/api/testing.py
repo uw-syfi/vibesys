@@ -33,6 +33,7 @@ from vs_runtime.fakes import (
     FakeWorkspace,
     FakeWorkspaceAgentSessions,
     FakeWorkspaces,
+    JudgeResultCall,
     ObservationCall,
 )
 
@@ -70,6 +71,7 @@ __all__ = [
     "FakeWorkspace",
     "FakeWorkspaceAgentSessions",
     "FakeWorkspaces",
+    "JudgeResultCall",
     "ObservationCall",
     "TurnResponder",
 ]
