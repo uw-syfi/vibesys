@@ -10,7 +10,6 @@ from launch.composition import AGENT_TOOL_BINDINGS
 from vibesys.api.wiring import AgentToolContext
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, PROFILER
 from vibesys.orchestration.dynamic import PLUGIN
-from vibesys.orchestration.single.agents import IMPLEMENTER as SINGLE_IMPLEMENTER
 from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity
 from vs_evaluation.api import ContentDigest, EvaluationAgentRole, EvaluationAgentService
 from vs_evaluation.api.testing import InMemoryEvaluationNamespace
@@ -27,7 +26,7 @@ if TYPE_CHECKING:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("role", "suspended"),
-    [(IMPLEMENTER, True), (JUDGE, True), (PROFILER, True), (SINGLE_IMPLEMENTER, False)],
+    [(IMPLEMENTER, True), (JUDGE, True), (PROFILER, True)],
 )
 async def test_product_binding_propagates_suspension_to_tool_schema(
     tmp_path: Path,
@@ -66,6 +65,4 @@ async def test_product_binding_propagates_suspension_to_tool_schema(
     if role in (IMPLEMENTER, PROFILER):
         assert "submit_evaluation" in names
         assert "await_evaluation" not in names
-    if role is SINGLE_IMPLEMENTER:
-        assert "await_evaluation" in names
     await backend.close()

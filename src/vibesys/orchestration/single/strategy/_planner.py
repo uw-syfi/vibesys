@@ -295,7 +295,7 @@ def on_turn(
     if not isinstance(plan, str):
         return _start(state, view, config, plan)
     corrected = turn.corrected(event.invocation, None, limit=config.max_corrections)
-    if corrected is None or event.output_json is None:
+    if corrected is None:
         return _failed(state, plan)
     return state.model_copy(
         update={
