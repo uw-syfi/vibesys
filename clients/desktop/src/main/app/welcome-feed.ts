@@ -2,8 +2,9 @@
  * The main process's ordered welcome feed: every push gets one sequence, and the latest values
  * needed for an authoritative bootstrap snapshot are retained beside that sequence.
  */
-import type {HostKey, HostListing, RecentRun} from '@vibesys/entities';
+import type {HostKey, HostListing} from '@vibesys/hosts';
 import type {ChromeState, WelcomeEvent, WelcomeOverview} from '@vibesys/ipc';
+import type {RecentRun} from '@vibesys/runs';
 
 export interface WelcomeSnapshotValues {
   readonly settingsProblem: string | null;

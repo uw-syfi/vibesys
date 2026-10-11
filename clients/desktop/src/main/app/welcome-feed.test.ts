@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
-import type {HostListing, RecentRun} from '@vibesys/entities';
+import type {HostListing} from '@vibesys/hosts';
 import type {ChromeState} from '@vibesys/ipc';
+import type {RecentRun} from '@vibesys/runs';
 import {WelcomeFeed} from './welcome-feed.js';
 
 describe('WelcomeFeed', () => {

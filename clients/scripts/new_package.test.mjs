@@ -45,13 +45,7 @@ const SCAFFOLDS = [
 test('every scaffolded package passes the graph and declaration checks', t => {
   const root = fixtureWorkspace(t);
   const directories = SCAFFOLDS.map(argv => createPackage(root, argv));
-  assert.deepEqual(directories, [
-    'features/stop-run',
-    'ui',
-    'connection',
-    'scheduler',
-    'apps/web',
-  ]);
+  assert.deepEqual(directories, ['features/stop-run', 'ui', 'connection', 'scheduler', 'apps/web']);
   assert.deepEqual(packageGraphErrors(root), []);
   assert.deepEqual(declarationErrors(root, workspaceLayout(root)), []);
 });

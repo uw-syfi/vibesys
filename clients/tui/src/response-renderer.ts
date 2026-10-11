@@ -1,5 +1,5 @@
 import type {ProtocolResponse, RequestInput} from '@vibesys/contracts';
-import {projectPerformance} from '@vibesys/core-state';
+import {projectPerformance} from '@vibesys/run-state/performance';
 import {renderPerformanceCurve} from './performance-chart.js';
 
 /** Renders the typed server replies used by generic command actions. */

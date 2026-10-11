@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import type {ProtocolResponse, RunSnapshot} from '@vibesys/contracts';
+import type {ProtocolResponse, RunSnapshot, RunStatus} from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import type {BatchReconciliation, StreamMessageContext} from '@vibesys/transport';
