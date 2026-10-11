@@ -55,6 +55,8 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       'src/**/*.test.tsx',
       // Playwright specs, run by `pnpm --filter @vibesys/web test:e2e`.
       'e2e/**/*.spec.ts',
+      // Loaded by gateway-form-harness.html rather than by a TypeScript import.
+      'e2e/gateway-form-harness.ts',
     ],
     project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.ts'],
   },
