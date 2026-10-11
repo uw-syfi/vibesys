@@ -122,13 +122,18 @@ export function stripControls(state: ChromeState): StripControls {
 
 /**
  * True when the recent runs may have changed between two window states: a different run is now
- * attached (the main process records every run it attaches to before showing it).
+ * attached, or the attached run's id became known (the main process records the run each time).
  */
 export function recentChanged(before: ChromeState, after: ChromeState): boolean {
   const run = after.attached;
   if (run === null) return false;
   const was = before.attached;
-  return was === null || was.host !== run.host || was.instanceId !== run.instanceId;
+  return (
+    was === null ||
+    was.host !== run.host ||
+    was.instanceId !== run.instanceId ||
+    was.runId !== run.runId
+  );
 }
 
 /**

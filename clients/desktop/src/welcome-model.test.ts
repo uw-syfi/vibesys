@@ -212,7 +212,7 @@ function attachedRun(random: () => number): Attached {
     host: pick(random, ['local', 'ssh:gpu']),
     hostLabel: 'h',
     instanceId: pick(random, [null, '0123456789ab', 'ba9876543210']),
-    runId: null,
+    runId: pick(random, [null, 'run-1']),
     project: '/p',
     status: ended ? 'run ended' : pick(random, ['connected', 'cannot connect', 'connecting']),
     detail: '',
@@ -255,7 +255,7 @@ describe('stripControls', () => {
 });
 
 describe('recentChanged', () => {
-  test('regression: attaching to a different run means the recent runs changed', () => {
+  test('regression: attaching to a different run, or learning its id, changes the recent runs', () => {
     const random = generator(11);
     for (let round = 0; round < 500; round += 1) {
       const before = chromeState(random);
@@ -264,7 +264,8 @@ describe('recentChanged', () => {
         after.attached === null ||
         (before.attached !== null &&
           before.attached.host === after.attached.host &&
-          before.attached.instanceId === after.attached.instanceId);
+          before.attached.instanceId === after.attached.instanceId &&
+          before.attached.runId === after.attached.runId);
       expect(recentChanged(before, after)).toBe(!same);
       expect(recentChanged(after, after)).toBe(false);
     }
