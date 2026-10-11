@@ -282,6 +282,7 @@ async def test_an_agent_submits_through_the_tool_and_is_resumed_once(tmp_path: P
         assert played.writer.turns == 2
         assert strategy.suspensions == 1
         assert strategy.resumes == 1
+        assert played.bridge[0].unacknowledged() == (), "the client confirmed it read the handle"
 
 
 async def test_the_tool_server_is_offered_without_an_interpreter_or_import_path(
