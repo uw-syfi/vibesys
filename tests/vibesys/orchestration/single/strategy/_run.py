@@ -11,7 +11,15 @@ from vibesys.orchestration.single.strategy.api import (
     SingleStrategyState,
     single_operation_registry,
 )
-from vs_core.api import ArtifactId, ArtifactRef, Limits, RevisionRef, RunEnvelope, RunFacts
+from vs_core.api import (
+    ArtifactId,
+    ArtifactRef,
+    LifecycleCapability,
+    Limits,
+    RevisionRef,
+    RunEnvelope,
+    RunFacts,
+)
 from vs_core.testing.drive import Harness
 from vs_core.testing.liveness import Budget, assert_live
 from vs_runtime.api.testing import HostOptions, Run, Script, drive_shell
@@ -41,13 +49,19 @@ FACTS = RunFacts(
 LIMITS = Limits(max_attempts=4, max_turns=60, max_parallel=1, max_retries=2, max_refunds=4)
 
 
-def harness(settings: SingleConfig, *, limits: Limits | None = None) -> Harness:
+def harness(
+    settings: SingleConfig,
+    *,
+    limits: Limits | None = None,
+    lifecycle: frozenset[LifecycleCapability] = frozenset(),
+) -> Harness:
     return Harness(
         registry=single_operation_registry(),
         facts=FACTS,
         limits=limits or LIMITS,
         envelope_type=RunEnvelope[SingleStrategyState],
         requirements=requirements_for(settings),
+        lifecycle=lifecycle,
     )
 
 
@@ -61,9 +75,10 @@ def run_shell(
 ) -> Run:
     """Run a fresh strategy to the end of its run on the production shell."""
     settings = config(**overrides)
-    chosen = harness(settings, limits=limits)
+    options = host or HostOptions()
+    chosen = harness(settings, limits=limits, lifecycle=options.lifecycle)
     finished = drive_shell(
-        SingleStrategy(config=settings), executors, chosen, reply_schemas(), host or HostOptions()
+        SingleStrategy(config=settings), executors, chosen, reply_schemas(), options
     )
     if live:
         assert_live(finished.journal, finished.core, Budget(retries=chosen.limits.max_retries))

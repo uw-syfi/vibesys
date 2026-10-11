@@ -42,11 +42,13 @@ from vs_core.api import (
     AttemptSettled,
     EvidenceKind,
     IntentBlocked,
+    InvocationRef,
     MeasurementResult,
     ObservationStatus,
     OperationResult,
     Rejected,
     ResumeAuthorized,
+    RevisionRef,
     RunView,
     TurnFailureKind,
     TurnResult,
@@ -249,6 +251,24 @@ def _next_turn(record: RoundState, update: dict[str, object]) -> RoundState:
     )
 
 
+def _candidate_of(
+    view: RunView, record: RoundState, invocation: InvocationRef
+) -> RevisionRef | None:
+    """The revision the reply's turn retained; a resumed turn's is the chain's latest checkpoint.
+
+    A turn that suspended to wait for its evaluations is checkpointed under its own
+    invocation. The turn core resumes edits nothing more when it only reads the verdicts, so it
+    retains nothing of its own: the candidate is what the chain checkpointed before it waited.
+    """
+    own = turn_candidate(view, record.attempt, invocation)
+    if own is not None or record.turn is None or record.turn.charge != "resume":
+        return own
+    live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
+    if live is None or not live.checkpoints:
+        return None
+    return live.checkpoints[-1].revision
+
+
 def settle_retained(
     state: SingleStrategyState, view: RunView, config: SingleConfig
 ) -> SingleStrategyState:
@@ -260,7 +280,7 @@ def settle_retained(
     if invocation is None or record.held_reply is None:
         return state
     live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
-    candidate = turn_candidate(view, record.attempt, invocation)
+    candidate = _candidate_of(view, record, invocation)
     declined = live is not None and any(
         row.invocation == invocation for row in live.checkpoint_declines
     )
@@ -309,7 +329,7 @@ def on_turn(
         )
     if isinstance(reply, WaitingForEvaluation):
         return _waiting(state, view, config, record, event)
-    candidate = turn_candidate(view, record.attempt, event.invocation)
+    candidate = _candidate_of(view, record, event.invocation)
     if candidate is None:
         return _put(state, record.holding(event.output_json, event.invocation))
     return _replied(state, config, record, reply, candidate)
