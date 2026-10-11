@@ -762,12 +762,20 @@ class DockerEnvironmentConfig:
     ``build_runner`` is what runs the agent image's ``docker build``. The
     unrecorded ``orphan_reaper`` effect lets tests keep recovery off the host.
     ``None`` selects the production effect for each seam.
+
+    ``image_build_timeout_seconds`` is the budget for the whole agent image
+    build (every Docker command together); ``None`` selects the image
+    library's default. A caller that runs under its own
+    limit, such as a test tier, sets it below that limit so a stalled build
+    ends in an error carrying the build output instead of in the caller's
+    timeout.
     """
 
     image: str | None = None
     docker: DockerCli | None = None
     build_runner: DockerBuildRunner | None = None
     orphan_reaper: _OrphanReaper | None = None
+    image_build_timeout_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -873,6 +881,11 @@ class DockerEnvironment:
             _docker_backend_image(request),
             features=image_features(toolchains),
             command_runner=self.config.build_runner,
+            timeout=(
+                image_helpers.DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS
+                if self.config.image_build_timeout_seconds is None
+                else self.config.image_build_timeout_seconds
+            ),
             on_progress=_image_build_progress(request),
         )
         workspace_root = _workspace_root(request, same_path=extras.same_path_workspace)

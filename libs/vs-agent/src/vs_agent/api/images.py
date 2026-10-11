@@ -8,6 +8,7 @@ optional runner seam; they do not inspect the packaged Feature.
 from vs_agent.agent_feature import AGENT_FEATURES_PROJECT, AGENT_USER, AGENT_WORKDIR, agent_feature
 from vs_agent.images import (
     DEFAULT_AGENT_IMAGE_REGISTRY,
+    DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS,
     DOCKER_OUTPUT_TAIL_CHARACTERS,
     DOCKER_PROGRESS_LINE_CHARACTERS,
     BuildProgressSink,
@@ -15,6 +16,7 @@ from vs_agent.images import (
     DockerBuildRunner,
     DockerCommandResult,
     ImageBuildProgress,
+    ImageBuildTimeoutError,
     ImagePushError,
     LegacyDockerCommandResult,
     SubprocessDockerBuildRunner,
@@ -31,6 +33,7 @@ __all__ = [
     "AGENT_USER",
     "AGENT_WORKDIR",
     "DEFAULT_AGENT_IMAGE_REGISTRY",
+    "DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS",
     "DOCKER_OUTPUT_TAIL_CHARACTERS",
     "DOCKER_PROGRESS_LINE_CHARACTERS",
     "BuildProgressSink",
@@ -38,6 +41,7 @@ __all__ = [
     "DockerBuildRunner",
     "DockerCommandResult",
     "ImageBuildProgress",
+    "ImageBuildTimeoutError",
     "ImagePushError",
     "LegacyDockerCommandResult",
     "SubprocessDockerBuildRunner",

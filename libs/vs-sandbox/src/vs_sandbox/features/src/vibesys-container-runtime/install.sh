@@ -9,6 +9,46 @@
 # install fails if one does not, so a wrong Feature order is never silent.
 set -euo pipefail
 
+# >>> vibesys network helpers (identical in every Feature; Features cannot share files)
+# Every fetch in a Feature is bounded and retried a bounded number of times, so
+# a stalled connection ends in a failure that names the step instead of hanging
+# the image build until the caller's budget runs out. Only operations that are
+# safe to repeat are retried: downloads to a path and package installs.
+NET_ATTEMPTS=5
+retry() {
+    local attempt=1
+    until "$@"; do
+        if [ "${attempt}" -ge "${NET_ATTEMPTS}" ]; then
+            echo "giving up after ${attempt} attempts: $*" >&2
+            return 1
+        fi
+        echo "retry ${attempt}/${NET_ATTEMPTS} after failure: $*" >&2
+        sleep $((attempt * 5))
+        attempt=$((attempt + 1))
+    done
+}
+# Fail a transfer that stalls (under 10 KB/s for 30 s) or runs over 10 minutes.
+fetch() {
+    retry curl -fsSL --connect-timeout 20 --speed-limit 10240 --speed-time 30 --max-time 600 "$@"
+}
+APT_BOUNDS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2)
+apt_update_and_install() {
+    apt-get update -qq "${APT_BOUNDS[@]}" &&
+        apt-get install -y -qq --no-install-recommends "${APT_BOUNDS[@]}" "$@"
+}
+apt_install() {
+    retry apt_update_and_install "$@"
+}
+# npm's own defaults (a 300 s request timeout, 2 retries) outlast a CI job's budget.
+npm_install_global() {
+    retry npm install -g --include=optional --fetch-retries=3 --fetch-timeout=60000 \
+        --fetch-retry-mintimeout=5000 --fetch-retry-maxtimeout=30000 "$@"
+}
+pip_install() {
+    retry pip install --no-cache-dir --retries 5 --timeout 30 "$@"
+}
+# <<< vibesys network helpers
+
 for pair in \
     "docker_engine_version=${DOCKER_ENGINE_VERSION:-}" \
     "docker_compose_version=${DOCKER_COMPOSE_VERSION:-}" \
@@ -28,31 +68,21 @@ case "${arch}" in
 esac
 
 export DEBIAN_FRONTEND=noninteractive
-installed=""
-for attempt in 1 2 3 4 5; do
-    if apt-get update -qq && apt-get install -y -qq --no-install-recommends \
-        curl ca-certificates tar iptables e2fsprogs pigz xz-utils procps kmod; then
-        installed=1
-        break
-    fi
-    echo "apt retry ${attempt}..." >&2
-    sleep $((attempt * 5))
-done
-[ -n "${installed}" ]
+apt_install curl ca-certificates tar iptables e2fsprogs pigz xz-utils procps kmod
 rm -rf /var/lib/apt/lists/*
 
-curl -fsSL --retry 5 --retry-delay 5 -o /tmp/docker.tgz \
+fetch -o /tmp/docker.tgz \
     "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_ENGINE_VERSION}.tgz"
 tar -xzf /tmp/docker.tgz -C /usr/local/bin --strip-components=1
 rm -f /tmp/docker.tgz
 mkdir -p /usr/local/lib/docker/cli-plugins
-curl -fsSL --retry 5 --retry-delay 5 \
+fetch \
     -o /usr/local/lib/docker/cli-plugins/docker-compose \
     "https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_VERSION}/docker-compose-linux-${compose_arch}"
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-curl -fsSL --retry 5 --retry-delay 5 -o /usr/local/bin/kind \
+fetch -o /usr/local/bin/kind \
     "https://kind.sigs.k8s.io/dl/v${KIND_VERSION}/kind-linux-${go_arch}"
-curl -fsSL --retry 5 --retry-delay 5 -o /usr/local/bin/kubectl \
+fetch -o /usr/local/bin/kubectl \
     "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${go_arch}/kubectl"
 chmod +x /usr/local/bin/kind /usr/local/bin/kubectl
 docker --version

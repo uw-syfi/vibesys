@@ -21,13 +21,15 @@ import queue
 import re
 import uuid
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from vs_agent.agent_feature import AGENT_USER, AGENT_WORKDIR, agent_feature
 from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
 from vs_sim.api import (
+    Clock,
+    MonotonicClock,
     OsThreads,
     PipedProcess,
     PipedProcessLauncher,
@@ -44,7 +46,10 @@ if TYPE_CHECKING:
     from vs_sandbox.api import FeatureRef
     from vs_sim.api import Worker
 
-_DEFAULT_BUILD_TIMEOUT_SECONDS = 1200.0
+DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS = 1200.0
+"""Default budget for one launch's image builds, summed over every Docker command."""
+
+_DEFAULT_BUILD_TIMEOUT_SECONDS = DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS
 _DEFAULT_PUSH_TIMEOUT_SECONDS = 1200.0
 _DEFAULT_VERIFY_TIMEOUT_SECONDS = 60.0
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
@@ -71,6 +76,8 @@ _AGENT_IMAGE_REPOSITORY = "vibesys-agent-build"
 _BUILD_STEP = re.compile(r"^#\d+ \[(?:\S+ )?\s*(\d+)/(\d+)\] (.+)$")
 #: Longest step label reported; a ``RUN`` line can be a whole shell script.
 _STEP_LABEL_LIMIT = 200
+#: Characters of a stopped build's output kept in its timeout error.
+_TIMEOUT_OUTPUT_CHARACTERS = 4000
 
 #: Where a pushed agent image lives. GHCR because the repository is on GitHub
 #: and it is cloud-neutral for SkyPilot's arbitrary infra targets. Runs
@@ -142,14 +149,29 @@ class TaskImageBuildError(RuntimeError):
         """Describe Docker being unavailable for an image build action."""
         return cls(f"Docker was not found while {action} {target.image_label}: {target.source}")
 
-    @classmethod
-    def docker_timed_out(
-        cls, timeout: float, action: str, target: _BuildTarget
-    ) -> TaskImageBuildError:
-        """Describe a Docker image build action that exceeded its timeout."""
-        return cls(
-            f"Docker timed out after {timeout:g} seconds while {action} "
-            f"{target.image_label}: {target.source}"
+
+class ImageBuildTimeoutError(TaskImageBuildError):
+    """Raised when an image build outlives its budget and its Docker process was stopped.
+
+    ``budget_seconds`` is the whole launch's build budget, not one command's.
+    ``step`` names the Dockerfile step that was running when time ran out (empty
+    when Docker had announced none), and ``output`` is the tail of what the build
+    printed, so a stalled network fetch shows up in the error instead of
+    vanishing with the killed process.
+    """
+
+    def __init__(
+        self, budget_seconds: float, action: str, subject: str, output: str, step: str
+    ) -> None:
+        """Describe the expired budget, the running step, and the captured output tail."""
+        self.budget_seconds = budget_seconds
+        self.step = step
+        self.output = output
+        running = f"; running {step}" if step else ""
+        tail = f"\nLast build output:\n{output}" if output else ""
+        super().__init__(
+            f"Docker build budget of {budget_seconds:g} seconds ran out while "
+            f"{action} {subject}{running}{tail}"
         )
 
 
@@ -239,9 +261,15 @@ type BuildProgressSink = Callable[[ImageBuildProgress], None]
 class _StepTracker:
     """Turn a build's BuildKit progress lines into forward-moving step observations."""
 
-    def __init__(self, sink: BuildProgressSink) -> None:
+    def __init__(self, sink: BuildProgressSink | None = None) -> None:
         self._sink = sink
         self._done = -1
+        self._running = ""
+
+    @property
+    def running(self) -> str:
+        """The latest Dockerfile step Docker announced, such as ``[2/14] RUN ...``."""
+        return self._running
 
     def line(self, text: str) -> None:
         match = _BUILD_STEP.match(text)
@@ -255,9 +283,10 @@ class _StepTracker:
             # A step re-announced (``CACHED``, a parallel stage) is not progress.
             return
         self._done = done
-        self._sink(
-            ImageBuildProgress(done=done, total=total, label=match.group(3)[:_STEP_LABEL_LIMIT])
-        )
+        label = match.group(3)[:_STEP_LABEL_LIMIT]
+        self._running = f"step {step}/{total}: {label}"
+        if self._sink is not None:
+            self._sink(ImageBuildProgress(done=done, total=total, label=label))
 
 
 @dataclass(frozen=True)
@@ -612,6 +641,10 @@ class SubprocessDockerBuildRunner:
         except BaseException as failure:
             deadline = self._threads.now() + self._cleanup_timeout
             self._note_settlement(failure, self._settle(execution, deadline, kill=True))
+            if isinstance(failure, ProcessTimeoutError):
+                # The process is gone; what it printed is the only clue to what stalled.
+                failure.output = stdout_tail.result().text.encode()
+                failure.stderr = stderr_tail.result().text.encode()
             raise
         cleanup_started = self._threads.now()
         deadline = cleanup_started + self._cleanup_timeout
@@ -780,6 +813,10 @@ def build_task_image(
     that does not know whether the task Dockerfile uses it.
 
     ``on_progress``, when given, receives the build's step observations.
+
+    ``timeout`` is the budget for the whole build, not for one Docker command.
+    When it runs out, the running Docker process group is killed and
+    :class:`ImageBuildTimeoutError` carries the step and output tail.
     """
     dockerfile = _validated_task_dockerfile(dockerfile_path, timeout)
     runner = command_runner or SubprocessDockerBuildRunner()
@@ -846,6 +883,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     on_progress: BuildProgressSink | None = None,
+    clock: Clock | None = None,
 ) -> str:
     """Build the agent layer on top of a task image, and return its image ID.
 
@@ -870,13 +908,21 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     ``on_progress``, when given, receives each build's step observations
     (the task image's, then the agent layer's), parsed from Docker's
     progress output.
+
+    ``timeout`` is the budget for the whole build (the task image, the base
+    tag, and the Feature build together). The Docker command that is running
+    when it runs out is stopped, process group included, and
+    :class:`ImageBuildTimeoutError` names the Dockerfile step and carries the
+    tail of the build's output. ``clock`` measures the budget.
     """
     if timeout <= 0:
         message = "agent image build timeout must be positive"
         raise ValueError(message)
 
     runner = command_runner or SubprocessDockerBuildRunner()
-    build = _BuildRun(runner=runner, timeout=timeout, on_progress=on_progress)
+    build = _BuildRun(
+        runner=runner, timeout=timeout, on_progress=on_progress, clock=clock or MonotonicClock()
+    )
     if task_dockerfile is not None:
         dockerfile = _validated_task_dockerfile(task_dockerfile, timeout)
         base = _build_task_image(
@@ -887,6 +933,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     else:
         base = _resolvable_base(base_image, build)
 
+    commands = _BuildCommandRunner(build)
     try:
         built = build_feature_image(
             base,
@@ -894,21 +941,38 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
             final=FinalImage(
                 user=AGENT_USER, workdir=AGENT_WORKDIR, image_repository=_AGENT_IMAGE_REPOSITORY
             ),
-            command_runner=_BuildCommandRunner(build),
+            command_runner=commands,
             timeout=timeout,
         )
     except FeatureImageBuildError as exc:
+        if commands.expired is not None:
+            raise commands.expired from exc
         raise TaskImageBuildError(str(exc)) from exc
     return built.image_id
 
 
 @dataclass(frozen=True)
 class _BuildRun:
-    """How every build of one launch runs: its runner, bound, and progress sink."""
+    """How every build of one launch runs: its runner, budget, and progress sink.
+
+    ``timeout`` is the budget for all of the launch's Docker commands together;
+    each command gets what remains of it by ``clock``, so no sequence of
+    commands can outlive the caller's limit.
+    """
 
     runner: DockerBuildRunner
     timeout: float
     on_progress: BuildProgressSink | None = None
+    clock: Clock = field(default_factory=MonotonicClock)
+    started: float = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Start the budget now."""
+        object.__setattr__(self, "started", self.clock.now())
+
+    def remaining(self) -> float:
+        """Seconds left of the budget; zero or less when it has run out."""
+        return self.timeout - (self.clock.now() - self.started)
 
 
 @dataclass(frozen=True)
@@ -924,27 +988,32 @@ class _BuildCommandRunner:
     """Present a :class:`DockerBuildRunner` to the image mechanism.
 
     The mechanism reports timeouts as ``TimeoutError`` and knows nothing of
-    progress, so this adapter translates the former and, for each ``docker
-    build`` it runs, reports the latter to the run's progress sink.
+    progress or of the launch's shared budget, so this adapter clamps each
+    command to what remains of the budget, translates an expired one while
+    keeping what the build printed (``expired``), and, for each ``docker
+    build`` it runs, reports progress to the run's progress sink.
     """
 
     def __init__(self, build: _BuildRun) -> None:
         self._build = build
+        self.expired: ImageBuildTimeoutError | None = None
 
     def run(self, argv: Sequence[str], *, cwd: Path, timeout: float) -> _FeatureCommandResult:
-        sink = self._build.on_progress
-        tracker = _StepTracker(sink).line if sink is not None and argv[1] == "build" else None
+        tracker = _StepTracker(self._build.on_progress)
         try:
             result = _bounded_result(
                 self._build.runner.run(
                     argv,
                     cwd=cwd,
-                    timeout=timeout,
-                    on_stderr_line=tracker,
+                    timeout=_command_budget(self._build, argv, timeout),
+                    on_stderr_line=tracker.line if argv[1] == "build" else None,
                 )
             )
         except ProcessTimeoutError as exc:
-            raise TimeoutError(str(exc)) from exc
+            self.expired = _timeout_error(
+                self._build, exc, action="building", subject="the agent image", step=tracker.running
+            )
+            raise TimeoutError(str(self.expired)) from exc
         return _FeatureCommandResult(
             returncode=result.returncode,
             stdout=(
@@ -963,6 +1032,30 @@ class _BuildCommandRunner:
         )
 
 
+def _command_budget(build: _BuildRun, argv: Sequence[str], limit: float) -> float:
+    """Return the seconds one command may run: its own *limit*, within what the launch has left.
+
+    Raises:
+        ProcessTimeoutError: the launch's budget is already spent.
+    """
+    remaining = build.remaining()
+    if remaining <= 0:
+        raise ProcessTimeoutError(tuple(argv), build.timeout)
+    return min(limit, remaining)
+
+
+def _timeout_error(
+    build: _BuildRun, exc: ProcessTimeoutError, *, action: str, subject: str, step: str
+) -> ImageBuildTimeoutError:
+    """Describe an expired command with the output tail the stopped process left."""
+    stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr
+    stdout = exc.output.decode(errors="replace") if isinstance(exc.output, bytes) else exc.output
+    tail = (stderr or "").strip() or (stdout or "").strip()
+    return ImageBuildTimeoutError(
+        build.timeout, action, subject, tail[-_TIMEOUT_OUTPUT_CHARACTERS:], step
+    )
+
+
 def _build_and_inspect(
     target: _BuildTarget, extra_build_args: Sequence[str], build: _BuildRun
 ) -> _BuiltImage:
@@ -979,12 +1072,13 @@ def _build_and_inspect(
         *extra_build_args,
         str(target.context),
     )
+    steps = _StepTracker(build.on_progress)
     build_result = _run_docker(
         build,
         build_argv,
         action="building",
         target=target,
-        on_stderr_line=None if build.on_progress is None else _StepTracker(build.on_progress).line,
+        steps=steps,
     )
     if build_result.returncode != 0:
         detail = build_result.failure_diagnostic("docker build failed")
@@ -1031,21 +1125,27 @@ def _run_docker(
     *,
     action: str,
     target: _BuildTarget,
-    on_stderr_line: Callable[[str], None] | None = None,
+    steps: _StepTracker | None = None,
 ) -> DockerCommandResult:
     try:
         return _bounded_result(
             build.runner.run(
                 argv,
                 cwd=target.context,
-                timeout=build.timeout,
-                on_stderr_line=on_stderr_line,
+                timeout=_command_budget(build, argv, build.timeout),
+                on_stderr_line=None if steps is None else steps.line,
             )
         )
     except FileNotFoundError as exc:
         raise TaskImageBuildError.docker_not_found(action, target) from exc
     except ProcessTimeoutError as exc:
-        raise TaskImageBuildError.docker_timed_out(build.timeout, action, target) from exc
+        raise _timeout_error(
+            build,
+            exc,
+            action=action,
+            subject=f"{target.image_label} from {target.source}",
+            step="" if steps is None else steps.running,
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

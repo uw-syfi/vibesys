@@ -51,6 +51,11 @@ RUN_ID_LABEL = "vibesys.run-id"
 RUN_ID_PREFIX = "minimal-container-"
 #: Longest a base image pull may take; the ROCm default is tens of gigabytes.
 PULL_TIMEOUT_SECONDS = 3600.0
+#: Budget for the agent image build. The first test of the tier pays for the
+#: build inside pytest's per-test limit (300 s, `timeout` in pyproject.toml), and a
+#: cold build takes about 140 s, so a stalled build must end by this budget
+#: with its output in the error, not by pytest's limit with nothing.
+IMAGE_BUILD_BUDGET_SECONDS = 240.0
 
 #: Stands in for the Slurm shell (the transport's ``bash -c``): it receives an ``srun`` or
 #: ``scancel`` command line as one argument and runs what follows ``--`` right here.
@@ -253,7 +258,7 @@ def open_editor(base: Base, directory: Path) -> Iterator[Editor]:
     environment = SlurmEnvironment(
         load_slurm_operator_settings(_slurm_config(directory)),
         gate_wrapper=(sys.executable, str(gate)),
-        docker=DockerEnvironmentConfig(),
+        docker=DockerEnvironmentConfig(image_build_timeout_seconds=IMAGE_BUILD_BUDGET_SECONDS),
         job_confinement=PassThroughConfinement(),
     )
     session = open_run_environment(environment, request)

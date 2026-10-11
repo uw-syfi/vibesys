@@ -69,6 +69,16 @@ Rules every Feature follows:
   explicitly anyway.
 - Its environment (`PATH`, `RUSTUP_HOME`) is `containerEnv` in its own
   metadata, not a line in a shared file.
+- Every network step is bounded and retried at most five times. The script
+  carries a helper block (`retry`, `fetch`, `apt_install`, `npm_install_global`,
+  `pip_install`) that sets connect, stall, and request timeouts; Features cannot
+  share files, so the block is duplicated and
+  `tests/quality/test_feature_network_steps.py` keeps the copies identical and
+  rejects a bare `curl`, `apt-get`, `npm install`, `pip install`, or `uv` fetch
+  outside them. The whole image build also has one budget
+  (`agent_image(timeout=...)`, `DockerEnvironmentConfig.image_build_timeout_seconds`);
+  when it runs out, Docker is stopped and `ImageBuildTimeoutError` names the
+  running Dockerfile step and carries the tail of the build output.
 
 The layout of each owner's `features/` folder is the one `devcontainer features test` expects:
 `src/<id>/` holds the Feature and `test/<id>/test.sh` holds its checks. The

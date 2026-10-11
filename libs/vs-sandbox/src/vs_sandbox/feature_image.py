@@ -308,6 +308,8 @@ class _Docker:
             raise FeatureImageBuildError(message) from exc
         except TimeoutError as exc:
             message = f"Docker timed out after {self._timeout:g} seconds: {' '.join(argv[:3])}"
+            if str(exc):
+                message = f"{message}\n{exc}"
             raise FeatureImageBuildError(message) from exc
 
     def checked(self, argv: Sequence[str], *, cwd: Path, what: str) -> CommandOutcome:
@@ -315,6 +317,7 @@ class _Docker:
         result = self.attempt(argv, cwd=cwd)
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or f"{what} failed").strip()
-            message = f"{what} failed (exit {result.returncode}): {detail[:_DIAGNOSTIC_LIMIT]}"
+            # The tail: a build prints the failing step last.
+            message = f"{what} failed (exit {result.returncode}): {detail[-_DIAGNOSTIC_LIMIT:]}"
             raise FeatureImageBuildError(message)
         return result

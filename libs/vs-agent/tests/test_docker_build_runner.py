@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
+import tempfile
 from io import StringIO
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -13,14 +16,17 @@ from vs_agent.api.images import (
     DOCKER_OUTPUT_TAIL_CHARACTERS,
     DOCKER_PROGRESS_LINE_CHARACTERS,
     DockerCommandResult,
+    ImageBuildTimeoutError,
     SubprocessDockerBuildRunner,
     TaskImageBuildError,
+    agent_image,
     build_task_image,
 )
 from vs_agent.api.testing import FakeDockerBuildRunner, docker_build_result
 from vs_sim.api import ProcessTimeoutError
 from vs_sim.api.testing import (
     FakePipedProcessLauncher,
+    ManualClock,
     ScriptedStreamingCommand,
     SimThreads,
     StreamedRun,
@@ -28,7 +34,6 @@ from vs_sim.api.testing import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from pathlib import Path
 
     from vs_sim.api import Condition, Event, Lock, Worker
 
@@ -286,7 +291,7 @@ def test_timeout_kills_reaps_and_closes_the_fake_process_group(tmp_path: Path) -
     threads = SimThreads()
     runner = SubprocessDockerBuildRunner(threads=threads, processes=launcher)
 
-    with pytest.raises(TaskImageBuildError, match="timed out after 7 seconds"):
+    with pytest.raises(TaskImageBuildError, match="budget of 7 seconds ran out"):
         threads.run(
             lambda: build_task_image(
                 dockerfile,
@@ -295,7 +300,10 @@ def test_timeout_kills_reaps_and_closes_the_fake_process_group(tmp_path: Path) -
             )
         )
 
-    assert process.wait_timeouts == [7, 5]
+    first_wait = process.wait_timeouts[0]
+    assert first_wait is not None
+    assert 0 < first_wait <= 7
+    assert process.wait_timeouts[1:] == [5]
     assert process.group_kills == 1
     assert process.stdout.closed
     assert process.stderr.closed
@@ -412,3 +420,118 @@ def test_truncated_failure_diagnostics_are_marked_and_bounded(
     assert len(diagnostic) <= 1000
     assert str(omitted) in diagnostic
     assert "earlier Docker output characters truncated" in diagnostic
+
+
+_IMAGE_ID = "sha256:" + "b" * 64
+_STALLED_BUILD_OUTPUT = (
+    "#6 [ 2/4] RUN apt-get update\n"
+    "#7 [ 3/4] RUN npm install -g @anthropic-ai/claude-code\n"
+    "#7 12.3 npm warn network ETIMEDOUT while fetching the tarball\n"
+)
+
+
+def test_an_agent_image_build_that_never_finishes_is_stopped_with_its_output() -> None:
+    """The stalled build's process group is killed and the error names the step and output."""
+    stalled = _FakePipedProcess(stderr=_STALLED_BUILD_OUTPUT, wait_results=(None, -9))
+
+    def start(argv: Sequence[str], _cwd: Path | None) -> _FakePipedProcess:
+        if argv[1] == "build":
+            return stalled
+        return _FakePipedProcess(stdout=_IMAGE_ID)
+
+    threads = SimThreads()
+    runner = SubprocessDockerBuildRunner(threads=threads, processes=FakePipedProcessLauncher(start))
+
+    with pytest.raises(ImageBuildTimeoutError) as caught:
+        threads.run(
+            lambda: agent_image(
+                "python:3.12-bookworm", command_runner=runner, timeout=240, clock=ManualClock()
+            )
+        )
+
+    assert stalled.group_kills == 1
+    assert stalled.wait_timeouts[0] == 240
+    assert caught.value.budget_seconds == 240
+    assert caught.value.step == "step 3/4: RUN npm install -g @anthropic-ai/claude-code"
+    assert "ETIMEDOUT while fetching the tarball" in str(caught.value)
+    assert "step 3/4: RUN npm install" in str(caught.value)
+    assert isinstance(caught.value, TaskImageBuildError)
+
+
+@given(tail=st.text(min_size=1, max_size=9000).filter(lambda text: text.strip() != ""))
+def test_a_stopped_task_build_reports_the_output_tail_and_running_step(tail: str) -> None:
+    class StallingRunner:
+        def run(
+            self,
+            argv: Sequence[str],
+            *,
+            cwd: Path,
+            timeout: float,
+            on_stderr_line: Callable[[str], None] | None = None,
+        ) -> DockerCommandResult:
+            del cwd
+            assert on_stderr_line is not None
+            on_stderr_line("#4 [2/9] RUN pip install torch")
+            raise ProcessTimeoutError(tuple(argv), timeout, stderr=tail.encode())
+
+    with tempfile.TemporaryDirectory() as directory:
+        dockerfile = Path(directory) / "Dockerfile"
+        dockerfile.write_text("FROM scratch\n", encoding="utf-8")
+        with pytest.raises(ImageBuildTimeoutError) as caught:
+            build_task_image(dockerfile, command_runner=StallingRunner(), timeout=30)
+
+    assert caught.value.step == "step 2/9: RUN pip install torch"
+    assert caught.value.output == tail.strip()[-4000:]
+    assert tail.strip()[-4000:] in str(caught.value)
+
+
+class _BudgetedRunner:
+    """Docker commands that each take scripted time on a shared manual clock.
+
+    A command that would outlive its ``timeout`` consumes exactly that long
+    and raises, as a real runner that killed it would.
+    """
+
+    def __init__(self, clock: ManualClock, durations: Sequence[float]) -> None:
+        self.clock = clock
+        self._durations = durations
+        self.timeouts: list[float] = []
+        self.starts: list[float] = []
+
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path,
+        timeout: float,
+        on_stderr_line: Callable[[str], None] | None = None,
+    ) -> DockerCommandResult:
+        del cwd, on_stderr_line
+        duration = self._durations[min(len(self.timeouts), len(self._durations) - 1)]
+        self.timeouts.append(timeout)
+        self.starts.append(self.clock.now())
+        if duration >= timeout:
+            self.clock.advance(timeout)
+            raise ProcessTimeoutError(tuple(argv), timeout)
+        self.clock.advance(duration)
+        return DockerCommandResult(tuple(argv), 0, _IMAGE_ID, "")
+
+
+@given(
+    budget=st.floats(min_value=0.5, max_value=100_000, allow_nan=False),
+    durations=st.lists(st.floats(min_value=0, max_value=100_000, allow_nan=False), min_size=1),
+)
+def test_no_docker_command_is_given_more_than_the_budget_that_remains(
+    budget: float, durations: list[float]
+) -> None:
+    """Whatever the commands do, the build ends within the caller's limit."""
+    clock = ManualClock()
+    runner = _BudgetedRunner(clock, durations)
+
+    with contextlib.suppress(ImageBuildTimeoutError):
+        agent_image("python:3.12-bookworm", command_runner=runner, timeout=budget, clock=clock)
+
+    assert runner.timeouts
+    for started, timeout in zip(runner.starts, runner.timeouts, strict=True):
+        assert 0 < timeout <= budget - started + 1e-9
+    assert clock.now() <= budget + 1e-9
