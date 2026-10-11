@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -25,6 +26,7 @@ from vibesys.orchestration.evolve.population import (
     CandidateOutcome,
     PopulationConfig,
     PopulationSearch,
+    PopulationState,
     Proposal,
 )
 from vibesys.orchestration.evolve.strategy.api import EvolveStrategyState, MetricRow
@@ -152,7 +154,9 @@ def test_the_population_does_not_depend_on_completion_order(
     assert _run(key, parallelism=parallelism, delays=delays) == expected
 
 
-def _reference_population(seed_world: int, seed_rng: int, space: MetricSpace, selector: str):  # noqa: ANN202
+def _reference_population(
+    seed_world: int, seed_rng: int, space: MetricSpace, selector: Literal["vibesys", "openevolve"]
+) -> PopulationState:
     """The legacy loop's use of the population policy, replayed serially without any agent."""
     config = PopulationConfig(
         space=space,
@@ -222,7 +226,7 @@ def _reference_population(seed_world: int, seed_rng: int, space: MetricSpace, se
 
 @pytest.mark.parametrize("selector", ["vibesys", "openevolve"])
 def test_e3_both_selectors_propose_what_the_legacy_use_of_the_policy_proposes(
-    selector: str,
+    selector: Literal["vibesys", "openevolve"],
 ) -> None:
     seed_world, seed_rng = 2, 7
     key = "world=2,seed=7,objectives=one"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import deque
+from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -14,21 +15,25 @@ from tests.vibesys.orchestration.evolve.strategy._run import config, run_shell
 from vibesys.orchestration.evolve.strategy.api import EvolveStrategyState
 from vs_core.api import (
     DispatchTurn,
+    Measure,
     ProposeWinner,
     RequestTurn,
+    RevisionRef,
     Settle,
     StartAttempt,
     Stop,
     Withdraw,
 )
 
+if TYPE_CHECKING:
+    from vs_runtime.api.testing import Run
+
 RUNS = settings(max_examples=6, deadline=None, derandomize=True, database=None)
 
 
-def _state(trace: object) -> EvolveStrategyState:
-    state = trace.state  # type: ignore[attr-defined]
-    assert isinstance(state, EvolveStrategyState)
-    return state
+def _state(trace: Run) -> EvolveStrategyState:
+    assert isinstance(trace.state, EvolveStrategyState)
+    return trace.state
 
 
 def _passing_world(*, passes: tuple[bool, ...]) -> Executors:
@@ -148,7 +153,9 @@ def test_m2_a_failing_profiler_never_fails_the_child() -> None:
     assert all(item.passed for item in state.population.individuals)
     assert any(note.startswith("profiler:") for note in state.notes)
     assert isinstance(trace.decisions[-1], Stop)
-    assert trace.decisions[-1].result.outcome == "success"  # type: ignore[union-attr]
+    final = trace.decisions[-1]
+    assert isinstance(final, Stop)
+    assert final.result.outcome == "success"
 
 
 def test_a_failed_review_skips_the_trusted_gates_and_keeps_the_feedback() -> None:
@@ -162,9 +169,9 @@ def test_a_failed_review_skips_the_trusted_gates_and_keeps_the_feedback() -> Non
     failed = [item for item in state.population.individuals if not item.passed]
     assert [item.feedback for item in failed] == ["tests fail"]
     measured = {
-        item.plan.candidate.revision_id.root  # type: ignore[union-attr]
+        item.plan.candidate.revision_id.root
         for item in trace.decisions
-        if type(item).__name__ == "Measure"
+        if isinstance(item, Measure) and isinstance(item.plan.candidate, RevisionRef)
     }
     assert len(measured) == 2  # the failed child was never measured
 
