@@ -41,17 +41,18 @@ from server.transport.discovery import (
     WebInstanceRecord,
 )
 from server.transport.subscriptions import SubscriptionTracker
-from vs_sim.api import SystemClock
+from vs_async_ops.api import finish
+from vs_sim.api import SystemClock, ThreadBlockingRunner
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from websockets.asyncio.server import Server, ServerConnection
     from websockets.http11 import Request
     from websockets.http11 import Response as HttpResponse
 
     from server.api.service import RunApi, SubscriptionBootstrap
-    from vs_sim.api import Clock, Event
+    from vs_sim.api import BlockingRunner, Clock, Event
 
 _LOG = logging.getLogger(__name__)
 
@@ -300,6 +301,21 @@ class WebSocketLimits:
     send_frame_bytes: int = _FRAME_BYTES
 
 
+async def _run_owned_request(
+    runner: BlockingRunner,
+    execute: Callable[[ProtocolRequest], Response],
+    request: ProtocolRequest,
+) -> Response:
+    """Run one synchronous API request without abandoning it on cancellation.
+
+    A browser disconnect or gateway shutdown can cancel the connection handler,
+    but ``RunApi.execute`` may already have changed durable state. Shield the
+    worker and drain it before propagating cancellation so the gateway never
+    closes its loop around an unowned side effect.
+    """
+    return await finish(asyncio.create_task(runner.run(execute, request)))
+
+
 class WebSocketGateway:
     """Serve the existing protocol API and web assets on one loopback port.
 
@@ -311,7 +327,7 @@ class WebSocketGateway:
     Unix adapter.
     """
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-101057 [PLR0913]; the gateway exposes independent protocol, asset, port, capability, discovery, and transport-bound options
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-101057 [PLR0913]; the gateway exposes independent protocol, asset, port, capability, discovery, transport, and execution-bound options
         self,
         api: RunApi,
         *,
@@ -326,11 +342,14 @@ class WebSocketGateway:
         limits: WebSocketLimits | None = None,
         startup: StartupSynchronization | None = None,
         clock: Clock | None = None,
+        request_runner: BlockingRunner | None = None,
     ) -> None:
         """Create a loopback gateway around a shared run API.
 
-        Raises `ValueError`, naming the offending value, when `allowed_origins`
-        holds anything a browser cannot send as an `Origin` header.
+        ``request_runner`` owns synchronous request execution outside the
+        gateway event loop. Raises `ValueError`, naming the offending value,
+        when `allowed_origins` holds anything a browser cannot send as an
+        `Origin` header.
         """
         self.api = api
         self.assets_dir = assets_dir.resolve() if assets_dir is not None else None
@@ -356,6 +375,9 @@ class WebSocketGateway:
         self._start_lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
         self._clock = clock or SystemClock()
+        self._request_runner = (
+            request_runner if request_runner is not None else ThreadBlockingRunner()
+        )
         self._attempt: _GatewayAttempt | None = None
 
     @property
@@ -1144,7 +1166,7 @@ class WebSocketGateway:
                         await self._write_stream_error(websocket, request, error)
                 return True
             try:
-                response = self.api.execute(request)
+                response = await _run_owned_request(self._request_runner, self.api.execute, request)
             # lint-waiver: LW-101111 [BLE001]; the request boundary converts arbitrary API failures into the protocol's typed response.
             # > Listing current service exceptions would leak future request failures out of the transport; a helper would retain the same broad boundary catch with more indirection.
             except Exception as error:  # noqa: BLE001

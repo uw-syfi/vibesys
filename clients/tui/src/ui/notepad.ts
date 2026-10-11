@@ -60,12 +60,11 @@ export class NotepadView {
   #renderedText: string | null = null;
   #renderedRunId: string | null = null;
   #renderedPersistence: SessionState['notepad']['persistence'] | null = null;
-  #statusColor: string;
-  #conflictColor: string;
+  #renderedPersistenceError: string | null = null;
+  #theme: Theme;
 
   constructor(renderer: CliRenderer, theme: Theme) {
-    this.#statusColor = theme.textMuted;
-    this.#conflictColor = theme.warning;
+    this.#theme = theme;
     this.output = new BoxRenderable(renderer, {
       id: 'notepad',
       width: '70%',
@@ -140,13 +139,14 @@ export class NotepadView {
   onTextChange: (text: string) => void = () => {};
 
   applyTheme(theme: Theme): void {
+    this.#theme = theme;
     this.output.borderColor = theme.info;
     this.output.backgroundColor = theme.canvas;
     this.#metaRun.fg = theme.textPrimary;
-    this.#statusColor = theme.textMuted;
-    this.#conflictColor = theme.warning;
     this.#metaNote.fg =
-      this.#renderedPersistence === 'conflict' ? this.#conflictColor : this.#statusColor;
+      this.#renderedPersistence === 'conflict' || this.#renderedPersistenceError !== null
+        ? theme.warning
+        : theme.textMuted;
     this.#hint.fg = theme.textSubtle;
     this.#editor.textColor = theme.textPrimary;
     this.#editor.focusedTextColor = theme.textStrong;
@@ -159,6 +159,7 @@ export class NotepadView {
       return;
     }
     this.output.visible = true;
+    const persistenceError = notepad.persistenceError?.replace(/\s+/g, ' ').trim() ?? null;
     const rows = fitModalRows(
       viewport,
       Math.round(viewport.height * TOP_SHARE),
@@ -181,11 +182,20 @@ export class NotepadView {
       const run = state.core.runId === null ? 'unknown run' : formatRunLabel(state.core.runId);
       this.#metaRun.content = `Run ${run}`;
     }
-    if (this.#renderedPersistence !== notepad.persistence) {
+    if (
+      this.#renderedPersistence !== notepad.persistence ||
+      this.#renderedPersistenceError !== persistenceError
+    ) {
       this.#renderedPersistence = notepad.persistence;
-      this.#metaNote.content = PERSISTENCE_STATUS[notepad.persistence];
+      this.#renderedPersistenceError = persistenceError;
+      this.#metaNote.content =
+        persistenceError === null
+          ? PERSISTENCE_STATUS[notepad.persistence]
+          : `Not saved locally · ${persistenceError} · draft stays in memory`;
       this.#metaNote.fg =
-        notepad.persistence === 'conflict' ? this.#conflictColor : this.#statusColor;
+        notepad.persistence === 'conflict' || persistenceError !== null
+          ? this.#theme.warning
+          : this.#theme.textMuted;
     }
   }
 

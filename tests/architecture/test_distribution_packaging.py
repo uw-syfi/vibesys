@@ -17,6 +17,11 @@ import pytest
 from packaging.requirements import Requirement
 from scripts.example_repositories import is_example_repository_path
 from tests.support import run_test_command
+from tests.support.distribution_build import (
+    PrivatePackagingSource,
+    build_distribution,
+    copy_private_packaging_source,
+)
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -50,6 +55,15 @@ INTERNAL_IMPORT_PACKAGES = {
     "vs_slurm",
     "vs_mcp",
 }
+
+
+@pytest.fixture(scope="module")
+def distribution_source(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> PrivatePackagingSource:
+    """Snapshot source once; packaging backends may mutate only this private tree."""
+    scratch = tmp_path_factory.mktemp("distribution-source")
+    return copy_private_packaging_source(PROJECT_ROOT, scratch / "checkout")
 
 
 def test_headless_readme_examples_select_a_run_collection() -> None:
@@ -371,15 +385,10 @@ def test_frontend_payload_belongs_to_the_entrypoints_package() -> None:
 
 def test_built_distribution_caps_dependencies_without_current_intel_macos_wheels(
     tmp_path: Path,
+    distribution_source: PrivatePackagingSource,
 ) -> None:
     """Published metadata must preserve constraints needed by Intel macOS installs."""
-    run_test_command(
-        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],
-        cwd=PROJECT_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    build_distribution(distribution_source, tmp_path, artifact="wheel")
     wheel = next(tmp_path.glob("vibesys-*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         members = set(archive.namelist())
@@ -388,7 +397,7 @@ def test_built_distribution_caps_dependencies_without_current_intel_macos_wheels
             name.startswith(("vibesys/orchestration/prompts/", "vibesys/orchestration/domains/"))
             for name in members
         )
-        source = PROJECT_ROOT / "src"
+        source = distribution_source.root / "src"
         prompt_assets = {
             path.relative_to(source).as_posix(): path
             for path in (source / "vibesys").rglob("*")
@@ -415,39 +424,37 @@ def test_built_distribution_caps_dependencies_without_current_intel_macos_wheels
     assert str(requirements["mcp"].specifier) == "<2,>=1.0"
 
 
-def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path: Path) -> None:
-    manifest = (PROJECT_ROOT / "MANIFEST.in").read_text().splitlines()
+def test_sdist_contains_evaluator_packages_without_local_build_outputs(
+    tmp_path: Path,
+    distribution_source: PrivatePackagingSource,
+) -> None:
+    source_root = distribution_source.root
+    manifest = (source_root / "MANIFEST.in").read_text().splitlines()
     assert "graft resources/evaluators" in manifest
     assert "prune resources/evaluators/*/native_runner/target" in manifest
     assert "graft clients" not in manifest
 
-    run_test_command(
-        ["uv", "build", "--sdist", "--out-dir", str(tmp_path)],
-        cwd=PROJECT_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    build_distribution(distribution_source, tmp_path, artifact="sdist")
     sdist = next(tmp_path.glob("vibesys-*.tar.gz"))
     with tarfile.open(sdist, mode="r:gz") as archive:
         members = {
             member.name.partition("/")[2] for member in archive.getmembers() if member.isfile()
         }
 
-    workspace_members = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())["tool"]["uv"][
+    workspace_members = tomllib.loads((source_root / "pyproject.toml").read_text())["tool"]["uv"][
         "workspace"
     ]["members"]
     for member_glob in workspace_members:
-        for manifest_path in PROJECT_ROOT.glob(f"{member_glob}/pyproject.toml"):
+        for manifest_path in source_root.glob(f"{member_glob}/pyproject.toml"):
             if member_glob.startswith("libs/"):
-                assert manifest_path.relative_to(PROJECT_ROOT).as_posix() in members
+                assert manifest_path.relative_to(source_root).as_posix() in members
 
     assert "resources/evaluators/queue/vibesys.evaluator.toml" in members
     assert "resources/evaluators/microservice/vibesys.evaluator.toml" in members
     assert "resources/evaluators/microservice/kubernetes_runtime/cli.py" in members
     assert "resources/evaluators/microservice/kubernetes_runtime/control.py" in members
     assert "resources/evaluators/microservice/kubernetes_runtime/runtime.py" in members
-    client_root = PROJECT_ROOT / "clients"
+    client_root = source_root / "clients"
     workspace_packages = sorted(
         manifest_path.parent
         for manifest_path in client_root.glob("*/package.json")
@@ -455,11 +462,11 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
     )
     assert workspace_packages
     for package in workspace_packages:
-        relative_package = package.relative_to(PROJECT_ROOT).as_posix()
+        relative_package = package.relative_to(source_root).as_posix()
         assert f"{relative_package}/package.json" in members
         source_entry = package / "src" / "index.ts"
         if source_entry.is_file():
-            assert source_entry.relative_to(PROJECT_ROOT).as_posix() in members
+            assert source_entry.relative_to(source_root).as_posix() in members
 
     assert "clients/pnpm-lock.yaml" in members
     assert "clients/biome.warnings.json" in members
@@ -470,7 +477,7 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
     assert "clients/scripts/check_package_graph.mjs" in members
     assert "clients/scripts/workspace_layout.mjs" in members
     module = _load_packaging_support()
-    expected_client_sources = set(module.discover_client_workspace_sources(PROJECT_ROOT))
+    expected_client_sources = set(module.discover_client_workspace_sources(source_root))
     assert {
         member for member in members if member.startswith("clients/")
     } == expected_client_sources

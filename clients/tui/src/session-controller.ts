@@ -128,6 +128,7 @@ import {
   setChatDockFits,
   setChatThreadPending,
   setDesignPane,
+  setNotepadPersistenceError,
   setNotepadText,
   setPerformancePane,
   showDetail,
@@ -676,19 +677,29 @@ export class SocketSessionController implements SessionController {
   setNoteText(text: string): void {
     const timestamp = new Date().toISOString();
     const next = setNotepadText(this.#state, text, timestamp);
-    this.#setState(next);
     const identity = this.#noteIdentity();
     if (
-      identity !== null &&
-      next.notepad.persistence === 'ready' &&
-      next.notepad.createdAt !== null
+      identity === null ||
+      next.notepad.persistence !== 'ready' ||
+      next.notepad.createdAt === null
     ) {
+      this.#setState(next);
+      return;
+    }
+    try {
       writeNote({
         ...identity,
         text: next.notepad.text,
         createdAt: next.notepad.createdAt,
         updatedAt: next.notepad.updatedAt ?? timestamp,
       });
+      this.#setState(setNotepadPersistenceError(next, null));
+    } catch (error) {
+      // The private note is convenience state, not part of the run. Keep the
+      // operator's newest draft in memory and show that it is unsaved; a later
+      // successful edit clears this diagnostic. Filesystem failure must never
+      // escape the editor callback or put note text on the backend transport.
+      this.#setState(setNotepadPersistenceError(next, errorMessage(error)));
     }
   }
 
@@ -718,13 +729,18 @@ export class SocketSessionController implements SessionController {
       return;
     }
     const {text, createdAt, updatedAt} = this.#state.notepad;
-    writeNote({
-      ...identity,
-      text,
-      createdAt,
-      updatedAt: updatedAt ?? createdAt,
-    });
-    this.#setState(hydrateNotepad(this.#state, null));
+    const bound = hydrateNotepad(this.#state, null);
+    try {
+      writeNote({
+        ...identity,
+        text,
+        createdAt,
+        updatedAt: updatedAt ?? createdAt,
+      });
+      this.#setState(setNotepadPersistenceError(bound, null));
+    } catch (error) {
+      this.#setState(setNotepadPersistenceError(bound, errorMessage(error)));
+    }
   }
 
   /**

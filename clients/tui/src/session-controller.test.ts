@@ -1,5 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it} from 'bun:test';
-import {mkdtempSync, rmSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {
@@ -2521,6 +2521,36 @@ describe('notepad', () => {
     );
   });
 
+  it('keeps a startup draft when its first identity-bound write fails and retries later', async () => {
+    const blockedStateHome = join(stateHome, 'startup-state-home');
+    writeFileSync(blockedStateHome, 'occupied');
+    process.env['VIBESYS_STATE_HOME'] = blockedStateHome;
+    const transport = new FakeTransport();
+    transport.deferSnapshot = true;
+    const controller = new SocketSessionController(transport);
+
+    const starting = controller.start();
+    controller.openNotepad();
+    controller.setNoteText('draft written during startup');
+    transport.releaseSnapshot();
+
+    await expect(starting).resolves.toBeUndefined();
+    expect(controller.state.notepad).toMatchObject({
+      text: 'draft written during startup',
+      persistence: 'ready',
+    });
+    expect(controller.state.notepad.persistenceError).toContain('ENOTDIR');
+
+    rmSync(blockedStateHome);
+    mkdirSync(blockedStateHome);
+    controller.setNoteText('recovered startup draft');
+
+    expect(controller.state.notepad.persistenceError).toBeNull();
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+      'recovered startup draft',
+    );
+  });
+
   it('persists every keystroke, surviving a restart against the same run', async () => {
     const controller = new SocketSessionController(new FakeTransport());
     await controller.start();
@@ -2538,6 +2568,43 @@ describe('notepad', () => {
     await restarted.start();
     restarted.openNotepad();
     expect(restarted.state.notepad.text).toBe('watch the retry budget');
+  });
+
+  it('keeps a draft in memory and off the wire when local persistence fails', async () => {
+    const blockedStateHome = join(stateHome, 'not-a-directory');
+    writeFileSync(blockedStateHome, 'occupied');
+    process.env['VIBESYS_STATE_HOME'] = blockedStateHome;
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    const bootRequests = transport.requests.length;
+    controller.openNotepad();
+
+    expect(() => controller.setNoteText('draft stays in memory')).not.toThrow();
+
+    expect(controller.state.notepad.text).toBe('draft stays in memory');
+    expect(controller.state.notepad.persistenceError).toContain('ENOTDIR');
+    expect(transport.requests.slice(bootRequests)).toEqual([]);
+  });
+
+  it('clears the persistence diagnostic after a later edit writes successfully', async () => {
+    const blockedStateHome = join(stateHome, 'recoverable-state-home');
+    writeFileSync(blockedStateHome, 'occupied');
+    process.env['VIBESYS_STATE_HOME'] = blockedStateHome;
+    const controller = new SocketSessionController(new FakeTransport());
+    await controller.start();
+    controller.openNotepad();
+    controller.setNoteText('first draft');
+    expect(controller.state.notepad.persistenceError).not.toBeNull();
+
+    rmSync(blockedStateHome);
+    mkdirSync(blockedStateHome);
+    controller.setNoteText('recovered draft');
+
+    expect(controller.state.notepad.persistenceError).toBeNull();
+    expect(readNote({projectScope: NOTE_PROJECT_SCOPE, runId: 'run'})?.text).toBe(
+      'recovered draft',
+    );
   });
 
   it('does not write to disk before a run id is known', () => {
