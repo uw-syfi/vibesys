@@ -13,6 +13,7 @@ function channelOptions(clock = new FakeClock()): ChannelOptions {
     deadlineMs: 60_000,
     scheduleTimeout: clock.scheduleTimeout,
     signal: new AbortController().signal,
+    heard: () => undefined,
     explain: () => new ConnectionError('link', 'the test helper ended'),
   };
 }
