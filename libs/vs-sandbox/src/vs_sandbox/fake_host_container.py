@@ -54,7 +54,6 @@ class HostExecutedContainerBackend(LocalBackend):
         log_path: Path | str | None = None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
         extra_env: dict[str, str] | None = None,
-        extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
         attach_accelerator: bool = True,
         ephemeral: bool = False,
@@ -73,7 +72,6 @@ class HostExecutedContainerBackend(LocalBackend):
                 log_path=log_path,
                 bind_mounts=bind_mounts,
                 extra_env=extra_env,
-                extra_init_commands=extra_init_commands,
                 lifecycle_hooks=lifecycle_hooks,
                 attach_accelerator=attach_accelerator,
                 ephemeral=ephemeral,
@@ -84,7 +82,7 @@ class HostExecutedContainerBackend(LocalBackend):
                 same_path_workspace=same_path_workspace,
                 run_id=run_id,
             )
-        del bind_mounts, log_path, extra_init_commands, attach_accelerator, ephemeral
+        del bind_mounts, log_path, attach_accelerator, ephemeral
         del container_image, auth_files, resources, docker_in_docker, same_path_workspace, run_id
         container = HostExecutedContainer(host_workspace, env=extra_env, inherit_env=True)
         SandboxLifecycle(lifecycle_hooks).before_ready(container)

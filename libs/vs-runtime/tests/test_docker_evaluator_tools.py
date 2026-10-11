@@ -13,6 +13,7 @@ from vs_runtime.api.infrastructure import (
     SANDBOX_EVALUATOR_TOOLS_ROOT,
     TrustedEvaluatorRequirements,
     docker_evaluator_tools_root,
+    evaluator_container_setup,
     prepare_docker_evaluator_resources,
 )
 from vs_sandbox.api import (
@@ -24,7 +25,6 @@ from vs_sandbox.api import (
 from vs_sandbox.api.evaluator_tools import (
     CargoGitToolSpec,
     EvaluatorToolError,
-    EvaluatorToolLifecycleHooks,
     evaluator_tools_install_command,
     prepare_evaluator_tools,
     tool_install_root,
@@ -173,11 +173,7 @@ def test_missing_cache_uses_target_image_ephemeral_builder_then_verifies(
     assert creation.ephemeral is True
     assert creation.container_image == _IMAGE
     assert creation.bind_mounts[0][1:] == (str(SANDBOX_EVALUATOR_TOOLS_ROOT), False)
-    assert len(creation.lifecycle_hooks) == 1
-    assert isinstance(creation.lifecycle_hooks[0], EvaluatorToolLifecycleHooks)
-    assert any(
-        "static.rust-lang.org/rustup/dist" in command for command in creation.extra_init_commands
-    )
+    assert creation.lifecycle_hooks == ()
     assert sandbox.start_count == 1
     assert sandbox.stop_count == 1
     ownership = sandbox.calls[-1]
@@ -189,6 +185,76 @@ def test_missing_cache_uses_target_image_ephemeral_builder_then_verifies(
     assert ownership.timeout == 120
 
 
+def _system_package_requirements(tmp_path: Path) -> TrustedEvaluatorRequirements:
+    tool = _tool().model_copy(update={"system_packages": ("pkg-config", "libssl-dev")})
+    return TrustedEvaluatorRequirements(
+        package_root=tmp_path / "evaluator-package",
+        tools={"check-tool": tool},
+        tools_root=tmp_path / "operator-tools",
+    )
+
+
+def test_builder_installs_system_packages_as_root_before_building_tools(tmp_path: Path) -> None:
+    """The tool's root setup is an exec in the started builder, not a backend parameter.
+
+    A backend parameter was silently ignored by every real backend, so the
+    packages never installed and `cargo install` failed on a real run.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    log_dir = tmp_path / "logs"
+    requirements = _system_package_requirements(tmp_path)
+    backend = FakeComputeBackend()
+    sandbox = FakeLifecycleRunner()
+    backend.script_sandbox(SandboxKind.DOCKER, str(_builder_workspace(log_dir)), sandbox)
+
+    with pytest.raises(EvaluatorToolError, match="did not publish every declared tool"):
+        prepare_docker_evaluator_resources(
+            requirements,
+            workspace,
+            backend=backend,
+            log_dir=log_dir,
+            container_image=_IMAGE,
+        )
+
+    install_tools = evaluator_tools_install_command(
+        requirements.tools, SANDBOX_EVALUATOR_TOOLS_ROOT
+    )
+    commands = [call.command for call in sandbox.calls]
+    package_step = next(
+        index
+        for index, call in enumerate(sandbox.calls)
+        if "apt-get install" in call.command and "libssl-dev" in call.command
+    )
+    assert sandbox.calls[package_step].as_root
+    assert package_step < commands.index(install_tools)
+    assert not sandbox.calls[commands.index(install_tools)].as_root
+
+
+def test_builder_setup_failure_names_the_step_and_still_stops(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    log_dir = tmp_path / "logs"
+    requirements = _system_package_requirements(tmp_path)
+    backend = FakeComputeBackend()
+    sandbox = FakeLifecycleRunner(default_result=CommandResult(output="E: no network", exit_code=1))
+    backend.script_sandbox(SandboxKind.DOCKER, str(_builder_workspace(log_dir)), sandbox)
+
+    with pytest.raises(EvaluatorToolError, match="builder setup failed: E: no network"):
+        prepare_docker_evaluator_resources(
+            requirements,
+            workspace,
+            backend=backend,
+            log_dir=log_dir,
+            container_image=_IMAGE,
+        )
+
+    assert sandbox.stop_count == 1
+    assert evaluator_tools_install_command(
+        requirements.tools, SANDBOX_EVALUATOR_TOOLS_ROOT
+    ) not in [call.command for call in sandbox.calls]
+
+
 def test_builder_ownership_failure_is_bounded_and_still_stops(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -198,10 +264,11 @@ def test_builder_ownership_failure_is_bounded_and_still_stops(tmp_path: Path) ->
     sandbox = FakeLifecycleRunner(
         default_result=CommandResult(output="denied\n" + "x" * 800, exit_code=1)
     )
-    sandbox.script(
+    for command in (
+        *evaluator_container_setup(requirements),
         evaluator_tools_install_command(requirements.tools, SANDBOX_EVALUATOR_TOOLS_ROOT),
-        DEFAULT_RESULT,
-    )
+    ):
+        sandbox.script(command, DEFAULT_RESULT)
     backend.script_sandbox(SandboxKind.DOCKER, str(_builder_workspace(log_dir)), sandbox)
 
     with pytest.raises(EvaluatorToolError) as raised:

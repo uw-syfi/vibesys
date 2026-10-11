@@ -14,10 +14,12 @@ from vs_runtime._trusted_evaluation_preparation import (
     evaluator_container_setup,
 )
 from vs_sandbox.api import (
+    BeforeReadyContext,
     ComputeBackendImpl,
     HostResource,
     HostResourceAccess,
     SandboxKind,
+    execute_as_root,
     start_sandbox,
     stop_sandbox,
 )
@@ -30,6 +32,10 @@ from vs_sandbox.api.evaluator_tools import (
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+
+#: Upper bound for one root setup command (an apt install with retries).
+_SETUP_TIMEOUT_S = 1800
 
 
 class _EvaluatorToolBuildRequiredError(RuntimeError):
@@ -116,14 +122,24 @@ def _build_evaluator_tools(
                 (str(host_parent), str(SANDBOX_EVALUATOR_TOOLS_ROOT), False),
             ],
             extra_env={},
-            extra_init_commands=evaluator_container_setup(requirements),
-            lifecycle_hooks=[EvaluatorToolLifecycleHooks(tools, SANDBOX_EVALUATOR_TOOLS_ROOT)],
             attach_accelerator=False,
             ephemeral=True,
             container_image=container_image,
         )
         try:
             start_sandbox(builder)
+            # The tool's root-only setup (system packages, toolchain) runs here,
+            # as root in the started builder, before the tools are built. It is
+            # an ordinary exec, so it works on every backend and shows in the
+            # builder log.
+            for command in evaluator_container_setup(requirements):
+                setup = execute_as_root(builder, command, timeout=_SETUP_TIMEOUT_S)
+                if setup.exit_code != 0:
+                    detail = (setup.output or "setup command failed").strip()
+                    raise EvaluatorToolError.builder_setup_failed(detail[-500:])
+            EvaluatorToolLifecycleHooks(tools, SANDBOX_EVALUATOR_TOOLS_ROOT).before_ready(
+                BeforeReadyContext(builder)
+            )
             container_roots = [
                 str(tool_install_root(SANDBOX_EVALUATOR_TOOLS_ROOT, name, spec))
                 for name, spec in tools.items()

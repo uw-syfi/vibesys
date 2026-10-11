@@ -81,6 +81,13 @@ const HYPOTHESIS_KEY_HELP =
 /** Bezel, one content row, bezel. See the header frame below. */
 const HEADER_FRAME_HEIGHT = 3;
 
+/**
+ * Rows below the header and banner that keep a bordered pane, its command
+ * surface, and the global help line disjoint. The banner gives up rows before
+ * these interactive surfaces do.
+ */
+const MIN_WORKSPACE_HEIGHT = 11;
+
 /** Two border cells plus a cell of padding on each side. */
 const HEADER_CHROME = 4;
 
@@ -441,7 +448,7 @@ export function createOpenTuiApp(
       : 0;
     const showExperimentLog = showLog && (zoomedPane === null || zoomedPane === 'experiments');
     paintHeader(renderHeader(state, showLog, renderer.terminalWidth - HEADER_CHROME));
-    errorBanner.render(state);
+    errorBanner.render(state, renderer.terminalHeight - headerFrame.height - MIN_WORKSPACE_HEIGHT);
     // The log carries its own key hints in its footer, so when it shares the
     // row with a pane the global line is the place for the pane's keys.
     renderedKeyHelp = showSplit

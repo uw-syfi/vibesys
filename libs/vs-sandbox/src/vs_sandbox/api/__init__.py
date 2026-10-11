@@ -75,6 +75,7 @@ if TYPE_CHECKING:
         SandboxLifecycleError,
         SandboxLifecycleHooks,
         SandboxSession,
+        execute_as_root,
         start_sandbox,
         stop_sandbox,
     )
@@ -142,6 +143,7 @@ __all__ = [
     "declare_resources",
     "deduplicate_host_resources",
     "ensure_model_volume",
+    "execute_as_root",
     "host_resource_for_mount",
     "linked_worktree_git_paths",
     "parse_gpu_info_output",
@@ -221,6 +223,7 @@ _LAZY_EXPORTS = {
     "SandboxLifecycle": ("lifecycle", "SandboxLifecycle"),
     "SandboxLifecycleError": ("lifecycle", "SandboxLifecycleError"),
     "SandboxLifecycleHooks": ("lifecycle", "SandboxLifecycleHooks"),
+    "execute_as_root": ("lifecycle", "execute_as_root"),
     "start_sandbox": ("lifecycle", "start_sandbox"),
     "stop_sandbox": ("lifecycle", "stop_sandbox"),
     "linked_worktree_git_paths": ("linked_worktree", "linked_worktree_git_paths"),

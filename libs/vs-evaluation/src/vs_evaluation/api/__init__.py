@@ -16,6 +16,7 @@ from vs_evaluation.agent_models import (
     EVALUATION_ACCESS_STATE_PATH,
     MAX_AGENT_AWAIT_S,
     MAX_STAGE_SUMMARY_TAIL_CHARS,
+    RECEIPT_LINE,
     AdditionalProfileCaptureReason,
     AgentAwaitResult,
     AgentEvaluationCall,
@@ -365,6 +366,7 @@ __all__ = [
 
 # Scope lifecycle contracts are appended separately from the established evaluation API.
 __all__ += [
+    "RECEIPT_LINE",
     "ScopeClosingError",
     "ScopeLifecycleStore",
     "ScopePhase",

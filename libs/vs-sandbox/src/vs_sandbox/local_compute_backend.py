@@ -77,7 +77,6 @@ class LocalBackend:
         log_path: Path | str | None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
         extra_env: dict[str, str] | None = None,
-        extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
         attach_accelerator: bool = True,
         ephemeral: bool = False,
@@ -93,11 +92,7 @@ class LocalBackend:
         # atexit handlers. Registration must stay side-effect free.
         docker_sandbox = import_module("vs_sandbox.api").DockerSandbox
 
-        # extra_init_commands is accepted for ComputeBackendImpl protocol
-        # parity (HostEnvironment.open() passes it unconditionally) but never
-        # used: neither the LOCAL sandbox nor the agent-image-based DOCKER
-        # sandbox runs per-launch install commands.
-        del attach_accelerator, ephemeral, extra_init_commands
+        del attach_accelerator, ephemeral
         bind_mounts = list(bind_mounts or [])
         extra_env = dict(extra_env or {})
         lifecycle_hooks = lifecycle_hooks or []

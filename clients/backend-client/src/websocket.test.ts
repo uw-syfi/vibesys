@@ -10,7 +10,7 @@ import type {
 import {REQUEST_POLICIES, ServerError} from './index.js';
 import {parseProtocolResponse} from './protocol-parse.js';
 import {expect} from './test-support/expect.js';
-import {FakeClock as FakeScheduler} from './testing/fake-clock.test-helper.js';
+import {FakeClock} from './testing/index.js';
 import {type WebSocketLike, WebSocketTransport} from './websocket.js';
 
 const URL = 'ws://127.0.0.1:43123';
@@ -234,7 +234,7 @@ describe('WebSocketTransport', () => {
   });
 
   it('bounds the subscription handshake and closes an unresponsive socket', async () => {
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const socket = new FakeSocket();
     const transport = new WebSocketTransport(URL, {
       connectTimeoutMs: 10,
@@ -393,7 +393,7 @@ describe('WebSocketTransport', () => {
 
   it('redials the control channel on the backoff schedule and carries a later command', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const states: ControlChannelState[] = [];
     const transport = controlTransport(gateway, scheduler, {
       reconnectDelaysMs: [0],
@@ -410,7 +410,7 @@ describe('WebSocketTransport', () => {
     expect(transport.connected).toBe(false);
 
     // The schedule redials on its own: no further request triggers it.
-    scheduler.runDue(0);
+    scheduler.advanceBy(0);
     await tick();
     expect(gateway.sockets).toHaveLength(2);
     expect(transport.connected).toBe(true);
@@ -432,7 +432,7 @@ describe('WebSocketTransport', () => {
 
   it('holds an idempotent request across a drop and resends it with a fresh id', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {reconnectDelaysMs: [0]});
 
     const pending = transport.request({type: 'command.pause'});
@@ -440,7 +440,7 @@ describe('WebSocketTransport', () => {
     const abandonedId = gateway.socket(0).requestIds()[0] ?? '';
 
     gateway.socket(0).drop();
-    scheduler.runDue(0);
+    scheduler.advanceBy(0);
     await tick();
 
     const resent = gateway.socket(1).frames()[0] ?? {};
@@ -458,7 +458,7 @@ describe('WebSocketTransport', () => {
 
   it('fails a non-idempotent request in flight at a drop and never resends it', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {reconnectDelaysMs: [0]});
 
     const pending = transport.request({type: 'command.steer', text: 'take the other branch'});
@@ -468,7 +468,7 @@ describe('WebSocketTransport', () => {
     gateway.socket(0).drop();
     await expect(pending).rejects.toMatchObject({kind: 'disconnected', retryable: true});
 
-    scheduler.runDue(0);
+    scheduler.advanceBy(0);
     await tick();
     // The channel recovered, and the steer reached only the first connection.
     expect(gateway.sockets).toHaveLength(2);
@@ -479,7 +479,7 @@ describe('WebSocketTransport', () => {
 
   it('resolves an in-flight request whose response arrives before the drop', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {reconnectDelaysMs: []});
 
     const pending = transport.request({type: 'query.snapshot'});
@@ -493,7 +493,7 @@ describe('WebSocketTransport', () => {
 
   it('reports the control channel dead once its schedule is spent, and revives on a request', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const states: ControlChannelState[] = [];
     const transport = controlTransport(gateway, scheduler, {
       reconnectDelaysMs: [],
@@ -529,7 +529,7 @@ describe('WebSocketTransport', () => {
   it('costs one bounded dial series while the gateway is down, not one dial per request', async () => {
     const gateway = new FakeGateway();
     gateway.outcome = 'fail';
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const states: ControlChannelState[] = [];
     const transport = controlTransport(gateway, scheduler, {
       reconnectDelaysMs: [0],
@@ -547,7 +547,7 @@ describe('WebSocketTransport', () => {
     // A request that must not be repeated does not wait out an outage.
     expect((await steer).kind).toBe('disconnected');
 
-    scheduler.runDue(0);
+    scheduler.advanceBy(0);
     await tick();
 
     // The schedule is one attempt long, so the second failure ends the series.
@@ -560,7 +560,7 @@ describe('WebSocketTransport', () => {
 
   it('routes a request onto a dedicated connection when the options ask for it', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {requestTimeoutMs: 20});
 
     const pending = transport.request({type: 'query.snapshot'}, {dedicatedConnection: true});
@@ -578,7 +578,7 @@ describe('WebSocketTransport', () => {
 
   it('runs a chat on its own connection because the policy table says so', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {});
 
     expect(REQUEST_POLICIES['query.chat']).toMatchObject({dedicatedConnection: true});
@@ -599,12 +599,12 @@ describe('WebSocketTransport', () => {
 
   it('honors a per-call timeout override', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {requestTimeoutMs: 30_000});
 
     const pending = transport.request({type: 'query.snapshot'}, {timeoutMs: 20});
     await tick();
-    scheduler.runDue(20);
+    scheduler.advanceBy(20);
     await tick();
     // The override fires first, then everything else. A build that ignored the
     // override used to leave nothing due at 20ms and this test waited on a
@@ -621,7 +621,7 @@ describe('WebSocketTransport', () => {
 
   it('discards the late response of an aborted request and stays routable', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {});
     const controller = new AbortController();
 
@@ -647,7 +647,7 @@ describe('WebSocketTransport', () => {
 
   it('aborts an in-flight dedicated request with the abort reason', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {});
     const controller = new AbortController();
 
@@ -665,7 +665,7 @@ describe('WebSocketTransport', () => {
 
   it('rejects a request whose signal was already aborted without opening a socket', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {});
     const controller = new AbortController();
     controller.abort();
@@ -681,7 +681,7 @@ describe('WebSocketTransport', () => {
 
   it('holds a first request of any type for its first dial, then refuses one after a failure', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const states: ControlChannelState[] = [];
     const transport = controlTransport(gateway, scheduler, {
       reconnectDelaysMs: [0],
@@ -709,7 +709,7 @@ describe('WebSocketTransport', () => {
 
   it('reconnect() dials immediately instead of waiting out an armed redial', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {reconnectDelaysMs: [60_000]});
 
     const first = transport.request({type: 'query.snapshot'});
@@ -735,7 +735,7 @@ describe('WebSocketTransport', () => {
 
   it('reports a dial in flight, and a second reconnect during it opens nothing', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const states: ControlChannelState[] = [];
     const transport = controlTransport(gateway, scheduler, {
       reconnectDelaysMs: [60_000],
@@ -766,7 +766,7 @@ describe('WebSocketTransport', () => {
 
     // When the stalled handshake expires, the outage is reported again with no
     // dial in flight, so the affordance comes back to life.
-    scheduler.runDue(5_000);
+    scheduler.advanceBy(5_000);
     await tick();
     expect(states.map(trace)).toEqual([
       'connected',
@@ -779,7 +779,7 @@ describe('WebSocketTransport', () => {
 
   it('reconnect() is inert on a live channel and after close, which cancels the redial', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {reconnectDelaysMs: [60_000]});
 
     const first = transport.request({type: 'query.snapshot'});
@@ -808,7 +808,7 @@ describe('WebSocketTransport', () => {
 
   it('ignores a retired connection still reporting after its replacement is live', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const states: ControlChannelState[] = [];
     const transport = controlTransport(gateway, scheduler, {
       reconnectDelaysMs: [0],
@@ -821,7 +821,7 @@ describe('WebSocketTransport', () => {
     await expect(first).resolves.toMatchObject({ok: true});
 
     gateway.socket(0).drop();
-    scheduler.runDue(0);
+    scheduler.advanceBy(0);
     await tick();
     expect(gateway.sockets).toHaveLength(2);
     expect(transport.connected).toBe(true);
@@ -849,7 +849,7 @@ describe('WebSocketTransport', () => {
 
   it('never resends a held request the caller abandoned during the outage', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {reconnectDelaysMs: [60_000]});
 
     const first = transport.request({type: 'query.snapshot'});
@@ -882,7 +882,7 @@ describe('WebSocketTransport', () => {
   });
 
   it('fails the dial when the socket it was handed is already gone', async () => {
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const sockets: FakeSocket[] = [];
     const transport = new WebSocketTransport(URL, {
       closeGraceMs: 0,
@@ -916,7 +916,7 @@ describe('WebSocketTransport', () => {
   });
 
   it('closes a control socket that close() raced before the dial was claimed', async () => {
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const socket = new FakeSocket();
     const transport = new WebSocketTransport(URL, {
       closeGraceMs: 0,
@@ -941,7 +941,7 @@ describe('WebSocketTransport', () => {
 
   it('disposes the rest of a resend batch when one send fails mid-flush', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {reconnectDelaysMs: [0, 0]});
 
     const first = transport.request({type: 'command.pause'});
@@ -954,7 +954,7 @@ describe('WebSocketTransport', () => {
     // reports a drop while the flush is still walking the queue.
     gateway.socket(0).drop();
     gateway.failSendAfter = 1;
-    scheduler.runDue(0);
+    scheduler.advanceBy(0);
     await tick();
     expect(gateway.socket(1).frames()).toHaveLength(1);
     expect(gateway.sendFailures()).toBe(1);
@@ -962,7 +962,7 @@ describe('WebSocketTransport', () => {
     // The next redial gets a healthy socket and must carry all three: none may
     // be left written to the dead socket and owed an answer by nobody.
     gateway.recover();
-    scheduler.runDue(0);
+    scheduler.advanceBy(0);
     await tick();
     expect(
       gateway
@@ -979,7 +979,7 @@ describe('WebSocketTransport', () => {
 
   it('answers exactly one of two concurrent identical requests', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {});
 
     const first = transport.request({type: 'query.snapshot'});
@@ -1005,7 +1005,7 @@ describe('WebSocketTransport', () => {
 
   it('stamps its own request id over one the caller supplied', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {});
 
     // `RequestInput` omits `request_id`, so a typed caller cannot supply one;
@@ -1028,7 +1028,7 @@ describe('WebSocketTransport', () => {
 
   it('queues a request issued from the connected report behind the resends', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     let reported = false;
     const transport: WebSocketTransport = controlTransport(gateway, scheduler, {
       onConnectionState: state => {
@@ -1060,14 +1060,14 @@ describe('WebSocketTransport', () => {
     for (const [type, policy] of Object.entries(REQUEST_POLICIES)) {
       if (policy.dedicatedConnection) continue;
       const gateway = new FakeGateway();
-      const scheduler = new FakeScheduler();
+      const scheduler = new FakeClock();
       const transport = controlTransport(gateway, scheduler, {reconnectDelaysMs: [0]});
       const pending = transport.request(requestOf(type));
       const settled = policy.idempotent ? null : rejection(pending);
       await tick();
 
       gateway.socket(0).drop();
-      scheduler.runDue(0);
+      scheduler.advanceBy(0);
       await tick();
 
       const resent = gateway.socket(1).frames().length;
@@ -1083,7 +1083,7 @@ describe('WebSocketTransport', () => {
 
   it('carries store_id only when the resume names one, and never as null', async () => {
     const gateway = new FakeGateway();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeClock();
     const transport = controlTransport(gateway, scheduler, {});
 
     const pending = [
@@ -1682,7 +1682,7 @@ function emptyStats(): InterleavingStats {
 
 async function runInterleaving(seed: number): Promise<InterleavingStats> {
   const gateway = new FakeGateway();
-  const scheduler = new FakeScheduler();
+  const scheduler = new FakeClock();
   const transport = controlTransport(gateway, scheduler, {reconnectDelaysMs: [0, 0]});
   const run = await driveInterleaving(seed, transport, gateway, scheduler);
   return checkInterleaving(seed, gateway, run);
@@ -1704,7 +1704,7 @@ async function driveInterleaving(
   seed: number,
   transport: WebSocketTransport,
   gateway: FakeGateway,
-  scheduler: FakeScheduler,
+  scheduler: FakeClock,
 ): Promise<Interleaving> {
   const random = seededRandom(seed);
   const tracked: TrackedRequest[] = [];
@@ -1727,7 +1727,7 @@ async function driveInterleaving(
         gateway.live()?.drop();
         break;
       case 4:
-        scheduler.runDue(0);
+        scheduler.advanceBy(0);
         break;
       default:
         // Perturb the gateway. A dial that refuses and a socket that breaks on
@@ -1741,7 +1741,7 @@ async function driveInterleaving(
   }
   gateway.recover();
   for (let pass = 0; pass < 6; pass += 1) {
-    scheduler.runDue(0);
+    scheduler.advanceBy(0);
     await tick(10);
     gateway.live()?.answerAll();
     await tick(10);
@@ -1876,7 +1876,7 @@ function seededRandom(seed: number): (bound: number) => number {
 
 function controlTransport(
   gateway: FakeGateway,
-  scheduler: FakeScheduler,
+  scheduler: FakeClock,
   options: {
     reconnectDelaysMs?: readonly number[];
     onConnectionState?: (state: ControlChannelState) => void;

@@ -5,6 +5,8 @@ import {fillLayer} from './box-fill.js';
 
 /** Enough rows to read a useful diagnostic without pushing the run off screen. */
 const ERROR_HEIGHT = 10;
+/** Border, one diagnostic row, and the footer remain useful in the compact form. */
+const MIN_ERROR_HEIGHT = 4;
 
 const ERROR_TITLES: Record<ErrorTitleKind, string> = {
   configuration: 'Configuration failed',
@@ -81,7 +83,7 @@ export class ErrorBannerView {
     this.#scroll.scrollBy(delta, 'viewport');
   }
 
-  render(state: SessionState): void {
+  render(state: SessionState, maxHeight: number): void {
     const banner = state.errorBanner;
     if (banner === null) {
       this.output.visible = false;
@@ -89,11 +91,11 @@ export class ErrorBannerView {
       return;
     }
     this.output.visible = true;
+    this.output.height = Math.max(MIN_ERROR_HEIGHT, Math.min(ERROR_HEIGHT, maxHeight));
     if (banner === this.#rendered) return;
     this.#rendered = banner;
     this.#clear();
     this.output.borderColor = banner.severity === 'fatal' ? this.#theme.error : this.#theme.warning;
-    this.output.height = ERROR_HEIGHT;
     this.#renderContent(banner);
   }
 
