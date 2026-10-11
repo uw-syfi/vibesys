@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {checkModel, Seeded} from '@vibesys/core-state/testing';
 import type {HostKey, HostSummary} from '@vibesys/entities';
 import type {ChromeState, WelcomeResult} from '@vibesys/ipc';
-import {randomChrome} from '../../../testing/fake-chrome.js';
+import {randomChrome} from '@vibesys/ipc/testing';
 import {
   type HostAction,
   type HostRequest,

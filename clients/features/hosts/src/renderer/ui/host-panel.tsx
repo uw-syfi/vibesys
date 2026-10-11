@@ -3,30 +3,36 @@
  * pushes them, and "Start a run…"; or why the host cannot be reached, with Sign in.
  */
 
-import {
-  type HostKey,
-  type HostListing,
-  type HostRun,
-  type HostSummary,
-  stopKey,
-  suggestProjects,
-} from '@vibesys/entities';
-import type {ChromeState} from '@vibesys/ipc';
+import type {HostKey, HostListing, HostRun, HostSummary} from '@vibesys/entities';
 import {Button} from '@vibesys/ui';
 import type {FormEvent, JSX, KeyboardEvent, ReactNode} from 'react';
-import type {CompletionState} from '../state/completion.js';
-import {type CheckoutForm, type HostAction, type HostState, hostLabelOf} from '../state/host.js';
-import type {ListsState} from '../state/lists.js';
-import {commands, PathInput, StopControls, type WelcomeSenders} from './common.js';
+import type {CompletionAction, CompletionState} from '../../state/completion.js';
+import {type CheckoutForm, type HostAction, type HostState, hostLabelOf} from '../../state/host.js';
+import {PathInput} from './path-input.js';
+
+/**
+ * What a listed run offers, which other features own: attaching to it, and its stop controls. The
+ * app composes them in.
+ */
+export interface HostRunActions {
+  readonly attach: (host: HostKey, instance: string) => void;
+  readonly stopControls: (host: HostKey, instance: string) => ReactNode;
+}
+
+/** Where the panel's events go. */
+export interface HostPanelSenders {
+  readonly host: (action: HostAction) => void;
+  readonly completion: (action: CompletionAction) => void;
+  /** Open "Start a run" on the shown host (another feature's sheet). */
+  readonly startRun: (host: {readonly key: HostKey; readonly label: string}) => void;
+}
 
 function RunRow(props: {
   readonly run: HostRun;
   readonly host: HostKey;
-  readonly chrome: ChromeState;
-  readonly send: WelcomeSenders;
+  readonly actions: HostRunActions;
 }): JSX.Element {
-  const {run, host, chrome} = props;
-  const dispatch = commands(props.send);
+  const {run, host, actions} = props;
   return (
     <tr>
       <td>{run.runId}</td>
@@ -34,16 +40,10 @@ function RunRow(props: {
       <td>{run.reason === null ? run.status : `${run.status}: ${run.reason}`}</td>
       <td>{run.startedAt === 0 ? '' : new Date(run.startedAt * 1000).toLocaleString()}</td>
       <td className="actions-cell">
-        <Button
-          variant="primary"
-          onClick={() => dispatch({kind: 'attach', host, instance: run.id})}
-        >
+        <Button variant="primary" onClick={() => actions.attach(host, run.id)}>
           Attach
         </Button>
-        <StopControls
-          view={chrome.stops[stopKey(host, run.id)]}
-          stop={force => dispatch({kind: 'stop', host, instance: run.id, force})}
-        />
+        {actions.stopControls(host, run.id)}
       </td>
     </tr>
   );
@@ -52,10 +52,10 @@ function RunRow(props: {
 function RunTable(props: {
   readonly data: HostSummary;
   readonly listing: HostListing | undefined;
-  readonly chrome: ChromeState;
-  readonly send: WelcomeSenders;
+  readonly actions: HostRunActions;
+  readonly send: HostPanelSenders;
 }): JSX.Element {
-  const {data, listing, chrome, send} = props;
+  const {data, listing, actions, send} = props;
   if (listing === undefined) return <p className="muted">Connecting to {data.label}…</p>;
   if (listing.kind === 'unavailable') return <Unavailable listing={listing} send={send} />;
   const unreadable =
@@ -85,7 +85,7 @@ function RunTable(props: {
       </thead>
       <tbody>
         {listing.live.map(run => (
-          <RunRow key={run.id} run={run} host={data.key} chrome={chrome} send={send} />
+          <RunRow key={run.id} run={run} host={data.key} actions={actions} />
         ))}
       </tbody>
     </table>
@@ -95,7 +95,7 @@ function RunTable(props: {
 /** Why the host's runs cannot be shown now: the connection's state, and Sign in when it asks. */
 function Unavailable(props: {
   readonly listing: Extract<HostListing, {kind: 'unavailable'}>;
-  readonly send: WelcomeSenders;
+  readonly send: HostPanelSenders;
 }): JSX.Element {
   const {connection} = props.listing;
   switch (connection.kind) {
@@ -130,7 +130,7 @@ function CheckoutQuestion(props: {
   readonly data: HostSummary;
   readonly host: (action: HostAction) => void;
   readonly completion: CompletionState;
-  readonly send: WelcomeSenders;
+  readonly send: HostPanelSenders;
   readonly signIn: ReactNode;
 }): JSX.Element {
   const {form, data, host} = props;
@@ -176,14 +176,13 @@ function CheckoutQuestion(props: {
 
 function Ready(props: {
   readonly panel: Extract<HostState['panel'], {kind: 'ready'}>;
-  readonly lists: ListsState;
+  readonly listing: HostListing | undefined;
   readonly completion: CompletionState;
-  readonly chrome: ChromeState;
-  readonly send: WelcomeSenders;
+  readonly actions: HostRunActions;
+  readonly send: HostPanelSenders;
   readonly signIn: ReactNode;
 }): JSX.Element {
-  const {panel, lists, chrome, send} = props;
-  const listing = lists.listings[panel.data.key];
+  const {panel, listing, actions, send} = props;
   const data = panel.data;
   const host = send.host;
   return (
@@ -208,17 +207,11 @@ function Ready(props: {
       )}
       {data.checkout === null ? null : (
         <>
-          <RunTable data={data} listing={listing} chrome={chrome} send={send} />
+          <RunTable data={data} listing={listing} actions={actions} send={send} />
           <div className="row">
             <Button
               variant="primary"
-              onClick={() =>
-                send.start({
-                  type: 'open',
-                  host: {key: data.key, label: data.label},
-                  projects: suggestProjects(listing, lists.runs, data.key),
-                })
-              }
+              onClick={() => send.startRun({key: data.key, label: data.label})}
             >
               Start a run…
             </Button>
@@ -256,12 +249,13 @@ function SignIn(props: {
 
 export function HostPanel(props: {
   readonly state: HostState;
-  readonly lists: ListsState;
+  /** The shown host's runs, as its helper last pushed them. */
+  readonly listing: HostListing | undefined;
   readonly completion: CompletionState;
-  readonly chrome: ChromeState;
-  readonly send: WelcomeSenders;
+  readonly actions: HostRunActions;
+  readonly send: HostPanelSenders;
 }): JSX.Element {
-  const {state, chrome, send} = props;
+  const {state, send} = props;
   const label = hostLabelOf(state.host);
   const panel = state.panel;
   const signIn = <SignIn state={state} host={send.host} />;
@@ -283,9 +277,9 @@ export function HostPanel(props: {
     body = (
       <Ready
         panel={panel}
-        lists={props.lists}
+        listing={props.listing}
         completion={props.completion}
-        chrome={chrome}
+        actions={props.actions}
         send={send}
         signIn={signIn}
       />
