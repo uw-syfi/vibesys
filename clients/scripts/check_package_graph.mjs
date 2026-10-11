@@ -111,11 +111,12 @@ export const FEATURE_ENTRIES = {'./state': 'neutral', './renderer': 'dom', './ma
 
 /**
  * The packages that own effects and run control-state machines outside a feature
- * (docs/contributing/clients-architecture.md, "State"): the machine glue and its test kit, and the
- * live run session. Folds (`store`, `run-state`), models (`hosts`, `runs`), primitives (`ui`), and
- * the wire packages (`contracts`, `transport`, `ipc`) never import XState.
+ * (docs/contributing/clients-architecture.md, "State"): the machine glue and its test kit. The
+ * live run session joins them with its session machine (#1969). Folds (`store`, `run-state`),
+ * models (`hosts`, `runs`), primitives (`ui`), and the wire packages (`contracts`, `transport`,
+ * `ipc`) never import XState.
  */
-export const MACHINE_PACKAGES = ['@vibesys/machine', '@vibesys/run-session'];
+export const MACHINE_PACKAGES = ['@vibesys/machine'];
 const ALL_RUNTIMES = Object.keys(RUNTIMES);
 
 /**

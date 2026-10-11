@@ -379,15 +379,18 @@ test('XState is allowed in a feature state and renderer entry and in a machine p
   workspace['stop-run'].manifest.dependencies.xstate = '5.33.2';
   workspace['stop-run'].files['src/state/index.ts'] += "import {setup} from 'xstate';\n";
   workspace['stop-run'].files['src/renderer/index.ts'] += "import {createActor} from 'xstate';\n";
-  workspace.connection.manifest.name = '@vibesys/run-session';
-  workspace.connection.manifest.dependencies.xstate = '5.33.2';
-  workspace.connection.files['src/index.ts'] += "import {setup} from 'xstate';\n";
-  workspace['stop-run'].manifest.dependencies['@vibesys/run-session'] =
-    workspace['stop-run'].manifest.dependencies['@vibesys/connection'];
-  delete workspace['stop-run'].manifest.dependencies['@vibesys/connection'];
-  workspace['stop-run'].files['src/main/index.ts'] =
-    "import 'electron';\nexport type {E} from '@vibesys/run-session';\n";
-  workspace['stop-run'].files['src/main/index.test.ts'] = "import '@vibesys/run-session';\n";
+  workspace.machine = {
+    manifest: {
+      name: '@vibesys/machine',
+      vibesys: {layer: 'core', entries: {'.': 'neutral'}},
+      exports: {'.': source('index')},
+      dependencies: {xstate: '5.33.2'},
+    },
+    files: {
+      'src/index.ts': "export {setup} from 'xstate';\n",
+      'tsconfig.lib.json': project({include: ['src']}),
+    },
+  };
   assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
 });
 

@@ -13,6 +13,7 @@ export type RunControlBridge = RunControlWelcomeBridge;
 export {
   type RunCommand,
   runControlMachine,
+  WELCOME_INITIAL,
   type WelcomeAction,
   type WelcomeState,
   welcomeView,

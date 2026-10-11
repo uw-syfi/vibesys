@@ -78,7 +78,10 @@ const KERNEL = {
     "import {createStore} from '@vibesys/store';\nexport const make = createStore;\n",
 };
 
-for (const directory of ['run-session/src', 'features/run-control/src/renderer/effects']) {
+for (const directory of [
+  'features/run-control/src/state',
+  'features/run-control/src/renderer/effects',
+]) {
   for (const [name, source] of Object.entries(KERNEL)) {
     test(`${directory} forbids ${name}`, async t => {
       assert.equal((await lintFixture(t, directory, source)).length, 1);
@@ -86,8 +89,8 @@ for (const directory of ['run-session/src', 'features/run-control/src/renderer/e
   }
 }
 
-test("a control-state package's fold module may use the store kernel", () => {
-  assert.deepEqual(pluginDiagnostics(join(WORKSPACE_ROOT, 'run-session/src/run.ts')), []);
+test('a control-state package pending migration is not held to the control-state rule', async t => {
+  assert.deepEqual(await lintFixture(t, 'run-session/src', KERNEL['a createStore call']), []);
 });
 
 test('a feature still on the reducer kernel is not held to the control-state rule', async t => {

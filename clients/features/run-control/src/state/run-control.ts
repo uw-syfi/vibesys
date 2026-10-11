@@ -59,7 +59,8 @@ interface Context {
   readonly command: RunCommand | null;
 }
 
-const INITIAL_VIEW: WelcomeState = {
+/** What the welcome view shows before any command: the machine's initial view. */
+export const WELCOME_INITIAL: WelcomeState = {
   chrome: {mode: 'welcome', attached: null, stops: {}},
   banner: null,
   busy: false,
@@ -86,7 +87,7 @@ export const runControlMachine = setup({
   actors: {command: unprovided<WelcomeResult<null>, RunCommand>('command')},
 }).createMachine({
   id: 'runControl',
-  context: {view: INITIAL_VIEW, command: null},
+  context: {view: WELCOME_INITIAL, command: null},
   initial: 'idle',
   on: {
     chrome: {

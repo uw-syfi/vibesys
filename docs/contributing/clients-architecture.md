@@ -49,9 +49,9 @@ clients/
                                               checkout path rules              -> contracts
   runs/             @vibesys/runs             run identity, recent status, resume and stop
                                                                                  -> contracts, hosts
-  run-session/      @vibesys/run-session      one live run: runStep, the session machine, its
+  run-session/      @vibesys/run-session      one live run: runStep, the session lifecycle, its
                                               ports, connectRun, WebSession    -> contracts, run-state,
-                                                                       transport, machine, store
+                                                                       transport, store
   transport-node/   @vibesys/transport-node   stdio / unix socket / ssh channel  -> transport
   ipc/              @vibesys/ipc              typed main <-> renderer messages, the welcome
                                               requests' parsers per feature      -> hosts, runs
@@ -76,7 +76,7 @@ flowchart BT
   hosts["hosts (L1)"] --> contracts
   runs["runs (L2)"] --> contracts & hosts
   machine["machine (L1)"] --> store
-  run-session["run-session (L2)"] --> contracts & run-state & transport & machine & store
+  run-session["run-session (L2)"] --> contracts & run-state & transport & store
   transport-node["transport-node (L2, Node)"] --> transport
   ipc["ipc (L3)"] --> hosts & runs
   connection["connection (L3, Node)"] --> contracts & transport & hosts
@@ -214,7 +214,7 @@ checker (`EXTERNAL_DEPENDENCIES`, rule `external-dependencies`):
 | `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, features' `./renderer`, browser and renderer apps |
 | `electron` | `node` and `preload` entries of features (`./main`) and apps (`desktop-main`) |
 | `@opentui/core` | `node` entries of apps (the deprecated `tui`) |
-| `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine` and `run-session`. Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
+| `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine`; `run-session` joins it with its session machine (#1969). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
 | Node builtins (`node:*` and bare names) | `node` entries |
 
 A package that declares one of them in `dependencies` must have an entry allowed to use it. Knip
@@ -250,23 +250,20 @@ loads, submits, and cancels are all control state. Each is written as
 **A data fold is a plain reducer.** A data fold turns ordered inputs into a value and has no mode:
 the run event fold (`@vibesys/run-state`), a host's listing, recent runs. It is a pure
 `(state, action) -> state` on `@vibesys/store`, tested with `checkModel`. A package that owns
-control state keeps its fold in one module (`run-session`'s `run.ts`) and uses `createStore`
-nowhere else.
+control state keeps its folds in their own modules and uses `createStore` nowhere else.
 
 **Resources.** XState drops a late output but cannot stop the work that produces it: a
 `fromPromise` body keeps running after its actor stops. So an operation that opens a resource
 returns it, and the machine installs it in that operation's `onDone` action, from where leaving the
 state disposes it. An operation that holds a resource only while it runs either reads its `signal`
 and disposes what it opened when that is aborted, or leaves teardown to the owner of the
-connection it ran on: `run-session`'s operations read no signal, and `connection.close()` (the
-`closeShell` action) tears down whatever they left open.
+connection it ran on, which tears down whatever they left open when the shell closes it.
 
 **Failures.** Every invoke has an `onError` as well as an `onDone`. The shell's operations report
-expected failures as output (`run-session`'s snapshot load resolves to `{ok: false, error}`), and
+expected failures as output (a snapshot load resolves to `{ok: false, error}`), and
 `onError` handles a rejection the same way, so an unexpected throw ends the flight instead of
 leaving its region waiting. An action can throw too (a fold or a connection method), which stops
-the actor; the shell observes that with an `error` observer and releases what it holds, as
-`WebSession` does.
+the actor; the shell observes that with an `error` observer and releases what it holds.
 
 **Tests.** A machine is tested three ways, all scaffolded by `pnpm new:package feature <name>`:
 pure transitions through `getNextSnapshot` (or `transition`, which also returns the actions);
@@ -306,14 +303,15 @@ the event. Every invoke gets an explicit `id` (the kit requires it).
 **Where XState may appear** is rule 9: the `external-dependencies` table confines the import, and
 two GritQL rules (wired in `biome.json`) keep features' `state/` and `effects/` free of
 `setTimeout`, `setInterval`, and `AbortController`, and keep migrated control-state packages off
-`createStore`. Features still on the reducer kernel are migrated one per change; until then the
-two effects modules that hand-roll a timer or an abort controller (`hosts`' path completion,
-`gateway-connect`'s attempt) are listed as exclusions in `biome.json`, a list that only shrinks;
-the remaining migrations and those exclusions are tracked in #1969.
+`createStore`. `run-session`'s session lifecycle and the features still on the reducer kernel are
+migrated one per change. Until then the two effects modules that hand-roll a timer or an abort
+controller (`hosts`' path completion, `gateway-connect`'s attempt) are listed as exclusions in
+`biome.json`, a list that only shrinks, and `run-session` is not yet held to the `createStore`
+rule; the remaining migrations and those exclusions are tracked in #1969.
 
 | Control state | Form | Status |
 | --- | --- | --- |
-| `run-session`'s session lifecycle | machine | migrated (#1950) |
+| `run-session`'s session lifecycle (`sessionStep`, `WebSession`) | reducer with reply tokens | pending migration (#1969) |
 | `feature-run-control`'s commands and banner | machine | migrated (#1950) |
 | `@vibesys/connection`'s connection manager (`connection/src/state`) | pure `state + event -> state + requests` core | one change; `connection` joins `MACHINE_PACKAGES` with it |
 | `feature-start-run`, `feature-hosts`, `feature-gateway-connect`, `feature-replay` screen stores | reducer with reply tokens | one feature per change |
@@ -407,7 +405,7 @@ names a missing or extra one.
 | `@vibesys/hosts` | core | exists: host identity and keys, labels, the checkout and project path rules (`HostValidationError`), a host's listed runs with their phase text (`instancePhaseText`), and what the window shows about a connection; depends on `contracts` | domain split (#1949) |
 | `@vibesys/runs` | domain | exists: run, task, and instance ids, a recent run's status from its host's listing, the exact-resume policy, the stop flow; depends on `contracts`, `hosts` | domain split (#1949) |
 | `@vibesys/machine` | core | exists: `actorStore`, `clockFrom`, `unprovided` (`.`) and `checkMachine` (`./testing`); domain-free | state architecture (#1950) |
-| `@vibesys/run-session` | domain | exists: the run fold's wiring (`runStep`), the session machine (`sessionMachine`), its ports, the run connection over a control transport (`connectRun`), and `WebSession`, with `./testing` (an in-memory control transport and page lifecycle, and `sessionWith`) | domain split (#1949) |
+| `@vibesys/run-session` | domain | exists: the run fold's wiring (`runStep`), the session lifecycle (`sessionStep`, a reducer pending its migration to a machine, #1969), its ports, the run connection over a control transport (`connectRun`), and `WebSession`, with `./testing` (an in-memory control transport and page lifecycle, and `sessionWith`) | domain split (#1949) |
 | `@vibesys/entities` | domain | deleted: split into `hosts` and `runs`; task arguments (`shellWords`) moved into `@vibesys/feature-start-run` | domain split (#1949) |
 | `@vibesys/ipc` | service | exists: the run page's bridge (port messages, their validation, the preload contract web's desktop shell reads) and the welcome view's channels, events, and payloads, with each feature's requests (channels, bridge slice, and the parser the main process runs) in `welcome/<feature>.ts`, and `./testing` (random window states for store models); depends on `hosts`, `runs` | domain packages (phase 5 of #1878); per-feature parsers with phase 8 |
 | `@vibesys/connection` | service | exists (`.`, `node`): the connection manager (`ConnectionManager`, `HostConnection`: a pure `state/` machine and a `shell/` owning the links, channels, and timers), the ssh and local links, the bootstrap, and `connectionStatus`, with `./testing` (`FakeHelper`, `FakeLink`, and the `HostConnection` contract suite); depends on `contracts`, `transport`, `hosts` | desktop main process (phase 8 of #1878) |
