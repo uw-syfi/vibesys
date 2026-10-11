@@ -1,4 +1,4 @@
-import type {ProtocolResponse, RequestInput} from '@vibesys/backend-client';
+import type {ProtocolResponse, RequestInput} from '@vibesys/contracts';
 import {projectPerformance} from '@vibesys/core-state';
 import {renderPerformanceCurve} from './performance-chart.js';
 
