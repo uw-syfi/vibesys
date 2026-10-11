@@ -139,7 +139,7 @@ describe('parseRecent', () => {
       [{version: 1, runs: [run({host: 'gpu'})]}, 'runs[0].host'],
       [{version: 1, runs: [run({instanceId: 'x'})]}, 'runs[0].instanceId must be 12 hex digits'],
       [{version: 1, runs: [run({project: 'rel'})]}, 'runs[0].project must be an absolute path'],
-      [{version: 1, runs: [run({task: 'Bad Task'})]}, 'runs[0].task must be null or match'],
+      [{version: 1, runs: [run({task: 'Bad Task'})]}, 'runs[0].task must be null or a task name'],
       [{version: 1, runs: [run({attachedAt: -1})]}, 'runs[0].attachedAt'],
     ];
     for (const [value, message] of cases) expect(() => parseRecent(value)).toThrow(message);

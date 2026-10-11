@@ -12,7 +12,7 @@
  */
 import {isAbsolute, resolve} from 'node:path';
 import {type HostId, SettingsError, validAlias} from './host-settings.js';
-import {INSTANCE_ID} from './ids.js';
+import {isInstanceId} from './ids.js';
 
 export type LaunchPlan =
   | {readonly kind: 'welcome'; readonly host: HostId | null}
@@ -60,7 +60,7 @@ export function parseLaunch(argv: readonly string[], cwd: string): LaunchPlan {
 function hostPlan(alias: string | undefined, instanceId: string | undefined): LaunchPlan {
   const host: HostId | null = alias === undefined ? null : {kind: 'ssh', alias: hostAlias(alias)};
   if (instanceId === undefined) return {kind: 'welcome', host};
-  if (!INSTANCE_ID.test(instanceId)) {
+  if (!isInstanceId(instanceId)) {
     throw new LaunchError(`--instance needs a run id of 12 hex digits, not ${instanceId}`);
   }
   return {kind: 'instance', host: host ?? {kind: 'local'}, instanceId};

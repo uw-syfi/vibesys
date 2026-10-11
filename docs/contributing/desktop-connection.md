@@ -377,7 +377,7 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
 | Import closure (`tests/architecture/test_light_entrypoints.py`, new) | deterministic | The static module-level import closure (AST, excluding `TYPE_CHECKING` blocks and function-local imports) of `entrypoints.host_helper`, `entrypoints.instances`, `entrypoints.tasks`, and the launcher's dispatch stays within an allowlist: the standard library, `pydantic`, `vs_sim.api`, `vs_project.api`, `server.host_api`, `server.registry`, `server.host_helper`, `server.stdio_bridge`, and the run protocol's control envelope. The allowlist has zero exceptions: no module is listed as a temporary hole. No `vibesys.*`, `vs_runtime`, `vs_agent`, `mcp`, `server.api`, `server.events`. |
 | Helper startup | real (`tests/e2e`) | A real helper answers `hello` and its loaded-module set (reported by `python -X importtime`) is within the allowlist and under a module-count ceiling that only shrinks. Wall time is reported as a metric against the 300 ms budget, not asserted, because a test's result must not depend on timing. |
 | Helper conformance | deterministic and real | Scenarios under `tests/conformance/scenarios/` (`helper-*`) are request and reply transcripts. Runner `tests/conformance/runners/host-helper.json` replays them against the Python helper in process (deterministic) and against any helper command over stdio (real), so another implementation is tested by pointing the runner at its command. |
-| Store invariants | deterministic | For each screen store, seeded random sequences of actions and replies (including stale, duplicated, and reordered replies) are folded through the reducer; after every step an `invariants(state)` function holds: no Retry on an ended phase, Start enabled only with a picked task listed for the current project, at most one awaited token per request slot, no reply applied with a stale token. The generator runs across many seeds with no new dependency, and failing seeds are printed for replay, then pinned as examples. |
+| Store invariants | deterministic | For each screen store, seeded random sequences of actions and replies (including stale, duplicated, and reordered replies) are folded through the reducer; after every step the store's `invariants(state)` hold (for example, no Retry on an ended phase), every awaited token was issued and no two request slots await one token, no reply is applied with a stale token, and per-store behavior properties pass (a start action asks to start a run only when Start is enabled). The generator runs across many seeds with no new dependency, and failing seeds are printed for replay, then pinned as examples. |
 | Supervisor and quit machines | deterministic | Same model-based style over `HostConnection.step` and the quit machine: no orphan waits (every waiting state has a timer or channel that will produce its event), terminal states are absorbing. |
 | Journeys | real (CI job) | Playwright drives the real Electron app against a host that runs the real helper locally: connect, start (with a fake run that reports startup stages), attach, drop the channel, stop, resume, quit. Assertions are on rendered phase and identity, with bounded waits that only guard hangs. |
 | Record versions | deterministic | Property: a listing over any mix of known, unknown, and malformed record versions returns every id exactly once, in `live`, `ended`, or `unreadable`. |
@@ -451,9 +451,6 @@ Deleted when the corresponding phase lands:
 - Run id inference: the empty-id convention for pre-ready events and the client's latch-on-first-id
   (phase 2).
 - The bounded wait for a first client after an early failure (phase 3, superseded by tombstones).
-- Imperative welcome DOM and hand-rolled focus code (phase 6).
-- The legacy gateway window: `VIBESYS_DESKTOP_URL`, `launch-url.ts`, and `scripts/run-desktop.sh`
-  with its `--demo` (phase 6; the bundled app covers every use, and `--demo` has no replacement).
 
 ### Phases
 
@@ -484,7 +481,7 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Control envelope split (phase 4, step one) | built (`server.control_envelope`) |
 | Host helper and its contract (phase 4) | not built |
 | Connection manager (phase 5) | not built |
-| Screen stores and app lifecycle (phase 6) | built (#1832) |
+| Screen stores and app lifecycle (phase 6) | built (#1839) |
 
 ## Decisions and alternatives
 

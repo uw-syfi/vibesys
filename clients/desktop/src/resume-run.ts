@@ -4,7 +4,7 @@
  * A control for one historical run must carry that run's identity. Missing or malformed identity
  * is unavailable, never an implicit request for the project's latest run.
  */
-import {RUN_ID} from './ids.js';
+import {isRunId} from './ids.js';
 
 declare const RESUME_RUN_ID: unique symbol;
 
@@ -23,7 +23,7 @@ export class ResumeRequestError extends Error {
 
 /** Validate identity received at the preload/main IPC boundary. */
 export function exactResumeRunId(value: unknown): ResumeRunId {
-  if (typeof value !== 'string' || !RUN_ID.test(value)) {
+  if (!isRunId(value)) {
     throw new ResumeRequestError(
       'a run id is 1-128 lowercase letters, digits, ".", "_", or "-", starting with a letter or digit',
     );
