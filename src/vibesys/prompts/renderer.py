@@ -71,7 +71,11 @@ def _build_env(template_dir: Path | str | None = None) -> TemplateRenderer:
             if key == str(PROMPTS_DIR)
             else TemplateRenderer(
                 Path(template_dir),
-                fallback_roots=(_SHARED_LOOP_FRAGMENTS_ROOT, PROMPTS_DIR),
+                fallback_roots=(
+                    _SHARED_LOOP_FRAGMENTS_ROOT,
+                    PROMPTS_DIR,
+                    PROMPTS_DIR / "core_protocol",
+                ),
             )
         )
     return _env_cache[key]

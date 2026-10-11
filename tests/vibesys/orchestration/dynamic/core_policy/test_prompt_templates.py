@@ -35,6 +35,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     ReviewPrompt,
     WaitUnrecordedPrompt,
 )
+from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate
 from vs_core.api import RevisionId, RevisionRef
 from vs_prompts.api import TemplateRenderer
 
@@ -44,7 +45,7 @@ if TYPE_CHECKING:
 _ROOT = Path(templates.__file__).parent
 _OBJECTIVE = "Raise queue throughput."
 # Immutable once built; its compiled-template cache is shared by every example.
-_RENDERER = TemplateRenderer(_ROOT)
+_RENDERER = TemplateRenderer(_ROOT, fallback_roots=(CORE_PROTOCOL_DIR,))
 
 
 def _revision(name: str) -> RevisionRef:
@@ -80,7 +81,7 @@ _PLANNER = st.builds(
     input_failure=st.none() | _TEXT,
     profiling=st.booleans(),
 )
-_CONTEXTS: dict[PromptTemplate, st.SearchStrategy[PromptContext]] = {
+_CONTEXTS: dict[PromptTemplate | CoreProtocolTemplate, st.SearchStrategy[PromptContext]] = {
     PromptTemplate.PORTFOLIO: _PLANNER,
     PromptTemplate.PORTFOLIO_CORRECTION: st.builds(
         PlannerCorrectionPrompt,
@@ -115,19 +116,19 @@ _CONTEXTS: dict[PromptTemplate, st.SearchStrategy[PromptContext]] = {
     PromptTemplate.PROFILE_REQUEST: st.builds(
         ProfilePrompt, question=_TEXT, required_fields=st.just(()), target=_REVISIONS
     ),
-    PromptTemplate.RESUME: st.builds(
+    CoreProtocolTemplate.RESUME: st.builds(
         ResumePrompt,
         role=st.sampled_from(("implementer", "judge", "profiler")),
         retained_revision=st.none() | _REVISIONS,
         timed_out=st.booleans(),
         repeated_failure=st.none() | _TEXT,
     ),
-    PromptTemplate.REPLY_CORRECTION: st.builds(
+    CoreProtocolTemplate.REPLY_CORRECTION: st.builds(
         ReplyCorrectionPrompt,
         role=st.sampled_from(("planner", "implementer", "judge", "profiler")),
         error=_TEXT,
     ),
-    PromptTemplate.WAIT_UNRECORDED: st.builds(WaitUnrecordedPrompt),
+    CoreProtocolTemplate.WAIT_UNRECORDED: st.builds(WaitUnrecordedPrompt),
 }
 
 
@@ -143,13 +144,15 @@ def _variables(context: BaseModel, *, agent_evaluation: bool = False) -> dict[st
 
 
 def test_every_requestable_template_has_a_context_generator() -> None:
-    assert set(_CONTEXTS) == set(PromptTemplate)
+    assert set(_CONTEXTS) == {*PromptTemplate, *CoreProtocolTemplate}
 
 
-@pytest.mark.parametrize("template", list(PromptTemplate), ids=lambda item: item.value)
+@pytest.mark.parametrize(
+    "template", [*PromptTemplate, *CoreProtocolTemplate], ids=lambda item: item.value
+)
 @given(data=st.data())
 def test_a_template_renders_for_every_context_of_its_kind(
-    template: PromptTemplate, data: st.DataObject
+    template: PromptTemplate | CoreProtocolTemplate, data: st.DataObject
 ) -> None:
     context = data.draw(_CONTEXTS[template])
 

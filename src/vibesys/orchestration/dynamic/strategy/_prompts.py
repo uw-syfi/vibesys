@@ -11,6 +11,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from vibesys.metrics import MetricRow, PartialRow
+from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
 from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionRef, Value
 
 
@@ -22,9 +23,6 @@ class PromptTemplate(StrEnum):
     IMPLEMENT = "implement"
     REVIEW = "review"
     PROFILE_REQUEST = "profile_request"
-    RESUME = "resume"
-    REPLY_CORRECTION = "reply_correction"
-    WAIT_UNRECORDED = "wait_unrecorded"
 
 
 class EvidenceCitation(Value):
@@ -162,31 +160,6 @@ class ProfilePrompt(Value):
     question: str
     required_fields: tuple[str, ...] = ()
     target: RevisionRef
-
-
-class ResumePrompt(Value):
-    """Continuation of a suspended turn after its awaited evaluations settled."""
-
-    template: Literal[PromptTemplate.RESUME] = PromptTemplate.RESUME
-    role: Literal["implementer", "judge", "profiler"]
-    retained_revision: RevisionRef | None
-    timed_out: bool
-    evidence: tuple[EvidenceId, ...] = ()
-    repeated_failure: str | None = None
-
-
-class ReplyCorrectionPrompt(Value):
-    """Why the previous reply violated its output schema."""
-
-    template: Literal[PromptTemplate.REPLY_CORRECTION] = PromptTemplate.REPLY_CORRECTION
-    role: Literal["planner", "implementer", "judge", "profiler"]
-    error: str
-
-
-class WaitUnrecordedPrompt(Value):
-    """The previous reply said it was waiting for an evaluation, but the run recorded no wait."""
-
-    template: Literal[PromptTemplate.WAIT_UNRECORDED] = PromptTemplate.WAIT_UNRECORDED
 
 
 type PromptContext = Annotated[

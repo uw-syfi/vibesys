@@ -362,7 +362,9 @@ def _catalog(
 ) -> OperationCatalog:
     registrations = {item.role: item.registration for item in policy.operations}
     ports = OperationPorts(
-        renderer=TemplateRenderer(policy.prompt_templates),
+        renderer=TemplateRenderer(
+            policy.prompt_templates, fallback_roots=policy.prompt_fallback_roots
+        ),
         artifacts=artifacts,
         workspaces=resources.workspaces,
         ledger=resources.workspaces,

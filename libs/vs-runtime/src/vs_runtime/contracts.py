@@ -1382,6 +1382,8 @@ class CorePolicy:
     """Label of the snapshot that retains a verified revision."""
     prompt_templates: Path
     """Directory of the templates the strategy's render operation reads."""
+    prompt_fallback_roots: tuple[Path, ...] = ()
+    """Directories searched, in order, for a template or include the strategy's own lacks."""
     artifact_directories: tuple[str, ...] = ()
     """Workspace-relative directories a write-artifacts turn may write."""
 

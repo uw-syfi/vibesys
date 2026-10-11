@@ -1,4 +1,5 @@
-{% from '_macros.j2' import rev, citations, evaluation_list %}
+{% from '_revision.j2' import rev %}
+{% from '_macros.j2' import citations, evaluation_list %}
 Review hypothesis `{{ hypothesis_id }}` without editing its candidate.
 
 {% include 'run_context.j2' %}

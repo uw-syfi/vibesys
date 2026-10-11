@@ -10,6 +10,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     DynamicStrategy,
     dynamic_operation_registrations,
 )
+from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import Capabilities, validate_startup
 from vs_project.api import Project
 from vs_prompts.api import TemplateRenderer
@@ -42,7 +43,7 @@ def test_production_owners_cover_every_operation_the_strategy_requires(tmp_path:
     }
     workspaces = FakeWorkspaces(FakeWorkspace())
     ports = OperationPorts(
-        renderer=TemplateRenderer(tmp_path),
+        renderer=TemplateRenderer(tmp_path, fallback_roots=(CORE_PROTOCOL_DIR,)),
         artifacts=ArtifactStore(namespace),
         workspaces=workspaces,
         ledger=workspaces,
