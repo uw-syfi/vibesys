@@ -84,6 +84,8 @@ const STDERR_TAIL = 8192;
 const BOOTSTRAP_LINES = 16;
 
 interface Pending {
+  /** The only successful reply discriminator this request accepts. */
+  readonly responseType: string;
   readonly resolve: (message: HelperMessage) => void;
   readonly reject: (error: Error) => void;
   readonly cancel: () => void;
@@ -165,6 +167,7 @@ export class HelperChannel implements AsyncDisposable {
         reject(new ConnectionError('link', `the helper did not answer ${body.type} in time`));
       }, deadlineMs + DEADLINE_SLACK_MS);
       this.#pending.set(requestId, {
+        responseType: body.type,
         resolve: message => resolve(message as ReplyOf<T>),
         reject,
         cancel,
@@ -211,13 +214,14 @@ export class HelperChannel implements AsyncDisposable {
   }
 
   #data(chunk: Buffer): void {
+    if (this.#failure !== null) return;
     if (this.#relay !== null) {
       this.#relay.deliver(chunk);
       return;
     }
     this.#buffer = Buffer.concat([this.#buffer, chunk]);
     let newline = this.#buffer.indexOf(0x0a);
-    while (newline >= 0 && this.#relay === null) {
+    while (newline >= 0 && this.#relay === null && this.#failure === null) {
       const line = this.#buffer.subarray(0, newline).toString('utf8');
       this.#buffer = this.#buffer.subarray(newline + 1);
       this.#line(line);
@@ -254,6 +258,15 @@ export class HelperChannel implements AsyncDisposable {
     const requestId = message.request_id;
     const pending = requestId === null ? undefined : this.#pending.get(requestId);
     if (pending === undefined) return;
+    if (message.type !== 'error' && message.type !== pending.responseType) {
+      this.#fail(
+        new ConnectionError(
+          'incompatible',
+          `the host helper answered ${pending.responseType} with ${message.type}`,
+        ),
+      );
+      return;
+    }
     this.#pending.delete(requestId as string);
     pending.cancel();
     if (message.type === 'error') pending.reject(new HelperRequestError(message));
@@ -263,6 +276,7 @@ export class HelperChannel implements AsyncDisposable {
   #fail(error: ConnectionError): void {
     if (this.#failure !== null) return;
     this.#failure = error;
+    this.#buffer = Buffer.alloc(0);
     this.#rejectAll(error);
     this.#process.stdin.destroy();
     this.#process.kill('SIGTERM');
