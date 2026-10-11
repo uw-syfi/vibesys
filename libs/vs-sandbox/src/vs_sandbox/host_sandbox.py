@@ -173,6 +173,11 @@ _MACOS_SYSTEM_READ_ROOTS: tuple[str, ...] = (
 )
 
 
+def system_read_roots() -> tuple[str, ...]:
+    """Return the system directories a confined job sees on this host, read-only."""
+    return _MACOS_SYSTEM_READ_ROOTS if sys.platform == "darwin" else _SYSTEM_READ_ROOTS
+
+
 def _is_disabled(env: dict[str, str]) -> bool:
     return env.get(DISABLE_ENV, "").strip().lower() in _DISABLED_VALUES
 

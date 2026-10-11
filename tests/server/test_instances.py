@@ -419,6 +419,34 @@ class RegistryInterleavings(RuleBasedStateMachine):
         # Listing keeps every live server and every fresh tombstone, and nothing else.
         assert set(self.store.ids()) == self.alive | self.foreign | set(self.ended)
 
+    @rule()
+    def read_instances(self) -> None:
+        """A watch's read reports what a listing would, and writes nothing.
+
+        A crashed server not yet buried is reported crashed without
+        ``ended_at``; an expired tombstone is not reported but stays on disk.
+        """
+        now = self.clock.now()
+        before = {key: (entry.lock, entry.raw) for key, entry in self.store.entries.items()}
+
+        listing = LiveRegistry(self.store, self.clock).read()
+
+        assert {key: (entry.lock, entry.raw) for key, entry in self.store.entries.items()} == before
+        expected_ended: dict[str, tuple[float | None, RunPhase]] = {
+            instance_id: (ended_at, phase)
+            for instance_id, (ended_at, phase) in self.ended.items()
+            if now - ended_at < TOMBSTONE_RETENTION_SECONDS
+        }
+        for instance_id in self.crashed:
+            expected_ended[instance_id] = (None, RunPhase(status=RunStatus.FAILED, reason=CRASHED))
+        assert sorted(record.id for record in listing.instances) == sorted(
+            self.alive & self.published
+        )
+        assert {
+            record.id: (record.ended_at, record.phase) for record in listing.ended
+        } == expected_ended
+        assert sorted(record.id for record in listing.unreadable) == sorted(self.foreign)
+
     @invariant()
     def no_ended_server_is_live_and_no_live_one_is_lost(self) -> None:
         for instance_id in self.holds:

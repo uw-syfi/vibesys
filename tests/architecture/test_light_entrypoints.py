@@ -1,6 +1,6 @@
 """The light host commands import only light modules.
 
-``vibesys example``, ``vibesys instances``, ``vibesys tasks``, the stdio bridge and the host
+``vibesys example``, ``vibesys instances``, ``vibesys tasks`` and the host
 helper are what the desktop app runs on a host, once per action or channel, so
 their start-up time is the app's latency. The run engine (``vibesys.api`` and what it loads) takes about
 1.7 s to import; these commands must never pay for it. Tach cannot keep them
@@ -59,9 +59,10 @@ ALLOWED_FIRST_PARTY = (
     "server.host_api",
     "server.host_helper",
     "server.host_helper_os",
+    "server.host_helper_requests",
     "server.instances",
     "server.registry",
-    "server.stdio_bridge",
+    "server.relay",
     "vs_sim",
     "vs_project",
 )

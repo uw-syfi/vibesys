@@ -112,8 +112,24 @@ read_only_paths = ["/home/operator/venvs/torch"]
 repeated or trailing slashes, and not `/`), must exist on the submit host when
 the run starts, and must be visible at the same path on the compute nodes. A
 symlink inside an exposed path is followed only if its target is also exposed,
-so list the interpreter's own installation directory too (a venv's `python`
-usually links to a Python installed elsewhere). The same list applies to the
+and a job exposes nothing the operator did not list, so the run refuses to start
+when a link would dangle. For every symlink directly inside a `bin` or `sbin`
+directory of a listed path (the entry points of a venv or install), the check
+follows the whole chain the way the job's kernel would. If a hop leaves the
+listed paths and the system directories, or the link is broken or loops, the
+open fails with a message like:
+
+```text
+vibesys.agent_gpu.read_only_paths lists paths holding symlinks that a confined job could not follow, so the job would fail with 'No such file':
+  /home/op/venv: /home/op/venv/bin/python -> /home/op/.local/share/uv/python/cpython-3.12-linux/bin/python3.12 reaches /home/op/.local/share/uv/python/cpython-3.12-linux/bin/python3.12, which the job cannot see; add /home/op/.local/share/uv/python/cpython-3.12-linux/bin/python3.12 (or the directory that holds it) to read_only_paths
+```
+
+Add the path it names (normally the Python installation directory, which is
+what a venv's `python` links to). On Linux, a listed path that is itself a
+symlink (uv's `cpython-3.12-...` alias directory) is exposed as the directory it
+points to, so listing the alias is enough and the real install need not be
+listed; on macOS the resolved path must be listed too. Symlinks outside `bin` and
+`sbin` are not checked. The same list applies to the
 Linux (bubblewrap) and macOS (Seatbelt) confinement. The agent's prompt says
 that GPU commands run in the host's environment, not the container's, and
 names these paths.

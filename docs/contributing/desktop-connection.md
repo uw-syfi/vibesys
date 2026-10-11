@@ -39,7 +39,7 @@ Measured on a development machine (2026-10-10, warm caches, this checkout):
 | `python -c pass` | 27 ms |
 | `import pydantic` | 71 ms |
 | `import vs_project.api` | 183 ms |
-| `import server.stdio_bridge` | 32 ms |
+| `import server.relay` | 32 ms |
 | `import server.instances` | 1751 ms |
 | `import vibesys.api` | 1697 ms |
 | `uv run vibesys instances list --json` | 3704 ms |
@@ -60,10 +60,10 @@ desktop main process (clients/desktop)                host (local or ssh)
 | AppLifecycle: single-instance lock, quit, |        | host helper (one process per        |
 |   settings store (sole writer)            |        |   channel; stateless)               |
 | ConnectionManager                         |  stdio | entrypoints.host_helper             |
-|   HostConnection per host                 |<------>|   -> server.host_helper (requests)  |
+|   HostConnection per host                 |<------>|   -> server.host_helper (channel)   |
 |     link (ssh master | none)              |  (ssh  |   -> server.host_api   (contracts)  |
 |     control channel  -> helper            |  exec  |   -> server.registry   (records)    |
-|     run channels     -> helper -> relay   |  chan- |   -> server.stdio_bridge (relay)    |
+|     run channels     -> helper -> relay   |  chan- |   -> server.relay (relay)    |
 |     supervisor (pure step + shell)        |  nels) |                                     |
 | screen stores (pure reducers) + React     |        | detached run servers (one per run)  |
 +-------------------------------------------+        |   entrypoints.server --detach       |
@@ -74,10 +74,11 @@ desktop main process (clients/desktop)                host (local or ssh)
 | --- | --- | --- |
 | Helper contracts | `server.host_api` (new, light) | Pydantic models for every helper message, the registry record, launch and stop results, and `RunPhase`. Imports `pydantic` and the standard library only. The single source of the helper's JSON Schema. |
 | Registry primitives | `server.registry` (new, light; split from `server.instances` and `server.transport.discovery`) | Registry root, lifetime lock, record store, `survey`. `server.instances` keeps the stop requester and composes these. |
-| Helper implementation | `server.host_helper` | The channel: a pure `step` that folds lines, replies, watch observations, and time into the channel's state and the outputs the shell performs (the handshake, request ids, deadlines, feature gates, the one hand-over to the relay), the per-method execution over role-named interfaces (`Projects`, `Directories`, `RunLauncher`, `CheckoutProbe`, the registry), and the shell. |
+| Helper channel | `server.host_helper` | The channel: a pure `step` that folds lines, replies, watch observations, and time into the channel's state and the outputs the shell performs (the handshake, request ids, deadlines, feature gates, the one hand-over to the relay), and the shell. |
+| Helper requests | `server.host_helper_requests` | The per-method execution over role-named interfaces (`Projects`, `Directories`, `RunLauncher`, `CheckoutProbe`, the registry), and the pure decisions it needs (`negotiate`, `run_summaries`, `launch_arguments`, path completion). |
 | Helper interfaces on a host | `server.host_helper_os` | The real implementations: projects through `vs_project.api`, directories as this account lists them, launches through `vs_sim.api` with the launcher's `headless_command`, the checkout through `git`. |
 | Helper entrypoint | `entrypoints.host_helper` (console script `vibesys-host-helper`) | Wires real I/O, reads stdin, writes stdout. Replaced `entrypoints.stdio_bridge` (phase 5). |
-| Relay core | `server.stdio_bridge` (kept) | Byte relay between stdio and a run's Unix socket, with its deadlines and typed outcomes. Used by `run.connect`. |
+| Relay core | `server.relay` (kept) | Byte relay between stdio and a run's Unix socket, with its deadlines and typed outcomes. Used by `run.connect`. |
 | Detached run server | `entrypoints.server` (changed) | Takes the lock and publishes its record (with `run_id` and phase `starting/resolving`) before importing the engine; owns its phases. |
 | Generated helper types | `clients/contracts/src/generated/`, read through `@vibesys/contracts/host-helper` | `host-helper.schema.json` (committed, language neutral), the TypeScript types and descriptor generated from it, and the strict parse every helper line goes through. |
 | Connection manager | `clients/desktop` (`src/main/platform/connection`: a pure `state/` machine and a `shell/`) | The only code that creates links and channels. One `HostConnection` per host; its machine is the one retry loop. |
@@ -96,13 +97,14 @@ New modules and edges, all downward; no module gains an edge to `vibesys.*`:
 | --- | --- |
 | `server.host_api` | none (pydantic only) |
 | `server.registry` | `server.host_api`, `vs_sim.api` |
-| `server.host_helper` | `server.host_api`, `server.registry`, `server.stdio_bridge`, `vs_sim.api` |
-| `server.host_helper_os` | `server.host_api`, `server.host_helper`, `vs_project`, `vs_sim.api` |
+| `server.host_helper` | `server.host_api`, `server.host_helper_requests`, `server.relay`, `vs_sim.api` |
+| `server.host_helper_requests` | `server.host_api`, `server.registry`, `server.relay`, `vs_sim.api` |
+| `server.host_helper_os` | `server.host_api`, `server.host_helper_requests`, `vs_project`, `vs_sim.api` |
 | `server.instances` | `server.api`, `vs_sim.api` (loses `server.transport`; keeps only the stop requester) |
 | `server.api` | adds `server.host_api` (`PROTOCOL_VERSION` is defined there) |
 | `server.transport` | adds `server.registry` (discovery's lock primitives move there) |
-| `entrypoints` | adds `server.host_api` and `server.registry` (phase 1), `server.host_helper` (phase 4); dropped `server.stdio_bridge_report` with the bridge entrypoint (phase 5) |
-| `server.stdio_bridge` | adds `server.host_api` (its outcomes and `ChannelEnd` are helper contracts) |
+| `entrypoints` | adds `server.host_api` and `server.registry` (phase 1), `server.host_helper` (phase 4); dropped `server.relay_report` with the bridge entrypoint (phase 5) |
+| `server.relay` | adds `server.host_api` (its outcomes and `ChannelEnd` are helper contracts) |
 
 Tach edges are module granular and `server.api` is one module, so tach alone cannot keep the helper
 light. The [import-closure guard](#guards) is the check that does.
@@ -160,7 +162,7 @@ The connection manager opens two kinds of channel to a host. Both start with the
 Framing is the run protocol's: one JSON message per line, UTF-8 (`WP-GRANULARITY`, `WP-FRAME-TYPE`,
 `WP-NEWLINE`), read with the existing `NewlineFramer`. After `connected`, the run channel's bytes
 are the run protocol's own, so the whole `wire-protocol.md` contract holds through it, as it does
-through the stdio bridge today. A run channel ends with the helper's exit status and, when it is
+through the relay. A run channel ends with the helper's exit status and, when it is
 not `0`, one typed `ChannelEnd` line on stderr (`server.host_api`, in the generated schema): `client_closed`, `server_closed`, `run_gone`, `connect_denied`,
 `connect_failed`, `server_stalled`, `client_stalled`, `server_failed`, `client_failed`, with the
 same statuses as the bridge.
@@ -171,7 +173,7 @@ same statuses as the bridge.
 | --- | --- | --- |
 | Isolation (a stuck stream must not block control) | Needs per-stream credit windows in our protocol; one slow reader blocks the shared pipe unless every stream is credited. Head-of-line blocking is the default failure. | ssh already gives every channel its own flow-control window; locally each child has its own pipe. A stalled subscribe cannot delay control. |
 | Flow control and backpressure | We reimplement HTTP/2-style windows, and the relay's stall semantics (`WP-DISCONNECT`: stall the producer, bounded by the write deadline) must be redefined per stream. | Unchanged: the relay's write deadline and the server's stall-the-producer policy apply per channel, as today. |
-| Failure detection | One channel death ends every stream; per-stream ends need in-band close frames and their own status codes. | Each channel ends with a typed status (`run_gone` vs `link` vs `connect_denied`) already defined and tested by the stdio-bridge runner. |
+| Failure detection | One channel death ends every stream; per-stream ends need in-band close frames and their own status codes. | Each channel ends with a typed status (`run_gone` vs `link` vs `connect_denied`) already defined and tested by the relay runner. |
 | Simplicity | New mux layer in Python and TypeScript, a new conformance surface, and a changed `WP-ROLES`. | Reuses the relay core and its conformance runner; `WP-ROLES` holds; the only new code is the shared `hello` prefix. |
 | Cost | One helper process per host. | One helper process per run connection (about 250 ms to `connected`, measured on the interpreter and light imports). |
 | Limits | None from ssh. | OpenSSH `MaxSessions` (default 10) bounds channels per master: 1 control plus up to 3 per attached run. The manager counts channels and opens a second master for the host past the limit; this is its job, not a caller's. |
@@ -193,7 +195,7 @@ either the method's result, whose `type` is the request's, or `HelperError` (`ty
 | --- | --- | --- | --- |
 | `hello` | `client_versions: [min, max]`, `features: [Feature]`, `app_version` | `protocol_version`, `features`, `vibesys_version`, `checkout: {root, commit, dirty} \| null` | First message on every channel; anything else first is `handshake_required`. |
 | `instances.list` | none | `InstanceList`: `live`, `ended` (tombstones with phase and reason), `unreadable` (id and record version) | Replaces `vibesys instances list --json`. |
-| `instances.watch` | none | `watch_id`, then `instances.changed {watch_id, listing}` pushes: the listing at once, then on each change | Removes manual refresh (Recent and host panels). Gated by feature `instances_watch`. The helper reads the registry once a second per watch; the client never polls. |
+| `instances.watch` | none | `watch_id`, then `instances.changed {watch_id, listing}` pushes: the listing at once, then on each change | Removes manual refresh (Recent and host panels). Gated by feature `instances_watch`. The helper reads the registry once a second per watch, without writing to it; the client never polls. |
 | `instances.unwatch` | `watch_id` | `watch_id` | Ends a watch; no push for it follows. `unknown_watch` when none is open. |
 | `tasks.list` | `project` | `TaskList` | Replaces `vibesys tasks --json`. Errors are typed: `project_missing`, `project_uninitialized`, `task_invalid`, each with the path. |
 | `runs.list` | `project` | the project's runs (`run_id`, `task`, `display_name`, `created_at`) with the `phase` of the server on this host that drives or last drove each, and its `instance_id` while live | Gives Recent rows status and lets resume name a concrete run. A run whose server left no record here has no phase; reading the run's own journal for it needs a light journal reader and is not built. |
@@ -308,6 +310,18 @@ Facts enter once:
   `ended`, and a free lock with a non-terminal record as `ended {failed: crashed}` with the server
   log path. A run that dies before any client attaches is therefore visible with its reason, and
   the bounded wait for a first client (the current fix for that symptom) is no longer needed.
+- **Who writes**: only a writing listing (`LiveRegistry.list`, behind `instances list`,
+  `instances.list` and `runs.list`) buries crashed servers and removes expired records. A watch
+  reads with `LiveRegistry.read`, which writes nothing: it reports a crashed server not yet buried
+  as `failed {crashed}` with `ended_at: null`, so a once-a-second read reports the same listing
+  until something changes, and it leaves expired records on disk, unreported. Watches poll rather
+  than wait on file events because a crashed holder releases its lock without touching any file.
+- **Accepted gaps across record versions and crashes**:
+  - A tombstone of a newer record version is never aged by an older reader: it is reported
+    `unreadable` and left for that version's lister to remove, so a host that only ever runs the
+    older checkout keeps it.
+  - A crashed run's `ended_at` is when a writing listing found it dead, not when it died: the
+    server wrote nothing as it died, and the lock carries no time. Its 24 hours run from then.
 
 The UI renders only the phase: Retry appears only on a link failure, never on an ended phase;
 Resume appears only on `stopped`, `failed`, and `finished`.
@@ -391,7 +405,7 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
 
 | Guard | Tier | Asserts |
 | --- | --- | --- |
-| Import closure (`tests/architecture/test_light_entrypoints.py`, new) | deterministic | The static module-level import closure (AST, excluding `TYPE_CHECKING` blocks and function-local imports) of `entrypoints.host_helper`, `entrypoints.instances`, `entrypoints.tasks`, and the launcher's dispatch stays within an allowlist: the standard library, `pydantic`, `vs_sim.api`, `vs_project.api`, `server.host_api`, `server.registry`, `server.host_helper`, `server.stdio_bridge`, and the run protocol's control envelope. The allowlist has zero exceptions: no module is listed as a temporary hole. No `vibesys.*`, `vs_runtime`, `vs_agent`, `mcp`, `server.api`, `server.events`. |
+| Import closure (`tests/architecture/test_light_entrypoints.py`, new) | deterministic | The static module-level import closure (AST, excluding `TYPE_CHECKING` blocks and function-local imports) of `entrypoints.host_helper`, `entrypoints.instances`, `entrypoints.tasks`, and the launcher's dispatch stays within an allowlist: the standard library, `pydantic`, `vs_sim.api`, `vs_project.api`, `server.host_api`, `server.registry`, `server.host_helper`, `server.relay`, and the run protocol's control envelope. The allowlist has zero exceptions: no module is listed as a temporary hole. No `vibesys.*`, `vs_runtime`, `vs_agent`, `mcp`, `server.api`, `server.events`. |
 | Helper startup | real (`tests/e2e`) | A real helper answers `hello` and its loaded-module set (reported by `python -X importtime`) is within the allowlist and under a module-count ceiling that only shrinks. Wall time is reported as a metric against the 300 ms budget, not asserted, because a test's result must not depend on timing. |
 | Helper conformance | deterministic and real | Scenarios under `tests/conformance/scenarios/` (`helper-*`) are request and reply transcripts. Runner `tests/conformance/runners/host-helper.json` replays them against the Python helper in process (deterministic) and against any helper command over stdio (real), so another implementation is tested by pointing the runner at its command. |
 | Store invariants | deterministic | For each screen store, seeded random sequences of actions and replies (including stale, duplicated, and reordered replies) are folded through the reducer; after every step the store's `invariants(state)` hold (for example, no Retry on an ended phase), every awaited token was issued and no two request slots await one token, no reply is applied with a stale token, and per-store behavior properties pass (a start action asks to start a run only when Start is enabled). The generator runs across many seeds with no new dependency, and failing seeds are printed for replay, then pinned as examples. |

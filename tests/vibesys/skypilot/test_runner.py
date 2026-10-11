@@ -85,7 +85,14 @@ class FakeCommandRunner:
             stdout_sink(result.stdout)
         if stderr_sink is not None and result.stderr:
             stderr_sink(result.stderr)
-        return ProcessResult(normalized, result.returncode, result.stdout, result.stderr)
+        return ProcessResult(
+            normalized,
+            result.returncode,
+            result.stdout,
+            result.stderr,
+            result.stdout_omitted_characters,
+            result.stderr_omitted_characters,
+        )
 
 
 class _StuckDrainWorker:
@@ -246,12 +253,25 @@ class _BlockingOrdinarySink:
         self.returned.set()
 
 
+class _RecordingCancellableSink:
+    """Record every concurrently delivered output segment."""
+
+    def __init__(self) -> None:
+        self.segments: list[str] = []
+
+    def __call__(self, data: str) -> None:
+        self.segments.append(data)
+
+    def cancel(self) -> None:
+        """Delivery never blocks, so cancellation has no work to do."""
+
+
 class _ExitedSkyPilotProcess:
     """A completed command with one captured stdout segment."""
 
-    def __init__(self) -> None:
-        self.stdout = StringIO("output\n")
-        self.stderr = StringIO()
+    def __init__(self, stdout: str = "output\n", stderr: str = "") -> None:
+        self.stdout = StringIO(stdout)
+        self.stderr = StringIO(stderr)
         self.group_kills = 0
 
     def wait(self, timeout: float | None) -> int:
@@ -461,6 +481,61 @@ def test_success_waits_for_slow_ordinary_sink_without_abandoning_a_delivery_work
     assert sink.returned.is_set()
     assert process.group_kills == 0
     assert result == ProcessResult(("sky", "status"), 0, "output\n", "")
+
+
+def test_subprocess_result_bounds_multiline_and_unterminated_output_while_sink_gets_all() -> None:
+    threads = _RecordingThreads()
+    stdout = "old\n" + ("x" * 150_000)
+    stderr = ("error\n" * 30_000) + "unterminated"
+    process = _ExitedSkyPilotProcess(stdout, stderr)
+    stdout_sink = _RecordingCancellableSink()
+    stderr_sink = _RecordingCancellableSink()
+    runner = SubprocessCommandRunner(
+        threads,
+        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        max_output_characters=127,
+    )
+
+    result = threads.run(
+        lambda: runner.run(
+            ("sky", "logs"),
+            stdout_sink=stdout_sink,
+            stderr_sink=stderr_sink,
+        )
+    )
+
+    assert result.stdout == stdout[-127:]
+    assert result.stderr == stderr[-127:]
+    assert result.stdout_omitted_characters == len(stdout) - 127
+    assert result.stderr_omitted_characters == len(stderr) - 127
+    assert result.stdout_truncated
+    assert result.stderr_truncated
+    assert "".join(stdout_sink.segments) == stdout
+    assert "".join(stderr_sink.segments) == stderr
+    assert all(len(segment) <= 64 * 1024 for segment in stdout_sink.segments)
+
+
+@given(
+    stdout=st.text(alphabet=("a", "b", "\n", "界"), max_size=100),
+    stderr=st.text(alphabet=("x", "y", "\n", "🙂"), max_size=100),
+    cap=st.integers(min_value=0, max_value=32),
+)
+@settings(max_examples=50)
+def test_subprocess_result_is_the_exact_bounded_suffix(stdout: str, stderr: str, cap: int) -> None:
+    threads = _RecordingThreads()
+    process = _ExitedSkyPilotProcess(stdout, stderr)
+    runner = SubprocessCommandRunner(
+        threads,
+        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        max_output_characters=cap,
+    )
+
+    result = threads.run(lambda: runner.run(("sky", "status")))
+
+    assert result.stdout == (stdout[-cap:] if cap else "")
+    assert result.stderr == (stderr[-cap:] if cap else "")
+    assert result.stdout_omitted_characters == max(0, len(stdout) - cap)
+    assert result.stderr_omitted_characters == max(0, len(stderr) - cap)
 
 
 def test_stable_name_uses_effective_resources_not_profile_alias() -> None:
@@ -712,6 +787,29 @@ def test_cancel_and_release_use_noninteractive_control_commands() -> None:
     ]
 
 
+def test_successful_side_effect_commands_ignore_truncated_diagnostics(tmp_path: Path) -> None:
+    truncated = ProcessResult(("sky",), 0, "diagnostic tail", "", 100, 0)
+    fake = FakeCommandRunner(
+        [
+            truncated,
+            truncated,
+            _queue({"job_name": "job", "job_id": 9, "status": "RUNNING"}),
+            _result(stdout="logs"),
+            truncated,
+            truncated,
+        ]
+    )
+    runner = SkyPilotJobRunner(fake, job_name_factory=lambda: "job")
+
+    assert runner.launch("lease", _resources()).status is ClusterStatus.UP
+    result = runner.run("lease", _resources(), workdir=tmp_path, command=("true",))
+    runner.cancel("lease", result.remote_job_id)
+    runner.release("lease")
+
+    assert result.status is JobStatus.COMPLETED
+    assert [call[1] for call in fake.calls] == ["launch", "exec", "queue", "logs", "cancel", "down"]
+
+
 def test_malformed_status_output_is_typed() -> None:
     runner = SkyPilotJobRunner(FakeCommandRunner([_result(stdout="not-json")]))
 
@@ -726,6 +824,34 @@ def test_control_failure_does_not_expose_process_output() -> None:
         runner.release("lease")
 
     assert "secret-value" not in str(caught.value)
+
+
+def test_inspect_cluster_rejects_truncated_machine_readable_output() -> None:
+    truncated = ProcessResult(
+        ("sky",),
+        0,
+        '[{"name": "lease", "status": "UP"}]',
+        "",
+        stdout_omitted_characters=1,
+    )
+    runner = SkyPilotJobRunner(FakeCommandRunner([truncated]))
+
+    with pytest.raises(SkyPilotOutputError, match="status output exceeded"):
+        runner.inspect_cluster("lease")
+
+
+def test_query_job_rejects_truncated_machine_readable_output() -> None:
+    truncated = ProcessResult(
+        ("sky",),
+        0,
+        '{"lease": [{"job_name": "j", "job_id": 7}]}',
+        "",
+        stdout_omitted_characters=1,
+    )
+    runner = SkyPilotJobRunner(FakeCommandRunner([truncated]))
+
+    with pytest.raises(SkyPilotOutputError, match="queue output exceeded"):
+        runner.query_job("lease", job_name="j")
 
 
 @pytest.mark.parametrize(
@@ -843,7 +969,7 @@ def test_run_rejects_negative_log_tail(tmp_path: Path) -> None:
 
 
 def test_run_with_existing_job_skips_submission_and_reports_job(tmp_path: Path) -> None:
-    fake = FakeCommandRunner([_result(0, "out")])
+    fake = FakeCommandRunner([ProcessResult(("sky",), 0, "out", "err", 12, 3)])
     started: list[int] = []
 
     result = SkyPilotJobRunner(fake).run(
@@ -858,6 +984,12 @@ def test_run_with_existing_job_skips_submission_and_reports_job(tmp_path: Path) 
 
     assert started == [9]
     assert result.remote_job_id == 9
+    assert result.stdout == "out"
+    assert result.stderr == "err"
+    assert result.stdout_omitted_characters == 12
+    assert result.stderr_omitted_characters == 3
+    assert result.stdout_truncated
+    assert result.stderr_truncated
     assert fake.calls == [("sky", "logs", "lease", "9", "--tail", "5")]
 
 

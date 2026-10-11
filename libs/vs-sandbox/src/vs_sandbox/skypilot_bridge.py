@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 
 _MAX_REQUEST_BYTES = 4096
 _OUTPUT_CHUNK_CHARACTERS = 64 * 1024
+_LOG_SPOOL_READ_CHARACTERS = 64 * 1024
 _MAX_ARTIFACT_BYTES = 512 * 1024
 _MAX_STAGED_FILES = 50_000
 _MAX_STAGED_BYTES = 512 * 1024 * 1024
@@ -172,10 +173,12 @@ class _ArtifactStream:
                 self._capturing = False
                 self._captures += 1
             elif self._capturing:
-                self._encoded.append(marker)
                 self._encoded_characters += len(marker)
                 if self._encoded_characters > (_MAX_ARTIFACT_BYTES * 2):
                     self._oversized = True
+                    self._encoded.clear()
+                elif not self._oversized:
+                    self._encoded.append(marker)
             else:
                 self._sink(line)
 
@@ -221,35 +224,28 @@ class _DecodedLogSpool:
         self._invocation_id = invocation_id
         self._sink = sink
         self._seen = 0
+        self._replay_byte_offset = 0
+        self._delivery_failed = False
         path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self._persisted = path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            self._persisted = ""
+        if not path.exists():
+            path.touch()
+        self._persisted_characters = self._count_persisted_characters()
         record = self._record()
-        if len(self._persisted) < record.remote_read_offset:
+        if self._persisted_characters < record.remote_read_offset:
             message = "SkyPilot log spool is shorter than its journal offset"
             raise ValueError(message)
-        if len(self._persisted) > record.remote_read_offset:
+        if self._persisted_characters > record.remote_read_offset:
             record = self._journal.offsets(
                 record,
-                remote_read=len(self._persisted),
+                remote_read=self._persisted_characters,
                 client_delivered=record.client_delivered_offset,
             )
-        if record.client_delivered_offset < len(self._persisted):
-            self._sink(self._persisted[record.client_delivered_offset :])
-            self._journal.offsets(
-                self._record(),
-                remote_read=len(self._persisted),
-                client_delivered=len(self._persisted),
-            )
+        self._replay_undelivered(record.client_delivered_offset)
 
     def feed(self, data: str) -> None:
         """Accept Sky's from-origin log stream and deliver only its new suffix."""
-        overlap = min(len(data), max(0, len(self._persisted) - self._seen))
-        if data[:overlap] != self._persisted[self._seen : self._seen + overlap]:
-            message = "SkyPilot replayed log prefix changed"
-            raise ValueError(message)
+        overlap = min(len(data), max(0, self._persisted_characters - self._seen))
+        self._compare_persisted(data, overlap)
         suffix = data[overlap:]
         self._seen += len(data)
         if not suffix:
@@ -258,18 +254,29 @@ class _DecodedLogSpool:
             spool.write(suffix)
             spool.flush()
             os.fsync(spool.fileno())
-        self._persisted += suffix
-        record = self._journal.offsets(
-            self._record(),
-            remote_read=len(self._persisted),
-            client_delivered=self._record().client_delivered_offset,
-        )
-        self._sink(suffix)
-        self._journal.offsets(
-            record,
-            remote_read=len(self._persisted),
-            client_delivered=len(self._persisted),
-        )
+        self._persisted_characters += len(suffix)
+        try:
+            current = self._record()
+            record = self._journal.offsets(
+                current,
+                remote_read=self._persisted_characters,
+                client_delivered=current.client_delivered_offset,
+            )
+            if self._delivery_failed:
+                return
+            delivered = record.client_delivered_offset
+            for start in range(0, len(suffix), _LOG_SPOOL_READ_CHARACTERS):
+                chunk = suffix[start : start + _LOG_SPOOL_READ_CHARACTERS]
+                self._sink(chunk)
+                delivered += len(chunk)
+                record = self._journal.offsets(
+                    record,
+                    remote_read=self._persisted_characters,
+                    client_delivered=delivered,
+                )
+        except Exception:
+            self._delivery_failed = True
+            raise
 
     def __call__(self, data: str) -> None:
         """Accept a decoded segment from the artifact stream."""
@@ -282,9 +289,50 @@ class _DecodedLogSpool:
 
     def finish(self) -> None:
         """Require a terminal from-origin stream to cover the durable prefix."""
-        if self._seen < len(self._persisted):
+        if self._seen < self._persisted_characters:
             message = "SkyPilot terminal log replay was truncated"
             raise ValueError(message)
+
+    def _count_persisted_characters(self) -> int:
+        characters = 0
+        with self._path.open("r", encoding="utf-8") as persisted:
+            while chunk := persisted.read(_LOG_SPOOL_READ_CHARACTERS):
+                characters += len(chunk)
+        return characters
+
+    def _replay_undelivered(self, delivered: int) -> None:
+        if delivered >= self._persisted_characters:
+            return
+        position = 0
+        record = self._record()
+        with self._path.open("r", encoding="utf-8") as persisted:
+            while chunk := persisted.read(_LOG_SPOOL_READ_CHARACTERS):
+                end = position + len(chunk)
+                if end > delivered:
+                    suffix = chunk[max(0, delivered - position) :]
+                    self._sink(suffix)
+                    delivered += len(suffix)
+                    record = self._journal.offsets(
+                        record,
+                        remote_read=self._persisted_characters,
+                        client_delivered=delivered,
+                    )
+                position = end
+
+    def _compare_persisted(self, data: str, overlap: int) -> None:
+        if overlap == 0:
+            return
+        compared = 0
+        with self._path.open("rb") as persisted:
+            persisted.seek(self._replay_byte_offset)
+            while compared < overlap:
+                width = min(_LOG_SPOOL_READ_CHARACTERS, overlap - compared)
+                expected = data[compared : compared + width].encode()
+                if persisted.read(len(expected)) != expected:
+                    message = "SkyPilot replayed log prefix changed"
+                    raise ValueError(message)
+                self._replay_byte_offset += len(expected)
+                compared += width
 
     def _record(self) -> InvocationRecord:
         record = self._journal.load(self._invocation_id)

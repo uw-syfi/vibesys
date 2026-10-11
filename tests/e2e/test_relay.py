@@ -1,11 +1,11 @@
-"""A run channel against a real Unix server: the conformance runner ``stdio-bridge``.
+"""A run channel against a real Unix server: the conformance runner ``relay``.
 
 Each connection is a real ``python -m entrypoints.host_helper`` process whose stdin and
 stdout stand in for an ssh exec channel, turned into a relay by ``hello`` and
 ``run.connect``, as the desktop app opens one. The scenarios in
-``tests/conformance/runners/stdio-bridge.json`` replay through it unchanged, so the relay
+``tests/conformance/runners/relay.json`` replay through it unchanged, so the relay
 is held to the same corpus as the Unix transport it fronts. The deterministic tests of
-the relay's ends and deadlines are in ``tests/server/test_stdio_bridge.py``.
+the relay's ends and deadlines are in ``tests/server/test_relay.py``.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from server.host_api import (
     RunStatus,
 )
 from server.registry import FileInstanceStore, instance_root
-from server.stdio_bridge import EXIT_STATUS
+from server.relay import EXIT_STATUS
 from server.transport.unix_jsonl import UnixJsonlServer
 
 if TYPE_CHECKING:
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _HISTORY_EVENTS = 100
-_RUNNER = "stdio-bridge"
+_RUNNER = "relay"
 _INSTANCE_ID = "0123456789ab"
 _HELLO = {
     "type": "hello",

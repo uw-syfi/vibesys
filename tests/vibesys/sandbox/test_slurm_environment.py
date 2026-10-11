@@ -535,6 +535,55 @@ def test_a_read_only_path_that_does_not_exist_fails_the_open_naming_the_key(
         open_run_environment(environment, _request(tmp_path, backend))
 
 
+def _aliased_venv(tmp_path: Path) -> tuple[Path, Path]:
+    """A venv whose interpreter is reached through an alias directory, as uv lays it out."""
+    real = tmp_path / "store" / "cpython-3.12.15"
+    (real / "bin").mkdir(parents=True)
+    interpreter = real / "bin" / "python3.12"
+    interpreter.write_text("#!/bin/sh\necho interpreter ran\n", encoding="utf-8")
+    interpreter.chmod(0o755)
+    alias = tmp_path / "store" / "cpython-3.12"
+    alias.symlink_to(real.name)
+    (tmp_path / "venv" / "bin").mkdir(parents=True)
+    (tmp_path / "venv" / "bin" / "python").symlink_to(alias / "bin" / "python3.12")
+    return tmp_path / "venv", alias
+
+
+def test_a_venv_whose_interpreter_link_leaves_the_listed_paths_fails_the_open_naming_what_to_add(
+    tmp_path: Path,
+) -> None:
+    venv, alias = _aliased_venv(tmp_path)
+    backend = DaemonBackend(daemon_engine(tmp_path))
+    environment = _real_confinement_environment(tmp_path, backend, [venv])
+
+    with pytest.raises(ValueError, match=r"agent_gpu\.read_only_paths") as raised:
+        open_run_environment(environment, _request(tmp_path, backend))
+
+    assert f"{venv / 'bin' / 'python'} -> {alias / 'bin' / 'python3.12'}" in str(raised.value)
+    assert f"add {alias / 'bin' / 'python3.12'}" in str(raised.value)
+
+
+@requires_bwrap
+def test_a_gpu_job_runs_an_interpreter_reached_through_a_link_chain_once_the_alias_is_listed(
+    tmp_path: Path,
+) -> None:
+    venv, alias = _aliased_venv(tmp_path)
+    backend = DaemonBackend(daemon_engine(tmp_path))
+    environment = _real_confinement_environment(tmp_path, backend, [venv, alias])
+    session = open_run_environment(environment, _request(tmp_path, backend))
+    try:
+        gate = session.view.paths.accuracy_command
+        assert gate is not None
+        client = shlex.split(gate)[0]
+
+        result = session.sandbox.execute(f"{client} -- {venv}/bin/python")
+
+        assert result.exit_code == 0, result.output
+        assert "interpreter ran" in result.output
+    finally:
+        session.close()
+
+
 @pytest.mark.parametrize("paths", [(), ("/opt/venv",), ("/opt/venv", "/home/op/data")])
 def test_the_notes_tell_the_agent_gpu_commands_run_in_the_hosts_environment_and_list_the_paths(
     tmp_path: Path, paths: tuple[str, ...]

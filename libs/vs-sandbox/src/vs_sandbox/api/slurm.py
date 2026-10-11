@@ -31,6 +31,7 @@ from vs_sandbox.host_command_broker import (
 from vs_sandbox.host_command_client import SOCKET_ENV as COMMAND_BROKER_SOCKET_ENV
 from vs_sandbox.host_command_client import TOKEN_ENV as COMMAND_BROKER_TOKEN_ENV
 from vs_sandbox.job_confinement import HostJobConfinement, JobConfinement
+from vs_sandbox.read_only_links import ReadOnlyPathLinkError, check_read_only_links
 from vs_sandbox.slurm_broker import SlurmProcessBroker, SlurmProcessBrokerError
 from vs_sandbox.slurm_broker_client import run_brokered_process
 from vs_sandbox.slurm_capture_plan import (
@@ -99,6 +100,7 @@ __all__ = [
     "HostJobConfinement",
     "JobConfinement",
     "ProfileCaptureDescriptor",
+    "ReadOnlyPathLinkError",
     "RunRoots",
     "SharedSlurmAdmission",
     "SlurmCapturePlan",
@@ -118,6 +120,7 @@ __all__ = [
     "SlurmStagePayload",
     "SlurmTargetLifecycle",
     "agent_gpu_capability",
+    "check_read_only_links",
     "choose_partition",
     "classify_benchmark_output",
     "configured_capture_lifecycle",

@@ -1,10 +1,10 @@
-"""The stdio bridge's relay, on the simulated network and threads.
+"""The relay core (``server.relay``), on the simulated network and threads.
 
 The pure fold (:func:`advance`) is checked directly over arbitrary event sequences. The
 shell (:func:`run_bridge`) runs against :class:`SimNetwork` with Fakes for stdin and
 stdout, under seeded schedules, so chunk boundaries, ends and stalls interleave in many
 orders while every deadline is virtual time. The same relay against a real server
-process is exercised in ``tests/e2e/test_stdio_bridge.py``.
+process is exercised in ``tests/e2e/test_relay.py``.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from server.host_api import ChannelEnd, ChannelEndOutcome
-from server.stdio_bridge import (
+from server.relay import (
     EXIT_STATUS,
     BridgeLimits,
     BridgeResult,
