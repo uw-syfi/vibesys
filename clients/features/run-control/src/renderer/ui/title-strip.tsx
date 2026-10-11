@@ -7,14 +7,17 @@ import type {ResumeRunId} from '@vibesys/entities';
 import type {ChromeState} from '@vibesys/ipc';
 import {Button, StatusChip, type Tone} from '@vibesys/ui';
 import type {JSX} from 'react';
+import type {RunCommand} from '../../state/run-control.js';
 import {
   connectionText,
   type RunLink,
   runLink,
   type StripControls,
   stripControls,
-} from '../state/strip.js';
-import type {Dispatch} from './common.js';
+} from '../../state/strip.js';
+
+/** Send a run command (attach, resume, stop, ...) to the run-control store. */
+export type Dispatch = (command: RunCommand) => void;
 
 type Attached = NonNullable<ChromeState['attached']>;
 
