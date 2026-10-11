@@ -22,6 +22,7 @@ from pydantic import TypeAdapter
 
 from vibesys.hypothesis.attempts import (
     AttemptState,
+    CandidateReply,
     JudgeReviewed,
     JudgeSkipped,
     JudgeSkipReason,
@@ -125,16 +126,24 @@ def validate_plan(config: HypothesisConfig, ledger: Ledger, updates: list) -> No
 
 
 def official_reason(
-    config: HypothesisConfig, ledger: Ledger, *, round_number: int, requested: bool
+    config: HypothesisConfig,
+    ledger: Ledger,
+    *,
+    round_number: int,
+    requested: bool,
+    candidate_ready: bool = True,
 ) -> str | None:
     """Why the official gates are due after this round's candidate, or None."""
     return HypothesisSearch(config).official_due(
-        records=ledger.records, round_number=round_number, requested=requested, candidate_ready=True
+        records=ledger.records,
+        round_number=round_number,
+        requested=requested,
+        candidate_ready=candidate_ready,
     )
 
 
 def pareto_conflict(
-    config: HypothesisConfig, ledger: Ledger, reply: SingleAgentReply
+    config: HypothesisConfig, ledger: Ledger, reply: CandidateReply
 ) -> ArchiveConflict | None:
     """The live archive points that dominate the reply's claimed frontier row, if any."""
     return HypothesisSearch(config).pareto_conflict(

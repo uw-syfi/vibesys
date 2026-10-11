@@ -98,8 +98,9 @@ current-architecture and candidate-mechanism ceilings. Then either pivot the
 roadmap or name the concrete change and measurement that can break the plateau.
 {% endif %}
 {% if last_profile %}
-The previous round's profile (reported by its implementer):
-{% if last_profile.bottlenecks %}- bottlenecks: {{ last_profile.bottlenecks }}
+{% if last_profile.source == 'profiler' %}A fresh profiler result for this plan{% if last_profile.evidence_directory %} (evidence files under `{{ last_profile.evidence_directory }}`){% endif %}:
+{% else %}The previous round's profile (reported by its implementer):
+{% endif %}{% if last_profile.bottlenecks %}- bottlenecks: {{ last_profile.bottlenecks }}
 {% endif %}{% if last_profile.suggestions %}- suggestions: {{ last_profile.suggestions }}
 {% endif %}{% if last_profile.analysis %}- analysis: {{ last_profile.analysis }}
 {% endif %}Use it quantitatively only when a comparable uninstrumented control shows acceptable
