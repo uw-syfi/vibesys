@@ -10,6 +10,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from entrypoints.run import supervise
@@ -26,7 +27,7 @@ from vibesys.api import (
     RunResult,
 )
 from vibesys.api import RunStatus as ProductRunStatus
-from vibesys.api.request import load_input_bundle
+from vibesys.api.request import load_task
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, ProjectStateError, validate_run_id
 from vs_runtime.api import OrchestrationPlugin, RunStatus
@@ -44,17 +45,18 @@ if TYPE_CHECKING:
 def request_template(tmp_path: Path) -> RunRequest:
     root = tmp_path / "project"
     root.mkdir()
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Improve the queue.\n",
     )
     return RunRequest(
         project_root=root,
         orchestration=OrchestrationDescriptor(id="identity-test", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "gpt-test"}}),
-        input_bundle=load_input_bundle(root),
+        input_bundle=load_task(root),
         exp_name="Display NAME / safe!",
         run_environment=fake_docker_environment(),
         agent_backend="stub",

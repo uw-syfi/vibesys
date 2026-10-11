@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.task_project import write_task
 
 from entrypoints import launcher
 from entrypoints.detached_run import SERVER_EXITED, RecordPublisher
@@ -219,10 +220,11 @@ _RESUME = ["--detach", "--outer-loop", "dynamic", "--resume", _RUN_ID]
 def _project_with_run(root: Path) -> Path:
     """A project holding one recorded, stopped run that ``--resume`` resolves."""
     root.mkdir()
-    (root / "OBJECTIVE.md").write_text("Make the queue faster.\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Make the queue faster.\n",
     )
     project = Project.open(root)
     project.state.create_project(root.name)

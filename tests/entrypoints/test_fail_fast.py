@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.task_project import write_task
 
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from entrypoints.headless import main
@@ -17,10 +18,11 @@ if TYPE_CHECKING:
 
 def _input_project(root: Path) -> Path:
     root.mkdir()
-    (root / "OBJECTIVE.md").write_text("Improve inference.\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Improve inference.\n",
     )
     return root
 

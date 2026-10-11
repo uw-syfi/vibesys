@@ -7741,6 +7741,183 @@ describe('single-key gating by the composer that owns the keyboard', () => {
   });
 });
 
+describe('modal geometry with an error banner', () => {
+  const banner: NonNullable<SessionState['errorBanner']> = {
+    titleKind: 'run',
+    message: 'TaskImageBuildError: agent image preparation failed',
+    detail: 'Docker denied access to the daemon socket.',
+    hint: 'Check Docker access and retry.',
+    diagnosticId: 'diagnostic-modal-geometry',
+    severity: 'fatal',
+    scope: 'run',
+    agentKind: null,
+    roundLabel: null,
+    invocationId: null,
+    count: 1,
+  };
+
+  function expectBelowBanner(testRenderer: TestRendererSetup, modalId: string): number {
+    const error = boxOf(testRenderer, 'error-banner');
+    const modal = boxOf(testRenderer, modalId);
+    expect(error.visible).toBe(true);
+    expect(modal.visible).toBe(true);
+    expect(error.y + error.height).toBeLessThanOrEqual(modal.y);
+    expect(modal.y + modal.height).toBeLessThanOrEqual(testRenderer.renderer.terminalHeight);
+    return modal.y;
+  }
+
+  it('removes pending modal post-layout callbacks before app teardown destroys their views', async () => {
+    const states: SessionState[] = [
+      openPalette(initialSessionState()),
+      {...initialSessionState(), themePicker: {selected: 'dark'}},
+    ];
+
+    for (const state of states) {
+      const testRenderer = await createTestRenderer({width: 120, height: 30});
+      cleanup.push(() => testRenderer.renderer.destroy());
+      const listenersBeforeApp = testRenderer.renderer.listenerCount(CliRenderEvents.FRAME);
+      const app = createOpenTuiApp(testRenderer.renderer, new FakeController(state));
+
+      expect(testRenderer.renderer.listenerCount(CliRenderEvents.FRAME)).toBe(
+        listenersBeforeApp + 1,
+      );
+      app.destroy();
+      expect(testRenderer.renderer.listenerCount(CliRenderEvents.FRAME)).toBe(listenersBeforeApp);
+    }
+  });
+
+  it('keeps /help below a fatal banner at 200x50 and recomputes it on a same-state resize', async () => {
+    const testRenderer = await createTestRenderer({width: 200, height: 50});
+    const controller = new FakeController({...initialSessionState(), errorBanner: banner});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes(banner.message));
+
+    await testRenderer.mockInput.typeText('/help');
+    testRenderer.mockInput.pressEnter();
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+    expect(frame).toContain('[× Dismiss] · Esc: dismiss');
+    expect(frame).toContain('/open-round');
+    const tallTop = expectBelowBanner(testRenderer, 'palette');
+
+    const sameState = controller.state;
+    testRenderer.renderer.resize(200, 38);
+    await frameAfter(testRenderer);
+    expect(controller.state).toBe(sameState);
+    const shortTop = expectBelowBanner(testRenderer, 'palette');
+    expect(shortTop).not.toBe(tallTop);
+  });
+
+  it('keeps the selected palette row visible when a fatal banner shrinks its viewport', async () => {
+    const testRenderer = await createTestRenderer({width: 120, height: 30});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    testRenderer.mockInput.pressKey('ARROW_UP');
+    const last = availableCommands({surface: 'command'}).at(-1);
+    if (last === undefined) throw new Error('the command palette has no commands');
+    await testRenderer.waitForFrame(value => value.includes(`› ${last.name}`));
+    const scroll = testRenderer.renderer.root.findDescendantById('palette-scroll');
+    if (!(scroll instanceof ScrollBoxRenderable)) throw new Error('palette scroll was missing');
+    const topBeforeBanner = scroll.scrollTop;
+
+    controller.publish({...controller.state, errorBanner: banner});
+    const withBanner = await testRenderer.waitForFrame(
+      value => value.includes(banner.message) && value.includes(`› ${last.name}`),
+    );
+
+    expect(withBanner).toContain(`› ${last.name}`);
+    expect(scroll.scrollTop).toBeGreaterThan(topBeforeBanner);
+    expectBelowBanner(testRenderer, 'palette');
+  });
+
+  it('keeps /theme below a fatal banner at 120x40 and recomputes it on a same-state resize', async () => {
+    const testRenderer = await createTestRenderer({width: 120, height: 40});
+    const controller = new FakeController({...initialSessionState(), errorBanner: banner});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes(banner.message));
+
+    await testRenderer.mockInput.typeText('/theme');
+    testRenderer.mockInput.pressEnter();
+    const frame = await testRenderer.waitForFrame(value => value.includes('Themes'));
+    const shortTop = expectBelowBanner(testRenderer, 'theme-picker');
+    expect(frame).toContain('[× Dismiss] · Esc: dismiss');
+    expect(frame).toContain('solarized-light');
+
+    const sameState = controller.state;
+    testRenderer.renderer.resize(120, 52);
+    await frameAfter(testRenderer);
+    expect(controller.state).toBe(sameState);
+    const tallTop = expectBelowBanner(testRenderer, 'theme-picker');
+    expect(tallTop).not.toBe(shortTop);
+  });
+
+  it('keeps every theme reachable in the short banner-derived viewport at 120x30', async () => {
+    const testRenderer = await createTestRenderer({width: 120, height: 30});
+    const controller = new FakeController({...initialSessionState(), errorBanner: banner});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes(banner.message));
+
+    await testRenderer.mockInput.typeText('/theme');
+    testRenderer.mockInput.pressEnter();
+    const themes = listThemes();
+    await testRenderer.waitForFrame(value => value.includes(`› ${themes[0]?.name}`));
+    for (const theme of themes.slice(1)) {
+      testRenderer.mockInput.pressKey('ARROW_DOWN');
+      await testRenderer.waitForFrame(value => value.includes(`› ${theme.name}`));
+    }
+
+    const scroll = testRenderer.renderer.root.findDescendantById('theme-picker-scroll');
+    if (!(scroll instanceof ScrollBoxRenderable))
+      throw new Error('theme picker scroll was missing');
+    expect(controller.state.themePicker?.selected).toBe(themes.at(-1)?.name);
+    expect(scroll.scrollTop).toBeGreaterThan(0);
+    expectBelowBanner(testRenderer, 'theme-picker');
+  });
+
+  it('applies the banner-safe viewport to the other root modal surfaces', async () => {
+    const initial = initialSessionState();
+    const surfaces: Array<{id: string; marker: string; state: SessionState}> = [
+      {
+        id: 'overlay',
+        marker: 'command acknowledgement body',
+        state: {
+          ...initial,
+          errorBanner: banner,
+          overlay: {kind: 'detail', content: 'command acknowledgement body'},
+        },
+      },
+      {
+        id: 'notepad',
+        marker: 'Saved locally',
+        state: {...initial, errorBanner: banner, notepad: {...initial.notepad, open: true}},
+      },
+      {
+        id: 'chat-overlay',
+        marker: 'Ask a question about the current experiment',
+        state: {...initial, errorBanner: banner, chatOpen: true},
+      },
+    ];
+
+    for (const surface of surfaces) {
+      const testRenderer = await createTestRenderer({width: 120, height: 40});
+      const controller = new FakeController(surface.state);
+      const app = createOpenTuiApp(testRenderer.renderer, controller);
+      registerCleanup(testRenderer.renderer, app);
+      const frame = await testRenderer.waitForFrame(value => value.includes(surface.marker));
+
+      expect(frame).toContain(banner.message);
+      expectBelowBanner(testRenderer, surface.id);
+    }
+  });
+});
+
 describe('command palette', () => {
   it('opens with F1 over the command bar, listing exactly what availableCommands yields', async () => {
     const testRenderer = await createTestRenderer({width: 140, height: 40});

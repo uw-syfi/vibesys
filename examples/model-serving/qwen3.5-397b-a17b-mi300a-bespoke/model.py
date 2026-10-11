@@ -1,6 +1,6 @@
 """Deliberately slow, plain-PyTorch Qwen3.5-MoE (text only), written from the HF modeling code.
 
-Design (see reference/modeling_qwen3_5_moe.py for the semantics this mirrors):
+Design (see .vibesys/tasks/default/reference/modeling_qwen3_5_moe.py for the semantics this mirrors):
 - batch size 1, one sequence at a time, static caches allocated once.
 - full-attention layers: static KV cache [1, kv_heads, max_seq, head_dim].
 - Gated DeltaNet layers: static conv state [1, conv_dim, K-1] and fp32 recurrent state

@@ -1,4 +1,4 @@
-"""Input-bundle discovery, standalone-input synthesis, and the ``validate`` command."""
+"""Task selection, standalone-input synthesis, and the ``validate`` command."""
 
 from __future__ import annotations
 
@@ -12,12 +12,10 @@ from entrypoints.cli.environment import _validate_run_environment_profiler
 from entrypoints.cli.errors import _configuration_error
 from vibesys.api import DomainName, ProfilerKind
 from vibesys.api.request import (
-    InputBundle,
     InputSynthesisError,
     SynthesizedInputSpec,
     generate_experiment_name,
-    load_input_bundle,
-    load_project_task,
+    load_task,
     synthesize_input_bundle,
     validate_experiment_name,
 )
@@ -28,12 +26,12 @@ if TYPE_CHECKING:
 
 
 def _run_validate(argv: list[str]) -> None:
-    """Validate one input-bundle contract, then report its resolved paths."""
+    """Validate one task contract, then report its resolved paths."""
     args = _build_validate_parser().parse_args(argv)
     input_path = (args.project or Path.cwd()).expanduser().resolve()
 
     try:
-        bundle = _load_selected_input(input_path, args.task)
+        bundle = load_task(input_path, args.task)
     except (FileNotFoundError, ProjectLayoutError, ValueError) as exc:
         _configuration_error(
             f"Validation failed for VibeSys project {input_path}: {exc}",
@@ -45,9 +43,8 @@ def _run_validate(argv: list[str]) -> None:
     summary = [
         "VibeSys validation passed: task is valid.",
         f"  project: {bundle.root}",
+        f"  task: {bundle.task_name}",
     ]
-    if bundle.task_name is not None:
-        summary.append(f"  task: {bundle.task_name}")
     summary.extend(
         [
             f"  objective: {bundle.objective_path}",
@@ -66,17 +63,6 @@ def _run_validate(argv: list[str]) -> None:
     if bundle.benchmark_result_protocol is not None:
         summary.append(f"  benchmark result protocol: {bundle.benchmark_result_protocol}")
     sys.stdout.write("\n".join(summary) + "\n")
-
-
-def _load_selected_input(project_root: Path, task_name: str | None) -> InputBundle:
-    """Select repository-native input, with legacy bundle compatibility."""
-    project = Project.open(project_root)
-    if project.is_initialized():
-        return load_project_task(project, project.select_task(task_name))
-    if task_name is not None:
-        message = "--task requires a project with .vibesys/tasks"
-        raise ValueError(message)
-    return load_input_bundle(project_root)
 
 
 def _standalone_input_dests_set(args: argparse.Namespace) -> list[str]:
@@ -188,7 +174,7 @@ def _validate_target_inputs(args: argparse.Namespace) -> None:
         args.input = input_arg
 
     try:
-        args.input_bundle = _load_selected_input(input_arg, task_name)
+        args.input_bundle = load_task(input_arg, task_name)
         args.task = args.input_bundle.task_name
     except (FileNotFoundError, ProjectLayoutError, ValueError) as exc:
         _configuration_error(str(exc), code="invalid_input", stage="input_loading")
@@ -227,18 +213,14 @@ def _apply_bundle_profiler_default(args: argparse.Namespace) -> None:
 
 
 def _resolve_implicit_input(args: argparse.Namespace, standalone: list[str]) -> Path:
-    """Resolve cwd project discovery or the legacy standalone synthesizer."""
+    """Resolve the current directory as the project, or synthesize one from flags."""
     if standalone:
         return _synthesize_standalone_input(args)
     current = Path.cwd().resolve()
-    legacy_markers = (current / "OBJECTIVE.md", current / "vibesys.input.toml")
-    repository_native = Project.open(current).is_initialized()
-    if repository_native or all(marker.is_file() for marker in legacy_markers):
+    if Project.open(current).is_initialized():
         return current
-    missing = ", ".join(marker.name for marker in legacy_markers if not marker.is_file())
     _configuration_error(
-        "Current directory is not a VibeSys project "
-        f"({current}; missing .vibesys/tasks or legacy {missing}). "
+        f"Current directory is not a VibeSys project ({current}; missing .vibesys/tasks). "
         "Launch VibeSys from the project or pass --project PATH.",
         code="missing_input",
         stage="input_loading",

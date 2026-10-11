@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.docker_environment import host_container_backend
+from tests.support.task_project import write_task
 
 from launch import LaunchSettings, create_session
 from vibesys.api import (
@@ -18,7 +19,7 @@ from vibesys.api import (
     ResumeRef,
     RunRequest,
 )
-from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
+from vibesys.api.request import RunEnvironmentSpec, load_task
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -27,7 +28,6 @@ if TYPE_CHECKING:
 def _request(root: Path, *, service: bool, profile: bool, requested: ProfilerKind) -> RunRequest:
     project = root / "project"
     project.mkdir()
-    (project / "OBJECTIVE.md").write_text("Improve serving latency.\n", encoding="utf-8")
     manifest = (
         'version = 1\n[agent]\ndomain = "llm-serving"\n'
         '[accuracy]\ncommand = ["python", "check.py"]\n'
@@ -35,7 +35,7 @@ def _request(root: Path, *, service: bool, profile: bool, requested: ProfilerKin
     )
     if profile:
         manifest += '[profile]\ncommand = ["python", "diagnostic.py"]\n'
-    (project / "vibesys.input.toml").write_text(manifest, encoding="utf-8")
+    write_task(project, manifest, objective="Improve serving latency.\n")
     config_path = root / "slurm.toml"
     operator_config = (
         '[slurm]\nname = "test-cluster"\nremote_workspace_root = "/remote/runs"\n'
@@ -51,7 +51,7 @@ def _request(root: Path, *, service: bool, profile: bool, requested: ProfilerKin
     config_path.write_text(operator_config, encoding="utf-8")
     return RunRequest(
         project_root=project,
-        input_bundle=load_input_bundle(project),
+        input_bundle=load_task(project),
         orchestration=OrchestrationDescriptor(
             id="multi-agent",
             config_version=1,

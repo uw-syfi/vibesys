@@ -1,0 +1,18 @@
+version = 1
+
+[agent]
+domain = "llm-serving"
+
+[accuracy]
+command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py"]
+timeout_seconds = 120
+
+[evaluator]
+name = "vibesys-evaluator-request-factory"
+version = "0.1.0"
+
+[benchmark]
+entrypoint = "request-factory-adapter"
+args = ["${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py"]
+timeout_seconds = 1800
+result_protocol = 2

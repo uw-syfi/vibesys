@@ -1,0 +1,12 @@
+version = 1
+
+[agent]
+domain = "llm-serving"
+
+[accuracy]
+command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/from-scratch/accuracy_checker/checker.py"]
+timeout_seconds = 120
+
+[benchmark]
+command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/from-scratch/benchmark/benchmark.py"]
+timeout_seconds = 300

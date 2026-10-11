@@ -25,28 +25,28 @@ The execution image is described in
 
 | Path | Role |
 | --- | --- |
-| `vibesys.input.toml`, `objectives.toml` | Input manifest; objectives `total_token_throughput` (max) and `p95_ttft_turn2plus_ms` (min), read over `benchmark.result_protocol = 2` |
-| `OBJECTIVE.md` | Task, validity rules, candidate contract |
-| `benchmark/run.py` | Workload driver; writes the result-protocol stream (`--vs-output`) and the human-readable metrics JSON (`--output-json`); hard-fails on any dropped, truncated, or errored turn |
-| `benchmark/vs_protocol.py` | Writer for the evaluator result protocol v2 (`sdk/vs-evaluator/PROTOCOL.md`) |
-| `benchmark/launcher.py` | Starts and stops `python3 server.py`, polls `/health` |
-| `benchmark/test_run.py` | Hermetic tests (fake clock and server) |
-| `accuracy_checker/checker.py` | 13 probes plus greedy-token pins; see its README |
-| `accuracy_checker/make_pins.py` | Generates `reference/pins.json` from a transformers forward |
-| `reference/` | Reference modeling code and `pins.json` |
+| `.vibesys/tasks/default/vibesys.input.toml`, `.vibesys/tasks/default/objectives.toml` | Input manifest; objectives `total_token_throughput` (max) and `p95_ttft_turn2plus_ms` (min), read over `benchmark.result_protocol = 2` |
+| `.vibesys/tasks/default/OBJECTIVE.md` | Task, validity rules, candidate contract |
+| `.vibesys/tasks/default/benchmark/run.py` | Workload driver; writes the result-protocol stream (`--vs-output`) and the human-readable metrics JSON (`--output-json`); hard-fails on any dropped, truncated, or errored turn |
+| `.vibesys/tasks/default/benchmark/vs_protocol.py` | Writer for the evaluator result protocol v2 (`sdk/vs-evaluator/PROTOCOL.md`) |
+| `.vibesys/tasks/default/benchmark/launcher.py` | Starts and stops `python3 server.py`, polls `/health` |
+| `.vibesys/tasks/default/benchmark/test_run.py` | Hermetic tests (fake clock and server) |
+| `.vibesys/tasks/default/accuracy_checker/checker.py` | 13 probes plus greedy-token pins; see its README |
+| `.vibesys/tasks/default/accuracy_checker/make_pins.py` | Generates `reference/pins.json` (same task directory) from a transformers forward |
+| `.vibesys/tasks/default/reference/` | Reference modeling code and `pins.json` |
 | `requirements.txt` | Pure-python extras; torch, triton, AITER come from the image |
 
 ## Checks without a GPU
 
 ```bash
 D=examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke
-uv run pytest $D/benchmark/test_run.py -q --no-cov -p no:tach
-uv run pytest $D/accuracy_checker/test_checker.py -q --no-cov -p no:tach
+uv run pytest $D/.vibesys/tasks/default/benchmark/test_run.py -q --no-cov -p no:tach
+uv run pytest $D/.vibesys/tasks/default/accuracy_checker/test_checker.py -q --no-cov -p no:tach
 uv run vibesys validate $D
 ```
 
-Before the first real run, generate `reference/pins.json` once on the cluster
-(see `accuracy_checker/README.md`); the accuracy gate fails without it.
+Before the first real run, generate `.vibesys/tasks/default/reference/pins.json` once on the cluster
+(see `.vibesys/tasks/default/accuracy_checker/README.md`); the accuracy gate fails without it.
 
 ## Seed status
 

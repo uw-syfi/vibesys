@@ -6,31 +6,33 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from tests.examples.example_task import load_example_task, task_root
 from tests.examples.request_factory_cpu_smoke import load_profile
 from tests.support import run_test_command
 
-from vibesys.api.request import load_input_bundle
 from vs_evaluator_protocol.api import parse_records, read_measurement
 
 _BUNDLE = Path(__file__).parents[2] / "examples" / "model-serving" / "Llama-3-8B-trn2"
-_BENCHMARK = _BUNDLE / "benchmark" / "benchmark.py"
+_BENCHMARK = task_root(_BUNDLE) / "benchmark" / "benchmark.py"
 
 
 def test_llama3_8b_trn2_uses_request_factory_protocol() -> None:
-    bundle = load_input_bundle(_BUNDLE)
+    bundle = load_example_task(_BUNDLE)
 
     assert bundle.manifest.evaluator is not None
     assert bundle.manifest.evaluator.name == "vibesys-evaluator-request-factory"
     assert bundle.manifest.benchmark.entrypoint == "request-factory-adapter"
-    assert bundle.manifest.benchmark.args == ("benchmark/benchmark.py",)
+    assert bundle.manifest.benchmark.args == (
+        "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py",
+    )
     assert bundle.benchmark_result_protocol == 2
     assert bundle.benchmark_output_argument == "--vs-output"
 
 
 def test_llama3_8b_trn2_cpu_smoke_profile_declares_benchmark_contract() -> None:
-    profile = load_profile(_BUNDLE / "benchmark" / "cpu_smoke.toml")
+    profile = load_profile(task_root(_BUNDLE) / "benchmark" / "cpu_smoke.toml")
 
-    assert profile.benchmark_path == _BUNDLE / "benchmark" / "benchmark.py"
+    assert profile.benchmark_path == task_root(_BUNDLE) / "benchmark" / "benchmark.py"
     assert profile.benchmark_args == (
         "--request-count",
         "4",
@@ -55,7 +57,7 @@ def test_llama3_8b_trn2_cpu_smoke_profile_declares_benchmark_contract() -> None:
 
 
 def test_cpu_smoke_profile_rejects_nonpositive_prompt_batches(tmp_path: Path) -> None:
-    profile_path = _BUNDLE / "benchmark" / "cpu_smoke.toml"
+    profile_path = task_root(_BUNDLE) / "benchmark" / "cpu_smoke.toml"
     invalid = tmp_path / "cpu_smoke.toml"
     invalid.write_text(
         profile_path.read_text(encoding="utf-8").replace(

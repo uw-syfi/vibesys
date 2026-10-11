@@ -11,6 +11,7 @@ from tests.support.docker_environment import (
     fake_docker_environment,
     host_container_backend,
 )
+from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
@@ -22,7 +23,7 @@ from vibesys.events import (
     GateKind,
     GateStartedData,
 )
-from vibesys.inputs import load_input_bundle
+from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
 from vibesys.run.host import open_product_run_host
@@ -90,7 +91,6 @@ def _write_project(
     protocol_row: dict[str, float] | None = None,
 ) -> None:
     root.mkdir(parents=True)
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
     if protocol_row is None:
         benchmark_body = "    json.dump({'throughput': 42.0}, output)\n"
@@ -129,11 +129,13 @@ def _write_project(
             }
         )
     )
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
         f'[accuracy]\ncommand = ["{accuracy_command}"]\n'
         f"[benchmark]\ncommand = {json.dumps(benchmark_command)}\n"
-        f"{result_contract}"
+        f"{result_contract}",
+        objective="Improve the queue.\n",
     )
 
 
@@ -149,7 +151,7 @@ def _request(project_root: Path, *, agent_backend: str | None = None) -> RunRequ
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id="evaluation", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "evaluation"}}),
-        input_bundle=load_input_bundle(project_root),
+        input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name="evaluation",
         agent_backend=agent_backend,

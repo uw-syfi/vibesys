@@ -6,6 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from entrypoints.run import run_headless
@@ -19,7 +20,7 @@ from vibesys.api import (
     ProfilerKind,
     RunRequest,
 )
-from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
+from vibesys.api.request import RunEnvironmentSpec, load_task
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_runtime.api import OrchestrationPlugin, Run, RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend
@@ -43,17 +44,18 @@ def _fake_agent(**_kwargs: object) -> FakeAgentClient:
 
 def _request(root: Path) -> RunRequest:
     root.mkdir()
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Improve the queue.\n",
     )
     return RunRequest(
         project_root=root,
         orchestration=OrchestrationDescriptor(id="launch-test", config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "gpt-test"}}),
-        input_bundle=load_input_bundle(root),
+        input_bundle=load_task(root),
         objective="Improve the queue.",
         exp_name="launch-test",
         run_environment=RunEnvironmentSpec("docker", {"build_runner": FakeDockerBuildRunner()}),

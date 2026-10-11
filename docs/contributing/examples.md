@@ -6,11 +6,14 @@ CI iterates that file, not a glob, so an example that is not registered fails
 `tests/examples/test_example_registry.py` (the failure prints the entry to
 add).
 
-An example is a directory with a root `vibesys.input.toml` or `OBJECTIVE.md`
-(legacy layout), or with `.vibesys/tasks/<task>/` (task layout). Submodule
-examples under `examples/<family>/repositories/` are registered with
-`external_repo = true`. Baselines, starters, and evaluator sources are not
-examples and are not registered.
+An example is a project root under `examples/<category>/` with its tasks in
+`.vibesys/tasks/<task>/` (the only layout; a root `vibesys.input.toml` fails the
+registry and `vibesys validate`). Variants that share one candidate codebase are
+one project with one task per variant. Submodule examples under
+`examples/<category>/repositories/` are registered with `external_repo = true`.
+Baselines are not examples and are not registered; shared evaluators are
+versioned packages under `resources/evaluators/`. Users start a run from an
+example with `vibesys example new` ([Running VibeSys](../running-vibesys.md)).
 
 ## Static checks run for every example
 
@@ -25,8 +28,7 @@ check consumes it.
 | Field | Meaning |
 | --- | --- |
 | `path` | Repo-relative example root. |
-| `layout` | `task` or `legacy`. |
-| `tasks` | `"all"` (default) or the exact task names on disk. Omit for legacy. |
+| `tasks` | `"all"` (default) or the exact task names on disk. |
 | `external_repo` | `true` when the task files and app source come from another repository that `scripts/example_repositories.py` checks out. Default `false`. It is the only field that changes behavior. |
 | `known_failing` | `[{ check, reason, tracking }]`: a static check that fails today. |
 | `skips` | `[{ check, reason }]`: a check that cannot run because source is absent from the checkout. |
@@ -35,10 +37,10 @@ check consumes it.
 
 | Check | Catches | Fails as |
 | --- | --- | --- |
-| Registry completeness | New example directory, missing path, wrong layout, task list out of date | Names the file and the entry to add |
-| `validate` | Everything `vibesys validate` rejects, per task, both layouts | Example path plus task |
+| Registry completeness | New example directory, missing path, root `vibesys.input.toml`, task list out of date | Names the file and the entry to add |
+| `validate` | Everything `vibesys validate` rejects, per task | Example path plus task |
 | `path-refs` | `${PROJECT_ROOT}/...` in accuracy/benchmark commands pointing at nothing | Example, task, path |
-| `trust-policy` | Files those commands read that the agent could edit, using `build_project_path_policy` on a scratch copy (both layouts) | Lists the writable files and the read-only set |
+| `trust-policy` | Files those commands read that the agent could edit, using `build_project_path_policy` on a scratch copy | Lists the writable files and the read-only set |
 | Stale references (repo-wide) | `examples/...` literals in workflows, scripts, docs, and READMEs whose target is gone | File and literal; exclusions live in the test with a comment |
 
 `known_failing` is a strict xfail: when the check starts passing the test fails

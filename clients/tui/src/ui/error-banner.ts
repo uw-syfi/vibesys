@@ -83,20 +83,23 @@ export class ErrorBannerView {
     this.#scroll.scrollBy(delta, 'viewport');
   }
 
-  render(state: SessionState, maxHeight: number): void {
+  /** Renders the banner and returns the rows allocated to it in this paint. */
+  render(state: SessionState, maxHeight: number): number {
     const banner = state.errorBanner;
     if (banner === null) {
       this.output.visible = false;
       this.#rendered = null;
-      return;
+      return 0;
     }
     this.output.visible = true;
-    this.output.height = Math.max(MIN_ERROR_HEIGHT, Math.min(ERROR_HEIGHT, maxHeight));
-    if (banner === this.#rendered) return;
+    const height = Math.max(MIN_ERROR_HEIGHT, Math.min(ERROR_HEIGHT, maxHeight));
+    this.output.height = height;
+    if (banner === this.#rendered) return height;
     this.#rendered = banner;
     this.#clear();
     this.output.borderColor = banner.severity === 'fatal' ? this.#theme.error : this.#theme.warning;
     this.#renderContent(banner);
+    return height;
   }
 
   #renderContent(banner: ErrorBannerState): void {

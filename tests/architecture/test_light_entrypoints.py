@@ -1,8 +1,8 @@
 """The light host commands import only light modules.
 
-``vibesys instances``, ``vibesys tasks``, the stdio bridge and the host helper
-are what the desktop app runs on a host, once per action or channel, so their
-start-up time is the app's latency. The run engine (``vibesys.api`` and what it loads) takes about
+``vibesys example``, ``vibesys instances``, ``vibesys tasks``, the stdio bridge and the host
+helper are what the desktop app runs on a host, once per action or channel, so
+their start-up time is the app's latency. The run engine (``vibesys.api`` and what it loads) takes about
 1.7 s to import; these commands must never pay for it. Tach cannot keep them
 light on its own: its edges are module granular, and ``server.api`` (run
 protocol and engine together) is one module.
@@ -32,6 +32,7 @@ SOURCE_ROOTS = (REPO_ROOT / "src", *sorted((REPO_ROOT / "libs").glob("*/src")))
 
 LIGHT_ENTRYPOINTS = (
     "entrypoints.launcher",
+    "entrypoints.examples",
     "entrypoints.instances",
     "entrypoints.tasks",
     "entrypoints.stdio_bridge",
@@ -47,6 +48,8 @@ ALLOWED_THIRD_PARTY = frozenset({"pydantic", "pydantic_core", "typing_extensions
 ALLOWED_FIRST_PARTY = (
     "entrypoints",
     "entrypoints.launcher",
+    "entrypoints.examples",
+    "entrypoints.example_catalog",
     "entrypoints.instances",
     "entrypoints.tasks",
     "entrypoints.stdio_bridge",

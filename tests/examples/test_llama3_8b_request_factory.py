@@ -6,41 +6,43 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tests.examples.example_task import load_example_task, task_root
 from tests.examples.request_factory_cpu_smoke import load_profile
 from tests.support import run_test_command
 
-from vibesys.api.request import load_input_bundle
 from vs_evaluator_protocol.api import parse_records, read_measurement
 
 if TYPE_CHECKING:
     import subprocess
 
 _BUNDLE = Path(__file__).parents[2] / "examples" / "model-serving" / "Llama-3-8B"
-_BENCHMARK = _BUNDLE / "benchmark" / "benchmark.py"
+_BENCHMARK = task_root(_BUNDLE) / "benchmark" / "benchmark.py"
 _FAKE_ENGINE = Path(__file__).with_name("fakes") / "request_factory_sweep_engine.py"
 _FAKE_MODULES = Path(__file__).with_name("fakes")
 _TOKENIZER_REVISION = "0e9e39f249a16976918f6564b8830bc894c89659"
 
 
 def test_llama3_8b_uses_request_factory_and_declares_pareto_metrics() -> None:
-    bundle = load_input_bundle(_BUNDLE)
+    bundle = load_example_task(_BUNDLE)
 
     assert bundle.manifest.evaluator is not None
     assert bundle.manifest.evaluator.name == "vibesys-evaluator-request-factory"
     assert bundle.manifest.benchmark.entrypoint == "request-factory-adapter"
-    assert bundle.manifest.benchmark.args == ("benchmark/benchmark.py",)
+    assert bundle.manifest.benchmark.args == (
+        "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py",
+    )
     assert bundle.benchmark_result_protocol == 2
     assert bundle.benchmark_output_argument == "--vs-output"
 
-    objectives = (_BUNDLE / "objectives.toml").read_text(encoding="utf-8")
+    objectives = (task_root(_BUNDLE) / "objectives.toml").read_text(encoding="utf-8")
     assert 'name = "aggregate_throughput"' in objectives
     assert 'name = "p99_latency_ms"' in objectives
 
 
 def test_llama3_8b_cpu_smoke_profile_declares_benchmark_contract() -> None:
-    profile = load_profile(_BUNDLE / "benchmark" / "cpu_smoke.toml")
+    profile = load_profile(task_root(_BUNDLE) / "benchmark" / "cpu_smoke.toml")
 
-    assert profile.benchmark_path == _BUNDLE / "benchmark" / "benchmark.py"
+    assert profile.benchmark_path == task_root(_BUNDLE) / "benchmark" / "benchmark.py"
     assert profile.benchmark_args == (
         "--request-count",
         "32",

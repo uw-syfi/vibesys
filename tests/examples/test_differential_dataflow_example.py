@@ -10,12 +10,12 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+from tests.examples.example_task import load_example_task, task_root
 from tests.support import run_test_command
 
-from vibesys.inputs import load_input_bundle
-
 _REPO = Path(__file__).resolve().parents[2]
-_BUNDLE = _REPO / "examples" / "database" / "differential-dataflow"
+_PROJECT = _REPO / "examples" / "database" / "differential-dataflow"
+_BUNDLE = task_root(_PROJECT)
 _PINNED_COMMIT = "4f05cbb61775a45844a0905de9dacfee1e91dd80"
 
 
@@ -30,20 +30,20 @@ def _load_module(name: str, relative_path: str) -> ModuleType:
 
 
 def test_differential_dataflow_bundle_is_a_runnable_database_input() -> None:
-    bundle = load_input_bundle(_BUNDLE)
+    bundle = load_example_task(_PROJECT)
 
     assert bundle.domain == "database"
     assert bundle.accuracy_command[:4] == (
         "uv",
         "run",
         "python",
-        "accuracy_checker/checker.py",
+        "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py",
     )
     assert bundle.benchmark_command == (
         "uv",
         "run",
         "python",
-        "benchmark/benchmark.py",
+        "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py",
     )
     assert bundle.benchmark_result is not None
     assert bundle.benchmark_result.json_argument == "--output-json"
@@ -54,7 +54,7 @@ def test_differential_dataflow_bundle_is_a_runnable_database_input() -> None:
         "uv",
         "run",
         "python",
-        "profiler/attribute_cpu.py",
+        "${PROJECT_ROOT}/.vibesys/tasks/default/profiler/attribute_cpu.py",
     )
     assert profile_guided.timeout_seconds == 1800
     assert profile_guided.result_protocol == 1
@@ -95,7 +95,7 @@ def test_differential_dataflow_objective_matches_benchmark_contract(tmp_path: Pa
             "--output-json",
             str(output),
         ],
-        cwd=_BUNDLE,
+        cwd=_PROJECT,
         capture_output=True,
         text=True,
         check=False,

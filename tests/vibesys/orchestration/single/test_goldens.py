@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tests.support.task_project import write_task
 from tests.vibesys.golden.helpers import (
     assert_board_snapshot,
     assert_events_snapshot,
@@ -79,11 +80,12 @@ def _golden_input(root: Path) -> Path:
     )
     (input_root / "queue.py").unlink()
     (input_root / "ref.py").write_text("def predict(x):\n    return x * 2\n", encoding="utf-8")
-    (input_root / "vibesys.input.toml").write_text(
+    write_task(
+        input_root,
         'version = 1\n[agent]\ndomain = "llm-serving"\n'
         '[accuracy]\ncommand = ["python", "-c", "print(\'ok\')"]\n'
         '[benchmark]\ncommand = ["python", "-c", "print(\'ok\')"]\n',
-        encoding="utf-8",
+        objective="Maximize tok/s throughput.\n",
     )
     return input_root
 

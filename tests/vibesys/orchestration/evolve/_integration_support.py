@@ -7,10 +7,11 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.task_project import write_task
 
 from launch.testing import create_session
 from vibesys.api import ComputeBackend, Config, OrchestrationRegistry
-from vibesys.inputs import load_input_bundle
+from vibesys.inputs import load_task
 from vibesys.orchestration.evolve import PLUGIN, REGISTRATION
 from vibesys.orchestration.evolve.models import EvolveState
 from vibesys.orchestration.profilers import ProfilerKind
@@ -57,12 +58,12 @@ def options(**changes: object) -> BaseModel:
 def write_input(root: Path) -> Path:
     """Create one self-contained input project that can be copied and resumed."""
     root.mkdir(parents=True)
-    (root / "OBJECTIVE.md").write_text("Increase queue throughput.\n", encoding="utf-8")
     (root / "queue.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
-        encoding="utf-8",
+        objective="Increase queue throughput.\n",
     )
     return root
 
@@ -92,7 +93,7 @@ def execute(
     resume_run_id: str | None = None,
 ) -> tuple[RunStatus, str, Path]:
     """Run the explicit evolve plugin through its production host adapter."""
-    bundle = load_input_bundle(project_root)
+    bundle = load_task(project_root)
     selected = configured or options()
     descriptor = OrchestrationDescriptor(
         id=PLUGIN.id,

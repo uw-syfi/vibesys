@@ -3,31 +3,32 @@ import json
 from pathlib import Path
 
 BUNDLE = Path("examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit")
+TASK = BUNDLE / ".vibesys" / "tasks" / "default"
 
 
 def test_llama_mlx_8bit_bundle_layout() -> None:
     assert (BUNDLE / "README.md").is_file()
     assert (BUNDLE / "config.json").is_file()
     assert (BUNDLE / "requirements.txt").is_file()
-    assert (BUNDLE / "reference" / "reference.py").is_file()
-    assert (BUNDLE / "reference" / "meta.json").is_file()
-    assert (BUNDLE / "reference" / "config.json").is_file()
-    assert (BUNDLE / "accuracy_checker" / "checker.py").is_file()
-    assert (BUNDLE / "benchmark" / "benchmark.py").is_file()
+    assert (TASK / "reference" / "reference.py").is_file()
+    assert (TASK / "reference" / "meta.json").is_file()
+    assert (TASK / "reference" / "config.json").is_file()
+    assert (TASK / "accuracy_checker" / "checker.py").is_file()
+    assert (TASK / "benchmark" / "benchmark.py").is_file()
 
 
 def test_llama_mlx_8bit_metadata_points_to_target_model() -> None:
-    meta = json.loads((BUNDLE / "reference" / "meta.json").read_text())
+    meta = json.loads((TASK / "reference" / "meta.json").read_text())
     assert meta["model_id"] == "mlx-community/Meta-Llama-3.1-8B-Instruct-8bit"
     assert meta["revision"] == "142d428004044c37c441272c91316251d9aecc58"
 
-    config = json.loads((BUNDLE / "reference" / "config.json").read_text())
+    config = json.loads((TASK / "reference" / "config.json").read_text())
     assert config["model_type"] == "llama"
     assert config["quantization"] == {"group_size": 64, "bits": 8}
 
 
 def test_llama_mlx_8bit_reference_defaults_to_local_model_dir() -> None:
-    tree = ast.parse((BUNDLE / "reference" / "reference.py").read_text())
+    tree = ast.parse((TASK / "reference" / "reference.py").read_text())
     assignments = [
         node
         for node in tree.body
@@ -40,8 +41,8 @@ def test_llama_mlx_8bit_reference_defaults_to_local_model_dir() -> None:
 
 
 def test_llama_mlx_8bit_checker_and_benchmark_support_url_flags() -> None:
-    checker_source = (BUNDLE / "accuracy_checker" / "checker.py").read_text()
-    benchmark_source = (BUNDLE / "benchmark" / "benchmark.py").read_text()
+    checker_source = (TASK / "accuracy_checker" / "checker.py").read_text()
+    benchmark_source = (TASK / "benchmark" / "benchmark.py").read_text()
 
     assert "--url" in checker_source
     assert "/v1/completions" in checker_source
@@ -61,8 +62,8 @@ def test_llama_mlx_8bit_checker_and_benchmark_support_url_flags() -> None:
 
 
 def test_llama_mlx_8bit_pins_jsonschemabench_dataset_revision() -> None:
-    checker_source = (BUNDLE / "accuracy_checker" / "checker.py").read_text()
-    benchmark_source = (BUNDLE / "benchmark" / "benchmark.py").read_text()
+    checker_source = (TASK / "accuracy_checker" / "checker.py").read_text()
+    benchmark_source = (TASK / "benchmark" / "benchmark.py").read_text()
     assert "epfl-dlab/JSONSchemaBench" in checker_source
     assert "5bd0f4640badc6f3f02df796421d21cb0ca0b141" in checker_source
     assert "epfl-dlab/JSONSchemaBench" in benchmark_source

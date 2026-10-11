@@ -19,6 +19,7 @@ from tests.composition.dynamic._harness import (
     simulated_clock,
     workstream,
 )
+from tests.support.task_project import task_path
 
 from vibesys.api import RunStatus
 from vibesys.dynamic_roles import IMPLEMENTER, ORCHESTRATOR
@@ -134,7 +135,7 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
 
 def _interrupt_input_evaluator(loop_input: LoopInput, tmp_path: Path, failures: int) -> Path:
     """Make the benchmark process die before any result for the input's first runs."""
-    benchmark = loop_input.root / "benchmark.py"
+    benchmark = task_path(loop_input.root) / "benchmark.py"
     original = benchmark.read_text(encoding="utf-8")
     counter = tmp_path / "input-attempts"
     # A missing result is ambiguous evidence, not a workload verdict. Only the

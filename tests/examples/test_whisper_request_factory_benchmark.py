@@ -5,10 +5,11 @@ import json
 from pathlib import Path
 from typing import TypedDict, cast
 
-from vibesys.inputs import load_input_bundle
+from tests.examples.example_task import load_example_task, task_root
 
 _REPO_ROOT = Path(__file__).parents[2]
-_TASK_ROOT = _REPO_ROOT / "examples" / "model-serving" / "whisper-large-v3"
+_PROJECT_ROOT = _REPO_ROOT / "examples" / "model-serving" / "whisper-large-v3"
+_TASK_ROOT = task_root(_PROJECT_ROOT)
 _TRACE_PATH = _TASK_ROOT / "benchmark" / "requests.jsonl"
 _CLIPS = (
     ("sample1.wav", "5bc474ec55cd50e7192d793a63c1b456fd205ea05737fc3fdffb99f46f61500a"),
@@ -76,7 +77,7 @@ def test_trace_is_a_deterministic_64_request_audio_cycle() -> None:
 
 
 def test_manifest_runs_the_pinned_engine_directly_and_reads_its_summary() -> None:
-    bundle = load_input_bundle(_TASK_ROOT)
+    bundle = load_example_task(_PROJECT_ROOT)
     manifest = bundle.manifest
 
     assert manifest.evaluator is not None
@@ -84,7 +85,9 @@ def test_manifest_runs_the_pinned_engine_directly_and_reads_its_summary() -> Non
     assert manifest.evaluator.version == "0.1.0"
     assert manifest.benchmark.entrypoint == "request-factory-engine"
     arguments = manifest.benchmark.args
-    assert _option(arguments, "--trace") == "benchmark/requests.jsonl"
+    assert _option(arguments, "--trace") == (
+        "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/requests.jsonl"
+    )
     assert _option(arguments, "--input-file-format") == "multimodal-independent-v1"
     assert _option(arguments, "--base-url") == "http://localhost:8000/v1"
     assert _option(arguments, "--model") == "whisper-large-v3"
