@@ -375,6 +375,7 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
             del run_id
 
     runtime = ServerRuntime(
+        run_id="run-1",
         runs=default_runs(),
         socket_path=tmp_path / "control.sock",
         detach=True,
@@ -427,6 +428,7 @@ def test_startup_rejects_commands_that_require_an_active_session(
 
     observer = Observer()
     runtime = ServerRuntime(
+        run_id="run-1",
         runs=default_runs(),
         socket_path=tmp_path / "control.sock",
         detach=True,
