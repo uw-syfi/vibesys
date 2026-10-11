@@ -251,7 +251,8 @@ export default {
       // that shipping code must not reach. Keep them reachable only from test files.
       name: 'production-code-does-not-import-backend-client-test-support',
       severity: 'error',
-      from: {path: SCANNED, pathNot: TEST_FILE},
+      // Test support may build on itself, e.g. the testing entry re-exporting its Fakes.
+      from: {path: SCANNED, pathNot: [TEST_FILE, BACKEND_CLIENT_TEST_ONLY]},
       to: {path: BACKEND_CLIENT_TEST_ONLY},
     },
     {

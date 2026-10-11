@@ -5,6 +5,7 @@
  */
 import {
   browserSessionForGateway,
+  type GatewayBootstrapTarget,
   type GatewayTarget,
   resolveGatewayTarget,
 } from '../entities/gateway.js';
@@ -19,7 +20,7 @@ export type BootPlan =
       readonly browserSession: string | null;
     }
   /** Exchange `target.bootstrapUrl` for a credential, then go live (or to the demo on failure). */
-  | {readonly kind: 'bootstrap'; readonly target: GatewayTarget & {readonly bootstrapUrl: string}};
+  | {readonly kind: 'bootstrap'; readonly target: GatewayBootstrapTarget};
 
 export function bootPlan(launchHref: string, remembered: Remembered): BootPlan {
   let target: GatewayTarget | null;

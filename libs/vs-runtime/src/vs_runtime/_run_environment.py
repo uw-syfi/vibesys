@@ -624,7 +624,6 @@ def _make_host_sandbox(request: RunEnvironmentRequest, *, ephemeral: bool = Fals
         log_path=None,
         bind_mounts=[],
         extra_env={},
-        extra_init_commands=[],
         lifecycle_hooks=hooks,
         ephemeral=ephemeral,
     )

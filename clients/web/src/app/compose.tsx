@@ -6,7 +6,7 @@
  */
 import type {JSX} from 'react';
 import {useSyncExternalStore} from 'react';
-import type {GatewayConnection} from '../entities/gateway.js';
+import type {GatewayBootstrapTarget, GatewayConnection} from '../entities/gateway.js';
 import {
   createGatewayConnectStore,
   type GatewayConnectAction,
@@ -40,24 +40,41 @@ export interface DemoAppOptions {
   /** Report an authenticated target while its credential still exists in this document. */
   readonly onGatewayConnected: (connection: GatewayConnection) => void;
   readonly initialGatewayError?: string | null;
+  /** Begin this already-validated launch without delaying the first render. */
+  readonly initialGatewayTarget?: GatewayBootstrapTarget | null;
 }
 
+export interface DemoAppServices {
+  readonly bootstrap: (capabilityUrl: string, signal: AbortSignal) => Promise<string>;
+  readonly loadReplay: typeof fetchReplayFixture;
+}
+
+const DEFAULT_DEMO_SERVICES: DemoAppServices = {
+  bootstrap: (capabilityUrl, signal) => bootstrapGateway(capabilityUrl, {signal}),
+  loadReplay: fetchReplayFixture,
+};
+
 /** The replay demo, with the form that switches the page to a live gateway. */
-export function createDemoApp({
-  page,
-  onGatewayConnected,
-  initialGatewayError = null,
-}: DemoAppOptions): JSX.Element {
+export function createDemoApp(
+  {
+    page,
+    onGatewayConnected,
+    initialGatewayError = null,
+    initialGatewayTarget = null,
+  }: DemoAppOptions,
+  services: DemoAppServices = DEFAULT_DEMO_SERVICES,
+): JSX.Element {
   const run = createRunStore();
   const replay = createReplayStore(
     events => run.dispatch({type: 'events', events}),
-    url => fetchReplayFixture(url),
+    services.loadReplay,
   );
   const gateway = createGatewayConnectStore({
     page,
     initialError: initialGatewayError,
+    initialTarget: initialGatewayTarget,
     onConnected: onGatewayConnected,
-    bootstrap: url => bootstrapGateway(url),
+    bootstrap: services.bootstrap,
   });
   replay.dispatch({type: 'load'});
   return <Demo run={run} replay={replay} gateway={gateway} />;

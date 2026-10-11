@@ -109,10 +109,10 @@ const VALID_FILES = {
   'backend-client/src/index.ts': '',
   'backend-client/src/backoff.test.ts': "import './test-support/expect.js';\n",
   'backend-client/src/test-support/expect.ts': "import 'node:module';\n",
-  'backend-client/src/testing/index.ts': '',
-  'backend-client/src/testing/fake-clock.test-helper.ts': '',
+  'backend-client/src/testing/index.ts': "export {} from './fake-clock.js';\n",
+  'backend-client/src/testing/fake-clock.ts': '',
   'backend-client/src/testing/fake-clock.test.ts':
-    "import '../test-support/expect.js';\nimport './fake-clock.test-helper.js';\n",
+    "import '../test-support/expect.js';\nimport './fake-clock.js';\n",
   'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
   'core-state/src/shared-fixtures.test.ts': "import '@vibesys/backend-client/testing';\n",
   'tui/src/index.ts':
@@ -260,7 +260,7 @@ const RULE_CASES = [
   {
     rule: 'production-code-does-not-import-backend-client-test-support',
     files: {
-      'backend-client/src/index.ts': "import './testing/fake-clock.test-helper.js';\n",
+      'backend-client/src/index.ts': "import './testing/fake-clock.js';\n",
     },
   },
   {

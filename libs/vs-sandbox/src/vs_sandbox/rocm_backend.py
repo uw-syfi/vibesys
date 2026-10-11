@@ -124,7 +124,6 @@ class RocmBackend:
         log_path: Path | str | None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
         extra_env: dict[str, str] | None = None,
-        extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
         attach_accelerator: bool = True,
         ephemeral: bool = False,
@@ -143,10 +142,7 @@ class RocmBackend:
         bind_mounts = list(bind_mounts or [])
         extra_env = dict(extra_env or {})
         lifecycle_hooks = lifecycle_hooks or []
-        # Accepted for ComputeBackendImpl protocol parity but unused: neither
-        # the LOCAL sandbox nor the agent-image-based DOCKER sandbox runs
-        # per-launch install commands.
-        del ephemeral, extra_init_commands
+        del ephemeral
 
         env = self._build_env(extra_env)
 

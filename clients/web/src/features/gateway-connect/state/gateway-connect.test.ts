@@ -23,11 +23,15 @@ describe('gatewayConnectStep', () => {
       initial: gatewayConnectInitial(PAGE, null),
       step: gatewayConnectStep,
       action: (random, issued): GatewayConnectAction => {
-        switch (random.int(3)) {
+        switch (random.int(5)) {
           case 0:
             return {type: 'edit', value: random.pick(URLS)};
           case 1:
             return {type: 'submit'};
+          case 2:
+            return {type: 'cancel'};
+          case 3:
+            return {type: 'retry'};
           default:
             return {
               type: 'bootstrap-reply',
@@ -48,13 +52,20 @@ describe('gatewayConnectStep', () => {
         // A submit while an exchange is pending, or after the hand-off, asks for nothing.
         if (action.type === 'submit' && before.kind !== 'editing') expect(requests).toEqual([]);
         for (const request of requests) {
-          if (request.kind === 'bootstrap') {
-            // Only a capability-bearing URL is ever exchanged, and never into a WebSocket URL.
-            expect(new URL(request.url).searchParams.get('token')).not.toBeNull();
-            expect(after.kind).toBe('connecting');
-          } else {
-            expect(request.connection.webSocketUrl).not.toContain('token');
-            expect(after.kind).toBe('connected');
+          switch (request.kind) {
+            case 'bootstrap':
+              // Only a capability-bearing URL is ever exchanged, never a WebSocket URL.
+              expect(new URL(request.url).searchParams.get('token')).not.toBeNull();
+              expect(after.kind).toBe('connecting');
+              break;
+            case 'cancel-bootstrap':
+              expect(before.kind).toBe('connecting');
+              expect(after.kind).toBe('editing');
+              break;
+            case 'connected':
+              expect(request.connection.webSocketUrl).not.toContain('token');
+              expect(after.kind).toBe('connected');
+              break;
           }
         }
       },
@@ -97,6 +108,34 @@ describe('gatewayConnectStep', () => {
           browserSession: 'browser-session',
         },
       },
+    ]);
+  });
+
+  test('cancels one attempt, drops its late reply, and retries the retained target', () => {
+    const typed = gatewayConnectStep(gatewayConnectInitial(PAGE, null), {
+      type: 'edit',
+      value: 'http://127.0.0.1:8765/?token=secret',
+    }).state;
+    const submitted = gatewayConnectStep(typed, {type: 'submit'});
+    const cancelled = gatewayConnectStep(submitted.state, {type: 'cancel'});
+
+    expect(cancelled.requests).toEqual([{kind: 'cancel-bootstrap', token: 1}]);
+    expect(cancelled.state).toMatchObject({
+      kind: 'editing',
+      error: 'Gateway connection cancelled. Retry when ready.',
+      retryTarget: {bootstrapUrl: 'http://127.0.0.1:8765/?token=secret'},
+    });
+    const late = gatewayConnectStep(cancelled.state, {
+      type: 'bootstrap-reply',
+      token: 1,
+      result: {ok: true, browserSession: 'late-session'},
+    });
+    expect(late).toEqual({state: cancelled.state, requests: []});
+
+    const retried = gatewayConnectStep(cancelled.state, {type: 'retry'});
+    expect(retried.state).toMatchObject({kind: 'connecting', token: 2});
+    expect(retried.requests).toEqual([
+      {kind: 'bootstrap', token: 2, url: 'http://127.0.0.1:8765/?token=secret'},
     ]);
   });
 });

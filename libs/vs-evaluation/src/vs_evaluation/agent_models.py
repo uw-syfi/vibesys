@@ -745,6 +745,14 @@ class SocketFailure(BaseModel):
 
 SocketReply = Annotated[SocketSuccess | SocketFailure, Field(discriminator="ok")]
 
+RECEIPT_LINE = b"received\n"
+"""What a client sends after reading a complete reply, before it closes its connection.
+
+A host that charged a submission keeps it owed to the agent until this line arrives: a
+reply written to a connection the client already abandoned (its tool deadline expired)
+reached nobody.
+"""
+
 
 __all__ = [
     "MAX_AGENT_AWAIT_S",

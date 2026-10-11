@@ -4693,6 +4693,60 @@ describe('theming', () => {
     expect(bottomRows().command).toBe(bottomRows().message);
   });
 
+  it('keeps a fatal banner, landing controls, and help on disjoint short-terminal rows', async () => {
+    const banner: NonNullable<SessionState['errorBanner']> = {
+      titleKind: 'run',
+      message: 'RuntimeError: app-server initialization was denied',
+      detail: 'The run server exited before accepting a client.',
+      hint: 'Check the startup log and retry.',
+      diagnosticId: 'diagnostic-short-terminal',
+      severity: 'fatal',
+      scope: 'run',
+      agentKind: null,
+      roundLabel: null,
+      invocationId: null,
+      count: 1,
+    };
+
+    for (const width of [58, 120]) {
+      const testRenderer = await createTestRenderer({width, height: 24});
+      const controller = new FakeController({
+        ...initialSessionState(),
+        errorBanner: banner,
+      });
+      const app = createOpenTuiApp(testRenderer.renderer, controller);
+      registerCleanup(testRenderer.renderer, app);
+      await controller.openExperimentLog();
+      await frameAfter(testRenderer);
+      expect(boxOf(testRenderer, 'error-banner').height).toBe(10);
+
+      for (const height of [18, 20, 23]) {
+        testRenderer.renderer.resize(width, height);
+        await frameAfter(testRenderer);
+
+        const error = boxOf(testRenderer, 'error-banner');
+        const experiments = boxOf(testRenderer, 'experiment-log');
+        const command = boxOf(testRenderer, 'command-input-box');
+        const help = boxOf(testRenderer, 'key-help');
+
+        expect(error.visible).toBe(true);
+        expect(error.height).toBeLessThan(10);
+        expect(error.y + error.height).toBeLessThanOrEqual(experiments.y);
+        expect(command.y + command.height).toBeLessThanOrEqual(
+          experiments.y + experiments.height - 1,
+        );
+        expect(experiments.y + experiments.height).toBeLessThanOrEqual(help.y);
+
+        const chat = boxOf(testRenderer, 'chat-pane');
+        if (chat.visible) {
+          const message = boxOf(testRenderer, 'chat-dock-composer-box');
+          expect(message.y + message.height).toBeLessThanOrEqual(chat.y + chat.height - 1);
+          expect(chat.y + chat.height).toBeLessThanOrEqual(help.y);
+        }
+      }
+    }
+  });
+
   it('opens both suggestion menus flush on the box they complete', async () => {
     // A menu that is not touching its input reads as belonging to whatever it
     // is touching instead. The composer's hint sits above its box, so a menu
