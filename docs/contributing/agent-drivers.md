@@ -373,13 +373,13 @@ A Docker run starts from two images, built by `vs_agent.api.images`:
   (`build_task_image`), or the backend's base image otherwise. It installs
   only what the task needs to build and test candidate code, and serves the
   evaluator as well as the agent.
-- The **agent image**, built on top of the task image from
-  `libs/vs-agent/src/vs_agent/images/agent.Dockerfile` (`agent_image`). It installs
-  Node, all four shipped CLIs (`claude`, `codex`, `gemini`, `opencode`),
-  ripgrep, `uv`, and Python's `mcp` package, then creates a non-root `agent`
-  user and ends with `USER agent`. The provider a session runs is a run-time
-  choice, so every shipped CLI lands in this one layer rather than one image
-  per provider.
+- The **agent image**, built on top of the task image by `agent_image` from
+  Dev Container Features under `libs/vs-agent/src/vs_agent/images/features/`.
+  The `vibesys-agent` Feature installs Node, all four shipped CLIs (`claude`,
+  `codex`, `gemini`, `opencode`), ripgrep, `uv`, and Python's `mcp` package,
+  then creates a non-root `agent` user; the image ends with `USER agent` in
+  `/workspace`. The provider a session runs is a run-time choice, so every
+  shipped CLI lands in this one layer rather than one image per provider.
 
 The agent layer sits on top so that a CLI version bump rebuilds only that top
 layer, and a task image stays pure enough to serve the evaluator on its own.
@@ -387,14 +387,18 @@ Docker's layer cache is what makes a repeat build of either image cheap;
 `vs_agent.api.images` builds an image once per launch and resolves its
 immutable manifest ID rather than keeping a manifest of its own.
 
-The roadmap moves this image to Dev Container Features; the phase 1 spike and
-its measurements are in [devcontainer-features.md](devcontainer-features.md).
+How a run's `devcontainer.json` is generated, how the containerized devcontainer
+CLI is invoked, and how Features are tested on each base family are in
+[devcontainer-features.md](devcontainer-features.md).
 
-CLI and toolchain versions are not in the Dockerfile: they are build args
-supplied through the library's public API, `vs_agent.api` (`NODE_VERSION`,
-`CLI_VERSIONS`, `RUST_TOOLCHAIN_VERSION`, `GO_TOOLCHAIN_VERSION`; defined in the
-library's `provider_policy` module), so a version bump is a one-line change in
-one module instead of an edit to the Dockerfile itself.
+CLI and toolchain versions are not in the Features' scripts: they are options
+that `agent_feature` fills from the library's public API, `vs_agent.api`
+(`NODE_VERSION`, `CLI_VERSIONS`; defined in the library's `provider_policy`
+module). The Rust, Go, and container-runtime pins live with their Features in
+`vs_sandbox.toolchain_features`, so a
+version bump is a one-line change in one module. Each Feature's option defaults
+repeat the pins so `devcontainer features test` can run unconfigured, and a test
+fails if they drift.
 
 A task Dockerfile that needs the backend's base image declares `ARG
 BASE_IMAGE` and `FROM ${BASE_IMAGE}`; `agent_image` always passes
@@ -405,18 +409,21 @@ is opt-in from the task Dockerfile's side. A task Dockerfile with its own
 is one) ignores the unused build arg and keeps its own base.
 
 A task that declares `[environment] docker_in_docker = true` adds the `container-runtime`
-toolchain to the agent layer (a Docker engine, the compose plugin, kind, and
-kubectl, pinned in `provider_policy` and applied through the same build-arg
-mechanism). `DockerSandbox` starts such a container under Sysbox with a
+toolchain to the agent layer (the `vibesys-container-runtime` Feature: a Docker
+engine, the compose plugin, kind, and kubectl, pinned in `provider_policy`).
+`DockerSandbox` starts such a container under Sysbox with a
 `dockerd` of its own and mounts the workspace at its host path (there is no
 host-socket mode); see `vs_sandbox.container_runtime` and "Docker-in-Docker" in
 `docs/running-vibesys.md`.
 
-The agent layer installs with `apt-get`, so every task Dockerfile and every
+The Features install with `apt-get`, so every task Dockerfile and every
 backend base image must be Debian- or Ubuntu-derived; every current backend
 base and task Dockerfile already is. Because setup happens once, at build
 time, an agent cannot `apt-get install` mid-round: a missing system package
 is a Dockerfile gap, not something a running turn can patch around.
+
+The build needs the host's Docker socket at `/var/run/docker.sock`, because the
+devcontainer CLI runs in a container and drives the host daemon through it.
 
 ### Registry: GHCR by digest
 

@@ -4,9 +4,9 @@
 # sandbox container, started at container start by `vs_sandbox` under the
 # Sysbox runtime. Only the tools land here: static engine binaries (no apt
 # repository key to manage), the compose plugin, kind, and kubectl, plus the
-# `docker` group that owns the daemon socket. Which user joins that group is
-# decided by the Feature that creates the user (the agent layer), so neither
-# Feature depends on the other's install order.
+# `docker` group that owns the daemon socket. The caller names, in the `users`
+# option, the users who join that group; they must already exist, and the
+# install fails if one does not, so a wrong Feature order is never silent.
 set -euo pipefail
 
 for pair in \
@@ -61,3 +61,10 @@ kind version
 kubectl version --client
 
 groupadd --force docker
+for user in ${USERS:-}; do
+    if ! id -u "${user}" >/dev/null 2>&1; then
+        echo "vibesys-container-runtime: user '${user}' does not exist; install the Feature that creates it first" >&2
+        exit 1
+    fi
+    usermod -aG docker "${user}"
+done

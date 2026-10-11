@@ -25,9 +25,9 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support import run_test_command
 
-from vs_agent.api import CONTAINER_RUNTIME_TOOLCHAIN
 from vs_agent.api.images import agent_image
-from vs_sandbox.api import AGENT_HOME, DockerSandbox
+from vs_runtime.api.infrastructure import image_features
+from vs_sandbox.api import AGENT_HOME, CONTAINER_RUNTIME_TOOLCHAIN, DockerSandbox
 
 if TYPE_CHECKING:
     import subprocess
@@ -87,7 +87,9 @@ def test_hotel_reservation_sandbox_runs_compose_and_containers_on_its_own_daemon
     sandbox = DockerSandbox(
         host_workspace=str(workspace),
         image=agent_image(
-            _BASE_IMAGE, toolchains={CONTAINER_RUNTIME_TOOLCHAIN}, timeout=_BUILD_TIMEOUT_S
+            _BASE_IMAGE,
+            features=image_features({CONTAINER_RUNTIME_TOOLCHAIN}),
+            timeout=_BUILD_TIMEOUT_S,
         ),
         docker_in_docker=True,
     )

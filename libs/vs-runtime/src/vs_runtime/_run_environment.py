@@ -41,7 +41,6 @@ from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from vs_agent.api import (
     CONTAINER_FRAMEWORK_ROOT,
-    CONTAINER_RUNTIME_TOOLCHAIN,
     AgentBackend,
     auth_bind_mounts,
     auth_copy_paths,
@@ -58,6 +57,7 @@ from vs_runtime._container_runtime_policy import (
     reject_docker_in_docker,
 )
 from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
+from vs_runtime._image_features import image_features
 from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
@@ -71,6 +71,7 @@ from vs_runtime._trusted_evaluation_preparation import (
     required_evaluator_tools_root,
 )
 from vs_sandbox.api import (
+    CONTAINER_RUNTIME_TOOLCHAIN,
     DeviceLease,
     EnvironmentBindMount,
     HostResource,
@@ -782,7 +783,7 @@ class DockerEnvironment:
         # agent layer is applied on top of it.
         container_image = image_helpers.agent_image(
             _docker_backend_image(request),
-            toolchains=toolchains,
+            features=image_features(toolchains),
             command_runner=self.config.build_runner,
         )
         workspace_root = _workspace_root(request, same_path=extras.same_path_workspace)
@@ -1051,7 +1052,7 @@ class SkyPilotEnvironment(DockerEnvironment):
 
             container_image = image_helpers.agent_image(
                 _docker_backend_image(request),
-                toolchains=evaluator_agent_toolchains(requirements),
+                features=image_features(evaluator_agent_toolchains(requirements)),
             )
             container_image = _ensure_pushed_for_remote_backend(
                 container_image,
@@ -1220,8 +1221,9 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         requirements = request.evaluator_requirements
         container_image = image_helpers.agent_image(
             _docker_backend_image(request),
-            toolchains=evaluator_agent_toolchains(requirements),
-            pip_extras=_MODAL_EDITOR_PIP_EXTRAS,
+            features=image_features(
+                evaluator_agent_toolchains(requirements), _MODAL_EDITOR_PIP_EXTRAS
+            ),
         )
         container_image = _ensure_pushed_for_remote_backend(
             container_image,

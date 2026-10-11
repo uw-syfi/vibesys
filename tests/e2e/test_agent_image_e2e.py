@@ -26,6 +26,7 @@ from tests.support import run_test_command
 
 from vs_agent.api import CONTAINER_PYTHON
 from vs_agent.api.images import agent_image, build_task_image
+from vs_runtime.api.infrastructure import image_features
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -69,7 +70,7 @@ def _enabled() -> bool:
 def test_cpu_agent_image_runs_every_shipped_cli_as_the_agent_user() -> None:
     image_id = agent_image(
         "python:3.12-bookworm",
-        toolchains=("rust", "go"),
+        features=image_features(("rust", "go")),
         timeout=_BUILD_TIMEOUT_S,
     )
 
@@ -96,8 +97,7 @@ def test_container_runtime_and_pip_extras_features_install_everything_they_use()
     """The opt-in Features add their tools, and the agent user can use the ``docker`` group."""
     image_id = agent_image(
         "python:3.12-bookworm",
-        toolchains=("container-runtime",),
-        pip_extras=("modal>=0.66",),
+        features=image_features(("container-runtime",), ("modal>=0.66",)),
         timeout=_BUILD_TIMEOUT_S,
     )
 

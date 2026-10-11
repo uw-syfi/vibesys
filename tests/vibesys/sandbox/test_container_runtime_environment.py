@@ -17,7 +17,6 @@ import pytest
 
 from vibesys.constants import ComputeBackend
 from vibesys.run.environment import open_run_environment
-from vs_agent.api import CONTAINER_RUNTIME_TOOLCHAIN
 from vs_runtime.api.infrastructure import (
     DockerEnvironment,
     DockerEnvironmentConfig,
@@ -30,6 +29,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api import (
+    CONTAINER_RUNTIME_TOOLCHAIN,
     ContainerRuntimeUnavailableError,
     DockerSandbox,
     SandboxKind,

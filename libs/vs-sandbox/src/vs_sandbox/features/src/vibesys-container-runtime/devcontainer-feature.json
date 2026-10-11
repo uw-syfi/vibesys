@@ -24,6 +24,11 @@
       "type": "string",
       "default": "1.32.1",
       "description": "kubectl release; default mirrors vs_agent.provider_policy.KUBECTL_VERSION."
+    },
+    "users": {
+      "type": "string",
+      "default": "",
+      "description": "Space-separated existing users to add to the `docker` group, which owns the daemon socket. Empty adds none. Install fails if a named user does not exist."
     }
   }
 }

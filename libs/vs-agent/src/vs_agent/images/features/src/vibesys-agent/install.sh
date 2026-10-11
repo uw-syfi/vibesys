@@ -18,7 +18,6 @@ require_option gemini_version "${GEMINI_VERSION:-}"
 require_option opencode_version "${OPENCODE_VERSION:-}"
 require_option python_version "${PYTHON_VERSION:-}"
 require_option python_home "${PYTHON_HOME:-}"
-SUPPLEMENTARY_GROUPS="${SUPPLEMENTARY_GROUPS:-}"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -85,14 +84,6 @@ if ! getent group agent >/dev/null 2>&1; then
         groupadd --gid "${gid}" agent
     fi
 fi
-
-# Groups other Features' tools are owned by (for example `docker`, which owns the
-# daemon socket of the container-runtime Feature). Creating the group here keeps
-# this Feature independent of which Feature is installed first.
-for group in ${SUPPLEMENTARY_GROUPS}; do
-    groupadd --force "${group}"
-    usermod -aG "${group}" agent
-done
 
 mkdir -p /workspace
 chown agent /workspace

@@ -14,20 +14,18 @@ import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_agent.api import CONTAINER_RUNTIME_TOOLCHAIN
-from vs_agent.api.images import KNOWN_TOOLCHAINS, TaskImageBuildError, agent_image
+from vs_agent.api.images import AGENT_FEATURES_PROJECT, TaskImageBuildError, agent_image
 from vs_agent.api.testing import DockerResult, docker_result
+from vs_sandbox.api import LocalFeature
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-_IMAGES_DIR = Path(str(importlib.resources.files("vs_agent").joinpath("images")))
 
 _TASK_IMAGE_ID = "sha256:" + "a" * 64
 _AGENT_IMAGE_ID = "sha256:" + "b" * 64
@@ -39,7 +37,7 @@ class _Workspace:
     """What the devcontainer CLI would have seen when it was run."""
 
     root: Path
-    config: dict[str, object]
+    config: dict[str, Any]
     finish_dockerfile: str
     feature_ids: frozenset[str]
 
@@ -134,8 +132,8 @@ def test_agent_image_builds_through_the_containerized_cli_then_finishes() -> Non
     assert cli_argv[cli_argv.index(cli_image) + 1] == "build"
     assert workspace.config["image"] == "python:3.12-bookworm"
     assert workspace.config["containerUser"] == "agent"
-    assert workspace.feature_ids == {"vibesys-agent", "vibesys-rust", "vibesys-go",
-                                      "vibesys-container-runtime", "vibesys-pip-extras"}  # fmt: skip
+    assert workspace.feature_ids == {"vibesys-agent"}
+    assert workspace.config["features"].keys() == {"./features/vibesys-agent"}
 
 
 def test_the_finishing_stage_makes_the_image_run_as_agent_in_workspace() -> None:
@@ -199,24 +197,24 @@ def test_agent_image_chains_task_image_as_base(tmp_path: Path) -> None:
     assert runner.workspaces[0].config["image"] == task_tag
 
 
-def test_toolchains_and_pip_extras_select_features() -> None:
+def test_extra_features_follow_the_agent_feature_in_order(tmp_path: Path) -> None:
+    extras = []
+    for name in ("zeta", "alpha"):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "devcontainer-feature.json").write_text(f'{{"id": "{name}"}}')
+        (directory / "install.sh").write_text("#!/bin/sh\n")
+        extras.append(LocalFeature(directory))
     runner = _FakeRunner()
 
-    agent_image(
-        "python:3.12-bookworm",
-        toolchains={"go", CONTAINER_RUNTIME_TOOLCHAIN},
-        pip_extras=("modal>=0.66", "modal>=0.66"),
-        command_runner=runner,
-    )
+    agent_image("python:3.12-bookworm", features=extras, command_runner=runner)
 
-    selected = runner.workspaces[0].config["features"]
-    assert isinstance(selected, dict)
-    assert list(selected) == [
+    assert runner.workspaces[0].feature_ids == {"vibesys-agent", "zeta", "alpha"}
+    assert list(runner.workspaces[0].config["features"]) == [
         "./features/vibesys-agent",
-        "./features/vibesys-pip-extras",
-        "./features/vibesys-go",
-        "./features/vibesys-container-runtime",
-    ]  # fmt: skip
+        "./features/zeta",
+        "./features/alpha",
+    ]
 
 
 def test_agent_image_rejects_nonpositive_timeout() -> None:
@@ -224,41 +222,25 @@ def test_agent_image_rejects_nonpositive_timeout() -> None:
         agent_image("python:3.12-bookworm", command_runner=_FakeRunner(), timeout=0)
 
 
-def test_unknown_toolchain_fails_before_any_build_command_for_the_agent_layer() -> None:
-    runner = _FakeRunner()
-
-    with pytest.raises(ValueError, match="unknown toolchain"):
-        agent_image("python:3.12-bookworm", toolchains=["cobol"], command_runner=runner)
-
-    assert runner.workspaces == []
-
-
-def test_a_failed_devcontainer_build_names_the_spec_and_cleans_up() -> None:
+def test_a_failed_devcontainer_build_is_a_task_image_build_error_and_cleans_up() -> None:
     runner = _FakeRunner(cli_returncode=1)
 
-    with pytest.raises(TaskImageBuildError, match=r"devcontainer\.json.*cli failed"):
+    with pytest.raises(TaskImageBuildError, match=r"devcontainer build failed.*cli failed"):
         agent_image("python:3.12-bookworm", command_runner=runner)
 
     assert runner.verbs() == [("build",), ("run",)]
     assert not runner.workspaces[0].root.exists()
 
 
-def test_build_inputs_ship_as_package_data() -> None:
-    """The CLI image Dockerfile and every Feature resolve through ``importlib.resources``
-    against the installed package, so a wheel that forgot to declare the data fails here."""
-    images = importlib.resources.files("vs_agent").joinpath("images")
-    assert images.joinpath("devcontainer-cli", "Dockerfile").is_file()
-    for toolchain in KNOWN_TOOLCHAINS:
-        feature = images.joinpath("features", "src", f"vibesys-{toolchain}")
-        assert feature.joinpath("install.sh").is_file()
-    assert images.joinpath("features", "src", "vibesys-agent", "install.sh").is_file()
-
-
-def test_the_package_declares_the_build_inputs_it_ships() -> None:
-    """``pyproject.toml`` lists the data globs, so a wheel includes them."""
-    text = (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
-    assert "images/devcontainer-cli/Dockerfile" in text
-    assert "images/features/src/*/*" in text
+def test_agent_feature_ships_as_package_data() -> None:
+    """The Feature resolves through ``importlib.resources`` against the installed package,
+    so a wheel that forgot to declare the data fails here."""
+    feature = importlib.resources.files("vs_agent").joinpath(
+        "images", "features", "src", "vibesys-agent"
+    )
+    assert feature.joinpath("install.sh").is_file()
+    assert feature.joinpath("devcontainer-feature.json").is_file()
+    assert AGENT_FEATURES_PROJECT.joinpath("src", "vibesys-agent").is_dir()
 
 
 def _devcontainer_base(runner: _FakeRunner) -> str:
