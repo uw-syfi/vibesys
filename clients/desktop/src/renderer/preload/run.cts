@@ -8,7 +8,6 @@
  * two functions below. Sandboxed preloads cannot be ES modules or import local files, hence `.cts`
  * and the channel names repeated from `bridge-protocol.ts`, whose types keep them in step.
  */
-import electron = require('electron');
 import type {MainToPage, PageToMain} from '../../common/bridge-protocol.js';
 
 const CONNECT_CHANNEL: typeof import('../../common/bridge-protocol.js').CONNECT_CHANNEL = 'vibesys:connect';
@@ -20,41 +19,232 @@ interface SocketHandlers {
   onClose(): void;
 }
 
-function connect(handlers: SocketHandlers): {send(data: string): void; close(): void} {
-  const {port1: port, port2: remote} = new MessageChannel();
-  let closed = false;
-  const post = (message: PageToMain): void => port.postMessage(message);
-  port.onmessage = event => {
-    if (closed) return;
-    const message = event.data as MainToPage;
-    if (message.type === 'open') handlers.onOpen();
-    else if (message.type === 'message') handlers.onMessage(message.data);
-    else {
-      closed = true;
-      port.close();
-      handlers.onClose();
-    }
-  };
-  electron.ipcRenderer.postMessage(CONNECT_CHANNEL, null, [remote]);
+interface PageSocket {
+  send(data: string): void;
+  close(): void;
+}
+
+interface PreloadMessagePort {
+  onmessage: ((event: MessageEvent<unknown>) => void) | null;
+  postMessage(message: PageToMain): void;
+  close(): void;
+}
+
+/** Effects the sandbox grants this preload, injectable so the exposed bridge has a public Fake. */
+interface RunPreloadCapabilities<RemotePort> {
+  readonly platform: string;
+  createChannel(): {readonly port: PreloadMessagePort; readonly remote: RemotePort};
+  attach(remote: RemotePort): void;
+  onWake(listener: () => void): void;
+}
+
+/** The complete capability exposed to the isolated page as `window.vibesysDesktop`. */
+interface RunPreloadBridge {
+  readonly platform: string;
+  connect(handlers: SocketHandlers): PageSocket;
+  onWake(listener: () => void): void;
+}
+
+/** Build the page capability from its Electron boundary effects. */
+function createRunPreload<RemotePort>(
+  capabilities: RunPreloadCapabilities<RemotePort>,
+): RunPreloadBridge {
   return {
-    send: data => {
-      if (!closed && typeof data === 'string') post({type: 'send', data});
-    },
-    close: () => {
-      if (closed) return;
-      closed = true;
-      post({type: 'close'});
-      port.close();
-    },
+    platform: capabilities.platform,
+    connect: handlers => connect(capabilities, handlers),
+    onWake: listener => capabilities.onWake(listener),
   };
 }
 
-function onWake(listener: () => void): void {
-  electron.ipcRenderer.on(WAKE_CHANNEL, () => listener());
+function connect<RemotePort>(
+  capabilities: RunPreloadCapabilities<RemotePort>,
+  handlers: SocketHandlers,
+): PageSocket {
+  const {port, remote} = capabilities.createChannel();
+  const connection = new PortConnection(port, handlers);
+  capabilities.attach(remote);
+  return {
+    send: data => connection.send(data),
+    close: () => connection.close(),
+  };
 }
 
-electron.contextBridge.exposeInMainWorld('vibesysDesktop', {
-  platform: process.platform,
-  connect,
-  onWake,
-});
+class PortConnection implements PageSocket {
+  readonly #port: PreloadMessagePort;
+  readonly #handlers: SocketHandlers;
+  readonly #queued: Array<{readonly data: string; readonly bytes: number}> = [];
+  #queuedBytes = 0;
+  #windowBytes = 0;
+  #sendCredit = 0;
+  #receiveCredit = 0;
+  #opened = false;
+  #closed = false;
+
+  constructor(port: PreloadMessagePort, handlers: SocketHandlers) {
+    this.#port = port;
+    this.#handlers = handlers;
+    port.onmessage = event => this.#receive(event.data);
+  }
+
+  send(data: string): void {
+    if (this.#closed) return;
+    if (!this.#opened || typeof data !== 'string') return this.#fail();
+    const bytes = frameBytes(data);
+    if (bytes > this.#windowBytes || bytes > this.#windowBytes - this.#queuedBytes) {
+      this.#fail();
+      return;
+    }
+    this.#queued.push({data, bytes});
+    this.#queuedBytes += bytes;
+    this.#flush();
+  }
+
+  #grant(bytes: number): void {
+    if (
+      this.#closed ||
+      !this.#opened ||
+      !validCredit(bytes) ||
+      bytes > this.#windowBytes - this.#receiveCredit
+    ) {
+      this.#fail();
+      return;
+    }
+    this.#receiveCredit += bytes;
+    this.#post({type: 'credit', bytes});
+  }
+
+  close(): void {
+    if (this.#closed) return;
+    this.#post({type: 'close'});
+    this.#closed = true;
+    this.#discardQueue();
+    this.#port.close();
+  }
+
+  #receive(value: unknown): void {
+    if (this.#closed || typeof value !== 'object' || value === null) {
+      if (!this.#closed) this.#fail();
+      return;
+    }
+    const message = value as MainToPage;
+    if (message.type === 'open') this.#open(message.creditBytes);
+    else if (message.type === 'message') this.#message(message.data, message.bytes);
+    else if (message.type === 'credit') this.#credited(message.bytes);
+    else if (message.type === 'close') this.#ended();
+    else this.#fail();
+  }
+
+  #open(creditBytes: number): void {
+    if (this.#opened || !validCredit(creditBytes)) {
+      this.#fail();
+      return;
+    }
+    this.#opened = true;
+    this.#windowBytes = creditBytes;
+    this.#sendCredit = creditBytes;
+    this.#grant(creditBytes);
+    if (!this.#closed) this.#handlers.onOpen();
+  }
+
+  #message(data: string, bytes: number): void {
+    if (
+      !this.#opened ||
+      typeof data !== 'string' ||
+      !validCredit(bytes) ||
+      bytes !== frameBytes(data) ||
+      bytes > this.#receiveCredit
+    ) {
+      this.#fail();
+      return;
+    }
+    this.#receiveCredit -= bytes;
+    try {
+      this.#handlers.onMessage(data);
+    } finally {
+      if (!this.#closed) this.#grant(bytes);
+    }
+  }
+
+  #credited(bytes: number): void {
+    if (
+      !this.#opened ||
+      !validCredit(bytes) ||
+      bytes > this.#windowBytes - this.#sendCredit
+    ) {
+      this.#fail();
+      return;
+    }
+    this.#sendCredit += bytes;
+    this.#flush();
+  }
+
+  #flush(): void {
+    while (!this.#closed) {
+      const frame = this.#queued[0];
+      if (frame === undefined || frame.bytes > this.#sendCredit) return;
+      this.#queued.shift();
+      this.#queuedBytes -= frame.bytes;
+      this.#sendCredit -= frame.bytes;
+      if (!this.#post({type: 'send', data: frame.data})) return;
+    }
+  }
+
+  #post(message: PageToMain): boolean {
+    try {
+      this.#port.postMessage(message);
+      return true;
+    } catch {
+      this.#ended();
+      return false;
+    }
+  }
+
+  #fail(): void {
+    if (this.#closed) return;
+    this.#post({type: 'close'});
+    this.#ended();
+  }
+
+  #ended(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#discardQueue();
+    this.#port.close();
+    this.#handlers.onClose();
+  }
+
+  #discardQueue(): void {
+    this.#queued.length = 0;
+    this.#queuedBytes = 0;
+  }
+}
+
+const UTF8 = new TextEncoder();
+
+function frameBytes(data: string): number {
+  return UTF8.encode(data).byteLength + 1;
+}
+
+function validCredit(bytes: unknown): bytes is number {
+  return typeof bytes === 'number' && Number.isSafeInteger(bytes) && bytes > 0;
+}
+
+// Electron's sandboxed CommonJS preload cannot import local runtime modules, so production wiring
+// remains in this file. Bun tests have no Electron renderer process and exercise the factory above.
+if (process.type === 'renderer') {
+  const electron: typeof import('electron') = require('electron');
+  electron.contextBridge.exposeInMainWorld(
+    'vibesysDesktop',
+    createRunPreload({
+      platform: process.platform,
+      createChannel: () => {
+        const {port1: port, port2: remote} = new MessageChannel();
+        return {port, remote};
+      },
+      attach: remote => electron.ipcRenderer.postMessage(CONNECT_CHANNEL, null, [remote]),
+      onWake: listener => electron.ipcRenderer.on(WAKE_CHANNEL, () => listener()),
+    }),
+  );
+}
+
+export = createRunPreload;
