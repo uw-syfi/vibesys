@@ -1,0 +1,1742 @@
+{
+  "$defs": {
+    "Checkout": {
+      "additionalProperties": false,
+      "description": "The VibeSys source checkout the helper runs from.",
+      "properties": {
+        "root": {
+          "title": "Root",
+          "type": "string"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Commit"
+        },
+        "dirty": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dirty"
+        }
+      },
+      "required": [
+        "root",
+        "commit",
+        "dirty"
+      ],
+      "title": "Checkout",
+      "type": "object"
+    },
+    "DetachedLaunchFailure": {
+      "additionalProperties": false,
+      "description": "What ``vibesys --detach`` prints on stdout, as one line, when it starts nothing.\n\nOn success the line is a ``LiveInstanceRecord`` instead; a reader tells them\napart by ``outcome``, which a record never has. ``code`` is a\n``DetachedLaunchErrorCode`` or the code of the run's configuration\ndiagnostic (``invalid_arguments``, ``resume_not_found``, ...), and\n``exit_code`` is the process's exit status.",
+      "properties": {
+        "version": {
+          "const": 1,
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "outcome": {
+          "const": "failed",
+          "default": "failed",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "exit_code": {
+          "exclusiveMinimum": 0,
+          "title": "Exit Code",
+          "type": "integer"
+        },
+        "log_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Log Path"
+        },
+        "live_instance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LiveInstanceRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "code",
+        "stage",
+        "message",
+        "exit_code"
+      ],
+      "title": "DetachedLaunchFailure",
+      "type": "object"
+    },
+    "FailureReason": {
+      "additionalProperties": false,
+      "description": "Why a run failed: the diagnostic it ended with.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "stage",
+        "message"
+      ],
+      "title": "FailureReason",
+      "type": "object"
+    },
+    "HelloReply": {
+      "additionalProperties": false,
+      "description": "The negotiated version and features, and what will start runs on this host.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "hello",
+          "default": "hello",
+          "title": "Type",
+          "type": "string"
+        },
+        "protocol_version": {
+          "exclusiveMinimum": 0,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "features": {
+          "items": {
+            "$ref": "#/$defs/HelperFeature"
+          },
+          "title": "Features",
+          "type": "array"
+        },
+        "vibesys_version": {
+          "title": "Vibesys Version",
+          "type": "string"
+        },
+        "checkout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Checkout"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "protocol_version",
+        "features",
+        "vibesys_version",
+        "checkout"
+      ],
+      "title": "HelloReply",
+      "type": "object"
+    },
+    "HelloRequest": {
+      "additionalProperties": false,
+      "description": "The first message on every channel: which versions and features the client speaks.\n\nIts shape never changes across protocol versions, so any helper can parse\nany client's ``hello`` and answer ``incompatible`` with a reason.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "hello",
+          "default": "hello",
+          "title": "Type",
+          "type": "string"
+        },
+        "client_versions": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            }
+          ],
+          "title": "Client Versions",
+          "type": "array"
+        },
+        "features": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Features",
+          "type": "array"
+        },
+        "app_version": {
+          "title": "App Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "client_versions",
+        "app_version"
+      ],
+      "title": "HelloRequest",
+      "type": "object"
+    },
+    "HelperError": {
+      "additionalProperties": false,
+      "description": "A failed request, or a line that was not one (``request_id`` is ``None`` then).",
+      "properties": {
+        "type": {
+          "const": "error",
+          "default": "error",
+          "title": "Type",
+          "type": "string"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Request Id"
+        },
+        "code": {
+          "$ref": "#/$defs/HelperErrorCode"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "supported_versions": {
+          "anyOf": [
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supported Versions"
+        },
+        "vibesys_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vibesys Version"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "code",
+        "message"
+      ],
+      "title": "HelperError",
+      "type": "object"
+    },
+    "HelperErrorCode": {
+      "description": "Why a request failed; a closed set.",
+      "enum": [
+        "handshake_required",
+        "incompatible",
+        "invalid_request",
+        "duplicate_request_id",
+        "feature_not_negotiated",
+        "deadline_exceeded",
+        "channel_busy",
+        "unknown_watch",
+        "project_missing",
+        "project_uninitialized",
+        "task_invalid",
+        "path_missing",
+        "path_not_directory",
+        "permission_denied",
+        "run_gone",
+        "connect_denied",
+        "connect_failed",
+        "internal"
+      ],
+      "title": "HelperErrorCode",
+      "type": "string"
+    },
+    "HelperFeature": {
+      "description": "Optional capabilities negotiated by ``hello``; a closed set per protocol version.\n\nA client calls a gated method only after ``hello`` returned its feature, so\na strict peer never sees a method it does not know.",
+      "enum": [
+        "instances_watch",
+        "paths_complete"
+      ],
+      "title": "HelperFeature",
+      "type": "string"
+    },
+    "InstanceList": {
+      "additionalProperties": false,
+      "description": "``vibesys instances list --json``: the detached servers on this node (version 3).",
+      "properties": {
+        "version": {
+          "const": 3,
+          "default": 3,
+          "title": "Version",
+          "type": "integer"
+        },
+        "instances": {
+          "items": {
+            "$ref": "#/$defs/LiveInstanceRecord"
+          },
+          "title": "Instances",
+          "type": "array"
+        },
+        "ended": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/LiveInstanceRecord"
+          },
+          "title": "Ended",
+          "type": "array"
+        },
+        "unreadable": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/UnreadableRecord"
+          },
+          "title": "Unreadable",
+          "type": "array"
+        },
+        "unverified": {
+          "default": [],
+          "items": {
+            "pattern": "^[0-9a-f]{12}$",
+            "type": "string"
+          },
+          "title": "Unverified",
+          "type": "array"
+        }
+      },
+      "required": [
+        "instances"
+      ],
+      "title": "InstanceList",
+      "type": "object"
+    },
+    "InstanceStatus": {
+      "description": "How far a live server has come; run status itself is on its socket.",
+      "enum": [
+        "starting",
+        "serving"
+      ],
+      "title": "InstanceStatus",
+      "type": "string"
+    },
+    "InstanceStopResult": {
+      "additionalProperties": false,
+      "description": "``vibesys instances stop --json``.",
+      "properties": {
+        "version": {
+          "const": 1,
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/StopOutcome"
+        },
+        "route": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopRoute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "outcome"
+      ],
+      "title": "InstanceStopResult",
+      "type": "object"
+    },
+    "InstancesChanged": {
+      "additionalProperties": false,
+      "description": "A push on a watch: the listing as it is now, sent first and then on each change.",
+      "properties": {
+        "type": {
+          "const": "instances.changed",
+          "default": "instances.changed",
+          "title": "Type",
+          "type": "string"
+        },
+        "watch_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Watch Id",
+          "type": "string"
+        },
+        "listing": {
+          "$ref": "#/$defs/InstanceList"
+        }
+      },
+      "required": [
+        "type",
+        "watch_id",
+        "listing"
+      ],
+      "title": "InstancesChanged",
+      "type": "object"
+    },
+    "InstancesListReply": {
+      "additionalProperties": false,
+      "description": "The registry's listing.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "instances.list",
+          "default": "instances.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "listing": {
+          "$ref": "#/$defs/InstanceList"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "listing"
+      ],
+      "title": "InstancesListReply",
+      "type": "object"
+    },
+    "InstancesListRequest": {
+      "additionalProperties": false,
+      "description": "The live and recently ended detached servers on this host.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "instances.list",
+          "default": "instances.list",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "InstancesListRequest",
+      "type": "object"
+    },
+    "InstancesUnwatchReply": {
+      "additionalProperties": false,
+      "description": "The watch ended; no ``instances.changed`` for ``watch_id`` follows.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "instances.unwatch",
+          "default": "instances.unwatch",
+          "title": "Type",
+          "type": "string"
+        },
+        "watch_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Watch Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "watch_id"
+      ],
+      "title": "InstancesUnwatchReply",
+      "type": "object"
+    },
+    "InstancesUnwatchRequest": {
+      "additionalProperties": false,
+      "description": "Stop the watch that ``watch_id`` (its request's id) started.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "instances.unwatch",
+          "default": "instances.unwatch",
+          "title": "Type",
+          "type": "string"
+        },
+        "watch_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Watch Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "watch_id"
+      ],
+      "title": "InstancesUnwatchRequest",
+      "type": "object"
+    },
+    "InstancesWatchReply": {
+      "additionalProperties": false,
+      "description": "The watch started; ``instances.changed`` for ``watch_id`` follows at once and on change.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "instances.watch",
+          "default": "instances.watch",
+          "title": "Type",
+          "type": "string"
+        },
+        "watch_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Watch Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "watch_id"
+      ],
+      "title": "InstancesWatchReply",
+      "type": "object"
+    },
+    "InstancesWatchRequest": {
+      "additionalProperties": false,
+      "description": "Push the listing now and again whenever it changes, until ``instances.unwatch``.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "instances.watch",
+          "default": "instances.watch",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "InstancesWatchRequest",
+      "type": "object"
+    },
+    "LiveInstanceRecord": {
+      "additionalProperties": false,
+      "description": "What a detached server publishes about itself (version 3).\n\n``run_id`` is allocated by the launcher before the server starts, so the\nrecord names its run from the first time it is published. ``phase`` is the\nrun's lifecycle as the server folds it from its journal. When the server\nexits it leaves its last record, with an ended phase and ``ended_at``, as a\ntombstone the registry keeps for a day.",
+      "properties": {
+        "version": {
+          "const": 3,
+          "default": 3,
+          "title": "Version",
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/InstanceStatus"
+        },
+        "phase": {
+          "$ref": "#/$defs/RunPhase"
+        },
+        "socket_path": {
+          "title": "Socket Path",
+          "type": "string"
+        },
+        "log_path": {
+          "title": "Log Path",
+          "type": "string"
+        },
+        "project_root": {
+          "title": "Project Root",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "pid": {
+          "exclusiveMinimum": 0,
+          "title": "Pid",
+          "type": "integer"
+        },
+        "started_at": {
+          "title": "Started At",
+          "type": "number"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ended At"
+        },
+        "hostname": {
+          "title": "Hostname",
+          "type": "string"
+        },
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "vibesys_version": {
+          "title": "Vibesys Version",
+          "type": "string"
+        },
+        "vibesys_root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vibesys Root"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "phase",
+        "socket_path",
+        "log_path",
+        "project_root",
+        "run_id",
+        "pid",
+        "started_at",
+        "hostname",
+        "vibesys_version"
+      ],
+      "title": "LiveInstanceRecord",
+      "type": "object"
+    },
+    "PathEntry": {
+      "additionalProperties": false,
+      "description": "One directory that completes the typed path, with what it looks like.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "vibesys_checkout": {
+          "title": "Vibesys Checkout",
+          "type": "boolean"
+        },
+        "vibesys_project": {
+          "title": "Vibesys Project",
+          "type": "boolean"
+        },
+        "git_repository": {
+          "title": "Git Repository",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "vibesys_checkout",
+        "vibesys_project",
+        "git_repository"
+      ],
+      "title": "PathEntry",
+      "type": "object"
+    },
+    "PathsCompleteReply": {
+      "additionalProperties": false,
+      "description": "Matching directories of ``directory``, sorted by name, at most ``PATHS_COMPLETE_CAP``.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "paths.complete",
+          "default": "paths.complete",
+          "title": "Type",
+          "type": "string"
+        },
+        "directory": {
+          "title": "Directory",
+          "type": "string"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/PathEntry"
+          },
+          "title": "Entries",
+          "type": "array"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "directory",
+        "entries",
+        "truncated"
+      ],
+      "title": "PathsCompleteReply",
+      "type": "object"
+    },
+    "PathsCompleteRequest": {
+      "additionalProperties": false,
+      "description": "The directories that complete a typed path on the host.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "paths.complete",
+          "default": "paths.complete",
+          "title": "Type",
+          "type": "string"
+        },
+        "prefix": {
+          "maxLength": 4096,
+          "title": "Prefix",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "prefix"
+      ],
+      "title": "PathsCompleteRequest",
+      "type": "object"
+    },
+    "PingReply": {
+      "additionalProperties": false,
+      "description": "The channel is alive.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "ping",
+          "default": "ping",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "type"
+      ],
+      "title": "PingReply",
+      "type": "object"
+    },
+    "PingRequest": {
+      "additionalProperties": false,
+      "description": "Liveness of the channel.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "ping",
+          "default": "ping",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "PingRequest",
+      "type": "object"
+    },
+    "ResumeLatest": {
+      "additionalProperties": false,
+      "description": "Resume the project's current or latest run; the launch resolves it before detaching.",
+      "properties": {
+        "latest": {
+          "const": true,
+          "title": "Latest",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "latest"
+      ],
+      "title": "ResumeLatest",
+      "type": "object"
+    },
+    "ResumeRun": {
+      "additionalProperties": false,
+      "description": "Resume this run.",
+      "properties": {
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "title": "ResumeRun",
+      "type": "object"
+    },
+    "RunConnectReply": {
+      "additionalProperties": false,
+      "description": "The channel is now a byte relay carrying the run protocol to this run.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.connect",
+          "default": "run.connect",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "protocol_version": {
+          "exclusiveMinimum": 0,
+          "title": "Protocol Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "run_id",
+        "protocol_version"
+      ],
+      "title": "RunConnectReply",
+      "type": "object"
+    },
+    "RunConnectRequest": {
+      "additionalProperties": false,
+      "description": "Make this channel a byte relay to a live run's control socket.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "run.connect",
+          "default": "run.connect",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/RunRole"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "instance_id",
+        "role"
+      ],
+      "title": "RunConnectRequest",
+      "type": "object"
+    },
+    "RunList": {
+      "additionalProperties": false,
+      "description": "A project's runs, oldest first.",
+      "properties": {
+        "project_root": {
+          "title": "Project Root",
+          "type": "string"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/RunSummary"
+          },
+          "title": "Runs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "project_root",
+        "runs"
+      ],
+      "title": "RunList",
+      "type": "object"
+    },
+    "RunPhase": {
+      "additionalProperties": false,
+      "description": "A run's lifecycle status with the detail its status needs.\n\n``stage`` says where a ``starting`` run is; ``reason`` says why a\n``failed`` one ended. Neither is present for any other status.",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StartupStage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "RunPhase",
+      "type": "object"
+    },
+    "RunRole": {
+      "description": "Which run-protocol connection a run channel carries (``WP-ROLES``).",
+      "enum": [
+        "control",
+        "subscribe",
+        "chat"
+      ],
+      "title": "RunRole",
+      "type": "string"
+    },
+    "RunStartReply": {
+      "additionalProperties": false,
+      "description": "The started server's record, or why nothing started.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.start",
+          "default": "run.start",
+          "title": "Type",
+          "type": "string"
+        },
+        "launch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LiveInstanceRecord"
+            },
+            {
+              "$ref": "#/$defs/DetachedLaunchFailure"
+            }
+          ],
+          "title": "Launch"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "launch"
+      ],
+      "title": "RunStartReply",
+      "type": "object"
+    },
+    "RunStartRequest": {
+      "additionalProperties": false,
+      "description": "Start a detached run (``vibesys --detach``) in ``project``.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "run.start",
+          "default": "run.start",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task"
+        },
+        "args": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "resume": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResumeRun"
+            },
+            {
+              "$ref": "#/$defs/ResumeLatest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resume"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project"
+      ],
+      "title": "RunStartRequest",
+      "type": "object"
+    },
+    "RunStatus": {
+      "description": "Lifecycle status of one run, as frontends observe it.\n\nThis is the authoritative closed set for the ``status`` field of\n``RunSnapshot`` and of ``RunStatusChangedData``; the generated TypeScript\nprotocol types derive their union from it.\n\n``PAUSING`` and ``PAUSED`` are distinct because a pause is only applied at\nan invocation boundary: ``/pause`` records the request, and the run keeps\nexecuting the call already in flight until it reaches that boundary.\n``STOPPING`` and ``STOPPED`` split the same way for ``/stop``, whose\nboundary is where the run ends instead of where it parks.",
+      "enum": [
+        "starting",
+        "running",
+        "pausing",
+        "paused",
+        "stopping",
+        "stopped",
+        "completed",
+        "failed"
+      ],
+      "title": "RunStatus",
+      "type": "string"
+    },
+    "RunStopReply": {
+      "additionalProperties": false,
+      "description": "What the stop observed.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.stop",
+          "default": "run.stop",
+          "title": "Type",
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/InstanceStopResult"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "result"
+      ],
+      "title": "RunStopReply",
+      "type": "object"
+    },
+    "RunStopRequest": {
+      "additionalProperties": false,
+      "description": "Stop a live detached server (``vibesys instances stop``).",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "run.stop",
+          "default": "run.stop",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "force": {
+          "default": false,
+          "title": "Force",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "instance_id"
+      ],
+      "title": "RunStopRequest",
+      "type": "object"
+    },
+    "RunSummary": {
+      "additionalProperties": false,
+      "description": "One run of a project, from its durable manifest and this host's registry.",
+      "properties": {
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Task"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunPhase"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "instance_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Instance Id"
+        }
+      },
+      "required": [
+        "run_id",
+        "task",
+        "display_name",
+        "created_at",
+        "phase",
+        "instance_id"
+      ],
+      "title": "RunSummary",
+      "type": "object"
+    },
+    "RunsListReply": {
+      "additionalProperties": false,
+      "description": "The project's runs.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "runs.list",
+          "default": "runs.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "runs": {
+          "$ref": "#/$defs/RunList"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "runs"
+      ],
+      "title": "RunsListReply",
+      "type": "object"
+    },
+    "RunsListRequest": {
+      "additionalProperties": false,
+      "description": "A project's runs, with the phase of any server on this host that drives one.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "runs.list",
+          "default": "runs.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project"
+      ],
+      "title": "RunsListRequest",
+      "type": "object"
+    },
+    "StartupStage": {
+      "description": "Where a starting run is, in the order it gets there.",
+      "enum": [
+        "resolving"
+      ],
+      "title": "StartupStage",
+      "type": "string"
+    },
+    "StopOutcome": {
+      "description": "What ``vibesys instances stop`` observed.",
+      "enum": [
+        "stopped",
+        "stopping",
+        "not_running",
+        "still_running",
+        "unsupported"
+      ],
+      "title": "StopOutcome",
+      "type": "string"
+    },
+    "StopRoute": {
+      "description": "How ``vibesys instances stop`` reached the server.",
+      "enum": [
+        "control_socket",
+        "signal"
+      ],
+      "title": "StopRoute",
+      "type": "string"
+    },
+    "TaskList": {
+      "additionalProperties": false,
+      "description": "``vibesys tasks --json``: the tasks of one project.",
+      "properties": {
+        "version": {
+          "const": 1,
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "project_root": {
+          "title": "Project Root",
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/TaskSummary"
+          },
+          "title": "Tasks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "project_root",
+        "tasks"
+      ],
+      "title": "TaskList",
+      "type": "object"
+    },
+    "TaskSummary": {
+      "additionalProperties": false,
+      "description": "One task of a project.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "TaskSummary",
+      "type": "object"
+    },
+    "TasksListReply": {
+      "additionalProperties": false,
+      "description": "The project's tasks.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "tasks.list",
+          "default": "tasks.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "tasks": {
+          "$ref": "#/$defs/TaskList"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "tasks"
+      ],
+      "title": "TasksListReply",
+      "type": "object"
+    },
+    "TasksListRequest": {
+      "additionalProperties": false,
+      "description": "The tasks a project defines under ``.vibesys/tasks/``.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "tasks.list",
+          "default": "tasks.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project"
+      ],
+      "title": "TasksListRequest",
+      "type": "object"
+    },
+    "UnreadableRecord": {
+      "additionalProperties": false,
+      "description": "A registry entry this reader cannot interpret; ``version`` is ``None`` if it has none.",
+      "properties": {
+        "id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Version"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "title": "UnreadableRecord",
+      "type": "object"
+    }
+  },
+  "description": "Root schema document for the host helper: what a client sends and what it receives.",
+  "properties": {
+    "request": {
+      "discriminator": {
+        "mapping": {
+          "hello": "#/$defs/HelloRequest",
+          "instances.list": "#/$defs/InstancesListRequest",
+          "instances.unwatch": "#/$defs/InstancesUnwatchRequest",
+          "instances.watch": "#/$defs/InstancesWatchRequest",
+          "paths.complete": "#/$defs/PathsCompleteRequest",
+          "ping": "#/$defs/PingRequest",
+          "run.connect": "#/$defs/RunConnectRequest",
+          "run.start": "#/$defs/RunStartRequest",
+          "run.stop": "#/$defs/RunStopRequest",
+          "runs.list": "#/$defs/RunsListRequest",
+          "tasks.list": "#/$defs/TasksListRequest"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HelloRequest"
+        },
+        {
+          "$ref": "#/$defs/InstancesListRequest"
+        },
+        {
+          "$ref": "#/$defs/InstancesWatchRequest"
+        },
+        {
+          "$ref": "#/$defs/InstancesUnwatchRequest"
+        },
+        {
+          "$ref": "#/$defs/TasksListRequest"
+        },
+        {
+          "$ref": "#/$defs/RunsListRequest"
+        },
+        {
+          "$ref": "#/$defs/RunStartRequest"
+        },
+        {
+          "$ref": "#/$defs/RunStopRequest"
+        },
+        {
+          "$ref": "#/$defs/RunConnectRequest"
+        },
+        {
+          "$ref": "#/$defs/PingRequest"
+        },
+        {
+          "$ref": "#/$defs/PathsCompleteRequest"
+        }
+      ],
+      "title": "Request"
+    },
+    "message": {
+      "discriminator": {
+        "mapping": {
+          "error": "#/$defs/HelperError",
+          "hello": "#/$defs/HelloReply",
+          "instances.changed": "#/$defs/InstancesChanged",
+          "instances.list": "#/$defs/InstancesListReply",
+          "instances.unwatch": "#/$defs/InstancesUnwatchReply",
+          "instances.watch": "#/$defs/InstancesWatchReply",
+          "paths.complete": "#/$defs/PathsCompleteReply",
+          "ping": "#/$defs/PingReply",
+          "run.connect": "#/$defs/RunConnectReply",
+          "run.start": "#/$defs/RunStartReply",
+          "run.stop": "#/$defs/RunStopReply",
+          "runs.list": "#/$defs/RunsListReply",
+          "tasks.list": "#/$defs/TasksListReply"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HelloReply"
+        },
+        {
+          "$ref": "#/$defs/InstancesListReply"
+        },
+        {
+          "$ref": "#/$defs/InstancesWatchReply"
+        },
+        {
+          "$ref": "#/$defs/InstancesUnwatchReply"
+        },
+        {
+          "$ref": "#/$defs/TasksListReply"
+        },
+        {
+          "$ref": "#/$defs/RunsListReply"
+        },
+        {
+          "$ref": "#/$defs/RunStartReply"
+        },
+        {
+          "$ref": "#/$defs/RunStopReply"
+        },
+        {
+          "$ref": "#/$defs/RunConnectReply"
+        },
+        {
+          "$ref": "#/$defs/PingReply"
+        },
+        {
+          "$ref": "#/$defs/PathsCompleteReply"
+        },
+        {
+          "$ref": "#/$defs/InstancesChanged"
+        },
+        {
+          "$ref": "#/$defs/HelperError"
+        }
+      ],
+      "title": "Message"
+    }
+  },
+  "required": [
+    "request",
+    "message"
+  ],
+  "title": "HostHelperDocument",
+  "type": "object"
+}

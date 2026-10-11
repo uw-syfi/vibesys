@@ -1,4 +1,8 @@
-"""Export the wire contract as JSON Schema for generated clients."""
+"""Export the wire contracts as JSON Schema for generated clients.
+
+Two contracts are published: the run protocol (``protocol.schema.json``) and the host
+helper's messages (``host-helper.schema.json``, from ``server.host_api``).
+"""
 
 from __future__ import annotations
 
@@ -13,6 +17,7 @@ from pydantic import BaseModel
 
 from server.api.protocol import ProtocolRequest, Response, RunSnapshot, ServerMessage
 from server.events import RunEvent
+from server.host_api import HelperMessage, HelperRequest
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -83,6 +88,22 @@ class ProtocolDocument(BaseModel):
     event: RunEvent
     snapshot: RunSnapshot
     server_message: ServerMessage
+
+
+class HostHelperDocument(BaseModel):
+    """Root schema document for the host helper: what a client sends and what it receives."""
+
+    request: HelperRequest
+    message: HelperMessage
+
+
+def host_helper_json_schema() -> dict[str, Any]:
+    """Return the published JSON Schema document for the host helper's messages.
+
+    The committed ``host-helper.schema.json`` and its generated TypeScript types come
+    from here; another helper or client implementation generates its types from it.
+    """
+    return require_tagged_union_discriminants(HostHelperDocument.model_json_schema())
 
 
 def protocol_json_schema() -> dict[str, Any]:
@@ -863,6 +884,8 @@ def main() -> None:
     arguments = sys.argv[1:]
     if len(arguments) == 1:
         document, output = protocol_json_schema(), Path(arguments[0])
+    elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--host-helper-schema":
+        document, output = host_helper_json_schema(), Path(arguments[1])
     elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--response-payload-schema":
         document, output = response_payload_json_schema(), Path(arguments[1])
     elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--response-payload-module":
@@ -883,7 +906,7 @@ def main() -> None:
     else:
         message = (
             "usage: python -m server.api.schema "
-            "[--response-payload-schema|--response-payload-module|"
+            "[--host-helper-schema|--response-payload-schema|--response-payload-module|"
             "--response-payload-fixture|--run-event-module] OUTPUT"
         )
         raise SystemExit(message)

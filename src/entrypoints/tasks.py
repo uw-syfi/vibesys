@@ -14,35 +14,13 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
+from server.host_helper import ProjectLookupError
+from server.host_helper_os import FileProjects
 
-from vs_project.api import Project, ProjectError
-
-
-class TaskSummary(BaseModel):
-    """One task of a project."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: str
-    """The task's directory name, the value ``--task`` accepts."""
-
-
-class TaskList(BaseModel):
-    """``vibesys tasks --json``: the tasks of one project."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    version: Literal[1] = 1
-    project_root: str
-    """The resolved absolute project directory the tasks were read from."""
-    tasks: tuple[TaskSummary, ...]
-
-
-class TasksError(Exception):
-    """The project's tasks could not be listed; the message names the path."""
+if TYPE_CHECKING:
+    from server.host_api import TaskList
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -61,23 +39,6 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def list_tasks(project_root: Path) -> TaskList:
-    """Read ``project_root``'s tasks; ``TasksError`` names what is missing or invalid."""
-    root = project_root.expanduser()
-    try:
-        project = Project.open(root)
-        if not project.is_initialized():
-            message = f"{project.root} has no VibeSys tasks: {project.configuration_path()}/tasks/ does not exist"
-            raise TasksError(message)
-        tasks = project.discover_tasks()
-    except ProjectError as exc:
-        raise TasksError(str(exc)) from exc
-    return TaskList(
-        project_root=str(project.root),
-        tasks=tuple(TaskSummary(name=task.name.value) for task in tasks),
-    )
-
-
 def format_tasks(listing: TaskList) -> str:
     """Render a listing for a terminal, one task name per line."""
     if not listing.tasks:
@@ -92,8 +53,8 @@ def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
     if not project.expanduser().is_absolute():
         project = cwd / project
     try:
-        listing = list_tasks(project)
-    except TasksError as exc:
+        listing = FileProjects().tasks(project.expanduser())
+    except ProjectLookupError as exc:
         return 1, "", f"vibesys tasks: {exc}\n"
     return 0, (listing.model_dump_json() if args.json else format_tasks(listing)) + "\n", ""
 

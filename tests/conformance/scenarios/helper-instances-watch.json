@@ -1,0 +1,104 @@
+{
+  "id": "helper-instances-watch",
+  "protocol": "host-helper",
+  "title": "Watch and unwatch the registry",
+  "description": "instances.watch is acknowledged with its watch id, the current listing is pushed at once as instances.changed, and instances.unwatch ends the watch.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "instances.watch",
+        "request_id": "w",
+        "deadline_ms": 10000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "instances.watch",
+        "request_id": "w",
+        "watch_id": "w"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "instances.changed",
+        "watch_id": "w",
+        "listing": {
+          "instances": [],
+          "ended": [],
+          "unreadable": [],
+          "unverified": []
+        }
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "instances.unwatch",
+        "request_id": "u",
+        "deadline_ms": 10000,
+        "watch_id": "w"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "instances.unwatch",
+        "request_id": "u",
+        "watch_id": "w"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "instances.unwatch",
+        "request_id": "u2",
+        "deadline_ms": 10000,
+        "watch_id": "w"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "u2",
+        "code": "unknown_watch"
+      }
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "id": "helper-instances-empty",
+  "protocol": "host-helper",
+  "title": "List an empty registry",
+  "description": "On a host with no detached servers, instances.list returns an empty listing.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "instances_watch",
+          "paths_complete"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "instances.list",
+        "request_id": "l",
+        "deadline_ms": 10000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "instances.list",
+        "request_id": "l",
+        "listing": {
+          "instances": [],
+          "ended": [],
+          "unreadable": [],
+          "unverified": []
+        }
+      }
+    }
+  ]
+}

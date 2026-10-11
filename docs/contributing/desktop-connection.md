@@ -72,8 +72,9 @@ desktop main process (clients/desktop)                host (local or ssh)
 | --- | --- | --- |
 | Helper contracts | `server.host_api` (new, light) | Pydantic models for every helper message, the registry record, launch and stop results, and `RunPhase`. Imports `pydantic` and the standard library only. The single source of the helper's JSON Schema. |
 | Registry primitives | `server.registry` (new, light; split from `server.instances` and `server.transport.discovery`) | Registry root, lifetime lock, record store, `survey`. `server.instances` keeps the stop requester and composes these. |
-| Helper implementation | `server.host_helper` (new) | Request dispatch: a pure `step` that maps a request and observations to a reply, and a shell over the registry, `vs_project.api`, process launch (`vs_sim.api`), and the relay core. |
-| Helper entrypoint | `entrypoints.host_helper` (new) | Wires real I/O, reads stdin, writes stdout. Replaces `entrypoints.stdio_bridge`. |
+| Helper implementation | `server.host_helper` | The channel: a pure `step` that folds lines, replies, watch observations, and time into the channel's state and the outputs the shell performs (the handshake, request ids, deadlines, feature gates, the one hand-over to the relay), the per-method execution over role-named interfaces (`Projects`, `Directories`, `RunLauncher`, `CheckoutProbe`, the registry), and the shell. |
+| Helper interfaces on a host | `server.host_helper_os` | The real implementations: projects through `vs_project.api`, directories as this account lists them, launches through `vs_sim.api` with the launcher's `headless_command`, the checkout through `git`. |
+| Helper entrypoint | `entrypoints.host_helper` (console script `vibesys-host-helper`) | Wires real I/O, reads stdin, writes stdout. Replaces `entrypoints.stdio_bridge` once the app uses it (phase 5). |
 | Relay core | `server.stdio_bridge` (kept) | Byte relay between stdio and a run's Unix socket, with its deadlines and typed outcomes. Used by `run.connect`. |
 | Detached run server | `entrypoints.server` (changed) | Takes the lock and publishes its record (with `run_id` and phase `starting/resolving`) before importing the engine; owns its phases. |
 | Generated helper types | `clients/backend-client/src/generated/` | `host-helper.schema.json` (committed, language neutral) and TypeScript types generated from it. |
@@ -93,7 +94,8 @@ New modules and edges, all downward; no module gains an edge to `vibesys.*`:
 | --- | --- |
 | `server.host_api` | none (pydantic only) |
 | `server.registry` | `server.host_api`, `vs_sim.api` |
-| `server.host_helper` | `server.host_api`, `server.registry`, `server.stdio_bridge`, `vs_project`, `vs_sim.api` |
+| `server.host_helper` | `server.host_api`, `server.registry`, `server.stdio_bridge`, `server.stdio_bridge_report`, `vs_sim.api` |
+| `server.host_helper_os` | `server.host_api`, `server.host_helper`, `vs_project`, `vs_sim.api` |
 | `server.instances` | `server.api`, `vs_sim.api` (loses `server.transport`; keeps only the stop requester) |
 | `server.api` | adds `server.host_api` (`PROTOCOL_VERSION` is defined there) |
 | `server.transport` | adds `server.registry` (discovery's lock primitives move there) |
@@ -104,8 +106,8 @@ light. The [import-closure guard](#guards) is the check that does.
 
 ## The host helper
 
-`python -m entrypoints.host_helper` (also `vibesys host-helper` for a person at a terminal) is the
-only program the app runs on a host. Locally it is a child process over stdio; remotely it is the
+`python -m entrypoints.host_helper` (also the `vibesys-host-helper` console script) is the only
+program the app runs on a host. Locally it is a child process over stdio; remotely it is the
 command of one ssh exec channel. Nothing else differs between the two.
 
 Properties:
@@ -156,8 +158,8 @@ Framing is the run protocol's: one JSON message per line, UTF-8 (`WP-GRANULARITY
 `WP-NEWLINE`), read with the existing `NewlineFramer`. After `connected`, the run channel's bytes
 are the run protocol's own, so the whole `wire-protocol.md` contract holds through it, as it does
 through the stdio bridge today. A run channel ends with the helper's exit status and, when it is
-not `0`, one typed `ChannelEnd` line on stderr (today's `BridgeReport`, moved into
-`server.host_api`): `client_closed`, `server_closed`, `run_gone`, `connect_denied`,
+not `0`, one typed `ChannelEnd` line on stderr (today's `BridgeReport`, which moves into
+`server.host_api` when the bridge entrypoint is deleted in phase 5): `client_closed`, `server_closed`, `run_gone`, `connect_denied`,
 `connect_failed`, `server_stalled`, `client_stalled`, `server_failed`, `client_failed`, with the
 same statuses as the bridge.
 
@@ -181,19 +183,23 @@ or a typed failure; there is no other way to reach a host.
 
 All messages are Pydantic models in `server.host_api` with `extra="forbid"`, discriminated by
 `type`. Every request has `request_id` and `deadline_ms`; every reply echoes `request_id` and is
-either the method's result or `HelperError`.
+either the method's result, whose `type` is the request's, or `HelperError` (`type: error`, a closed
+`code`, and the `path` for project and path errors). A line that is not a request is answered
+`invalid_request`, with its `request_id` when it has one.
 
 | Method | Request | Result | Notes |
 | --- | --- | --- | --- |
 | `hello` | `client_versions: [min, max]`, `features: [Feature]`, `app_version` | `protocol_version`, `features`, `vibesys_version`, `checkout: {root, commit, dirty} \| null` | First message on every channel; anything else first is `handshake_required`. |
 | `instances.list` | none | `InstanceList`: `live`, `ended` (tombstones with phase and reason), `unreadable` (id and record version) | Replaces `vibesys instances list --json`. |
-| `instances.watch` | none | stream of `InstanceList` pushes on change, then `instances.unwatch` | Removes manual refresh (Recent and host panels). Gated by feature `instances_watch`. |
+| `instances.watch` | none | `watch_id`, then `instances.changed {watch_id, listing}` pushes: the listing at once, then on each change | Removes manual refresh (Recent and host panels). Gated by feature `instances_watch`. The helper reads the registry once a second per watch; the client never polls. |
+| `instances.unwatch` | `watch_id` | `watch_id` | Ends a watch; no push for it follows. `unknown_watch` when none is open. |
 | `tasks.list` | `project` | `TaskList` | Replaces `vibesys tasks --json`. Errors are typed: `project_missing`, `project_uninitialized`, `task_invalid`, each with the path. |
-| `runs.list` | `project` | the project's runs with id, task, created time, and durable status | Gives Recent rows authoritative status and lets resume name a concrete run. |
+| `runs.list` | `project` | the project's runs (`run_id`, `task`, `display_name`, `created_at`) with the `phase` of the server on this host that drives or last drove each, and its `instance_id` while live | Gives Recent rows status and lets resume name a concrete run. A run whose server left no record here has no phase; reading the run's own journal for it needs a light journal reader and is not built. |
 | `run.start` | `project`, `task`, `args: [str]`, `resume: {run_id} \| {latest: true} \| null` | `{instance_id, run_id, socket_path, phase}` or `DetachedLaunchFailure` | Allocates or resolves `run_id` before detaching (see [Run identity](#run-identity)); returns once the record is published, not when the run is ready. |
 | `run.stop` | `instance_id`, `force` | `InstanceStopResult` | Same outcomes as `vibesys instances stop`. |
-| `run.connect` | `instance_id`, `role: control \| subscribe \| chat` | `connected {run_id, protocol_version}` then relay | Run channels only. The run's `run_id` comes back here, so the page never derives it. |
-| `ping` | none | `pong` | Control channel liveness for the supervisor. |
+| `run.connect` | `instance_id`, `role: control \| subscribe \| chat` | `{run_id, protocol_version}` then relay | Run channels only; `channel_busy` while another request or watch is open. The run's `run_id` comes back here, so the page never derives it. Bytes the client sends before the reply are relayed after it. A failed connect (`run_gone`, `connect_denied`, `connect_failed`) leaves the channel a request channel. |
+| `ping` | none | an empty reply | Control channel liveness for the supervisor. |
+| `paths.complete` | `prefix` | `directory`, `entries: [{name, path, vibesys_checkout, vibesys_project, git_repository}]`, `truncated` | For the host's project and checkout pickers. `~` expands on the host and a relative prefix is under the home directory; a trailing `/` lists the directory. Directories only (a link counts when this account can follow it to one), filtered by the typed name prefix exactly, sorted, at most 200. A directory is read for at most 10,000 entries; past either bound `truncated` is set. `path_missing`, `path_not_directory`, `permission_denied` name the path. Gated by feature `paths_complete`. |
 
 There is no `projects.recent` method: Recent is the app's own record of what this user opened,
 across hosts, and has one writer (the settings store). What the host knows, the runs of a project
@@ -440,7 +446,8 @@ it.
 
 Deleted when the corresponding phase lands:
 
-- `entrypoints.stdio_bridge` and the bridge's own command line (phase 4; the relay core stays).
+- `entrypoints.stdio_bridge` and the bridge's own command line (phase 5, once the app connects
+  through `run.connect`; the relay core stays).
 - `Host.invoke` and every per-action ssh script: `instances list`, `tasks`, `--detach` start and
   resume, `instances stop` (phase 5).
 - `host.ts`, `detached-host.ts`, `ssh-host.ts`, `local-host.ts`, `bridge-protocol.ts`, and the
@@ -482,7 +489,7 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Explicit run identity (phase 2) | built (server side; the desktop app still keeps its id inference until phase 5 or 6 removes it) |
 | Lifecycle phases, progress, tombstones (phase 3) | built: phases with failure reason in the record, tombstones; not built: startup stages past `resolving` and image-build progress (`run_startup_progress`) |
 | Control envelope split (phase 4, step one) | built (`server.control_envelope`) |
-| Host helper and its contract (phase 4) | not built |
+| Host helper and its contract (phase 4) | built: every method, `host-helper.schema.json` and its TypeScript types, the `helper-*` conformance scenarios and runner (in process and over stdio), the import-closure and start-up guards; not built: deleting `entrypoints.stdio_bridge`, which the shipping app runs until phase 5 |
 | Connection manager (phase 5) | not built |
 | Screen stores and app lifecycle (phase 6) | built (#1832) |
 

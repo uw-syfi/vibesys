@@ -19,7 +19,7 @@ import time
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.light_imports import is_heavy
+from tests.support.light_imports import BUDGET_MS, is_heavy, loaded_modules
 
 from vs_sim.api.testing import HANG_GUARD_S
 
@@ -28,18 +28,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     RecordProperty = Callable[[str, object], None]
-
-BUDGET_MS = 300
-"""The start-up budget for a light host command on a development machine."""
-
-
-def _loaded_modules(importtime_stderr: str) -> list[str]:
-    """Module names from ``-X importtime`` lines (``import time: self | cumulative | name``)."""
-    return [
-        line.rsplit("|", 1)[1].strip()
-        for line in importtime_stderr.splitlines()
-        if line.startswith("import time:") and "|" in line and "imported package" not in line
-    ]
 
 
 def _run_light(
@@ -61,7 +49,7 @@ def _run_light(
     record_property(f"wall_ms[{' '.join(argv[:2])}]", elapsed_ms)
     sys.stdout.write(f"vibesys {' '.join(argv)}: {elapsed_ms} ms (budget {BUDGET_MS} ms)\n")
     assert result.returncode == exit_code, result.stderr[-2000:]
-    loaded = _loaded_modules(result.stderr)
+    loaded = loaded_modules(result.stderr)
     assert "pydantic" in loaded, "importtime reported no modules; the check would be vacuous"
     assert [name for name in loaded if is_heavy(name)] == []
     return result.stdout

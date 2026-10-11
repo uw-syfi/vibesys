@@ -124,6 +124,7 @@ graph TD
     launch --> vs_sandbox
     launch --> vs_slurm
     server --> vibesys
+    server --> vs_project
     server --> vs_prompts
     server --> vs_sim
     vibesys --> vs_agent

@@ -97,7 +97,7 @@ commands = [
   ["pnpm", "check:ts-architecture"],
   ["pnpm", "check:knip"],
   ["pnpm", "--dir", "backend-client", "generate:protocol"],
-  ["git", "diff", "--exit-code", "--", "backend-client/src/generated/protocol.schema.json", "backend-client/src/generated/protocol.generated.ts"],
+  ["git", "diff", "--exit-code", "--", "backend-client/src/generated/protocol.schema.json", "backend-client/src/generated/protocol.generated.ts", "backend-client/src/generated/host-helper.schema.json", "backend-client/src/generated/host-helper.generated.ts"],
   ["pnpm", "check:clients"],
 ]
 

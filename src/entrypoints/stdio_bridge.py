@@ -17,7 +17,14 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
-from server.stdio_bridge import BridgeOutcome, BridgeResult, ClientStreams, run_bridge
+from server.stdio_bridge import (
+    BridgeOutcome,
+    BridgeResult,
+    ClientStreams,
+    FdSink,
+    FdSource,
+    run_bridge,
+)
 from vs_sim.api import OsThreads, UnixNetwork
 
 if TYPE_CHECKING:
@@ -29,28 +36,6 @@ if TYPE_CHECKING:
 _STDIN_FD = 0
 _STDOUT_FD = 1
 _STDERR_FD = 2
-
-
-class _FdSource:
-    """Unbuffered reads, so a frame reaches the socket as soon as it arrives."""
-
-    def __init__(self, fd: int) -> None:
-        self._fd = fd
-
-    def read(self, max_bytes: int) -> bytes:
-        return os.read(self._fd, max_bytes)
-
-
-class _FdSink:
-    """Unbuffered writes, so a stalled stdout blocks here and not in an interpreter buffer."""
-
-    def __init__(self, fd: int) -> None:
-        self._fd = fd
-
-    def write(self, data: bytes) -> None:
-        view = memoryview(data)
-        while view:
-            view = view[os.write(self._fd, view) :]
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -94,8 +79,8 @@ def main(argv: list[str] | None = None) -> None:
     status = bridge(
         sys.argv[1:] if argv is None else argv,
         network=UnixNetwork(),
-        client=ClientStreams(_FdSource(_STDIN_FD), _FdSink(_STDOUT_FD)),
-        errors=_FdSink(_STDERR_FD),
+        client=ClientStreams(FdSource(_STDIN_FD), FdSink(_STDOUT_FD)),
+        errors=FdSink(_STDERR_FD),
         threads=OsThreads(),
     )
     # A copy loop may still be blocked reading stdin or writing a stalled stdout; neither

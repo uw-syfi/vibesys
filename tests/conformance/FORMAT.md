@@ -96,6 +96,17 @@ a runner or declares `required_setup`. It does not execute the steps; the runner
 steps declarative and partial lets one scenario file drive both a Python transport replay and a
 TypeScript fold without either owning the wire values.
 
+### Host helper scenarios
+
+A scenario with `"protocol": "host-helper"` is one channel to the host helper
+(`docs/contributing/desktop-connection.md`, "The host helper") instead of a run-protocol connection.
+Its `role` is `control` or `run`, its `transports` are `["stdio"]`, and it has no `decisions` and no
+`clients`. A `c2s` frame's `type` must be a helper request and an `s2c` expectation's a helper
+message, both read from the generated `host-helper.schema.json`. Every helper request must be sent by
+at least one helper scenario, so a new method cannot land without one. Replies are matched as subsets
+like run-protocol frames; a scenario assumes an empty live registry and no project at the paths it
+names, so any helper command can replay it.
+
 ## Runner inventories: `runners/<id>.json`
 
 Each file is one runner's executable inventory. Groups correspond to distinct setup paths in that

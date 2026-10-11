@@ -14,6 +14,7 @@ from pydantic import TypeAdapter, ValidationError
 from server.api.protocol import ProtocolRequest, Response, ServerMessage
 from server.api.schema import (
     fully_populated_response,
+    host_helper_json_schema,
     protocol_json_schema,
     require_supported_response_payload_schema,
     require_supported_run_event_schema,
@@ -26,6 +27,7 @@ from server.events import EventData
 from vibesys.api import RunFailedData, RunFailure, ToolResultPayload
 
 SCHEMA_PATH = Path("clients/backend-client/src/generated/protocol.schema.json")
+HOST_HELPER_SCHEMA_PATH = Path("clients/backend-client/src/generated/host-helper.schema.json")
 RESPONSE_PAYLOAD_SCHEMA_PATH = Path(
     "clients/backend-client/src/generated/response-payload.schema.json"
 )
@@ -73,6 +75,10 @@ def _definition(document: dict[str, Any], ref: str) -> dict[str, Any]:
 
 def test_committed_protocol_schema_matches_python_contract() -> None:
     assert _committed_schema() == protocol_json_schema()
+
+
+def test_committed_host_helper_schema_matches_python_contract() -> None:
+    assert json.loads(HOST_HELPER_SCHEMA_PATH.read_text()) == host_helper_json_schema()
 
 
 def test_committed_response_payload_schema_matches_python_contract() -> None:
