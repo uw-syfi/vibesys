@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import TYPE_CHECKING
 
 from entrypoints.launcher import headless_command, source_checkout_root
 from server.host_helper import HelperHost, serve_channel
@@ -36,22 +37,21 @@ from vs_sim.api import (
     UnixNetwork,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from vs_sim.api import Threads
+
 _STDIN_FD = 0
 _STDOUT_FD = 1
 _STDERR_FD = 2
 
 
-def main() -> None:
-    """Serve this process's stdin and stdout as one channel, then exit with its status."""
-    threads = OsThreads()
-    try:
-        root = instance_root(os.environ, os.getuid())
-    except PermissionError as exc:
-        sys.stderr.write(f"vibesys-host-helper: {exc}\n")
-        raise SystemExit(1) from exc
+def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperHost:
+    """This host as the helper sees it; ``PermissionError`` when the registry root is unsafe."""
     network = UnixNetwork()
-    host = HelperHost(
-        registry=LiveRegistry(FileInstanceStore(root), threads),
+    return HelperHost(
+        registry=LiveRegistry(FileInstanceStore(instance_root(environ, uid)), threads),
         stop_effects=StopEffects(
             requester=ControlSocketStopRequester(network),
             signaller=PidfdProcessSignaller(),
@@ -65,6 +65,16 @@ def main() -> None:
         dialer=network,
         vibesys_version=host_facts()[1],
     )
+
+
+def main() -> None:
+    """Serve this process's stdin and stdout as one channel, then exit with its status."""
+    threads = OsThreads()
+    try:
+        host = real_host(os.environ, os.getuid(), threads)
+    except PermissionError as exc:
+        sys.stderr.write(f"vibesys-host-helper: {exc}\n")
+        raise SystemExit(1) from exc
     status = serve_channel(
         host=host,
         source=FdSource(_STDIN_FD),
