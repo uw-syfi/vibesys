@@ -50,6 +50,7 @@ from vs_core.api import (
     Request,
     RequestId,
     ResourceId,
+    ResumeSessionTurn,
     RetainRevision,
     RevisionRef,
     Scope,
@@ -59,6 +60,7 @@ from vs_core.api import (
     VerifyAdoption,
 )
 from vs_core.testing.drive import Answer, Failed, Running, Succeeded, Unknown
+from vs_runtime.api.core import handle_for
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -111,7 +113,9 @@ class Executors:
     infrastructure_failure: Callable[[MeasurementPlan], bool] = lambda _plan: False
     # How many times the evaluator reports a candidate's job still running before it ends, so a
     # test can make children complete in any order.
-    polls: Callable[[str], int] = lambda _commit: 0
+    job_polls: Callable[[str], int] = lambda _commit: 0
+    # What happens to a measurement submission (the default starts a job that ends when polled).
+    submit: Callable[[SubmitMeasurement], Answer] | None = None
     jobs: int = 0
     observed: Counter[str] = field(default_factory=Counter)
     seen: list[Request] = field(default_factory=list)
@@ -132,8 +136,7 @@ class Executors:
             case ExecuteRegisteredOperation():
                 answer = self._operation(request)
             case SubmitMeasurement():
-                self.jobs += 1
-                answer = Running(resource_id=ResourceId(root=f"job:{self.jobs}"))
+                answer = self._submit(request)
             case DispatchTurn():
                 answer = self._turn(request)
             case EnsureWorkspace() | EnsureSession():
@@ -147,6 +150,40 @@ class Executors:
             case AdoptRevision() | VerifyAdoption():
                 answer = Succeeded(revision=request.selection.revision)
         return answer
+
+    def _submit(self, request: SubmitMeasurement) -> Answer:
+        if request.plan.purpose == "local-validation" and self.submit is None:
+            return self.finished_agent_evaluation(request)
+        if self.submit is not None:
+            return self.submit(request)
+        self.jobs += 1
+        return Running(resource_id=ResourceId(root=f"job:{self.jobs}"))
+
+    def finished_agent_evaluation(self, request: SubmitMeasurement) -> Answer:
+        """An agent's evaluation that ends as soon as it is accepted, with trusted evidence."""
+        assert isinstance(request.plan.candidate, RevisionRef)
+        assert request.request_id is not None
+        commit = request.plan.candidate.revision_id.root
+        refs: list[EvidenceRef] = []
+        stages: list[EvaluationStageResult] = []
+        for stage in request.plan.stages:
+            reading = self._reading(
+                request.plan, _KINDS[stage.stage_id], stage.stage_id, commit
+            ).model_copy(update={"kind": EvidenceKind.LOCAL_VALIDATION})
+            self.readings[reading.evidence_id] = reading
+            refs.append(self._ref(request.scope, request.request_id, request.plan, reading))
+            outcome = (
+                EvaluationStageOutcome.PASSED if reading.passed else EvaluationStageOutcome.FAILED
+            )
+            stages.append(EvaluationStageResult(stage_id=stage.stage_id, outcome=outcome))
+        self.jobs += 1
+        return Succeeded(
+            resource_id=ResourceId(root=handle_for(request.request_id)),
+            evidence=tuple(refs),
+            facts=EvaluationTerminalFacts(
+                stages=tuple(stages), accuracy_passed=all(i.passed for i in self.readings.values())
+            ),
+        )
 
     def _retain(self, request: SnapshotAndRetain) -> Answer:
         attempt = request.attempt.attempt_id.root
@@ -171,7 +208,7 @@ class Executors:
 
     # -- agents -----------------------------------------------------------
 
-    def _turn(self, request: DispatchTurn) -> Answer:
+    def _turn(self, request: DispatchTurn | ResumeSessionTurn) -> Answer:
         role = request.turn.session.role_id.root.removeprefix("evolve-")
         invocation = request.turn.invocation_id.root
         # `inv:<role>:<key>.<role>:<serial>`
@@ -202,7 +239,7 @@ class Executors:
             return Failed(accepted=True)
         commit = plan.candidate.revision_id.root
         self.observed[request.resource_id.root] += 1
-        if self.observed[request.resource_id.root] <= self.polls(commit):
+        if self.observed[request.resource_id.root] <= self.job_polls(commit):
             return Running(resource_id=request.resource_id)
         refs: list[EvidenceRef] = []
         stages: list[EvaluationStageResult] = []
@@ -231,7 +268,11 @@ class Executors:
         assert isinstance(plan.candidate, RevisionRef)
         return EvidenceRef(
             evidence_id=reading.evidence_id,
-            kind=reading.kind,
+            kind=(
+                EvidenceKind.LOCAL_VALIDATION
+                if plan.purpose == "local-validation"
+                else reading.kind
+            ),
             purpose=plan.purpose,
             scope=scope,
             source_request=source,

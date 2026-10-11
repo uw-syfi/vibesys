@@ -71,7 +71,7 @@ def scripted(seed: int, *, delays: tuple[int, ...] = (0,)) -> Executors:
         extra_metrics=lambda commit: (
             MetricRow(name="ttft_ms", value=children[commit].ttft_ms, direction="min"),
         ),
-        polls=lambda commit: delays[int(commit, 16) % len(delays)],
+        job_polls=lambda commit: delays[int(commit, 16) % len(delays)],
     )
 
 
