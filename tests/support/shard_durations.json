@@ -767,7 +767,6 @@
  "tests/vibesys/test_kubernetes_inputs.py": 1.07,
  "tests/vibesys/test_kubernetes_runtime.py": 3.45,
  "tests/vibesys/test_logger.py": 0.02,
- "tests/vibesys/test_loose_git_objects.py": 0.01,
  "tests/vibesys/test_profilers.py": 0.68,
  "tests/vibesys/test_project_provisioning.py": 0.51,
  "tests/vibesys/test_quota_config.py": 0.22,

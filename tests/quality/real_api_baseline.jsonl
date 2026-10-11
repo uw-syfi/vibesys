@@ -347,4 +347,3 @@
 {"path": "tests/vibesys/test_kubernetes_runtime.py", "rule": "socket", "count": 18}
 {"path": "tests/vibesys/test_kubernetes_runtime.py", "rule": "subprocess", "count": 13}
 {"path": "tests/vibesys/test_kubernetes_runtime.py", "rule": "threading", "count": 10}
-{"path": "tests/vibesys/test_loose_git_objects.py", "rule": "subprocess", "count": 2}
