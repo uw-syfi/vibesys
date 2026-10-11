@@ -353,7 +353,9 @@ class RunEnvironmentRequest:
     git_history_root: Path | None = None
     # Host directories the run owns besides ``workspace``, such as the
     # directory holding its candidate worktrees. Agent tools bound once per
-    # run (the profiler) may stage any of them to a remote executor.
+    # run (the profiler) may stage any of them to a remote executor. Only the
+    # root session has any: a candidate session's request clears them, so its
+    # brokers never reach a sibling candidate.
     run_owned_roots: tuple[Path, ...] = ()
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
     seeded_workspace_paths: tuple[str, ...] = ()

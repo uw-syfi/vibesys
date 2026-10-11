@@ -200,10 +200,11 @@ function validateString(value: unknown, schema: Schema, path: string, walk: Sche
     throw invalid(path, `must be one of ${members.join(', ')}`);
   }
   const {minLength, maxLength, pattern} = schema;
-  if (typeof minLength === 'number' && value.length < minLength) {
+  const length = [...value].length;
+  if (typeof minLength === 'number' && length < minLength) {
     throw invalid(path, `must be at least ${minLength} characters`);
   }
-  if (typeof maxLength === 'number' && value.length > maxLength) {
+  if (typeof maxLength === 'number' && length > maxLength) {
     throw invalid(path, `must be at most ${maxLength} characters`);
   }
   if (typeof pattern === 'string' && !new RegExp(pattern, 'u').test(value)) {

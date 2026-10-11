@@ -332,8 +332,7 @@ const runEventSchema: Record<string, unknown> = {
           "type": "string"
         },
         "thread_id": {
-          "title": "Thread Id",
-          "type": "string"
+          "$ref": "#/$defs/ChatThreadId"
         },
         "title": {
           "default": "",
@@ -363,6 +362,12 @@ const runEventSchema: Record<string, unknown> = {
       ],
       "title": "ChatThreadCreatedData",
       "type": "object"
+    },
+    "ChatThreadId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^(?!(?:aux|con|nul|prn|com[1-9]|lpt[1-9])(?:\\.|$))(?!.*\\.$)[a-z0-9][a-z0-9._-]*$(?![\\s\\S])",
+      "type": "string"
     },
     "CommandResultPayload": {
       "description": "Structured result of a command-style tool execution.",
@@ -2281,14 +2286,13 @@ const runEventSchema: Record<string, unknown> = {
     "chat_thread_id": {
       "anyOf": [
         {
-          "type": "string"
+          "$ref": "#/$defs/ChatThreadId"
         },
         {
           "type": "null"
         }
       ],
-      "default": null,
-      "title": "Chat Thread Id"
+      "default": null
     },
     "data": {
       "anyOf": [

@@ -17,14 +17,13 @@ from server.chat.prompts import (
 )
 
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "chat_prompts"
-_STATE_DIR = "/state/threads/thread-1"
 
 
 @pytest.mark.parametrize(
     ("name", "text"),
     [
-        ("system", experiment_chat_system_prompt(_STATE_DIR)),
-        ("continuation", experiment_chat_continuation_prompt(_STATE_DIR)),
+        ("system", experiment_chat_system_prompt()),
+        ("continuation", experiment_chat_continuation_prompt()),
     ],
 )
 def test_chat_prompt_matches_golden(name: str, text: str) -> None:

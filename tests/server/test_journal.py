@@ -400,6 +400,61 @@ def _legacy_driver_line(sequence: int, event_type: str, data: Mapping[str, objec
     )
 
 
+def _write_replayed_chat_thread(log_dir: Path, thread_id: str) -> None:
+    """Write one pre-validation thread record through the durable wire shape."""
+    created = {
+        "kind": "chat_thread_created",
+        "thread_id": thread_id,
+        "provider": "codex",
+        "model": "gpt-test",
+        "created_at": "2024-01-01T00:00:00Z",
+    }
+    record = json.loads(_legacy_driver_line(1, "chat_thread_created", created))
+    record["chat_thread_id"] = thread_id
+    log_dir.mkdir()
+    (log_dir / "run-events.jsonl").write_text(json.dumps(record) + "\n")
+
+
+def test_replayed_absolute_chat_thread_identity_fails_before_attachment(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    log_dir = tmp_path / "logs"
+    thread_id = str(outside)
+    _write_replayed_chat_thread(log_dir, thread_id)
+
+    with pytest.raises(ValueError, match="invalid experiment chat thread identity") as error:
+        build_server_parts(log_dir)
+
+    assert repr(thread_id) in str(error.value)
+    assert not outside.exists()
+
+
+@pytest.mark.parametrize(
+    "thread_id",
+    [
+        pytest.param("../outside", id="parent-traversal"),
+        pytest.param("nested/thread", id="posix-separator"),
+        pytest.param(r"nested\thread", id="windows-separator"),
+        pytest.param(r"C:\outside", id="windows-drive"),
+        pytest.param(r"\\server\share", id="windows-unc"),
+        pytest.param("con", id="windows-device"),
+        pytest.param("nul.txt", id="windows-device-extension"),
+        pytest.param("thread.", id="windows-trailing-dot"),
+        pytest.param("thread ", id="windows-trailing-space"),
+    ],
+)
+def test_replayed_nonportable_chat_thread_identity_fails_before_attachment(
+    tmp_path: Path, thread_id: str
+) -> None:
+    log_dir = tmp_path / "logs"
+    _write_replayed_chat_thread(log_dir, thread_id)
+
+    with pytest.raises(ValueError, match="invalid experiment chat thread identity") as error:
+        build_server_parts(log_dir)
+
+    assert repr(thread_id) in str(error.value)
+    assert list(tmp_path.rglob("conversation.jsonl")) == []
+
+
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=25)
 @given(driver=st.one_of(st.none(), st.text(max_size=12)))
 def test_journal_recorded_with_the_removed_driver_field_still_replays(

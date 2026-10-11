@@ -51,6 +51,11 @@ table is rejected with any other transport. See
 [GPU commands through Slurm](slurm-gpu-commands.md) for the table, the agent's
 view, and the deprecated `--run-environment slurm-gpu` alias.
 
+The dynamic loop runs on `slurm` with or without agent GPU commands. Each
+parallel candidate gets its own container session and its own host broker,
+and a broker accepts only its own candidate's worktree, so one candidate's
+agent cannot run a GPU job in another candidate's files.
+
 ## SkyPilot configuration ownership
 
 - `vibesys.input.toml` owns portable requirements such as node count, accelerator

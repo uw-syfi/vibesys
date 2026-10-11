@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from server.events import (
     ChatData,
     ChatThreadCreatedData,
+    ChatThreadId,
     EventHeader,
     EventStatus,
     EventType,
@@ -63,7 +64,7 @@ class ChatThreadHandle:
     close: Callable[[], None] = _noop_thread_close
 
 
-ChatThreadFactory = Callable[[str, str | None, str | None], ChatThreadHandle]
+ChatThreadFactory = Callable[[ChatThreadId, str | None, str | None], ChatThreadHandle]
 
 
 @dataclass(frozen=True)
@@ -158,9 +159,9 @@ class ChatManager:
         self._fallback_answer: Callable[[str], str] | None = None
         self._default_handler: Callable[[str], ChatAnswer] | None = None
         self._thread_factory: ChatThreadFactory | None = None
-        self._thread_handlers: dict[str, _ThreadRoute] = {}
-        self._thread_restorations: dict[str, _ThreadRestoration] = {}
-        self._thread_specs: dict[str, ChatThreadCreatedData] = {}
+        self._thread_handlers: dict[ChatThreadId, _ThreadRoute] = {}
+        self._thread_restorations: dict[ChatThreadId, _ThreadRestoration] = {}
+        self._thread_specs: dict[ChatThreadId, ChatThreadCreatedData] = {}
         self._run_settings: ChatRunSettings | None = None
         self._active_default_calls = 0
         self._active_thread_calls = 0
@@ -206,7 +207,7 @@ class ChatManager:
         with self._condition:
             return self._default_handler is not None
 
-    def chat(self, text: str, thread_id: str | None = None) -> str:
+    def chat(self, text: str, thread_id: ChatThreadId | None = None) -> str:
         """Answer and record a question on the default or selected thread."""
         if thread_id is not None:
             return self._thread_chat(text, thread_id)
@@ -245,7 +246,7 @@ class ChatManager:
                 self._release_default_call()
 
     def chat_with_event(
-        self, text: str, thread_id: str | None = None
+        self, text: str, thread_id: ChatThreadId | None = None
     ) -> tuple[str, RunEvent | None]:
         """Answer a question and return its synchronously folded terminal event."""
         captures = self._chat_response_local.captures
@@ -383,7 +384,7 @@ class ChatManager:
         if resource is not None:
             resource.close()
 
-    def _thread_chat(self, text: str, thread_id: str) -> str:
+    def _thread_chat(self, text: str, thread_id: ChatThreadId) -> str:
         handler = self._acquire_thread_handler(thread_id)
         if isinstance(handler, str):
             return handler
@@ -408,7 +409,7 @@ class ChatManager:
             handler.turn_lock.release()
             self._release_thread_call()
 
-    def _acquire_thread_handler(self, thread_id: str) -> _ThreadLease | str:
+    def _acquire_thread_handler(self, thread_id: ChatThreadId) -> _ThreadLease | str:
         claim = self._reserve_thread_handler(thread_id)
         if isinstance(claim, str):
             return claim
@@ -434,7 +435,7 @@ class ChatManager:
         return self._lease_thread_route(route)
 
     def _reserve_thread_handler(
-        self, thread_id: str
+        self, thread_id: ChatThreadId
     ) -> _ThreadRoute | _ThreadRestorationClaim | str:
         """Reserve one thread call or return its current user-facing failure."""
         with self._condition:
@@ -469,7 +470,7 @@ class ChatManager:
 
     def _restore_thread(
         self,
-        thread_id: str,
+        thread_id: ChatThreadId,
         spec: ChatThreadCreatedData,
         factory: ChatThreadFactory,
         restoration: _ThreadRestoration,
@@ -505,7 +506,7 @@ class ChatManager:
 
     def _finish_thread_restoration(
         self,
-        thread_id: str,
+        thread_id: ChatThreadId,
         restoration: _ThreadRestoration,
         *,
         error: BaseException,
@@ -521,7 +522,7 @@ class ChatManager:
             self._active_thread_calls -= 1
             self._condition.notify_all()
 
-    def _thread_unavailable_message(self, thread_id: str | None = None) -> str:
+    def _thread_unavailable_message(self, thread_id: ChatThreadId | None = None) -> str:
         subject = (
             "Experiment chat threads"
             if thread_id is None
@@ -529,7 +530,7 @@ class ChatManager:
         )
         return f"{subject} cannot answer right now ({self._unavailable_reason()})."
 
-    def _title_thread_if_needed(self, thread_id: str, question: str) -> str | None:
+    def _title_thread_if_needed(self, thread_id: ChatThreadId, question: str) -> str | None:
         with self._condition:
             spec = self._thread_specs.get(thread_id)
             if spec is None or spec.title:

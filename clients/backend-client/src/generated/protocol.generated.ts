@@ -52,7 +52,7 @@ export type ClientId5 = string;
 export type Timestamp5 = string;
 export type Type5 = "query.chat";
 export type Text1 = string;
-export type ThreadId = string | null;
+export type ChatThreadId = string;
 export type ProtocolVersion6 = 1;
 export type RequestId6 = string;
 export type ClientId6 = string;
@@ -150,8 +150,6 @@ export type Status = "pending" | "consumed";
 export type Question = string;
 export type Answer = string;
 export type Effect = "none";
-export type ThreadId1 = string | null;
-export type ThreadId2 = string;
 export type Title1 = string;
 export type Provider1 = string;
 export type Model1 = string;
@@ -275,7 +273,6 @@ export type RoundLabel2 = string | null;
 export type AgentKind2 = string | null;
 export type InvocationId = string | null;
 export type ExecutionId1 = string | null;
-export type ChatThreadId = string | null;
 export type Data =
   | (
       | ChatData
@@ -321,7 +318,6 @@ export type Answer1 = string;
 export type ThreadTitle = string | null;
 export type InvocationId1 = string | null;
 export type Kind2 = "chat_thread_created";
-export type ThreadId3 = string;
 export type Title2 = string;
 export type Provider4 = string;
 export type Model4 = string;
@@ -728,7 +724,7 @@ export interface ChatQuery {
   timestamp?: Timestamp5;
   type: Type5;
   text: Text1;
-  thread_id?: ThreadId;
+  thread_id?: ChatThreadId | null;
 }
 /**
  * Create a new experiment-chat thread with its own agent selection.
@@ -929,13 +925,13 @@ export interface ChatResult {
   question: Question;
   answer: Answer;
   effect?: Effect;
-  thread_id?: ThreadId1;
+  thread_id?: ChatThreadId | null;
 }
 /**
  * Resolved identity and agent settings of one experiment-chat thread.
  */
 export interface ChatThreadInfo {
-  thread_id: ThreadId2;
+  thread_id: ChatThreadId;
   title?: Title1;
   provider: Provider1;
   model: Model1;
@@ -1031,7 +1027,7 @@ export interface RunEvent {
   agent_kind?: AgentKind2;
   invocation_id?: InvocationId;
   execution_id?: ExecutionId1;
-  chat_thread_id?: ChatThreadId;
+  chat_thread_id?: ChatThreadId | null;
   data?: Data;
   truncated?: Truncated;
 }
@@ -1053,7 +1049,7 @@ export interface ChatData {
  */
 export interface ChatThreadCreatedData {
   kind: Kind2;
-  thread_id: ThreadId3;
+  thread_id: ChatThreadId;
   title?: Title2;
   provider: Provider4;
   model: Model4;

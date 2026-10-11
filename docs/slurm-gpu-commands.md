@@ -41,9 +41,9 @@ compute nodes. A host-owned broker therefore sits between them:
   and the container receives a per-run token in its environment. The launcher
   is a single Python file that uses only the standard library, so it runs in any
   image that has `python3`.
-- The broker checks that the working directory is inside the run's workspace
-  or one of its candidate worktrees, checks the request against the operator
-  limits (rejecting rather than clamping), and runs the command with `srun`.
+- The broker checks that the working directory is inside the workspace of the
+  session it serves, checks the request against the operator limits (rejecting
+  rather than clamping), and runs the command with `srun`.
 - A GPU job runs on a compute node under the host sandbox (bubblewrap on Linux,
   Seatbelt on macOS), confined to the workspace. The job environment is the
   host's baseline allowlist plus the variables the agent passed, minus the
@@ -55,6 +55,16 @@ compute nodes. A host-owned broker therefore sits between them:
   submit host checks that it can confine a job, but the job names `bwrap` by
   program, so the node's own `PATH` finds it: install bubblewrap on the compute
   nodes, not only on the submit host.
+
+### Parallel candidates
+
+The dynamic loop evaluates several candidates at once, each in its own git
+worktree and its own container session. Every session opens its own broker, with
+its own socket and token, and that broker accepts only its own candidate's
+worktree. An agent in candidate A that asks for a GPU command in candidate B's
+worktree is refused with `commands must run from inside the run's workspace`, so
+one candidate cannot read or write another's files through a GPU job. Candidate
+sessions run concurrently; Slurm queues their jobs against the operator limits.
 
 The trusted accuracy and benchmark gates are host commands that the framework
 planned. The agent runs them as `vibesys-gpu --gate accuracy` or
