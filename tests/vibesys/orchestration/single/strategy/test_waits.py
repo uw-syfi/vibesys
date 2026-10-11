@@ -37,6 +37,7 @@ def _run(root: Path, *, waits: tuple[bool, ...], polls: tuple[int, ...], rounds:
         implementer=deque(combined() for _ in range(40)),
         decide=lambda n: waits[n % len(waits)],
         polls=list(polls),
+        unchanged_after_first_retain=True,
     )
     host = HostOptions(
         max_concurrent=2,
