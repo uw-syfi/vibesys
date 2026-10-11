@@ -41,7 +41,7 @@ clients/
   ui/               @vibesys/ui               domain-free React primitives + design tokens
   core-state/       @vibesys/core-state       pure fold of run events            -> contracts
   transport/        @vibesys/transport        framing, redial, persistent stream -> contracts
-  entities/         @vibesys/entities         run/host/task models + selectors   -> contracts, core-state
+  entities/         @vibesys/entities         run/host/task models + selectors   -> contracts
   transport-node/   @vibesys/transport-node   stdio / unix socket / ssh channel  -> transport
   ipc/              @vibesys/ipc              typed main <-> renderer messages   -> contracts, entities
   connection/       @vibesys/connection       host connection manager            -> contracts, transport-node
@@ -59,7 +59,7 @@ flowchart BT
   ui["ui (L0, DOM)"]
   core-state["core-state (L1)"] --> contracts
   transport["transport (L1)"] --> contracts
-  entities["entities (L2)"] --> contracts & core-state
+  entities["entities (L2)"] --> contracts
   transport-node["transport-node (L2, Node)"] --> transport
   ipc["ipc (L3)"] --> contracts & entities
   connection["connection (L3, Node)"] --> contracts & transport-node
