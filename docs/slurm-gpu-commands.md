@@ -48,6 +48,10 @@ compute nodes. A host-owned broker therefore sits between them:
   Seatbelt on macOS), confined to the workspace. The job environment is the
   host's baseline allowlist plus the variables the agent passed, minus the
   container's identity, its device variables and any `SLURM_*` variable. The
+  job sees the workspace (writable), the host's system directories, and the
+  paths named by `read_only_paths` (read-only, never writable); nothing else,
+  so an interpreter or package in the operator's home directory is invisible
+  unless it is listed (see [Operator configuration](#operator-configuration)). The
   submit host checks that it can confine a job, but the job names `bwrap` by
   program, so the node's own `PATH` finds it: install bubblewrap on the compute
   nodes, not only on the submit host.
@@ -87,7 +91,20 @@ max_time_minutes = 120
 default_time_minutes = 30   # when the agent omits --time
 windows_command = ["slurm-windows", "--json"]
 srun_arguments = []         # extra site arguments, for example ["--account=lab"]
+# Host paths the agent's GPU jobs may read besides the workspace and the system
+# directories, for example the Python environment with torch. Read-only always.
+read_only_paths = ["/home/operator/venvs/torch"]
 ```
+
+`read_only_paths` entries must be absolute, normalized paths (no `..`, `.`,
+repeated or trailing slashes, and not `/`), must exist on the submit host when
+the run starts, and must be visible at the same path on the compute nodes. A
+symlink inside an exposed path is followed only if its target is also exposed,
+so list the interpreter's own installation directory too (a venv's `python`
+usually links to a Python installed elsewhere). The same list applies to the
+Linux (bubblewrap) and macOS (Seatbelt) confinement. The agent's prompt says
+that GPU commands run in the host's environment, not the container's, and
+names these paths.
 
 Unknown keys and out-of-range limits are rejected at launch, naming the key.
 `gate_gpus` and `gate_time_minutes` are not accepted here: gates are sized by
@@ -123,13 +140,13 @@ when the configuration is not at the default path.
 
 `--run-environment slurm-gpu` still works. It reads the old `[slurm_gpu]` table
 (default `~/.config/vibesys/slurm-gpu.toml`, or `--slurm-config`), translates it
-once to the settings above, logs one deprecation warning, and opens the `slurm`
+once to the settings above, reports one deprecation warning when the run starts (not once per environment open), and opens the `slurm`
 environment. A run recorded as `slurm-gpu` resumes the same way. The
 translation is a pure function; a key it cannot carry over is rejected by name.
 
 | Old key | Becomes |
 |---|---|
-| `partitions`, `max_gpus`, `max_time_minutes`, `default_time_minutes`, `windows_command`, `job_name_prefix`, `srun_arguments` | the same keys of `[vibesys.agent_gpu]`; `srun_arguments` reach the agent's jobs only, never the gates (`--pty` is invalid for `sbatch`) |
+| `partitions`, `max_gpus`, `max_time_minutes`, `default_time_minutes`, `windows_command`, `job_name_prefix`, `srun_arguments` | the same keys of `[vibesys.agent_gpu]` (`read_only_paths` too); `srun_arguments` reach the agent's jobs only, never the gates (`--pty` is invalid for `sbatch`) |
 | `srun_command`, `scancel_command` | `[slurm.transport] shell_command` only: whatever precedes `srun` (a login-container wrapper) becomes the prefix of `shell_command`, through which `srun`, `scancel` and `sbatch` all run. Both commands must end in `srun` / `scancel` and carry the same wrapper, or the file is rejected |
 | `gate_gpus`, or the task's `[resources]` accelerators per node | gate `--gres=gpu:N`; a task needing more than `max_gpus` is rejected |
 | `gate_time_minutes` | gate `--time=M`; the job timeout is that plus a one hour queue allowance |

@@ -10,6 +10,8 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
@@ -193,3 +195,37 @@ class TestLauncher:
         ]
         assert len(scancel_lines) == 1
         assert "--me" in scancel_lines[0]
+
+
+_LIMITS = {"partitions": ["main"], "max_gpus": 2, "max_time_minutes": 30}
+_path_segment = st.from_regex(r"[A-Za-z0-9_.-]{1,8}", fullmatch=True).filter(
+    lambda segment: segment not in {".", ".."}
+)
+
+
+@given(segments=st.lists(_path_segment, min_size=1, max_size=4, unique=True))
+def test_read_only_paths_accept_absolute_normalized_paths(segments: list[str]) -> None:
+    paths = ["/" + "/".join(segments[: n + 1]) for n in range(len(segments))]
+
+    config = AgentGpuConfig.model_validate({**_LIMITS, "read_only_paths": paths})
+
+    assert config.read_only_paths == tuple(paths)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["", "/", "relative/venv", "~/venv", "/opt/../etc", "/opt/./venv", "/opt//venv", "/opt/venv/"],
+)
+def test_read_only_paths_reject_what_is_not_absolute_and_normalized(path: str) -> None:
+    with pytest.raises(ValueError, match="read_only_paths"):
+        AgentGpuConfig.model_validate({**_LIMITS, "read_only_paths": [path]})
+
+
+def test_read_only_paths_reject_a_repeated_path() -> None:
+    with pytest.raises(ValueError, match="repeat"):
+        AgentGpuConfig.model_validate({**_LIMITS, "read_only_paths": ["/opt/venv", "/opt/venv"]})
+
+
+def test_there_is_no_writable_counterpart_to_read_only_paths() -> None:
+    with pytest.raises(ValueError, match="writable_paths"):
+        AgentGpuConfig.model_validate({**_LIMITS, "writable_paths": ["/opt/venv"]})

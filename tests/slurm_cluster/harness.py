@@ -211,8 +211,21 @@ _AGENT_GPU_TABLE = textwrap.dedent(
     max_gpus = 4
     max_time_minutes = 10
     default_time_minutes = 5
+    read_only_paths = [{tools}]
     """
 )
+#: The one file in the operator's read-only tools directory (see :func:`operator_tools`).
+OPERATOR_TOOL_FILE = "interpreter.txt"
+OPERATOR_TOOL_TEXT = "operator interpreter\n"
+
+
+def operator_tools(cluster: SlurmCluster) -> Path:
+    """The directory of host tools outside any workspace that ``slurm-local-gpu`` exposes read-only.
+
+    It stands for the operator's Python environment in a home directory: shared
+    with the node, and invisible to a job unless ``read_only_paths`` names it.
+    """
+    return cluster.root / "operator-tools"
 
 
 def _slurm_config(cluster: SlurmCluster, kind: str, shim: Path | None) -> str:
@@ -236,7 +249,11 @@ def _slurm_config(cluster: SlurmCluster, kind: str, shim: Path | None) -> str:
         )
         + transport
         + '\n\n[vibesys]\nremote_python = "/usr/bin/python3"\n'
-        + (_AGENT_GPU_TABLE if kind == "slurm-local-gpu" else "")
+        + (
+            _AGENT_GPU_TABLE.format(tools=json.dumps(str(operator_tools(cluster))))
+            if kind == "slurm-local-gpu"
+            else ""
+        )
     )
 
 
@@ -288,6 +305,10 @@ def make_environment(
                 RunResourceRequest(accelerators_per_node=1, accelerator_backend="cuda"),
                 docker=docker,
             )
+    if kind == "slurm-local-gpu":
+        tools = operator_tools(cluster)
+        tools.mkdir(exist_ok=True)
+        (tools / OPERATOR_TOOL_FILE).write_text(OPERATOR_TOOL_TEXT, encoding="utf-8")
     config = directory / f"{kind}.toml"
     config.write_text(_slurm_config(cluster, kind, shim), encoding="utf-8")
     return SlurmEnvironment(load_slurm_operator_settings(config), docker=docker)

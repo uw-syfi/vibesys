@@ -104,6 +104,7 @@ from vs_runtime.api.infrastructure import (
     open_run_environment_resources,
     prepare_trusted_evaluator,
     resolve_run_environment_spec,
+    run_environment_deprecation,
     run_environment_record,
 )
 from vs_sandbox.api import (
@@ -245,6 +246,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 log=buffered_logs.append,
             )
             environment = build_run_environment(run_environment_spec)
+            # Reported once here: the environment is opened again for every candidate.
+            if (deprecation := run_environment_deprecation(environment)) is not None:
+                buffered_logs.append(f"[environment] {deprecation}")
             input_path_str = _coerce_dir_path(input_path, "--input")
             input_dir = Path(input_path_str)
             run_id = (

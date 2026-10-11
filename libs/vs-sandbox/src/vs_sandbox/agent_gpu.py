@@ -36,6 +36,16 @@ _READ_BYTES = 65_536
 _MAX_QUEUE_MINUTES = 60 * 24 * 365
 
 
+def _is_normalized_absolute(path: str) -> bool:
+    """Whether *path* is absolute, not the root, with no empty, ``.`` or ``..`` segment."""
+    segments = path.split("/")
+    return (
+        path.startswith("/")
+        and len(segments) > 1
+        and all(segment not in {"", ".", ".."} for segment in segments[1:])
+    )
+
+
 class AgentGpuRequestError(ValueError):
     """A GPU command request outside the operator's limits."""
 
@@ -47,6 +57,11 @@ class AgentGpuConfig(BaseModel):
     first partition whose reported window starts the job now is chosen;
     otherwise, and when nothing starts now, the first partition whose time
     limit fits the request is used and the job waits in its queue.
+
+    A job sees its workspace (writable), the system directories, and
+    ``read_only_paths``: extra absolute host paths, such as the operator's
+    Python environment, that it may read and never write. Without them an
+    interpreter or dependency outside the workspace is invisible to the job.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -57,6 +72,7 @@ class AgentGpuConfig(BaseModel):
     default_time_minutes: Annotated[int, Field(gt=0)] = 30
     windows_command: tuple[str, ...] | None = None
     srun_arguments: tuple[str, ...] = ()
+    read_only_paths: tuple[str, ...] = ()
     job_name_prefix: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")] = (
         "vibesys-gpu"
     )
@@ -65,6 +81,7 @@ class AgentGpuConfig(BaseModel):
         "partitions",
         "windows_command",
         "srun_arguments",
+        "read_only_paths",
         mode="before",
     )
     @classmethod
@@ -76,6 +93,21 @@ class AgentGpuConfig(BaseModel):
     def _non_empty_items(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if any(not item for item in value):
             message = "arrays must contain non-empty strings"
+            raise ValueError(message)
+        return value
+
+    @field_validator("read_only_paths")
+    @classmethod
+    def _absolute_normalized_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        for item in value:
+            if not _is_normalized_absolute(item):
+                message = (
+                    f"read_only_paths entry {item!r} must be an absolute, normalized path "
+                    "other than the root (no '..', '.', repeated or trailing slashes)"
+                )
+                raise ValueError(message)
+        if len(set(value)) != len(value):
+            message = "read_only_paths must not repeat a path"
             raise ValueError(message)
         return value
 

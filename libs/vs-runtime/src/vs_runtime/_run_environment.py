@@ -264,6 +264,8 @@ class AgentGpuFacts:
 
     max_gpus: int
     max_time_minutes: int
+    #: Host paths the jobs may read besides the workspace and system directories.
+    read_only_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

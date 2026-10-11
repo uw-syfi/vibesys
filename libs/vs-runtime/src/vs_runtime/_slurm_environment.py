@@ -197,7 +197,9 @@ class _AgentGpuMode:
 
     @property
     def agent_gpu_facts(self) -> AgentGpuFacts:
-        return AgentGpuFacts(self.config.max_gpus, self.config.max_time_minutes)
+        return AgentGpuFacts(
+            self.config.max_gpus, self.config.max_time_minutes, self.config.read_only_paths
+        )
 
     def gpu_commands(
         self, request: RunEnvironmentRequest, confinement: JobConfinement | None
@@ -281,6 +283,16 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         self._job_confinement = job_confinement
         self._deprecation = deprecation
 
+    @property
+    def deprecation(self) -> str | None:
+        """The notice for a deprecated selection, or ``None``.
+
+        The environment is built once per run but opened many times (once per
+        candidate session), so the notice is read here by whoever launches the
+        run and reports it once, not logged by every open.
+        """
+        return self._deprecation
+
     # What the run consults before it prepares the environment. The profiler
     # follows the mode: the agent's own GPU commands run where the agent's
     # jobs do, while without them profiling is a remote capture, and where
@@ -342,7 +354,8 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
 
         The file is read and translated to ``slurm`` settings now, so a bad or
         untranslatable file fails here, naming the key. Running a prepared
-        environment logs one deprecation warning.
+        environment carries one deprecation notice (:attr:`deprecation`) for the
+        run's launch to report; opening, which a run does many times, never logs it.
         """
         if resources is not None and resources.nodes != 1:
             message = "the slurm-gpu run environment runs single-node jobs only"
@@ -368,8 +381,6 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Validate external policy before opening the editor container."""
-        if self._deprecation is not None and request.log is not None:
-            request.log(f"[environment] {self._deprecation}")
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="slurm")
         return _PreparedRunEnvironment(
             SlurmEnvironmentFacts(

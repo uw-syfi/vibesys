@@ -63,6 +63,15 @@ def resolve_run_environment_spec(
     return replace(spec, name="host", options={})
 
 
+def run_environment_deprecation(environment: RunEnvironment) -> str | None:
+    """Return the deprecation notice of a built environment, or ``None``.
+
+    A run reports it once when it launches. Opening an environment (done for
+    every candidate session) must not, or the notice repeats.
+    """
+    return environment.deprecation if isinstance(environment, SlurmEnvironment) else None
+
+
 def run_environment_record(spec: RunEnvironmentSpec) -> RunEnvironmentRecord:
     """Project a CLI-built spec onto the record persisted with the run.
 

@@ -16,11 +16,9 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.slurm_cluster
 
 
-def test_opening_the_alias_logs_one_deprecation_naming_the_replacement(alias_run: OpenRun) -> None:
-    [warning] = [line for line in alias_run.log_lines if "deprecated" in line]
-
-    assert "--run-environment slurm" in warning
-    assert "[vibesys.agent_gpu]" in warning
+def test_opening_the_alias_does_not_log_the_run_level_deprecation(alias_run: OpenRun) -> None:
+    """The launching run reports the deprecation once; every open of the environment would repeat it."""
+    assert [line for line in alias_run.log_lines if "deprecated" in line] == []
 
 
 def test_the_aliass_gates_run_as_jobs_staged_into_its_stage_root(

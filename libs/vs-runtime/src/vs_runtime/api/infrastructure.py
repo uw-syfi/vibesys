@@ -201,6 +201,7 @@ from vs_runtime._run_environment_selection import (
     build_run_environment,
     make_run_environment_spec,
     resolve_run_environment_spec,
+    run_environment_deprecation,
     run_environment_record,
     validate_run_environment_profile,
 )
@@ -664,6 +665,7 @@ __all__ = [
     "resolve_run_environment_spec",
     "resolve_sdk_source",
     "resolve_skill_resources",
+    "run_environment_deprecation",
     "run_environment_record",
     "run_local_validation",
     "signal_of",

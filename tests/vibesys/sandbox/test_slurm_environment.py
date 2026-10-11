@@ -8,6 +8,7 @@ program stands in for the cluster, so nothing patches the code under test.
 from __future__ import annotations
 
 import shlex
+import shutil
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -22,10 +23,12 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentRequest,
     SlurmEnvironment,
     TrustedEvaluatorRequirements,
+    run_environment_deprecation,
 )
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api import DockerSandbox, SandboxKind
 from vs_sandbox.api.slurm import SlurmPolicyError, load_slurm_operator_settings
+from vs_sim.api import SubprocessProbe
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -87,6 +90,19 @@ print("gate", *sys.argv[1:], "cwd=" + os.getcwd())
 sys.exit(7 if "benchmark" in sys.argv else 0)
 """
 
+
+def _bwrap_works() -> bool:
+    """Whether bubblewrap can create the namespaces the host job confinement needs here."""
+    bwrap = shutil.which("bwrap")
+    if bwrap is None or not sys.platform.startswith("linux"):
+        return False
+    probe = SubprocessProbe().run(
+        [bwrap, "--ro-bind", "/", "/", "--unshare-user", "--", "/bin/true"], timeout_seconds=10
+    )
+    return probe is not None and probe.returncode == 0
+
+
+requires_bwrap = pytest.mark.skipif(not _bwrap_works(), reason="needs a working bubblewrap")
 
 # The interpreter that runs the fake programs standing in for the cluster.
 _PYTHON = sys.executable
@@ -421,20 +437,118 @@ def test_agent_gpu_commands_are_rejected_without_the_local_transport(
         load_slurm_operator_settings(config)
 
 
-def test_the_slurm_gpu_alias_logs_one_deprecation_naming_the_replacement_and_the_stage_root(
+def test_the_slurm_gpu_alias_deprecation_is_reported_once_per_run_not_once_per_open(
     tmp_path: Path,
 ) -> None:
+    """Regression: a run opens its environment for every candidate, and each open logged it."""
     backend = DaemonBackend(daemon_engine(tmp_path))
     logged: list[str] = []
     request = replace(_request(tmp_path, backend), log=logged.append)
+    environment = _environment(tmp_path, "slurm-gpu", backend)
 
-    session = open_run_environment(_environment(tmp_path, "slurm-gpu", backend), request)
-    session.close()
+    for _ in range(3):
+        open_run_environment(environment, request).close()
 
-    [warning] = [line for line in logged if "deprecated" in line]
+    assert [line for line in logged if "deprecated" in line] == []
+    warning = run_environment_deprecation(environment)
+    assert warning is not None
     assert "--run-environment slurm" in warning
     assert "[vibesys.agent_gpu]" in warning
     assert str(Path("~/.cache/vibesys/slurm-gpu-stage").expanduser()) in warning
+
+
+@pytest.mark.parametrize("name", ["slurm", "slurm-local", "slurm+gpu"])
+def test_a_selection_that_is_not_deprecated_has_no_deprecation(tmp_path: Path, name: str) -> None:
+    backend = DaemonBackend(daemon_engine(tmp_path))
+
+    assert run_environment_deprecation(_environment(tmp_path, name, backend)) is None
+
+
+def _read_only_tools(tmp_path: Path) -> Path:
+    tools = tmp_path / "operator-tools"
+    tools.mkdir()
+    (tools / "interpreter.txt").write_text("operator interpreter\n", encoding="utf-8")
+    return tools
+
+
+def _real_confinement_environment(
+    tmp_path: Path, backend: DaemonBackend, read_only_paths: Sequence[Path]
+) -> SlurmEnvironment:
+    """The agent GPU environment with the host's real job confinement, not a pass-through."""
+    config = _write_agent_gpu_slurm_config(tmp_path, tmp_path / "srun.log")
+    paths = ", ".join(f'"{path}"' for path in read_only_paths)
+    with config.open("a", encoding="utf-8") as handle:
+        handle.write(f"read_only_paths = [{paths}]\n")
+    gate = tmp_path / "fake_gate.py"
+    gate.write_text(_FAKE_GATE, encoding="utf-8")
+    return SlurmEnvironment(
+        load_slurm_operator_settings(config),
+        docker=daemon_docker_config(backend.engine),
+        gate_wrapper=(_PYTHON, str(gate)),
+    )
+
+
+@requires_bwrap
+@pytest.mark.parametrize("exposed", [True, False])
+def test_a_gpu_job_reads_an_operator_declared_path_outside_the_workspace_and_never_writes_it(
+    tmp_path: Path, *, exposed: bool
+) -> None:
+    """The job's confinement hides everything but the workspace unless the operator exposes it."""
+    tools = _read_only_tools(tmp_path)
+    backend = DaemonBackend(daemon_engine(tmp_path))
+    request = _request(tmp_path, backend)
+    environment = _real_confinement_environment(tmp_path, backend, [tools] if exposed else [])
+    session = open_run_environment(environment, request)
+    try:
+        gate = session.view.paths.accuracy_command
+        assert gate is not None
+        client = shlex.split(gate)[0]
+
+        read = session.sandbox.execute(f"{client} -- cat {tools}/interpreter.txt")
+        write = session.sandbox.execute(f"{client} -- sh -c 'echo x > {tools}/written.txt'")
+
+        assert (read.exit_code == 0) is exposed, read.output
+        assert ("operator interpreter" in read.output) is exposed
+        assert write.exit_code != 0
+        assert not (tools / "written.txt").exists()
+    finally:
+        session.close()
+
+
+def test_a_read_only_path_that_does_not_exist_fails_the_open_naming_the_key(
+    tmp_path: Path,
+) -> None:
+    backend = DaemonBackend(daemon_engine(tmp_path))
+    environment = _real_confinement_environment(tmp_path, backend, [tmp_path / "missing-venv"])
+
+    with pytest.raises(ValueError, match=r"agent_gpu\.read_only_paths.*missing-venv"):
+        open_run_environment(environment, _request(tmp_path, backend))
+
+
+@pytest.mark.parametrize("paths", [(), ("/opt/venv",), ("/opt/venv", "/home/op/data")])
+def test_the_notes_tell_the_agent_gpu_commands_run_in_the_hosts_environment_and_list_the_paths(
+    tmp_path: Path, paths: tuple[str, ...]
+) -> None:
+    backend = DaemonBackend(daemon_engine(tmp_path))
+    config = _write_agent_gpu_slurm_config(tmp_path, tmp_path / "srun.log")
+    quoted = ", ".join(f'"{path}"' for path in paths)
+    with config.open("a", encoding="utf-8") as handle:
+        handle.write(f"read_only_paths = [{quoted}]\n")
+    environment = SlurmEnvironment(
+        load_slurm_operator_settings(config),
+        docker=daemon_docker_config(backend.engine),
+        job_confinement=_PassThroughConfinement(),
+    )
+    session = open_run_environment(environment, _request(tmp_path, backend))
+    try:
+        notes = session.view.prompt_notes
+        assert "host's environment, not in this container" in notes
+        for path in paths:
+            assert f"`{path}`" in notes
+        assert ("these read-only paths" in notes) is bool(paths)
+        assert ("exposed no extra paths" in notes) is not paths
+    finally:
+        session.close()
 
 
 # What each configuration lets a run select: the remote capture needs the SSH transport's
