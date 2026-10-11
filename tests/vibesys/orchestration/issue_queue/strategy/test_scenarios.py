@@ -193,3 +193,14 @@ def test_a_run_that_spends_every_budget_stays_within_the_derived_limits() -> Non
     )
     assert len(core.attempts.attempts) <= limits.max_attempts
     assert turns <= limits.max_turns
+
+
+def test_an_issue_closed_by_a_turn_that_changed_nothing_keeps_the_tip_and_adopts_nothing() -> None:
+    """The work was already there: the issue closes, no candidate is retained, nothing is adopted."""
+    executors = _one_issue()
+    executors.unchanged.add("attempt:issue:1")
+    trace = run_shell(executors)
+    result = _stop(trace).result
+    assert result.outcome == "success"
+    assert not any(isinstance(item, ProposeWinner) for item in trace.decisions)
+    assert _board(executors) == {1: ("closed", 1)}

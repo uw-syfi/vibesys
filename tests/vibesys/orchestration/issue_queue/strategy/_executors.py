@@ -134,6 +134,10 @@ class Executors:
     retained: Counter[str] = field(default_factory=Counter)
     agent_calls: int = 0
     jobs: int = 0
+    # Attempts whose turns change nothing: the workspace executor retains the revision it started
+    # from, as a snapshot of an unchanged tree is.
+    unchanged: set[str] = field(default_factory=set)
+    bases: dict[str, RevisionRef] = field(default_factory=dict)
     # Whether the trusted accuracy gate passes for a commit.
     accuracy: Callable[[str], bool] = lambda _commit: True
     owner: IssueBoardOwner = field(init=False)
@@ -197,7 +201,9 @@ class Executors:
             case CloseSession():
                 answer = Succeeded(resource_id=_lease(request.session_id))
             case SnapshotAndRetain():
-                answer = Succeeded(revision=self.revision_of(request.attempt.attempt_id.root))
+                attempt = request.attempt.attempt_id.root
+                kept = self.bases[attempt] if attempt in self.unchanged else None
+                answer = Succeeded(revision=kept or self.revision_of(attempt))
             case RetainRevision():
                 answer = Succeeded(revision=request.revision)
             case AdoptRevision() | VerifyAdoption():
@@ -252,9 +258,9 @@ class Executors:
         """The commit the workspace executor retains for an attempt."""
         return RevisionRef.of_git_commit(hashlib.sha256(attempt.encode()).hexdigest()[:40])
 
-    @staticmethod
-    def _ensure(request: EnsureWorkspace | EnsureSession) -> Answer:
+    def _ensure(self, request: EnsureWorkspace | EnsureSession) -> Answer:
         if isinstance(request, EnsureWorkspace):
+            self.bases[request.attempt.attempt_id.root] = request.plan.base
             return Succeeded(
                 resource_id=ResourceId(
                     root=f"workspace:{request.scope.owner.root}:{request.attempt.generation}"
