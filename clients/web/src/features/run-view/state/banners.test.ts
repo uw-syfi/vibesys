@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {BackendClientError, type RunEvent} from '@vibesys/backend-client';
+import {BackendClientError, type RunEvent} from '@vibesys/contracts';
 import {type CoreRunStatus, hasRunEnded, initialCoreState} from '@vibesys/core-state';
 import type {WebSessionState, WebSessionStatus} from '../../../entities/connection.js';
 import {runStep} from '../../../entities/run.js';

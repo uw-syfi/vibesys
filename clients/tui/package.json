@@ -38,12 +38,14 @@
   "dependencies": {
     "@opentui/core": "0.4.3",
     "@vibesys/backend-client": "workspace:*",
+    "@vibesys/contracts": "workspace:*",
     "@vibesys/core-state": "workspace:*",
     "highlight.js": "11.11.2",
     "lowlight": "3.3.0"
   },
   "bundledDependencies": [
     "@vibesys/backend-client",
+    "@vibesys/contracts",
     "@vibesys/core-state"
   ],
   "devDependencies": {

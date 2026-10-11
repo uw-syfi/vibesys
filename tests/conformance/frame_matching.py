@@ -29,7 +29,7 @@ def _response_section() -> str:
     pseudo-type, and that name is derived here rather than written down, so the
     runner does not keep its own copy of a fact the protocol already fixes.
     ``ProtocolDocument`` is what the committed
-    ``clients/backend-client/src/generated/protocol.schema.json`` is generated
+    ``clients/contracts/src/generated/protocol.schema.json`` is generated
     from (parity is pinned by ``tests/server/test_protocol_schema.py``), and
     that schema is the same artifact the Node corpus gate reads every real
     frame type out of, so its section name for ``Response`` is the one name

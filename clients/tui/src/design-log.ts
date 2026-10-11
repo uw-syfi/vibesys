@@ -1,4 +1,4 @@
-import type {DesignFileChange} from '@vibesys/backend-client';
+import type {DesignFileChange} from '@vibesys/contracts';
 import {formatPerformanceDelta} from '@vibesys/core-state';
 import type {DesignRoundView} from './experiments.js';
 

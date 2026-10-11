@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import type {HypothesisEntry, ProtocolResponse} from '@vibesys/backend-client';
+import type {HypothesisEntry, ProtocolResponse} from '@vibesys/contracts';
 import {setDesignLog, setExperiments} from '../experiments.js';
 import {PLOT_WIDTH} from '../performance-chart.js';
 import {

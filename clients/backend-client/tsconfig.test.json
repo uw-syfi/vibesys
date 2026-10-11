@@ -7,5 +7,5 @@
     "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
   },
   "include": ["src/**/*.test.ts", "src/**/*.test-helper.ts", "src/test-support/**/*.ts"],
-  "references": [{"path": "./tsconfig.lib.json"}]
+  "references": [{"path": "../contracts/tsconfig.lib.json"}, {"path": "../contracts/tsconfig.testing.json"}, {"path": "./tsconfig.lib.json"}]
 }

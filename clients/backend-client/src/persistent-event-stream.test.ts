@@ -1,5 +1,7 @@
 import {describe, it} from 'node:test';
-import {BackendClientError, ServerError} from './errors.js';
+import type {RunEvent, ServerMessage} from '@vibesys/contracts';
+import {BackendClientError, ServerError} from '@vibesys/contracts';
+import {event} from '@vibesys/contracts/testing';
 import {
   PersistentEventStream,
   type PersistentEventStreamCallbacks,
@@ -7,9 +9,8 @@ import {
   type StreamConnectionState,
   type StreamTransport,
 } from './persistent-event-stream.js';
-import type {RunEvent, ServerMessage} from './protocol.js';
 import {expect} from './test-support/expect.js';
-import {event, FakeClock} from './testing/index.js';
+import {FakeClock} from './testing/index.js';
 import type {EventSubscription} from './transport.js';
 
 /** A production stream with only its public scheduling seam replaced. */

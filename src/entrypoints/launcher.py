@@ -84,19 +84,24 @@ _MIN_NODE_MAJOR = 20
 _REBUILD_WATCH_FILES: tuple[str, ...] = (
     "clients/backend-client/package.json",
     "clients/backend-client/tsconfig.json",
-    "clients/backend-client/tsconfig.check.json",
+    "clients/backend-client/tsconfig.lib.json",
+    "clients/contracts/package.json",
+    "clients/contracts/tsconfig.json",
+    "clients/contracts/tsconfig.lib.json",
     "clients/core-state/package.json",
     "clients/core-state/tsconfig.json",
-    "clients/core-state/tsconfig.check.json",
+    "clients/core-state/tsconfig.lib.json",
     "clients/tui/package.json",
     "clients/tui/tsconfig.json",
     "clients/tui/tsconfig.check.json",
+    "clients/tsconfig.base.json",
+    "clients/turbo.json",
     "clients/package.json",
     "clients/pnpm-lock.yaml",
     "clients/pnpm-workspace.yaml",
     "clients/biome.json",
     # Inputs to `generate:protocol` (python -m server.api.schema), which
-    # feeds clients/backend-client's generated types and, downstream, the TUI
+    # feeds clients/contracts' generated types and, downstream, the TUI
     # bundle. See the principle above for why this is the full set, no more.
     "src/server/api/schema.py",
     "src/server/events.py",
@@ -107,6 +112,7 @@ _REBUILD_WATCH_FILES: tuple[str, ...] = (
 )
 _REBUILD_WATCH_DIRS: tuple[str, ...] = (
     "clients/backend-client/src",
+    "clients/contracts/src",
     "clients/core-state/src",
     "clients/tui/src",
 )
@@ -505,7 +511,7 @@ def _run_pnpm_install(pnpm: list[str], root: Path, host: LauncherHost) -> bool:
 
 def _run_codegen_and_build(pnpm: list[str], root: Path, host: LauncherHost) -> bool:
     steps = (
-        [*pnpm, "--dir", "backend-client", "generate:protocol"],
+        [*pnpm, "--dir", "contracts", "generate:protocol"],
         [*pnpm, "build:clients"],
     )
     for command in steps:

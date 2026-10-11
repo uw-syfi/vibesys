@@ -13,7 +13,7 @@
       "**/*.tsx",
       "scripts/**/*.mjs",
       "!**/dist",
-      "!backend-client/src/generated"
+      "!contracts/src/generated"
     ]
   },
   "formatter": {

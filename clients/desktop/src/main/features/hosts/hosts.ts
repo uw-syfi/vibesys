@@ -5,7 +5,7 @@
  * host's one connection; nothing here retries or polls.
  */
 import {readFile} from 'node:fs/promises';
-import type {PathsCompleteReply} from '@vibesys/backend-client/host-helper';
+import type {PathsCompleteReply} from '@vibesys/contracts/host-helper';
 import {
   type HostId,
   type HostKey,

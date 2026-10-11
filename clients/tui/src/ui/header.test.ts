@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import type {RunEvent} from '@vibesys/backend-client';
+import type {RunEvent} from '@vibesys/contracts';
 import {type CoreRunStatus, initialCoreState, reduceEvent} from '@vibesys/core-state';
 import {selectAgent} from '../round-agent-selection.js';
 import {initialSessionState, type SessionState} from '../session-model.js';

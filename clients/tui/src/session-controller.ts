@@ -1,17 +1,19 @@
 import {
   DEFAULT_RECONNECT_DELAYS_MS,
-  type ExperimentCursor,
   PersistentEventStream,
-  type ProtocolResponse,
-  type RequestInput,
-  type RunEvent,
   type ScheduleTimeout,
-  ServerError,
-  type ServerMessage,
   type ServerTransport,
   type StreamConnectionState,
   StreamReconciler,
 } from '@vibesys/backend-client';
+import {
+  type ExperimentCursor,
+  type ProtocolResponse,
+  type RequestInput,
+  type RunEvent,
+  ServerError,
+  type ServerMessage,
+} from '@vibesys/contracts';
 import {
   DEFAULT_CHAT_THREAD_ID,
   hasRunEnded,

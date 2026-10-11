@@ -1,4 +1,4 @@
-import type {RequestInput} from './protocol.js';
+import type {RequestInput} from '@vibesys/contracts';
 
 /**
  * Per-request-type policy, kept as data so both this client and a caller's own

@@ -1,7 +1,7 @@
+import type {ServerMessage} from '@vibesys/contracts';
+import {BackendClientError, isServerRejection} from '@vibesys/contracts';
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 import {defaultScheduleTimeout, type ScheduleTimeout} from './control-channel.js';
-import {BackendClientError, isServerRejection} from './errors.js';
-import type {ServerMessage} from './protocol.js';
 import type {EventSubscription, SubscribeOptions} from './transport.js';
 
 /**

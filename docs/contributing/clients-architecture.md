@@ -159,6 +159,7 @@ checker (`EXTERNAL_DEPENDENCIES`, rule `external-dependencies`):
 | --- | --- |
 | `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, features' `./renderer`, browser and renderer apps |
 | `electron` | `node` entries of features (`./main`) and apps (`desktop-main`) |
+| `@opentui/core` | `node` entries of apps (the deprecated `tui`) |
 | Node builtins (`node:*` and bare names) | `node` entries |
 
 A package that declares one of them in `dependencies` must have an entry allowed to use it. Knip
@@ -248,9 +249,9 @@ names a missing or extra one.
 
 | Package | Layer | Status | Item that creates or moves it |
 | --- | --- | --- | --- |
-| `@vibesys/contracts` | foundation | pilot | foundation item (#1869), contracts pilot |
+| `@vibesys/contracts` | foundation | exists (pilot: generated run-protocol and host-helper types, the one schema walker, error taxonomy, `./host-helper` validation, `./testing` fixtures) | foundation item (#1869) |
 | `@vibesys/ui` | foundation | planned | web feature-folder refactor, then package extraction |
-| `@vibesys/core-state` | core | exists (moves to the source condition and project references) | foundation item |
+| `@vibesys/core-state` | core | exists, on the per-entry layout, depends on `contracts` only | foundation item (#1869) |
 | `@vibesys/transport` | core | planned (split from `backend-client`) | backend-client split |
 | `@vibesys/transport-node` | domain | planned (split from `backend-client/node` and desktop's links) | backend-client split |
 | `@vibesys/entities` | domain | planned | desktop and web model extraction |
@@ -259,7 +260,7 @@ names a missing or extra one.
 | `@vibesys/settings` | service | planned (desktop's settings store) | desktop main/renderer split |
 | `@vibesys/feature-*` | feature | planned: run-view, connect-host, start-run, stop-run, resume-run, recent-runs, path-autocomplete | feature extraction, after the web feature-folder refactor lands |
 | `apps/desktop-main`, `apps/desktop-renderer`, `apps/web` | app | planned | app composition, last |
-| `@vibesys/backend-client` | foundation until the pilot, then core | exists; split into `transport` and `transport-node`, then deleted | backend-client split |
+| `@vibesys/backend-client` | core | exists; split into `transport` and `transport-node`, then deleted | backend-client split |
 | `@vibesys/desktop`, `@vibesys/web` | app | exist; emptied into features and apps, then deleted | app composition |
 | `@vibesys/tui` | app | deprecated; kept building, not migrated | none |
 

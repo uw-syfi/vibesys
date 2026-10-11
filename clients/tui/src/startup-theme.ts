@@ -1,4 +1,4 @@
-import type {ProtocolResponse} from '@vibesys/backend-client';
+import type {ProtocolResponse} from '@vibesys/contracts';
 import {resolveTheme, type ThemeName} from './theme.js';
 
 export interface StartupThemeOptions {

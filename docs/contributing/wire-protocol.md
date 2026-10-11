@@ -14,7 +14,7 @@ which connection carries which role, how errors and disconnects are expressed, a
 flow control behave. It does not specify the schema of the messages themselves: those are the
 Pydantic models in `src/server/api/protocol.py` (built on the light control envelope in
 `src/server/control_envelope.py`), generated into
-`clients/backend-client/src/generated/`. A transport relays whole protocol messages opaquely. If the
+`clients/contracts/src/generated/`. A transport relays whole protocol messages opaquely. If the
 payload schema changes (for example a version bump), this layer does not.
 
 One payload invariant is relevant to framing: a recorded `RunEvent` is bounded by
@@ -330,7 +330,7 @@ by both conformance suites: the client-side fold suite (#812) and the server-sid
 
 - `tests/conformance/events/` holds one fixture per `EventType` (the event-kind enum in the generated
   schema). The corpus gate enumerates the enum from
-  `clients/backend-client/src/generated/protocol.schema.json` and fails if a kind has no fixture, so
+  `clients/contracts/src/generated/protocol.schema.json` and fails if a kind has no fixture, so
   a new event kind cannot land without a fixture.
 - `tests/conformance/scenarios/` holds the connection scenarios (bootstrap, resume, rebootstrap,
   capability probes, protocol error, and so on), each tagging the framing decisions it exercises.

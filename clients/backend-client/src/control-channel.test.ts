@@ -1,4 +1,6 @@
 import {describe, it} from 'node:test';
+import type {ProtocolResponse} from '@vibesys/contracts';
+import {BackendClientError} from '@vibesys/contracts';
 import {
   ControlChannel,
   type ControlChannelState,
@@ -6,8 +8,6 @@ import {
   type ControlConnectionHandlers,
   type IssuedRequest,
 } from './control-channel.js';
-import {BackendClientError} from './errors.js';
-import type {ProtocolResponse} from './protocol.js';
 import {expect} from './test-support/expect.js';
 import {FakeClock} from './testing/index.js';
 

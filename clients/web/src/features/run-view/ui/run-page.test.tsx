@@ -1,5 +1,5 @@
 import {expect, test} from 'bun:test';
-import {event} from '@vibesys/backend-client/testing';
+import {event} from '@vibesys/contracts/testing';
 import {initialCoreState} from '@vibesys/core-state';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {runStep} from '../../../entities/run.js';

@@ -249,7 +249,7 @@ The TypeScript client has its own workflow; see
 ```bash
 cd clients
 pnpm install --frozen-lockfile
-pnpm --dir backend-client generate:protocol
+pnpm --dir contracts generate:protocol
 pnpm check:ts-architecture
 pnpm check:knip
 pnpm check:clients
@@ -267,7 +267,7 @@ model. `tsc -b` keeps each package's `dist` incrementally; `pnpm exec tsc -b --c
 removes it.
 
 When Python protocol models change, regenerate the files under
-`clients/backend-client/src/generated/` and review the diff.
+`clients/contracts/src/generated/` and review the diff.
 See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
 TUI-specific contributor docs are indexed in [`tui/README.md`](tui/README.md).
 

@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import type {StopOutcome} from '@vibesys/backend-client/host-helper';
+import type {StopOutcome} from '@vibesys/contracts/host-helper';
 import {
   confirmText,
   IDLE,

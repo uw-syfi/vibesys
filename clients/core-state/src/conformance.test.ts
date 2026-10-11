@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {readdirSync, readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
-import type {RunEvent} from '@vibesys/backend-client';
+import type {RunEvent} from '@vibesys/contracts';
 import {initialCoreState, reduceEventBatch} from './core-state.js';
 
 const EVENT_CORPUS = resolve(import.meta.dir, '../../../tests/conformance/events');

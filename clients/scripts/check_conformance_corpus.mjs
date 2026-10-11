@@ -13,8 +13,8 @@ import {readdir, readFile} from 'node:fs/promises';
 import {basename, dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const SCHEMA_RELATIVE = 'backend-client/src/generated/protocol.schema.json';
-const HELPER_SCHEMA_RELATIVE = 'backend-client/src/generated/host-helper.schema.json';
+const SCHEMA_RELATIVE = 'contracts/src/generated/protocol.schema.json';
+const HELPER_SCHEMA_RELATIVE = 'contracts/src/generated/host-helper.schema.json';
 const HELPER_PROTOCOL = 'host-helper';
 const HELPER_ROLES = new Set(['control', 'run']);
 const HELPER_TRANSPORTS = new Set(['stdio']);

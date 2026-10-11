@@ -3,7 +3,7 @@
  * moved verbatim from `core-state.ts` (#856). `core-state.ts` calls into this
  * module; nothing here imports back, so the dependency stays one-way.
  */
-import type {RunEvent} from '@vibesys/backend-client';
+import type {RunEvent} from '@vibesys/contracts';
 import {ownProjectionInput, type ReadonlyProjection} from './publication.js';
 import {type RoundKey, roundKeyFor, roundNumberFor} from './round-key.js';
 

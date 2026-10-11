@@ -1,11 +1,11 @@
 import {describe, expect, it} from 'bun:test';
-import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
+import type {RunEvent, RunSnapshot} from '@vibesys/contracts';
 import {
   chatEvent,
   event as fixtureEvent,
   roundFinishedEvent,
   timestamp,
-} from '@vibesys/backend-client/testing';
+} from '@vibesys/contracts/testing';
 import {
   type CoreState,
   DEFAULT_CHAT_THREAD_ID,

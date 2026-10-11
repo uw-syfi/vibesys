@@ -2,19 +2,21 @@ import {afterEach, beforeEach, describe, expect, it} from 'bun:test';
 import {mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import type {
+  EventSubscription,
+  ScheduleTimeout,
+  ServerTransport,
+  SubscribeOptions,
+} from '@vibesys/backend-client';
 import {
-  type EventSubscription,
   type ProtocolResponse,
   type RequestInput,
   type RunEvent,
   type RunStatus,
-  type ScheduleTimeout,
   ServerError,
   type ServerMessage,
-  type ServerTransport,
-  type SubscribeOptions,
-} from '@vibesys/backend-client';
-import {chatEvent, event} from '@vibesys/backend-client/testing';
+} from '@vibesys/contracts';
+import {chatEvent, event} from '@vibesys/contracts/testing';
 import {resolveStartupTrace} from './boot-trace.js';
 import {fuzzyMatchCommands} from './commands.js';
 import {readNote, writeNote} from './notes-store.js';

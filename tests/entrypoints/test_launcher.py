@@ -620,7 +620,7 @@ def test_source_launcher_installs_and_runs_pnpm_steps(
     started = _started(host)
     calls = [list(spec.argv) for spec in started]
     assert [c[1] for c in calls] == ["install", "--dir", "build:clients"]
-    assert calls[1][2:] == ["backend-client", "generate:protocol"]
+    assert calls[1][2:] == ["contracts", "generate:protocol"]
 
     assert {spec.cwd for spec in started} == {root / "clients"}
     assert (root / "clients" / "node_modules" / ".vibesys-install-stamp").is_file()

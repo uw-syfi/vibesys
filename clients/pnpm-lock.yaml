@@ -29,6 +29,25 @@ importers:
         version: 7.1.5(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.1)
 
   backend-client:
+    dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      expect:
+        specifier: 30.5.2
+        version: 30.5.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  contracts:
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
@@ -48,9 +67,9 @@ importers:
 
   core-state:
     dependencies:
-      '@vibesys/backend-client':
+      '@vibesys/contracts':
         specifier: workspace:*
-        version: link:../backend-client
+        version: link:../contracts
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
@@ -64,6 +83,9 @@ importers:
       '@vibesys/backend-client':
         specifier: workspace:*
         version: link:../backend-client
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@vibesys/core-state':
         specifier: workspace:*
         version: link:../core-state
@@ -104,6 +126,9 @@ importers:
       '@vibesys/backend-client':
         specifier: workspace:*
         version: link:../backend-client
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@vibesys/core-state':
         specifier: workspace:*
         version: link:../core-state
@@ -129,6 +154,9 @@ importers:
       '@vibesys/backend-client':
         specifier: workspace:*
         version: link:../backend-client
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@vibesys/core-state':
         specifier: workspace:*
         version: link:../core-state

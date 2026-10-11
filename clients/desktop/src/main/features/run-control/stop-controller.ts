@@ -4,7 +4,7 @@
  * run has ended from the registry's pushes (`observeLive`) or from the connection (`runEnded`). No timers:
  * the caller reports what it sees and is told, through `changed`, when a view must be redrawn.
  */
-import type {InstanceStopResult} from '@vibesys/backend-client/host-helper';
+import type {InstanceStopResult} from '@vibesys/contracts/host-helper';
 import type {HostKey} from '../../../common/hosts.js';
 import {
   confirmText,

@@ -10,19 +10,21 @@ import {
   type BatchReconciliation,
   type ControlChannelState,
   type ControlTransport,
-  type EventBatchMessage,
   PersistentEventStream,
   type PersistentEventStreamOptions,
-  type RunEvent,
-  type RunSnapshot,
   type ScheduleTimeout,
-  ServerError,
   type StreamConnectionState,
   StreamReconciler,
   sameControlChannelState,
-  validateRunEvent,
 } from '@vibesys/backend-client';
 import {type WebSocketLike, WebSocketTransport} from '@vibesys/backend-client/websocket';
+import {
+  type EventBatchMessage,
+  type RunEvent,
+  type RunSnapshot,
+  ServerError,
+  validateRunEvent,
+} from '@vibesys/contracts';
 
 export type {ControlTransport, WebSocketLike};
 

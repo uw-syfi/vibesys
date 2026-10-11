@@ -278,6 +278,12 @@ const EXTERNAL_CASES = {
   'a bare Node builtin in a dom entry': workspace => {
     workspace.ui.files['src/index.ts'] += "import 'fs';\n";
   },
+  'a Node builtin in a neutral entry': workspace => {
+    workspace.contracts.files['src/index.ts'] += "import 'node:fs';\n";
+  },
+  'the terminal UI runtime outside an app': workspace => {
+    workspace.contracts.files['src/index.ts'] += "import '@opentui/core';\n";
+  },
   'React declared by a package with no dom entry': workspace => {
     workspace.contracts.manifest.dependencies = {'react-dom': '19.1.1'};
   },

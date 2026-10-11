@@ -1,5 +1,5 @@
 /**
- * The host helper's contract as clients read it (`@vibesys/backend-client/host-helper`).
+ * The host helper's contract as clients read it (`@vibesys/contracts/host-helper`).
  *
  * `server.host_api` owns every helper message; `host-helper.schema.json` is its language-neutral
  * export and the types below are generated from it. Every line a client reads from a helper goes

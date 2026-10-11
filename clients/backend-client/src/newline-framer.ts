@@ -1,4 +1,4 @@
-import {BackendClientError} from './errors.js';
+import {BackendClientError} from '@vibesys/contracts';
 
 /**
  * The largest newline-less remainder the framer will hold before it declares the

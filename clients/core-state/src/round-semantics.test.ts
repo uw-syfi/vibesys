@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'bun:test';
-import type {HypothesisEntry, RunEvent} from '@vibesys/backend-client';
-import {timestamp} from '@vibesys/backend-client/testing';
+import type {HypothesisEntry, RunEvent} from '@vibesys/contracts';
+import {timestamp} from '@vibesys/contracts/testing';
 import {
   activeRunFocus,
   initialCoreState,

@@ -1,4 +1,4 @@
-import type {ChatOptions} from '@vibesys/backend-client';
+import type {ChatOptions} from '@vibesys/contracts';
 import {agentRuntimeLabel} from './agent-runtime-label.js';
 import {type ChatMenuRow, chatThreadLabel, type SessionState} from './session-model.js';
 

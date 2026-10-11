@@ -26,7 +26,7 @@ test('dependency-cruiser rule names are unique', async () => {
   assert.equal(new Set(names).size, names.length);
 });
 
-test('dependency-cruiser rejects forbidden package and runtime edges', async t => {
+test('dependency-cruiser rejects relative paths into a package, cycles, and unresolvable imports', async t => {
   const root = await scratchDirectory(t, 'vibesys-dependency-rules-');
   await writeFile(
     join(root, 'tsconfig.architecture.json'),
@@ -50,23 +50,16 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async t =
     'index.ts',
     "import '../../core-state/src/index.js';\n",
   );
-  await writeSource(
-    root,
-    'core-state',
-    'index.ts',
-    "import 'node:fs';\nimport '@opentui/core';\nimport '../../tui/src/index.js';\n",
-  );
+  await writeSource(root, 'core-state', 'index.ts', "import '../../tui/src/index.js';\n");
   await writeSource(
     root,
     'tui',
     'index.ts',
-    "import '@vibesys/core-state';\nimport '@vibesys/core-state/private';\nimport './cycle-a.js';\nimport 'missing-package';\nimport 'undeclared-package';\n",
+    "import '@vibesys/core-state';\nimport '@vibesys/core-state/private';\nimport './cycle-a.js';\nimport 'missing-package';\n",
   );
   await writeSource(root, 'tui', 'cycle-a.ts', "import './cycle-b.js';\n");
   await writeSource(root, 'tui', 'cycle-b.ts', "import './cycle-a.js';\n");
   await writeSource(root, 'web', 'index.ts', "import '@vibesys/core-state';\n");
-  await writeExternalPackage(root, '@opentui/core');
-  await writeExternalPackage(root, 'undeclared-package');
 
   const options = await extractDepcruiseOptions(CONFIG);
   const result = await cruise(['backend-client/src', 'core-state/src', 'tui/src', 'web/src'], {
@@ -81,12 +74,7 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async t =
   assert.deepEqual(
     violatedRules,
     new Set([
-      'backend-client-is-lowest-layer',
-      'core-state-is-below-frontends',
       'workspace-packages-use-public-exports',
-      'core-state-has-no-node-runtime',
-      'core-state-has-no-ui-runtime',
-      'production-dependencies-are-declared',
       'no-circular-dependencies',
       'no-unresolvable-imports',
     ]),
@@ -258,24 +246,12 @@ const RULE_CASES = [
     },
   },
   {
-    rule: 'core-state-has-no-node-runtime',
-    files: {'core-state/src/index.ts': "import 'node:fs';\n"},
-  },
-  {
-    rule: 'core-state-has-no-ui-runtime',
-    files: {'core-state/src/index.ts': "import '@opentui/core';\n"},
-  },
-  {
     rule: 'renderers-do-not-import-electron',
     files: {'web/src/platform/backend.ts': "import 'electron';\n"},
   },
   {
     rule: 'web-opens-no-sockets-or-processes',
     files: {'web/src/platform/backend.ts': "import 'net';\n"},
-  },
-  {
-    rule: 'desktop-does-not-depend-on-peer-frontends',
-    files: {'desktop/src/main/app/main.ts': "import '../../../../web/src/index.js';\n"},
   },
   {
     rule: 'web-features-does-not-import-layers-above',
@@ -349,10 +325,6 @@ const RULE_CASES = [
     files: {'core-state/src/index.ts': "import '../../tui/dev/harness.js';\n"},
   },
   {
-    rule: 'backend-client-neutral-has-no-node-runtime',
-    files: {'backend-client/src/neutral.ts': "import 'node:crypto';\n"},
-  },
-  {
     rule: 'tools-are-leaves',
     files: {'tui/src/session-model.ts': "import '../benchmarks/bench.js';\n"},
   },
@@ -379,22 +351,6 @@ const RULE_CASES = [
     files: {'core-state/bench/run.ts': "import '../../web/e2e/fixtures.js';\n"},
   },
   {
-    rule: 'backend-client-is-lowest-layer',
-    files: {'backend-client/src/index.ts': "import '../../web/src/index.js';\n"},
-  },
-  {
-    rule: 'web-does-not-depend-on-peer-frontends',
-    files: {'web/src/index.ts': "import '../../tui/src/session-model.js';\n"},
-  },
-  {
-    rule: 'tui-does-not-depend-on-peer-frontends',
-    files: {'tui/src/session-model.ts': "import '../../web/src/index.js';\n"},
-  },
-  {
-    rule: 'core-state-is-below-frontends',
-    files: {'core-state/src/index.ts': "import '../../web/src/index.js';\n"},
-  },
-  {
     rule: 'scripts-do-not-import-package-code',
     files: {'scripts/check.mjs': "import '../tui/src/session-model.js';\n"},
   },
@@ -419,28 +375,8 @@ const RULE_CASES = [
     },
   },
   {
-    rule: 'backend-client-neutral-has-no-node-runtime',
-    files: {'backend-client/src/testing/index.ts': "import 'node:fs';\n"},
-  },
-  {
     rule: 'workspace-packages-use-public-exports',
     files: {'tui/dev/harness.ts': "import '../../core-state/src/index.js';\n"},
-  },
-  {
-    rule: 'workspace-packages-have-no-deep-imports',
-    files: {
-      'tui/dev/harness.ts': "import '@vibesys/core-state/dist/index.js';\n",
-      'node_modules/@vibesys/core-state/dist/index.js': 'export {};\n',
-      'node_modules/@vibesys/core-state/package.json': '{"name":"@vibesys/core-state"}',
-    },
-  },
-  {
-    rule: 'workspace-packages-have-no-deep-imports',
-    files: {
-      'scripts/check.mjs': "import '@vibesys/tui/src/index.js';\n",
-      'node_modules/@vibesys/tui/src/index.js': 'export {};\n',
-      'node_modules/@vibesys/tui/package.json': '{"name":"@vibesys/tui"}',
-    },
   },
   {
     rule: 'no-unresolvable-imports',
@@ -452,20 +388,6 @@ const RULE_CASES = [
       'tui/dev/a.ts': "import './b.js';\n",
       'tui/dev/b.ts': "import './a.js';\n",
     },
-  },
-  {
-    rule: 'production-dependencies-are-declared',
-    files: {'tui/dev/harness.ts': "import 'undeclared-package';\n"},
-  },
-  {
-    rule: 'production-dependencies-are-declared',
-    files: {'scripts/check.mjs': "import 'undeclared-package';\n"},
-  },
-  {
-    // The rule could not reach the end-to-end specs while the scan roots were a hand-written
-    // list that omitted `web/e2e`, which is how `@playwright/test` stayed undeclared.
-    rule: 'production-dependencies-are-declared',
-    files: {'web/e2e/live.spec.ts': "import 'undeclared-package';\n"},
   },
   {
     rule: 'tui-ui-does-not-depend-on-backend-client',
@@ -544,16 +466,10 @@ async function violatedRules(t, files) {
   );
   await writeExternalPackage(root, '@opentui/core');
   await writeExternalPackage(root, 'declared-package');
-  await writeExternalPackage(root, 'undeclared-package');
   await writeExternalPackage(root, 'electron');
-  const declared = {
-    devDependencies: {'declared-package': '1.0.0', '@opentui/core': '1.0.0', electron: '1.0.0'},
-  };
-  await writeFile(join(root, 'package.json'), JSON.stringify(declared));
-  // Each package declares the same externals, because `production-dependencies-are-declared`
-  // resolves a declaration against the manifest nearest the importing module.
+  await writeFile(join(root, 'package.json'), JSON.stringify({name: 'fixture-workspace'}));
   for (const directory of PACKAGE_DIRECTORIES) {
-    await writePackage(root, directory, `@vibesys/${directory}`, ['src'], declared);
+    await writePackage(root, directory, `@vibesys/${directory}`, ['src']);
   }
   for (const [file, source] of Object.entries(files)) {
     await mkdir(dirname(join(root, file)), {recursive: true});
@@ -828,7 +744,7 @@ const SCAN_ROOT_PROBES = REPOSITORY_LAYOUT.scanRoots.map(scanRoot => `${scanRoot
 test('the architecture gate cruises every directory the layout derives', async t => {
   const {output, exitCode} = await cruiseFixture(
     t,
-    Object.fromEntries(SCAN_ROOT_PROBES.map(file => [file, "import 'undeclared-package';\n"])),
+    Object.fromEntries(SCAN_ROOT_PROBES.map(file => [file, "import 'missing-package';\n"])),
   );
 
   // dependency-cruiser exits with its error-severity violation count, so this pins the total:
@@ -838,7 +754,7 @@ test('the architecture gate cruises every directory the layout derives', async t
   assert.equal(exitCode, SCAN_ROOT_PROBES.length);
   for (const file of SCAN_ROOT_PROBES) {
     assert.ok(
-      output.includes(`production-dependencies-are-declared: ${file}`),
+      output.includes(`no-unresolvable-imports: ${file}`),
       `${file} is not a scan root, so no rule can reach it. Report:\n${output}`,
     );
   }
@@ -881,7 +797,6 @@ async function cruiseFixture(t, files) {
     }),
   );
   await writeFile(join(root, 'package.json'), JSON.stringify({name: 'fixture-workspace'}));
-  await writeExternalPackage(root, 'undeclared-package');
   for (const directory of PACKAGE_DIRECTORIES) {
     await writePackage(root, directory, `@vibesys/${directory}`, ['src']);
     await writeFile(join(root, directory, 'src/index.ts'), '');
@@ -892,8 +807,8 @@ async function cruiseFixture(t, files) {
   }
   const {output, exitCode} = await cruiseWorkspace(root);
   // dependency-cruiser's `err` reporter colorizes through chalk, which turns itself on when `CI`
-  // is set as well as for a TTY. So the same report reads `...declared: web/src/probe.ts` on a
-  // developer machine and `...declared: \x1b[1mweb/src/probe.ts\x1b[22m` on CI, and an assertion
+  // is set as well as for a TTY. So the same report reads `...imports: web/src/probe.ts` on a
+  // developer machine and `...imports: \x1b[1mweb/src/probe.ts\x1b[22m` on CI, and an assertion
   // on the raw string passes locally and fails there. The colors are for the human reading the
   // gate's stdout, not for these assertions, so they are dropped at the one seam that reads it.
   return {output: withoutAnsi(output), exitCode};

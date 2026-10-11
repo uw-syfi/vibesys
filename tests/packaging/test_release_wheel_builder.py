@@ -89,12 +89,13 @@ def _fake_deployment(destination: Path) -> None:
                 "version": "0.1.0",
                 "dependencies": {
                     "@vibesys/backend-client": "@vibesys/backend-client@file:///build/backend",
+                    "@vibesys/contracts": "@vibesys/contracts@file:///build/contracts",
                     "@vibesys/core-state": "@vibesys/core-state@file:///build/core",
                 },
             }
         )
     )
-    for package in ("backend-client", "core-state"):
+    for package in ("backend-client", "contracts", "core-state"):
         workspace_package = destination / "node_modules" / "@vibesys" / package
         (workspace_package / "dist").mkdir(parents=True)
         (workspace_package / "package.json").write_text(
@@ -180,12 +181,13 @@ def test_build_release_wheel_assembles_payload_without_mutating_node_modules(
     assert "app/dist/launcher.js.map" not in files
     assert "app/node_modules/@opentui/core-linux-x64" in files
     assert "app/node_modules/@opentui/core-linux-arm64" not in files
-    assert "app/node_modules/@vibesys/backend-client/dist/index.js" in files
-    assert "app/node_modules/@vibesys/core-state/dist/index.js" in files
+    for package in ("backend-client", "contracts", "core-state"):
+        assert f"app/node_modules/@vibesys/{package}/dist/index.js" in files
     package = payload_snapshot["package"]
     assert isinstance(package, dict)
     assert package["dependencies"] == {
         "@vibesys/backend-client": "0.1.0",
+        "@vibesys/contracts": "0.1.0",
         "@vibesys/core-state": "0.1.0",
     }
     assert "file://" not in json.dumps(package)

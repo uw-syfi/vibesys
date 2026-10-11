@@ -3,7 +3,7 @@
  * fixture under a fresh attempt number (so a retry is never served from cache) and carries a
  * token; a reply for any other load is dropped, so a superseded load never folds its events.
  */
-import type {RunEvent} from '@vibesys/backend-client';
+import type {RunEvent} from '@vibesys/contracts';
 import {only, type Step} from '@vibesys/core-state';
 
 export const DEFAULT_REPLAY_FIXTURE_URL = '/__vibesys/fixtures/framework-events.jsonl';

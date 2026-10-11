@@ -1,4 +1,13 @@
 import {createConnection, type Socket} from 'node:net';
+import type {ProtocolResponse, RequestInput, ServerMessage} from '@vibesys/contracts';
+import {
+  BackendClientError,
+  parseProtocolResponse,
+  parseServerMessage,
+  responseError,
+  ServerError,
+  streamFailure,
+} from '@vibesys/contracts';
 import {
   ControlChannel,
   type ControlChannelState,
@@ -8,15 +17,7 @@ import {
   type IssuedRequest,
   type ScheduleTimeout,
 } from '../control-channel.js';
-import {BackendClientError, ServerError} from '../errors.js';
 import {NewlineFramer} from '../newline-framer.js';
-import type {ProtocolResponse, RequestInput, ServerMessage} from '../protocol.js';
-import {
-  parseProtocolResponse,
-  parseServerMessage,
-  responseError,
-  streamFailure,
-} from '../protocol-parse.js';
 import {type AbortSignalLike, abortReason, type RequestOptions} from '../request-policy.js';
 import {type EventSubscription, type SubscribeOptions, subscribeRequest} from '../transport.js';
 

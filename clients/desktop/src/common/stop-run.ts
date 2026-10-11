@@ -10,7 +10,7 @@
  * and whether a force stop is on offer. The functions here decide; `StopController` performs the
  * effects and feeds results back.
  */
-import type {StopOutcome} from '@vibesys/backend-client/host-helper';
+import type {StopOutcome} from '@vibesys/contracts/host-helper';
 import type {HostKey} from './hosts.js';
 
 /** Key of a run's stop flow in `ChromeState.stops`. */
