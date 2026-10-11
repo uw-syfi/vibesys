@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.slurm_cluster.harness import (
     CONTAINER_TMP,
+    OPERATOR_INTERPRETER_OUTPUT,
     OPERATOR_TOOL_FILE,
     OPERATOR_TOOL_TEXT,
+    OPERATOR_VENV_PYTHON,
     operator_tools,
 )
 
@@ -102,3 +104,15 @@ def test_a_job_reads_the_operators_read_only_tools_outside_its_workspace_and_can
     assert write.exit_code != 0
     assert tool.read_text(encoding="utf-8") == OPERATOR_TOOL_TEXT
     assert hidden.exit_code != 0
+
+
+def test_a_job_runs_an_interpreter_reached_through_a_chain_of_links_inside_the_listed_path(
+    gpu_run: OpenRun, slurm_cluster: SlurmCluster
+) -> None:
+    """The venv's python links to an alias directory that links to the install; all are listed."""
+    python = operator_tools(slurm_cluster) / OPERATOR_VENV_PYTHON
+
+    result = gpu_run.agent(f'"$VIBESYS_GPU" -- {python}')
+
+    assert result.exit_code == 0, result.output
+    assert result.output.endswith(OPERATOR_INTERPRETER_OUTPUT)

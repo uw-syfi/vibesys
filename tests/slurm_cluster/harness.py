@@ -233,6 +233,27 @@ def operator_tools(cluster: SlurmCluster) -> Path:
     return cluster.root / "operator-tools"
 
 
+#: The interpreter, reached from a venv through an alias directory as uv lays it out.
+OPERATOR_VENV_PYTHON = "venv/bin/python"
+OPERATOR_INTERPRETER_OUTPUT = "interpreter ran\n"
+
+
+def write_operator_venv(tools: Path) -> None:
+    """Lay out, inside *tools*, a venv whose ``python`` links to an alias of the install."""
+    real = tools / "store" / "cpython-3.12.15"
+    (real / "bin").mkdir(parents=True, exist_ok=True)
+    interpreter = real / "bin" / "python3.12"
+    interpreter.write_text(f"#!/bin/sh\necho {OPERATOR_INTERPRETER_OUTPUT}", encoding="utf-8")
+    interpreter.chmod(0o755)
+    alias = tools / "store" / "cpython-3.12"
+    if not alias.is_symlink():
+        alias.symlink_to(real.name)
+    (tools / "venv" / "bin").mkdir(parents=True, exist_ok=True)
+    link = tools / OPERATOR_VENV_PYTHON
+    if not link.is_symlink():
+        link.symlink_to(alias / "bin" / "python3.12")
+
+
 def _slurm_config(cluster: SlurmCluster, kind: str, shim: Path | None) -> str:
     """The operator file of *kind*: the SSH transport, or the local one with *shim* as its shell."""
     if shim is None:
@@ -314,6 +335,7 @@ def make_environment(
         tools = operator_tools(cluster)
         tools.mkdir(exist_ok=True)
         (tools / OPERATOR_TOOL_FILE).write_text(OPERATOR_TOOL_TEXT, encoding="utf-8")
+        write_operator_venv(tools)
     config = directory / f"{kind}.toml"
     config.write_text(_slurm_config(cluster, kind, shim), encoding="utf-8")
     return SlurmEnvironment(load_slurm_operator_settings(config), docker=docker)

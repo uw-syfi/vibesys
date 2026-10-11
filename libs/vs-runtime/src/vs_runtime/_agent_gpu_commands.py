@@ -16,7 +16,12 @@ from typing import TYPE_CHECKING
 
 from vs_agent.api import declare_command_host_resources
 from vs_sandbox.api import HostResource, HostResourceAccess
-from vs_sandbox.api.slurm import AgentGpuLauncher, GpuCommands, HostJobConfinement
+from vs_sandbox.api.slurm import (
+    AgentGpuLauncher,
+    GpuCommands,
+    HostJobConfinement,
+    check_read_only_links,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -47,13 +52,19 @@ def agent_gpu_commands(
     run through it, so the operator names the Slurm binaries in one place.
     """
     host_env = dict(os.environ)
-    confinement = confinement or HostJobConfinement(
-        env=host_env,
-        resources=declare_command_host_resources(
+    if confinement is None:
+        resources = declare_command_host_resources(
             host_env, additional=_operator_read_only_resources(config)
-        ),
-        project_path_policy=project_path_policy,
-    )
+        )
+        check_read_only_links(
+            "vibesys.agent_gpu.read_only_paths",
+            config.read_only_paths,
+            workspace=workspace,
+            resources=resources,
+        )
+        confinement = HostJobConfinement(
+            env=host_env, resources=resources, project_path_policy=project_path_policy
+        )
     # Fail closed now, not at the first GPU command: a host that cannot confine
     # a job must not start a run whose agent can only use GPUs through jobs.
     confinement.wrap(workspace, [])
