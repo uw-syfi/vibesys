@@ -44,7 +44,12 @@ if TYPE_CHECKING:
     from typing import TextIO
 
     from vs_agent.api import AgentClientProtocol
-    from vs_project.api import OrchestrationRunManifest, StateNamespace
+    from vs_project.api import (
+        GitRepository,
+        GitRepositoryFactory,
+        OrchestrationRunManifest,
+        StateNamespace,
+    )
     from vs_runtime.api import AgentRole, OrchestrationResumeDecision
     from vs_runtime.api.infrastructure import (
         AgentExecutionConfiguration,
@@ -120,6 +125,16 @@ class WorkspaceEnv:
         return self.project.state.local_namespace(RUN_ID, "receipts")
 
 
+def _git_factory(
+    disk: FakeGitRepositories | None, wrap: Callable[[GitRepository], GitRepository] | None
+) -> GitRepositoryFactory | None:
+    if disk is None:
+        return None
+    if wrap is None:
+        return disk.repository
+    return lambda root, faults: wrap(disk.repository(root, faults))
+
+
 @contextmanager
 def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; each option is an independent world setting and a bundling options type would only rename the keywords every caller passes.
     tmp_path: Path,
@@ -129,6 +144,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession] | None = None,
     owns_candidate_worktrees: bool = False,
     memory_paths: tuple[str, ...] = (),
+    wrap_git: Callable[[GitRepository], GitRepository] | None = None,
 ) -> Iterator[WorkspaceEnv]:
     """A fresh run with one started host. The caller closes ``env.hosts`` (async) before exit.
 
@@ -137,7 +153,8 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     ``open_session`` opens every session (the root's and
     each candidate's) instead of the default fake one. ``owns_candidate_worktrees`` names
     the run's candidate worktrees directory in the request's ``run_owned_roots``, as a
-    product run does.
+    product run does. ``wrap_git`` wraps every Fake repository (not with real Git), so a
+    case can stand between the run and Git, for example to kill the host at a Git step.
     """
     disk = FakeGitRepositories() if git is GitKind.FAKE else None
     root = tmp_path / "project"
@@ -163,7 +180,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
         git_events=NullGitTrackerEvents(),
         log_emit=_emit,
         on_log_ready=lambda _path: None,
-        git_repository=None if disk is None else disk.repository,
+        git_repository=_git_factory(disk, wrap_git),
     )
     with open_project_run_resources(
         request, effects=effects, resolve_resume=unexpected_resume

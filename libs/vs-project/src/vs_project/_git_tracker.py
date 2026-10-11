@@ -517,6 +517,7 @@ class GitTracker:
         framework-owned memory that must survive a candidate-code rollback.
         """
         preserved: dict[Path, bytes] = {}
+        preserve_paths = tuple(preserve_paths)
         try:
             preserved = self._capture_preserved_paths(preserve_paths)
             self._git.reset_index()
@@ -526,8 +527,19 @@ class GitTracker:
                 self._git.clean_untracked(
                     include_ignored=clean_ignored,
                     protect=self._state_integration.metadata_clean_exclusion,
+                    # Preserved files are held only in memory until the restore ends, so a
+                    # crash between the clean and the reapply must not find them deleted.
+                    keep=[f"/{Path(path).as_posix().rstrip('/')}" for path in preserve_paths],
                 )
-            self._git.restore_worktree(sha, self._state_integration.metadata_restore_exclusions)
+            # The restore leaves preserved paths as they are, so they never pass through a
+            # state a crash could leave behind; reapplying them below then changes nothing.
+            self._git.restore_worktree(
+                sha,
+                [
+                    *self._state_integration.metadata_restore_exclusions,
+                    *(f":(exclude){Path(path).as_posix().rstrip('/')}" for path in preserve_paths),
+                ],
+            )
             self._restore_preserved_paths(preserved)
         except (OSError, GitError) as exc:
             try:

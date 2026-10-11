@@ -207,6 +207,7 @@ from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
     RootGrant,
+    RootRelease,
     StoreWorkspaceReceipts,
     WorkspaceReceipts,
 )
@@ -330,6 +331,7 @@ __all__ = [
     "ResumeDiagnostic",
     "RetainRevisionOwner",
     "RootGrant",
+    "RootRelease",
     "RunControlBridge",
     "RunInvocationProof",
     "RunLoopConfig",

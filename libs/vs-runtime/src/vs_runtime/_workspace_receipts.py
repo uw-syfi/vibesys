@@ -41,6 +41,17 @@ class RootGrant(StrEnum):
     """This attempt generation already ended its hold, so it cannot take the root again."""
 
 
+class RootRelease(StrEnum):
+    """What a request to end an attempt generation's hold of the exclusive root did."""
+
+    RELEASED = "released"
+    """The generation held the root and its hold ended now."""
+    ALREADY_RELEASED = "already_released"
+    """The generation's hold had ended before, whoever holds the root since."""
+    NOT_HOLDER = "not_holder"
+    """The generation never ended its hold and does not hold the root (a newer one took it)."""
+
+
 class WorkspaceReceipts(Protocol):
     """Durable bindings, root holder, generations, revision ownership and release proofs."""
 
@@ -54,11 +65,12 @@ class WorkspaceReceipts(Protocol):
         """Grant the exclusive root to one attempt generation at a time."""
         ...
 
-    def release_root(self, attempt: AttemptRef) -> None:
+    def release_root(self, attempt: AttemptRef) -> RootRelease:
         """End *attempt*'s hold of the exclusive root, if it is the recorded holder.
 
         Only the holder's own generation releases, so a stale or repeated release
         changes nothing and a later holder is never released by an earlier attempt.
+        The result says which of those happened.
         """
         ...
 
@@ -127,6 +139,9 @@ class StoreWorkspaceReceipts:
 
     def acquire_root(self, attempt: AttemptRef) -> RootGrant:
         def decide(holder: AttemptRef | None) -> tuple[AttemptRef | None, RootGrant]:
+            if self.is_released(attempt):
+                # An ended generation is never granted again, whoever holds the root now.
+                return None, RootGrant.RELEASED
             ended = holder is not None and self.is_released(holder)
             if holder is None or (ended and holder.attempt_id != attempt.attempt_id):
                 return attempt, RootGrant.GRANTED
@@ -135,17 +150,20 @@ class StoreWorkspaceReceipts:
             if attempt.generation < holder.generation:
                 return None, RootGrant.SUPERSEDED
             if attempt == holder:
-                # The holder asks again: still its root, unless that generation ended.
-                return None, RootGrant.RELEASED if ended else RootGrant.GRANTED
+                return None, RootGrant.GRANTED  # The holder asks again: still its root.
             return attempt, RootGrant.GRANTED
 
         with self._store.exclusive():
             return self._store.modify(_ROOT, "holder", "root", AttemptRef, decide)
 
-    def release_root(self, attempt: AttemptRef) -> None:
+    def release_root(self, attempt: AttemptRef) -> RootRelease:
         with self._store.exclusive():
-            if self._store.load(_ROOT, "holder", "root", AttemptRef) == attempt:
-                self.mark_released(attempt)
+            if self.is_released(attempt):
+                return RootRelease.ALREADY_RELEASED
+            if self._store.load(_ROOT, "holder", "root", AttemptRef) != attempt:
+                return RootRelease.NOT_HOLDER
+            self.mark_released(attempt)
+            return RootRelease.RELEASED
 
     def admit_generation(self, attempt: AttemptRef) -> bool:
         def decide(stored: AttemptRef | None) -> tuple[AttemptRef | None, bool]:

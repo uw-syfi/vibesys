@@ -5,15 +5,18 @@ each attempt with a `DiscardWorkspace`; the next attempt is granted the root, an
 must be the plan's base again, with the run's declared artifact directory kept.
 
 Every durable write goes through one `ReceiptStore`, so a store that raises at its n-th
-operation models a host that died between two durable writes. After the death a new executor
-over the same disk repeats the request, as a restarted shell does.
+operation models a host that died between two durable writes. The restore of the root tree is
+a sequence of Git steps (reset the index, clean untracked and ignored files, restore tracked
+files), and a repository wrapper that raises at the n-th step models a host that died before,
+between or after them. After the death a new executor over the same disk repeats the request,
+as a restarted shell does.
 """
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -53,13 +56,25 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import AttemptRef, Request, RevisionRef
+    from vs_project.api import GitRepository
+    from vs_runtime.api.infrastructure import RuntimeWorkspace
 
 _ROOT = WorkspaceMode.EXCLUSIVE_ROOT
 _ARTIFACT_DIR = "roadmap"
 _PLAN = f"{_ARTIFACT_DIR}/plan.md"
 _NEVER = 10**6
 _WRITES_PER_REQUEST = 9
-_BASE_TREE_KEY = "candidate.py"
+_RESTORE_POINTS = 4
+"""Before the index reset, before the clean, before the tracked restore, and after it."""
+_IGNORE_RULES = "*.cache\nbuild/\n"
+_LEFTOVERS = (
+    "scratch.txt",
+    "untracked/notes.txt",
+    "result.cache",
+    "build/out.bin",
+    "deep/er/object.cache",
+)
+"""Files an attempt may leave: untracked ones and ones the ignore rules hide."""
 
 
 class MortalStore(ReceiptStore):
@@ -84,25 +99,75 @@ class MortalStore(ReceiptStore):
         super().replace(family, part, key, receipt)
 
 
+class RestoreCrash:
+    """Counts the steps of a tree restore and raises at the n-th while armed."""
+
+    def __init__(self) -> None:
+        self.dies_at = _NEVER
+        self.steps = 0
+
+    def step(self) -> None:
+        self.steps += 1
+        if self.steps > self.dies_at:
+            raise HostDied
+
+    def disarm(self) -> None:
+        self.dies_at = _NEVER
+        self.steps = 0
+
+
+class CrashingGit:
+    """A repository whose tree-restore steps are crash points; all else passes through."""
+
+    def __init__(self, git: Any, crash: RestoreCrash) -> None:  # noqa: ANN401  # lint-waiver: LW-402321 [ANN401]; forwards every method of the wrapped repository protocol unchanged.
+        self._git = git
+        self._crash = crash
+
+    def __getattr__(self, name: str) -> Any:  # noqa: ANN401  # lint-waiver: LW-402322 [ANN401]; forwards every method of the wrapped repository protocol unchanged.
+        return getattr(self._git, name)
+
+    def reset_index(self) -> None:
+        self._crash.step()
+        self._git.reset_index()
+
+    def clean_untracked(self, **kwargs: Any) -> bool:  # noqa: ANN401  # lint-waiver: LW-402323 [ANN401]; forwards the wrapped call's keywords unchanged.
+        self._crash.step()
+        return cast("bool", self._git.clean_untracked(**kwargs))
+
+    def restore_worktree(self, *args: Any) -> None:  # noqa: ANN401  # lint-waiver: LW-402324 [ANN401]; forwards the wrapped call's arguments unchanged.
+        self._crash.step()
+        self._git.restore_worktree(*args)
+        self._crash.step()
+
+
 @dataclass
 class Host:
     """One run's disk and a restartable executor over it."""
 
     env: WorkspaceEnv
+    crash: RestoreCrash = field(default_factory=RestoreCrash)
     epoch: int = 1
 
     def executor(self, store: ReceiptStore) -> RuntimeWorkspaceRequests:
         return RuntimeWorkspaceRequests(self.env.hosts[-1], store, SettledRunInvocations())
 
-    async def run(self, request: Request, *, dies_at: int = _NEVER) -> ExecutionResult:
-        """Execute *request*; if the host dies at its *dies_at*-th write, restart and repeat."""
+    async def run(
+        self, request: Request, *, dies_at: int = _NEVER, restore_dies_at: int = _NEVER
+    ) -> ExecutionResult:
+        """Execute *request*; if the host dies at its *dies_at*-th durable write or its
+        *restore_dies_at*-th restore step, restart and repeat."""
         store = MortalStore(self.env)
         store.dies_at = dies_at
+        self.crash.disarm()
+        self.crash.dies_at = restore_dies_at
         try:
             return await self._execute(self.executor(store), request)
         except HostDied:
             self.epoch += 1
+            self.crash.disarm()
             return await self._execute(self.executor(MortalStore(self.env)), request)
+        finally:
+            self.crash.disarm()
 
     async def _execute(
         self, executor: RuntimeWorkspaceRequests, request: Request
@@ -130,6 +195,8 @@ class Round:
     snapshot: bool
     ensure_dies_at: int
     discard_dies_at: int
+    restore_dies_at: int = _NEVER
+    leftovers: tuple[str, ...] = ()
 
 
 _ROUND = st.builds(
@@ -138,6 +205,8 @@ _ROUND = st.builds(
     snapshot=st.booleans(),
     ensure_dies_at=st.sampled_from([_NEVER, *range(9)]),
     discard_dies_at=st.sampled_from([_NEVER, *range(8)]),
+    restore_dies_at=st.sampled_from([_NEVER, *range(_RESTORE_POINTS)]),
+    leftovers=st.lists(st.sampled_from(_LEFTOVERS), unique=True).map(tuple),
 )
 
 
@@ -158,10 +227,27 @@ def _without_artifacts(root: Path) -> dict[str, str]:
     }
 
 
-async def _attempts(env: WorkspaceEnv, rounds: list[Round]) -> None:
+def _is_ignored(name: str) -> bool:
+    return name.endswith(".cache") or name.startswith("build/")
+
+
+def _write_files(root: Path, names: tuple[str, ...] | list[str]) -> None:
+    for name in names:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"left by {name}\n", encoding="utf-8")
+
+
+async def _commit_ignore_rules(root: RuntimeWorkspace) -> None:
+    (root.path / ".gitignore").write_text(_IGNORE_RULES, encoding="utf-8")
+    await root.snapshot("ignore rules")
+
+
+async def _attempts(env: WorkspaceEnv, rounds: list[Round], crash: RestoreCrash) -> None:
     """Run one attempt per round in the root, checking the hold and each grant's tree."""
-    host = Host(env)
+    host = Host(env, crash)
     root = env.hosts[-1].root
+    await _commit_ignore_rules(root)
     assert root.revision is not None
     # Revisions a later attempt may use as its base, with the tree each one holds.
     bases = [(revision_ref(root.revision), _without_artifacts(root.path))]
@@ -171,12 +257,17 @@ async def _attempts(env: WorkspaceEnv, rounds: list[Round]) -> None:
         base, base_tree = bases[step.base_pick % len(bases)]
         plan = WorkspacePlan(mode=_ROOT, base=base)
         ensure = _ensure(attempt, f"ensure-{index}", plan)
-        granted = await host.run(ensure, dies_at=step.ensure_dies_at)
+        granted = await host.run(
+            ensure, dies_at=step.ensure_dies_at, restore_dies_at=step.restore_dies_at
+        )
         assert _status(granted) is ObservationStatus.SUCCEEDED
         assert host.holder() == attempt
-        # The grant's tree is the plan's base plus the artifacts earlier attempts left.
+        # The grant's tree is exactly the plan's base plus the artifact directory earlier
+        # attempts kept: no untracked or ignored file an earlier attempt left remains.
         assert _without_artifacts(root.path) == base_tree
         expected_plan = None if index == 0 else f"step {index - 1}\n"
+        kept = {name for name in _visible_files(root.path) if name.startswith(f"{_ARTIFACT_DIR}/")}
+        assert kept == (set() if index == 0 else {_PLAN})
         found = _visible_files(root.path).get(_PLAN)
         assert found == expected_plan
         # While it holds the root, no other attempt gets it and no ended attempt's
@@ -194,7 +285,13 @@ async def _attempts(env: WorkspaceEnv, rounds: list[Round]) -> None:
         (root.path / "scratch.txt").write_text("x\n", encoding="utf-8")
         (root.path / _PLAN).parent.mkdir(exist_ok=True)
         (root.path / _PLAN).write_text(f"step {index}\n", encoding="utf-8")
-        worked_tree = _without_artifacts(root.path)
+        _write_files(root.path, step.leftovers)
+        # A snapshot commits tracked and untracked files but not the ignored ones.
+        worked_tree = {
+            name: text
+            for name, text in _without_artifacts(root.path).items()
+            if not _is_ignored(name)
+        }
         if index == 0:
             # The first base becomes a retained revision of the run, so a later
             # attempt may name it after the root's head has moved on.
@@ -222,8 +319,13 @@ def _play(
 ) -> None:
     path = tmp_path_factory.mktemp("rounds")
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(path / "operator-state"))
-    with open_workspace_env(path, memory_paths=(_ARTIFACT_DIR,)) as env:
-        asyncio.run(_attempts(env, rounds))
+    crash = RestoreCrash()
+    with open_workspace_env(
+        path,
+        memory_paths=(_ARTIFACT_DIR,),
+        wrap_git=lambda git: cast("GitRepository", CrashingGit(git, crash)),
+    ) as env:
+        asyncio.run(_attempts(env, rounds, crash))
         for workspaces in env.hosts:
             asyncio.run(workspaces.close())
 
@@ -243,5 +345,164 @@ def test_a_host_that_dies_at_any_write_of_a_grant_or_a_release_loses_nothing(
     tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, dies_at: int
 ) -> None:
     """The second attempt starts on a dirty root, so a lost restore would show."""
-    round_ = Round(base_pick=0, snapshot=True, ensure_dies_at=dies_at, discard_dies_at=dies_at)
+    round_ = Round(
+        base_pick=0,
+        snapshot=True,
+        ensure_dies_at=dies_at,
+        discard_dies_at=dies_at,
+        leftovers=_LEFTOVERS,
+    )
     _play(tmp_path_factory, monkeypatch, [round_, round_, round_])
+
+
+@pytest.mark.parametrize("restore_dies_at", range(_RESTORE_POINTS))
+def test_a_host_that_dies_before_during_or_after_the_restore_of_a_grant_loses_nothing(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    restore_dies_at: int,
+) -> None:
+    """A grant binds only after its restore finished, so a death anywhere in the restore
+    repeats the restore instead of leaving a bound attempt on a dirty tree."""
+    round_ = Round(
+        base_pick=0,
+        snapshot=False,
+        ensure_dies_at=_NEVER,
+        discard_dies_at=_NEVER,
+        restore_dies_at=restore_dies_at,
+        leftovers=_LEFTOVERS,
+    )
+    _play(tmp_path_factory, monkeypatch, [round_, round_, round_])
+
+
+# -- replaying ensure and discard across ended generations ---------------------------------
+
+_POOL = tuple(_attempt(name, generation) for name in ("p", "q") for generation in (0, 1))
+
+
+@dataclass(frozen=True)
+class Op:
+    """One request in a replay order: a fresh ensure or discard, or a verbatim repeat."""
+
+    kind: str
+    pick: int
+
+
+_OPS = st.builds(Op, kind=st.sampled_from(["ensure", "discard", "repeat"]), pick=st.integers(0, 50))
+
+
+@dataclass
+class _Model:
+    """What the root's holder and the ended generations must be, by the exclusive-root rules."""
+
+    holder: AttemptRef | None = None
+    bound: set[AttemptRef] = field(default_factory=set)
+    ended: set[AttemptRef] = field(default_factory=set)
+
+    def ensure(self, attempt: AttemptRef) -> ObservationStatus:
+        holder = self.holder
+        if attempt in self.ended:
+            return ObservationStatus.REJECTED
+        if holder is not None and holder.attempt_id != attempt.attempt_id:
+            return ObservationStatus.UNKNOWN
+        if holder is not None and attempt.generation < holder.generation:
+            return ObservationStatus.REJECTED
+        self.holder = attempt
+        self.bound.add(attempt)
+        return ObservationStatus.SUCCEEDED
+
+    def discard(self, attempt: AttemptRef) -> ObservationStatus:
+        if attempt in self.ended:
+            return ObservationStatus.SUCCEEDED
+        if attempt != self.holder:
+            return ObservationStatus.REJECTED
+        self.holder = None
+        self.ended.add(attempt)
+        return ObservationStatus.SUCCEEDED
+
+
+async def _replay(env: WorkspaceEnv, ops: list[Op], crash: RestoreCrash) -> None:
+    """Drive *ops* and check each result, the holder and the tree against the model."""
+    host = Host(env, crash)
+    root = env.hosts[-1].root
+    await _commit_ignore_rules(root)
+    base_tree = _visible_files(root.path)
+    base = revision_ref(cast("str", root.revision))
+    plan = WorkspacePlan(mode=_ROOT, base=base)
+    model = _Model()
+    sent: list[Request] = []
+    for index, op in enumerate(ops):
+        attempt = _POOL[op.pick % len(_POOL)]
+        dirty_names = (*_LEFTOVERS, "candidate.py")
+        _write_files(root.path, dirty_names)
+        before = _visible_files(root.path)
+        was_new_hold = model.holder != attempt
+        if op.kind == "repeat" and sent:
+            # A sealed request answers again without effect: nothing changes.
+            await host.run(sent[op.pick % len(sent)])
+            assert host.holder() == model.holder
+            assert _visible_files(root.path) == before
+            continue
+        if op.kind == "discard" and attempt in model.bound:
+            request: Request = DiscardWorkspace(**_common(attempt, f"op-{index}"), attempt=attempt)
+            expected = model.discard(attempt)
+            released = True
+        elif op.kind == "ensure":
+            request = _ensure(attempt, f"op-{index}", plan)
+            expected = model.ensure(attempt)
+            released = False
+        else:
+            continue
+        sent.append(request)
+        result = await host.run(request)
+        assert _status(result) is expected, (op, attempt, expected)
+        assert host.holder() == model.holder
+        granted = not released and expected is ObservationStatus.SUCCEEDED and was_new_hold
+        # A new grant restores the base; every other request leaves the tree as it was.
+        assert _visible_files(root.path) == (base_tree if granted else before)
+
+
+@settings(
+    max_examples=40, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(ops=st.lists(_OPS, min_size=1, max_size=14))
+def test_an_ended_generation_is_never_granted_again_and_a_stale_release_never_reports_success(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, ops: list[Op]
+) -> None:
+    path = tmp_path_factory.mktemp("replay")
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(path / "operator-state"))
+    crash = RestoreCrash()
+    with open_workspace_env(
+        path,
+        memory_paths=(_ARTIFACT_DIR,),
+        wrap_git=lambda git: cast("GitRepository", CrashingGit(git, crash)),
+    ) as env:
+        asyncio.run(_replay(env, ops, crash))
+        for workspaces in env.hosts:
+            asyncio.run(workspaces.close())
+
+
+def test_a_replayed_ensure_of_an_ended_generation_is_refused_after_a_later_holder_ended(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ends, B takes the root and ends it, then A's ensure is replayed under a new id."""
+    first, second = _attempt("p"), _attempt("q")
+    ops = [
+        Op("ensure", 0),  # p gen 0
+        Op("discard", 0),
+        Op("ensure", 2),  # q gen 0
+        Op("discard", 2),
+        Op("ensure", 0),  # p gen 0 again
+    ]
+    assert _POOL[0] == first
+    assert _POOL[2] == second
+    path = tmp_path_factory.mktemp("replay")
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(path / "operator-state"))
+    crash = RestoreCrash()
+    with open_workspace_env(
+        path,
+        memory_paths=(_ARTIFACT_DIR,),
+        wrap_git=lambda git: cast("GitRepository", CrashingGit(git, crash)),
+    ) as env:
+        asyncio.run(_replay(env, ops, crash))
+        for workspaces in env.hosts:
+            asyncio.run(workspaces.close())
