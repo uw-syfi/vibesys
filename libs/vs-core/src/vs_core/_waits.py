@@ -17,7 +17,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING, assert_never
 
-from .types.attempts import AttemptPhase
+from .types.attempts import AttemptPhase, SnapshotAndRetain
 from .types.common import LifecycleClass, RunStatus, Value
 from .types.evaluation import (
     ContinuationPhase,
@@ -35,6 +35,7 @@ from .types.sessions import (
     EnsureSession,
     ResumeSessionTurn,
     SessionPhase,
+    SnapshotAndRetainRun,
 )
 
 if TYPE_CHECKING:
@@ -53,6 +54,7 @@ class WaitKind(StrEnum):
     RECOVERY_CHECK = "recovery-check"
     OWNED_JOB = "owned-job"
     RELEASE_DEPENDENCY = "release-dependency"
+    YIELD_PUBLICATION = "yield-publication"
 
 
 class Producer(StrEnum):
@@ -311,6 +313,33 @@ def _release_waits(core: CoreState) -> list[Wait]:
     ]
 
 
+def _yield_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
+    """A turn that ended waiting, whose suspension is not yet published.
+
+    Core publishes the suspension when the checkpoint of the turn's workspace comes back, so
+    the wait is produced by that checkpoint request. A yield with no checkpoint request
+    pending or answered would never be published, and the turn would never resume.
+    """
+    found = []
+    for invocation in core.sessions.invocations:
+        if invocation.pending_suspension is None:
+            continue
+        related = [
+            row
+            for row in core.intents.intents
+            if isinstance(row.request, SnapshotAndRetain | SnapshotAndRetainRun)
+            and row.request.invocation == invocation.invocation
+        ]
+        found.append(
+            Wait(
+                waiter=WaitKind.YIELD_PUBLICATION,
+                subject=invocation.invocation.invocation_id.root,
+                producer=_producer(related, outbox),
+            )
+        )
+    return found
+
+
 def _observes(intent: Intent, resource: object) -> bool:
     request = intent.request
     return isinstance(request, ObserveOwnedJob | InspectOwnedJob) and (
@@ -329,6 +358,7 @@ def waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[Wait, ...]
         *_recovery_waits(core),
         *_job_waits(core, pending),
         *_release_waits(core),
+        *_yield_waits(core, pending),
     )
 
 

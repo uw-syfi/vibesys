@@ -100,6 +100,16 @@ def write_turn_authority(ref: InvocationRef) -> RequestId:
     return turn_request_id(ref, "retain-write")
 
 
+def yield_authority(ref: InvocationRef) -> RequestId:
+    """Authority and request identity of the checkpoint that publishes a yielded turn.
+
+    A writer's yield is checkpointed under ``write_turn_authority``; any other turn that
+    waits is checkpointed under this one. It is never the turn's own request, which the
+    checkpoint request would then collide with.
+    """
+    return turn_request_id(ref, "retain-yield")
+
+
 def retains_write_turn(invocation: Invocation) -> bool:
     """Whether the invocation is a conclusive write turn whose workspace edits must be kept.
 
@@ -109,6 +119,24 @@ def retains_write_turn(invocation: Invocation) -> bool:
     observation = invocation.observation
     return (
         invocation.turn.session.access == Access.WRITE_CANDIDATE
+        and observation is not None
+        and observation.terminal
+        and observation.accepted
+        and observation.status == ObservationStatus.SUCCEEDED
+    )
+
+
+def yields_turn(invocation: Invocation) -> bool:
+    """Whether the invocation ended conclusively with a suspension still waiting to be published.
+
+    Core publishes a suspension only behind a checkpoint of the attempt's workspace, whatever
+    the session's access: a read-only turn (a judge) that waits for its own evaluation needs
+    the same checkpoint as a writer. Without it the suspension is never published and the
+    turn is never resumed.
+    """
+    observation = invocation.observation
+    return (
+        invocation.pending_suspension is not None
         and observation is not None
         and observation.terminal
         and observation.accepted

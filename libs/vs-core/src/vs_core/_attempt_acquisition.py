@@ -28,7 +28,7 @@ from ._proofs import (
     operation_for,
 )
 from ._registry import ContractError
-from ._session_scope import retains_write_turn, write_turn_authority
+from ._session_scope import retains_write_turn, write_turn_authority, yield_authority, yields_turn
 from .types.attempts import (
     AttemptAdmitted,
     AttemptChargeRefundRequested,
@@ -1207,9 +1207,18 @@ def _interrupt_checkpoint(
 def _checkpoint_authorized(
     context: AttemptsContext, invocation: Invocation, identity: RequestId
 ) -> bool:
-    """An interruption claim, or the conclusive write turn's own derived authority."""
-    return _interrupt_checkpoint(context, invocation.invocation, identity) or (
-        retains_write_turn(invocation) and identity == write_turn_authority(invocation.invocation)
+    """An interruption claim, the conclusive write turn's own derived authority, or a yield's.
+
+    A turn that yielded is checkpointed under its yield authority, whatever its access,
+    because the checkpoint is what publishes its suspension.
+    """
+    return (
+        _interrupt_checkpoint(context, invocation.invocation, identity)
+        or (
+            retains_write_turn(invocation)
+            and identity == write_turn_authority(invocation.invocation)
+        )
+        or (yields_turn(invocation) and identity == yield_authority(invocation.invocation))
     )
 
 

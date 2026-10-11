@@ -12,7 +12,7 @@ lifecycle fact: a missing or wrong observation shows up as core rejecting it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import ValidationError
 
@@ -28,6 +28,7 @@ from vs_core.api import (
     EventId,
     InvocationRef,
     JobObserved,
+    LifecycleCapability,
     MeasurementSubmissionObserved,
     Observation,
     ObservationStatus,
@@ -37,6 +38,7 @@ from vs_core.api import (
     RequestObserved,
     RestoreRevision,
     ResumeSessionTurn,
+    RunResultProposal,
     SessionObserved,
     SubmitMeasurement,
     TurnObserved,
@@ -54,11 +56,13 @@ from vs_runtime.api.core import (
     ExecutionResult,
     OwnerEvent,
     RequestExecutors,
+    RunControlBridge,
     RunLoopConfig,
     RunStalledError,
     drive_core,
     start_core,
 )
+from vs_runtime.api.infrastructure import create_run_control_channel
 from vs_runtime.api.testing import FakePublicationDelivery
 from vs_sim.api.testing import VirtualClock, run_virtual
 
@@ -395,15 +399,32 @@ LEASE = 1000.0
 MAX_DISPATCHES = 400
 
 
+@dataclass(frozen=True)
+class HostOptions:
+    """How the production host around the strategy is arranged for one run."""
+
+    max_concurrent: int = 1
+    """Requests the loop executes at once."""
+    translator: type[ScriptedExecutors] = ScriptedExecutors
+    """The executors' class; a test whose turns reach a real host service subclasses it."""
+    attach: Callable[[CoreRuntime[Any], VirtualClock], None] | None = None
+    """Hears the shell and clock once they exist."""
+    controlled: bool = False
+    """Give the loop an idle run-control channel, as a product run has, so it looks at the
+    shell every control-poll interval while requests run."""
+    lifecycle: frozenset[LifecycleCapability] = frozenset()
+    """Lifecycle capabilities the run offers its strategy (such as ``suspend``)."""
+
+
 def drive_shell[S: StrategyState](
     strategy: Strategy[S],
     script: Script,
     harness: Harness,
     schemas: Mapping[SchemaRef, type[BaseModel]],
-    *,
-    max_concurrent: int = 1,
+    host_options: HostOptions | None = None,
 ) -> Run:
     """Run ``strategy`` to the end of its run on the production shell and loop."""
+    options = host_options or HostOptions()
     decisions: list[Decision] = []
     recorded = RecordingStrategy(strategy, decisions)
     store = FakeStateStore()
@@ -415,7 +436,7 @@ def drive_shell[S: StrategyState](
         bindings=CoreRuntimeBindings(
             registry=harness.registry,
             executors=_executors(
-                ScriptedExecutors(
+                options.translator(
                     script, lambda: shell.record.envelope.core, harness.registry, schemas, journal
                 )
             ),
@@ -424,12 +445,23 @@ def drive_shell[S: StrategyState](
     if isinstance(script, Admitting):
         script.admit = lambda event, now_at: shell.admit(event, now_at=now_at)
     clock = VirtualClock(1.0)
-    host = CoreRunHost(shell, FakePublicationDelivery(store), clock)
+    if options.attach is not None:
+        options.attach(shell, clock)
+    controls = (
+        RunControlBridge(
+            create_run_control_channel(lambda _transition: None),
+            _NoSteer(),
+            stop_result=RunResultProposal(outcome="cancelled", reason="stop"),
+        )
+        if options.controlled
+        else None
+    )
+    host = CoreRunHost(shell, FakePublicationDelivery(store), clock, controls)
     config = RunLoopConfig(
         host_id="scenario",
         lease_duration=LEASE,
         max_dispatches=MAX_DISPATCHES,
-        max_concurrent=max_concurrent,
+        max_concurrent=options.max_concurrent,
     )
     start_core(host, config)
     halted = None
@@ -446,6 +478,13 @@ def drive_shell[S: StrategyState](
         journal=journal,
         halted=halted,
     )
+
+
+class _NoSteer:
+    """A steer store for a channel that never carries steer text."""
+
+    def put(self, ref: object, text: str) -> None:
+        raise AssertionError((ref, text))
 
 
 def _executors(executor: ScriptedExecutors) -> RequestExecutors:

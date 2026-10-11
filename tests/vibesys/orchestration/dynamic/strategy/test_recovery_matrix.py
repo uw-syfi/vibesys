@@ -24,6 +24,7 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
     reviewed,
 )
 from tests.vibesys.orchestration.dynamic.strategy._run import run_shell
+from tests.vibesys.orchestration.dynamic.strategy._shell import HostOptions
 
 from vs_core.api import ResourceId, SubmitMeasurement
 from vs_core.testing.drive import Retryable, Running, Unknown
@@ -123,7 +124,12 @@ def test_every_registered_kind_is_classified() -> None:
 def _run(kind: str, how: Reply | None, cap: int) -> Faulted:
     deadline = OPEN_DEADLINE if (kind, how) in KNOWN_OPEN else DEADLINE
     script = Faulted(kind, how) if how is not None else Faulted("", Reply.SILENT)
-    run_shell(script, max_concurrent=cap, max_in_flight=WORKSTREAMS, deadline_at=deadline)
+    run_shell(
+        script,
+        host=HostOptions(max_concurrent=cap),
+        max_in_flight=WORKSTREAMS,
+        deadline_at=deadline,
+    )
     return script
 
 

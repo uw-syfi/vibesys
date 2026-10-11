@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.vibesys.orchestration.dynamic.strategy._shell import Run, Script, drive_shell
+from tests.vibesys.orchestration.dynamic.strategy._shell import (
+    HostOptions,
+    Run,
+    Script,
+    drive_shell,
+)
 
 from vibesys.orchestration.dynamic.core_policy.api import (
     reply_schemas,
@@ -16,7 +21,14 @@ from vibesys.orchestration.dynamic.strategy.api import (
     DynamicStrategyState,
     dynamic_operation_registry,
 )
-from vs_core.api import ArtifactId, ArtifactRef, Limits, RevisionRef, RunEnvelope, RunFacts
+from vs_core.api import (
+    ArtifactId,
+    ArtifactRef,
+    Limits,
+    RevisionRef,
+    RunEnvelope,
+    RunFacts,
+)
 from vs_core.testing.drive import Faults, Harness, Trace, drive
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
 
@@ -86,8 +98,8 @@ def run_shell(
     *,
     limits: Limits | None = None,
     live: bool = True,
-    max_concurrent: int = 1,
     deadline_at: float = Harness.deadline_at,
+    host: HostOptions | None = None,
     **overrides: object,
 ) -> Run:
     """Run a fresh strategy to the end of its run on the production shell.
@@ -96,6 +108,7 @@ def run_shell(
     is False.
     """
     settings = config(**overrides)
+    chosen_host = host or HostOptions()
     harness = Harness(
         registry=dynamic_operation_registry(),
         facts=FACTS,
@@ -103,13 +116,14 @@ def run_shell(
         envelope_type=RunEnvelope[DynamicStrategyState],
         requirements=requirements_for(settings),
         deadline_at=deadline_at,
+        lifecycle=chosen_host.lifecycle,
     )
     finished = drive_shell(
         DynamicStrategy(config=settings),
         executors,
         harness,
         reply_schemas(settings),
-        max_concurrent=max_concurrent,
+        chosen_host,
     )
     if live:
         assert_live(finished.journal, finished.core, Budget(retries=harness.limits.max_retries))

@@ -33,6 +33,7 @@ from ._session_scope import (
     scope_active,
     turn_request_id,
     write_turn_authority,
+    yield_authority,
 )
 from ._turn_outcomes import (
     acceptance_signals,
@@ -1324,7 +1325,7 @@ def _terminal_signals(
         if claim is not None
         else write_turn_authority(event.invocation)
         if retains_write_turn(invocation)
-        else observation.request_id
+        else yield_authority(event.invocation)
     )
     if owner is not None:
         attempt = AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)

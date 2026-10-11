@@ -34,7 +34,9 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
+    AttemptPhase,
     ClockAdvanced,
+    ContinuationPhase,
     ControlId,
     ControlInput,
     CoreState,
@@ -42,6 +44,8 @@ from vs_core.api import (
     RunControlEvent,
     RunResultProposal,
     RunStatus,
+    SessionPhase,
+    orphan_waits,
     project,
 )
 from vs_runtime._core_loop import LeaseUnavailableError
@@ -564,6 +568,12 @@ def _noop() -> None:
 
 
 def _describe(core: CoreState, notes: Sequence[str]) -> str:
+    """Why nothing can proceed: the open intents, then every wait nothing will end.
+
+    A stalled run always names a cause. When core holds no open intent and no orphaned wait,
+    the strategy still has unfinished work core is not waiting on, so the report lists the
+    attempts, sessions and continuations that have not ended.
+    """
     open_intents = [
         f"{intent.request.kind}:{intent.phase.value}"
         for intent in core.intents.intents
@@ -582,6 +592,34 @@ def _describe(core: CoreState, notes: Sequence[str]) -> str:
     ]
     if waiting:
         text += f"; attempts waiting for a release {waiting}"
+    orphans = [f"{wait.waiter.value} {wait.subject}" for wait in orphan_waits(core)]
+    if orphans:
+        text += f"; waits nothing will end {orphans}"
+    if not open_intents and not waiting and not orphans:
+        text += f"; {_unfinished(core)}"
     if notes:
         text += f"; {'; '.join(notes)}"
     return text
+
+
+def _unfinished(core: CoreState) -> str:
+    """What has not ended when core waits on nothing: the work left to the strategy."""
+    attempts = [
+        f"{row.attempt_id.root} {row.phase.value}"
+        for row in core.attempts.attempts
+        if row.phase != AttemptPhase.TERMINAL
+    ]
+    sessions = [
+        f"{row.spec.session_id.root} {row.phase.value}"
+        for row in core.sessions.sessions
+        if row.phase not in (SessionPhase.TERMINAL, SessionPhase.IDLE)
+    ]
+    continuations = [
+        f"{row.continuation_id.root} {row.phase.value}"
+        for row in core.evaluation.continuations
+        if row.phase in (ContinuationPhase.WAITING, ContinuationPhase.AUTHORIZED)
+    ]
+    return (
+        "core waits on nothing, so the strategy is the one that has stopped proposing; "
+        f"unfinished attempts {attempts}, sessions {sessions}, continuations {continuations}"
+    )

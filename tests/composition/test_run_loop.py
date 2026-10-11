@@ -335,11 +335,26 @@ async def test_a_run_nothing_can_wake_is_reported_stalled(tmp_path: Path) -> Non
             await drive_core(host, _config())
 
 
+async def test_a_stalled_run_with_no_open_intent_still_names_what_is_unfinished(
+    tmp_path: Path,
+) -> None:
+    """``open intents []`` is never the whole report: core says it waits on nothing."""
+    with open_skeleton_world(tmp_path, INERT) as world:
+        _, host = _host(world, ProbedRunClock(clock_from(1.0)))
+        start_core(host, _config())
+        with pytest.raises(
+            RunStalledError,
+            match=r"open intents \[\]; core waits on nothing, so the strategy is the one that has "
+            r"stopped proposing; unfinished attempts \[.*\], sessions \[.*\], continuations \[",
+        ):
+            await drive_core(host, _config())
+
+
 async def test_a_stalled_run_reports_what_the_host_knows_about_the_cause(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path, INERT) as world:
         _, host = _host(world, ProbedRunClock(clock_from(1.0)))
         start_core(host, _config())
-        with pytest.raises(RunStalledError, match=r"open intents \[\]; a submission nobody told"):
+        with pytest.raises(RunStalledError, match=r"open intents \[\].*; a submission nobody told"):
             await drive_core(host, _config(), stall_notes=lambda: ["a submission nobody told"])
 
 
