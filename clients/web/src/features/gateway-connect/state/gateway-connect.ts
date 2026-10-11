@@ -15,12 +15,16 @@ import {
 
 const CANCELLED_ERROR = 'Gateway connection cancelled. Retry when ready.';
 
+export type GatewayConnectFeedback =
+  | {readonly kind: 'failure'; readonly message: string}
+  | {readonly kind: 'cancelled'; readonly message: string};
+
 export type GatewayConnectState =
   | {
       readonly kind: 'editing';
       readonly page: string;
       readonly url: string;
-      readonly error: string | null;
+      readonly feedback: GatewayConnectFeedback | null;
       /** A validated capability kept for Retry, but not rendered into an initially blank field. */
       readonly retryTarget: GatewayBootstrapTarget | null;
       readonly next: number;
@@ -59,9 +63,16 @@ export type GatewayConnectRequest =
   | {readonly kind: 'cancel-bootstrap'; readonly token: number}
   | {readonly kind: 'connected'; readonly connection: GatewayConnection};
 
-/** The form on `page` (the capability-free page URL), showing `error` from a refused launch. */
+/** The form on `page` (the capability-free page URL), showing a refused launch as failure feedback. */
 export function gatewayConnectInitial(page: string, error: string | null): GatewayConnectState {
-  return {kind: 'editing', page, url: '', error, retryTarget: null, next: 1};
+  return {
+    kind: 'editing',
+    page,
+    url: '',
+    feedback: error === null ? null : {kind: 'failure', message: error},
+    retryTarget: null,
+    next: 1,
+  };
 }
 
 export function gatewayConnectStep(
@@ -92,7 +103,7 @@ export function gatewayConnectInvariants(state: GatewayConnectState): string[] {
   if (state.kind === 'editing' && state.retryTarget?.bootstrapUrl === '') {
     problems.push('retry without a capability');
   }
-  if (state.kind !== 'editing' && 'error' in state) problems.push('error outside editing');
+  if (state.kind !== 'editing' && 'feedback' in state) problems.push('feedback outside editing');
   return problems;
 }
 
@@ -119,7 +130,7 @@ function edit(
   value: string,
 ): Step<GatewayConnectState, GatewayConnectRequest> {
   if (state.kind !== 'editing') return only(state);
-  return only({...state, url: value, error: null, retryTarget: null});
+  return only({...state, url: value, feedback: null, retryTarget: null});
 }
 
 function submit(state: GatewayConnectState): Step<GatewayConnectState, GatewayConnectRequest> {
@@ -129,7 +140,7 @@ function submit(state: GatewayConnectState): Step<GatewayConnectState, GatewayCo
     if (target.bootstrapUrl === null) {
       return only({
         ...state,
-        error: 'The gateway URL has no capability token',
+        feedback: {kind: 'failure', message: 'The gateway URL has no capability token'},
         retryTarget: null,
       });
     }
@@ -137,7 +148,10 @@ function submit(state: GatewayConnectState): Step<GatewayConnectState, GatewayCo
   } catch (reason) {
     return only({
       ...state,
-      error: reason instanceof Error ? reason.message : String(reason),
+      feedback: {
+        kind: 'failure',
+        message: reason instanceof Error ? reason.message : String(reason),
+      },
       retryTarget: null,
     });
   }
@@ -162,7 +176,7 @@ function cancel(state: GatewayConnectState): Step<GatewayConnectState, GatewayCo
       kind: 'editing',
       page: state.page,
       url: state.url,
-      error: CANCELLED_ERROR,
+      feedback: {kind: 'cancelled', message: CANCELLED_ERROR},
       retryTarget: state.target,
       next: state.next,
     },
@@ -182,7 +196,7 @@ function bootstrapReply(
       kind: 'editing',
       page,
       url,
-      error: result.error,
+      feedback: {kind: 'failure', message: result.error},
       retryTarget: target,
       next,
     });

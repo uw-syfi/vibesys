@@ -79,7 +79,10 @@ describe('gatewayConnectStep', () => {
     expect(step.requests).toEqual([]);
     expect(step.state).toMatchObject({
       kind: 'editing',
-      error: 'The gateway URL must include its capability token',
+      feedback: {
+        kind: 'failure',
+        message: 'The gateway URL must include its capability token',
+      },
     });
   });
 
@@ -110,6 +113,32 @@ describe('gatewayConnectStep', () => {
     ]);
   });
 
+  test('keeps a failed exchange error until the operator edits or retries it', () => {
+    const typed = gatewayConnectStep(gatewayConnectInitial(PAGE, null), {
+      type: 'edit',
+      value: 'http://127.0.0.1:8765/?token=secret',
+    }).state;
+    const submitted = gatewayConnectStep(typed, {type: 'submit'}).state;
+    const failed = gatewayConnectStep(submitted, {
+      type: 'bootstrap-reply',
+      token: 1,
+      result: {ok: false, error: 'Gateway rejected the capability (HTTP 403)'},
+    }).state;
+
+    expect(failed).toMatchObject({
+      kind: 'editing',
+      feedback: {kind: 'failure', message: 'Gateway rejected the capability (HTTP 403)'},
+    });
+    expect(gatewayConnectStep(failed, {type: 'retry'}).state).toMatchObject({
+      kind: 'connecting',
+    });
+    expect(gatewayConnectStep(failed, {type: 'edit', value: 'replacement'}).state).toMatchObject({
+      kind: 'editing',
+      feedback: null,
+      retryTarget: null,
+    });
+  });
+
   test('cancels one attempt, drops its late reply, and retries the retained target', () => {
     const typed = gatewayConnectStep(gatewayConnectInitial(PAGE, null), {
       type: 'edit',
@@ -121,7 +150,10 @@ describe('gatewayConnectStep', () => {
     expect(cancelled.requests).toEqual([{kind: 'cancel-bootstrap', token: 1}]);
     expect(cancelled.state).toMatchObject({
       kind: 'editing',
-      error: 'Gateway connection cancelled. Retry when ready.',
+      feedback: {
+        kind: 'cancelled',
+        message: 'Gateway connection cancelled. Retry when ready.',
+      },
       retryTarget: {bootstrapUrl: 'http://127.0.0.1:8765/?token=secret'},
     });
     const late = gatewayConnectStep(cancelled.state, {
