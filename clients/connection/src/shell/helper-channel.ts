@@ -82,6 +82,15 @@ const DEADLINE_SLACK_MS = 2_000;
 const STDERR_TAIL = 8192;
 /** How many of the bootstrap's lines a channel keeps; it prints one or two. */
 const BOOTSTRAP_LINES = 16;
+/**
+ * The largest line this channel buffers before a newline ends it. A control-channel reply or a
+ * bootstrap line is far below this, so a remainder this large means the helper has stopped
+ * delimiting lines, not that a real message is this big. Mirrors `NewlineFramer`'s
+ * `MAX_REMAINDER_CHARS` (`@vibesys/transport`), the same bound one hop downstream once a run
+ * channel is relaying: it exists to bound memory against an endless chunk, not to police message
+ * size.
+ */
+const MAX_BUFFERED_LINE_BYTES = 4 * 1024 * 1024;
 
 interface Pending {
   /** The only successful reply discriminator this request accepts. */
@@ -231,6 +240,14 @@ export class HelperChannel implements AsyncDisposable {
       this.#buffer = this.#buffer.subarray(newline + 1);
       this.#line(line);
       newline = this.#buffer.indexOf(0x0a);
+    }
+    if (this.#buffer.length > MAX_BUFFERED_LINE_BYTES) {
+      this.#fail(
+        new ConnectionError(
+          'incompatible',
+          `the host helper wrote more than ${MAX_BUFFERED_LINE_BYTES} bytes without a newline`,
+        ),
+      );
     }
   }
 
