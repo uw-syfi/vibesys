@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,13 +23,18 @@ from vs_sandbox.api.skypilot import (
     SkyPilotJobStateError,
     SkyPilotOutputError,
     SkyPilotTimeoutError,
+    SubprocessCommandRunner,
     build_task_document,
     stable_cluster_name,
 )
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+
+    from vs_sandbox.api.skypilot import SkyPilotCommandProcess
+    from vs_sim.api import Condition, Event, Lock, Worker
 
 
 def _resources(**overrides: object) -> ResolvedSkyPilotResources:
@@ -82,8 +88,330 @@ class FakeCommandRunner:
         return ProcessResult(normalized, result.returncode, result.stdout, result.stderr)
 
 
+class _StuckDrainWorker:
+    """A drain that consumes its finite join budget but never completes."""
+
+    def __init__(self, threads: _StuckDrainThreads, name: str) -> None:
+        self._threads = threads
+        self.name = name
+        self.join_timeouts: list[float | None] = []
+
+    def is_alive(self) -> bool:
+        return not self._threads.drains_released
+
+    def join(self, timeout: float | None = None) -> None:
+        self.join_timeouts.append(timeout)
+        if self.is_alive() and timeout is not None:
+            self._threads.advance_to(self._threads.now() + timeout)
+
+
+class _StuckDrainThreads:
+    """A virtual clock whose output workers stay blocked forever."""
+
+    def __init__(self) -> None:
+        self._threads = SimThreads()
+        self.workers: list[_StuckDrainWorker] = []
+        self.drains_released = False
+
+    def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
+        del target, daemon
+        worker = _StuckDrainWorker(self, name)
+        self.workers.append(worker)
+        return worker
+
+    def lock(self) -> Lock:
+        return self._threads.lock()
+
+    def rlock(self) -> Lock:
+        return self._threads.rlock()
+
+    def condition(self, lock: Lock | None = None) -> Condition:
+        return self._threads.condition(lock)
+
+    def event(self) -> Event:
+        return self._threads.event()
+
+    def sleep(self, seconds: float) -> None:
+        self.advance_to(self.now() + seconds)
+
+    def now(self) -> float:
+        return self._threads.now()
+
+    def advance_to(self, instant: float) -> None:
+        self._threads.advance_to(instant)
+
+    def release_drains(self) -> None:
+        self.drains_released = True
+
+
+class _StuckSkyPilotProcess:
+    """A process whose leader and inherited output pipes never report completion."""
+
+    def __init__(self, threads: _StuckDrainThreads) -> None:
+        self._threads = threads
+        self.stdout = StringIO()
+        self.stderr = StringIO()
+        self.wait_timeouts: list[float | None] = []
+        self.group_kills = 0
+
+    def wait(self, timeout: float | None) -> int:
+        self.wait_timeouts.append(timeout)
+        if timeout is None:
+            raise AssertionError
+        if len(self.wait_timeouts) > 1:
+            self._threads.advance_to(self._threads.now() + timeout)
+        raise subprocess.TimeoutExpired(("sky",), timeout)
+
+    def kill_group(self) -> None:
+        self.group_kills += 1
+
+
+class _NormalSkyPilotProcess(_StuckSkyPilotProcess):
+    """A leader that exits normally while descendants retain both pipes."""
+
+    def wait(self, timeout: float | None) -> int:
+        self.wait_timeouts.append(timeout)
+        return 0
+
+    def kill_group(self) -> None:
+        super().kill_group()
+        self._threads.release_drains()
+
+
+class _FakeSkyPilotProcessLauncher:
+    def __init__(self, process: SkyPilotCommandProcess) -> None:
+        self.process = process
+
+    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> SkyPilotCommandProcess:
+        del argv, cwd
+        return self.process
+
+
+class _RecordingThreads(OsThreads):
+    """OS synchronization with observable worker ownership."""
+
+    def __init__(self) -> None:
+        self.workers: list[Worker] = []
+
+    def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
+        worker = super().spawn(target, name=name, daemon=daemon)
+        self.workers.append(worker)
+        return worker
+
+
+class _ControlledJoinWorker:
+    """A real worker whose finite joins expire immediately on a virtual clock."""
+
+    def __init__(self, worker: Worker, threads: _ControlledJoinThreads) -> None:
+        self._worker = worker
+        self._threads = threads
+
+    @property
+    def name(self) -> str:
+        return self._worker.name
+
+    def is_alive(self) -> bool:
+        return self._worker.is_alive()
+
+    def join(self, timeout: float | None = None) -> None:
+        if timeout is None or not self.name.endswith("-sink"):
+            self._worker.join()
+            return
+        self._threads.advance(timeout)
+
+
+class _ControlledJoinThreads(OsThreads):
+    """Run targets for real while making delivery cleanup deadlines deterministic."""
+
+    def __init__(self) -> None:
+        self.workers: list[_ControlledJoinWorker] = []
+        self._now = 0.0
+
+    def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
+        worker = _ControlledJoinWorker(
+            super().spawn(target, name=name, daemon=daemon),
+            self,
+        )
+        self.workers.append(worker)
+        return worker
+
+    def now(self) -> float:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now += seconds
+
+
+class _BlockingCancellableSink:
+    """A bridge-shaped sink whose active transport write ends on cancellation."""
+
+    def __init__(self, threads: OsThreads) -> None:
+        self.started = threads.event()
+        self.cancelled = threads.event()
+        self.returned = threads.event()
+
+    def __call__(self, _: str) -> None:
+        self.started.set()
+        self.cancelled.wait()
+        self.returned.set()
+
+    def cancel(self) -> None:
+        self.cancelled.set()
+
+
+class _BlockingOrdinarySink:
+    """A finite ordinary callback controlled entirely by synchronization events."""
+
+    def __init__(self, threads: OsThreads) -> None:
+        self.started = threads.event()
+        self.release = threads.event()
+        self.returned = threads.event()
+
+    def __call__(self, _: str) -> None:
+        self.started.set()
+        self.release.wait()
+        self.returned.set()
+
+
+class _ExitedSkyPilotProcess:
+    """A completed command with one captured stdout segment."""
+
+    def __init__(self) -> None:
+        self.stdout = StringIO("output\n")
+        self.stderr = StringIO()
+        self.group_kills = 0
+
+    def wait(self, timeout: float | None) -> int:
+        del timeout
+        return 0
+
+    def kill_group(self) -> None:
+        self.group_kills += 1
+
+
+class _TimeoutAfterSinkStartsProcess:
+    """A command that times out only after delivery is blocked in its sink."""
+
+    def __init__(self, sink: _BlockingCancellableSink) -> None:
+        self._sink = sink
+        self.stdout = StringIO("output\n")
+        self.stderr = StringIO()
+        self.waits = 0
+        self.group_kills = 0
+
+    def wait(self, timeout: float | None) -> int:
+        self.waits += 1
+        if self.waits == 1:
+            self._sink.started.wait()
+            assert timeout is not None
+            raise subprocess.TimeoutExpired(("sky",), timeout)
+        return -9
+
+    def kill_group(self) -> None:
+        self.group_kills += 1
+
+
 def _result(returncode: int = 0, stdout: str = "", stderr: str = "") -> ProcessResult:
     return ProcessResult(("sky",), returncode, stdout, stderr)
+
+
+def test_subprocess_timeout_kills_the_group_and_bounds_all_cleanup_waits() -> None:
+    threads = _StuckDrainThreads()
+    process = _StuckSkyPilotProcess(threads)
+    runner = SubprocessCommandRunner(
+        threads,
+        processes=_FakeSkyPilotProcessLauncher(process),
+        cleanup_timeout=7,
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        runner.run(("sky", "status"), timeout=3)
+
+    assert caught.value.timeout == 3
+    assert process.group_kills == 1
+    assert process.wait_timeouts == [3, 7]
+    assert [worker.join_timeouts for worker in threads.workers] == [[0], [0]]
+    assert threads.now() == 8
+
+
+def test_normal_exit_with_stuck_drains_reaps_workers_and_closes_pipes_after_group_kill() -> None:
+    threads = _StuckDrainThreads()
+    process = _NormalSkyPilotProcess(threads)
+    runner = SubprocessCommandRunner(
+        threads,
+        processes=_FakeSkyPilotProcessLauncher(process),
+        cleanup_timeout=7,
+    )
+
+    with pytest.raises(SkyPilotCLIError, match="process group was killed"):
+        runner.run(("sky", "status"))
+
+    assert process.group_kills == 1
+    assert process.wait_timeouts == [None, 7]
+    assert [worker.join_timeouts for worker in threads.workers] == [[7, 7], [0, 7]]
+    assert all(not worker.is_alive() for worker in threads.workers)
+    assert process.stdout.closed
+    assert process.stderr.closed
+    assert threads.now() == 8
+
+
+@pytest.mark.timeout(10)
+def test_timeout_cancels_blocked_bridge_sink_without_retaining_drain_workers_or_pipes() -> None:
+    threads = _RecordingThreads()
+    sink = _BlockingCancellableSink(threads)
+    process = _TimeoutAfterSinkStartsProcess(sink)
+    runner = SubprocessCommandRunner(
+        threads,
+        processes=_FakeSkyPilotProcessLauncher(process),
+        cleanup_timeout=1,
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        runner.run(("sky", "status"), timeout=0, stdout_sink=sink)
+
+    assert sink.cancelled.is_set()
+    assert sink.returned.is_set()
+    assert process.group_kills == 1
+    assert process.stdout.closed
+    assert process.stderr.closed
+    assert all(not worker.is_alive() for worker in threads.workers)
+
+
+@pytest.mark.timeout(10)
+def test_success_waits_for_slow_ordinary_sink_without_abandoning_a_delivery_worker() -> None:
+    runner_threads = _ControlledJoinThreads()
+    control_threads = OsThreads()
+    sink = _BlockingOrdinarySink(control_threads)
+    process = _ExitedSkyPilotProcess()
+    runner = SubprocessCommandRunner(
+        runner_threads,
+        processes=_FakeSkyPilotProcessLauncher(process),
+        cleanup_timeout=0,
+    )
+    results: list[ProcessResult] = []
+    failures: list[SkyPilotCLIError] = []
+
+    def invoke() -> None:
+        try:
+            results.append(runner.run(("sky", "status"), stdout_sink=sink))
+        except SkyPilotCLIError as exc:
+            failures.append(exc)
+
+    call = control_threads.spawn(invoke, name="test-command-runner", daemon=True)
+    sink.started.wait()
+    try:
+        assert len(runner_threads.workers) == 2
+        assert all(not worker.is_alive() for worker in runner_threads.workers)
+    finally:
+        sink.release.set()
+        call.join()
+        for worker in runner_threads.workers:
+            worker.join()
+
+    assert not failures
+    assert sink.returned.is_set()
+    assert process.group_kills == 0
+    assert results == [ProcessResult(("sky", "status"), 0, "output\n", "")]
 
 
 def test_stable_name_uses_effective_resources_not_profile_alias() -> None:
