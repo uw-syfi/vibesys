@@ -1,6 +1,6 @@
 /**
  * The host panel's store: one host's checkout and the checkout form, plus sign-in. Its runs are
- * not asked for: the main process pushes them (`lists.ts`).
+ * not asked for: the main process pushes them (`@vibesys/feature-recent-runs`).
  *
  * The panel always names the host it shows, and every reply carries the token of the request it
  * answers: a reply for a host no longer shown, or for a request a newer one replaced, is dropped.

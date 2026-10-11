@@ -2,7 +2,7 @@
 
 import {Button, Dialog} from '@vibesys/ui';
 import type {JSX, KeyboardEvent} from 'react';
-import {type PickerAction, type PickerState, pickerChoices} from '../state/picker.js';
+import {type PickerAction, type PickerState, pickerChoices} from '../../state/picker.js';
 
 function emptyText(state: Extract<PickerState, {kind: 'open'}>): string {
   return state.aliases.kind === 'loading' ? 'Reading ~/.ssh/config…' : 'No matching hosts.';
