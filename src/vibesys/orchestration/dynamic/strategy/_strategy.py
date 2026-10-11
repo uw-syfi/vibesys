@@ -33,6 +33,7 @@ from vibesys.orchestration.dynamic.strategy._state import (
     RunPhase,
 )
 from vs_core.api import (
+    AdoptionFailed,
     AdoptionResult,
     AttemptExhausted,
     AttemptReady,
@@ -147,6 +148,8 @@ class DynamicStrategy:
             return state.model_copy(update={"stopping": stop})
         if isinstance(event, AdoptionResult):
             return run.on_adoption(state, event)
+        if isinstance(event, AdoptionFailed):
+            return run.on_adoption_failed(state, event)
         if isinstance(event, RunEnded):
             return state.model_copy(update={"phase": RunPhase.FINISHED})
         return state
