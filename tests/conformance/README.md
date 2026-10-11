@@ -46,8 +46,8 @@ tests/conformance/
 | Reader | Language | Lands in | Uses |
 | --- | --- | --- | --- |
 | corpus gate | Node (`clients/scripts/check_conformance_corpus.mjs`) | 888a (this) | validates coverage, structure, decision anchoring, and the execution partition |
-| event fold runner | TypeScript (`clients/core-state/src/conformance.test.ts`) | follow-up to 888a | folds every shared event fixture through `core-state`, both batched and incrementally |
-| client scenario runner | TypeScript | 888b | replays connection scenarios through the client transport and `core-state` |
+| event fold runner | TypeScript (`clients/run-state/src/conformance.test.ts`) | follow-up to 888a | folds every shared event fixture through `run-state`, both batched and incrementally |
+| client scenario runner | TypeScript | 888b | replays connection scenarios through the client transport and `run-state` |
 | server scenario suite | Python (`tests/conformance/test_server_transports.py`) | follow-up to #811 | replays the bootstrap, control-path, and simultaneous two-client scenarios on every transport each declares |
 | relay runner | Python (`tests/e2e/test_relay.py`) | #1785 | replays the Unix bootstrap, control-path, and tail-overflow scenarios through a real host helper's run channel |
 | host helper runner | Python (`tests/conformance/test_host_helper.py`, `tests/e2e/test_host_helper.py`) | #1887 | replays the `helper-*` scenarios against the helper in process and over stdio against a real helper command (`VIBESYS_HOST_HELPER_COMMAND` points it at another implementation) |
@@ -79,7 +79,7 @@ From the repository root:
 ```bash
 node clients/scripts/check_conformance_corpus.mjs       # one-shot check, prints violations and exits non-zero
 pnpm --dir clients test:conformance                     # the same check under node --test, with failure-mode tests
-pnpm --dir clients --filter @vibesys/core-state test    # folds the shared event fixtures through core state
+pnpm --dir clients --filter @vibesys/run-state test    # folds the shared event fixtures through core state
 uv run pytest -q tests/conformance/test_server_transports.py  # exercises both server transports
 ```
 

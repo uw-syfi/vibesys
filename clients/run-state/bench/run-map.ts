@@ -6,7 +6,7 @@ const runMapModule =
   Bun.env.RUN_MAP_BENCH_MODULE ?? new URL('../src/run-map.ts', import.meta.url).pathname;
 const {applyRunMapEvent} = (await import(runMapModule)) as typeof import('../src/run-map.js');
 const coreStateModule =
-  Bun.env.RUN_MAP_BENCH_CORE_MODULE ?? new URL('../src/core-state.ts', import.meta.url).pathname;
+  Bun.env.RUN_MAP_BENCH_CORE_MODULE ?? new URL('../src/index.ts', import.meta.url).pathname;
 const {initialCoreState, reduceEvent, reduceEventBatch} = (await import(
   coreStateModule
 )) as typeof import('../src/index.js');

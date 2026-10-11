@@ -286,7 +286,7 @@ re-runnable** repro before writing it up.
    - Same wrong pixels when frozen with `/pause`, no log anomaly → **render/UI**
      state (`clients/tui/src/ui/**` or `session-model`/`session-controller`).
    - Wrong data present but formatted correctly (a count, a status, a selection
-     surviving refetch) → **core-state** fold or a **backend projection**
+     surviving refetch) → **run-state** fold or a **backend projection**
      (`src/vibesys/server/**`), not rendering.
    - Traceback / `protocol_error` / malformed frame in `backend.log`, or the
      event stream and the persisted record disagree → **transport framing**
@@ -346,7 +346,7 @@ a few packages with one legal dependency direction, checked by
 
 ```
 @vibesys/contracts  <-  @vibesys/transport  <-  @vibesys/transport-node  <-  @vibesys/tui
-@vibesys/contracts  <-  @vibesys/core-state  <-  @vibesys/tui
+@vibesys/contracts  <-  @vibesys/run-state  <-  @vibesys/tui
 ```
 
 Ownership (put the fix where the state lives, per `tui-architecture.md`):
@@ -354,21 +354,21 @@ Ownership (put the fix where the state lives, per `tui-architecture.md`):
 | Symptom | Owner | Where |
 | --- | --- | --- |
 | Protocol types, socket framing, connection lifecycle, requests, event subscription | `transport`, `transport-node` | `clients/transport/**`, `clients/transport-node/**` |
-| Status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics (a pure fold over snapshot + ordered events) | `core-state` | `clients/core-state/**` |
+| Status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics (a pure fold over snapshot + ordered events) | `run-state` | `clients/run-state/**` |
 | Focus, selection, layout, zoom, theme, modals, drafts, query progress; widgets, rendering, key/mouse | `tui` | `clients/tui/src/**`, `ui/**` |
 | Event/query payloads, run state, projection into experiments/design/rounds, the optimization loop | Python backend | `src/vibesys/server/**`, `src/vibesys/loops/**` |
 
 Rules that follow from this and from AGENTS.md and the `software-design` skill:
 - **Backend events are the frontend contract.** Emit semantic fields from the
   backend; do formatting, truncation, color, and layout in the consumer. Do not
-  move presentation into `server/**`, and do not teach `core-state` about themes,
+  move presentation into `server/**`, and do not teach `run-state` about themes,
   layout, or OpenTUI (it has no Node/renderer dependency).
 - **Unidirectional flow.** A frontend action may send a command, but must not
   optimistically mutate backend-authoritative state; the resulting backend event
   does. Do not add a reverse or cross-package relative import to reach a value;
   thread it through the owning package's public entry point.
 - **Fold vs render.** A selection-survives-refetch, count, or status bug belongs
-  in the `core-state` fold (keyed by id, clock passed in explicitly), not in a
+  in the `run-state` fold (keyed by id, clock passed in explicitly), not in a
   widget. A misaligned border, wrong breakpoint, or focus-indicator bug belongs
   in `clients/tui/src/ui/**`.
 
@@ -390,7 +390,7 @@ duplication or clarifies data flow**, keep it in a separate commit from the bug
 fix, and never let it cross a package boundary the architecture check forbids.
 Prefer extending the canonical module over adding a compatibility shim.
 
-**Add a regression test at the layer that owned the bug.** core-state fold test
+**Add a regression test at the layer that owned the bug.** run-state fold test
 for a projection/selection bug; a `*.test.ts` render/app/controller test in
 `clients/tui/src/**` for a UI bug; a Python `tests/**` test for a
 backend/loop/projection bug. The test should fail on the unfixed code and pass

@@ -73,7 +73,7 @@ interface SnapshotResponse {
  * now, and the tail from that event on, which is what terminates the run.
  * `null` when the batch does not end the run.
  *
- * Only `events` is rewritten. `core-state` folds events in order and skips one
+ * Only `events` is rewritten. `@vibesys/run-state` folds events in order and skips one
  * whose sequence it has already passed, so the prefix advances the cursor to
  * its own last event and the withheld tail still folds when it arrives.
  */

@@ -19,13 +19,13 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "core state changes reach downstream TypeScript packages"
-paths = ["clients/core-state/src/core-state.test.ts"]
+name = "run fold changes reach downstream TypeScript packages"
+paths = ["clients/run-state/src/reduce.test.ts"]
 jobs = ["tui"]
 [cases.collections]
 native_languages = []
 native_targets = []
-pnpm_packages = ["@vibesys/app-desktop-renderer", "@vibesys/app-web", "@vibesys/core-state", "@vibesys/desktop", "@vibesys/entities", "@vibesys/feature-gateway-connect", "@vibesys/feature-hosts", "@vibesys/feature-recent-runs", "@vibesys/feature-replay", "@vibesys/feature-run-control", "@vibesys/feature-run-view", "@vibesys/feature-start-run", "@vibesys/ipc", "@vibesys/tui"]
+pnpm_packages = ["@vibesys/app-web", "@vibesys/feature-run-view", "@vibesys/run-session", "@vibesys/run-state", "@vibesys/tui"]
 
 [[cases]]
 name = "evaluator SDK changes reach consumers"
@@ -61,7 +61,7 @@ native_targets = [
   "resources/evaluators/unordered-map/native_runner",
   "sdk/vs-evaluator/vseval",
 ]
-pnpm_packages = ["@vibesys/app-desktop-renderer", "@vibesys/app-web", "@vibesys/contracts", "@vibesys/core-state", "@vibesys/desktop", "@vibesys/entities", "@vibesys/feature-gateway-connect", "@vibesys/feature-hosts", "@vibesys/feature-recent-runs", "@vibesys/feature-replay", "@vibesys/feature-run-control", "@vibesys/feature-run-view", "@vibesys/feature-start-run", "@vibesys/ipc", "@vibesys/transport", "@vibesys/transport-node", "@vibesys/tui", "@vibesys/ui"]
+pnpm_packages = ["@vibesys/app-desktop-renderer", "@vibesys/app-web", "@vibesys/contracts", "@vibesys/desktop", "@vibesys/feature-gateway-connect", "@vibesys/feature-hosts", "@vibesys/feature-recent-runs", "@vibesys/feature-replay", "@vibesys/feature-run-control", "@vibesys/feature-run-view", "@vibesys/feature-start-run", "@vibesys/hosts", "@vibesys/ipc", "@vibesys/run-session", "@vibesys/run-state", "@vibesys/runs", "@vibesys/store", "@vibesys/transport", "@vibesys/transport-node", "@vibesys/tui", "@vibesys/ui"]
 
 [[cases]]
 name = "test isolation policy changes reach Python and TypeScript checks"

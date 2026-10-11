@@ -59,7 +59,7 @@ export const REQUEST_POLICIES: Readonly<Record<string, RequestPolicy>> = {
 /**
  * The subset of `AbortSignal` this client uses, declared structurally rather
  * than by referencing the global. The neutral packages that re-export
- * `RequestOptions` (core-state) compile without DOM or node lib types in scope,
+ * `RequestOptions` compile without DOM or node lib types in scope,
  * so the signal type must not depend on either; a real `AbortSignal` satisfies
  * this interface.
  */

@@ -22,7 +22,7 @@ The TypeScript frontend packages have one allowed dependency direction (the full
 ```text
 @vibesys/contracts <- @vibesys/transport <- @vibesys/transport-node <- @vibesys/tui
 @vibesys/contracts <- @vibesys/transport <- @vibesys/app-web
-@vibesys/contracts <- @vibesys/core-state <- @vibesys/tui, @vibesys/app-web
+@vibesys/contracts <- @vibesys/run-state <- @vibesys/tui, @vibesys/app-web
 ```
 
 `@vibesys/tui` and `@vibesys/app-web` may depend on the lower layers. They never depend on each other,
@@ -31,7 +31,7 @@ and reverse imports and cross-package relative imports are forbidden and checked
 
 Dependency-cruiser parses and resolves the TypeScript graph for dependency direction, cycles,
 unresolvable or undeclared imports, public package entry points, and the runtime-independence rules
-for `core-state`. `tsconfig.architecture.json` maps workspace package names to their public source
+for `run-state`. `tsconfig.architecture.json` maps workspace package names to their public source
 entry points, so the check does not depend on prior builds. A small manifest check covers forbidden
 workspace dependencies that are declared but unused, because they do not appear in a source
 dependency graph. Rule regressions run as part of `pnpm test:clients`.
@@ -64,7 +64,7 @@ therefore gated on its first commit. Beyond the package direction, it enforces:
 | --- | --- |
 | Generated protocol types and their validator | `contracts` |
 | Framing, connection lifecycle, requests, event subscription | `transport` (Unix socket: `transport-node`) |
-| Run identity, status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics | `core-state` |
+| Run identity, status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics | `run-state` |
 | Focus, selection, layout, zoom, theme, modals, drafts, query progress | `tui` |
 | Terminal widgets, rendering, keyboard and mouse events | `tui` |
 | Browser bindings, presentation, and browser-only interaction state | `web` |
@@ -90,10 +90,10 @@ those values before the replacement run is presented.
 Only backend messages change core state. A frontend action may send a command, but the command does
 not optimistically change backend-authoritative state. The resulting backend event does.
 
-The web client is a presentation adapter over `core-state`. Its React external-store binding owns
+The web client is a presentation adapter over `run-state`. Its React external-store binding owns
 subscriptions and browser presentation state; it does not fold events or copy TUI state logic.
 Recorded replay fixtures are served by the development harness and folded through the same
-`core-state` reducer used by live clients.
+`run-state` reducer used by live clients.
 
 The browser launch path keeps the server composition shared. `vibesys --web` starts the existing
 Unix adapter and a loopback WebSocket gateway around the same `RunApi` and
@@ -138,7 +138,7 @@ journal and validates any explicit identity against it. Mixed recorded identitie
 an identity-less legacy log requires an explicit identity. This validation uses the event index and
 does not turn replay into an eager full-journal read.
 
-`core-state` has no Node runtime, OpenTUI, theme, layout, focus, or query-result dependencies. Its
+`run-state` has no Node runtime, OpenTUI, theme, layout, focus, or query-result dependencies. Its
 time-dependent selectors require an explicit clock value so tests remain deterministic. Transcript
 labels and tones are semantic annotations derived from event fields; the TUI decides whether and how
 to display them.

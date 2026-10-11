@@ -486,7 +486,7 @@ Deleted when the corresponding phase lands:
   resume, `instances stop` (phase 5).
 - `host.ts`, `detached-host.ts`, `ssh-host.ts`, `local-host.ts`, the bridge protocol (now
   `@vibesys/ipc`'s `bridge.ts`), and the per-command parts of `shell-words.ts` (now in
-  `@vibesys/entities`) and `instances.ts`, replaced by the connection manager
+  `@vibesys/feature-start-run`) and `instances.ts`, replaced by the connection manager
   (phase 5). The shell-safe encoding survives only for the bootstrap line.
 - The registry check in `supervisor.ts` (replaced by the real-operation check) and the page's
   desktop reconnect timer (phase 5).

@@ -209,7 +209,7 @@ export function connectionBanners(run: CoreState, session: WebSessionState): Con
 }
 
 /**
- * Decide the page header without presenting core-state's initial value as a
+ * Decide the page header without presenting the run fold's initial value as a
  * fact about a live run. Replay mode keeps its existing loading heading; a live
  * session names gateway connectivity until a snapshot establishes run state.
  */

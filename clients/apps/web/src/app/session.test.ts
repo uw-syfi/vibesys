@@ -138,11 +138,16 @@ describe('the run page over a live session', () => {
 
   test('offers a reattach for the same fault while the run can still stream', async () => {
     const lifecycle = new FakeLifecycle();
-    const {session, transport} = sessionWith(lifecycle);
+    const scheduler = new FakeClock();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
 
     await session.start();
     expect(session.store.getState().sequence).toBe(1);
 
+    const redialed = transport.nextSubscription();
     transport.subscriptions[0]?.onDisconnect(
       new BackendClientError('parse', 'Invalid event batch message'),
     );
@@ -157,9 +162,14 @@ describe('the run page over a live session', () => {
       controls: null,
     });
 
-    await settle();
-    // The stream redialed on its own schedule and the gap closed: the
-    // re-bootstrap folded the batch the faulted dial never delivered.
+    // The stream redials on its own schedule and the gap closes: the
+    // re-bootstrap folds the batch the faulted dial never delivered.
+    expect(scheduler.runNext()).toBe(true);
+    await redialed;
+    await waitForSession(
+      session,
+      () => session.store.getState().sequence === 2 && session.getState().status === 'connected',
+    );
     expect(transport.subscriptions.length).toBeGreaterThan(1);
     expect(session.getState()).toEqual(healthy());
     expect(session.store.getState().sequence).toBe(2);
@@ -197,9 +207,3 @@ describe('the run page over a live session', () => {
     await session.close();
   });
 });
-
-/** Let the transport's pending callbacks run. */
-async function settle(): Promise<void> {
-  await new Promise<void>(resolve => setTimeout(resolve, 0));
-  await Promise.resolve();
-}

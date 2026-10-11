@@ -176,8 +176,8 @@ The run page is one app package over three feature packages
   enforce both.
 
 The store kernel (`Step`, `Reducer`, `createStore`) comes from
-`@vibesys/core-state`, shared with the desktop welcome view. The reducers are
-tested model-based with `checkModel` from `@vibesys/core-state/testing`: seeded
+`@vibesys/store`, shared with the desktop welcome view. The reducers are
+tested model-based with `checkModel` from `@vibesys/store/testing`: seeded
 random action and reply sequences, checking after every step that each awaited
 token was issued and no two slots await one, that no stale reply is applied,
 and each reducer's own invariants and properties.
@@ -436,9 +436,9 @@ enforces the layout:
   `@vibesys/feature-run-control` (the title strip, stop and force stop, resume, the banner), and
   `@vibesys/feature-recent-runs` (Recent). Each feature's effects call only the slice of the
   welcome bridge its `./state` declares (`HostsBridge`, `StartRunBridge`, `RunControlBridge`).
-- The processes share only workspace packages: `@vibesys/entities` (host naming, ids, a host's
-  listed runs, recent runs, the stop and resume decisions) and `@vibesys/ipc` (the run page's
-  bridge and the typed welcome IPC). The welcome view draws its dialogs, path fields, status chip,
+- The processes share only workspace packages: `@vibesys/hosts` (host naming, a host's listed
+  runs), `@vibesys/runs` (ids, recent runs, the stop and resume decisions), and `@vibesys/ipc`
+  (the run page's bridge and the typed welcome IPC). The welcome view draws its dialogs, path fields, status chip,
   and buttons with `@vibesys/ui`.
 
 The desktop package declares one entry per process: `.` (`node`, `src/main/index.ts`, the
@@ -511,10 +511,10 @@ connections with the browser's `WebSocketTransport` and `WebSession`, which keep
 reconciliation logic but no retry timer of their own: the shell wakes the page when the host
 connection recovers.
 
-The welcome view's stores (each feature's `state/`) are pure reducers on core-state's store
+The welcome view's stores (each feature's `state/`) are pure reducers on `@vibesys/store`'s
 kernel; each feature's `renderer/ui/` is presentational and `renderer/effects/` its shell, and the
 app's `main.tsx` is the composition root. They are tested model-based with `checkModel` from
-`@vibesys/core-state/testing`, with random window states from `@vibesys/ipc/testing`.
+`@vibesys/store/testing`, with random window states from `@vibesys/ipc/testing`.
 
 `AppLifecycle` (`main/app/app-lifecycle.ts`) is the one owner of process-wide state: a
 single-instance lock (a second launch focuses the first window and opens what it was asked to)

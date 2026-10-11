@@ -18,7 +18,6 @@
     {"path": "../../transport/tsconfig.lib.json"},
     {"path": "../../transport/tsconfig.websocket.json"},
     {"path": "../../run-session/tsconfig.lib.json"},
-    {"path": "../../run-state/tsconfig.lib.json"},
     {"path": "../../store/tsconfig.lib.json"},
     {"path": "../../ipc/tsconfig.lib.json"},
     {"path": "../../features/run-view/tsconfig.state.json"},

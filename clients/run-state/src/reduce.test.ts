@@ -286,7 +286,7 @@ describe('core state projection', () => {
     expect(reduceEvent(projected, outputEvent(2, 'known')).unknownEventKinds).toBe(1);
   });
 
-  it('preserves published run-map arrays through core-state clone paths', () => {
+  it('preserves published run-map arrays through the fold clone paths', () => {
     const started = reduceEvent(
       initialCoreState(),
       executionEvent(1, 'agent_execution_started', 'exec', startedData('Implement')),
@@ -2249,7 +2249,7 @@ function runScopedStatusEvent(
 
 /**
  * Deterministic choices for the property tests, mixed the way
- * `core-state-prefix.test.ts`'s generator is. A bare LCG will not do: its low
+ * `reduce-prefix.test.ts`'s generator is. A bare LCG will not do: its low
  * bit alternates, so `state % 2` on consecutive draws is a constant choice
  * rather than a varying one.
  */

@@ -149,7 +149,7 @@ describe('connectionBanners', () => {
     // The property below builds its `CoreState` by assigning `status`, so it
     // asserts that the decision is right about a status without asserting that
     // any real input produces that status. This closes that: the run's own
-    // terminal event goes through `core-state`'s reducer, which is the path the
+    // terminal event goes through `@vibesys/run-state`'s reducer, which is the path the
     // browser takes, and is the same event `e2e/controls-banner.spec.ts`
     // withholds and then releases.
     let run = initialCoreState();
