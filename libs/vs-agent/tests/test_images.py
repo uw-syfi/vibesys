@@ -112,7 +112,7 @@ def test_agent_image_is_one_docker_build_of_the_generated_dockerfile() -> None:
     image_id = agent_image("python:3.12-bookworm", command_runner=runner, timeout=42)
 
     assert image_id == _AGENT_IMAGE_ID
-    assert runner.verbs() == [("build",), ("image", "inspect")]
+    assert runner.verbs() == [("image", "inspect"), ("build",), ("image", "inspect")]
     assert {timeout for _argv, _cwd, timeout in runner.calls} == {42}
     (workspace,) = runner.workspaces
     assert workspace.base_image == "python:3.12-bookworm"
@@ -206,7 +206,7 @@ def test_a_failed_feature_image_build_is_a_task_image_build_error_and_cleans_up(
     with pytest.raises(TaskImageBuildError, match=r"feature image build failed.*build failed"):
         agent_image("python:3.12-bookworm", command_runner=runner)
 
-    assert runner.verbs() == [("build",)]
+    assert runner.verbs() == [("image", "inspect"), ("build",)]
     assert not runner.workspaces[0].root.exists()
 
 
