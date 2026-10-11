@@ -86,7 +86,7 @@ class _FaultedRuntimeWorkspace(_WorkspaceResource):
     def pending_changes(self) -> list[str]:
         return list(self.fault.changes)
 
-    def restore(self, revision: str, *, preserve_paths: tuple[str, ...] = (), **_: bool) -> bool:
+    def restore(self, revision: str, *, preserve_paths: tuple[str, ...] = (), **_: object) -> bool:
         # A lying restore exercises post-restore verification, too.
         self.fault.restore(revision, preserve_paths)
         return True
@@ -193,7 +193,7 @@ class _BlockedRecoveryRuntimeWorkspace(_FaultedRuntimeWorkspace):
         super().__init__(fault)
         self.gate = gate
 
-    def restore(self, revision: str, *, preserve_paths: tuple[str, ...] = (), **_: bool) -> bool:
+    def restore(self, revision: str, *, preserve_paths: tuple[str, ...] = (), **_: object) -> bool:
         if self.fault.recovery_allowed:
             self.gate.wait_sync()
         return super().restore(revision, preserve_paths=preserve_paths)

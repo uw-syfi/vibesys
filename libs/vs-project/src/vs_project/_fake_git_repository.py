@@ -548,6 +548,20 @@ class FakeGitRepository:
             scope = self._scope(command)
             return tuple(sorted(self._status(scope, self._specs(pathspecs, command))))
 
+    def unversioned_paths(self, *, include_ignored: bool) -> tuple[str, ...]:
+        with self._operation("unversioned_paths"):
+            command = ["ls-files", "-z", "--others", "--exclude-standard", "--", "."]
+            scope = self._scope(command)
+            specs = self._specs(["."], command)
+            walk = self._walk(scope, specs, descend_ignored=include_ignored)
+            return tuple(
+                sorted(
+                    found.path
+                    for found in walk_untracked(walk)
+                    if include_ignored or not found.ignored
+                )
+            )
+
     def changed_since(self, commit: Revision, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
         with self._operation("changed_since"):
             command = ["diff", "--name-only", f"{commit}..HEAD", "--", *pathspecs]

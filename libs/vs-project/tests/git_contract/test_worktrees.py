@@ -115,6 +115,32 @@ def test_clean_leaves_the_files_named_in_keep_even_when_ignored(sandbox: Contrac
     assert not (sandbox.root / "sub").exists()
 
 
+def test_unversioned_paths_lists_untracked_files_and_ignored_ones_only_on_request(
+    sandbox: ContractProject,
+) -> None:
+    sandbox.start({"a.txt": "1\n", "src/b.txt": "1\n"})
+    sandbox.repo.add_excludes(["*.log", ".venv/"])
+    sandbox.write("stray.txt", "s\n")
+    sandbox.write("src/new.txt", "n\n")
+    sandbox.write("deep/er/more.txt", "m\n")
+    sandbox.write("noise.log", "n\n")
+    sandbox.write(".venv/lib/pkg.py", "p\n")
+    sandbox.write("a.txt", "changed\n")
+
+    assert sandbox.repo.unversioned_paths(include_ignored=False) == (
+        "deep/er/more.txt",
+        "src/new.txt",
+        "stray.txt",
+    )
+    assert sandbox.repo.unversioned_paths(include_ignored=True) == (
+        ".venv/lib/pkg.py",
+        "deep/er/more.txt",
+        "noise.log",
+        "src/new.txt",
+        "stray.txt",
+    )
+
+
 def test_restore_then_clean_yields_exactly_the_revision(sandbox: ContractProject) -> None:
     first = sandbox.start({"a.txt": "1\n", "dir/b.txt": "1\n"})
     sandbox.write("a.txt", "2\n")

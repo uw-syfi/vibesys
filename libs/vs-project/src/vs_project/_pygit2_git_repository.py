@@ -426,6 +426,9 @@ class Pygit2GitRepository:
         except _LIBGIT2_ERRORS as error:
             self._fail(f"ls-files -- {pathspec}", error)
 
+    def unversioned_paths(self, *, include_ignored: bool) -> tuple[str, ...]:
+        return self._cli.unversioned_paths(include_ignored=include_ignored)
+
     def worktree_matches(
         self,
         revision: Revision,
