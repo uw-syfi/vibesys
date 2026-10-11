@@ -73,6 +73,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import FakeProjectMaterializationEffects
 from vs_sandbox.api import DockerSandbox, HostResourceAccess, host_resource_for_mount
+from vs_sandbox.api.slurm import AgentGpuConfig
 
 if TYPE_CHECKING:
     from vs_sandbox.api import HostResource
@@ -311,6 +312,7 @@ def representative_context() -> dict[str, object]:
         updated_at="2026-01-01T00:00:00Z",
     )
     context.update(
+        agent_gpu=AgentGpuConfig(partitions=("gpu",), max_gpus=2, max_time_minutes=60),
         archive=ParetoArchiveView(axes=(), relative_noise=0.05, latest=None),
         capture=EvaluationOperationSnapshot(
             handle_id="profile-capture",
