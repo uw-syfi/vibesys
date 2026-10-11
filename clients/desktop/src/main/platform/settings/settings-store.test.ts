@@ -4,8 +4,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Seeded} from '@vibesys/core-state/testing';
 import {withHostSettings} from './host-settings.js';
-import type {RecentFile} from './recent.js';
-import {remember} from './recent.js';
+import {EMPTY_RECENT, type RecentFile, remember} from './recent.js';
 import {SettingsStore} from './settings-store.js';
 
 function store() {
@@ -38,6 +37,25 @@ describe('SettingsStore', () => {
     await settings.updateRecent(current => remember(current, run(2)));
     expect(heard.map(recent => recent.runs.length)).toEqual([1, 2]);
     expect(heard.at(-1)).toEqual(await settings.recent());
+  });
+
+  test('a superseded recent update is discarded at the atomic commit boundary', async () => {
+    const {settings, directory} = store();
+    const heard: RecentFile[] = [];
+    let current = true;
+    settings.onRecentChanged(recent => heard.push(recent));
+
+    await settings.updateRecent(
+      recent => {
+        current = false;
+        return remember(recent, run(1));
+      },
+      () => current,
+    );
+
+    expect(await settings.recent()).toEqual(EMPTY_RECENT);
+    expect(heard).toEqual([]);
+    expect(readdirSync(directory).filter(name => name.endsWith('.tmp'))).toEqual([]);
   });
 
   test('interleaved updates of both files keep every change and leave no partial file', async () => {

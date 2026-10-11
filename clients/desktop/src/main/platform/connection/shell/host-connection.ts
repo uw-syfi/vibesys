@@ -41,6 +41,12 @@ export interface HostConnectionOptions {
   readonly log: (message: string) => void;
 }
 
+/** A guarded request's explicit write-boundary result. */
+type GuardedRequestResult<T> =
+  | {readonly kind: 'not-written'}
+  | {readonly kind: 'answered'; readonly reply: T}
+  | {readonly kind: 'failed'; readonly written: boolean; readonly error: unknown};
+
 /** What a phase that ends every wait means for a caller. */
 function terminalError(phase: Phase): ConnectionError | null {
   switch (phase.kind) {
@@ -146,9 +152,42 @@ export class HostConnection implements AsyncDisposable {
   /** Send `body` on the control channel once the host is ready. */
   async request<T extends string>(body: Body & {readonly type: T}): Promise<ReplyOf<T>> {
     await this.ready();
+    return this.#request(body);
+  }
+
+  /**
+   * Send `body` only if `current` still owns it after the host becomes ready. The predicate and
+   * control-channel write share one synchronous boundary, so another main-process intent cannot
+   * interleave between them. A failure says whether that write boundary was crossed.
+   */
+  async requestIfCurrent<T extends string>(
+    body: Body & {readonly type: T},
+    current: () => boolean,
+  ): Promise<GuardedRequestResult<ReplyOf<T>>> {
+    try {
+      await this.ready();
+    } catch (error) {
+      return {kind: 'failed', written: false, error};
+    }
+    if (!current()) return {kind: 'not-written'};
+    let reply: Promise<ReplyOf<T>>;
+    try {
+      reply = this.#request(body);
+    } catch (error) {
+      return {kind: 'failed', written: false, error};
+    }
+    try {
+      return {kind: 'answered', reply: await reply};
+    } catch (error) {
+      return {kind: 'failed', written: true, error};
+    }
+  }
+
+  /** Write one request to the already-ready control channel. */
+  #request<T extends string>(body: Body & {readonly type: T}): Promise<ReplyOf<T>> {
     const control = this.#control;
     if (control === null) throw new ConnectionError('link', 'the control channel is down');
-    return (await control.request(body)) as ReplyOf<T>;
+    return control.request(body) as Promise<ReplyOf<T>>;
   }
 
   /**

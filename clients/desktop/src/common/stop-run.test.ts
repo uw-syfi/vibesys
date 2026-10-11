@@ -28,7 +28,7 @@ const OUTCOMES: readonly StopOutcome[] = [
 ];
 
 function arbitraryEvent(random: () => number): StopEvent {
-  switch (Math.floor(random() * 8)) {
+  switch (Math.floor(random() * 9)) {
     case 0:
       return {type: 'request', force: false};
     case 1:
@@ -45,6 +45,8 @@ function arbitraryEvent(random: () => number): StopEvent {
       };
     case 6:
       return {type: 'failed', message: 'boom'};
+    case 7:
+      return {type: 'abandon'};
     default:
       return random() < 0.2 ? {type: 'ended'} : {type: 'confirm'};
   }
@@ -96,6 +98,14 @@ describe('stop flow', () => {
   test('cancelling the confirmation sends nothing and returns to idle', () => {
     const confirming = stopStep(IDLE, {type: 'request', force: false}).state;
     expect(stopStep(confirming, {type: 'cancel'})).toEqual({state: IDLE, effect: null});
+  });
+
+  test('withdrawing an unsent stop returns to idle but cannot retract an accepted stop', () => {
+    const confirming = stopStep(IDLE, {type: 'request', force: false}).state;
+    const sending = stopStep(confirming, {type: 'confirm'}).state;
+    expect(stopStep(sending, {type: 'abandon'})).toEqual({state: IDLE, effect: null});
+    const accepted = stopStep(sending, {type: 'result', outcome: 'stopping'}).state;
+    expect(stopStep(accepted, {type: 'abandon'}).state).toBe(accepted);
   });
 
   test('unsupported and still_running offer a force stop, once', () => {

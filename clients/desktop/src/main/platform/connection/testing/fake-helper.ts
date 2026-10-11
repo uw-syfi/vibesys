@@ -24,6 +24,46 @@ import {type FakeProcess, fakeProcess} from './fake-process.js';
 
 type Reply = Record<string, unknown>;
 
+/** One explicitly deferred helper reply, released by a deterministic test action. */
+export interface DeferredAnswer {
+  /** Resolves after the helper handled the request and is holding its reply. */
+  readonly received: Promise<void>;
+  release(): void;
+}
+
+class PendingAnswer implements DeferredAnswer {
+  readonly received: Promise<void>;
+  readonly #received: () => void;
+  #answer: (() => void) | null = null;
+  #released = false;
+
+  constructor() {
+    let received = (): void => {};
+    this.received = new Promise<void>(resolve => {
+      received = resolve;
+    });
+    this.#received = received;
+  }
+
+  hold(answer: () => void): void {
+    this.#answer = answer;
+    this.#received();
+    this.#answerIfReleased();
+  }
+
+  release(): void {
+    this.#released = true;
+    this.#answerIfReleased();
+  }
+
+  #answerIfReleased(): void {
+    if (!this.#released || this.#answer === null) return;
+    const answer = this.#answer;
+    this.#answer = null;
+    answer();
+  }
+}
+
 /** A run's server end: it gets the run channel's bytes and writes the server's. */
 export type RunServer = (stream: {
   write(line: string): void;
@@ -80,7 +120,10 @@ export class FakeHelper {
   readonly channels: FakeProcess[] = [];
   /** How many helpers were started: one per channel. */
   spawned = 0;
+  /** Stop requests received, in order. */
+  readonly stops: {readonly instanceId: string; readonly force: boolean}[] = [];
   readonly #watches = new Set<() => void>();
+  readonly #pendingAnswers = new Map<HelperRequest['type'], PendingAnswer[]>();
   #nextInstance = 1;
 
   /** Start one helper: a new channel. */
@@ -94,6 +137,24 @@ export class FakeHelper {
     }
     new HelperSession(this, channel).start();
     return channel.process;
+  }
+
+  /** Handle the next request of `type`, but hold its correlated reply until this gate is released. */
+  deferNext(type: HelperRequest['type']): DeferredAnswer {
+    const pending = new PendingAnswer();
+    const queue = this.#pendingAnswers.get(type) ?? [];
+    queue.push(pending);
+    this.#pendingAnswers.set(type, queue);
+    return pending;
+  }
+
+  /** Take the reply gate registered for the next request of `type`, if any. */
+  takeDeferred(type: HelperRequest['type']): PendingAnswer | null {
+    const queue = this.#pendingAnswers.get(type);
+    const pending = queue?.shift();
+    if (pending === undefined) return null;
+    if (queue?.length === 0) this.#pendingAnswers.delete(type);
+    return pending;
   }
 
   /** Publish a live record; watches push it. */
@@ -110,6 +171,14 @@ export class FakeHelper {
       this.host.ended.push({...ended, phase: {status, stage: null, reason: null}, ended_at: 2});
     }
     this.changed();
+  }
+
+  /** Record and perform one host stop; returns whether the run was live. */
+  stop(instanceId: string, force: boolean): boolean {
+    this.stops.push({instanceId, force});
+    const live = this.host.instances.some(entry => entry.id === instanceId);
+    if (live) this.end(instanceId);
+    return live;
   }
 
   /** Every channel ends at once, as when the link to the host breaks. */
@@ -146,6 +215,8 @@ class HelperSession {
   readonly #helper: FakeHelper;
   readonly #channel: FakeProcess;
   readonly #watches = new Map<string, () => void>();
+  /** Correlated request replies held after their request's side effects have happened. */
+  readonly #deferredReplies = new Map<string, PendingAnswer>();
   #buffer = '';
   #features: string[] | null = null;
   #relay: ((line: string) => void) | null = null;
@@ -180,8 +251,19 @@ class HelperSession {
   }
 
   #send(reply: Reply): void {
-    if (!this.#channel.stdout.writableEnded)
-      this.#channel.stdout.write(`${JSON.stringify(reply)}\n`);
+    const send = (): void => {
+      if (!this.#channel.stdout.writableEnded)
+        this.#channel.stdout.write(`${JSON.stringify(reply)}\n`);
+    };
+    const requestId = reply['request_id'];
+    const pending =
+      typeof requestId === 'string' ? this.#deferredReplies.get(requestId) : undefined;
+    if (pending === undefined) {
+      send();
+      return;
+    }
+    this.#deferredReplies.delete(requestId as string);
+    pending.hold(send);
   }
 
   #error(requestId: string | null, code: string, message: string): Reply {
@@ -197,6 +279,8 @@ class HelperSession {
       this.#send(this.#error(id, 'invalid_request', (error as Error).message));
       return;
     }
+    const pending = this.#helper.takeDeferred(request.type);
+    if (pending !== null) this.#deferredReplies.set(request.request_id, pending);
     if (this.#features === null && request.type !== 'hello') {
       this.#send(this.#error(request.request_id, 'handshake_required', 'hello first'));
       return;
@@ -263,8 +347,7 @@ class HelperSession {
         this.#project(request);
         return;
       case 'run.stop': {
-        const live = helper.host.instances.some(entry => entry.id === request.instance_id);
-        if (live) helper.end(request.instance_id);
+        const live = helper.stop(request.instance_id, request.force ?? false);
         this.#send({
           type: 'run.stop',
           request_id: id,

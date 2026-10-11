@@ -98,7 +98,7 @@ async function openWindow(manager: ConnectionManager): Promise<Desktop> {
     connection: id => hosts.connection(id),
     openPage: label => window.openRunPage(label),
     confirm: text => window.confirmStop(text),
-    remember: run => settings.updateRecent(current => remember(current, run)),
+    remember: (run, current) => settings.updateRecent(recent => remember(recent, run), current),
     changed,
     log,
     now: () => Date.now(),

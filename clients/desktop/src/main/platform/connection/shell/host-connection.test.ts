@@ -59,6 +59,48 @@ hostConnectionContract(
 );
 
 describe('HostConnection over the FakeHelper', () => {
+  test('a guarded request withdrawn while readiness waits is never written to the helper', async () => {
+    const link = new FakeLink();
+    link.helper.publish(record('000000000001', 'run-1'));
+    const hello = link.helper.deferNext('hello');
+    await using connection = fakeConnection(link);
+    let current = true;
+
+    const stopping = connection.requestIfCurrent(
+      {type: 'run.stop', instance_id: '000000000001', force: false},
+      () => current,
+    );
+    await hello.received;
+    current = false;
+    hello.release();
+
+    expect(await stopping).toEqual({kind: 'not-written'});
+    expect(link.helper.stops).toEqual([]);
+    expect(link.helper.host.instances.map(instance => instance.id)).toEqual(['000000000001']);
+  });
+
+  test('a guarded request distinguishes a failure after its write from withdrawal', async () => {
+    const link = new FakeLink();
+    link.helper.publish(record('000000000001', 'run-1'));
+    const stopped = link.helper.deferNext('run.stop');
+    await using connection = fakeConnection(link);
+    await connection.ready();
+    let current = true;
+
+    const stopping = connection.requestIfCurrent(
+      {type: 'run.stop', instance_id: '000000000001', force: false},
+      () => current,
+    );
+    await stopped.received;
+    current = false;
+    link.helper.drop();
+
+    const result = await stopping;
+    expect(result.kind).toBe('failed');
+    expect(result).toMatchObject({written: true});
+    expect(link.helper.stops).toEqual([{instanceId: '000000000001', force: false}]);
+  });
+
   test('a dropped link is checked, restored, and the registry watch resumes', async () => {
     const link = new FakeLink();
     await using connection = fakeConnection(link);

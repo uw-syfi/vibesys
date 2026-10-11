@@ -44,7 +44,7 @@ async function world(options: {stop?: StopDeps['stop']; answer?: boolean} = {}):
         (async (_host, instanceId, force) => {
           state.stops.push({force});
           const reply = await host.request({type: 'run.stop', instance_id: instanceId, force});
-          return reply.result;
+          return {kind: 'answered', result: reply.result};
         }),
       confirm: async text => {
         state.asked.push(text);
@@ -83,9 +83,64 @@ describe('StopController', () => {
     expect(w.controller.views()).toEqual({});
   });
 
+  test('a confirmed stop uses the same flow without asking again', async () => {
+    const w = await world();
+    expect(await w.controller.stopConfirmed(TARGET)).toEqual({kind: 'complete'});
+    expect(w.asked).toEqual([]);
+    expect(w.stops).toEqual([{force: false}]);
+    expect(w.controller.views()[KEY]?.phase).toBe('ended');
+    await w.host[Symbol.asyncDispose]();
+  });
+
+  test('a confirmed stop returns the failure already recorded in its view', async () => {
+    const w = await world({
+      stop: async (_host, id) => ({
+        kind: 'answered',
+        result: {id, outcome: 'unsupported', route: null},
+      }),
+    });
+    expect(await w.controller.stopConfirmed(TARGET)).toEqual({
+      kind: 'failed',
+      message: 'This run cannot be stopped gracefully from here.',
+    });
+    expect(w.controller.views()[KEY]).toMatchObject({phase: 'error', canForce: true});
+    await w.host[Symbol.asyncDispose]();
+  });
+
+  test('a confirmed stop withdrawn before the host write leaves no stop flow', async () => {
+    const w = await world({stop: async () => ({kind: 'not-written'})});
+    expect(await w.controller.stopConfirmed(TARGET)).toEqual({kind: 'withdrawn'});
+    expect(w.controller.views()).toEqual({});
+    expect(w.stops).toEqual([]);
+    await w.host[Symbol.asyncDispose]();
+  });
+
+  test('a failure after the stop write is preserved when ownership changes before its reply', async () => {
+    let current = true;
+    const w = await world({
+      stop: async () => {
+        current = false;
+        return {kind: 'failed', written: true, message: 'the written stop lost its reply'};
+      },
+    });
+
+    expect(await w.controller.stopConfirmed(TARGET, () => current)).toEqual({
+      kind: 'failed',
+      message: 'the written stop lost its reply',
+    });
+    expect(w.controller.views()[KEY]).toMatchObject({
+      phase: 'error',
+      text: 'the written stop lost its reply',
+    });
+    await w.host[Symbol.asyncDispose]();
+  });
+
   test('an accepted stop shows Stopping… until the registry or the connection says it ended', async () => {
     const w = await world({
-      stop: async (_host, id) => ({id, outcome: 'stopping', route: 'control_socket'}),
+      stop: async (_host, id) => ({
+        kind: 'answered',
+        result: {id, outcome: 'stopping', route: 'control_socket'},
+      }),
     });
     await w.controller.request(TARGET, false);
     expect(w.controller.views()[KEY]).toMatchObject({phase: 'stopping', text: 'Stopping…'});
@@ -103,7 +158,10 @@ describe('StopController', () => {
 
   test('the connection ending ends an accepted stop', async () => {
     const w = await world({
-      stop: async (_host, id) => ({id, outcome: 'stopping', route: 'signal'}),
+      stop: async (_host, id) => ({
+        kind: 'answered',
+        result: {id, outcome: 'stopping', route: 'signal'},
+      }),
     });
     await w.controller.request(TARGET, false);
     w.controller.runEnded(HOST, TARGET.instanceId);
@@ -115,7 +173,10 @@ describe('StopController', () => {
     const w = await world({
       stop: async (_host, id, force) => {
         forces.push(force);
-        return {id, outcome: force ? 'stopped' : 'unsupported', route: null};
+        return {
+          kind: 'answered',
+          result: {id, outcome: force ? 'stopped' : 'unsupported', route: null},
+        };
       },
     });
     await w.controller.request(TARGET, false);

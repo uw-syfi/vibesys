@@ -29,6 +29,8 @@ export type StopEvent =
   /** The user asked to stop (`force`: to force-stop after a stop failed). */
   | {readonly type: 'request'; readonly force: boolean}
   | {readonly type: 'cancel'}
+  /** The owner withdrew this stop before its command reached the host. */
+  | {readonly type: 'abandon'}
   | {readonly type: 'confirm'}
   /** The host reported what `instances stop` observed. */
   | {readonly type: 'result'; readonly outcome: StopOutcome}
@@ -70,7 +72,7 @@ function transition(state: StopState, event: StopEvent): StopState {
         ? {phase: 'confirming', force: event.force}
         : state;
     case 'confirming':
-      if (event.type === 'cancel') return IDLE;
+      if (event.type === 'cancel' || event.type === 'abandon') return IDLE;
       return event.type === 'confirm'
         ? {phase: 'stopping', force: state.force, accepted: false}
         : state;
@@ -84,6 +86,7 @@ function transition(state: StopState, event: StopEvent): StopState {
 /** A stop command that is in flight: it fails, or the host reports what it observed. */
 function afterCommand(state: StopState, event: StopEvent): StopState {
   if (state.phase !== 'stopping') return state;
+  if (event.type === 'abandon') return IDLE;
   if (event.type === 'failed') return {phase: 'error', message: event.message, canForce: false};
   return event.type === 'result' ? afterOutcome(event.outcome, state.force) : state;
 }

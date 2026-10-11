@@ -15,7 +15,7 @@
  *
  * Electron-free: the main process supplies the paths.
  */
-import {readFile, rename, writeFile} from 'node:fs/promises';
+import {readFile, rename, unlink, writeFile} from 'node:fs/promises';
 import {EMPTY_SETTINGS, parseSettings, type SettingsFile} from './host-settings.js';
 import {EMPTY_RECENT, parseRecent, type RecentFile} from './recent.js';
 
@@ -84,11 +84,18 @@ export class SettingsStore {
     });
   }
 
-  /** Replace the recent runs with `update` of the current ones, then tell the listeners. */
-  updateRecent(update: (current: RecentFile) => RecentFile): Promise<void> {
+  /**
+   * Replace the recent runs with `update` of the current ones, then tell the listeners. `current`
+   * is checked at the atomic-replace boundary, after staging, so superseded navigation cannot
+   * commit or announce an obsolete selection.
+   */
+  updateRecent(
+    update: (recent: RecentFile) => RecentFile,
+    current: () => boolean = () => true,
+  ): Promise<void> {
     return this.#serialize(async () => {
       const next = update(await this.recent());
-      await writeJson(this.#options.recentPath, next);
+      if (!(await writeJson(this.#options.recentPath, next, current))) return;
       for (const listener of this.#recentListeners) listener(next);
     });
   }
@@ -107,8 +114,17 @@ export class SettingsStore {
 }
 
 /** Replace `path` with `value` as JSON, private to the user, atomically (write aside, rename). */
-async function writeJson(path: string, value: unknown): Promise<void> {
+async function writeJson(
+  path: string,
+  value: unknown,
+  current: () => boolean = () => true,
+): Promise<boolean> {
   const staging = `${path}.${process.pid}.tmp`;
   await writeFile(staging, `${JSON.stringify(value, null, 2)}\n`, {mode: 0o600});
+  if (!current()) {
+    await unlink(staging);
+    return false;
+  }
   await rename(staging, path);
+  return true;
 }
