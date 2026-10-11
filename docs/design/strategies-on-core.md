@@ -66,7 +66,7 @@ stop), `RunEnded`.
 | Part | Status | Phase |
 |---|---|---|
 | Core lifecycle, attempts, settlement, adoption, suspension, exclusive root, `wip` retention | built (`vs-core`) | n/a |
-| Agent evaluation tool bridge, per-candidate budgets, `Waitable` replies | built (`docs/design/core-agent-evaluation-bridge.md`) | n/a |
+| Agent evaluation tool bridge, per-candidate budgets, the `waiting_for_evaluation` reply (declared privately in `dynamic`) | built (`docs/design/core-agent-evaluation-bridge.md`) | n/a |
 | `dynamic` on core, its scenario, recovery-matrix, liveness, chaos and smoke tests | built | n/a |
 | Shared building blocks B1 to B15 (section 3) | unbuilt; `dynamic` holds private copies | 2 |
 | Strategy conformance suite and the promoted runtime shell test kit (T1, T2 in 3.1) | unbuilt; `dynamic` holds a private shell harness | 2 |
@@ -168,13 +168,13 @@ code sits in `dynamic`.
 | B6a | Evidence views: `trusted_keys`, `ledger_refs`, `turn_candidate` | `_evidence.py` | `vs_core.api.evidence_views` (pure functions of core types) | dynamic, single, multi, evolve | import them |
 | B6b | Decoded readings: `MetricRow`, `PartialRow`, `AcceptedReading`, `reading_of`, `accept_readings` | `_rows.py`, `_evidence.py` | `vibesys.metrics` (shared policy sibling) | dynamic, single, multi, evolve | import them |
 | B7 | `StrategyOperations(namespace, context_type)`: registrations, schema refs and runtime role mapping for render, verify, interpret and retain | `_operations.py`; `_ROLE_OF_KIND` in `dynamic_core.py` | `vs_runtime.api.core` (it owns `OperationRole` and the owners) | all five | build from the kit with namespace `dynamic`, so the persisted kind names (`dynamic.render_role_artifacts`, ...) do not change |
-| B8 | Candidate lifecycle policy: (a) `settle_for` (assessments, eligibility, retention, outcome), (b) the input baseline stage, (c) the run phases SEARCHING, SELECTING, ADOPTING, STOPPING, FINISHED with `choose_winner`, `selection_of`, `on_adoption` and the three run endings | `_settlement.py`, `_baseline.py`, `_run.py` | new package `vibesys.candidates` beside `orchestration` | (a) and (b): dynamic, single, multi, evolve (evolve skips the baseline); (c): all five | move the three modules; a small `CandidateConfig` carries the knobs they read |
+| B8 | Candidate lifecycle policy: (a) `settle_for` (assessments, eligibility, retention, outcome), (b) the input baseline stage, (c) the run phases SEARCHING, SELECTING, ADOPTING, STOPPING, FINISHED with `choose_winner`, `selection_of`, `on_adoption` and the three run endings | `_settlement.py`, `_baseline.py`, `_run.py` | new package `vibesys.candidates` beside `orchestration` | (a): dynamic, single, multi, evolve; (b): dynamic, single, multi (evolve builds from a cold start); (c): all five | move the three modules; a small `CandidateConfig` carries the knobs they read |
 | B9 | Hypothesis round machine: the serial hypothesis search glue for `HypothesisSearch` (next round, plan validation and one correction, `start` with parent and rollback base, cadence, `close_round`, `best`) and the `RecordInput` builder from core facts | `HypothesisSearch` exists; the glue is in `single/orchestration.py` and `multi/orchestration.py` (two near-copies) | `vibesys.hypothesis` | single, multi | none; it already shares `cadence` |
 | B10 | `Waitable[R]`: reply union of a result and `waiting_for_evaluation`, with its discriminator | `ImplementerReply`, `JudgeReply`, `WaitingForEvaluation` in `dynamic/models.py` | `vs_runtime.api.core` (the bridge parses the same wire form) | all five | import it |
 | B11 | Core-path role factory and capability sets (`CONTINUATION`, `MEASURING`, the evaluation tool) | `dynamic_roles.py` | `vibesys.core_roles` (thin product wiring) | all five | call the factory |
 | B12 | Core wiring: store the evaluation recipe, read the evaluation identity, derive stage budgets and flags (`EvaluationInputs`), `agent_evaluation_policy`, the workspace-mode and sandbox check, plugin registration and `RuntimeRecordProjector` | `dynamic_core.py` | `vibesys.core_wiring` (thin product wiring) | all five | shrink to a caller |
 | B13 | Core-protocol prompt templates and contexts: reply correction, resume, wait-unrecorded, agent-evaluation notes, environment notes, run context | `dynamic/core_policy/prompts/*.j2`, `strategy/_prompts.py` | `vibesys.prompts` (shared templates) | all five | import them |
-| B14 | `CaptureCommand` operation: run a configured argv in a revision's workspace with a timeout and return bounded output | none (`run.commands.capture_output` in legacy `attribution.py`) | contract in `vs_runtime.api.core`, owner in `vs_runtime` | single, multi (profile-guided) | none |
+| B14 | `CaptureCommand` operation: run a configured argv in a revision's workspace with a timeout and return bounded output | none; two copies of the legacy call in `single/attribution.py` and `multi/attribution.py` | contract in `vs_runtime.api.core`, owner in `vs_runtime` | single, multi (profile-guided) | none |
 | B15 | Stateless tool admission: a role may name a tool server that holds no run state (profiler diagnostics) | none; `_refuse_unbridged_tools` rejects all but `evaluation` | `vs_runtime.api.core` (`AgentTool` declares its class), `vibesys.run.core_services` | multi, evolve, issue_queue | none |
 | T1 | Runtime shell test kit: `ScriptedExecutors`, `run_shell`, restart-at-boundary | `tests/vibesys/orchestration/dynamic/strategy/_shell.py`, `_executors.py`, `_run.py` (about 1,000 lines) | `vs_runtime.api.testing` | all five | import it |
 | T2 | Whole-loop harness and invariants: `_harness.py`, `_chaos.py`, `loop_invariants.py`, smoke e2e | `tests/composition/dynamic/`, `tests/support/loop_invariants.py`, `tests/e2e/test_dynamic_loop_smoke_e2e.py` | `tests/composition/_loop/` and `tests/support/` parametrized by plugin id | all five | become one parametrization |
@@ -188,8 +188,9 @@ code sits in `dynamic`.
   transition returns the new track and never proposes a decision; `decide` proposes, as in
   `dynamic` today.
 - **B3** makes a trusted measurement and an agent's tool measurement share one identity by
-  construction, which is what `core-agent-evaluation-bridge.md` already requires ("an agent
-  measurement and a trusted one share one identity"). Today two functions build it.
+  construction. `dynamic_core.py` already promises this in the docstring of its agent
+  evaluation policy ("an agent measurement and a trusted one share one identity"), but two
+  functions build the plan today and only a review keeps them equal.
 - **B7** keeps one operation per runtime role. A strategy with its own namespace gets its own
   kinds, so two strategies never collide in one registry, while the request and outcome models
   and the runtime owners are the same code.
@@ -206,8 +207,8 @@ code sits in `dynamic`.
 
 Used by one strategy only, so they stay in that strategy: the parent catalog and portfolio
 plan validation (`dynamic`), the population policy and selectors (`evolve`), issue-board
-rendering and policy (`issue_queue`), the pre-round decision and local validation
-(`multi`), plan-correction details of `HypothesisSearch` users.
+rendering and policy (`issue_queue`), and the pre-round decision and local validation
+(`multi`).
 
 ### 3.4 Refactoring `dynamic`
 
@@ -301,8 +302,8 @@ each paid turn atomically with its dispatch), `accuracy_receipt` (the evidence l
 
 - One round is one attempt, serial (`Limits.max_parallel = 1`). The workspace mode is
   `ISOLATED_CHILD` when the run environment can open candidate sandboxes and `EXCLUSIVE_ROOT`
-  otherwise (chosen once in config by B12, the way `dynamic` rejects such environments today
-  but these loops currently support them). The attempt budget is
+  otherwise. B12 chooses once, in config. `dynamic` refuses environments without candidate
+  sandboxes, but these loops run there today and must keep doing so. The attempt budget is
   `paid_invocation_limit = max_retries_per_round`, `retry_limit = max_corrections +
   max_turn_drops`.
 - A continued hypothesis starts a new attempt in the next round on the previous round's
@@ -591,7 +592,7 @@ operations (8.3 recommends the design; the operations are named here).
 One issue is one attempt whose paid-turn budget is `max_attempts_per_issue`; a judge
 rejection is the next paid turn on the same workspace, exactly as `dynamic` handles a review
 rejection. A pass settles `eligible=True` with `retention="candidate"`, and `tip` advances to
-it. The judge is the declared `LOCAL_VALIDATION` authority (`plain-judge`), and
+it; `tip` starts as the run baseline. The judge is the declared `LOCAL_VALIDATION` authority (`plain-judge`), and
 `required_assessments` is that kind only, since the loop has no trusted gates. The run adopts
 `tip` at the end whenever an issue closed, whatever the exit status, so work done before a
 budget stop is not lost (the legacy root keeps it); the result is `success` only when the
@@ -754,14 +755,14 @@ envelope migration.
 
 ### 9.1 Order and reasons
 
-| Order | Port | Why here |
+| Roadmap phase | Port | Why here |
 |---|---|---|
-| 0 | Phase 2: blocks B1 to B15, T1, T2, and `dynamic` refactored onto them; spikes for A1 to A4 | Nothing is ported until the shared parts exist and `dynamic` proves they preserve behavior. The four assumptions decide the shape of every port, so they are tested first. |
-| 1 | `single`, then `profile-guided single` | The smallest hypothesis-round machine. It proves the round machine (B9), the designer as a run-scoped artifact-writing turn, cadence and provisional retention (A1), and the L1 ledger. `multi` is `single` plus roles, so it must follow. |
-| 2 | `issue_queue` | Independent of 1 (different modules and a different owner: `vs-issue-tracker`), so it can proceed in parallel with 1 when two people are available. It carries the only new external-system operations, which is the largest new surface, so it should not wait behind `multi` and `evolve`. |
-| 3 | `multi`, then `profile-guided multi` | Adds pre-round and profiler turns, the judge, `ValidateLocal` and stateless tool admission on top of 1. |
-| 4 | `evolve` | The largest model change (immutable population, patch artifacts), concurrency with slot-ordered admission and a bootstrap chain on `wip` bases. It reuses the concurrency lessons of `dynamic` and, last, the conformance suite is at its most mature. |
-| 5 | Phase 6: delete shared legacy runtime and the evaluation service (section 10) | Only after the last strategy has left. |
+| 2 | Blocks B1 to B15, T1 and T2; `dynamic` refactored onto them; tests for assumptions A1 to A4 | Nothing is ported until the shared parts exist and `dynamic` proves they preserve behavior. The four assumptions decide the shape of every port, so they are tested first. |
+| 3, first | `single`, then `profile-guided single` | The smallest hypothesis-round machine. It proves the round machine (B9), the designer as a run-scoped turn that writes an artifact, cadence with provisional retention (A1) and the JSON-field ledger (8.4, L1). `multi` is `single` plus roles, so `single` must come first. |
+| 3, in parallel | `issue_queue` | Independent of `single`: different modules and a different owner (`vs-issue-tracker`). It carries the only new external-system operations, the largest new surface, so it should not wait behind `multi` and `evolve`. |
+| 4 | `multi`, then `profile-guided multi` | Adds the pre-round and profiler turns, the judge, `ValidateLocal` and stateless tool admission on top of `single`. |
+| 5 | `evolve` | The largest model change (immutable population, patch artifacts), concurrency with slot-ordered admission, and a bootstrap chain on `wip` bases. It comes last so the conformance suite and the concurrency handling are at their most mature. |
+| 6 | Shared legacy runtime and the evaluation service (section 10) | Only after the last strategy has left. |
 
 A strategy's own legacy modules go in its port PR, because a plugin has exactly one of
 `orchestrate` and `core`; a leftover `orchestrate` would be unreachable code. To keep an
@@ -789,7 +790,7 @@ and before dispatch, and after dispatch and before the observation is committed.
 | C8 | Adoption safety: `ProposeWinner` names an eligible retained settlement and the best one by the metric space, judged by an independent oracle; a failed adoption stops without a winner | candidate sets with ties and noise |
 | C9 | Every request kind the strategy issues is classified, as `test_recovery_matrix.py` does with `REQUEST_DISPATCH` | the registry |
 
-### 9.3 Port 1: single
+### 9.3 Phase 3: single
 
 - **Added properties.** S1: a round the cadence skipped is never a winner and is accepted as
   the next round's base. S2: differential test against the golden transcripts of the legacy
@@ -814,7 +815,7 @@ and before dispatch, and after dispatch and before the observation is committed.
   `AgentMeasurementRequested` is admitted; wall time and cost are within 1.5 times of the
   legacy loop on the same example (a proposed bound, one summary line as in the smoke tier).
 
-### 9.4 Port 2: issue_queue
+### 9.4 Phase 3: issue_queue
 
 - **Added properties.** Q1: replaying any prefix of `ApplyIssueChanges` yields the same board,
   for every `IssueTracker` implementation (the contract suite). Q2: no reply can create more
@@ -833,7 +834,7 @@ and before dispatch, and after dispatch and before the observation is committed.
   Criteria as in 9.3, plus: the board and the progress log match the run's events, and a
   `kill -9` between a board write and its acknowledgement leaves no duplicate issue.
 
-### 9.5 Port 3: multi
+### 9.5 Phase 4: multi
 
 - **Added properties.** M1: for generated cadences and outcomes, the roles asked in each round
   equal the legacy decision table (`review_due`, `official_due`, `continuation_requested`).
@@ -849,7 +850,7 @@ and before dispatch, and after dispatch and before the observation is committed.
 - **Live run.** As 9.3 with `--inner-loop multi-agent`, with a profiler enabled, plain and
   profile-guided; also confirm the judge asked for the evaluation tool at least once.
 
-### 9.6 Port 4: evolve
+### 9.6 Phase 5: evolve
 
 - **Added properties.** E1: for any completion order of K slots the final population is
   identical. E2: a crash between the last admission and the generation transition resumes to
@@ -865,7 +866,7 @@ and before dispatch, and after dispatch and before the observation is committed.
   each selector; criteria as 9.3, plus: the admitted order equals slot order in the event log
   whatever the completion order was.
 
-### 9.7 Port 0 acceptance (the Phase 2 PRs)
+### 9.7 Phase 2 acceptance
 
 `dynamic`'s whole suite passes unchanged; the transcript test (3.4) shows identical decision
 ids and payload digests; `scripts/check_tach.py`, `check_purity.py` (no baseline entry for
