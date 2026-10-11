@@ -5,12 +5,12 @@ evidence is retried up to `max_input_measurement_attempts`; a workload rejection
 of the input is a typed failure shown to the planner, not an exception.
 """
 
+from vibesys.metrics import reading_of
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._draft import Draft, measurement_plan, operation
 from vibesys.orchestration.dynamic.strategy._evidence import accept_readings
 from vibesys.orchestration.dynamic.strategy._ids import decision_id
 from vibesys.orchestration.dynamic.strategy._operations import EvidenceReadings, InterpretEvidence
-from vibesys.orchestration.dynamic.strategy._rows import reading_of
 from vibesys.orchestration.dynamic.strategy._state import (
     BaselineStage,
     BaselineState,

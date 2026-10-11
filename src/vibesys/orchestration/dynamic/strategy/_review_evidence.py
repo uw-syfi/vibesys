@@ -8,10 +8,11 @@ carries each record's evidence ID, kind, revision, verdict, metrics and failure 
 as typed data. The judge never searches the filesystem for results.
 """
 
+from vibesys.metrics import AcceptedReading
 from vibesys.orchestration.dynamic.strategy._evidence import accept_readings
 from vibesys.orchestration.dynamic.strategy._operations import EvidenceReadings
 from vibesys.orchestration.dynamic.strategy._prompts import ReviewEvaluation
-from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading, ReviewEvidence
+from vibesys.orchestration.dynamic.strategy._rows import ReviewEvidence
 from vibesys.orchestration.dynamic.strategy._state import AttemptRecord
 from vs_core.api import EvidenceKey, EvidenceRef, RunView
 

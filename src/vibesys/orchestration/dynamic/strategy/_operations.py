@@ -10,6 +10,7 @@ from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
+from vibesys.metrics import EvidenceReading
 from vs_core.api import (
     ArtifactRef,
     EvidenceRef,
@@ -26,7 +27,6 @@ from vs_core.api import (
 )
 
 from ._prompts import PromptContext
-from ._rows import EvidenceReading
 
 type Status = Literal["succeeded", "pending", "cancelled", "rejected", "failed", "unknown"]
 

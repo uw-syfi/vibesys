@@ -10,9 +10,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
+from vibesys.metrics import MetricRow, PartialRow
 from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionRef, Value
-
-from ._rows import MetricRow, PartialRow
 
 
 class PromptTemplate(StrEnum):

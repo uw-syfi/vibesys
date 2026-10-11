@@ -9,9 +9,8 @@ rejected by review and beats the input baseline is winner-eligible.
 from typing import Literal
 
 from vibesys.hypothesis import HypothesisOutcome
-from vibesys.metrics import Measurement, MetricComparison
+from vibesys.metrics import AcceptedReading, Measurement, MetricComparison, MetricRow, reading_of
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
-from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading, MetricRow, reading_of
 from vibesys.orchestration.dynamic.strategy._state import (
     AttemptRecord,
     BaselineStage,

@@ -318,7 +318,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.metrics"
 layer = "roles_search"
-depends_on = []
+depends_on = ["vs_core"]
 
 [[modules]]
 path = "vibesys.orchestration.profilers"
@@ -1050,7 +1050,7 @@ expose = ["splice_steering"]
 from = ["vibesys.steering"]
 
 [[interfaces]]
-expose = ["FrameworkBenchmarkOutcome", "Measurement", "MetricComparison", "MetricSpace", "Objective"]
+expose = ["AcceptedReading", "EvidenceReading", "FrameworkBenchmarkOutcome", "Measurement", "MetricComparison", "MetricRow", "MetricSpace", "Objective", "PartialRow", "accept_readings", "reading_of"]
 from = ["vibesys.metrics"]
 
 [[interfaces]]

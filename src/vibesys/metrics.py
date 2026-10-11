@@ -27,16 +27,32 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 from pydantic.dataclasses import dataclass
 
+from vs_core.api import (
+    EvidenceId,
+    EvidenceKey,
+    EvidenceKind,
+    EvidenceRef,
+    ObservationStatus,
+    RequestId,
+    Value,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
 
 __all__ = [
+    "AcceptedReading",
+    "EvidenceReading",
     "FrameworkBenchmarkOutcome",
     "Measurement",
     "MetricComparison",
+    "MetricRow",
     "MetricSpace",
     "Objective",
+    "PartialRow",
+    "accept_readings",
+    "reading_of",
 ]
 
 
@@ -299,3 +315,100 @@ def _reading(objective: Objective, row: Mapping[str, float]) -> Measurement | No
     if value is None:
         return None
     return Measurement(metric=objective.name, value=value, direction=objective.direction)
+
+
+# -- decoded readings of core evidence ------------------------------------------------------
+#
+# Core evidence carries identity and artifacts but no numbers. The numeric facts arrive through
+# a declared interpretation operation, never by parsing artifacts inside a strategy, as typed
+# readings. These are the immutable shapes every strategy keeps in its state and hands to
+# prompt contexts, and the one rule that binds a reading to the record it decodes.
+
+type Finite = Annotated[float, Field(allow_inf_nan=False)]
+type Direction = Literal["max", "min"]
+
+
+class MetricRow(Value):
+    """One measured quantity on a declared axis."""
+
+    name: str = Field(min_length=1)
+    value: Finite
+    direction: Direction
+    unit: str | None = None
+
+
+class PartialRow(Value):
+    """What a failed benchmark measured before it stopped, as its evaluator reported it."""
+
+    name: str = Field(min_length=1)
+    value: Finite
+    direction: Direction
+    unit: str | None = None
+    target: Finite | None = None
+    completed: int | None = Field(default=None, ge=0)
+    required: int | None = Field(default=None, gt=0)
+    progress_unit: str | None = None
+
+
+class EvidenceReading(Value):
+    """Typed reading of one core `EvidenceRef`, decoded by the evidence owner."""
+
+    evidence_id: EvidenceId
+    kind: EvidenceKind
+    passed: bool
+    stage: str = Field(min_length=1)
+    protocol: int = Field(default=1, ge=1)
+    metrics: tuple[MetricRow, ...] = ()
+    partial: PartialRow | None = None
+    feedback: str = ""
+
+    def headline(self) -> MetricRow | None:
+        """The first reported metric, the benchmark's headline reading."""
+        return self.metrics[0] if self.metrics else None
+
+
+class AcceptedReading(EvidenceReading):
+    """A reading matched to exactly one requested core evidence record.
+
+    The owner names a reading by evidence ID only, and an ID is unique only within
+    its source request. Acceptance binds the reading to the full `EvidenceKey`, so
+    every later lookup, assessment source and parent identity uses the key.
+    """
+
+    source_request: RequestId
+
+    @property
+    def key(self) -> EvidenceKey:
+        """The run-wide identity of the evidence this reading decodes."""
+        return EvidenceKey(source_request=self.source_request, evidence_id=self.evidence_id)
+
+
+def reading_of[R: EvidenceReading](readings: tuple[R, ...], kind: EvidenceKind) -> R | None:
+    """The latest decoded reading of one evidence kind, or None when absent."""
+    matching = [item for item in readings if item.kind is kind]
+    return matching[-1] if matching else None
+
+
+def accept_readings(
+    readings: tuple[EvidenceReading, ...], requested: tuple[EvidenceRef, ...]
+) -> tuple[AcceptedReading, ...] | str:
+    """Bind each reading to the one requested record it decodes, or say why not.
+
+    A reading must name a requested evidence ID that no other requested record
+    shares, at most once, with the record's own kind, and may claim a pass only for
+    a record whose observation succeeded.
+    """
+    accepted: list[AcceptedReading] = []
+    for reading in readings:
+        matches = tuple(item for item in requested if item.evidence_id == reading.evidence_id)
+        if len(matches) != 1:
+            return f"reading {reading.evidence_id.root} names no single requested record"
+        (ref,) = matches
+        if reading.kind is not ref.kind:
+            return f"reading {reading.evidence_id.root} has kind {reading.kind.value}"
+        if reading.passed and ref.status is not ObservationStatus.SUCCEEDED:
+            return f"reading {reading.evidence_id.root} passed over a {ref.status.value} record"
+        if any(item.evidence_id == reading.evidence_id for item in accepted):
+            return f"reading {reading.evidence_id.root} repeated"
+        accepted.append(AcceptedReading(**reading.model_dump(), source_request=ref.source_request))
+    return tuple(accepted)

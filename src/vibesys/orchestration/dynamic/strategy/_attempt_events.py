@@ -12,6 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from vibesys.hypothesis import HypothesisConfig, HypothesisOutcome
 from vibesys.hypothesis.cadence import keeps_hypothesis_active, review_due
+from vibesys.metrics import AcceptedReading, reading_of
 from vibesys.orchestration.dynamic.models import (
     ImplementerReply,
     ImplementerResult,
@@ -42,7 +43,6 @@ from vibesys.orchestration.dynamic.strategy._prompts import (
     ResumePrompt,
     WaitUnrecordedPrompt,
 )
-from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading, reading_of
 from vibesys.orchestration.dynamic.strategy._settlement import STOPPED
 from vibesys.orchestration.dynamic.strategy._state import (
     AttemptRecord,
