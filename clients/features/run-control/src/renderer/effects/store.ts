@@ -57,5 +57,6 @@ export function createRunControlStore(
       ),
     },
   });
+  // The actor lives as long as the window that renders it, so it is intentionally never stopped.
   return actorStore(createActor(machine).start(), welcomeView);
 }

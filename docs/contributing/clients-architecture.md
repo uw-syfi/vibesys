@@ -50,7 +50,8 @@ clients/
   runs/             @vibesys/runs             run identity, recent status, resume and stop
                                                                                  -> contracts, hosts
   run-session/      @vibesys/run-session      one live run: runStep, the session machine, its
-                                              ports, connectRun, WebSession    -> run-state, transport, machine
+                                              ports, connectRun, WebSession    -> contracts, run-state,
+                                                                       transport, machine, store
   transport-node/   @vibesys/transport-node   stdio / unix socket / ssh channel  -> transport
   ipc/              @vibesys/ipc              typed main <-> renderer messages, the welcome
                                               requests' parsers per feature      -> hosts, runs
@@ -75,7 +76,7 @@ flowchart BT
   hosts["hosts (L1)"] --> contracts
   runs["runs (L2)"] --> contracts & hosts
   machine["machine (L1)"] --> store
-  run-session["run-session (L2)"] --> run-state & transport & machine
+  run-session["run-session (L2)"] --> contracts & run-state & transport & machine & store
   transport-node["transport-node (L2, Node)"] --> transport
   ipc["ipc (L3)"] --> hosts & runs
   connection["connection (L3, Node)"] --> contracts & transport & hosts
@@ -254,9 +255,18 @@ nowhere else.
 
 **Resources.** XState drops a late output but cannot stop the work that produces it: a
 `fromPromise` body keeps running after its actor stops. So an operation that opens a resource
-returns it, the machine installs it in that operation's `onDone` action (from where leaving the
-state disposes it), and an operation that sees its `signal` aborted disposes what it opened
-itself.
+returns it, and the machine installs it in that operation's `onDone` action, from where leaving the
+state disposes it. An operation that holds a resource only while it runs either reads its `signal`
+and disposes what it opened when that is aborted, or leaves teardown to the owner of the
+connection it ran on: `run-session`'s operations read no signal, and `connection.close()` (the
+`closeShell` action) tears down whatever they left open.
+
+**Failures.** Every invoke has an `onError` as well as an `onDone`. The shell's operations report
+expected failures as output (`run-session`'s snapshot load resolves to `{ok: false, error}`), and
+`onError` handles a rejection the same way, so an unexpected throw ends the flight instead of
+leaving its region waiting. An action can throw too (a fold or a connection method), which stops
+the actor; the shell observes that with an `error` observer and releases what it holds, as
+`WebSession` does.
 
 **Tests.** A machine is tested three ways, all scaffolded by `pnpm new:package feature <name>`:
 pure transitions through `getNextSnapshot` (or `transition`, which also returns the actions);
@@ -266,7 +276,9 @@ live operation and armed delay belongs to an active state, that no delay is arme
 cancelled while not armed, that a final state holds nothing, and the model's own invariants; and,
 for stale replies, a live actor whose operations the test settles in a chosen order. Migrating a
 reducer to a machine keeps its seeded invariants (ported through the kit) and its shell's
-behavioral tests unchanged, and deletes the reducer in the same change.
+behavioral tests, changed only where an operation's reply now lands a step later (a test then
+waits for the published state instead of reading it at once), and deletes the reducer in the same
+change.
 
 **Why.** Hand-rolled control state kept producing the same bugs: a reply token compared against the
 wrong slot, a timer not cleared on one exit path, an abort controller that outlived its owner.
@@ -296,7 +308,8 @@ two GritQL rules (wired in `biome.json`) keep features' `state/` and `effects/` 
 `setTimeout`, `setInterval`, and `AbortController`, and keep migrated control-state packages off
 `createStore`. Features still on the reducer kernel are migrated one per change; until then the
 two effects modules that hand-roll a timer or an abort controller (`hosts`' path completion,
-`gateway-connect`'s attempt) are listed as exclusions in `biome.json`, a list that only shrinks.
+`gateway-connect`'s attempt) are listed as exclusions in `biome.json`, a list that only shrinks;
+the remaining migrations and those exclusions are tracked in #1969.
 
 | Control state | Form | Status |
 | --- | --- | --- |

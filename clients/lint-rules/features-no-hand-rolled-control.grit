@@ -3,6 +3,8 @@
 // work. Hand-rolled timers and abort controllers in `state/` and `effects/` are the bookkeeping
 // that kept producing stale replies and orphaned timers, so they are not written there. Any
 // reference counts, not only a call: `const later = setTimeout` schedules all the same.
+// The modules `biome.json` excludes from this rule await their machines, a list that only
+// shrinks; biome.json takes no comments, so the list is tracked here and in #1969.
 language js;
 
 or {
