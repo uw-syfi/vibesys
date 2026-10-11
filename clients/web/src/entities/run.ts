@@ -42,7 +42,7 @@ export function runStep(state: CoreState, action: RunAction): Step<CoreState, ne
         fold(
           state,
           message.events,
-          message.active_executions ?? [],
+          message.active_executions,
           message.through_sequence,
           reconciliation.historyFloor,
         ),
