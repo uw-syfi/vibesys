@@ -1,0 +1,22 @@
+{% from '_macros.j2' import board_list %}
+Work only on issue #{{ issue.id }}: [{{ issue.type }}] {{ issue.title }}
+
+{{ issue.description }}
+
+{% include '_run_context.j2' %}
+{% if feedback is not none or analysis is not none %}
+
+Your previous attempt at this issue failed review.
+Feedback: {{ feedback or "" }}
+Analysis: {{ analysis or "" }}
+{% endif %}
+
+Every issue on the board, for context (do not work on any other):
+{{ board_list(board) }}
+
+You work in your own checkout of the accumulated candidate; earlier closed issues are
+already in it. Inspect the accuracy checker and benchmark interface before changing their
+integration points. Make the minimum sufficient change, then run the relevant pytest,
+accuracy, benchmark, and streaming checks. Return exactly one JSON object matching:
+{"summary": "...", "files_touched": ["..."], "self_check": "..."}
+{% include 'agent_evaluation.j2' %}

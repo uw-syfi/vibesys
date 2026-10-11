@@ -78,7 +78,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vs_sim.api", "vs_project", "vs_github", "vs_issue_tracker", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.issue_queue", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os"]
+depends_on = ["vs_sim.api", "vs_project", "vs_github", "vs_issue_tracker", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os"]
 
 [[modules]]
 path = "headless"
@@ -220,10 +220,6 @@ path = "vibesys.api.hypothesis"
 depends_on = ["vibesys.hypothesis", "vibesys.hypothesis.readmodel"]
 
 [[modules]]
-path = "vibesys.api.issue_queue"
-depends_on = ["vibesys.orchestration.issue_queue"]
-
-[[modules]]
 path = "vibesys.api.metrics"
 depends_on = ["vibesys.metrics"]
 
@@ -297,7 +293,7 @@ depends_on = ["vibesys.orchestration.attempts", "vibesys.orchestration.structure
 [[modules]]
 path = "vibesys.orchestration.issue_queue"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vs_runtime", "vs_issue_tracker", "vs_prompts", "vibesys.plugin_registration", "vibesys.orchestration.resume", "vibesys.run.contracts"]
+depends_on = ["vibesys.issue_queue_core", "vibesys.orchestration.issue_queue.models"]
 
 [[modules]]
 # Shared memory paths declared by the built-in orchestration plugins.
@@ -935,10 +931,6 @@ expose = ["AgentRunProjection", "CandidateDisposition", "HypothesisOutcome", "Hy
 from = ["vibesys.api.hypothesis"]
 
 [[interfaces]]
-expose = ["IssueBoardContext", "IssueBoardTool", "IssueToolPolicy", "issue_board_tools"]
-from = ["vibesys.api.issue_queue"]
-
-[[interfaces]]
 expose = ["MetricComparison", "MetricSpace", "Objective"]
 from = ["vibesys.api.metrics"]
 
@@ -979,7 +971,7 @@ expose = ["PLUGIN", "REGISTRATION", "resolve_openevolve_options"]
 from = ["vibesys.orchestration.evolve"]
 
 [[interfaces]]
-expose = ["IssueBoardContext", "IssueBoardTool", "IssueQueueOptions", "IssueQueueState", "IssueToolPolicy", "PLUGIN", "REGISTRATION", "issue_board_tools"]
+expose = ["IssueQueueOptions", "PLUGIN", "REGISTRATION"]
 from = ["vibesys.orchestration.issue_queue"]
 
 [[interfaces]]
@@ -1235,6 +1227,44 @@ depends_on = ["vs_core.types.common", "vs_core._values"]
 [[interfaces]]
 from = ["vs_core._outcomes"]
 expose = ["OutcomeCodecError", "OutcomeValue", "bind_outcome", "prove_outcome"]
+[[modules]]
+path = "vibesys.orchestration.issue_queue.models"
+layer = "loops"
+depends_on = ["vs_core", "vs_issue_tracker"]
+
+[[interfaces]]
+expose = ["ImplementerReplyModel", "IssueImplementerResult", "IssueJudgeResult", "IssuePerfEvalResult", "IssueQueueOptions", "JudgeReplyModel", "LatencyStats", "LoadLevel", "LoadLevelMetrics", "NewBug", "NewIssue", "PerfMetrics", "PerformanceTrend", "ThroughputStats", "perf_result_model"]
+from = ["vibesys.orchestration.issue_queue.models"]
+
+[[modules]]
+path = "vibesys.orchestration.issue_queue.strategy"
+layer = "loops"
+depends_on = ["vs_core", "vs_issue_tracker", "vibesys.candidates", "vibesys.metrics", "vibesys.orchestration.issue_queue.models"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.issue_queue.strategy"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vibesys.orchestration.issue_queue.core_policy"
+layer = "loops"
+depends_on = ["vs_core", "vs_prompts", "vs_issue_tracker", "vibesys.orchestration.issue_queue.models", "vibesys.orchestration.issue_queue.strategy", "vibesys.run.contracts"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.issue_queue.core_policy"]
+expose = ["api", "api\\..*"]
+
+[[interfaces]]
+from = ["vibesys.issue_queue_core"]
+expose = ["CORE_ROLES", "IMPLEMENTER", "JUDGE", "PERF_EVALUATOR", "board_entries", "issue_queue_core_registration", "issue_queue_operation_catalog", "issue_queue_projector", "resolve_core_policy"]
+
+[[modules]]
+# Assembles the issue-queue core policy from the run's resolved resources: the one place that
+# stores the recipe, opens the tracker, builds the operation catalog and declares the roles.
+path = "vibesys.issue_queue_core"
+layer = "loops"
+depends_on = ["vs_core", "vs_issue_tracker", "vs_project", "vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.core_wiring", "vibesys.orchestration.issue_queue.core_policy", "vibesys.orchestration.issue_queue.models", "vibesys.orchestration.issue_queue.strategy", "vibesys.plugin_registration"]
+
 [[modules]]
 path = "vibesys.orchestration.dynamic.parents"
 layer = "orchestration_host"

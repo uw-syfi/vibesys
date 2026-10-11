@@ -80,15 +80,23 @@ class IssueBoardOwner:
     async def execute(self, request: OperationRequest, context: ExecutionContext) -> BaseModel:
         """Perform one operation; a tracker failure propagates as an unknown effect."""
         del context
+        return self.perform(request)
+
+    async def inspect(self, request: OperationRequest, context: ExecutionContext) -> Inspection:
+        """Say from the tracker's records whether the write landed; a query answers by running."""
+        del context
+        return self.observe(request)
+
+    def perform(self, request: OperationRequest) -> BaseModel:
+        """Perform one operation now: the body of `execute`, for callers that hold no event loop."""
         if isinstance(request, ReadBoard):
             return self._read()
         if isinstance(request, ApplyIssueChanges):
             return self._apply(request)
         return self._log(cast("LogProgress", request))
 
-    async def inspect(self, request: OperationRequest, context: ExecutionContext) -> Inspection:
-        """Say from the tracker's records whether the write landed; a query answers by running."""
-        del context
+    def observe(self, request: OperationRequest) -> Inspection:
+        """Say whether the operation's effect is recorded now: the body of `inspect`."""
         if isinstance(request, ReadBoard):
             return Applied(self._read())
         if isinstance(request, ApplyIssueChanges):
