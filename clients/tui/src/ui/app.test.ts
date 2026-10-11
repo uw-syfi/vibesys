@@ -99,6 +99,7 @@ import {
   selectNextTodo,
   setChatDockFits,
   setDesignPane,
+  setNotepadPersistenceError,
   setNotepadText,
   setPerformancePane,
   switchChatThread,
@@ -8382,6 +8383,7 @@ describe('notepad', () => {
         createdAt: 't0',
         updatedAt: 't0',
         persistence: 'conflict',
+        persistenceError: null,
       },
     });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -8404,6 +8406,7 @@ describe('notepad', () => {
         createdAt: 't0',
         updatedAt: 't1',
         persistence: 'conflict',
+        persistenceError: null,
       },
     });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -8417,6 +8420,42 @@ describe('notepad', () => {
     expect(input).toBeInstanceOf(InputRenderable);
     if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
     expect(input.value).toBe('');
+  });
+
+  it('shows a local persistence failure as an unsaved in-memory draft', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const initial = initialSessionState();
+    const failed = setNotepadPersistenceError(
+      {
+        ...initial,
+        notepad: {
+          ...initial.notepad,
+          open: true,
+          text: 'draft stays in memory',
+          createdAt: 't0',
+          updatedAt: 't0',
+          persistence: 'ready',
+        },
+      },
+      'EACCES: permission denied',
+    );
+    const controller = new FakeController(failed);
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    const frame = await testRenderer.waitForFrame(value =>
+      value.includes('Not saved locally · EACCES: permission denied'),
+    );
+
+    expect(frame).toContain('draft stays in memory');
+    expect(controller.submissions).toEqual([]);
+    expect(controller.chatSubmissions).toEqual([]);
+
+    controller.publish(setNotepadPersistenceError(controller.state, null));
+    const recovered = await testRenderer.waitForFrame(value =>
+      value.includes('Saved locally · kept out of run-events.jsonl'),
+    );
+    expect(recovered).not.toContain('Not saved locally');
   });
 
   it('treats a leading / inside the notepad as plain text, never a command', async () => {

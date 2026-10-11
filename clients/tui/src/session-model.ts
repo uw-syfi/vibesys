@@ -266,7 +266,8 @@ interface ThemePicker {
  * (`notes-store.ts#readNote` returns `null` in that case too). `persistence`
  * records whether the controller has bound this draft to a run/project
  * identity. A conflict keeps an early startup draft in memory while leaving
- * an already-saved note untouched.
+ * an already-saved note untouched. A non-null `persistenceError` means the
+ * text is still owned in memory but its latest version is not durable yet.
  */
 interface NotepadState {
   open: boolean;
@@ -274,6 +275,7 @@ interface NotepadState {
   createdAt: string | null;
   updatedAt: string | null;
   persistence: 'pending_identity' | 'ready' | 'conflict';
+  persistenceError: string | null;
 }
 
 /**
@@ -431,6 +433,7 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
       createdAt: null,
       updatedAt: null,
       persistence: 'pending_identity',
+      persistenceError: null,
     },
     errorBanner: null,
     inputError: null,
@@ -848,6 +851,10 @@ function visiblePaneOrder(state: SessionState): PaneFocus[] {
  * with no saved note, which still completes the identity binding.
  */
 export function hydrateNotepad(state: SessionState, record: NoteRecord | null): SessionState {
+  // A failed write makes the in-memory draft newer than any readable record.
+  // Reopening the modal must never replace that unsaved owner with the last
+  // durable version.
+  if (state.notepad.persistenceError !== null) return state;
   return {
     ...state,
     notepad: {
@@ -911,6 +918,7 @@ export function closeNotepadAfterPromotion(state: SessionState): SessionState {
       createdAt: null,
       updatedAt: null,
       persistence: 'ready',
+      persistenceError: null,
     },
   };
 }
@@ -927,6 +935,15 @@ export function setNotepadText(state: SessionState, text: string, timestamp: str
       updatedAt: timestamp,
     },
   };
+}
+
+/** Records whether the latest in-memory notepad text reached its local sidecar. */
+export function setNotepadPersistenceError(
+  state: SessionState,
+  persistenceError: string | null,
+): SessionState {
+  if (state.notepad.persistenceError === persistenceError) return state;
+  return {...state, notepad: {...state.notepad, persistenceError}};
 }
 
 /**

@@ -49,6 +49,7 @@ import {
   openPane,
   reportError,
   setChatDockFits,
+  setNotepadPersistenceError,
   setNotepadText,
   setPerformancePane,
   showDetail,
@@ -2403,6 +2404,7 @@ describe('notepad', () => {
       createdAt: null,
       updatedAt: null,
       persistence: 'pending_identity',
+      persistenceError: null,
     });
   });
 
@@ -2454,6 +2456,20 @@ describe('notepad', () => {
     expect(setNotepadText(first, 'a', 't1')).toBe(first);
   });
 
+  it('records and clears a local persistence diagnostic without changing the draft', () => {
+    const written = setNotepadText(openNotepad(initialSessionState()), 'draft', 't0');
+    const failed = setNotepadPersistenceError(written, 'EACCES: permission denied');
+
+    expect(failed.notepad).toMatchObject({
+      text: 'draft',
+      persistenceError: 'EACCES: permission denied',
+    });
+    expect(setNotepadPersistenceError(failed, null).notepad).toMatchObject({
+      text: 'draft',
+      persistenceError: null,
+    });
+  });
+
   it('hydrates from a saved record only when one is given', () => {
     const opened = openNotepad(initialSessionState());
     const record = {
@@ -2474,6 +2490,12 @@ describe('notepad', () => {
       ...opened.notepad,
       persistence: 'ready',
     });
+
+    const unsaved = setNotepadPersistenceError(
+      setNotepadText(hydrated, 'newer in-memory draft', 't2'),
+      'EACCES: permission denied',
+    );
+    expect(hydrateNotepad(unsaved, record)).toBe(unsaved);
   });
 
   it('keeps a conflicted draft until promotion copies it to a composer', () => {
@@ -2491,6 +2513,7 @@ describe('notepad', () => {
       createdAt: null,
       updatedAt: null,
       persistence: 'ready',
+      persistenceError: null,
     });
   });
 
@@ -2593,6 +2616,7 @@ describe('notepad', () => {
       createdAt: null,
       updatedAt: null,
       persistence: 'pending_identity',
+      persistenceError: null,
     });
     expect(changed.selectedRound).toBeNull();
     expect(changed.selectedAgentKind).toBeNull();
