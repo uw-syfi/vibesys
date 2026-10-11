@@ -35,10 +35,10 @@ def mutate_prompt(state: EvolveStrategyState, slot: SlotState, config: EvolveCon
         failed = 0 if current is None else sum(not item.passed for item in current.individuals)
         return MutatePrompt(
             base_revision=slot.base,
-            cold_start=True,
+            is_cold_start=True,
             repair_seed=slot.repair_seed,
             failed_lessons=lessons,
-            failed_attempts=failed,
+            num_failed_attempts=failed,
             modality=config.modality,
             reference_path=config.reference_path,
             interface=config.interface,
@@ -46,7 +46,7 @@ def mutate_prompt(state: EvolveStrategyState, slot: SlotState, config: EvolveCon
     (parent,) = _peers(state, (proposal.parent_id,))
     return MutatePrompt(
         base_revision=slot.base,
-        cold_start=False,
+        is_cold_start=False,
         parent=parent,
         inspirations=_peers(state, proposal.inspiration_ids),
         modality=config.modality,
@@ -61,7 +61,7 @@ def judge_prompt(slot: SlotState, config: EvolveConfig) -> JudgePrompt:
         message = "a review needs the mutator's candidate"
         raise RuntimeError(message)
     return JudgePrompt(
-        candidate_revision=slot.candidate, modality=config.modality, interface=config.interface
+        candidate=slot.candidate, modality=config.modality, interface=config.interface
     )
 
 
@@ -71,7 +71,7 @@ def profile_prompt(slot: SlotState, config: EvolveConfig) -> ProfilerPrompt:
         message = "a profile needs the mutator's candidate"
         raise RuntimeError(message)
     return ProfilerPrompt(
-        candidate_revision=slot.candidate,
+        candidate=slot.candidate,
         profiler_kind=ProfilerKind(config.profiler_id).value,
         profile_execution=config.profile_execution,
         benchmark_command=config.benchmark_command,

@@ -9,6 +9,7 @@ recorded.
 ## Authoritative inputs
 
 {% include 'run_context.j2' %}
+{% include 'agent_evaluation.j2' %}
 
 Your workspace is an isolated candidate at `{{ rev(base_revision) }}`; edit it freely.
 
@@ -19,7 +20,7 @@ files and commands are trusted infrastructure: inspect them to understand the
 contract, but do not edit or bypass them. Only the framework's trusted evaluation
 decides whether the offspring passes.
 
-{% if cold_start %}
+{% if is_cold_start %}
 ## Bootstrap the first passing seed
 
 {% if repair_seed %}
@@ -34,7 +35,7 @@ generations will mutate it.
 {% endif %}
 
 {% if failed_lessons %}
-### Lessons from {{ failed_attempts }} failed bootstrap attempt(s)
+### Lessons from {{ num_failed_attempts }} failed bootstrap attempt(s)
 
 Do not repeat these failures:
 

@@ -591,7 +591,7 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         default=5.0,
         metavar="SECONDS",
         help=(
-            "Core-path loops (dynamic, single, multi): wait this long before asking an agent again after the provider "
+            "Core-path loops (dynamic, single, multi, evolve): wait this long before asking an agent again after the provider "
             "dropped its turn; doubles with each further drop of the same turn (default: 5)."
         ),
     )
@@ -767,6 +767,16 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
             "Max candidates to evaluate concurrently within a generation "
             "(default: 1 = serial). Values >1 take effect only when the selected "
             "run environment supports isolated candidate evaluation."
+        ),
+    )
+    parser.add_argument(
+        "--turn-drop-backoff-seconds",
+        type=float,
+        default=5.0,
+        metavar="SECONDS",
+        help=(
+            "Wait this long before asking an agent again after the provider dropped its "
+            "turn; doubles with each further drop of the same turn (default: 5)."
         ),
     )
     parser.add_argument("--modality", default=None, choices=_MODALITIES)

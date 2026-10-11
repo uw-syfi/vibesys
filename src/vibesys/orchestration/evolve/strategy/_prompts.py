@@ -37,12 +37,12 @@ class MutatePrompt(Value):
 
     template: Literal[PromptTemplate.MUTATE] = PromptTemplate.MUTATE
     base_revision: RevisionRef
-    cold_start: bool
+    is_cold_start: bool
     # The workspace already holds the previous cold start's files, to be repaired in place.
     repair_seed: bool = False
     # Distinct feedback of the most recent failed individuals, newest first.
     failed_lessons: tuple[str, ...] = ()
-    failed_attempts: int = Field(default=0, ge=0)
+    num_failed_attempts: int = Field(default=0, ge=0)
     parent: Individual | None = None
     inspirations: tuple[Individual, ...] = ()
     modality: str | None = None
@@ -54,7 +54,7 @@ class JudgePrompt(Value):
     """The independent review of one offspring."""
 
     template: Literal[PromptTemplate.JUDGE] = PromptTemplate.JUDGE
-    candidate_revision: RevisionRef
+    candidate: RevisionRef
     modality: str | None = None
     interface: str = "inprocess"
 
@@ -63,7 +63,7 @@ class ProfilerPrompt(Value):
     """One advisory profiling turn of a passing offspring."""
 
     template: Literal[PromptTemplate.PROFILER] = PromptTemplate.PROFILER
-    candidate_revision: RevisionRef
+    candidate: RevisionRef
     profiler_kind: str
     profile_execution: str
     benchmark_command: str | None = None

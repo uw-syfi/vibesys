@@ -32,6 +32,8 @@ _ALLOWED_EXTERNAL_POLICY_IMPORTS = {
     "dynamic_core.py",
     "dynamic_roles.py",
     "multi_core.py",
+    "evolve_core.py",
+    "evolve_roles.py",
     "multi_roles.py",
     "single_core.py",
     "single_roles.py",

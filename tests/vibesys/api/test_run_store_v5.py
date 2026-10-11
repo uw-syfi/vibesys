@@ -13,7 +13,6 @@ from tests.support import run_test_command
 from launch import open_run_store
 from vibesys.api import OrchestrationRegistry
 from vibesys.api.contracts import RunStatus
-from vibesys.orchestration.evolve.models import EvolveState
 from vibesys.orchestration.issue_queue import IssueQueueState
 from vs_project.api import (
     OrchestrationDescriptor,
@@ -124,42 +123,6 @@ def test_plain_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
     }
 
 
-def test_evolve_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
-    (tmp_path / "OBJECTIVE.md").write_text("Optimize the service.\n")
-    project = Project.open(tmp_path)
-    project.state.create_project("evolve project")
-    manifest = project.state.new_run_manifest(
-        "evolve run",
-        run_id="evolve-run",
-        branch="vibesys-runs/evolve-run",
-        vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="docker"),
-        execution=run_execution_record(),
-        orchestration=OrchestrationDescriptor(
-            id="evolve", config_version=1, options={"max_generations": 3}
-        ),
-        trusted_input_baseline="0" * 40,
-    )
-    project.state.create_run(manifest)
-    state = EvolveState.model_validate({"population": {"rng_state": (3, (), None)}})
-    project.state.portable_namespace(manifest.run_id, "evolve").slot(
-        "state.json", EvolveState
-    ).save(state)
-
-    store = open_run_store(project)
-    direct = store.get_run(manifest.run_id)
-
-    assert direct.loop == "evolve"
-    assert direct.status is RunStatus.UNKNOWN
-    assert direct.run_id == manifest.run_id
-    assert direct.projection == {
-        "population": state.population.model_dump(mode="json"),
-        "metric_space": state.metric_space.model_dump(mode="json"),
-        "generation": 0,
-    }
-    assert store.list_runs() == [direct]
-
-
 def test_unknown_v5_run_has_generic_history_view(tmp_path: Path) -> None:
     (tmp_path / "OBJECTIVE.md").write_text("Explore candidates.\n")
     project = Project.open(tmp_path)
@@ -229,7 +192,7 @@ def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
         vibesys_version="test",
         run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
-        orchestration=OrchestrationDescriptor(id="evolve", config_version=1, options={}),
+        orchestration=OrchestrationDescriptor(id="plain", config_version=1, options={}),
         trusted_input_baseline="0" * 40,
     )
     project.state.create_run(manifest)
@@ -238,7 +201,7 @@ def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
 
     documents = open_run_store(project).get_record(manifest.run_id).history_documents()
 
-    assert [document.relative_path.name for document in documents] == ["agent.json"]
+    assert [document.relative_path.name for document in documents] == ["plain.json"]
 
 
 def test_workspace_changes_hide_the_registered_plugins_memory(tmp_path: Path) -> None:
