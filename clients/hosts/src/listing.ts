@@ -28,6 +28,8 @@ export type HostListing =
       readonly ended: readonly HostRun[];
       /** Records this app cannot read (another VibeSys version), by id. */
       readonly unreadable: readonly string[];
+      /** Ids whose lock could not be read: neither known live nor known ended, by id. */
+      readonly unverified: readonly string[];
     }
   | {
       readonly kind: 'unavailable';
@@ -75,10 +77,8 @@ export function hostListing(host: HostKey, listing: InstanceList): HostListing {
     host,
     live: listing.instances.map(hostRun),
     ended: (listing.ended ?? []).map(hostRun),
-    unreadable: [
-      ...(listing.unreadable ?? []).map(entry => entry.id),
-      ...(listing.unverified ?? []),
-    ].sort(),
+    unreadable: (listing.unreadable ?? []).map(entry => entry.id).sort(),
+    unverified: [...(listing.unverified ?? [])].sort(),
   };
 }
 

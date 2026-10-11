@@ -81,5 +81,6 @@ function listing(host: 'local' | 'ssh:worker', runId: string): HostListing {
     ],
     ended: [],
     unreadable: [],
+    unverified: [],
   };
 }
