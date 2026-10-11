@@ -109,6 +109,7 @@ def resolve_core_policy(
         bounds,
         PolicyInputs(
             objective=run.facts.objective,
+            domain_id=run.facts.domain_id,
             baseline_commit=run.baseline_commit,
             evaluator_digest=evaluation.evaluator_digest,
             workload_digest=evaluation.workload_digest,

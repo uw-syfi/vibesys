@@ -21,6 +21,9 @@ class IssueQueueConfig(BaseModel):
 
     # The evaluation recipe artifact every measurement plan cites.
     recipe: ArtifactRef
+    # The input-owned domain selects only domain-specific agent contracts. Unknown registered
+    # domains use the neutral contract; the runtime has already validated the registry value.
+    domain_id: Annotated[str, Field(min_length=1)] = "llm-serving"
     max_rounds: Positive
     # Paid implementer turns one issue may use before it is blocked.
     max_attempts_per_issue: Positive

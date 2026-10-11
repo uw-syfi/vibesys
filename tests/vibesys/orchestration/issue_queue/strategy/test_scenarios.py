@@ -11,7 +11,12 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors
-from tests.vibesys.orchestration.issue_queue.strategy._replies import evaluated, implemented, judged
+from tests.vibesys.orchestration.issue_queue.strategy._replies import (
+    evaluated,
+    generic_evaluated,
+    implemented,
+    judged,
+)
 from tests.vibesys.orchestration.issue_queue.strategy._run import kinds, run_shell
 
 from vs_core.api import ProposeWinner, RequestTurn, Stop, SubmitMeasurement
@@ -53,6 +58,21 @@ def test_a_quiet_board_ends_in_success_with_the_work_adopted() -> None:
     assert any(isinstance(item, ProposeWinner) for item in trace.decisions)
     assert kinds(trace).count("StartAttempt") == 2  # the issue, then the evaluation
     assert _board(executors) == {1: ("closed", 1)}
+
+
+def test_a_generic_domain_run_accepts_domain_neutral_performance_evidence() -> None:
+    executors = Executors(
+        implementer=deque([implemented()]),
+        judge=deque([judged()]),
+        perf=deque([generic_evaluated()]),
+    )
+
+    trace = run_shell(executors, domain_id="generic")
+
+    assert _stop(trace).result.outcome == "success"
+    assert _board(executors) == {1: ("closed", 1)}
+    assert _titles(executors) == ["serve the model"]
+    assert all("legacy_load_levels" not in request.model_dump_json() for request in executors.seen)
 
 
 def test_a_failed_review_is_the_next_paid_turn_of_the_same_attempt() -> None:

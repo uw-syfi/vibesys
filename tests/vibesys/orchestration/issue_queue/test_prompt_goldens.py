@@ -7,6 +7,7 @@ typed context, with the context's fields and the plan's run-level variables. Reg
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -14,9 +15,16 @@ from tests.vibesys.golden.helpers import assert_exact_text
 
 from vibesys.issue_queue_board import IssueQueueTexts
 from vibesys.issue_queue_core import CORE_ROLES
-from vibesys.orchestration.issue_queue.core_policy.api import prompts
+from vibesys.orchestration.issue_queue.core_policy.api import (
+    PolicyInputs,
+    RunBounds,
+    build_core_policy,
+    prompts,
+)
+from vibesys.orchestration.issue_queue.models import IssueQueueOptions
 from vibesys.orchestration.issue_queue.strategy.api import (
     BOOTSTRAP_TEMPLATE,
+    PERF_REPLY,
     ImplementPrompt,
     IssueBrief,
     IssueDetail,
@@ -28,7 +36,7 @@ from vibesys.orchestration.issue_queue.strategy.api import (
     ReviewPrompt,
     WaitUnrecordedPrompt,
 )
-from vs_core.api import EvidenceId, RevisionId, RevisionRef
+from vs_core.api import ArtifactId, ArtifactRef, EvidenceId, RevisionId, RevisionRef
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import AgentRole, ProfileExecution, RunFacts
 
@@ -178,3 +186,80 @@ def test_the_first_issue_text_names_no_kind_of_task_but_the_runs_own(name: str) 
 @pytest.mark.parametrize("role", CORE_ROLES, ids=lambda role: role.id)
 def test_no_issue_queue_system_prompt_assumes_a_serving_task(role: AgentRole) -> None:
     assert not [term for term in _SERVING_ONLY_TERMS if term in role.system_prompt]
+
+
+def test_generic_run_prompts_do_not_invent_a_serving_contract() -> None:
+    contexts = (
+        ImplementPrompt(issue=_ISSUE),
+        ReviewPrompt(issue=_ISSUE, summary="Done."),
+        PerformancePrompt(iteration=2, max_new_issues=1, prior=_PRIOR),
+    )
+    rendered = [*(_render(context, _BARE) for context in contexts)]
+    rendered.extend(role.system_prompt for role in CORE_ROLES)
+
+    for prompt in rendered:
+        for serving_assumption in (
+            "inference server",
+            "VibeServeModel",
+            "/v1/completions",
+            "/health",
+            "model weights",
+            "token throughput",
+            "TTFT",
+            "TPOT",
+            "pytest",
+            "server process",
+        ):
+            assert serving_assumption.casefold() not in prompt.casefold()
+
+
+@pytest.mark.parametrize(
+    ("facts", "expected", "foreign"),
+    [
+        (
+            _CONFIGURED,
+            ("throughput_trend", "latency_trend"),
+            ("primary_metric_trend", "secondary_metric_trend"),
+        ),
+        (
+            _BARE,
+            ("primary_metric_trend", "secondary_metric_trend"),
+            ("throughput_trend", "latency_trend"),
+        ),
+    ],
+    ids=("llm-serving", "generic"),
+)
+def test_performance_prompt_field_names_match_the_domain_reply_schema(
+    facts: RunFacts,
+    expected: tuple[str, str],
+    foreign: tuple[str, str],
+) -> None:
+    """The shared role prompt must not contradict either domain-selected reply schema."""
+    task = _render(PerformancePrompt(iteration=1, max_new_issues=1), facts)
+    system = next(role.system_prompt for role in CORE_ROLES if role.id == "plain-perf-evaluator")
+    combined = f"{system}\n{task}"
+    policy = build_core_policy(
+        IssueQueueOptions(max_rounds=1, max_attempts_per_issue=1, max_issues_per_perf_eval=1),
+        RunBounds(
+            queue_allowance_seconds=1, observe_interval_seconds=1, observe_backoff_cap_seconds=1
+        ),
+        PolicyInputs(
+            objective=facts.objective,
+            domain_id=facts.domain_id,
+            baseline_commit="abc123",
+            evaluator_digest="e",
+            workload_digest="w",
+            environment_digest="env",
+            recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
+            accuracy_configured=True,
+            benchmark_configured=True,
+        ),
+    )
+    schema = json.dumps(policy.reply_schemas[PERF_REPLY].model_json_schema())
+
+    for field in expected:
+        assert field in combined
+        assert field in schema
+    for field in foreign:
+        assert field not in combined
+        assert field not in schema
