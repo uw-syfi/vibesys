@@ -209,29 +209,29 @@ def on_operation(
     return state
 
 
-def on_blocked(
-    state: IssueQueueStrategyState, decision: str | None, max_retries: int
-) -> IssueQueueStrategyState | None:
-    """A board request's effect stayed unknown: send it again, or end the run once it keeps failing.
+def retry_blocked(
+    state: IssueQueueStrategyState, blocked: frozenset[str | None], max_retries: int
+) -> IssueQueueStrategyState:
+    """Send a board request again once its effect stayed unknown, or end the run if it keeps failing.
 
-    Returns None when the blocked request is not one of the run's own.
+    A request core blocked stays blocked in the view; the request it is sent again as has a
+    new decision identity and the same keys, so a write that did land is not repeated.
     """
     current = state.board
-    if current.read.awaiting is not None and current.read.awaiting.root == decision:
-        retries = current.read.retries
-        if retries >= max_retries:
+    reading = current.read.awaiting
+    if reading is not None and reading.root in blocked:
+        if current.read.retries >= max_retries:
             return _unavailable(state, "reading the board")
-        read = Pending(retries=retries + 1)
+        read = Pending(retries=current.read.retries + 1)
         return state.model_copy(update={"board": current.model_copy(update={"read": read})})
-    if current.bootstrap.awaiting is not None and current.bootstrap.awaiting.root == decision:
-        retries = current.bootstrap.retries
-        if retries >= max_retries:
+    filing = current.bootstrap.awaiting
+    if filing is not None and filing.root in blocked:
+        if current.bootstrap.retries >= max_retries:
             return _unavailable(state, "filing the bootstrap issue")
-        bootstrap = Pending(retries=retries + 1)
-        return state.model_copy(
-            update={"board": current.model_copy(update={"bootstrap": bootstrap})}
-        )
-    return None
+        bootstrap = Pending(retries=current.bootstrap.retries + 1)
+        board_state = current.model_copy(update={"bootstrap": bootstrap})
+        return state.model_copy(update={"board": board_state})
+    return state
 
 
 def on_rejected(

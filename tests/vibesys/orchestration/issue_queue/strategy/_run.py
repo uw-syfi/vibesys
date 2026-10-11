@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tests.vibesys.orchestration.issue_queue.strategy._executors import WorldTranslator
+
 from vibesys.orchestration.issue_queue.core_policy.api import (
     limits_for,
     reply_schemas,
@@ -96,7 +98,7 @@ def run_shell(
 ) -> Run:
     """Run a fresh strategy to the end of its run on the production shell."""
     settings = config(**overrides)
-    chosen_host = host or HostOptions()
+    chosen_host = host or HostOptions(translator=WorldTranslator)
     chosen = harness(settings, deadline_at=deadline_at, lifecycle=chosen_host.lifecycle)
     finished = drive_shell(
         IssueQueueStrategy(config=settings),

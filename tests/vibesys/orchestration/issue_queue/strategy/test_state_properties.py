@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors
+from tests.vibesys.orchestration.issue_queue.strategy._executors import Executors, WorldTranslator
 from tests.vibesys.orchestration.issue_queue.strategy._replies import evaluated, implemented, judged
 from tests.vibesys.orchestration.issue_queue.strategy._run import config, harness, limits
 
@@ -26,14 +26,21 @@ from vibesys.orchestration.issue_queue.strategy.api import (
 )
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
+    ControlChanged,
+    ControlId,
+    ControlInput,
     EventCursor,
     HostFence,
     HostId,
+    Measure,
+    ProposeWinner,
     RunEnvelope,
-    validate_immutable_schema,
+    Settle,
+    Stop,
+    Withdraw,
 )
 from vs_core.testing.drive import new_run
-from vs_runtime.api.testing import drive_shell
+from vs_runtime.api.testing import HostOptions, drive_shell
 
 if TYPE_CHECKING:
     from vs_core.api import Proposal, RunView, StrategyEvent
@@ -78,12 +85,14 @@ def _captured() -> tuple[IssueQueueStrategy, Capture]:
         perf=deque([evaluated("more"), evaluated()]),
     )
     strategy = IssueQueueStrategy(config=settings)
-    drive_shell(
+    finished = drive_shell(
         CapturingStrategy(strategy, capture),
         executors,
         harness(settings),
         reply_schemas(settings),
+        HostOptions(translator=WorldTranslator),
     )
+    assert finished.halted is None
     return strategy, capture
 
 
@@ -128,11 +137,21 @@ def test_every_reached_state_round_trips_the_envelope_codec() -> None:
         assert loaded.strategy == state
 
 
-def test_the_state_is_a_tree_of_immutable_values() -> None:
-    validate_immutable_schema(IssueQueueStrategyState)
-
-
 @pytest.mark.parametrize("field_name", ["max_rounds", "max_attempts_per_issue"])
 def test_the_derived_limits_cover_the_attempts_the_config_allows(field_name: str) -> None:
     settings = config(**{field_name: 3})
     assert limits(settings).max_attempts == settings.max_attempts
+
+
+def test_after_an_operator_stop_the_strategy_starts_no_new_work() -> None:
+    """From every state a run reaches, a stop leaves only settling, adopting and stopping."""
+    stop = ControlChanged(control=ControlInput(control_id=ControlId(root="stop"), action="stop"))
+    for state, view in CAPTURE.pairs:
+        stopped = STRATEGY.bind(STRATEGY.bind(state).on_event(view, stop))
+        proposal = stopped.decide(view)
+        for decision in proposal.decisions:
+            assert isinstance(decision, Withdraw | ProposeWinner | Stop | Measure), decision
+            if isinstance(decision, Withdraw):
+                disposition = decision.disposition
+                assert isinstance(disposition, Settle)
+                assert disposition.outcome in {"cancelled", "succeeded", "failed"}

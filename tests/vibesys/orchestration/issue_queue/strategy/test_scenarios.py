@@ -143,3 +143,29 @@ def test_the_work_is_not_adopted_when_the_final_candidate_fails_the_accuracy_gat
     assert not any(
         status is IssueStatus.OPEN for status in (i.status for i in executors.tracker.list())
     )
+
+
+def test_an_invalid_reply_is_corrected_once_and_then_accepted() -> None:
+    executors = _one_issue()
+    executors.implementer.appendleft("not json")
+    trace = run_shell(executors)
+    assert _stop(trace).result.outcome == "success"
+    turns = [item.turn for item in trace.decisions if isinstance(item, RequestTurn)]
+    corrections = [turn for turn in turns if turn.charge_class == "correction"]
+    assert len(corrections) == 1
+    assert corrections[0].predecessor is not None
+    # A correction speaks in its predecessor's session.
+    assert (
+        len({turn.session for turn in turns if turn.session.role_id.root.endswith("implementer")})
+        == 1
+    )
+
+
+def test_a_reply_that_stays_invalid_ends_the_run_in_failure_with_nothing_adopted() -> None:
+    executors = _one_issue()
+    executors.implementer.extendleft(["not json", "still not json"])
+    trace = run_shell(executors)
+    result = _stop(trace).result
+    assert result.outcome == "failure"
+    assert "implementer turn did not complete" in result.reason
+    assert not any(isinstance(item, ProposeWinner) for item in trace.decisions)

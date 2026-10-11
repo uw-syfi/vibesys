@@ -41,6 +41,7 @@ from vs_core.api import (
     AttemptSettled,
     ControlChanged,
     IntentBlocked,
+    IntentPhase,
     MeasurementResult,
     OperationResult,
     Proposal,
@@ -92,6 +93,7 @@ class IssueQueueStrategy:
         if self.state.phase is RunPhase.FINISHED:
             return Proposal(state=self.state, decisions=())
         state = job_events.settle_retained(self.state, view, self.config)
+        state = self._retry_blocked(state, view)
         draft = Draft(view=view, config=self.config, state=state)
         job_decisions.advance(draft)
         job = draft.state.job
@@ -100,6 +102,20 @@ class IssueQueueStrategy:
         flow.decide(draft)
         run.decide(draft)
         return Proposal(state=draft.state, decisions=tuple(draft.decisions), wake_at=draft.wake_at)
+
+    def _retry_blocked(
+        self, state: IssueQueueStrategyState, view: RunView
+    ) -> IssueQueueStrategyState:
+        """Send again each board request core blocked, read from the view."""
+        blocked = frozenset(
+            decision_of_operation(item.operation_id.root)
+            for item in view.operations
+            if item.phase is IntentPhase.BLOCKED
+        )
+        if not blocked:
+            return state
+        state = flow.retry_blocked(state, blocked, self.config.max_board_retries)
+        return job_events.retry_blocked(state, blocked, self.config)
 
     def on_event(self, view: RunView, event: StrategyEvent) -> IssueQueueStrategyState:
         """Fold one core feedback into the policy state."""
@@ -138,7 +154,7 @@ class IssueQueueStrategy:
             return job_events.on_resume(state, event)
         if isinstance(event, AttemptExhausted):
             return job_events.on_exhausted(state, event)
-        return self._blocked(state, event)
+        return job_events.on_blocked(state, event)
 
     def _run_feedback(
         self, state: IssueQueueStrategyState, event: StrategyEvent
@@ -153,16 +169,6 @@ class IssueQueueStrategy:
         if isinstance(event, RunEnded):
             return state.model_copy(update={"phase": RunPhase.FINISHED})
         return state
-
-    def _blocked(
-        self, state: IssueQueueStrategyState, event: IntentBlocked
-    ) -> IssueQueueStrategyState:
-        """Route a blocked request to the board request or the job awaiting it."""
-        decision = decision_of_operation(event.target.root)
-        own = flow.on_blocked(state, decision, self.config.max_board_retries)
-        if own is not None:
-            return own
-        return job_events.on_blocked(state, event, self.config)
 
     def _rejected(self, state: IssueQueueStrategyState, event: Rejected) -> IssueQueueStrategyState:
         detail = f"decision rejected: {event.code.value}: {event.detail}"

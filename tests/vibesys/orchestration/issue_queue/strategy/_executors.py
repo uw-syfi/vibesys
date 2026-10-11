@@ -8,18 +8,18 @@ across a restart and a scripted fault can lose an acknowledgement after a write 
 from __future__ import annotations
 
 import hashlib
+import tempfile
 from collections import Counter, deque
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.issue_queue.strategy.api import (
-    RenderRoleArtifacts,
-    plain_operation_registry,
-)
+from vibesys.orchestration.issue_queue.strategy.api import OPERATIONS
 from vs_core.api import (
     AdoptRevision,
     ArtifactId,
     ArtifactRef,
+    CancelOwnedResource,
     CloseSession,
     DispatchTurn,
     EnsureSession,
@@ -31,10 +31,10 @@ from vs_core.api import (
     EvidenceKind,
     EvidenceRef,
     ExecuteRegisteredOperation,
+    InspectRequest,
     ObservationStatus,
     ObserveOwnedJob,
     OwnedJob,
-    RenderedArtifacts,
     Request,
     ResourceId,
     ResumeSessionTurn,
@@ -47,13 +47,27 @@ from vs_core.api import (
 )
 from vs_core.testing.drive import Answer, Running, Succeeded, Unknown
 from vs_issue_tracker.api import (
-    ApplyIssueChanges,
     FakeIssueTracker,
     LogProgress,
     MemoryProgressLog,
-    ReadBoard,
+    board_operation_registrations,
 )
-from vs_runtime.api.core import IssueBoardOwner
+from vs_project.api import Project
+from vs_runtime.api.core import (
+    Applied,
+    ExecutionContext,
+    ExecutionResult,
+    IssueBoardOwner,
+    NamespaceOperationReceipts,
+    ObservationFactory,
+    OperationEntry,
+    OperationRole,
+    ReceiptStore,
+    RegisteredOperationRequests,
+    build_operation_catalog,
+    operation_roles,
+)
+from vs_runtime.api.testing import ScriptedExecutors
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -69,6 +83,25 @@ class Texts:
 
     def progress_entry(self, request: LogProgress) -> str:
         return f"{request.step} {request.iteration}"
+
+
+class FakeRenderer:
+    """The render owner: stores nothing and names the prompt after the request."""
+
+    async def execute(self, request: object, context: object) -> dict[str, object]:
+        del context
+        return {
+            "status": "succeeded",
+            "prompts": (
+                ArtifactRef(
+                    artifact_id=ArtifactId(root=f"prompt:{request.subject}:{request.ordinal}"),  # type: ignore[attr-defined]
+                    digest="prompt",
+                ),
+            ),
+        }
+
+    async def inspect(self, request: object, context: object) -> Applied:
+        return Applied(await self.execute(request, context))
 
 
 def _lease(session_id: SessionId) -> ResourceId:
@@ -93,9 +126,35 @@ class Executors:
     # Whether the trusted accuracy gate passes for a commit.
     accuracy: Callable[[str], bool] = lambda _commit: True
     owner: IssueBoardOwner = field(init=False)
+    operations: RegisteredOperationRequests = field(init=False)
+    # Requests the real operation executor was handed, so an inspection of one is its to answer.
+    operation_ids: set[str] = field(default_factory=set)
+    _disk: tempfile.TemporaryDirectory[str] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.owner = IssueBoardOwner(self.tracker, self.progress, Texts())
+        self._disk = tempfile.TemporaryDirectory()
+        root = Path(self._disk.name)
+        (root / "project").mkdir()
+        namespace = Project.open(root / "project").state.state_store_namespace("run")
+        registrations = operation_roles(OPERATIONS)
+        board = tuple(
+            OperationEntry.owned(registration, self.owner)
+            for registration in board_operation_registrations()
+        )
+        catalog = build_operation_catalog(
+            registrations,
+            {
+                OperationRole.RENDER_ARTIFACTS: FakeRenderer(),
+                OperationRole.VERIFY_REVISION: FakeRenderer(),
+            },
+            extra=board,
+        )
+        self.operations = RegisteredOperationRequests(
+            catalog,
+            NamespaceOperationReceipts(ReceiptStore(namespace)),
+            ObservationFactory(ReceiptStore(namespace)),
+        )
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
         self.seen.append(request)
@@ -111,8 +170,6 @@ class Executors:
     def _answer(self, request: Request) -> Answer:
         """What an executor that needs no view of core reports for ``request``."""
         match request:
-            case ExecuteRegisteredOperation():
-                return self._operation(request)
             case DispatchTurn() | ResumeSessionTurn():
                 return self._turn(request)
             case EnsureWorkspace() | EnsureSession():
@@ -201,23 +258,35 @@ class Executors:
         self.agent_calls += 1
         return Succeeded(output_json=reply, resource_id=_lease(request.turn.session.session_id))
 
-    def _operation(self, request: ExecuteRegisteredOperation) -> Answer:
-        typed = plain_operation_registry().decode(request.operation)
-        if isinstance(typed, RenderRoleArtifacts):
-            return Succeeded(
-                outcome=RenderedArtifacts(
-                    status="succeeded",
-                    prompts=(
-                        ArtifactRef(
-                            artifact_id=ArtifactId(root=f"prompt:{request.operation_id.root}"),
-                            digest="prompt",
-                        ),
-                    ),
-                )
-            )
-        if isinstance(typed, ReadBoard | ApplyIssueChanges | LogProgress):
-            return Succeeded(outcome=self.owner.perform(typed))
-        return Succeeded()
+
+class WorldTranslator(ScriptedExecutors):
+    """Scripted executors whose operation role is the production operation executor.
+
+    Operations go through real receipts and the real `IssueBoardOwner`, so a lost
+    acknowledgement and a restart are recovered by inspection exactly as in production. Every
+    other role answers from the script.
+    """
+
+    def _owns(self, request: Request) -> bool:
+        world = self._script
+        if not isinstance(world, Executors):
+            return False
+        if isinstance(request, ExecuteRegisteredOperation | CancelOwnedResource):
+            return True
+        return isinstance(request, InspectRequest) and request.target.root in world.operation_ids
+
+    async def execute(self, request: Request, context: ExecutionContext) -> ExecutionResult:
+        """Route operation requests to the real executor; script everything else."""
+        world = self._script
+        if not self._owns(request) or not isinstance(world, Executors):
+            return await super().execute(request, context)
+        assert request.request_id is not None
+        self.journal.issue(request)
+        if isinstance(request, ExecuteRegisteredOperation):
+            world.operation_ids.add(request.request_id.root)
+        result = await world.operations.execute(request, context)  # type: ignore[arg-type]
+        self.journal.observe_event(result.observation)
+        return result
 
 
-__all__ = ["Executors", "Texts"]
+__all__ = ["Executors", "Texts", "WorldTranslator"]

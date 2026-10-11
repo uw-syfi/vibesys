@@ -151,38 +151,44 @@ def on_ready(state: IssueQueueStrategyState, event: AttemptReady) -> IssueQueueS
     return _with(state, admitted.model_copy(update=update))
 
 
-def on_blocked(
-    state: IssueQueueStrategyState, event: IntentBlocked, config: IssueQueueConfig
+def retry_blocked(
+    state: IssueQueueStrategyState, blocked: frozenset[str | None], config: IssueQueueConfig
 ) -> IssueQueueStrategyState:
-    """A blocked request leaves its effect unknown.
+    """Send the job's board write again once its effect stayed unknown, or fail the job.
 
-    A board write is keyed, so it is sent again under a new decision identity up to a bound;
-    anything else of the attempt ends the job.
+    A write core blocked stays blocked in the view; the request it is sent again as has a new
+    decision identity and the same keys, so a write that did land is not repeated.
+    """
+    job = state.job
+    if job is None or job.phase is Phase.DONE or job.awaiting is None:
+        return state
+    if job.awaiting.root not in blocked:
+        return state
+    if job.write_retries >= config.max_board_retries:
+        return fail(state, f"a board request stayed unknown (sent {job.write_retries + 1} times)")
+    return _with(
+        state,
+        job.model_copy(
+            update={"write_retries": job.write_retries + 1, "step": Step.NEEDED, "awaiting": None}
+        ),
+    )
+
+
+def on_blocked(state: IssueQueueStrategyState, event: IntentBlocked) -> IssueQueueStrategyState:
+    """A blocked request of the job's attempt leaves its effect unknown: end the job.
+
+    A board write is run-scoped and is retried from the view instead (`retry_blocked`).
     """
     job = state.job
     if job is None or job.phase is Phase.DONE:
         return state
     detail = f"request blocked: {event.diagnostic}"
     decision = ids.decision_of_operation(event.target.root)
-    if job.awaits(decision) and job.phase in (Phase.CLAIM, Phase.RECORD, Phase.FILE, Phase.BLOCK):
-        if job.write_retries >= config.max_board_retries:
-            return fail(state, f"{detail} (sent {job.write_retries + 1} times)")
-        return _with(
-            state,
-            job.model_copy(
-                update={
-                    "write_retries": job.write_retries + 1,
-                    "step": Step.NEEDED,
-                    "awaiting": None,
-                }
-            ),
-        )
     attempt_owned = event.scope.owner.kind == "attempt" and event.scope.owner == job.attempt
-    if job.awaits(decision) or (
+    awaiting = job.awaits(decision) or (
         attempt_owned and event.scope.generation == job.generation and job.step is Step.AWAITING
-    ):
-        return fail(state, detail)
-    return state
+    )
+    return fail(state, detail) if awaiting else state
 
 
 def _rendered(
@@ -520,14 +526,21 @@ def settle_retained(
 def _unfinished(
     state: IssueQueueStrategyState, view: RunView, config: IssueQueueConfig, event: TurnResult
 ) -> IssueQueueStrategyState:
-    """A turn ended without a usable reply: ask again if the connection dropped it, else fail."""
+    """A turn ended without a usable reply: ask again, correct the reply, or fail the job."""
     job = state.job
     role = None if job is None else role_of(job)
     if role is None:
         return state
     if event.failure is TurnFailureKind.TRANSPORT_LOST:
         return _ask_again(state, config, event, view.run.now_at)
-    return fail(state, f"{role.value} turn did not complete ({event.observation.status.value})")
+    reason = f"{role.value} turn did not complete ({event.observation.status.value})"
+    if event.failure is TurnFailureKind.PROVIDER_FAILED:
+        # The executor ended the turn with the reason, which is how a reply that broke its
+        # schema reaches the strategy: the role is asked to fix it, a bounded number of times.
+        corrected = _correct(state, config, event.detail or reason, event.invocation)
+        if corrected is not None:
+            return corrected
+    return fail(state, reason)
 
 
 def _wait_or_correct(

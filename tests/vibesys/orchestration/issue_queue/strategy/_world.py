@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from tests.vibesys.orchestration.issue_queue.strategy._executors import WorldTranslator
 from tests.vibesys.orchestration.issue_queue.strategy._run import config, harness
 
 from vibesys.orchestration.issue_queue.core_policy.api import reply_schemas
@@ -41,7 +42,6 @@ from vs_runtime.api.testing import (
     LEASE,
     FakePublicationDelivery,
     RecordingStrategy,
-    ScriptedExecutors,
     request_executors,
 )
 from vs_sim.api.testing import VirtualClock, run_virtual
@@ -93,7 +93,7 @@ class _Observer:
             raise Crash
 
 
-class _Executors(ScriptedExecutors):
+class _Executors(WorldTranslator):
     """Scripted executors whose effects are remembered, so a restart inspects them."""
 
     def __init__(self, *args: object, outside: Outside, dies: DiesAt) -> None:
@@ -102,12 +102,15 @@ class _Executors(ScriptedExecutors):
         self._dies = dies
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionResult:
-        if isinstance(request, InspectRequest):
+        if isinstance(request, InspectRequest) and not self._owns(request):
             return self._inspect(request, context)
         assert request.request_id is not None
         outside = self._outside
-        outside.executed.append(request.request_id.root)
+        if not isinstance(request, InspectRequest):
+            outside.executed.append(request.request_id.root)
         result = await super().execute(request, context)
+        if isinstance(request, InspectRequest):
+            return result
         outside.sealed[request.request_id.root] = result
         if self._dies.effect is not None and len(outside.executed) == self._dies.effect:
             raise Crash
