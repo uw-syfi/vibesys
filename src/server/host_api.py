@@ -21,7 +21,8 @@ Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
 ``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
-``TaskList``, and the host helper's messages: ``HELPER_PROTOCOL_VERSIONS``,
+``TaskList``, the inspection documents, and the host helper's messages:
+``HELPER_PROTOCOL_VERSIONS``,
 ``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
 members, ``HelperMessage`` and its members, ``HelperErrorCode``, and a relayed
 channel's end: ``ChannelEndOutcome``, ``ChannelEnd``.
@@ -36,6 +37,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -47,6 +49,7 @@ from pydantic import (
     StringConstraints,
     TypeAdapter,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -226,6 +229,15 @@ class RunPhase(BaseModel):
         return failure.model_copy(update={"stage": self.stage.value})
 
 
+INSPECTION_LOG_TAIL_BYTES = 64 * 1024
+"""Maximum UTF-8 bytes returned by one explicit instance-log inspection."""
+ECMASCRIPT_DATE_MAX_SECONDS = 8_640_000_000_000
+"""Largest Unix timestamp that ECMAScript ``Date`` can represent, in seconds."""
+_MAX_PATH_CHARACTERS = 4096
+_MAX_IDENTITY_CHARACTERS = 255
+_StartedAt = Annotated[float, Field(ge=0, le=ECMASCRIPT_DATE_MAX_SECONDS, allow_inf_nan=False)]
+
+
 class InstanceStatus(StrEnum):
     """How far a live server has come; run status itself is on its socket."""
 
@@ -256,7 +268,7 @@ class LiveInstanceRecord(BaseModel):
     project_root: str
     run_id: RunId
     pid: PositiveInt
-    started_at: float
+    started_at: _StartedAt
     ended_at: float | None = None
     hostname: str
     protocol_version: Literal[1] = PROTOCOL_VERSION
@@ -387,6 +399,120 @@ class InstanceStopResult(BaseModel):
     """How the server was reached; ``None`` when nothing was sent."""
 
 
+class AvailableLogTail(BaseModel):
+    """A bounded suffix of one instance's regular ``server.log`` file."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    state: Literal["available"] = "available"
+    text: str = Field(json_schema_extra={"x-vibesys-max-utf8-bytes": INSPECTION_LOG_TAIL_BYTES})
+    truncated: bool
+
+    @field_validator("text")
+    @classmethod
+    def _bounded_text(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > INSPECTION_LOG_TAIL_BYTES:
+            message = f"log tail exceeds {INSPECTION_LOG_TAIL_BYTES} UTF-8 bytes"
+            raise ValueError(message)
+        return value
+
+
+class MissingLogTail(BaseModel):
+    """The instance has no retained ``server.log`` file."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    state: Literal["missing"] = "missing"
+
+
+InstanceLogTail = Annotated[AvailableLogTail | MissingLogTail, Field(discriminator="state")]
+
+
+class InspectionState(StrEnum):
+    """What one coherent registry observation proved about an instance."""
+
+    LIVE = "live"
+    ENDED = "ended"
+    UNVERIFIED = "unverified"
+
+
+BoundedPath = Annotated[str, StringConstraints(min_length=1, max_length=_MAX_PATH_CHARACTERS)]
+BoundedIdentity = Annotated[
+    str, StringConstraints(min_length=1, max_length=_MAX_IDENTITY_CHARACTERS)
+]
+ProjectIdentity = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9._-]{0,127}$")]
+
+
+class InstanceInspectionMetadata(BaseModel):
+    """Immutable detached-process facts retained after its live record disappears."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    version: Literal[1] = 1
+    id: InstanceId
+    project_root: BoundedPath
+    run_id: ProjectIdentity
+    task: ProjectIdentity | None = None
+    pid: PositiveInt
+    started_at: _StartedAt
+    hostname: BoundedIdentity
+    protocol_version: Literal[1] = PROTOCOL_VERSION
+    vibesys_version: BoundedIdentity
+    vibesys_root: BoundedPath | None = None
+    control_socket_path: BoundedPath
+    server_log_path: BoundedPath
+
+    @field_validator("project_root", "vibesys_root", "control_socket_path", "server_log_path")
+    @classmethod
+    def _absolute_path(cls, value: str | None) -> str | None:
+        if value is not None and not Path(value).is_absolute():
+            message = f"inspection path must be absolute: {value!r}"
+            raise ValueError(message)
+        return value
+
+
+class InstanceInspection(BaseModel):
+    """``vibesys instances inspect --json``: identity plus an optional diagnostic tail."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: Literal[1] = 1
+    id: InstanceId
+    state: InspectionState
+    record: LiveInstanceRecord | None
+    metadata: InstanceInspectionMetadata | None
+    control_socket_path: BoundedPath
+    server_log_path: BoundedPath
+    log: InstanceLogTail | None = None
+
+    @field_validator("control_socket_path", "server_log_path")
+    @classmethod
+    def _absolute_path(cls, value: str) -> str:
+        if not Path(value).is_absolute():
+            message = f"inspection path must be absolute: {value!r}"
+            raise ValueError(message)
+        return value
+
+    @model_validator(mode="after")
+    def _coherent_identity(self) -> InstanceInspection:
+        if self.record is not None and self.record.id != self.id:
+            message = "inspection record id does not match inspection id"
+            raise ValueError(message)
+        if self.metadata is not None and self.metadata.id != self.id:
+            message = "inspection metadata id does not match inspection id"
+            raise ValueError(message)
+        if self.metadata is not None and (
+            self.metadata.control_socket_path != self.control_socket_path
+            or self.metadata.server_log_path != self.server_log_path
+        ):
+            message = "inspection paths do not match retained metadata"
+            raise ValueError(message)
+        if self.state is InspectionState.LIVE and self.record is None:
+            message = "a live inspection requires a live record"
+            raise ValueError(message)
+        return self
+
+
 class DetachedLaunchErrorCode(StrEnum):
     """Failure codes ``vibesys --detach`` owns; configuration codes pass through as is."""
 
@@ -463,6 +589,8 @@ class HelperFeature(StrEnum):
     """``instances.watch`` and ``instances.unwatch``: registry changes pushed as they happen."""
     PATHS_COMPLETE = "paths_complete"
     """``paths.complete``: directory completion for a typed path on the host."""
+    INSTANCES_INSPECT = "instances_inspect"
+    """``instances.inspect``: retained metadata and an optional bounded log tail."""
 
 
 RequestId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
@@ -498,6 +626,14 @@ class InstancesListRequest(_HelperRequest):
     """The live and recently ended detached servers on this host."""
 
     type: Literal["instances.list"] = "instances.list"
+
+
+class InstancesInspectRequest(_HelperRequest):
+    """Inspect one detached server without starting another host process."""
+
+    type: Literal["instances.inspect"] = "instances.inspect"
+    instance_id: InstanceId
+    include_log: bool = False
 
 
 class InstancesWatchRequest(_HelperRequest):
@@ -597,6 +733,7 @@ class PathsCompleteRequest(_HelperRequest):
 HelperRequest = Annotated[
     HelloRequest
     | InstancesListRequest
+    | InstancesInspectRequest
     | InstancesWatchRequest
     | InstancesUnwatchRequest
     | TasksListRequest
@@ -652,6 +789,13 @@ class InstancesListReply(_HelperReply):
 
     type: Literal["instances.list"] = "instances.list"
     listing: InstanceList
+
+
+class InstancesInspectReply(_HelperReply):
+    """One coherent inspection of a detached server and its retained artifacts."""
+
+    type: Literal["instances.inspect"] = "instances.inspect"
+    inspection: InstanceInspection
 
 
 class InstancesWatchReply(_HelperReply):
@@ -837,6 +981,7 @@ class HelperError(BaseModel):
 HelperReply = (
     HelloReply
     | InstancesListReply
+    | InstancesInspectReply
     | InstancesWatchReply
     | InstancesUnwatchReply
     | TasksListReply

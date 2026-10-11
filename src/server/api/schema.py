@@ -140,6 +140,8 @@ _HOST_HELPER_DESCRIPTOR_KEYWORDS = frozenset(
         "required",
         "title",
         "type",
+        # Consumed by @vibesys/contracts/host-helper as the semantic log-tail byte limit.
+        "x-vibesys-max-utf8-bytes",
     }
 )
 """What the TypeScript walker's strict mode enforces (``contracts/src/schema-walker.ts``)."""

@@ -61,6 +61,7 @@ function recent(runId: string): RecentRun {
     project: `/projects/${runId}`,
     task: 'queue',
     runId,
+    instanceId: `instance-${runId}`,
     attachedAt: 1,
   };
 }

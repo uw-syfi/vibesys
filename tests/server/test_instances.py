@@ -15,14 +15,22 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 from pydantic import ValidationError
 
+import server.registry as instance_module
 from server.api.protocol import Response
 from server.control_envelope import CommandAck, StopCommand
 from server.host_api import (
+    ECMASCRIPT_DATE_MAX_SECONDS,
+    INSPECTION_LOG_TAIL_BYTES,
     RECORD_VERSION,
+    AvailableLogTail,
     FailureReason,
+    InspectionState,
+    InstanceInspectionMetadata,
     InstanceList,
+    InstanceLogTail,
     InstanceStatus,
     LiveInstanceRecord,
+    MissingLogTail,
     RunPhase,
     RunStatus,
     StopOutcome,
@@ -36,8 +44,17 @@ from server.registry import (
     STOP_TIMEOUT_SECONDS,
     TOMBSTONE_RETENTION_SECONDS,
     FakeInstanceHold,
+    FakeInstanceLogs,
+    FakeInstanceMetadataStore,
     FakeInstanceStore,
+    FileInstanceHold,
+    FileInstanceLogs,
+    FileInstanceMetadataStore,
     FileInstanceStore,
+    InstanceHold,
+    InstanceInspector,
+    InstanceLogError,
+    InstanceMetadataError,
     InstanceObservation,
     LiveRegistry,
     LockState,
@@ -86,6 +103,40 @@ def _record(
         hostname="node",
         vibesys_version="0+test",
     )
+
+
+def _inspection_metadata(
+    instance_id: str = IDS[0], *, started_at: float = 1.0
+) -> InstanceInspectionMetadata:
+    return InstanceInspectionMetadata(
+        id=instance_id,
+        project_root="/project",
+        run_id="20261011-120000-11111111-run",
+        task="queue",
+        pid=4242,
+        started_at=started_at,
+        hostname="node",
+        vibesys_version="0+test",
+        vibesys_root="/src/vibesys",
+        control_socket_path=f"/run/vibesys/runs/{instance_id}/control.sock",
+        server_log_path=f"/run/vibesys/runs/{instance_id}/server.log",
+    )
+
+
+def _crash(hold: InstanceHold) -> None:
+    """Die without cleanup, as ``kill -9`` would: the lock drops, the files stay.
+
+    A crashed hold must not be released afterwards: its descriptor is gone.
+    """
+    if isinstance(hold, FakeInstanceHold):
+        hold.crash()
+        return
+    assert isinstance(hold, FileInstanceHold)
+    # test-isolation: a real crash is the kernel closing the lock descriptor;
+    # closing it here reproduces exactly that in process, without a child.
+    os.close(hold._lock._descriptor or -1)  # noqa: SLF001  # lint-waiver: LW-178207 [SLF001]; model kill -9 by closing the private lock descriptor the kernel would close
+    # > A public crash method on the production hold would exist only for tests,
+    # > and a real child process per step would make the interleaving property slow.
 
 
 @pytest.fixture(params=["fake", "file"])
@@ -190,6 +241,325 @@ def test_file_records_are_private_and_reject_unknown_keys(tmp_path: Path) -> Non
         LiveInstanceRecord.model_validate_json(raw)
     record_path.write_text(raw)
     assert judge(store.observe(IDS[0]), 0.0) is Verdict.UNREADABLE
+
+
+# --- inspection ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("contract", [_record, _inspection_metadata])
+def test_instance_timestamps_fit_the_ecmascript_date_domain(
+    contract: Callable[..., LiveInstanceRecord | InstanceInspectionMetadata],
+) -> None:
+    assert contract(IDS[0], started_at=ECMASCRIPT_DATE_MAX_SECONDS).started_at == (
+        ECMASCRIPT_DATE_MAX_SECONDS
+    )
+    with pytest.raises(ValidationError, match="less than or equal"):
+        contract(IDS[0], started_at=ECMASCRIPT_DATE_MAX_SECONDS + 1)
+
+
+@given(st.floats(min_value=0, max_value=ECMASCRIPT_DATE_MAX_SECONDS, allow_nan=False))
+def test_every_finite_timestamp_in_the_ecmascript_date_domain_is_accepted(
+    started_at: float,
+) -> None:
+    assert _record(IDS[0], started_at=started_at).started_at == started_at
+    assert _inspection_metadata(IDS[0], started_at=started_at).started_at == started_at
+
+
+def test_live_instance_record_does_not_absorb_inspection_metadata() -> None:
+    assert set(_record(IDS[0]).model_dump()) == {
+        "version",
+        "id",
+        "status",
+        "phase",
+        "socket_path",
+        "log_path",
+        "project_root",
+        "run_id",
+        "pid",
+        "started_at",
+        "ended_at",
+        "hostname",
+        "protocol_version",
+        "vibesys_version",
+        "vibesys_root",
+    }
+    with pytest.raises(ValidationError, match="task"):
+        LiveInstanceRecord.model_validate({**_record(IDS[0]).model_dump(), "task": "queue"})
+
+
+def test_inspection_loads_diagnostics_only_when_explicitly_requested() -> None:
+    store = FakeInstanceStore()
+    hold = store.hold(IDS[0])
+    hold.publish(_record(IDS[0]))
+
+    class RefusingLogs(FakeInstanceLogs):
+        def tail(self, instance_id: str) -> InstanceLogTail:
+            del instance_id
+            raise AssertionError
+
+    inspection = InstanceInspector(store, RefusingLogs(), FakeInstanceMetadataStore()).inspect(
+        IDS[0]
+    )
+
+    assert inspection.state is InspectionState.LIVE
+    assert inspection.record == _record(IDS[0])
+    assert inspection.log is None
+
+
+def test_inspection_observes_the_record_after_its_published_metadata() -> None:
+    store = FakeInstanceStore()
+    hold = store.hold(IDS[0])
+    hold.publish(_record(IDS[0]).model_copy(update={"project_root": "/launch"}))
+    authoritative = _record(IDS[0]).model_copy(update={"project_root": "/selected"})
+    metadata = _inspection_metadata().model_copy(
+        update={"project_root": "/selected", "run_id": authoritative.run_id}
+    )
+
+    class PublishingMetadataStore(FakeInstanceMetadataStore):
+        def load(self, instance_id: str) -> InstanceInspectionMetadata | None:
+            hold.publish(authoritative)
+            return super().load(instance_id)
+
+    snapshots = PublishingMetadataStore()
+    snapshots.publish(metadata)
+
+    inspection = InstanceInspector(store, FakeInstanceLogs(), snapshots).inspect(IDS[0])
+
+    assert inspection.state is InspectionState.LIVE
+    assert inspection.record == authoritative
+    assert inspection.metadata == metadata
+    assert inspection.record.project_root == inspection.metadata.project_root
+
+
+def test_inspection_reports_ended_but_retains_metadata_when_the_run_ends_during_log_read() -> None:
+    store = FakeInstanceStore()
+    hold = store.hold(IDS[0])
+    hold.publish(_record(IDS[0]))
+
+    class EndingLogs(FakeInstanceLogs):
+        def tail(self, instance_id: str) -> InstanceLogTail:
+            del instance_id
+            hold.release()
+            return AvailableLogTail(text="last line\n", truncated=False)
+
+    inspection = InstanceInspector(store, EndingLogs(), FakeInstanceMetadataStore()).inspect(
+        IDS[0], include_log=True
+    )
+
+    assert inspection.state is InspectionState.ENDED
+    assert inspection.record == _record(IDS[0])
+    assert inspection.log == AvailableLogTail(text="last line\n", truncated=False)
+
+
+def test_inspection_does_not_trust_a_record_when_its_lock_is_unverified() -> None:
+    store = FakeInstanceStore()
+    hold = store.hold(IDS[0])
+    hold.publish(_record(IDS[0]))
+    store.entries[IDS[0]].lock = LockState.UNKNOWN
+
+    inspection = InstanceInspector(store, FakeInstanceLogs(), FakeInstanceMetadataStore()).inspect(
+        IDS[0]
+    )
+
+    assert inspection.state is InspectionState.UNVERIFIED
+    assert inspection.record is None
+
+
+def test_ended_inspection_loads_the_retained_snapshot_without_a_live_record() -> None:
+    metadata = FakeInstanceMetadataStore()
+    metadata.publish(_inspection_metadata())
+
+    inspection = InstanceInspector(FakeInstanceStore(), FakeInstanceLogs(), metadata).inspect(
+        IDS[0]
+    )
+
+    assert inspection.state is InspectionState.ENDED
+    assert inspection.record is None
+    assert inspection.metadata == _inspection_metadata()
+    assert inspection.server_log_path == _inspection_metadata().server_log_path
+
+
+@given(raw=st.binary(max_size=512), limit=st.integers(min_value=1, max_value=256))
+def test_every_fake_log_tail_is_valid_utf8_within_its_byte_bound(raw: bytes, limit: int) -> None:
+    logs = FakeInstanceLogs(limit=limit)
+    logs.contents[IDS[0]] = raw
+
+    tail = logs.tail(IDS[0])
+
+    assert isinstance(tail, AvailableLogTail)
+    assert len(tail.text.encode("utf-8")) <= limit
+    repaired_size = len(raw.decode("utf-8", errors="replace").encode("utf-8"))
+    assert tail.truncated == (len(raw) > limit or repaired_size > limit)
+
+
+def test_file_log_tail_reads_from_the_end_and_handles_a_multibyte_boundary(tmp_path: Path) -> None:
+    path = tmp_path / "runs" / IDS[0] / "server.log"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"old" * INSPECTION_LOG_TAIL_BYTES + "\néclair\n".encode())
+
+    tail = FileInstanceLogs(tmp_path).tail(IDS[0])
+
+    assert isinstance(tail, AvailableLogTail)
+    assert tail.text.endswith("éclair\n")
+    assert len(tail.text.encode("utf-8")) <= INSPECTION_LOG_TAIL_BYTES
+    assert tail.truncated is True
+
+
+@pytest.mark.parametrize("component", ["ancestor", "root", "runs", "instance"])
+def test_file_log_tail_rejects_a_symlink_in_every_parent_component(
+    tmp_path: Path, component: str
+) -> None:
+    outside = tmp_path / "outside"
+    (outside / "runs" / IDS[0]).mkdir(parents=True)
+    (outside / "runs" / IDS[0] / "server.log").write_text("secret")
+    root = tmp_path / "registry"
+    if component == "ancestor":
+        parent = tmp_path / "parent"
+        parent.mkdir()
+        linked = parent / "linked"
+        linked.symlink_to(outside, target_is_directory=True)
+        root = linked / "registry"
+        (outside / "registry" / "runs" / IDS[0]).mkdir(parents=True)
+        (outside / "registry" / "runs" / IDS[0] / "server.log").write_text("secret")
+    elif component == "root":
+        root.symlink_to(outside, target_is_directory=True)
+    elif component == "runs":
+        root.mkdir()
+        (root / "runs").symlink_to(outside / "runs", target_is_directory=True)
+    else:
+        (root / "runs").mkdir(parents=True)
+        (root / "runs" / IDS[0]).symlink_to(outside / "runs" / IDS[0], target_is_directory=True)
+
+    with pytest.raises(InstanceLogError, match="safely"):
+        FileInstanceLogs(root).tail(IDS[0])
+
+
+def test_an_opened_instance_directory_stays_anchored_when_its_root_is_replaced(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "registry"
+    directory = root / "runs" / IDS[0]
+    directory.mkdir(parents=True)
+    (directory / "server.log").write_text("original")
+
+    # test-isolation: this security property is the descriptor-walk mechanism itself. Opening the
+    # private scope is the only deterministic way to replace a parent between the directory walk
+    # and leaf open without a scheduling race or a test-only callback in the production interface.
+    with instance_module._instance_directory(root, IDS[0]) as opened:  # noqa: SLF001  # lint-waiver: LW-182301 [SLF001]; exercise descriptor anchoring across an adversarial rename
+        root.rename(tmp_path / "opened-registry")
+        replacement = root / "runs" / IDS[0]
+        replacement.mkdir(parents=True)
+        (replacement / "server.log").write_text("replacement")
+        descriptor = os.open(
+            "server.log",
+            os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=opened,
+        )
+        try:
+            assert os.read(descriptor, 64) == b"original"
+        finally:
+            os.close(descriptor)
+
+
+def test_a_file_one_byte_over_the_tail_bound_is_marked_truncated(tmp_path: Path) -> None:
+    path = tmp_path / "runs" / IDS[0] / "server.log"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"x" * (INSPECTION_LOG_TAIL_BYTES + 1))
+
+    tail = FileInstanceLogs(tmp_path).tail(IDS[0])
+
+    assert isinstance(tail, AvailableLogTail)
+    assert len(tail.text.encode()) == INSPECTION_LOG_TAIL_BYTES
+    assert tail.truncated is True
+
+
+def test_a_missing_instance_log_is_a_typed_result(tmp_path: Path) -> None:
+    assert FileInstanceLogs(tmp_path).tail(IDS[0]) == MissingLogTail()
+
+
+def test_the_typed_log_contract_rejects_an_oversized_tail() -> None:
+    with pytest.raises(ValidationError, match="log tail exceeds"):
+        AvailableLogTail(text="x" * (INSPECTION_LOG_TAIL_BYTES + 1), truncated=True)
+
+
+def test_log_readers_reject_a_limit_outside_the_public_contract(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="between 1"):
+        FileInstanceLogs(tmp_path, limit=INSPECTION_LOG_TAIL_BYTES + 1)
+    with pytest.raises(ValueError, match="between 1"):
+        FakeInstanceLogs(limit=0)
+
+
+def test_file_inspection_metadata_is_atomic_private_and_immutable(tmp_path: Path) -> None:
+    directory = tmp_path / "runs" / IDS[0]
+    directory.mkdir(parents=True)
+    metadata = _inspection_metadata()
+    snapshots = FileInstanceMetadataStore(tmp_path)
+
+    snapshots.publish(metadata)
+    snapshots.publish(metadata)
+
+    path = directory / "inspection.json"
+    assert snapshots.load(IDS[0]) == metadata
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert list(directory.glob(".*.tmp")) == []
+    with pytest.raises(InstanceMetadataError, match="unlike immutable"):
+        snapshots.publish(metadata.model_copy(update={"task": "other"}))
+
+
+def test_file_inspection_metadata_rejects_a_symlinked_instance_directory(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / "runs").mkdir()
+    (tmp_path / "runs" / IDS[0]).symlink_to(outside, target_is_directory=True)
+    (outside / "inspection.json").write_text(_inspection_metadata().model_dump_json())
+
+    snapshots = FileInstanceMetadataStore(tmp_path)
+    with pytest.raises(InstanceMetadataError, match="safely"):
+        snapshots.load(IDS[0])
+    with pytest.raises(InstanceMetadataError, match="safely"):
+        snapshots.publish(_inspection_metadata())
+
+
+@pytest.mark.parametrize("kind", ["symlink", "directory", "fifo", "oversized", "unknown-field"])
+def test_file_inspection_metadata_rejects_unsafe_or_invalid_snapshots(
+    tmp_path: Path, kind: str
+) -> None:
+    path = tmp_path / "runs" / IDS[0] / "inspection.json"
+    path.parent.mkdir(parents=True)
+    if kind == "symlink":
+        target = tmp_path / "outside"
+        target.write_text(_inspection_metadata().model_dump_json())
+        path.symlink_to(target)
+    elif kind == "directory":
+        path.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(path)
+    elif kind == "oversized":
+        path.write_bytes(b"x" * (32 * 1024 + 1))
+    else:
+        path.write_text(
+            _inspection_metadata().model_dump_json().removesuffix("}") + ',"extra":true}'
+        )
+
+    with pytest.raises(InstanceMetadataError):
+        FileInstanceMetadataStore(tmp_path).load(IDS[0])
+
+
+@pytest.mark.parametrize("kind", ["symlink", "directory", "fifo"])
+def test_file_log_tail_rejects_symlinks_and_non_regular_files(tmp_path: Path, kind: str) -> None:
+    path = tmp_path / "runs" / IDS[0] / "server.log"
+    path.parent.mkdir(parents=True)
+    if kind == "symlink":
+        target = tmp_path / "secret"
+        target.write_text("do not read")
+        path.symlink_to(target)
+    elif kind == "directory":
+        path.mkdir()
+    else:
+        os.mkfifo(path)
+
+    with pytest.raises(InstanceLogError):
+        FileInstanceLogs(tmp_path).tail(IDS[0])
 
 
 # --- pure core ----------------------------------------------------------------

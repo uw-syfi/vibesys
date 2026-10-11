@@ -19,7 +19,7 @@ from server.host_api import (
     StartupProgress,
     StartupStage,
 )
-from server.registry import FakeInstanceStore, InstanceHold, LiveRegistry
+from server.registry import FakeInstanceMetadataStore, FakeInstanceStore, InstanceHold, LiveRegistry
 from vs_sim.api.testing import ManualClock, SimThreads
 
 INSTANCE = "0123456789ab"
@@ -72,7 +72,13 @@ def test_a_starting_run_shows_each_stage_and_its_latest_progress() -> None:
     def scenario() -> list[tuple[float, RunPhase]]:
         with registry.register(INSTANCE) as hold:
             timed = _TimedHold(hold, threads)
-            publisher = RecordPublisher(timed, _starting_record(), ManualClock(100.0), threads)
+            publisher = RecordPublisher(
+                timed,
+                _starting_record(),
+                ManualClock(100.0),
+                metadata=FakeInstanceMetadataStore(),
+                threads=threads,
+            )
             threads.sleep(5)
             publisher.observe(startup=StartupFact(stage=StartupStage.BUILDING_IMAGE))
             for done in range(5):
@@ -110,7 +116,13 @@ def test_a_build_failure_leaves_a_tombstone_failed_in_building_image() -> None:
 
     def scenario() -> None:
         with registry.register(INSTANCE) as hold:
-            publisher = RecordPublisher(hold, _starting_record(), clock, threads)
+            publisher = RecordPublisher(
+                hold,
+                _starting_record(),
+                clock,
+                metadata=FakeInstanceMetadataStore(),
+                threads=threads,
+            )
             publisher.observe(startup=_building(3))
             publisher.observe(status=RunStatus.FAILED)
             publisher.observe(failure=reason)
@@ -149,7 +161,13 @@ def test_progress_writes_are_paced_and_the_record_ends_on_the_folded_phase(
     def scenario() -> list[tuple[float, RunPhase]]:
         with registry.register(INSTANCE) as hold:
             timed = _TimedHold(hold, threads)
-            publisher = RecordPublisher(timed, _starting_record(), ManualClock(100.0), threads)
+            publisher = RecordPublisher(
+                timed,
+                _starting_record(),
+                ManualClock(100.0),
+                metadata=FakeInstanceMetadataStore(),
+                threads=threads,
+            )
             for delay, fact in steps:
                 threads.sleep(delay)
                 if isinstance(fact, StartupFact):

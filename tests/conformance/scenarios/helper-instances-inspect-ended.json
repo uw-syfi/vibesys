@@ -1,0 +1,63 @@
+{
+  "id": "helper-instances-inspect-ended",
+  "protocol": "host-helper",
+  "title": "Inspect an absent detached instance",
+  "description": "After negotiating inspection, instances.inspect reports an absent retained id as ended without loading its log.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "instances_inspect"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "instances_inspect"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "instances.inspect",
+        "request_id": "i",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab",
+        "include_log": false
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "instances.inspect",
+        "request_id": "i",
+        "inspection": {
+          "id": "0123456789ab",
+          "state": "ended",
+          "record": null,
+          "metadata": null,
+          "log": null
+        }
+      }
+    }
+  ]
+}

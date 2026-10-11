@@ -9,7 +9,7 @@ import {ECHO_SERVER, FakeHelper, FakeLink, record} from '../testing/fake-helper.
 import {deferredKillProcess, fakeProcess} from '../testing/fake-process.js';
 import {hostConnectionContract, phaseReached} from '../testing/host-connection-contract.js';
 import {ConnectionManager} from './connection-manager.js';
-import {ConnectionError, type HelperRequestError} from './helper-channel.js';
+import {ConnectionError, HelperRequestError} from './helper-channel.js';
 import {HostConnection} from './host-connection.js';
 import {LocalLink, nodeSpawn, type Spawn, SshLink} from './link.js';
 
@@ -160,6 +160,46 @@ describe('HostConnection over the FakeHelper', () => {
     expect(result.kind).toBe('failed');
     expect(result).toMatchObject({written: true});
     expect(link.helper.stops).toEqual([{instanceId: '000000000001', force: false}]);
+  });
+
+  test('does not send inspection to a helper that did not negotiate it', async () => {
+    const link = new FakeLink();
+    link.helper.features.delete('instances_inspect');
+    await using connection = fakeConnection(link);
+
+    const error: unknown = await connection
+      .request({type: 'instances.inspect', instance_id: '0123456789ab', include_log: false})
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(HelperRequestError);
+    if (!(error instanceof HelperRequestError)) throw error;
+    expect(error.code).toBe('feature_not_negotiated');
+    expect(connection.phase.kind).toBe('ready');
+  });
+
+  test('inspection requests retained diagnostics only with explicit log consent', async () => {
+    const link = new FakeLink();
+    const instanceId = '0123456789ab';
+    link.helper.host.logs.set(instanceId, {text: 'retained diagnostics', truncated: false});
+    await using connection = fakeConnection(link);
+
+    const metadataOnly = await connection.request({
+      type: 'instances.inspect',
+      instance_id: instanceId,
+      include_log: false,
+    });
+    const withLog = await connection.request({
+      type: 'instances.inspect',
+      instance_id: instanceId,
+      include_log: true,
+    });
+
+    expect(metadataOnly.inspection.log).toBeNull();
+    expect(withLog.inspection.log).toEqual({
+      state: 'available',
+      text: 'retained diagnostics',
+      truncated: false,
+    });
   });
 
   test('a dropped link is checked, restored, and the registry watch resumes', async () => {

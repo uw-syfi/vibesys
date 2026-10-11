@@ -76,7 +76,14 @@ export type Body = {readonly type: string} & Record<string, unknown>;
 /** The reply type of each request type. */
 export type ReplyOf<T extends string> = Extract<HelperMessage, {type: T}>;
 
-const FEATURES: readonly HelperFeature[] = ['instances_watch', 'paths_complete'];
+const FEATURES: readonly HelperFeature[] = [
+  'instances_watch',
+  'paths_complete',
+  'instances_inspect',
+];
+const FEATURE_BY_REQUEST: Readonly<Partial<Record<string, HelperFeature>>> = {
+  'instances.inspect': 'instances_inspect',
+};
 /** How long past its own deadline a request may take before this side gives up on it. */
 const DEADLINE_SLACK_MS = 2_000;
 const STDERR_TAIL = 8192;
@@ -173,6 +180,18 @@ export class HelperChannel implements AsyncDisposable {
   /** Send `body` and resolve with its reply; rejects with `HelperRequestError` or `ConnectionError`. */
   request<T extends string>(body: Body & {readonly type: T}): Promise<ReplyOf<T>> {
     if (this.#failure !== null) return Promise.reject(this.#failure);
+    const required = FEATURE_BY_REQUEST[body.type];
+    if (this.hello !== null && required !== undefined && !this.hello.features.includes(required)) {
+      return Promise.reject(
+        new HelperRequestError({
+          type: 'error',
+          request_id: null,
+          code: 'feature_not_negotiated',
+          message: `${body.type} requires the ${required} feature`,
+          path: null,
+        }),
+      );
+    }
     const requestId = `r${this.#nextId++}`;
     const {deadlineMs, scheduleTimeout} = this.#options;
     return new Promise<ReplyOf<T>>((resolve, reject) => {

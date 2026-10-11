@@ -8,6 +8,7 @@
 import {
   createCompletionStore,
   createHostStore,
+  createInspectorStore,
   createPickerStore,
 } from '@vibesys/feature-hosts/renderer';
 import type {
@@ -15,6 +16,8 @@ import type {
   CompletionState,
   HostAction,
   HostState,
+  InspectorAction,
+  InspectorState,
   PickerAction,
   PickerState,
 } from '@vibesys/feature-hosts/state';
@@ -43,6 +46,7 @@ export interface WelcomeStores {
   readonly start: Store<StartState, StartAction>;
   readonly picker: Store<PickerState, PickerAction>;
   readonly completion: Store<CompletionState, CompletionAction>;
+  readonly inspector: Store<InspectorState, InspectorAction>;
 }
 
 type WelcomePush =
@@ -56,6 +60,7 @@ function createWelcomeStores(
   bridge: WelcomeBridge,
   confirm: Confirm,
   firstHost: HostKey,
+  copy: (value: string) => Promise<void>,
 ): WelcomeStores {
   const welcome = createRunControlStore(bridge, confirm);
   const lists = createListsStore();
@@ -63,20 +68,25 @@ function createWelcomeStores(
   const start = createStartStore(bridge);
   const picker = createPickerStore(bridge, key => host.dispatch({type: 'show', host: key}));
   const completion = createCompletionStore(bridge);
+  const inspector = createInspectorStore(bridge, copy);
   host.dispatch({type: 'show', host: firstHost});
-  return {welcome, lists, host, start, picker, completion};
+  return {welcome, lists, host, start, picker, completion, inspector};
 }
 
 function applyPush(stores: WelcomeStores, push: WelcomePush): void {
   switch (push.kind) {
-    case 'chrome':
+    case 'chrome': {
+      const enteringRun =
+        stores.welcome.getState().chrome.mode !== 'run' && push.value.mode === 'run';
       stores.welcome.dispatch({type: 'chrome', chrome: push.value});
       stores.host.dispatch({type: 'chrome', chrome: push.value});
       if (push.value.mode === 'run') {
         stores.start.dispatch({type: 'run-shown'});
         stores.picker.dispatch({type: 'close'});
+        if (enteringRun) stores.inspector.dispatch({type: 'close'});
       }
       return;
+    }
     case 'recent':
       stores.lists.dispatch({type: 'runs', runs: push.value});
       return;
@@ -114,6 +124,7 @@ function applyOverview(stores: WelcomeStores, overview: WelcomeOverview): void {
 export async function loadWelcomeStores(
   bridge: WelcomeBridge,
   confirm: Confirm,
+  copy: (value: string) => Promise<void>,
 ): Promise<WelcomeResult<WelcomeStores>> {
   const buffered: WelcomePush[] = [];
   let receive = (push: WelcomePush): void => {
@@ -131,7 +142,7 @@ export async function loadWelcomeStores(
     return overview;
   }
 
-  const stores = createWelcomeStores(bridge, confirm, overview.value.host);
+  const stores = createWelcomeStores(bridge, confirm, overview.value.host, copy);
   applyOverview(stores, overview.value);
   for (const push of buffered) {
     if (push.sequence > overview.value.eventCursor) applyPush(stores, push);

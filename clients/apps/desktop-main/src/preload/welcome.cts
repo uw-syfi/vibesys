@@ -24,6 +24,7 @@ const CHANNELS: Channels = {
   cancelCheckout: 'vibesys:welcome:cancel-checkout',
   signIn: 'vibesys:welcome:sign-in',
   complete: 'vibesys:welcome:complete',
+  inspect: 'vibesys:welcome:inspect',
   tasks: 'vibesys:welcome:tasks',
   start: 'vibesys:welcome:start',
   cancelStart: 'vibesys:welcome:cancel-start',
@@ -67,6 +68,8 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     cancelCheckout: change => call(CHANNELS.cancelCheckout, change),
     signIn: host => call(CHANNELS.signIn, host),
     complete: (host, directory) => call(CHANNELS.complete, host, directory),
+    inspect: (host, instance, includeLog, inspection) =>
+      call(CHANNELS.inspect, host, instance, includeLog, inspection),
     tasks: (host, project) => call(CHANNELS.tasks, host, project),
     start: (host, project, task, args, start) =>
       call(CHANNELS.start, host, project, task, args, start),

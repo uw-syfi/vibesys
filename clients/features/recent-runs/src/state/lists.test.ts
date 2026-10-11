@@ -5,7 +5,15 @@ import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {LISTS_EMPTY, type ListsAction, listsInvariants, listsStep, statusOf} from './lists.js';
 
 function run(host: string, runId: string): RecentRun {
-  return {host, hostLabel: host, project: '/p', task: 'spsc', runId, attachedAt: 1};
+  return {
+    host,
+    hostLabel: host,
+    project: '/p',
+    task: 'spsc',
+    runId,
+    instanceId: null,
+    attachedAt: 1,
+  };
 }
 
 const RUNS = [run('local', 'run-1'), run('ssh:gpu', 'run-2')];

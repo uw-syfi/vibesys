@@ -76,7 +76,7 @@ export function parseWelcomeRequest(channel: string, args: readonly unknown[]): 
   throw new Error(`${JSON.stringify(channel)} is not a welcome request`);
 }
 
-export type {HostsWelcomeBridge} from './hosts.js';
+export type {HostsWelcomeBridge, WelcomeInspection} from './hosts.js';
 export type {RunControlWelcomeBridge} from './run-control.js';
 export type {StartRunWelcomeBridge} from './start-run.js';
 export {

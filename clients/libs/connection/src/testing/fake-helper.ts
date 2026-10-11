@@ -93,6 +93,8 @@ export interface FakeHost {
   readonly runs: Map<string, RunServer>;
   /** Live runs this user may not connect to (`connect_denied`). */
   readonly denied: Set<string>;
+  /** Retained bounded diagnostic tails, by instance id. */
+  readonly logs: Map<string, {readonly text: string; readonly truncated: boolean}>;
 }
 
 export function record(id: string, runId: string, project = '/p'): LiveInstanceRecord {
@@ -123,6 +125,7 @@ export class FakeHelper {
     directories: new Map(),
     runs: new Map(),
     denied: new Set(),
+    logs: new Map(),
   };
   /** Exit every new channel at once with this status and stdout, as a failing bootstrap does. */
   bootstrapExit: {readonly code: number; readonly stdout: string} | null = null;
@@ -142,6 +145,8 @@ export class FakeHelper {
   spawned = 0;
   /** Stop requests received, in order. */
   readonly stops: {readonly instanceId: string; readonly force: boolean}[] = [];
+  /** Features this helper version recognizes. */
+  readonly features = new Set(['instances_watch', 'paths_complete', 'instances_inspect']);
   readonly #pendingAnswers = new Map<HelperRequest['type'], PendingAnswer[]>();
   /** How many of them have exited. */
   exited = 0;
@@ -361,76 +366,33 @@ class HelperSession {
 
   #answer(request: HelperRequest): void {
     const id = request.request_id;
-    const helper = this.#helper;
     switch (request.type) {
-      case 'hello': {
-        const [low, high] = request.client_versions as [number, number];
-        if (this.#features !== null || low > 1 || high < 1) {
-          this.#send({
-            ...this.#error(id, 'incompatible', 'versions'),
-            supported_versions: [1, 1],
-            vibesys_version: '0.1.1',
-          });
-          return;
-        }
-        this.#features = (request.features ?? []).filter(
-          f => f === 'instances_watch' || f === 'paths_complete',
-        );
-        this.#send({
-          type: 'hello',
-          request_id: id,
-          protocol_version: 1,
-          features: this.#features,
-          vibesys_version: '0.1.1',
-          checkout: {root: '/src/vibesys', commit: null, dirty: null},
-        });
+      case 'hello':
+        this.#hello(request);
         return;
-      }
       case 'ping':
         this.#send({type: 'ping', request_id: id});
         return;
       case 'instances.list':
-        this.#send({type: 'instances.list', request_id: id, listing: helper.listing()});
+        this.#send({type: 'instances.list', request_id: id, listing: this.#helper.listing()});
         return;
-      case 'instances.watch': {
-        if (!this.#negotiated('instances_watch', id)) return;
-        this.#send({type: 'instances.watch', request_id: id, watch_id: id});
-        const push = (): void =>
-          this.#send({type: 'instances.changed', watch_id: id, listing: helper.listing()});
-        this.#watches.set(id, helper.watch(push));
-        push();
+      case 'instances.inspect':
+        this.#inspect(request);
         return;
-      }
-      case 'instances.unwatch': {
-        const stop = this.#watches.get(request.watch_id);
-        if (stop === undefined) {
-          this.#send(this.#error(id, 'unknown_watch', 'no such watch'));
-          return;
-        }
-        stop();
-        this.#watches.delete(request.watch_id);
-        this.#send({type: 'instances.unwatch', request_id: id, watch_id: request.watch_id});
+      case 'instances.watch':
+        this.#watch(request);
         return;
-      }
+      case 'instances.unwatch':
+        this.#unwatch(request);
+        return;
       case 'tasks.list':
       case 'runs.list':
       case 'run.start':
         this.#project(request);
         return;
-      case 'run.stop': {
-        const live = helper.stop(request.instance_id, request.force ?? false);
-        this.#send({
-          type: 'run.stop',
-          request_id: id,
-          result: {
-            version: 1,
-            id: request.instance_id,
-            outcome: live ? 'stopped' : 'not_running',
-            route: null,
-          },
-        });
+      case 'run.stop':
+        this.#stop(request);
         return;
-      }
       case 'run.connect':
         this.#connect(id, request.instance_id);
         return;
@@ -438,6 +400,99 @@ class HelperSession {
         if (this.#negotiated('paths_complete', id)) this.#complete(id, request.prefix);
         return;
     }
+  }
+
+  #hello(request: Extract<HelperRequest, {type: 'hello'}>): void {
+    const [low, high] = request.client_versions as [number, number];
+    if (this.#features !== null || low > 1 || high < 1) {
+      this.#send({
+        ...this.#error(request.request_id, 'incompatible', 'versions'),
+        supported_versions: [1, 1],
+        vibesys_version: '0.1.1',
+      });
+      return;
+    }
+    this.#features = (request.features ?? []).filter(feature => this.#helper.features.has(feature));
+    this.#send({
+      type: 'hello',
+      request_id: request.request_id,
+      protocol_version: 1,
+      features: this.#features,
+      vibesys_version: '0.1.1',
+      checkout: {root: '/src/vibesys', commit: null, dirty: null},
+    });
+  }
+
+  #inspect(request: Extract<HelperRequest, {type: 'instances.inspect'}>): void {
+    if (!this.#negotiated('instances_inspect', request.request_id)) return;
+    const helper = this.#helper;
+    const record = [...helper.host.instances, ...helper.host.ended].find(
+      entry => entry.id === request.instance_id,
+    );
+    const retained = helper.host.logs.get(request.instance_id);
+    const log = request.include_log
+      ? retained === undefined
+        ? {state: 'missing' as const}
+        : {state: 'available' as const, ...retained}
+      : null;
+    this.#send({
+      type: 'instances.inspect',
+      request_id: request.request_id,
+      inspection: {
+        version: 1,
+        id: request.instance_id,
+        state:
+          record === undefined
+            ? 'ended'
+            : helper.host.instances.includes(record)
+              ? 'live'
+              : 'ended',
+        record: record ?? null,
+        metadata: null,
+        control_socket_path: record?.socket_path ?? `/tmp/${request.instance_id}.sock`,
+        server_log_path: record?.log_path ?? `/tmp/${request.instance_id}.log`,
+        log,
+      },
+    });
+  }
+
+  #watch(request: Extract<HelperRequest, {type: 'instances.watch'}>): void {
+    const id = request.request_id;
+    if (!this.#negotiated('instances_watch', id)) return;
+    this.#send({type: 'instances.watch', request_id: id, watch_id: id});
+    const push = (): void =>
+      this.#send({type: 'instances.changed', watch_id: id, listing: this.#helper.listing()});
+    this.#watches.set(id, this.#helper.watch(push));
+    push();
+  }
+
+  #unwatch(request: Extract<HelperRequest, {type: 'instances.unwatch'}>): void {
+    const stop = this.#watches.get(request.watch_id);
+    if (stop === undefined) {
+      this.#send(this.#error(request.request_id, 'unknown_watch', 'no such watch'));
+      return;
+    }
+    stop();
+    this.#watches.delete(request.watch_id);
+    this.#send({
+      type: 'instances.unwatch',
+      request_id: request.request_id,
+      watch_id: request.watch_id,
+    });
+  }
+
+  #stop(request: Extract<HelperRequest, {type: 'run.stop'}>): void {
+    const live = this.#helper.stop(request.instance_id, request.force ?? false);
+    this.#send({
+      type: 'run.stop',
+      request_id: request.request_id,
+      result: {
+        version: 1,
+        id: request.instance_id,
+        outcome: live ? 'stopped' : 'not_running',
+        route: null,
+      },
+    });
   }
 
   #negotiated(feature: string, id: string): boolean {

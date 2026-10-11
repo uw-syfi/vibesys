@@ -73,7 +73,7 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
     from server.runtime import ServerLifecycleObserver, ServerRuntime
-    from vibesys.api import Config
+    from vibesys.api import Config, Runs
     from vs_sim.api import Threads
 
 
@@ -918,11 +918,17 @@ def _start_detached_instance(
     return _spawn_detached_instance([*arguments, "--run-id", run_id], root, effects)
 
 
-def main(argv: list[str] | None = None, *, observer: ServerLifecycleObserver | None = None) -> None:
+def main(
+    argv: list[str] | None = None,
+    *,
+    observer: ServerLifecycleObserver | None = None,
+    runs: Runs | None = None,
+) -> None:
     """Run the frontend server and headless engine in one process.
 
     ``observer`` is a detached server's registry record
     (``entrypoints.detached_run``), told when the server reaches a milestone.
+    ``runs`` replaces the application-wired run service in tests.
 
     Every configuration diagnostic raised below this frame is rendered to
     stderr and exits with the diagnostic's code, the way
@@ -933,7 +939,7 @@ def main(argv: list[str] | None = None, *, observer: ServerLifecycleObserver | N
     by the TUI launcher and redirected onto the detached startup log.
     """
     try:
-        _serve(sys.argv[1:] if argv is None else argv, observer)
+        _serve(sys.argv[1:] if argv is None else argv, observer, runs)
     except ConfigurationError as exc:
         if observer is not None:
             diagnostic = exc.diagnostic
@@ -953,7 +959,11 @@ def main(argv: list[str] | None = None, *, observer: ServerLifecycleObserver | N
         raise SystemExit(1) from None
 
 
-def _serve(arguments: list[str], observer: ServerLifecycleObserver | None) -> None:  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR0912, PLR0915]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches
+def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR0912, PLR0915]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches
+    arguments: list[str],
+    observer: ServerLifecycleObserver | None,
+    runs: Runs | None,
+) -> None:
     """Serve one invocation, leaving configuration diagnostics to `main`."""
     if arguments and arguments[0] == "tui-defaults":
         _run_tui_defaults(arguments[1:])
@@ -1028,13 +1038,18 @@ def _serve(arguments: list[str], observer: ServerLifecycleObserver | None) -> No
             if read_only_log is not None
             else cli.build_run_request(cli.parse_cli_invocation(_headless_argv(arguments)))
         )
+        if observer is not None and request is not None:
+            observer.resolved(
+                project_root=request.project_root,
+                task=request.input_bundle.task_name,
+            )
         run_id = None if request is None else request.resolved_run_id
         project_root = None if request is None else request.resolved_project_root
         server_runtime = import_module("server.runtime").ServerRuntime
         if web:
             runtime = server_runtime(
                 socket_path=control_socket,
-                runs=default_runs(),
+                runs=default_runs() if runs is None else runs,
                 run_id=run_id,
                 project_root=project_root,
                 tui_defaults=_tui_defaults_from_argv(arguments),
@@ -1050,7 +1065,7 @@ def _serve(arguments: list[str], observer: ServerLifecycleObserver | None) -> No
         else:
             runtime = server_runtime(
                 socket_path=control_socket,
-                runs=default_runs(),
+                runs=default_runs() if runs is None else runs,
                 run_id=run_id,
                 project_root=project_root,
                 tui_defaults=_tui_defaults_from_argv(arguments),

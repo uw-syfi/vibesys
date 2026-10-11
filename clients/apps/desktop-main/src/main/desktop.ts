@@ -86,6 +86,9 @@ export class Desktop {
       WELCOME_URL,
       (request, rendererGeneration) => this.#answer(request, rendererGeneration),
       async rendererGeneration => {
+        // Inspection writes are independently guarded, so revoke them before awaiting checkout
+        // teardown. A pending checkout must not extend a replaced document's commit authority.
+        deps.hosts.retireInspectionOwner(rendererGeneration);
         try {
           await deps.hosts.cancelCheckoutOwner(rendererGeneration);
         } catch (error) {
@@ -213,6 +216,11 @@ export class Desktop {
       case 'stop':
         await runs.stop(request.host, request.instance, request.force);
         return null;
+      case 'inspect':
+        return hosts.inspect(request.host, request.instance, request.includeLog, {
+          owner: rendererGeneration,
+          sequence: request.inspection,
+        });
       case 'show-run':
       case 'show-welcome':
         this.#mode(request.kind === 'show-run' ? 'run' : 'welcome');

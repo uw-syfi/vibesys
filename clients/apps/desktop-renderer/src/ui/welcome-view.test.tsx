@@ -9,11 +9,13 @@ import {
   type CompletionAction,
   completionStep,
   hostInitial,
+  INSPECTOR_CLOSED,
   PICKER_CLOSED,
 } from '@vibesys/feature-hosts/state';
 import {LISTS_EMPTY} from '@vibesys/feature-recent-runs/state';
 import {WELCOME_INITIAL} from '@vibesys/feature-run-control/state';
 import {START_CLOSED, type StartAction, startStep} from '@vibesys/feature-start-run/state';
+import {Dialog} from '@vibesys/ui';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import type {Root} from 'react-dom/client';
@@ -74,12 +76,14 @@ async function mountWelcome(): Promise<{readonly root: Root; readonly container:
     start: opened,
     picker: PICKER_CLOSED,
     completion: COMPLETION_EMPTY,
+    inspector: INSPECTOR_CLOSED,
     send: {
       welcome: () => undefined,
       host: () => undefined,
       start,
       picker: () => undefined,
       completion,
+      inspector: () => undefined,
     },
   };
   await act(async () => render());
@@ -118,4 +122,39 @@ test('typing in the start sheet keeps the project field the same element', async
   }
   await act(async () => root.unmount());
   container.remove();
+});
+
+test('the public dialog restores focus to the opener or its stable fallback', async () => {
+  const {createRoot} = await import('react-dom/client');
+  for (const removeOpener of [false, true]) {
+    const opener = document.createElement('button');
+    const fallback = document.createElement('section');
+    const container = document.createElement('div');
+    fallback.id = 'dialog-focus-fallback';
+    fallback.tabIndex = -1;
+    document.body.append(opener, fallback, container);
+    opener.focus();
+    const root = createRoot(container);
+    const render = (open: boolean): void =>
+      root.render(
+        <Dialog
+          open={open}
+          label="Focus owner"
+          focusFallbackId={fallback.id}
+          dismiss={() => undefined}
+        >
+          <button type="button">Inside</button>
+        </Dialog>,
+      );
+
+    await act(async () => render(true));
+    if (removeOpener) opener.remove();
+    await act(async () => render(false));
+
+    expect(document.activeElement).toBe(removeOpener ? fallback : opener);
+    await act(async () => root.unmount());
+    opener.remove();
+    fallback.remove();
+    container.remove();
+  }
 });

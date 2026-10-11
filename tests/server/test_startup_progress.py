@@ -64,6 +64,9 @@ def test_the_record_observer_is_told_each_startup_fact(tmp_path: Path) -> None:
     facts: list[object] = []
 
     class Observer:
+        def resolved(self, *, project_root: Path, task: str) -> None:
+            del project_root, task
+
         def listening(self) -> None:
             facts.append("listening")
 
@@ -107,6 +110,9 @@ def test_a_pause_resumed_during_the_image_build_keeps_the_run_starting(tmp_path:
     facts: list[object] = []
 
     class Observer:
+        def resolved(self, *, project_root: Path, task: str) -> None:
+            del project_root, task
+
         def listening(self) -> None:
             facts.append("listening")
 

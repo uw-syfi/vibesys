@@ -18,11 +18,44 @@ import {
   type HostsBridge,
   hostInitial,
   hostStep,
+  INSPECTOR_CLOSED,
+  type InspectorAction,
+  type InspectorState,
+  inspectorStep,
   PICKER_CLOSED,
   type PickerAction,
   type PickerState,
   pickerStep,
 } from '../../state/index.js';
+
+/** The detached-run inspector store over the host bridge and an injected clipboard writer. */
+export function createInspectorStore(
+  bridge: HostsBridge,
+  copy: (value: string) => Promise<void>,
+): Store<InspectorState, InspectorAction> {
+  return createStore(inspectorStep, INSPECTOR_CLOSED, (request, dispatch) => {
+    switch (request.kind) {
+      case 'inspect':
+        void settled(
+          bridge.inspect(request.host, request.instance, request.includeLog, request.token),
+        ).then(result => dispatch({type: 'inspection-reply', token: request.token, result}));
+        return;
+      case 'copy':
+        void copy(request.value).then(
+          () =>
+            dispatch({type: 'copy-reply', token: request.token, label: request.label, error: null}),
+          (error: unknown) =>
+            dispatch({
+              type: 'copy-reply',
+              token: request.token,
+              label: request.label,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+        );
+        return;
+    }
+  });
+}
 
 /** The host panel's store, showing `firstHost` until told otherwise. */
 export function createHostStore(

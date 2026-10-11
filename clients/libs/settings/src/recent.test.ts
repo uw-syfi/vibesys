@@ -5,6 +5,7 @@ import {
   parseRecent,
   type RecentFile,
   remember,
+  rememberInstance,
   type StoredRecentRun,
 } from './recent.js';
 
@@ -17,6 +18,7 @@ function arbitraryRun(random: Seeded, attachedAt: number): StoredRecentRun {
     project: random.pick(['/srv/a', '~/b']),
     task: random.pick([null, 'spsc', 'mpmc']),
     runId: random.pick(RUN_IDS),
+    instanceId: random.int(16).toString(16).padStart(12, '0'),
     attachedAt,
   };
 }
@@ -43,15 +45,25 @@ describe('recent runs', () => {
   });
 
   test('parsing rejects unknown keys and unusable values, naming the path', () => {
-    const run = {host: 'local', project: '/p', task: null, runId: 'run-1', attachedAt: 1};
-    expect(() => parseRecent({version: 2, runs: [{...run, extra: 1}]})).toThrow(
+    const run = {
+      host: 'local',
+      project: '/p',
+      task: null,
+      runId: 'run-1',
+      instanceId: '0123456789ab',
+      attachedAt: 1,
+    };
+    expect(() => parseRecent({version: 3, runs: [{...run, extra: 1}]})).toThrow(
       'recent.json: runs[0].extra is not a known field',
     );
-    expect(() => parseRecent({version: 2, runs: [{...run, runId: null}]})).toThrow('runs[0].runId');
-    expect(() => parseRecent({version: 2, runs: [{...run, host: 'ssh:-oProxy'}]})).toThrow(
+    expect(() => parseRecent({version: 3, runs: [{...run, runId: null}]})).toThrow('runs[0].runId');
+    expect(() => parseRecent({version: 3, runs: [{...run, host: 'ssh:-oProxy'}]})).toThrow(
       'runs[0].host',
     );
-    expect(() => parseRecent({version: 3, runs: []})).toThrow('version');
+    expect(() => parseRecent({version: 3, runs: [{...run, instanceId: 'bad'}]})).toThrow(
+      'runs[0].instanceId',
+    );
+    expect(() => parseRecent({version: 4, runs: []})).toThrow('version');
   });
 
   test('a version 1 file keeps the runs it named and drops those saved before their id was known', () => {
@@ -70,8 +82,46 @@ describe('recent runs', () => {
       ],
     });
     expect(parsed).toEqual({
+      version: 3,
+      runs: [
+        {
+          host: 'local',
+          project: '/p',
+          task: 'spsc',
+          runId: 'run-1',
+          instanceId: '0123456789ab',
+          attachedAt: 1,
+        },
+      ],
+    });
+  });
+
+  test('version 2 migrates without guessing an instance, then inspection preserves its locator', () => {
+    const parsed = parseRecent({
       version: 2,
-      runs: [{host: 'local', project: '/p', task: 'spsc', runId: 'run-1', attachedAt: 1}],
+      runs: [{host: 'local', project: '/p', task: null, runId: 'run-1', attachedAt: 1}],
+    });
+    expect(parsed.runs[0]?.instanceId).toBeNull();
+    expect(parseRecent(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+
+    const located = rememberInstance(parsed, {
+      host: 'local',
+      project: '/p',
+      runId: 'run-1',
+      instanceId: '0123456789ab',
+    });
+    expect(located).toEqual({
+      version: 3,
+      runs: [
+        {
+          host: 'local',
+          project: '/p',
+          task: null,
+          runId: 'run-1',
+          instanceId: '0123456789ab',
+          attachedAt: 1,
+        },
+      ],
     });
   });
 });

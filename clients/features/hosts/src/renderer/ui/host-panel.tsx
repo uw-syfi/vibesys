@@ -17,6 +17,7 @@ import {PathInput} from './path-input.js';
 export interface HostRunActions {
   readonly attach: (host: HostKey, instance: string) => void;
   readonly stopControls: (host: HostKey, instance: string) => ReactNode;
+  readonly inspect: (host: HostKey, hostLabel: string, run: HostRun) => void;
 }
 
 /** Where the panel's events go. */
@@ -30,9 +31,10 @@ export interface HostPanelSenders {
 function RunRow(props: {
   readonly run: HostRun;
   readonly host: HostKey;
+  readonly hostLabel: string;
   readonly actions: HostRunActions;
 }): JSX.Element {
-  const {run, host, actions} = props;
+  const {run, host, hostLabel, actions} = props;
   return (
     <tr>
       <td>{run.runId}</td>
@@ -44,6 +46,7 @@ function RunRow(props: {
           Attach
         </Button>
         {actions.stopControls(host, run.id)}
+        <Button onClick={() => actions.inspect(host, hostLabel, run)}>Inspect</Button>
       </td>
     </tr>
   );
@@ -87,7 +90,13 @@ function RunTable(props: {
         </thead>
         <tbody>
           {listing.live.map(run => (
-            <RunRow key={run.id} run={run} host={data.key} actions={actions} />
+            <RunRow
+              key={run.id}
+              run={run}
+              host={data.key}
+              hostLabel={data.label}
+              actions={actions}
+            />
           ))}
         </tbody>
       </table>
@@ -295,7 +304,7 @@ export function HostPanel(props: {
     );
   }
   return (
-    <section id="host-panel">
+    <section id="host-panel" tabIndex={-1}>
       <h2>
         {label}
         {state.host === 'local' ? null : (

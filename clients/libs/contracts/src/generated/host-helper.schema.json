@@ -1,5 +1,33 @@
 {
   "$defs": {
+    "AvailableLogTail": {
+      "additionalProperties": false,
+      "description": "A bounded suffix of one instance's regular ``server.log`` file.",
+      "properties": {
+        "state": {
+          "const": "available",
+          "default": "available",
+          "title": "State",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string",
+          "x-vibesys-max-utf8-bytes": 65536
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "state",
+        "text",
+        "truncated"
+      ],
+      "title": "AvailableLogTail",
+      "type": "object"
+    },
     "ChannelEnd": {
       "additionalProperties": false,
       "description": "The one stderr line a relayed run channel writes when it ends with a nonzero status.",
@@ -402,10 +430,218 @@
       "description": "Optional capabilities negotiated by ``hello``; a closed set per protocol version.\n\nA client calls a gated method only after ``hello`` returned its feature, so\na strict peer never sees a method it does not know.",
       "enum": [
         "instances_watch",
-        "paths_complete"
+        "paths_complete",
+        "instances_inspect"
       ],
       "title": "HelperFeature",
       "type": "string"
+    },
+    "InspectionState": {
+      "description": "What one coherent registry observation proved about an instance.",
+      "enum": [
+        "live",
+        "ended",
+        "unverified"
+      ],
+      "title": "InspectionState",
+      "type": "string"
+    },
+    "InstanceInspection": {
+      "additionalProperties": false,
+      "description": "``vibesys instances inspect --json``: identity plus an optional diagnostic tail.",
+      "properties": {
+        "version": {
+          "const": 1,
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/InspectionState"
+        },
+        "record": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LiveInstanceRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstanceInspectionMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "control_socket_path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Control Socket Path",
+          "type": "string"
+        },
+        "server_log_path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Server Log Path",
+          "type": "string"
+        },
+        "log": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "available": "#/$defs/AvailableLogTail",
+                  "missing": "#/$defs/MissingLogTail"
+                },
+                "propertyName": "state"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/AvailableLogTail"
+                },
+                {
+                  "$ref": "#/$defs/MissingLogTail"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Log"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "record",
+        "metadata",
+        "control_socket_path",
+        "server_log_path"
+      ],
+      "title": "InstanceInspection",
+      "type": "object"
+    },
+    "InstanceInspectionMetadata": {
+      "additionalProperties": false,
+      "description": "Immutable detached-process facts retained after its live record disappears.",
+      "properties": {
+        "version": {
+          "const": 1,
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_root": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Project Root",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task"
+        },
+        "pid": {
+          "exclusiveMinimum": 0,
+          "title": "Pid",
+          "type": "integer"
+        },
+        "started_at": {
+          "maximum": 8640000000000,
+          "minimum": 0,
+          "title": "Started At",
+          "type": "number"
+        },
+        "hostname": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Hostname",
+          "type": "string"
+        },
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "vibesys_version": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Vibesys Version",
+          "type": "string"
+        },
+        "vibesys_root": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vibesys Root"
+        },
+        "control_socket_path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Control Socket Path",
+          "type": "string"
+        },
+        "server_log_path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Server Log Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_root",
+        "run_id",
+        "pid",
+        "started_at",
+        "hostname",
+        "vibesys_version",
+        "control_socket_path",
+        "server_log_path"
+      ],
+      "title": "InstanceInspectionMetadata",
+      "type": "object"
     },
     "InstanceList": {
       "additionalProperties": false,
@@ -528,6 +764,76 @@
         "listing"
       ],
       "title": "InstancesChanged",
+      "type": "object"
+    },
+    "InstancesInspectReply": {
+      "additionalProperties": false,
+      "description": "One coherent inspection of a detached server and its retained artifacts.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "instances.inspect",
+          "default": "instances.inspect",
+          "title": "Type",
+          "type": "string"
+        },
+        "inspection": {
+          "$ref": "#/$defs/InstanceInspection"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "inspection"
+      ],
+      "title": "InstancesInspectReply",
+      "type": "object"
+    },
+    "InstancesInspectRequest": {
+      "additionalProperties": false,
+      "description": "Inspect one detached server without starting another host process.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "instances.inspect",
+          "default": "instances.inspect",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "include_log": {
+          "default": false,
+          "title": "Include Log",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "instance_id"
+      ],
+      "title": "InstancesInspectRequest",
       "type": "object"
     },
     "InstancesListReply": {
@@ -764,6 +1070,8 @@
           "type": "integer"
         },
         "started_at": {
+          "maximum": 8640000000000,
+          "minimum": 0,
           "title": "Started At",
           "type": "number"
         },
@@ -821,6 +1129,23 @@
       ],
       "title": "LiveInstanceRecord",
       "type": "object"
+    },
+    "MissingLogTail": {
+      "additionalProperties": false,
+      "description": "The instance has no retained ``server.log`` file.",
+      "properties": {
+        "state": {
+          "const": "missing",
+          "default": "missing",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "title": "MissingLogTail",
+      "type": "object",
+      "required": [
+        "state"
+      ]
     },
     "PathEntry": {
       "additionalProperties": false,
@@ -1707,6 +2032,7 @@
       "discriminator": {
         "mapping": {
           "hello": "#/$defs/HelloRequest",
+          "instances.inspect": "#/$defs/InstancesInspectRequest",
           "instances.list": "#/$defs/InstancesListRequest",
           "instances.unwatch": "#/$defs/InstancesUnwatchRequest",
           "instances.watch": "#/$defs/InstancesWatchRequest",
@@ -1726,6 +2052,9 @@
         },
         {
           "$ref": "#/$defs/InstancesListRequest"
+        },
+        {
+          "$ref": "#/$defs/InstancesInspectRequest"
         },
         {
           "$ref": "#/$defs/InstancesWatchRequest"
@@ -1763,6 +2092,7 @@
           "error": "#/$defs/HelperError",
           "hello": "#/$defs/HelloReply",
           "instances.changed": "#/$defs/InstancesChanged",
+          "instances.inspect": "#/$defs/InstancesInspectReply",
           "instances.list": "#/$defs/InstancesListReply",
           "instances.unwatch": "#/$defs/InstancesUnwatchReply",
           "instances.watch": "#/$defs/InstancesWatchReply",
@@ -1782,6 +2112,9 @@
         },
         {
           "$ref": "#/$defs/InstancesListReply"
+        },
+        {
+          "$ref": "#/$defs/InstancesInspectReply"
         },
         {
           "$ref": "#/$defs/InstancesWatchReply"

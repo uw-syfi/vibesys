@@ -20,10 +20,17 @@ import {
   hostKey,
   hostLabel,
   hostListing,
+  inspectionReply,
   validHostPath,
 } from '@vibesys/hosts';
-import type {PathCompletion} from '@vibesys/ipc';
-import {type SettingsStore, settingsFor, sshConfigHosts, withHostSettings} from '@vibesys/settings';
+import type {PathCompletion, WelcomeInspection} from '@vibesys/ipc';
+import {
+  rememberInstance,
+  type SettingsStore,
+  settingsFor,
+  sshConfigHosts,
+  withHostSettings,
+} from '@vibesys/settings';
 
 export interface HostsDeps {
   readonly manager: ConnectionManager;
@@ -33,6 +40,7 @@ export interface HostsDeps {
   readonly localCheckout: string;
   readonly sshConfigPath: string;
   readonly sshConfigFilesystem?: SshConfigFilesystem;
+  readonly log: (message: string) => void;
   /** Send a host's listing to the welcome view. */
   readonly push: (listing: HostListing) => void;
 }
@@ -52,6 +60,12 @@ interface CheckoutChangeId {
   readonly sequence: number;
 }
 
+/** One inspection intent, unique within the renderer document that issued it. */
+export interface InspectionChangeId {
+  readonly owner: string;
+  readonly sequence: number;
+}
+
 export class Hosts {
   readonly #deps: HostsDeps;
   readonly #sshConfigFilesystem: SshConfigFilesystem;
@@ -59,6 +73,10 @@ export class Hosts {
   readonly #watched = new Map<HostKey, () => void>();
   /** Checkout validations that still own permission to persist, by renderer-document operation. */
   readonly #checkoutChanges = new Map<string, CheckoutChange>();
+  /** Latest inspection sequence admitted for each renderer document. */
+  readonly #inspectionChanges = new Map<string, number>();
+  /** Renderer documents whose outstanding inspection writes have been revoked. */
+  readonly #retiredInspectionOwners = new Set<string>();
 
   constructor(deps: HostsDeps) {
     this.#deps = deps;
@@ -213,6 +231,69 @@ export class Hosts {
       })),
       truncated: reply.truncated,
     };
+  }
+
+  /** One coherent observation, persisting its locator only while this renderer intent is current. */
+  async inspect(
+    id: HostId,
+    instanceId: string,
+    includeLog: boolean,
+    change: InspectionChangeId,
+  ): Promise<WelcomeInspection> {
+    const current = this.#claimInspection(change);
+    const connection = await this.connection(id);
+    let inspection: WelcomeInspection;
+    try {
+      const reply = await connection.request({
+        type: 'instances.inspect',
+        instance_id: instanceId,
+        include_log: includeLog,
+      });
+      inspection = inspectionReply(instanceId, reply.inspection);
+    } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        throw new Error(
+          `Run inspection is unavailable on ${hostLabel(id)}. Update its VibeSys checkout.`,
+        );
+      }
+      throw plain(error, `Could not inspect ${instanceId}`);
+    }
+    const identity = inspection.metadata ?? inspection.record;
+    if (identity !== null) {
+      try {
+        await this.#deps.settings.updateRecent(
+          recent =>
+            rememberInstance(recent, {
+              host: hostKey(id),
+              project: identity.project_root,
+              runId: identity.run_id,
+              instanceId,
+            }),
+          current,
+        );
+      } catch (error) {
+        this.#deps.log(`could not remember the inspected run: ${(error as Error).message}`);
+      }
+    }
+    return inspection;
+  }
+
+  /** Revoke every outstanding inspection write owned by a renderer document that went away. */
+  retireInspectionOwner(owner: string): void {
+    this.#inspectionChanges.delete(owner);
+    this.#retiredInspectionOwners.add(owner);
+  }
+
+  #claimInspection(change: InspectionChangeId): () => boolean {
+    if (this.#retiredInspectionOwners.has(change.owner)) {
+      throw new Error('the inspection owner was retired');
+    }
+    const latest = this.#inspectionChanges.get(change.owner);
+    if (latest !== undefined && change.sequence <= latest) {
+      throw new Error('the inspection was superseded');
+    }
+    this.#inspectionChanges.set(change.owner, change.sequence);
+    return () => this.#inspectionChanges.get(change.owner) === change.sequence;
   }
 
   #watch(key: HostKey, connection: HostConnection): void {

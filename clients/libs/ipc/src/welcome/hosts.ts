@@ -8,8 +8,10 @@ import {
   type HostKey,
   type HostSummary,
   hostFromKey,
+  type InstanceInspection,
   validHostPath,
 } from '@vibesys/hosts';
+import {isInstanceId} from '@vibesys/runs';
 import type {PathCompletion, WelcomeResult} from './types.js';
 import {type ChannelOf, operationToken} from './values.js';
 
@@ -20,6 +22,7 @@ export const HOSTS_CHANNELS = {
   cancelCheckout: 'vibesys:welcome:cancel-checkout',
   signIn: 'vibesys:welcome:sign-in',
   complete: 'vibesys:welcome:complete',
+  inspect: 'vibesys:welcome:inspect',
 } as const;
 
 /** The welcome bridge's requests the hosts feature makes. */
@@ -32,6 +35,12 @@ export interface HostsWelcomeBridge {
   signIn(host: HostKey): Promise<WelcomeResult<null>>;
   /** The directories that complete `directory` (a path ending in `/`) on `host`. */
   complete(host: HostKey, directory: string): Promise<WelcomeResult<PathCompletion>>;
+  inspect(
+    host: HostKey,
+    instance: string,
+    includeLog: boolean,
+    inspection: number,
+  ): Promise<WelcomeResult<InstanceInspection>>;
 }
 
 export type HostsRequest =
@@ -47,7 +56,15 @@ export type HostsRequest =
   | {readonly kind: 'cancel-checkout'; readonly change: number}
   | {readonly kind: 'sign-in'; readonly host: HostId}
   /** List `directory` (a path ending in `/`) for completion. */
-  | {readonly kind: 'complete'; readonly host: HostId; readonly directory: string};
+  | {readonly kind: 'complete'; readonly host: HostId; readonly directory: string}
+  | {
+      readonly kind: 'inspect';
+      readonly host: HostId;
+      readonly instance: string;
+      readonly includeLog: boolean;
+      /** Renderer-local operation sequence, paired with its document identity by main. */
+      readonly inspection: number;
+    };
 
 /** A directory to list: a host path, as the listing's prefix (ending in `/`). */
 function directory(value: unknown): string {
@@ -55,12 +72,19 @@ function directory(value: unknown): string {
   return path.endsWith('/') ? path : `${path}/`;
 }
 
+function instance(value: unknown): string {
+  if (!isInstanceId(value)) {
+    throw new Error('the instance to inspect must be a 12-digit instance id');
+  }
+  return value;
+}
+
 /** The typed request on `channel` with `args`; throws naming the first invalid value. */
 export function parseHostsRequest(
   channel: ChannelOf<typeof HOSTS_CHANNELS>,
   args: readonly unknown[],
 ): HostsRequest {
-  const [first, second, third] = args;
+  const [first, second, third, fourth] = args;
   switch (channel) {
     case HOSTS_CHANNELS.hosts:
       return {kind: 'hosts'};
@@ -79,5 +103,15 @@ export function parseHostsRequest(
       return {kind: 'sign-in', host: hostFromKey(first)};
     case HOSTS_CHANNELS.complete:
       return {kind: 'complete', host: hostFromKey(first), directory: directory(second)};
+    case HOSTS_CHANNELS.inspect:
+      return {
+        kind: 'inspect',
+        host: hostFromKey(first),
+        instance: instance(second),
+        includeLog: third === true,
+        inspection: operationToken(fourth, 'inspection'),
+      };
   }
 }
+
+export type WelcomeInspection = InstanceInspection;

@@ -23,6 +23,8 @@ export type {
   HelperError,
   HelperErrorCode,
   HelperFeature,
+  InstanceInspection,
+  InstanceInspectionMetadata,
   InstanceList,
   InstanceStatus,
   InstanceStopResult,
@@ -49,6 +51,13 @@ const properties = hostHelperSchema['properties'] as Record<string, Schema>;
 const MESSAGE = properties['message'] as Schema;
 const CHANNEL_END = properties['channel_end'] as Schema;
 const REQUEST = properties['request'] as Schema;
+const definitions = hostHelperSchema['$defs'] as Record<string, Schema>;
+const logTail = definitions['AvailableLogTail'] as Schema;
+const logProperties = logTail['properties'] as Record<string, Schema>;
+const logText = logProperties['text'] as Schema;
+
+/** Maximum UTF-8 bytes in an available instance log tail, generated from Python's contract. */
+export const INSTANCE_LOG_TAIL_BYTES = logText['x-vibesys-max-utf8-bytes'] as number;
 
 /** The helper protocol versions this client speaks (`hello`'s `client_versions`). */
 export const HELPER_CLIENT_VERSIONS: readonly [number, number] = [1, 1];

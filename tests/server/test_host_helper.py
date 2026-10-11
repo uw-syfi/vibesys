@@ -44,6 +44,8 @@ from server.host_api import (
     HelperRequest,
     InstanceList,
     InstancesChanged,
+    InstancesInspectReply,
+    InstancesInspectRequest,
     LiveInstanceRecord,
     PathsCompleteReply,
     PathsCompleteRequest,
@@ -365,6 +367,29 @@ def test_input_end_closes_once_nothing_is_in_flight() -> None:
 
 
 # ----- paths.complete -----
+
+
+def test_inspection_executes_through_the_host_helper_registry_interface() -> None:
+    threads = SimThreads()
+    store = FakeInstanceStore()
+    hold = store.hold("0123456789ab")
+    expected = record("0123456789ab")
+    hold.publish(expected)
+    host = fake_host(threads, SimNetwork(threads), store=store)
+
+    reply = answer(
+        InstancesInspectRequest(
+            request_id="i",
+            deadline_ms=1000,
+            instance_id="0123456789ab",
+        ),
+        host,
+    )
+
+    assert isinstance(reply, InstancesInspectReply)
+    assert reply.inspection.record == expected
+    assert reply.inspection.log is None
+
 
 _NAMES = st.text(alphabet="ab.c", min_size=1, max_size=4)
 

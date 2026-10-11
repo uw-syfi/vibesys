@@ -82,6 +82,10 @@ function cases(random: Seeded): Case[] {
     [bridge => bridge.cancelCheckout(token), {kind: 'cancel-checkout', change: token}],
     [bridge => bridge.signIn(key), {kind: 'sign-in', host}],
     [bridge => bridge.complete(key, directory), {kind: 'complete', host, directory}],
+    [
+      bridge => bridge.inspect(key, instance, true, token),
+      {kind: 'inspect', host, instance, includeLog: true, inspection: token},
+    ],
     [bridge => bridge.tasks(key, path), {kind: 'tasks', host, project: path}],
     [
       bridge => bridge.start(key, path, name, words, token),

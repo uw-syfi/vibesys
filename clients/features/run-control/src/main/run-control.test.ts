@@ -176,7 +176,14 @@ describe('RunControl over the FakeHelper', () => {
     const live = w.link.helper.host.instances[0];
     expect(attached?.runId).toBe(live?.run_id);
     expect(w.remembered).toEqual([
-      {host: 'local', project: '/p', task: 'spsc', runId: live?.run_id ?? '', attachedAt: 7},
+      {
+        host: 'local',
+        project: '/p',
+        task: 'spsc',
+        runId: live?.run_id ?? '',
+        instanceId: live?.id ?? '',
+        attachedAt: 7,
+      },
     ]);
     await w.connection[Symbol.asyncDispose]();
   });

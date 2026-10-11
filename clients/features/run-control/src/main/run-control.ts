@@ -408,6 +408,7 @@ export class RunControl {
         project: record.project_root,
         task,
         runId: record.run_id,
+        instanceId: record.id,
         attachedAt: this.#deps.now(),
       });
       if (!this.#owns(generation)) return false;

@@ -41,6 +41,9 @@ def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
     milestones: list[str] = []
 
     class Observer:
+        def resolved(self, *, project_root: Path, task: str) -> None:
+            del project_root, task
+
         def listening(self) -> None:
             milestones.append("listening")
 

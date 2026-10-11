@@ -3,8 +3,10 @@
 export {
   createCompletionStore,
   createHostStore,
+  createInspectorStore,
   createPickerStore,
 } from './effects/stores.js';
 export {HostPanel, type HostPanelSenders, type HostRunActions} from './ui/host-panel.js';
 export {HostPicker} from './ui/host-picker.js';
+export {InspectorSheet} from './ui/inspector-sheet.js';
 export {PathInput, type PathInputProps} from './ui/path-input.js';

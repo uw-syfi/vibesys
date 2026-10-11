@@ -1,9 +1,10 @@
-"""``vibesys instances``: list and stop the detached servers live on this node.
+"""``vibesys instances``: list, inspect, and stop detached servers on this node.
 
-Both commands read the per-user live registry (``server.registry``). ``--json``
-prints one ``InstanceList`` or ``InstanceStopResult`` document on stdout; the
-human form prints one line per server. ``stop`` exits 0 when the server stopped
-or accepted the stop (``stopped``, ``stopping``) and 1 otherwise.
+The commands read the per-user live registry (``server.registry``). ``--json``
+prints one versioned document on stdout. ``inspect`` reads diagnostics only
+after explicit ``--include-log`` consent, and the registry bounds the tail.
+``stop`` exits 0 when the server stopped or accepted the stop (``stopped``,
+``stopping``) and 1 otherwise.
 
 This is a light host command: its module-level imports stay within the
 allowlist ``tests/architecture/test_light_entrypoints.py`` enforces, so
@@ -17,10 +18,21 @@ import argparse
 import os
 import sys
 
-from server.host_api import InstanceList, InstanceStopResult, LiveInstanceRecord, StopOutcome
+from server.host_api import (
+    InstanceInspection,
+    InstanceList,
+    InstanceStopResult,
+    LiveInstanceRecord,
+    StopOutcome,
+)
 from server.instances import ControlSocketStopRequester
 from server.registry import (
+    FileInstanceLogs,
+    FileInstanceMetadataStore,
     FileInstanceStore,
+    InstanceInspector,
+    InstanceLogError,
+    InstanceMetadataError,
     LiveRegistry,
     StopEffects,
     instance_root,
@@ -40,11 +52,19 @@ def _instance_id(value: str) -> str:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vibesys instances",
-        description="List and stop detached VibeSys servers running on this node.",
+        description="List, inspect, and stop detached VibeSys servers running on this node.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     listing = commands.add_parser("list", help="list live detached servers")
     listing.add_argument("--json", action="store_true", help="print one JSON document")
+    inspect = commands.add_parser("inspect", help="inspect one detached server")
+    inspect.add_argument("id", type=_instance_id, help="the server's registry id")
+    inspect.add_argument("--json", action="store_true", help="print one JSON document")
+    inspect.add_argument(
+        "--include-log",
+        action="store_true",
+        help="include a bounded server-log tail (it may contain sensitive output)",
+    )
     stop = commands.add_parser("stop", help="stop one live detached server")
     stop.add_argument("id", type=_instance_id, help="the server's registry id")
     stop.add_argument("--json", action="store_true", help="print one JSON document")
@@ -104,10 +124,49 @@ def format_stop(result: InstanceStopResult) -> str:
             )
 
 
+def format_inspection(inspection: InstanceInspection) -> str:
+    """Render one inspection without loading or inferring any additional data."""
+    identity = inspection.metadata or inspection.record
+    lines = [f"Instance: {inspection.id}", f"State: {inspection.state.value}"]
+    if identity is not None:
+        lines.extend(
+            (
+                f"Hostname: {identity.hostname}",
+                f"Run: {identity.run_id}",
+                f"Project: {identity.project_root}",
+                f"PID: {identity.pid}",
+                f"Started: {identity.started_at}",
+                f"VibeSys: {identity.vibesys_version}",
+                f"Protocol: {identity.protocol_version}",
+            )
+        )
+        task = inspection.metadata.task if inspection.metadata is not None else None
+        if task is not None:
+            lines.insert(3, f"Task: {task}")
+        if identity.vibesys_root is not None:
+            lines.append(f"Checkout: {identity.vibesys_root}")
+    lines.extend(
+        (
+            f"Control socket: {inspection.control_socket_path}",
+            f"Server log: {inspection.server_log_path}",
+        )
+    )
+    if inspection.log is None:
+        lines.append("Diagnostics: not loaded (pass --include-log)")
+    elif inspection.log.state == "missing":
+        lines.append("Diagnostics: no retained server log")
+    else:
+        qualification = "truncated" if inspection.log.truncated else "complete"
+        lines.append(f"Diagnostics ({qualification} bounded tail):")
+        lines.append(inspection.log.text)
+    return "\n".join(lines)
+
+
 def run(
     argv: list[str],
     *,
     registry: LiveRegistry,
+    inspector: InstanceInspector,
     effects: StopEffects,
 ) -> tuple[int, str]:
     """Run one ``vibesys instances`` command; return its exit code and stdout text."""
@@ -115,6 +174,12 @@ def run(
     if args.command == "list":
         listing = registry.list()
         return 0, (listing.model_dump_json() if args.json else format_list(listing)) + "\n"
+    if args.command == "inspect":
+        inspection = inspector.inspect(args.id, include_log=args.include_log)
+        return (
+            0,
+            (inspection.model_dump_json() if args.json else format_inspection(inspection)) + "\n",
+        )
     result = registry.stop(args.id, effects, force=args.force)
     code = 0 if result.outcome in {StopOutcome.STOPPED, StopOutcome.STOPPING} else 1
     return code, (result.model_dump_json() if args.json else format_stop(result)) + "\n"
@@ -128,16 +193,26 @@ def main(argv: list[str] | None = None) -> int:
     except PermissionError as exc:
         sys.stderr.write(f"{exc}\n")
         return 1
-    code, output = run(
-        sys.argv[1:] if argv is None else argv,
-        registry=LiveRegistry(FileInstanceStore(root), threads),
-        effects=StopEffects(
-            requester=ControlSocketStopRequester(UnixNetwork()),
-            signaller=PidfdProcessSignaller(),
-            clock=threads,
-            pause=threads.sleep,
-        ),
-    )
+    store = FileInstanceStore(root)
+    try:
+        code, output = run(
+            sys.argv[1:] if argv is None else argv,
+            registry=LiveRegistry(store, threads),
+            inspector=InstanceInspector(
+                store,
+                FileInstanceLogs(root),
+                FileInstanceMetadataStore(root),
+            ),
+            effects=StopEffects(
+                requester=ControlSocketStopRequester(UnixNetwork()),
+                signaller=PidfdProcessSignaller(),
+                clock=threads,
+                pause=threads.sleep,
+            ),
+        )
+    except (InstanceLogError, InstanceMetadataError) as exc:
+        sys.stderr.write(f"vibesys instances: {exc}\n")
+        return 1
     sys.stdout.write(output)
     return code
 
