@@ -166,7 +166,8 @@ def test_web_port_and_asset_parsers_cover_invalid_and_explicit_values(tmp_path: 
 
 
 def _write_web_build_manifest(assets: Path, workspace: Path, source: Path) -> None:
-    source_file = source / "entry.ts"
+    source_file = source if source.is_file() else source / "entry.ts"
+    source_name = "." if source.is_file() else "entry.ts"
     asset_file = assets / "index.html"
     asset_file.write_text("<!doctype html>\n", encoding="utf-8")
     digest = hashlib.sha256(source_file.read_bytes()).hexdigest()
@@ -178,7 +179,7 @@ def _write_web_build_manifest(assets: Path, workspace: Path, source: Path) -> No
         "sources": [
             {
                 "path": source.relative_to(workspace).as_posix(),
-                "files": {"entry.ts": digest},
+                "files": {source_name: digest},
             }
         ],
         "assets": {"index.html": asset_digest},
@@ -220,6 +221,33 @@ def test_web_gateway_rejects_a_manifest_after_its_source_changes(
     assert exit_info.value.code == 2
     assert f"web assets {assets} are stale" in diagnostic
     assert str(source_file) in diagnostic
+    assert "pnpm --dir clients/web build" in diagnostic
+    assert not (tmp_path / "web-gateway.json").exists()
+
+
+def test_web_gateway_rejects_a_manifest_after_a_build_input_file_changes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workspace = tmp_path / "workspace"
+    assets = workspace / "clients" / "web" / "dist"
+    build_input = workspace / "clients" / "web" / "index.html"
+    assets.mkdir(parents=True)
+    build_input.parent.mkdir(parents=True, exist_ok=True)
+    build_input.write_text('<main id="root"></main>\n', encoding="utf-8")
+    _write_web_build_manifest(assets, workspace, build_input)
+
+    bundle = _web_assets_from_argv(["--web-assets", str(assets)])
+    assert bundle is not None
+    build_input.write_text('<main id="app"></main>\n', encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(_asset_validation_arguments(tmp_path, assets))
+
+    diagnostic = capsys.readouterr().err
+    assert exit_info.value.code == 2
+    assert f"web assets {assets} are stale" in diagnostic
+    assert str(build_input) in diagnostic
     assert "pnpm --dir clients/web build" in diagnostic
     assert not (tmp_path / "web-gateway.json").exists()
 

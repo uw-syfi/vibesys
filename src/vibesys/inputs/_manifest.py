@@ -21,7 +21,7 @@ from pydantic import (
 
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.constants import DomainName
-from vs_project.api import RunResourceRequest
+from vs_project.api import Project, RunResourceRequest
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageNotFoundError,
     EvaluatorPackageRequirement,
@@ -29,7 +29,7 @@ from vs_runtime.api.infrastructure import (
 )
 
 if TYPE_CHECKING:
-    from vs_project.api import Project, TaskDirectory
+    from vs_project.api import TaskDirectory
     from vs_runtime.api.infrastructure import ResolvedEvaluatorPackage
 
 MANIFEST_NAME = "vibesys.input.toml"
@@ -181,7 +181,7 @@ class WorkspaceSource(BaseModel):
 
 
 class EvaluatorInput(BaseModel):
-    """A legacy source tree or an exact reusable evaluator package."""
+    """A task-local evaluator source tree or an exact reusable evaluator package."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -198,7 +198,7 @@ class EvaluatorInput(BaseModel):
             message = "source must be a non-empty path"
             raise ValueError(message)
         if Path(value).is_absolute():
-            message = "source must be relative to the input bundle"
+            message = "source must be relative to the task directory"
             raise ValueError(message)
         return value
 
@@ -218,7 +218,7 @@ class EvaluatorInput(BaseModel):
 
     @property
     def package_requirement(self) -> EvaluatorPackageRequirement | None:
-        """Return the exact package requirement, if this is not a legacy source."""
+        """Return the exact package requirement, if this is not a source tree."""
         if self.name is None or self.version is None:
             return None
         return EvaluatorPackageRequirement(name=self.name, version=self.version)
@@ -578,7 +578,7 @@ class InputBundle(BaseModel):
 
     root: Path
     task_root: Path
-    task_name: str | None = None
+    task_name: str
     manifest_path: Path
     objective_path: Path
     dockerfile_path: Path | None
@@ -677,53 +677,59 @@ class InputBundle(BaseModel):
         return self.manifest.workspace.sources
 
 
-def load_input_bundle(path: Path) -> InputBundle:
-    """Load and validate a command-based input bundle.
+def reject_root_manifest(project_root: Path) -> None:
+    """Fail when ``project_root`` carries a root-level ``vibesys.input.toml``.
 
-    Evaluators are resolved exactly once relative to the manifest directory.
-    They may be siblings of the bundle when the author uses ``..`` components,
-    which lets a collection share large inputs without tying resolution to a
-    VibeSys source checkout.
+    Task inputs live in ``.vibesys/tasks/<task>/``; a manifest at the project
+    root is the retired legacy layout and would otherwise be ignored silently.
     """
-    root = path.expanduser().resolve()
-    return _load_input_bundle(project_root=root, task_root=root, task_name=None)
+    manifest = project_root / MANIFEST_NAME
+    if manifest.is_file():
+        message = (
+            f"{manifest}: a root-level input manifest is not supported; move it, with "
+            f"OBJECTIVE.md and the files its commands read, to "
+            f".vibesys/tasks/<task>/{MANIFEST_NAME}"
+        )
+        raise ValueError(message)
+
+
+def load_task(project_root: Path, task_name: str | None = None) -> InputBundle:
+    """Load the selected task of the project at ``project_root``.
+
+    ``task_name`` may be omitted when the project defines exactly one task.
+    Raises ``FileNotFoundError`` or ``ValueError`` (including
+    ``vs_project`` layout errors) that name the offending path.
+    """
+    root = project_root.expanduser().resolve()
+    _validate_project_root(root)
+    reject_root_manifest(root)
+    project = Project.open(root)
+    if not project.is_initialized():
+        message = (
+            f"{root} is not a VibeSys project: {project.configuration_path()}/tasks/ does not exist"
+        )
+        raise ValueError(message)
+    return load_project_task(project, project.select_task(task_name))
 
 
 def load_project_task(project: Project, task: TaskDirectory) -> InputBundle:
     """Load one repository-native task against its candidate project root."""
-    return _load_input_bundle(
-        project_root=project.root,
-        task_root=task.path,
-        task_name=str(task.name),
-        task_directory=task,
-    )
-
-
-def _load_input_bundle(
-    *,
-    project_root: Path,
-    task_root: Path,
-    task_name: str | None,
-    task_directory: TaskDirectory | None = None,
-) -> InputBundle:
-    """Load a manifest and resolve its commands for project-root execution."""
-    root = project_root.expanduser().resolve()
-    bundle_root = task_root.expanduser().resolve()
+    root = project.root.expanduser().resolve()
     _validate_project_root(root)
-    manifest_path, objective_path = _input_bundle_paths(bundle_root, task_directory)
-    manifest = _read_input_manifest(manifest_path, objective_path)
+    reject_root_manifest(root)
+    manifest = _read_input_manifest(task.manifest_path, task.objective_path)
     _validate_modal_entrypoint(root, manifest)
     evaluator_package, resolved_commands = _resolve_evaluator_commands(root, manifest)
-    reference_path = _resolve_reference_path(bundle_root, task_directory)
-    evaluator_path = _resolve_evaluator_source_path(bundle_root, task_directory, manifest)
+    reference_path = _resolve_reference_path(task)
+    evaluator_path = _resolve_evaluator_source_path(task, manifest)
 
     return InputBundle(
         root=root,
-        task_root=bundle_root,
-        task_name=task_name,
-        manifest_path=manifest_path,
-        objective_path=objective_path,
-        dockerfile_path=(task_directory.dockerfile_path if task_directory is not None else None),
+        task_root=task.path,
+        task_name=str(task.name),
+        manifest_path=task.manifest_path,
+        objective_path=task.objective_path,
+        dockerfile_path=task.dockerfile_path,
         reference_path=reference_path,
         evaluator_path=evaluator_path,
         evaluator_package_digest=(
@@ -739,26 +745,11 @@ def _load_input_bundle(
 
 def _validate_project_root(root: Path) -> None:
     if not root.exists():
-        message = f"--input path does not exist: {root}"
+        message = f"project path does not exist: {root}"
         raise FileNotFoundError(message)
     if not root.is_dir():
-        message = f"--input path is not a directory: {root}"
+        message = f"project path is not a directory: {root}"
         raise ValueError(message)
-
-
-def _input_bundle_paths(
-    bundle_root: Path,
-    task_directory: TaskDirectory | None,
-) -> tuple[Path, Path]:
-    manifest_path = (
-        task_directory.manifest_path if task_directory is not None else bundle_root / MANIFEST_NAME
-    )
-    objective_path = (
-        task_directory.objective_path
-        if task_directory is not None
-        else bundle_root / "OBJECTIVE.md"
-    )
-    return manifest_path, objective_path
 
 
 def _read_input_manifest(manifest_path: Path, objective_path: Path) -> InputManifest:
@@ -856,34 +847,21 @@ def _resolve_evaluator_command(
     return command
 
 
-def _resolve_reference_path(
-    bundle_root: Path,
-    task_directory: TaskDirectory | None,
-) -> Path | None:
-    reference_path = bundle_root / "reference"
+def _resolve_reference_path(task: TaskDirectory) -> Path | None:
+    reference_path = task.path / "reference"
     if reference_path.exists() or reference_path.is_symlink():
-        reference_path = (
-            task_directory.resolve("reference") if task_directory is not None else reference_path
-        )
+        reference_path = task.resolve("reference")
     if reference_path.exists() and not reference_path.is_dir():
         message = f"reference path is not a directory: {reference_path}"
         raise ValueError(message)
     return reference_path if reference_path.exists() else None
 
 
-def _resolve_evaluator_source_path(
-    bundle_root: Path,
-    task_directory: TaskDirectory | None,
-    manifest: InputManifest,
-) -> Path | None:
+def _resolve_evaluator_source_path(task: TaskDirectory, manifest: InputManifest) -> Path | None:
     evaluator = manifest.evaluator
     if evaluator is None or evaluator.source is None:
         return None
-    evaluator_path = (
-        task_directory.resolve(evaluator.source)
-        if task_directory is not None
-        else (bundle_root / evaluator.source).resolve()
-    )
+    evaluator_path = task.resolve(evaluator.source)
     if not evaluator_path.exists():
         message = f"evaluator.source path does not exist: {evaluator_path}"
         raise FileNotFoundError(message)

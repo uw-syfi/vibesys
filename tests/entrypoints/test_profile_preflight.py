@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.task_project import write_task
 
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from entrypoints.headless import main
@@ -17,12 +18,12 @@ if TYPE_CHECKING:
 def _arguments(root: Path, profiler: ProfilerKind) -> list[str]:
     project = root / "project"
     project.mkdir()
-    (project / "OBJECTIVE.md").write_text("Reduce latency.\n", encoding="utf-8")
-    (project / "vibesys.input.toml").write_text(
+    write_task(
+        project,
         'version = 1\n[agent]\ndomain = "llm-serving"\n'
         '[accuracy]\ncommand = ["python", "check.py"]\n'
         '[benchmark]\ncommand = ["python", "benchmark.py"]\n',
-        encoding="utf-8",
+        objective="Reduce latency.\n",
     )
     operator = root / "slurm.toml"
     operator.write_text(

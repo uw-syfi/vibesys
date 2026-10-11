@@ -8,7 +8,7 @@ import pytest
 from tests.support.docker_environment import fake_docker_environment
 
 from vibesys.api import Config, OrchestrationDescriptor, ResumeRef, RunRequest
-from vibesys.api.request import load_input_bundle
+from vibesys.api.request import load_project_task
 from vs_project.api import Project
 
 if TYPE_CHECKING:
@@ -18,7 +18,8 @@ _EXAMPLE = "examples/model-serving/whisper-large-v3"
 
 
 def _request(root: Path) -> RunRequest:
-    bundle = load_input_bundle(root)
+    project = Project.open(root)
+    bundle = load_project_task(project, project.select_task("default"))
     return RunRequest(
         run_environment=fake_docker_environment(),
         project_root=root,

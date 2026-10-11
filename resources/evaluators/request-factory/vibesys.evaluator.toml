@@ -9,6 +9,8 @@ git = "https://github.com/uw-syfi/request-factory"
 rev = "89dce4a64ae12e7084fbe464ddda882fa0a4c482"
 package = "req-frontend"
 bins = ["session_runner"]
+# req-frontend links OpenSSL through openssl-sys, which locates it with pkg-config.
+system_packages = ["pkg-config", "libssl-dev"]
 
 [entrypoints]
 request-factory-engine = ["${TOOL:request-factory/session_runner}"]

@@ -54,9 +54,10 @@ the completed state without an agent CLI or credentials. A second invocation
 from the same checkout reuses that gateway instead of competing for port 8765.
 
 The production build writes `clients/web/dist/.vibesys-web-build.json`. That
-manifest identifies the build and records the source contents from
-`clients/web/src`, `clients/backend-client/src`, and `clients/core-state/src`.
-The gateway refuses the checkout's default bundle when any recorded source has
+manifest identifies the build and records every tracked input that can change
+the production browser bundle, including the three client source trees, HTML
+entrypoint, Vite configuration, package metadata, and locked dependency graph.
+The gateway refuses the checkout's default bundle when any recorded input has
 changed or the manifest is missing, and reports the changed path plus
 `pnpm --dir clients/web build`. `--no-build` still reuses the last build, but
 only while that build matches the current workspace. The build ID is stored in

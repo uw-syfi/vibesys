@@ -311,7 +311,8 @@ class FakeDockerEngine:
             )
             pidfile = self._state_dir / "unused.pid"
         else:
-            program = request.program
+            # As in `_exec`, root setup is recorded in `calls`, never run on the host.
+            program = ("true",) if request.user == "root" else request.program
             marker = request.env.get(EXEC_MARKER_ENV, f"anonymous-{uuid.uuid4().hex}")
             pidfile = self._pidfile(marker)
             container.markers.append(marker)

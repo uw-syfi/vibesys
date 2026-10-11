@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import difflib
 import textwrap
+from pathlib import Path
 
 from hypothesis import given
 from hypothesis import strategies as st
-from scripts.explore_changed_tests import changed_lines, function_spans, selected_ids
+from scripts.explore_changed_tests import (
+    changed_lines,
+    function_spans,
+    selected_ids,
+    suite_pathspecs,
+)
 
 MODULE = textwrap.dedent(
     """\
@@ -91,3 +97,12 @@ def function_spans_include_class_methods_and_skip_helpers() -> None:
         "test_two",
         "TestGroup::test_three",
     ]
+
+
+def test_only_the_suites_testpaths_are_explored() -> None:
+    pyproject = (Path(__file__).resolve().parents[2] / "pyproject.toml").read_text()
+
+    pathspecs = suite_pathspecs(pyproject)
+
+    assert ":(glob)tests/**/*.py" in pathspecs
+    assert all("examples" not in spec for spec in pathspecs)

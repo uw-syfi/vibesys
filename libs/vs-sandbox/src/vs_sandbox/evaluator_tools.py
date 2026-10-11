@@ -55,10 +55,18 @@ _MAX_INSTALL_ERROR_CHARACTERS = 2000
 _TOOL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
 _CARGO_IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
 _GIT_REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_DEBIAN_PACKAGE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9+.-]+$")
 
 
 class CargoGitToolSpec(BaseModel):
-    """One Cargo package installed from an immutable Git revision."""
+    """One Cargo package installed from an immutable Git revision.
+
+    ``system_packages`` names the Debian/Ubuntu packages the build needs beyond
+    Rust and a linker (for example ``libssl-dev`` for a crate that links
+    OpenSSL). It is the single declaration of the tool's native build
+    dependencies: a Docker target installs exactly these with ``apt-get`` before
+    building, and other targets must already provide them.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -67,6 +75,22 @@ class CargoGitToolSpec(BaseModel):
     rev: str
     package: str
     bins: tuple[str, ...]
+    system_packages: tuple[str, ...] = ()
+
+    @field_validator("system_packages")
+    @classmethod
+    def _valid_system_packages(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            message = "system_packages must not contain duplicates"
+            raise ValueError(message)
+        invalid = next(
+            (name for name in value if not _DEBIAN_PACKAGE_PATTERN.fullmatch(name)),
+            None,
+        )
+        if invalid is not None:
+            message = f"invalid Debian package name: {invalid!r}"
+            raise ValueError(message)
+        return value
 
     @field_validator("git")
     @classmethod
@@ -362,6 +386,11 @@ class EvaluatorToolError(RuntimeError):
             "Docker evaluator tool builder could not return cache ownership "
             f"to the host user: {detail}"
         )
+
+    @classmethod
+    def builder_setup_failed(cls, detail: str) -> EvaluatorToolError:
+        """Report a failed root setup command in the evaluator tool builder."""
+        return cls(f"evaluator tool builder setup failed: {detail}")
 
     @classmethod
     def builder_incomplete(cls) -> EvaluatorToolError:

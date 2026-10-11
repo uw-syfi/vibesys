@@ -63,7 +63,6 @@ class FakeRunnerCreation:
     log_path: Path | str | None
     bind_mounts: tuple[tuple[str, str, bool], ...]
     extra_env: dict[str, str]
-    extra_init_commands: tuple[str, ...]
     lifecycle_hooks: tuple[SandboxLifecycleHooks, ...]
     attach_accelerator: bool
     ephemeral: bool
@@ -119,7 +118,6 @@ class FakeComputeBackend:
         log_path: Path | str | None = None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
         extra_env: dict[str, str] | None = None,
-        extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
         attach_accelerator: bool = True,
         ephemeral: bool = False,
@@ -138,7 +136,6 @@ class FakeComputeBackend:
                 log_path=log_path,
                 bind_mounts=tuple(bind_mounts or ()),
                 extra_env=dict(extra_env or {}),
-                extra_init_commands=tuple(extra_init_commands or ()),
                 lifecycle_hooks=tuple(lifecycle_hooks or ()),
                 attach_accelerator=attach_accelerator,
                 ephemeral=ephemeral,

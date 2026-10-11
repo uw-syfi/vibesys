@@ -1,0 +1,17 @@
+# Stack MPMC Task
+
+This task targets a multi-producer, multi-consumer reservation-aware bounded
+stack. Successful pushes may reserve capacity before publication; `FULL` counts
+reservations while `EMPTY` and pop observe published items. The manifest invokes
+the shared trusted stack evaluator and ABI.
+
+The project root holds an intentionally naive Rust candidate. From the project
+root, run:
+
+    make
+    go -C <vibesys>/resources/evaluators/stack run . check --workspace "$PWD" --scenario mpmc
+    go -C <vibesys>/resources/evaluators/stack run . benchmark --workspace "$PWD" --scenario mpmc --duration 1s --warmup 0s
+
+The candidate is untrusted and may be replaced by any implementation exporting
+the ABI in the evaluator package's `CANDIDATE_CONTRACT.md`
+(`resources/evaluators/stack` in the VibeSys repository).

@@ -15,6 +15,9 @@ export interface GatewayTarget {
   readonly bootstrapUrl: string | null;
 }
 
+/** A parsed target whose launch capability is available for one or more bounded exchanges. */
+export type GatewayBootstrapTarget = GatewayTarget & {readonly bootstrapUrl: string};
+
 /** A capability-free gateway target paired with its freshly exchanged credential. */
 export interface GatewayConnection {
   readonly gatewayUrl: string;

@@ -47,7 +47,7 @@ onto gfx90a or vice versa.
 FP8 is **not native** on MI210 (`fp8_native = false`): there is no FP8 roof
 to draw here; a GEMM ported from an FP8 gfx942 recipe runs in BF16/FP16 on
 this SKU or not at all. Source:
-`examples/model-serving/qwen3.5-9b-mi210/config/platforms/mi210.toml`.
+`examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/config/platforms/mi210.toml`.
 
 **Use the measured ridge (~83–88 FLOP/byte) to classify real kernels on this
 hardware, not the spec ridge (~113).** The spec peak assumes a clock this SKU

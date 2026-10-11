@@ -618,7 +618,7 @@ def test_real_mi210_triage_expresses_mfma_utilization_as_a_fraction_of_spec_peak
     # time would understate achieved throughput by ~2x (this reproduced as
     # "33% of peak", ~59 TFLOP/s, well below the 115-150 TFLOP/s this shape
     # measures at on real MI210 serving load per
-    # examples/model-serving/qwen3.5-9b-mi210/config/platforms/mi210.toml).
+    # examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/config/platforms/mi210.toml).
     # Correctly scaled: 2 * 2*4096^3 FLOPs / 2320966 ns = 118.4 TFLOP/s
     # achieved / 181.0 TFLOP/s spec peak = 65.4% -> 65%, which lands inside
     # that measured range.

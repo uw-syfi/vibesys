@@ -19,7 +19,7 @@ def test_kv_store_is_a_registered_modality() -> None:
 
 
 def test_kv_store_input_bundle_loads() -> None:
-    project = Project.open(_PROJECT_ROOT / "examples" / "kv-store")
+    project = Project.open(_PROJECT_ROOT / "examples" / "database" / "kv-store")
     bundle = load_project_task(project, project.select_task("default"))
     assert bundle.domain.value == "generic"
     assert bundle.benchmark_result is not None
@@ -53,7 +53,7 @@ def test_kv_store_linux_cpu_profiler_gets_resp2_specific_guidance() -> None:
     """Regression test: linux_cpu.j2 used to omit the {% include %} that pulls
     in _modality/kv_store/profiler.j2, so a kv_store profiling round silently
     lost the RESP2-specific py-spy/perf/strace guidance even though it's the
-    modality this profiler kind is actually paired with in examples/kv-store.
+    modality this profiler kind is actually paired with in examples/database/kv-store.
     """
     output = render_template(
         "profilers/linux_cpu.j2",

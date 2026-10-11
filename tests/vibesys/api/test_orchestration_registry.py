@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.task_project import write_task
 
 from launch import LaunchSettings, built_in_orchestrations, create_session, open_run_store
 from vibesys.api import (
@@ -21,7 +22,7 @@ from vibesys.api import (
     RunStatus,
     RunView,
 )
-from vibesys.api.request import load_input_bundle
+from vibesys.api.request import load_task
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData, RunStartedData
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.dynamic import PLUGIN as DYNAMIC_PLUGIN
@@ -143,11 +144,12 @@ _SETUP_REGISTRATION = OrchestrationRegistration(
 def _custom_request(tmp_path: Path) -> RunRequest:
     root = tmp_path / "custom-project"
     root.mkdir()
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
-    (root / "vibesys.input.toml").write_text(
+    write_task(
+        root,
         'version = 1\n[agent]\ndomain = "generic"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Improve the queue.\n",
     )
     return RunRequest(
         project_root=root,
@@ -155,7 +157,7 @@ def _custom_request(tmp_path: Path) -> RunRequest:
             id="team-search", config_version=2, options={"workers": 3}
         ),
         config=Config.model_validate({"model": {"name": "gpt-test"}}),
-        input_bundle=load_input_bundle(root),
+        input_bundle=load_task(root),
         exp_name="custom-run",
         run_environment=fake_docker_environment(),
         agent_backend="stub",
@@ -618,6 +620,11 @@ def test_request_rejects_parallel_legacy_selector_fields(tmp_path: Path) -> None
         RunRequest.model_validate({**request.model_dump(), "max_rounds": 2})
 
 
+def _authored_tree(root: Path) -> frozenset[str]:
+    """Every path under the project's ``.vibesys``: only the authored task before a run."""
+    return frozenset(path.relative_to(root).as_posix() for path in (root / ".vibesys").rglob("*"))
+
+
 def test_constructor_rejects_invalid_descriptor_before_run_resources(tmp_path: Path) -> None:
     request = _custom_request(tmp_path).model_copy(
         update={
@@ -626,6 +633,7 @@ def test_constructor_rejects_invalid_descriptor_before_run_resources(tmp_path: P
     )
     registry = OrchestrationRegistry()
     registry.register_plugin(_TEAM_PLUGIN)
+    authored = _authored_tree(request.project_root)
     with pytest.raises(ValueError, match="requires config version 2"):
         create_session(
             request,
@@ -633,7 +641,7 @@ def test_constructor_rejects_invalid_descriptor_before_run_resources(tmp_path: P
             registry=registry,
             settings=LaunchSettings(backend_factory=host_container_backend),
         )
-    assert not (request.project_root / ".vibesys").exists()
+    assert _authored_tree(request.project_root) == authored
 
 
 def test_public_session_applies_registered_plugin_metadata(tmp_path: Path) -> None:
@@ -732,6 +740,7 @@ def test_registered_plugin_rejects_invalid_options_before_run_resources(tmp_path
     )
     registry = OrchestrationRegistry()
     registry.register_plugin(_SETUP_PLUGIN)
+    authored = _authored_tree(request.project_root)
 
     with pytest.raises(ValidationError, match="unknown"):
         create_session(
@@ -741,7 +750,7 @@ def test_registered_plugin_rejects_invalid_options_before_run_resources(tmp_path
             settings=LaunchSettings(backend_factory=host_container_backend),
         )
 
-    assert not (request.project_root / ".vibesys").exists()
+    assert _authored_tree(request.project_root) == authored
 
 
 def test_registered_plugin_derives_roles_from_declaration() -> None:

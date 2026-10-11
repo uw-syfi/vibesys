@@ -1,0 +1,28 @@
+version = 1
+
+[agent]
+domain = "generic"
+
+[evaluator]
+name = "vibesys-evaluator-stack"
+version = "0.1.0"
+
+[accuracy]
+entrypoint = "vibesys-stack"
+args = [
+  "check", "--workspace", "${PROJECT_ROOT}",
+  "--scenario", "spsc", "--operations", "32", "--trials", "100",
+]
+timeout_seconds = 120
+
+[benchmark]
+entrypoint = "vibesys-stack"
+args = [
+  "benchmark", "--workspace", "${PROJECT_ROOT}",
+  "--scenario", "spsc", "--repetitions", "3",
+]
+timeout_seconds = 300
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "total_ops_per_sec"

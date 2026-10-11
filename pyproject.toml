@@ -237,8 +237,8 @@ extend-exclude = [
     "examples/model-serving/repositories/vllm",
     "examples/model-serving/repositories/vllm-omni",
     # Verbatim transformers modeling code shipped as a bundle reference.
-    "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/reference/modeling_qwen3_5_moe.py",
-    "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/reference/configuration_qwen3_5_moe.py",
+    "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/.vibesys/tasks/default/reference/modeling_qwen3_5_moe.py",
+    "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/.vibesys/tasks/default/reference/configuration_qwen3_5_moe.py",
 ]
 
 [tool.ruff.lint]

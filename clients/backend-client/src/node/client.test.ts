@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 import {BackendClientError, type ControlChannelState, ServerError} from '../index.js';
 import {expect} from '../test-support/expect.js';
-import {FakeClock} from '../testing/fake-clock.test-helper.js';
+import {FakeClock} from '../testing/index.js';
 import {ServerClient, type ServerClientOptions} from './client.js';
 
 /** One reported state as a short string; see `websocket.test.ts`'s `trace`. */
@@ -602,7 +602,7 @@ describe('ServerClient', () => {
     const connecting = ServerClient.connect(path, {connectTimeoutMs: 5_000, clock});
     await clock.waitUntilScheduled(25);
     await listen(server, path);
-    await clock.runNext(25);
+    clock.runNext();
 
     const client = await connecting;
     try {
@@ -622,7 +622,10 @@ describe('ServerClient', () => {
       connectRetryIntervalMs: 20,
       clock,
     }).catch((error: BackendClientError) => error);
-    for (let retry = 0; retry < 5; retry += 1) await clock.runNext(20);
+    for (let retry = 0; retry < 5; retry += 1) {
+      await clock.waitUntilScheduled(20);
+      clock.runNext();
+    }
     const error = await outcome;
     expect(error).toBeInstanceOf(BackendClientError);
     if (!(error instanceof BackendClientError)) throw new Error('Expected connection failure');
@@ -639,7 +642,10 @@ describe('ServerClient', () => {
       connectRetryIntervalMs: 10,
       clock,
     }).catch((error: BackendClientError) => error);
-    for (let retry = 0; retry < 9; retry += 1) await clock.runNext(10);
+    for (let retry = 0; retry < 9; retry += 1) {
+      await clock.waitUntilScheduled(10);
+      clock.runNext();
+    }
     expect(await outcome).toBeInstanceOf(BackendClientError);
     expect(clock.now()).toBe(90);
     expect(clock.pendingDelays()).toEqual([]);
@@ -851,7 +857,8 @@ describe('ServerClient', () => {
     const client = await ServerClient.connect(socketPath, {closeGraceMs: 40, clock});
     try {
       const closing = client.close();
-      await clock.runNext(40);
+      await clock.waitUntilScheduled(40);
+      clock.runNext();
       await closing;
     } finally {
       await close(server);
@@ -937,7 +944,8 @@ describe('ServerClient', () => {
         await expect(client.request({type: 'command.steer', text: 'x'})).rejects.toMatchObject({
           kind: 'disconnected',
         });
-        await clock.runNext(0);
+        await clock.waitUntilScheduled(0);
+        clock.runNext();
         await watcher.live(client);
         const response = await client.request({type: 'query.snapshot'});
         expect(response.snapshot?.status).toBe('running');

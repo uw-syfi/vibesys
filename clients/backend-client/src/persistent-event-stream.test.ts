@@ -9,8 +9,7 @@ import {
 } from './persistent-event-stream.js';
 import type {RunEvent, ServerMessage} from './protocol.js';
 import {expect} from './test-support/expect.js';
-import {FakeClock} from './testing/fake-clock.test-helper.js';
-import {event} from './testing/index.js';
+import {event, FakeClock} from './testing/index.js';
 import type {EventSubscription} from './transport.js';
 
 /** A production stream with only its public scheduling seam replaced. */
@@ -28,7 +27,7 @@ class TestEventStream extends PersistentEventStream {
 
   /** Fire one pending reconnect, then drain the promise continuations it caused. */
   async settle(): Promise<void> {
-    this.#scheduler.runOne();
+    this.#scheduler.runNext();
     for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
   }
 
