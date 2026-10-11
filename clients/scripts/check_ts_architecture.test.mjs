@@ -44,12 +44,7 @@ test('dependency-cruiser rejects relative paths into a package, cycles, and unre
       },
     }),
   );
-  await writeSource(
-    root,
-    'transport',
-    'index.ts',
-    "import '../../core-state/src/index.js';\n",
-  );
+  await writeSource(root, 'transport', 'index.ts', "import '../../core-state/src/index.js';\n");
   await writeSource(root, 'core-state', 'index.ts', "import '../../tui/src/index.js';\n");
   await writeSource(
     root,
@@ -148,8 +143,7 @@ const VALID_FILES = {
   'desktop/src/main/platform/link/index.ts': "import './shell/link.js';\n",
   'desktop/src/main/platform/link/shell/link.ts':
     "import 'node:child_process';\nimport '../state/machine.js';\n",
-  'desktop/src/main/platform/link/state/machine.ts':
-    "import type {} from '@vibesys/transport';\n",
+  'desktop/src/main/platform/link/state/machine.ts': "import type {} from '@vibesys/transport';\n",
   'desktop/src/main/platform/link/testing/fake.ts': "import '../state/machine.js';\n",
   'desktop/src/common/ids.ts': "import type {} from '@vibesys/transport';\n",
   'desktop/src/renderer/welcome/main.tsx':
