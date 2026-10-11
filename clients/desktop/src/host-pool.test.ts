@@ -152,6 +152,27 @@ describe('HostPool', () => {
     ]);
   });
 
+  test('regression: concurrent remembers and reads keep every run and never see a partial file', async () => {
+    const {hosts, logged} = pool('', null);
+    const ids = ['0123456789ab', 'ba9876543210', 'aaaaaaaaaaaa', 'bbbbbbbbbbbb', 'cccccccccccc'];
+    const reads: Promise<unknown>[] = [];
+    const writes = ids.map((instanceId, index) => {
+      reads.push(hosts.recent());
+      return hosts.remember({
+        host: 'local',
+        project: '/tmp/queue-rs',
+        task: null,
+        instanceId,
+        runId: null,
+        attachedAt: index,
+      });
+    });
+    await Promise.all([...writes, ...reads]);
+    const remembered = (await hosts.recent()).runs.map(entry => entry.instanceId);
+    expect([...remembered].sort()).toEqual([...ids].sort());
+    expect(logged.filter(line => line.startsWith('ignoring'))).toEqual([]);
+  });
+
   test('an invalid settings file is reported and ignored, not fatal', async () => {
     const {hosts, logged} = pool(
       'Host gpu-box\n',

@@ -7,7 +7,7 @@
  * the recent-runs list. Electron-free: the main process supplies paths and the system, and tests
  * supply a `HostFactory` over fakes.
  */
-import {readFile, writeFile} from 'node:fs/promises';
+import {readFile, rename, writeFile} from 'node:fs/promises';
 import type {Host} from './host.js';
 import {HostError} from './host.js';
 import {
@@ -79,6 +79,8 @@ export class HostPool {
   /** Hosts replaced by a checkout change, still serving the run attached through them. */
   readonly #retired: Promise<CheckedHost>[] = [];
   #settingsProblem: string | null = null;
+  /** The last update of `recent.json`; each update reads the file the one before wrote. */
+  #recentUpdate: Promise<void> = Promise.resolve();
 
   constructor(options: HostPoolOptions) {
     this.#options = options;
@@ -149,9 +151,7 @@ export class HostPool {
     const candidate = this.#options.factory(id, checkout);
     const root = await (await candidate).verifyCheckout();
     const next = withHostSettings(await this.#settings(), id, {checkout});
-    await writeFile(this.#options.settingsPath, `${JSON.stringify(next, null, 2)}\n`, {
-      mode: 0o600,
-    });
+    await writeJson(this.#options.settingsPath, next);
     const key = hostKey(id);
     const previous = this.#hosts.get(key);
     if (previous !== undefined) this.#retired.push(previous);
@@ -238,9 +238,13 @@ export class HostPool {
     }
   }
 
+  /** Record `run` in `recent.json`. Updates run one at a time, so none overwrites another. */
   async remember(run: RecentRun): Promise<void> {
-    const next = remember(await this.recent(), run);
-    await writeFile(this.#options.recentPath, `${JSON.stringify(next, null, 2)}\n`, {mode: 0o600});
+    const update = this.#recentUpdate.then(async () => {
+      await writeJson(this.#options.recentPath, remember(await this.recent(), run));
+    });
+    this.#recentUpdate = update.catch(() => undefined);
+    await update;
   }
 
   async closeAll(): Promise<void> {
@@ -274,4 +278,14 @@ export class HostPool {
       return EMPTY_SETTINGS;
     }
   }
+}
+
+/**
+ * Replace `path` with `value` as JSON, private to the user. The text goes to a sibling file first and
+ * is renamed over `path`, so a reader sees the old file or the new one, never a partial write.
+ */
+async function writeJson(path: string, value: unknown): Promise<void> {
+  const staging = `${path}.${process.pid}.tmp`;
+  await writeFile(staging, `${JSON.stringify(value, null, 2)}\n`, {mode: 0o600});
+  await rename(staging, path);
 }
