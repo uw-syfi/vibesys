@@ -959,20 +959,6 @@
     "occurrence": 1
   },
   {
-    "path": "src/vibesys/orchestration/resume.py",
-    "symbol": "<module>",
-    "rule": "io-import",
-    "subject": "vs_project.api",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/resume.py",
-    "symbol": "<module>",
-    "rule": "io-import",
-    "subject": "vs_runtime.api",
-    "occurrence": 1
-  },
-  {
     "path": "src/vibesys/orchestration/skill_selection.py",
     "symbol": "<module>",
     "rule": "banned-import",
