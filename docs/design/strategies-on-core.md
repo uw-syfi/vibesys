@@ -68,17 +68,18 @@ stop), `RunEnded`.
 | Core lifecycle, attempts, settlement, adoption, suspension, exclusive root, `wip` retention | built (`vs-core`) | n/a |
 | Agent evaluation tool bridge, per-candidate budgets, the `waiting_for_evaluation` reply (declared privately in `dynamic`) | built (`docs/design/core-agent-evaluation-bridge.md`) | n/a |
 | `dynamic` on core, its scenario, recovery-matrix, liveness, chaos and smoke tests | built | n/a |
-| Tests of assumptions A1 to A4 (section 11) | built; A2 and A4 hold since B16, A3 is feasible and unbuilt (section 11.1) | 2 |
+| Tests of assumptions A1 to A4 (section 11) | built; A2 and A4 hold since B16, A3 holds since B15 (section 11.1) | 2 |
 | Decision transcript test of `dynamic` (3.4) | built (`test_decision_transcript.py`, 96 scenarios) | 2 |
 | Exclusive-root executor fixes (B16, section 3.1) | built (`test_exclusive_root_attempts.py`); prerequisite of every port that runs without candidate sandboxes | 2 |
-| Shared building blocks B1 to B15 (section 3) | unbuilt; `dynamic` holds private copies; extraction waits for the decision in 11.1 | 2 |
-| Strategy conformance suite and the promoted runtime shell test kit (T1, T2 in 3.1) | unbuilt; `dynamic` holds a private shell harness | 2 |
-| `CaptureCommand` operation (profile-guided attribution) | unbuilt | 3 |
+| Shared building blocks B1 to B15 (section 3) | built except B9 and B13, with `dynamic` moved onto each (section 3.6) | 2 |
+| Promoted runtime shell test kit (T1) and plugin-keyed loop harness (T2) | T1 built (`vs_runtime.api.testing`); T2 is a seam (3.6) | 2 |
+| Strategy conformance suite C1 to C5 (9.2) | unbuilt | 2 |
+| `CaptureCommand` operation (profile-guided attribution, B14) | contract and owner built; no strategy uses it yet | 3 |
 | Immutable hypothesis state, or the JSON-field bridge (8.4) | unbuilt | 3 |
 | `single` and `profile-guided single` strategy | unbuilt | 3 |
 | Issue-tracker operations and `FakeIssueTracker` contract suite | unbuilt | 3 |
 | `issue_queue` strategy | unbuilt | 3 |
-| `ValidateLocal` operation, stateless tool admission, `multi` strategy | unbuilt | 4 |
+| `ValidateLocal` operation, `multi` strategy (stateless tool admission, B15, is built) | unbuilt | 4 |
 | Immutable population state, `ExportPatch` operation, `evolve` strategy | unbuilt | 5 |
 | Removal of the legacy loop runtime and evaluation service | unbuilt | 6 |
 | Limits extension for a resumed run with a larger round budget | undecided (Q3) | n/a |
@@ -253,6 +254,37 @@ graph TD
     rt --> trk["vs-issue-tracker: board operations (8.3)"]
     trk --> core
 ```
+
+### 3.6 Phase 2 outcome
+
+The blocks as built. Every row's `dynamic` use passed its whole suite and the unchanged decision
+transcript golden (3.4) at the commit that introduced it.
+
+| # | Status | Owner and public interface as built | PR |
+|---|---|---|---|
+| B1 | built | `vs_core.api`: `IdScheme(namespace, role_prefix)`, `component`, `attempt_id`, `item_id`, `attempt_ref`, `decision_of_operation` | #1973 |
+| B2 | built | `vs_core.api`: `Draft[S]`, `run_scope`, `attempt_scope`, `declared_operation`, `workspace_for`, `session_for`, `TurnShape`, `request_turn`, `invocation_for`, `turn_decision_id` | #1977 |
+| B3 | built | `vs_core.api`: `MeasurementRecipe`, `StageBudget`; `AgentEvaluationPolicy.from_recipe` and `.measurement` | #1977 |
+| B4, B5 | built | `vs_core.api`: `TurnChain[C]`, `AttemptTrack[T]`, `Step`. `dynamic`'s records subclass them, so its persisted state keeps one flat shape | #1974 |
+| B6a | built | `vs_core.api`: `trusted_keys`, `ledger_refs`, `turn_candidate` | #1973 |
+| B6b | built | `vibesys.metrics`: `MetricRow`, `PartialRow`, `EvidenceReading`, `AcceptedReading`, `reading_of`, `accept_readings` (new `tach` edge to `vs_core`) | #1983 |
+| B7 | built, owner moved | `vs_core.api`: `StrategyOperations`, the `*Base` request models and shared outcomes; `vs_runtime.api.core.operation_roles` maps them to `OperationRole`s | #1983 |
+| B8 | built | `vibesys.candidates.api`: `CandidateConfig`, settlement (`settle_for`, `FinishedAttempt`), the input baseline (`propose`, `on_*`), the run phases (`choose_winner`, `proposal`, `stop`, `after_adoption`) | #1984 |
+| B9 | not built | The glue is inline in the two legacy loops, entangled with workspace and file effects, and `dynamic` is not a user. It is extracted as a pure round machine when `single` ports, against its first core-path consumer | n/a |
+| B10 | built, owner moved | `vs_core.api`: `Waitable[R]`, `WaitingForEvaluation`, `WaitingForDependency`; the agent-visible JSON schemas are unchanged | #1983 |
+| B11 | built | `vibesys.core_roles`: capability sets, `RoleKind` presets, `core_role` | #1985 |
+| B12 | built | `vibesys.core_wiring`: `ResolvedRun`, `EvaluationInputs`, `evaluation_inputs`, `agent_evaluation_policy`, `operation_catalog`, `require_candidate_sandboxes` | #1985 |
+| B13 | not built | The six core-protocol templates are pinned by the prompt-folder registry and layout architecture tests (one folder per plugin) and by a renderer with one root; moving them needs the renderer's fallback roots in `CorePolicy` and those tests changed. Done with the first port that needs a second user of them | n/a |
+| B14 | built | Contract `vs_core.api.CaptureCommandBase`, `CommandCapture` (optional member of `StrategyOperations`); owner `vs_runtime.api.core.CaptureCommandOwner`; role `OperationRole.CAPTURE_COMMAND` | #1992 |
+| B15 | built | `AgentTool.stateless`; `StatelessToolServers`, `CombinedToolServers`; `CoreResources.stateless_tool_servers`; admission in `vibesys.run.core_services` | #1992 |
+| B16 | built | by the workspace executor change that preceded this list | n/a |
+| T1 | built | `vs_runtime.api.testing`: `ScriptedExecutors`, `drive_shell`, `Run`, `HostOptions`, `Script`, `request_executors`, on `vs_core.api.testing` | #1993 |
+| T2 | seam | `tests/composition/_loop/spec.py`: `LoopSpec` keyed by plugin id (CLI selection and envelope codec). The harness and chaos driver stay under `tests/composition/dynamic` until a second strategy draws the split | #1993 |
+
+Why B7 and B10 are in `vs-core`, not `vs-runtime` as the table in 3.1 first said: the pure strategy
+package may not import `vs-runtime` (the purity ratchet admits no new `io-import`), and these are
+data contracts between a pure strategy and the runtime's executors. `vs-core` is the pure home both
+can import; the runtime keeps the mapping from operations to the roles it performs.
 
 ## 4. Strategy: single (plain and profile-guided)
 
@@ -974,7 +1006,7 @@ until the next designer turn.
 |---|---|---|---|
 | A1 | true | `tests/vibesys/orchestration/test_serial_strategy_assumptions.py` (real core and shell, both workspace modes, `candidate` and `wip`); `libs/vs-runtime/tests/test_serial_strategy_workspaces.py::test_a_retained_candidate_is_a_base_for_the_next_attempt` (real Git) | none: the cadence design in 4.4 stands, and the `wip` fallback also works |
 | A2 | true since B16 (it was false: two gaps) | `libs/vs-runtime/tests/test_serial_strategy_workspaces.py`, `test_exclusive_root_attempts.py` | none: B16 is built |
-| A3 | feasible, not yet built | `tests/vibesys/run/test_core_stateless_tools.py` | B15 as designed: the session resolver already takes any `ToolServerSource`, and the only gate is `_refuse_unbridged_tools`; the issue board stays refused (pinned by the second test in that file) |
+| A3 | true since B15 | `tests/vibesys/run/test_core_stateless_tools.py` | B15 as designed (built): the session resolver already takes any `ToolServerSource`, and the only gate is `_refuse_unbridged_tools`; the issue board stays refused (pinned by the second test in that file) |
 | A4 | true, including across a root restore that declares its artifact directories (`memory_paths`) | `libs/vs-runtime/tests/test_run_scoped_artifacts.py` | the roadmap written by a `WRITE_ARTIFACTS` run-scoped turn is kept and is visible at the next designer turn; the root restore keeps the plugin's declared `memory_paths` (`roadmap`, `progress`), and B16's grant restore uses it |
 
 **A2 gaps (fixed by B16).** (1) Core ends every settled attempt with a `DiscardWorkspace` request and
