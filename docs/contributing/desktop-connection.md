@@ -186,11 +186,13 @@ or a typed failure; there is no other way to reach a host.
 The Electron message-port hop preserves that per-channel backpressure with symmetric byte credits.
 The main-process relay and sandbox preload each grant one bounded window. A sender spends the UTF-8
 size of the protocol frame plus its byte-stream newline, and the receiver returns those bytes only
-after the page callback or host-stream write has accepted them. Exhausted page credit pauses the
-owned host stream; exhausted host credit keeps page frames in one bounded preload queue. Invalid or
-excess credit, an oversized frame, or a queue that would exceed the window closes the connection
-instead of growing memory. Thus a frozen renderer eventually stalls the helper's stdout and reaches
-the relay's `client_stalled` deadline, rather than moving an unbounded queue into Electron IPC.
+after the page callback or host-stream write has accepted them. Exhausted page credit allows one
+bounded window of read-ahead, then pauses the owned host stream; exhausted host credit keeps page
+frames in one bounded preload queue. Invalid or excess credit, an oversized frame, or a queue that
+would exceed the window closes the connection instead of growing memory. A complete host frame that
+cannot cross the Electron hop starts a local no-progress deadline, reset by positive page credit.
+This both bounds a frozen renderer and covers a clean EOF buffered by Node after credit was
+exhausted; on expiry the relay ends the connection unconditionally.
 
 ### Methods
 

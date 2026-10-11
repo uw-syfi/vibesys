@@ -1,6 +1,8 @@
 import {describe, expect, test} from 'bun:test';
 import {Duplex} from 'node:stream';
 import {BRIDGE_CREDIT_WINDOW_BYTES, type MainToPage} from '@vibesys/ipc';
+import type {ScheduleTimeout} from '@vibesys/transport';
+import {FakeClock} from '@vibesys/transport/testing';
 import {type RelayPort, relay} from './relay.js';
 
 /** The server's end of one connection. */
@@ -134,14 +136,15 @@ function random(seed: number): () => number {
 async function connected(
   server: ConnectionHandler,
   grantOutput = true,
-): Promise<{port: FakePort; done: Promise<void>; stream: Duplex}> {
+  scheduleTimeout?: ScheduleTimeout,
+): Promise<{port: FakePort; done: Promise<void>; stream: Duplex; host: Duplex}> {
   const [stream, end] = duplexPair();
   server(end);
   const port = new FakePort();
-  const done = relay(port, async () => stream);
+  const done = relay(port, async () => stream, scheduleTimeout);
   await port.until(posted => posted.length > 0);
   if (grantOutput) port.send({type: 'credit', bytes: BRIDGE_CREDIT_WINDOW_BYTES});
-  return {port, done, stream};
+  return {port, done, stream, host: end};
 }
 
 function frameBytes(data: string): number {
@@ -219,6 +222,68 @@ describe('relay', () => {
       {type: 'open', creditBytes: BRIDGE_CREDIT_WINDOW_BYTES},
       {type: 'message', data: 'first', bytes: frameBytes('first')},
       {type: 'message', data: 'second', bytes: frameBytes('second')},
+      {type: 'close'},
+    ]);
+  });
+
+  test('a clean host EOF whose page credit never arrives ends the relay at a bounded deadline', async () => {
+    const clock = new FakeClock();
+    const {port, done} = await connected(
+      connection => connection.end('first\nsecond\n'),
+      false,
+      clock.scheduleTimeout,
+    );
+    port.send({type: 'credit', bytes: frameBytes('first')});
+    await port.until(posted => frames(posted).length === 1);
+    expect(port.posted).toEqual([
+      {type: 'open', creditBytes: BRIDGE_CREDIT_WINDOW_BYTES},
+      {type: 'message', data: 'first', bytes: frameBytes('first')},
+    ]);
+
+    // The page never grants the credit "second" needs; nothing but a deadline ends this.
+    expect(port.closedByMain).toBe(false);
+    expect(clock.pendingDelays()).toEqual([40_000]);
+    clock.advanceBy(39_999);
+    expect(port.closedByMain).toBe(false);
+
+    // Some progress, even though it cannot deliver the next frame yet, restarts the no-progress
+    // deadline rather than charging time elapsed since EOF.
+    port.send({type: 'credit', bytes: 1});
+    expect(clock.pendingDelays()).toEqual([40_000]);
+    clock.advanceBy(39_999);
+    expect(port.closedByMain).toBe(false);
+    clock.advanceBy(1);
+    await done;
+    expect(port.posted).toEqual([
+      {type: 'open', creditBytes: BRIDGE_CREDIT_WINDOW_BYTES},
+      {type: 'message', data: 'first', bytes: frameBytes('first')},
+      {type: 'close'},
+    ]);
+    expect(port.closedByMain).toBe(true);
+  });
+
+  test('a clean EOF buffered after credit is exhausted still reaches bounded cleanup', async () => {
+    const clock = new FakeClock();
+    const {port, done, host} = await connected(() => {}, false, clock.scheduleTimeout);
+    port.send({type: 'credit', bytes: frameBytes('first')});
+
+    // Exhaust credit only after the relay is listening. The old relay paused here, so the later
+    // tail and EOF remained in Node's readable buffer and its EOF-only deadline never armed.
+    host.write('first\n');
+    await port.until(posted => frames(posted).length === 1);
+    host.end('second\n');
+    await Promise.resolve();
+
+    expect(port.closedByMain).toBe(false);
+    expect(clock.pendingDelays()).toEqual([40_000]);
+    clock.advanceBy(39_999);
+    expect(port.closedByMain).toBe(false);
+    clock.advanceBy(1);
+    expect(port.closedByMain).toBe(true);
+    await done;
+    expect(port.posted).toEqual([
+      {type: 'open', creditBytes: BRIDGE_CREDIT_WINDOW_BYTES},
+      {type: 'message', data: 'first', bytes: frameBytes('first')},
       {type: 'close'},
     ]);
   });
