@@ -46,7 +46,7 @@ export function Activity({
             <li key={entry.id}>
               <span className="marker" />
               <span className="transcript-entry">
-                <span>{entry.content}</span>
+                <span className="transcript-content">{entry.content}</span>
                 {entry.truncated === true && (
                   <span className="event-truncated">
                     Event payload truncated at the server's size bound.

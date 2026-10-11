@@ -11,6 +11,92 @@ test('renders the replay-driven run viewer', async ({page}) => {
   await page.screenshot({path: 'artifacts/web-replay.png', fullPage: true});
 });
 
+test('preserves multiline transcript text within the minimum viewport', async ({page}) => {
+  const formattedContent = `one
+  two
+${'A'.repeat(512)}`;
+  const baselineContent = `one
+  two
+short`;
+  let content = baselineContent;
+  await page.route(/\/__vibesys\/fixtures\/framework-events\.jsonl(?:\?.*)?$/, async route => {
+    const response = await route.fetch();
+    const events = (await response.text())
+      .trimEnd()
+      .split('\n')
+      .map(line => JSON.parse(line) as Record<string, unknown>);
+    let replacements = 0;
+    const formatted = events.map(event => {
+      if (event['sequence'] !== 15) return event;
+      replacements += 1;
+      return {
+        ...event,
+        type: 'agent_output_chunk',
+        status: null,
+        agent_kind: 'implementer',
+        invocation_id: 'formatting-invocation',
+        execution_id: 'formatting-execution',
+        data: {kind: 'agent_output_chunk', channel: 'assistant', content},
+      };
+    });
+    if (replacements !== 1) throw new Error(`Expected one replay event 15, got ${replacements}`);
+    await route.fulfill({
+      response,
+      body: `${formatted.map(event => JSON.stringify(event)).join('\n')}\n`,
+    });
+  });
+  await page.setViewportSize({width: 320, height: 640});
+  await page.goto('/');
+  await expect(page.locator('.transcript-content').filter({hasText: 'short'})).toHaveText(
+    baselineContent,
+  );
+  const baselineDocumentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+
+  content = formattedContent;
+  await page.reload();
+
+  const transcript = page.locator('.transcript-content').filter({hasText: 'A'.repeat(128)});
+  await expect(transcript).toHaveText(formattedContent);
+  const layout = await transcript.evaluate((element, payload) => {
+    const text = element.firstChild;
+    const entry = element.parentElement;
+    const panel = element.closest('.panel');
+    if (!(text instanceof Text) || entry === null || panel === null) {
+      throw new Error('Transcript markup does not expose its text, entry, and panel');
+    }
+    const character = (index: number): DOMRect => {
+      const range = document.createRange();
+      range.setStart(text, index);
+      range.setEnd(text, index + 1);
+      return range.getBoundingClientRect();
+    };
+    const first = character(payload.indexOf('one'));
+    const second = character(payload.indexOf('two'));
+    const style = getComputedStyle(element);
+    return {
+      documentWidth: document.documentElement.scrollWidth,
+      entryClientWidth: entry.clientWidth,
+      entryScrollWidth: entry.scrollWidth,
+      firstLeft: first.left,
+      firstTop: first.top,
+      overflowWrap: style.overflowWrap,
+      panelClientWidth: panel.clientWidth,
+      panelScrollWidth: panel.scrollWidth,
+      secondLeft: second.left,
+      secondTop: second.top,
+      whiteSpace: style.whiteSpace,
+    };
+  }, formattedContent);
+
+  expect(layout.whiteSpace).toBe('pre-wrap');
+  expect(layout.overflowWrap).toBe('anywhere');
+  expect(layout.secondTop).toBeGreaterThan(layout.firstTop);
+  expect(layout.secondLeft).toBeGreaterThan(layout.firstLeft);
+  expect(layout.entryScrollWidth).toBeLessThanOrEqual(layout.entryClientWidth);
+  expect(layout.panelScrollWidth).toBeLessThanOrEqual(layout.panelClientWidth);
+  expect(layout.documentWidth).toBe(baselineDocumentWidth);
+});
+
 test('surfaces a malformed replay event and retries it', async ({page}) => {
   let corruptReplay = true;
   await page.route(/\/__vibesys\/fixtures\/framework-events\.jsonl(?:\?.*)?$/, async route => {
