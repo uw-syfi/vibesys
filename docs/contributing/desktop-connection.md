@@ -64,7 +64,7 @@ desktop main process (apps/desktop-main)              host (local or ssh)
 |     link (ssh master | none)              |  (ssh  |   -> server.host_api   (contracts)  |
 |     control channel  -> helper            |  exec  |   -> server.registry   (records)    |
 |     run channels     -> helper -> relay   |  chan- |   -> server.relay (relay)    |
-|     supervisor (pure step + shell)        |  nels) |                                     |
+|     supervisor (XState machine + shell)   |  nels) |                                     |
 | screen stores (pure reducers) + React     |        | detached run servers (one per run)  |
 +-------------------------------------------+        |   entrypoints.server --detach       |
                                                      +-------------------------------------+
@@ -343,7 +343,7 @@ One `ConnectionManager` in the main process owns every link and channel. Windows
 for a channel; they never create one.
 
 ```text
-HostConnection states (pure step, as in today's supervisor.ts)
+HostConnection states (an XState machine, @vibesys/connection state/host-connection.ts)
 
   idle --open--> linking --link up--> handshaking --hello ok--> ready
                    |                      |                       |
@@ -377,6 +377,15 @@ Rules:
    host panel within 1 s of choosing a host with a warm master (one channel open, `hello`,
    `instances.list`).
 5. **Closing the app closes channels and masters, never runs.**
+6. **Work belongs to its state.** The machine is XState (`clients-architecture.md`, "State"). Each
+   operation (link, handshake, ping, check) is an invoked actor the shell provides, and each wait
+   (the operation's deadline, the heartbeat, a backoff slot) a delayed transition on the clock the
+   shell injects; leaving a state stops its operation and cancels its delays, so there are no
+   operation or timer ids to compare. A control channel an operation opened is installed only by the
+   machine accepting that outcome (`installControl`), after the shell's `current` guard confirms the
+   channel still serves; an outcome it does not accept hands the channel back (`discard`), and one
+   it stopped waiting for is closed when the operation's signal aborts. A check that finds the host
+   answering but the run gone emits `run-unreachable` and returns to `ready`.
 
 ## Screen stores
 
@@ -386,8 +395,9 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
   `{kind: 'editing', project, tasks: {for: project, list} | null, picked} | {kind: 'starting',
   token, ...} | {kind: 'failed', failure}`. Facts that must agree live in one variant, so "Start
   enabled for a task listed from another project" is not representable.
-- **Pure reducer.** `step(state, action) -> {state, requests}`, the same shape as the supervisor.
-  No I/O, clock, or DOM in the reducer.
+- **Pure reducer.** `step(state, action) -> {state, requests}`. No I/O, clock, or DOM in the
+  reducer. (A store whose state is control state, with work to start, wait for, and cancel, is an
+  XState machine instead, as the supervisor is: `clients-architecture.md`, "State".)
 - **Request tokens.** Every request the reducer emits carries a token stored in the state that
   awaits it. A reply whose token is not the awaited one is dropped by the reducer. A stale task
   list or overview reply cannot overwrite newer state, by construction.
@@ -518,13 +528,13 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Run protocol, framing, conformance corpus | built |
 | Detached runs, live registry, stop and resume | built |
 | Stdio relay core | built (run channels; the bridge entrypoint is deleted) |
-| Pure supervisor core | replaced by the connection manager's machine (phase 5) |
+| Pure supervisor core | replaced by the connection manager's machine (phase 5), an XState machine since phase 8 of #1878 |
 | Light host commands and import guard (phase 1) | built |
 | Explicit run identity (phase 2) | built (server side; the desktop app still keeps its id inference until phase 5 or 6 removes it) |
 | Lifecycle phases, progress, tombstones (phase 3) | built: phases with failure reason in the record, tombstones, startup stages and image-build progress (`run_startup_progress`, record version 4); the desktop parses them but does not render them yet |
 | Control envelope split (phase 4, step one) | built (`server.control_envelope`) |
 | Host helper and its contract (phase 4) | built: every method, `host-helper.schema.json` and its TypeScript types, the `helper-*` conformance scenarios and runner (in process and over stdio), the import-closure and start-up guards; `entrypoints.stdio_bridge` deleted in phase 5 |
-| Connection manager (phase 5) | built: `ConnectionManager` and `HostConnection` (pure machine, shell with disposal scopes), the bootstrap, typed channels with one strict validator, run channels, watch-pushed listings, path completion, the HostConnection contract suite over the `FakeHelper` and the real helper; not built: the Playwright journey job, a second master past `MaxSessions`, and checkout completion on a host with no checkout yet (it needs a helper) |
+| Connection manager (phase 5) | built: `ConnectionManager` and `HostConnection` (an XState machine, shell with disposal scopes), the bootstrap, typed channels with one strict validator, run channels, watch-pushed listings, path completion, the HostConnection contract suite over the `FakeHelper` and the real helper; not built: the Playwright journey job, a second master past `MaxSessions`, and checkout completion on a host with no checkout yet (it needs a helper) |
 | Screen stores and app lifecycle (phase 6) | built (#1839) |
 
 ## Decisions and alternatives

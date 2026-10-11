@@ -55,7 +55,8 @@ clients/
   transport-node/   @vibesys/transport-node   stdio / unix socket / ssh channel  -> transport
   ipc/              @vibesys/ipc              typed main <-> renderer messages, the welcome
                                               requests' parsers per feature      -> hosts, runs
-  connection/       @vibesys/connection       host connection manager            -> contracts, transport, hosts
+  connection/       @vibesys/connection       host connection manager            -> contracts, transport, hosts,
+                                                                                    machine
   settings/         @vibesys/settings         settings store, atomic files       -> hosts, runs
   features/<x>/     @vibesys/feature-<x>      run-view, gateway-connect, replay, hosts,
                                               start-run, run-control, recent-runs
@@ -79,7 +80,7 @@ flowchart BT
   run-session["run-session (L2)"] --> contracts & run-state & transport & store
   transport-node["transport-node (L2, Node)"] --> transport
   ipc["ipc (L3)"] --> hosts & runs
-  connection["connection (L3, Node)"] --> contracts & transport & hosts
+  connection["connection (L3, Node)"] --> contracts & transport & hosts & machine
   settings["settings (L3, Node)"] --> hosts & runs
   features["feature-* (L4)"] --> run-session & runs & hosts & ipc & ui & store
   features -. "./main only" .-> connection & settings
@@ -105,7 +106,7 @@ This refines the sketch in the brief in three places. `ui` and `store` sit in `f
 is the mechanical form of "no domain dependencies", so the layer rule enforces rule 6 for them with
 no special case. `transport-node`, `connection`, and `settings` get ranks of their own (`domain` and
 `service`) because each depends on another package the sketch places at the same level
-(`transport-node` on `transport`, `connection` on `transport` and `hosts`, `settings` and `ipc` on
+(`transport-node` on `transport`, `connection` on `transport`, `hosts`, and `machine`, `settings` and `ipc` on
 `hosts` and `runs`). And `hosts` sits in
 `core`, one rank below `runs`, because a run names the host it runs on (a recent run's status reads
 its host's listing; the stop flow is keyed by host) while a host never names a run's model.
@@ -214,7 +215,7 @@ checker (`EXTERNAL_DEPENDENCIES`, rule `external-dependencies`):
 | `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, features' `./renderer`, browser and renderer apps |
 | `electron` | `node` and `preload` entries of features (`./main`) and apps (`desktop-main`) |
 | `@opentui/core` | `node` entries of apps (the deprecated `tui`) |
-| `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine`; `run-session` joins it with its session machine (#1969). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
+| `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine` and `connection` (its host connection machine); `run-session` joins them with its session machine (#1969). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
 | Node builtins (`node:*` and bare names) | `node` entries |
 
 A package that declares one of them in `dependencies` must have an entry allowed to use it. Knip
@@ -298,13 +299,20 @@ this state" structural, and the kit checks it over every seeded interleaving.
 each other's `assign`s in order, so an action that must read the previous context runs before the
 `assign`. A placeholder actor typed differently from the real one makes `provide` reject it; type
 the placeholder with the operation's input and output. `always` guards should read context, not
-the event. Every invoke gets an explicit `id` (the kit requires it).
+the event. Every invoke gets an explicit `id` (the kit requires it). An outcome can go stale
+between the operation's end and the machine taking it (a channel the operation opened ends in
+between): guard `onDone` with a guard the shell provides, and give it a fallback transition whose
+action hands the resource back, as `@vibesys/connection`'s `current` guard and `discard` action
+do. A `fromPromise` signal aborts when its actor stops before its outcome was delivered, so an
+operation disposes what it opened on that abort. The pure `transition` keeps taking events in a
+final state, which the live actor does not: a model stops generating events once the snapshot's
+`status` is `done`.
 
 **Where XState may appear** is rule 9: the `external-dependencies` table confines the import, and
-two GritQL rules (wired in `biome.json`) keep features' `state/` and `effects/` free of
-`setTimeout`, `setInterval`, and `AbortController`, and keep migrated control-state packages off
-`createStore`. `run-session`'s session lifecycle and the features still on the reducer kernel are
-migrated one per change. Until then the two effects modules that hand-roll a timer or an abort
+two GritQL rules (wired in `biome.json`) keep features' `state/` and `effects/` (and
+`connection`'s `state/`) free of `setTimeout`, `setInterval`, and `AbortController`, and keep
+migrated control-state packages (`run-control`, `connection`) off `createStore`. `run-session`'s
+session lifecycle and the features still on the reducer kernel are migrated one per change. Until then the two effects modules that hand-roll a timer or an abort
 controller (`hosts`' path completion, `gateway-connect`'s attempt) are listed as exclusions in
 `biome.json`, a list that only shrinks, and `run-session` is not yet held to the `createStore`
 rule; the remaining migrations and those exclusions are tracked in #1969.
@@ -313,7 +321,7 @@ rule; the remaining migrations and those exclusions are tracked in #1969.
 | --- | --- | --- |
 | `run-session`'s session lifecycle (`sessionStep`, `WebSession`) | reducer with reply tokens | pending migration (#1969) |
 | `feature-run-control`'s commands and banner | machine | migrated (#1950) |
-| `@vibesys/connection`'s connection manager (`connection/src/state`) | pure `state + event -> state + requests` core | one change; `connection` joins `MACHINE_PACKAGES` with it |
+| `@vibesys/connection`'s `HostConnection` | machine | migrated (phase 8) |
 | `feature-start-run`, `feature-hosts`, `feature-gateway-connect`, `feature-replay` screen stores | reducer with reply tokens | one feature per change |
 
 ## Build model
@@ -408,7 +416,7 @@ names a missing or extra one.
 | `@vibesys/run-session` | domain | exists: the run fold's wiring (`runStep`), the session lifecycle (`sessionStep`, a reducer pending its migration to a machine, #1969), its ports, the run connection over a control transport (`connectRun`), and `WebSession`, with `./testing` (an in-memory control transport and page lifecycle, and `sessionWith`) | domain split (#1949) |
 | `@vibesys/entities` | domain | deleted: split into `hosts` and `runs`; task arguments (`shellWords`) moved into `@vibesys/feature-start-run` | domain split (#1949) |
 | `@vibesys/ipc` | service | exists: the run page's bridge (port messages, their validation, the preload contract web's desktop shell reads) and the welcome view's channels, events, and payloads, with each feature's requests (channels, bridge slice, and the parser the main process runs) in `welcome/<feature>.ts`, and `./testing` (random window states for store models); depends on `hosts`, `runs` | domain packages (phase 5 of #1878); per-feature parsers with phase 8 |
-| `@vibesys/connection` | service | exists (`.`, `node`): the connection manager (`ConnectionManager`, `HostConnection`: a pure `state/` machine and a `shell/` owning the links, channels, and timers), the ssh and local links, the bootstrap, and `connectionStatus`, with `./testing` (`FakeHelper`, `FakeLink`, and the `HostConnection` contract suite); depends on `contracts`, `transport`, `hosts` | desktop main process (phase 8 of #1878) |
+| `@vibesys/connection` | service | exists (`.`, `node`): the connection manager (`ConnectionManager`, `HostConnection`: an XState machine in `state/` and a `shell/` owning the links, channels, and the machine's clock), the ssh and local links, the bootstrap, and `connectionStatus`, with `./testing` (`FakeHelper`, `FakeLink`, and the `HostConnection` contract suite); depends on `contracts`, `transport`, `hosts` | desktop main process (phase 8 of #1878) |
 | `@vibesys/settings` | service | exists (`.`, `node`): the settings store (`hosts.json`, `recent.json`; one writer, atomic replace), with `./testing` (`FakeSettingsFilesystem`); depends on `hosts`, `runs` | desktop main process (phase 8 of #1878) |
 | `@vibesys/feature-run-view`, `@vibesys/feature-gateway-connect`, `@vibesys/feature-replay` | feature | exist: the run page's transcript, rounds, status, and banners (`./state`, `./renderer`; the live session is `@vibesys/run-session`); the browser's gateway connect form (`./renderer`); the recorded-run load (`./state`, `./renderer`) | feature packages (phase 6 of #1878) |
 | `@vibesys/feature-hosts`, `@vibesys/feature-start-run`, `@vibesys/feature-run-control`, `@vibesys/feature-recent-runs` | feature | exist, renderer side (`./state`, `./renderer`): the host panel, checkout form, sign-in, "Connect to host", and path completion; the "Start a run" sheet; the title strip, stop, force stop, resume, and the banner; Recent. Each feature's effects call only the slice of `@vibesys/ipc`'s welcome bridge its `./state` declares. `feature-hosts` and `feature-run-control` also publish their main-process controllers (`./main`: `Hosts`; `RunControl` with its relay and stop flow) | desktop renderer (phase 7 of #1878); `./main` with the main-process split (phase 8) |

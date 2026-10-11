@@ -15,13 +15,6 @@ import {
   phaseOf,
   type RunUnreachable,
 } from './host-connection.js';
-import {
-  INITIAL as LEGACY_INITIAL,
-  type ConnectionEvent as LegacyEvent,
-  type ConnectionState as LegacyState,
-  phaseOf as legacyPhaseOf,
-  step as legacyStep,
-} from './legacy-host-connection.js';
 
 const FIRST_DELAY = 500;
 const CONFIG: ConnectionConfig = {
@@ -489,114 +482,5 @@ describe('HostConnection machine (live actor)', () => {
     expect(installed).toEqual([]);
     expect(actor.getSnapshot().context.detail).toContain('ended during the connection operation');
     actor.stop();
-  });
-});
-
-/** An abstract event both machines understand: a plain event, or an outcome of what is in flight. */
-type Abstract =
-  | {readonly kind: 'plain'; readonly event: ConnectionEvent}
-  | {readonly kind: 'succeed'; readonly opened: boolean}
-  | {readonly kind: 'fail'; readonly cause: Cause}
-  | {readonly kind: 'fire'};
-
-function randomAbstract(random: Seeded): Abstract {
-  switch (random.int(10)) {
-    case 0:
-      return {kind: 'plain', event: {type: 'open'}};
-    case 1:
-      return {kind: 'plain', event: random.int(8) === 0 ? {type: 'close'} : {type: 'wake'}};
-    case 2:
-    case 3:
-      return {kind: 'succeed', opened: random.bool()};
-    case 4:
-      return {kind: 'fail', cause: random.pick(CAUSES)};
-    case 5:
-    case 6:
-      return {kind: 'fire'};
-    case 7:
-      return {
-        kind: 'plain',
-        event: {type: 'control-ended', cause: random.pick(CAUSES), detail: 'ended'},
-      };
-    case 8:
-      return {
-        kind: 'plain',
-        event: {type: 'run-ended', instanceId: RUN, cause: random.pick(CAUSES), detail: 'x'},
-      };
-    default:
-      return {kind: 'plain', event: {type: 'user-retry'}};
-  }
-}
-
-/** The hand-written machine's event for `abstract`, or null when it names nothing in flight. */
-function legacyEvent(state: LegacyState, abstract: Abstract): LegacyEvent | null {
-  switch (abstract.kind) {
-    case 'plain':
-      return abstract.event;
-    case 'succeed':
-      return state.op === null ? null : {type: 'succeeded', op: state.op.id};
-    case 'fail':
-      return state.op === null
-        ? null
-        : {type: 'failed', op: state.op.id, cause: abstract.cause, detail: 'why'};
-    case 'fire':
-      return state.timer === null ? null : {type: 'timer-fired', timer: state.timer.id};
-  }
-}
-
-/** Drive the XState machine with `abstract`; false when it names nothing in flight. */
-function driveAbstract(drive: Drive, abstract: Abstract): boolean {
-  switch (abstract.kind) {
-    case 'plain':
-      drive.event(abstract.event);
-      return true;
-    case 'succeed':
-      if (drive.operation === null) return false;
-      drive.succeed(abstract.opened ? OPENED : null);
-      return true;
-    case 'fail':
-      if (drive.operation === null) return false;
-      drive.fail(abstract.cause);
-      return true;
-    case 'fire': {
-      const [purpose] = drive.delays;
-      if (purpose === undefined) return false;
-      drive.fire(purpose);
-      return true;
-    }
-  }
-}
-
-describe('cutover: the XState machine against the hand-written step', () => {
-  test('the same events reach the same phase, attempt, and run-unreachable reports', () => {
-    let steps = 0;
-    for (const seed of SEEDS) {
-      const random = new Seeded(seed);
-      let legacy = LEGACY_INITIAL;
-      const drive = new Drive();
-      for (let index = 0; index < 80 && drive.snapshot.status !== 'done'; index += 1) {
-        const abstract: Abstract =
-          index === 0 ? {kind: 'plain', event: {type: 'open'}} : randomAbstract(random);
-        const where = {seed, index, abstract: JSON.stringify(abstract)};
-        const event = legacyEvent(legacy, abstract);
-        // Something is in flight in one machine exactly when it is in the other.
-        const driven = driveAbstract(drive, abstract);
-        expect({...where, driven}).toEqual({...where, driven: event !== null});
-        if (event === null) continue;
-        const next = legacyStep(legacy, event, CONFIG);
-        legacy = next.state;
-        steps += 1;
-        expect({...where, phase: drive.phase}).toEqual({...where, phase: legacyPhaseOf(legacy)});
-        const reports = next.requests.flatMap(request =>
-          request.type === 'run-unreachable' ? [{...request}] : [],
-        );
-        expect({...where, reports: emitted(drive.actions)}).toEqual({...where, reports});
-        expect({...where, attempt: drive.snapshot.context.attempt}).toEqual({
-          ...where,
-          attempt: legacy.attempt,
-        });
-      }
-    }
-    expect(steps).toBeGreaterThan(SEEDS.length * 40);
   });
 });
