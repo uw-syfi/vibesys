@@ -102,6 +102,9 @@ class Subject:
     """Request kinds the strategy's own decisions cause in a run that has no fault."""
     sweeps_crashes: bool = True
     """Whether the exhaustive crash sweep runs on this subject (one run per durable boundary)."""
+    ci_stride: int = 1
+    """Every n-th boundary is swept in CI; a subject whose run has so many commits that the full
+    sweep would not fit CI's budget sets this above 1, and the slow sweep covers every boundary."""
 
 
 # Kinds core issues only to recover from a fault, to cancel, or to resume a suspended turn.
