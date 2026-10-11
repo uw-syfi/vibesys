@@ -33,7 +33,6 @@ from vibesys.orchestration.single.strategy._state import (
     STATE_SCHEMA,
     RunPhase,
     SingleStrategyState,
-    Step,
 )
 from vs_core.api import (
     AdoptionFailed,
@@ -196,7 +195,7 @@ class SingleStrategy:
         run_turn = (
             event.scope.owner.kind == "run"
             and decision is None
-            and waiting.step is Step.AWAITING
+            and waiting.step.has_request_in_flight
             and waiting.active
         )
         return by_decision or run_turn

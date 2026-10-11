@@ -10,12 +10,17 @@ from vs_core.api import (
     AttemptTrack,
     ContinuationId,
     DecisionId,
+    IntentBlocked,
     InvocationId,
     InvocationRef,
+    RequestId,
+    RunId,
+    Scope,
     SessionId,
     Step,
     TurnChain,
     Value,
+    blocked_track,
 )
 
 
@@ -127,3 +132,41 @@ def test_a_track_awaits_exactly_its_decision() -> None:
     assert track.awaits("d")
     assert not track.awaits("other")
     assert not track.awaits(None)
+
+
+def _blocked(root: str, owner: AttemptId | RunId, generation: int) -> IntentBlocked:
+    return IntentBlocked(
+        request_id=RequestId(root="block"),
+        target=RequestId(root=root),
+        scope=Scope(owner=owner, generation=generation),
+        diagnostic="blocked",
+    )
+
+
+@given(step=st.sampled_from(Step), generation=st.integers(0, 3), asked=st.integers(0, 3))
+def test_a_blocked_request_of_an_attempt_belongs_to_it_only_while_one_is_in_flight(
+    step: Step, generation: int, asked: int
+) -> None:
+    attempt = AttemptId(root="a1")
+    track = Track(attempt=attempt, generation=generation, step=step)
+    event = _blocked("turn-request", attempt, asked)
+    in_flight = step in (Step.RENDERING, Step.AWAITING)
+    assert step.has_request_in_flight == in_flight
+    assert track.owns_blocked(event) == (in_flight and asked == generation)
+    assert blocked_track([track], event) == (track if track.owns_blocked(event) else None)
+
+
+@given(step=st.sampled_from(Step))
+def test_a_blocked_request_of_another_attempt_or_a_run_belongs_to_no_track(step: Step) -> None:
+    track = Track(attempt=AttemptId(root="a1"), step=step)
+    assert not track.owns_blocked(_blocked("turn-request", AttemptId(root="a2"), 0))
+    assert not track.owns_blocked(_blocked("turn-request", RunId(root="run"), 0))
+
+
+@given(step=st.sampled_from(Step))
+def test_a_blocked_operation_belongs_to_the_track_that_awaits_its_decision(step: Step) -> None:
+    waiting = Track(attempt=AttemptId(root="a1"), step=step, awaiting=DecisionId(root="render-1"))
+    other = Track(attempt=AttemptId(root="a2"), step=Step.AWAITING)
+    event = _blocked("operation:render-1", RunId(root="run"), 0)
+    assert blocked_track([other, waiting], event) == waiting
+    assert blocked_track([other], event) is None

@@ -17,15 +17,19 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from pydantic import BaseModel
+
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     AdoptRevision,
+    AttemptTrack,
     ControlId,
     ControlInput,
     DispatchTurn,
     EventCursor,
     HostFence,
     HostId,
+    IntentBlocked,
     MeasurementFailure,
     ObserveOwnedJob,
     OwnedJob,
@@ -33,12 +37,15 @@ from vs_core.api import (
     ProposeWinner,
     Rejected,
     RejectionCode,
+    RequestId,
     ResourceId,
     ResumeSessionTurn,
     RetainedCandidate,
     RunControlEvent,
     RunEnvelope,
     RunResultProposal,
+    Scope,
+    Step,
     SubmitMeasurement,
     TrustedBaseline,
     VerifyAdoption,
@@ -49,10 +56,9 @@ from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_runtime.api.testing import HostOptions, Run, drive_shell
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from hypothesis.strategies import SearchStrategy
-    from pydantic import BaseModel
 
     from vs_core.api import (
         CoreState,
@@ -413,6 +419,62 @@ def check_a_folded_event_twice_changes_nothing(subject: Subject, recorded: Recor
     for _, view, event, folded in recorded.tape.folded:
         again = subject.new_strategy().bind(folded).on_event(view, event)
         assert again == folded, f"a duplicate {type(event).__name__} changed the state"
+
+
+def _tracks(value: object) -> Iterator[AttemptTrack[Any]]:
+    """Every attempt track inside a strategy state, wherever the state keeps it."""
+    if isinstance(value, AttemptTrack):
+        yield value
+    if isinstance(value, BaseModel):
+        for name in type(value).model_fields:
+            yield from _tracks(getattr(value, name))
+    elif isinstance(value, list | tuple | set | frozenset):
+        for item in value:
+            yield from _tracks(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _tracks(item)
+
+
+def check_a_blocked_request_ends_the_track_that_has_one_in_flight(
+    subject: Subject, recorded: Recorded
+) -> set[Step]:
+    """C10: a request core blocked ends the attempt whose turn has a request in flight.
+
+    A blocked request the strategy cannot name by decision (a turn, session or measurement
+    request of the attempt) belongs to the attempt of its scope and generation. Whatever step
+    of its turn a track is in when the block arrives, the strategy ends it exactly when the
+    step has a request in flight (`Step.has_request_in_flight`): an attempt never keeps
+    waiting on a request nothing answers, and no other step is disturbed. The probe is every
+    state the run reached, with a block injected for each of its tracks in turn. Returns the
+    steps the probe met.
+    """
+    tape = recorded.tape
+    pairs = [(state, view) for state, view, _ in tape.decided]
+    pairs += [(state, view) for state, view, _, _ in tape.folded]
+    seen: set[str] = set()
+    met: set[Step] = set()
+    for state, view in pairs:
+        key = state.model_dump_json()
+        if key in seen:
+            continue
+        seen.add(key)
+        for track in _tracks(state):
+            if track.failure is not None or getattr(track, "phase", None) == "done":
+                continue
+            event = IntentBlocked(
+                request_id=RequestId(root="conformance-block"),
+                target=RequestId(root="conformance-blocked-request"),
+                scope=Scope(owner=track.attempt, generation=track.generation),
+                diagnostic="conformance",
+            )
+            after = subject.new_strategy().bind(state).on_event(view, event)
+            met.add(track.step)
+            assert (after != state) == track.step.has_request_in_flight, (
+                f"a request blocked while the attempt's step was {track.step.value} "
+                f"{'did not end' if track.step.has_request_in_flight else 'ended'} it"
+            )
+    return met
 
 
 def check_limits_hold(subject: Subject, recorded: Recorded) -> None:

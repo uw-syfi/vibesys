@@ -18,12 +18,18 @@ one flat shape. Every transition returns a new track and never proposes a decisi
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Self
+from typing import TYPE_CHECKING, Any, Self, assert_never
 
 from pydantic import Field
 
+from vs_core._ids import decision_of_operation
 from vs_core._turn_chain import TurnChain
 from vs_core.types.common import AttemptId, DecisionId, InvocationRef, Value
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from vs_core.types.intents import IntentBlocked
 
 
 class Step(StrEnum):
@@ -43,6 +49,23 @@ class Step(StrEnum):
     AWAITING = "awaiting"
     SUSPENDED = "suspended"
     RETAINING = "retaining"
+
+    @property
+    def has_request_in_flight(self) -> bool:
+        """Whether a request of the subject's turn is outstanding in this step.
+
+        A request core blocked while the subject is in such a step is the one the subject
+        waits on: the prompt render (RENDERING) or the decision or turn (AWAITING). In the
+        other steps the strategy proposes or resumes next, so no request of the subject is
+        outstanding. The match is exhaustive, so a new step must decide which side it is on.
+        """
+        match self:
+            case Step.RENDERING | Step.AWAITING:
+                return True
+            case Step.NEEDED | Step.RENDERED | Step.SUSPENDED | Step.RETAINING:
+                return False
+            case _:
+                assert_never(self)
 
 
 class AttemptTrack[T: TurnChain](Value):
@@ -69,6 +92,24 @@ class AttemptTrack[T: TurnChain](Value):
     def awaits(self, decision: str | None) -> bool:
         """Whether the track waits on the decision with this identity."""
         return decision is not None and self.awaiting is not None and self.awaiting.root == decision
+
+    def owns_blocked(self, event: IntentBlocked) -> bool:
+        """Whether the blocked request is one this attempt waits on, in whatever turn step.
+
+        A request named by an operation identity is attributed by its decision. Any other
+        request of the attempt (a turn, session or measurement request) carries the attempt's
+        scope, so it belongs to the attempt of that scope and generation while a request of
+        its turn is in flight (`Step.has_request_in_flight`).
+        """
+        if self.awaits(decision_of_operation(event.target.root)):
+            return True
+        scope = event.scope
+        return (
+            scope.owner.kind == "attempt"
+            and scope.owner == self.attempt
+            and scope.generation == self.generation
+            and self.step.has_request_in_flight
+        )
 
     def admitted(self, generation: int) -> Self:
         """Core admitted the attempt: it holds a slot at ``generation``."""
@@ -110,3 +151,17 @@ class AttemptTrack[T: TurnChain](Value):
         return self.model_copy(
             update={"step": Step.NEEDED, "held_reply": None, "held_invocation": None}
         )
+
+
+def blocked_track[T: AttemptTrack[Any]](tracks: Iterable[T], event: IntentBlocked) -> T | None:
+    """The track a blocked request belongs to, or None when no track waits on it.
+
+    A track named by the request's decision wins over one attributed by scope, so an
+    operation's block never ends another track of the same attempt.
+    """
+    candidates = tuple(tracks)
+    by_decision = decision_of_operation(event.target.root)
+    named = next((track for track in candidates if track.awaits(by_decision)), None)
+    if named is not None:
+        return named
+    return next((track for track in candidates if track.owns_blocked(event)), None)

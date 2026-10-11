@@ -30,6 +30,7 @@ from vs_core.api import (
     Rejected,
     RunView,
     Step,
+    blocked_track,
 )
 
 
@@ -100,16 +101,7 @@ def on_exhausted(state: EvolveStrategyState, event: AttemptExhausted) -> EvolveS
 def on_blocked(state: EvolveStrategyState, event: IntentBlocked) -> EvolveStrategyState:
     """A blocked request leaves its effect unknown: end the slot awaiting it."""
     detail = f"request blocked: {event.diagnostic}"
-    slot = awaiting(state, ids.decision_of_operation(event.target.root))
-    if slot is None and event.scope.owner.kind == "attempt":
-        candidate = slot_of(state, event.scope.owner)
-        if (
-            candidate is not None
-            and candidate.generation == event.scope.generation
-            and candidate.step in (Step.AWAITING, Step.RENDERING)
-            and candidate.phase is not WorkPhase.DONE
-        ):
-            slot = candidate
+    slot = blocked_track((item for item in state.slots if item.phase is not WorkPhase.DONE), event)
     return state if slot is None else fail(state, slot, detail)
 
 

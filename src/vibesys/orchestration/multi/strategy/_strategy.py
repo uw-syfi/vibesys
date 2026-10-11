@@ -36,7 +36,6 @@ from vibesys.orchestration.multi.strategy._state import (
     STATE_SCHEMA,
     MultiStrategyState,
     RunPhase,
-    Step,
 )
 from vs_core.api import (
     AdoptionFailed,
@@ -179,7 +178,7 @@ class MultiStrategy:
         design_waits = tracks.awaits(state, decision) or (
             event.scope.owner.kind == "run"
             and decision is None
-            and design.step is Step.AWAITING
+            and design.step.has_request_in_flight
             and design.active
         )
         if design_waits:

@@ -57,6 +57,7 @@ from vs_core.api import (
     TurnSuspended,
     Waitable,
     WaitingForEvaluation,
+    blocked_track,
     ledger_refs,
     may_resubmit,
     trusted_keys,
@@ -578,17 +579,10 @@ def on_exhausted(state: SingleStrategyState, event: AttemptExhausted) -> SingleS
 def on_blocked(state: SingleStrategyState, event: IntentBlocked) -> SingleStrategyState:
     """A blocked request leaves its effect unknown: end the round awaiting it."""
     detail = f"request blocked: {event.diagnostic}"
-    record = _awaiting(state, ids.decision_of_operation(event.target.root))
-    if (
-        record is None
-        and state.round is not None
-        and event.scope.owner.kind == "attempt"
-        and state.round.attempt == event.scope.owner
-        and state.round.generation == event.scope.generation
-        and state.round.step is Step.AWAITING
-        and state.round.phase is not WorkPhase.DONE
-    ):
-        record = state.round
+    open_rounds = [] if state.round is None else [state.round]
+    record = blocked_track(
+        (item for item in open_rounds if item.phase is not WorkPhase.DONE), event
+    )
     return state if record is None else fail(state, record, detail)
 
 

@@ -3,6 +3,7 @@
 from vs_core._attempt_track import (
     AttemptTrack,
     Step,
+    blocked_track,
 )
 from vs_core._continuations import SuspensionRefusal
 from vs_core._draft import (
@@ -950,6 +951,7 @@ __all__ = [
     "attempt_ref",
     "attempt_scope",
     "attempt_view",
+    "blocked_track",
     "component",
     "decision_of_operation",
     "declared_operation",

@@ -186,12 +186,7 @@ def on_blocked(state: IssueQueueStrategyState, event: IntentBlocked) -> IssueQue
     if job is None or job.phase is Phase.DONE:
         return state
     detail = f"request blocked: {event.diagnostic}"
-    decision = ids.decision_of_operation(event.target.root)
-    attempt_owned = event.scope.owner.kind == "attempt" and event.scope.owner == job.attempt
-    awaiting = job.awaits(decision) or (
-        attempt_owned and event.scope.generation == job.generation and job.step is Step.AWAITING
-    )
-    return fail(state, detail) if awaiting else state
+    return fail(state, detail) if job.owns_blocked(event) else state
 
 
 def _rendered(

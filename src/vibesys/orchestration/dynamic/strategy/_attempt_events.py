@@ -79,6 +79,7 @@ from vs_core.api import (
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
+    blocked_track,
     ledger_refs,
     may_resubmit,
     trusted_keys,
@@ -856,17 +857,9 @@ def on_blocked(state: DynamicStrategyState, event: IntentBlocked) -> DynamicStra
     an attempt (turn, measurement, start) ends that attempt's awaited step.
     """
     detail = f"request blocked: {event.diagnostic}"
-    index = _awaiting(state, ids.decision_of_operation(event.target.root))
-    if index is None and event.scope.owner.kind == "attempt":
-        index = next(
-            (
-                i
-                for i, item in enumerate(state.attempts)
-                if item.attempt == event.scope.owner
-                and item.generation == event.scope.generation
-                and item.step is Step.AWAITING
-                and item.phase is not WorkPhase.DONE
-            ),
-            None,
-        )
-    return state if index is None else fail(state, index, detail)
+    owner = blocked_track(
+        (item for item in state.attempts if item.phase is not WorkPhase.DONE), event
+    )
+    if owner is None:
+        return state
+    return fail(state, state.attempts.index(owner), detail)
