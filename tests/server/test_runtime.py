@@ -30,6 +30,7 @@ from server.api.service import RunApi, RunControlUnavailableError
 from server.chat.manager import ChatManager
 from server.controller import RunController
 from server.execution import ExecutionTracker
+from server.host_api import FailureReason, RunStatus
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.runtime import ServerRuntime
@@ -42,6 +43,7 @@ from vs_runtime.api.infrastructure import RunControlChannel
 
 if TYPE_CHECKING:
     from websockets.typing import Origin
+
 
 # The one line `ServerRuntime.run` prints for a web launch, and the only place
 # the minted capability token leaves the process.
@@ -371,8 +373,10 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
             assert response.ack is not None
             assert (response.ack.action, response.ack.status) == ("stop", "pending")
 
-        def run_ready(self, run_id: str) -> None:
-            del run_id
+        def observe(
+            self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+        ) -> None:
+            del status, failure
 
     runtime = ServerRuntime(
         run_id="run-1",
@@ -423,8 +427,10 @@ def test_startup_rejects_commands_that_require_an_active_session(
                 runtime.api.execute(command)
             self.failure = raised.value
 
-        def run_ready(self, run_id: str) -> None:
-            del run_id
+        def observe(
+            self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+        ) -> None:
+            del status, failure
 
     observer = Observer()
     runtime = ServerRuntime(
