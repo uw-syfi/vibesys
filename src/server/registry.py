@@ -1075,9 +1075,10 @@ class InstanceInspector:
         state = _inspection_state(after)
         record = (
             after.record
-            if state is InspectionState.LIVE
+            if state is InspectionState.LIVE and isinstance(after.record, LiveInstanceRecord)
             else before.record
             if _inspection_state(before) is InspectionState.LIVE
+            and isinstance(before.record, LiveInstanceRecord)
             else None
         )
         paths = self._logs.paths(instance_id)

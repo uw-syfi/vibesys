@@ -63,4 +63,22 @@ describe('recentStatus', () => {
     });
     expect(recentStatus(RECENT, undefined)).toEqual({kind: 'unknown'});
   });
+
+  test('an ended run never borrows a same-named run from another project', () => {
+    const other = server(9, 9, 'failed');
+    const listing: HostListing = {
+      kind: 'listed',
+      host: 'ssh:gpu',
+      live: [],
+      ended: [{...other, projectRoot: '/another-project'}],
+      unreadable: [],
+    };
+
+    expect(recentStatus(RECENT, listing)).toEqual({
+      kind: 'ended',
+      instanceId: null,
+      status: null,
+      reason: null,
+    });
+  });
 });

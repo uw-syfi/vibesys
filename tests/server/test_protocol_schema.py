@@ -105,6 +105,13 @@ def test_committed_host_helper_module_matches_python_contract() -> None:
     assert HOST_HELPER_MODULE_PATH.read_text() == host_helper_typescript()
 
 
+def test_host_helper_schema_exports_the_instance_log_utf8_byte_limit() -> None:
+    document = host_helper_json_schema()
+    text = document["$defs"]["AvailableLogTail"]["properties"]["text"]
+
+    assert text["x-vibesys-max-utf8-bytes"] == 64 * 1024
+
+
 @pytest.mark.parametrize(
     "keyword",
     [

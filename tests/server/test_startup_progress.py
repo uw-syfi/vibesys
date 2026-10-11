@@ -64,6 +64,9 @@ def test_the_record_observer_is_told_each_startup_fact(tmp_path: Path) -> None:
     facts: list[object] = []
 
     class Observer:
+        def resolved(self, *, project_root: Path, task: str) -> None:
+            del project_root, task
+
         def listening(self) -> None:
             facts.append("listening")
 

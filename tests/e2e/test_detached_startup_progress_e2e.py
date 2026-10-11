@@ -29,6 +29,7 @@ from server.host_api import (
     StartupStage,
 )
 from server.registry import (
+    FileInstanceMetadataStore,
     FileInstanceStore,
     LiveRegistry,
     host_facts,
@@ -106,6 +107,7 @@ def _serve(
                         vibesys_version=version,
                     ),
                     clock,
+                    metadata=FileInstanceMetadataStore(root),
                 )
                 runtime = ServerRuntime(
                     run_id="run-1",

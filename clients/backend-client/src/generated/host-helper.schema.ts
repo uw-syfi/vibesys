@@ -14,7 +14,8 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         "text": {
           "title": "Text",
-          "type": "string"
+          "type": "string",
+          "x-vibesys-max-utf8-bytes": 65536
         },
         "truncated": {
           "title": "Truncated",

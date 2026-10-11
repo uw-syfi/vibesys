@@ -9,6 +9,7 @@ from pathlib import Path
 from entrypoints.detached_run import RecordPublisher
 from server.host_api import InstanceStatus, LiveInstanceRecord, RunPhase, RunStatus
 from server.registry import (
+    FileInstanceMetadataStore,
     FileInstanceStore,
     LiveRegistry,
     host_facts,
@@ -40,6 +41,7 @@ def main(instance_id: str) -> None:
                 vibesys_version=version,
             ),
             clock,
+            metadata=FileInstanceMetadataStore(root),
         )
         sys.stdout.write("ready\n")
         sys.stdout.flush()

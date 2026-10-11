@@ -29,7 +29,7 @@ export function recentStatus(run: WelcomeRecent, listing: HostListing | undefine
   if (live !== undefined) return {kind: 'live', instanceId: live.id, status: live.status};
   // A run resumed and ended again has several tombstones: its latest server says how it ended.
   const ended = listing.ended
-    .filter(entry => entry.runId === run.runId)
+    .filter(entry => entry.runId === run.runId && entry.projectRoot === run.project)
     .reduce<WelcomeRun | undefined>(
       (latest, entry) =>
         latest === undefined || entry.startedAt > latest.startedAt ? entry : latest,

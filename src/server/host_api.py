@@ -405,7 +405,7 @@ class AvailableLogTail(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     state: Literal["available"] = "available"
-    text: str
+    text: str = Field(json_schema_extra={"x-vibesys-max-utf8-bytes": INSPECTION_LOG_TAIL_BYTES})
     truncated: bool
 
     @field_validator("text")

@@ -134,6 +134,8 @@ _HOST_HELPER_DESCRIPTOR_KEYWORDS = frozenset(
         "required",
         "title",
         "type",
+        # Consumed explicitly by backend-client's semantic instance-inspection refinement.
+        "x-vibesys-max-utf8-bytes",
     }
 )
 """What the TypeScript walker's strict mode enforces (``backend-client/src/schema-walker.ts``)."""

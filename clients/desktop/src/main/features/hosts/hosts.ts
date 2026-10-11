@@ -20,6 +20,7 @@ import type {
   WelcomeInspection,
 } from '../../../common/welcome-protocol.js';
 import {connectionStatus, hostListing} from '../../entities/listing.js';
+import {inspectionReply} from '../../entities/inspection.js';
 import {
   type ConnectionManager,
   HelperRequestError,
@@ -159,7 +160,7 @@ export class Hosts {
         instance_id: instanceId,
         include_log: includeLog,
       });
-      return reply.inspection;
+      return inspectionReply(instanceId, reply.inspection);
     } catch (error) {
       if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
         throw new Error(

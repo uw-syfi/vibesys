@@ -7,7 +7,7 @@ import os
 import stat
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from hypothesis import given
@@ -43,14 +43,20 @@ from server.host_api import (
 from server.instances import ControlSocketStopRequester
 from server.registry import (
     TOMBSTONE_RETENTION_SECONDS,
+    FakeInstanceMetadataStore,
     FakeInstanceStore,
+    FileInstanceLogs,
+    FileInstanceMetadataStore,
     FileInstanceStore,
     InstanceHold,
+    InstanceInspector,
     LiveRegistry,
     StopEffects,
     driving,
     instance_root,
 )
+from vibesys.api import CoreEvent, RunRequest, RunResult
+from vibesys.api.testing import FakeRuns
 from vibesys.orchestration.dynamic import DynamicOptions
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
@@ -64,10 +70,50 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import BinaryIO
+
+    from vibesys.api import Runs, RunView
+    from vibesys.api.auxiliary import RunReady
 
 INSTANCE = "0123456789ab"
 _RUN_ID = "20261010-120000-11111111-dynamic"
+
+
+class _FinishedSession:
+    """In-memory run session that completes without emitting observations."""
+
+    def __init__(self, run_id: str) -> None:
+        self._run_id = run_id
+
+    def start(self) -> None:
+        pass
+
+    async def await_result(self) -> RunResult:
+        return RunResult(run_id=self._run_id, loop="plain", succeeded=True)
+
+    def stop(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def on_committed_view(
+        self, listener: Callable[[RunView, tuple[str, ...] | None], None]
+    ) -> None:
+        del listener
+
+    def on_ready(self, listener: Callable[[RunReady], None]) -> None:
+        del listener
+
+
+def _finished_runs() -> Runs:
+    runs = FakeRuns[RunRequest, CoreEvent, RunResult, _FinishedSession](
+        lambda request, _sink: _FinishedSession(request.resolved_run_id),
+        identity=lambda request: request.resolved_run_id,
+        is_resume=lambda request: request.resume is not None,
+    )
+    return cast("Runs", runs)
 
 
 def _record(
@@ -487,7 +533,9 @@ def test_a_detached_server_record_follows_its_run_and_names_it_throughout() -> N
         phases.append((record.status, record.phase, record.run_id))
 
     with registry.register(INSTANCE) as hold:
-        publisher = RecordPublisher(hold, _starting(INSTANCE), clock)
+        publisher = RecordPublisher(
+            hold, _starting(INSTANCE), clock, metadata=FakeInstanceMetadataStore()
+        )
         seen()
         publisher.listening()
         seen()
@@ -532,7 +580,9 @@ def test_a_run_that_fails_at_startup_shows_its_reason_to_a_client_that_comes_lat
     clock = ManualClock(100.0)
     registry = LiveRegistry(FakeInstanceStore(), clock)
     with registry.register(INSTANCE) as hold:
-        publisher = RecordPublisher(hold, _starting(INSTANCE), clock)
+        publisher = RecordPublisher(
+            hold, _starting(INSTANCE), clock, metadata=FakeInstanceMetadataStore()
+        )
         publisher.listening()
         publisher.observe(status=RunStatus.FAILED)
         publisher.observe(failure=_EARLY_FAILURE)
@@ -553,7 +603,9 @@ def test_a_server_that_exits_before_its_run_ends_leaves_a_failed_tombstone() -> 
     clock = ManualClock(100.0)
     registry = LiveRegistry(FakeInstanceStore(), clock)
     with registry.register(INSTANCE) as hold:
-        RecordPublisher(hold, _starting(INSTANCE), clock).end()
+        RecordPublisher(
+            hold, _starting(INSTANCE), clock, metadata=FakeInstanceMetadataStore()
+        ).end()
 
     (ended,) = registry.list().ended
     assert ended.phase == RunPhase(status=RunStatus.FAILED, reason=SERVER_EXITED)
@@ -576,3 +628,55 @@ def test_a_detached_server_without_its_allocated_identity_registers_nothing(
 
     assert exit_info.value.code == 2
     assert not (tmp_path / "vibesys").exists()
+
+
+def test_detached_start_retains_resolved_identity_for_later_inspection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The child retains the sole task that server parsing selected automatically."""
+    launch_directory = tmp_path / "launcher-cwd"
+    launch_directory.mkdir()
+    project = tmp_path / "resolved-project"
+    project.mkdir()
+    write_task(
+        project,
+        'version = 1\n[agent]\ndomain = "generic"\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        task="latency",
+    )
+    monkeypatch.chdir(launch_directory)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setenv("VIBESYS_DETACHED_CHILD", "1")
+    root = instance_root(os.environ, os.getuid())
+    (root / "runs" / INSTANCE).mkdir(parents=True, mode=0o700)
+    socket = tmp_path / "control.sock"
+
+    detached_run_main(
+        [
+            "--detach",
+            "--instance-id",
+            INSTANCE,
+            "--run-id",
+            _RUN_ID,
+            "--control-socket",
+            str(socket),
+            "--outer-loop",
+            "plain",
+            "--project",
+            str(project),
+        ],
+        runs=_finished_runs(),
+    )
+
+    inspection = InstanceInspector(
+        FileInstanceStore(root),
+        FileInstanceLogs(root),
+        FileInstanceMetadataStore(root),
+    ).inspect(INSTANCE)
+    assert inspection.state.value == "ended"
+    assert inspection.record is None
+    assert inspection.metadata is not None
+    assert inspection.metadata.project_root == str(project)
+    assert inspection.metadata.task == "latency"
+    assert inspection.metadata.run_id == _RUN_ID
+    assert inspection.metadata.control_socket_path == str(socket)
