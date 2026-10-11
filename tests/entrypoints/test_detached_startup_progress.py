@@ -128,14 +128,14 @@ def test_a_build_failure_leaves_a_tombstone_failed_in_building_image() -> None:
 _FACTS = st.one_of(
     st.builds(_building, st.integers(0, 13)),
     st.builds(StartupFact, stage=st.sampled_from(StartupStage)),
-    st.builds(dict, status=st.sampled_from([RunStatus.RUNNING, RunStatus.STOPPING])),
+    st.sampled_from([RunStatus.RUNNING, RunStatus.STOPPING]),
 )
 
 
 @settings(max_examples=40, deadline=None)
 @given(steps=st.lists(st.tuples(st.sampled_from([0.0, 0.1, 0.4, 0.9, 1.0, 3.0]), _FACTS)))
 def test_progress_writes_are_paced_and_the_record_ends_on_the_folded_phase(
-    steps: list[tuple[float, StartupFact | dict[str, RunStatus]]],
+    steps: list[tuple[float, StartupFact | RunStatus]],
 ) -> None:
     threads = SimThreads()
     registry = LiveRegistry(FakeInstanceStore(), ManualClock(100.0))
@@ -149,7 +149,7 @@ def test_progress_writes_are_paced_and_the_record_ends_on_the_folded_phase(
                 if isinstance(fact, StartupFact):
                     publisher.observe(startup=fact)
                 else:
-                    publisher.observe(**fact)
+                    publisher.observe(status=fact)
             threads.sleep(2 * PROGRESS_WRITE_INTERVAL_SECONDS)
             return timed.writes
 
@@ -160,7 +160,7 @@ def test_progress_writes_are_paced_and_the_record_ends_on_the_folded_phase(
         folded = (
             folded.advance(startup=fact)
             if isinstance(fact, StartupFact)
-            else folded.advance(**fact)
+            else folded.advance(status=fact)
         )
     assert writes[-1][1] == folded
     for (before_at, before), (at, phase) in pairwise(writes):

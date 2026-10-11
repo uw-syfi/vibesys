@@ -113,7 +113,7 @@ depends_on = []
 
 [[modules]]
 path = "server.events"
-depends_on = ["server.diagnostics", "server.run_lifecycle", "server.event_index", "vibesys.api", "vs_sim.api"]
+depends_on = ["server.diagnostics", "server.host_api", "server.run_lifecycle", "server.event_index", "vibesys.api", "vs_sim.api"]
 
 [[modules]]
 path = "server.execution"
@@ -693,7 +693,7 @@ depends_on = []
 [[modules]]
 path = "vs_sim.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.network", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals"]
+depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.network", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals", "vs_sim.streaming"]
 
 [[modules]]
 path = "vs_sim.api.testing"
@@ -722,6 +722,11 @@ depends_on = []
 
 [[modules]]
 path = "vs_sim.probes"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.streaming"
 layer = "prompts_and_lower_libs"
 depends_on = []
 

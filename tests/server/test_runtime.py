@@ -30,7 +30,7 @@ from server.api.service import RunApi, RunControlUnavailableError
 from server.chat.manager import ChatManager
 from server.controller import RunController
 from server.execution import ExecutionTracker
-from server.host_api import FailureReason, RunStatus
+from server.host_api import FailureReason, RunStatus, StartupFact
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.runtime import ServerRuntime
@@ -374,9 +374,13 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
             assert (response.ack.action, response.ack.status) == ("stop", "pending")
 
         def observe(
-            self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+            self,
+            *,
+            status: RunStatus | None = None,
+            failure: FailureReason | None = None,
+            startup: StartupFact | None = None,
         ) -> None:
-            del status, failure
+            del status, failure, startup
 
     runtime = ServerRuntime(
         run_id="run-1",
@@ -428,9 +432,13 @@ def test_startup_rejects_commands_that_require_an_active_session(
             self.failure = raised.value
 
         def observe(
-            self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+            self,
+            *,
+            status: RunStatus | None = None,
+            failure: FailureReason | None = None,
+            startup: StartupFact | None = None,
         ) -> None:
-            del status, failure
+            del status, failure, startup
 
     observer = Observer()
     runtime = ServerRuntime(

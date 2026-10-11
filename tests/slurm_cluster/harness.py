@@ -113,10 +113,15 @@ class PrebuiltImageRunner:
         self._image_id = image_id
 
     def run(
-        self, argv: Sequence[str], *, cwd: Path, timeout: float
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path,
+        timeout: float,
+        on_stderr_line: Callable[[str], None] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Return the scripted outcome for ``docker build`` or ``docker image inspect``."""
-        del cwd, timeout
+        del cwd, timeout, on_stderr_line
         stdout = self._image_id if argv[1] == "image" else ""
         return subprocess.CompletedProcess(tuple(argv), 0, stdout, "")
 

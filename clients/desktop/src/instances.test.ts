@@ -174,9 +174,9 @@ describe('registry records', () => {
       reason: null,
     });
     const progress = {done: -1, total: 14, label: 'x'};
-    expect(() =>
-      parseInstanceRecord({...building, phase: {...building.phase, progress}}),
-    ).toThrow('record.phase.progress.done');
+    expect(() => parseInstanceRecord({...building, phase: {...building.phase, progress}})).toThrow(
+      'record.phase.progress.done',
+    );
     expect(() =>
       parseInstanceRecord({...building, version: 3, phase: {...building.phase}}),
     ).toThrow('record.phase');

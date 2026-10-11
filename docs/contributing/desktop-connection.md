@@ -286,10 +286,16 @@ emits `run_status_changed`, so the two cannot disagree.
 Facts enter once:
 
 - **Journal**: a new event `run_startup_progress {stage, progress}` and the existing
-  `run_status_changed` (now carrying the reason on `failed`). The image build reports progress as
-  typed observations from `vs_sandbox`'s build (steps done and total), not log lines.
-- **Record**: the server rewrites its record atomically (temp file, rename) on each phase change,
-  throttled to one write per second for progress.
+  `run_status_changed` (now carrying the reason on `failed`). The agent image build
+  (`vs_agent.api.images.agent_image`) parses Docker's progress output into typed step
+  observations (`ImageBuildProgress {done, total, label}`), not log lines; the run environment
+  reports them, and the stage it is in, to the request's `startup` sink (`vs_runtime`), and the
+  engine emits each as a `run_startup_progress` core event. The run's status stays `starting`
+  until its session reports it ready (`RunTrigger.READY`); attaching the journal is not readiness.
+  A failure while starting past `resolving` names the startup stage it failed in.
+- **Record**: the server rewrites its record atomically (temp file, rename) on each phase change;
+  a change of progress alone is written at most once per second, the latest one when the second
+  ends.
 - **Ended records**: when a server exits, its last record (terminal phase and reason) stays in the
   registry as a tombstone for 24 hours; the next listing after that removes it, with no coupling to
   client acknowledgements. Finished runs stay reachable from run history (`runs.list`), not the
@@ -467,7 +473,7 @@ Each phase merges on its own and leaves the app working.
 | --- | --- | --- |
 | 1. Light host commands | Split `server.registry` (lock, store, survey) and `server.host_api` (records) out of `server.instances` and `server.transport.discovery`; stop `server.transport`'s package `__init__` from importing both transports; make the launcher's `boot_trace` mark light and dispatch `instances` and `tasks` in process. Add the import-closure guard. | Guard test green. `vibesys instances list --json` and `vibesys tasks --json` import none of the denied modules; measured time reported in the PR (target under 400 ms locally). No behavior change. |
 | 2. Explicit run identity | `--run-id`; resume target resolved before detaching; record version 2 with required `run_id`, published before engine import; every event carries the run id; listing reports unknown record versions as `unreadable`. App stores Recent by run id at start. | Regression tests for the inferred-identity class (first event of a detached run names the run; resume latest records the resolved id; listing over mixed versions). Web client no longer latches identity from data. |
-| 3. Lifecycle phases | `RunPhase`; `run_startup_progress`; image-build progress from `vs_sandbox`; record phase updates; tombstones with reason. App renders phase only. | A run failing at startup shows `failed` with its reason in `instances.list` with no client attached. Image build shows progress. Property test for listing tombstones. |
+| 3. Lifecycle phases | `RunPhase`; `run_startup_progress`; image-build progress from `vs_agent`; record phase updates; tombstones with reason. App renders phase only. | A run failing at startup shows `failed` with its reason in `instances.list` with no client attached. Image build shows progress. Property test for listing tombstones. |
 | 4. Host helper | `server.host_api` messages in the schema pipeline; `server.host_helper` and `entrypoints.host_helper` with every method; helper conformance scenarios and runner; delete `entrypoints.stdio_bridge`. Step one (a small phase 3.5 if it lands separately): split the run protocol's control envelope (requests and responses needed by `run.stop`) from the engine-importing modules. | Step one: the import-closure guard passes with zero allowlisted modules. Then: conformance runner green in process and over a real process; startup guard green; the app still works on today's code paths (the helper is additive until phase 5). |
 | 5. Connection manager | `ConnectionManager`, `HostConnection` with pure step; bootstrap line; channels; real-operation checks; warm masters; local uses the same path. Delete the per-action scripts and host implementations listed above. | Contract suite over a fake helper and over the real helper; journey test (connect, start, attach, drop, stop, resume, quit); connect to a populated host under 1 s with a warm master (measured, reported). |
 | 6. Screen stores and app lifecycle | React welcome, host panel, start-run sheet, run strip on per-screen stores with tokens and `<dialog>`; `AppLifecycle` with single-instance lock, quit machine, settings store. | Model-based invariant tests per store; quit and second-launch journey steps. Can land before phase 5 against today's welcome bridge. |
@@ -484,7 +490,7 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Pure supervisor core | built (check to be replaced) |
 | Light host commands and import guard (phase 1) | built |
 | Explicit run identity (phase 2) | built (server side; the desktop app still keeps its id inference until phase 5 or 6 removes it) |
-| Lifecycle phases, progress, tombstones (phase 3) | built: phases with failure reason in the record, tombstones; not built: startup stages past `resolving` and image-build progress (`run_startup_progress`) |
+| Lifecycle phases, progress, tombstones (phase 3) | built: phases with failure reason in the record, tombstones, startup stages and image-build progress (`run_startup_progress`, record version 4); the desktop parses them but does not render them yet |
 | Control envelope split (phase 4, step one) | built (`server.control_envelope`) |
 | Host helper and its contract (phase 4) | built: every method, `host-helper.schema.json` and its TypeScript types, the `helper-*` conformance scenarios and runner (in process and over stdio), the import-closure and start-up guards; not built: deleting `entrypoints.stdio_bridge`, which the shipping app runs until phase 5 |
 | Connection manager (phase 5) | not built |
