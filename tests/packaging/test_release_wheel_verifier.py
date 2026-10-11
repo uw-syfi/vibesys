@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import platform
-import shutil
 import stat
 import zipfile
 from pathlib import Path
@@ -15,6 +14,7 @@ import packaging_support
 import pytest
 import verify_release_wheel as verifier
 from tests.support import run_test_command
+from tests.support.distribution_build import build_distribution, copy_private_packaging_source
 from wheel_targets import TARGETS
 
 FRAMEWORK_PACKAGES = (
@@ -649,14 +649,12 @@ def test_bdist_wheel_revalidates_the_native_host(tmp_path: Path) -> None:
     )
     env = {**os.environ, "VIBESYS_WHEEL_TARGET": target_key}
 
-    uv = shutil.which("uv")
-    assert uv is not None
-    result = run_test_command(
-        [uv, "build", "--wheel", "--out-dir", str(tmp_path / "dist")],
-        cwd=Path(__file__).resolve().parents[2],
-        env=env,
-        capture_output=True,
-        text=True,
+    source = copy_private_packaging_source(Path(__file__).resolve().parents[2], tmp_path / "source")
+    result = build_distribution(
+        source,
+        tmp_path / "dist",
+        artifact="wheel",
+        environment=env,
         check=False,
     )
 

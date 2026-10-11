@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import re
-import shutil
 import sys
 import sysconfig
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,6 +17,11 @@ from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionId,
 
 if __name__ != "packaged_prompt_contract":
     from tests.support import run_test_command
+    from tests.support.distribution_build import (
+        PrivatePackagingSource,
+        build_distribution,
+        copy_private_packaging_source,
+    )
 
 from vibesys.constants import ComputeBackend
 from vibesys.hypothesis import (
@@ -80,34 +85,30 @@ if TYPE_CHECKING:
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@dataclass(frozen=True)
+class _PackagedTree:
+    """The installed wheel paired with the exact source snapshot that produced it."""
+
+    source: PrivatePackagingSource
+    installed: Path
+
+
 @pytest.fixture(scope="module")
-def packaged_tree(tmp_path_factory: pytest.TempPathFactory) -> Path:
+def packaged_tree(tmp_path_factory: pytest.TempPathFactory) -> _PackagedTree:
     """Build in private scratch so concurrent packaging checks share no build output."""
     scratch = tmp_path_factory.mktemp("prompt-wheel")
-    checkout = scratch / "checkout"
-    shutil.copytree(
-        ROOT,
-        checkout,
-        ignore=shutil.ignore_patterns(
-            ".git", ".venv", "build", "dist", "*.egg-info", "__pycache__", ".pytest_cache"
-        ),
-    )
-    run_test_command(
-        ["uv", "build", "--wheel", "--out-dir", str(scratch / "dist")],
-        cwd=checkout,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    source = copy_private_packaging_source(ROOT, scratch / "checkout")
+    build_distribution(source, scratch / "dist", artifact="wheel")
     installed = scratch / "installed"
     with zipfile.ZipFile(next((scratch / "dist").glob("vibesys-*.whl"))) as archive:
         archive.extractall(installed)
-    return installed
+    return _PackagedTree(source=source, installed=installed)
 
 
-def assert_every_source_prompt_is_in_the_wheel(packaged_tree: Path) -> None:
+def assert_every_source_prompt_is_in_the_wheel(packaged_tree: _PackagedTree) -> None:
     """A forgotten package-data glob must fail even when editable installs render it."""
-    sources = [ROOT / "src", *(ROOT / "libs").glob("*/src")]
+    source_root = packaged_tree.source.root
+    sources = [source_root / "src", *(source_root / "libs").glob("*/src")]
     expected = {
         path.relative_to(source)
         for source in sources
@@ -115,11 +116,15 @@ def assert_every_source_prompt_is_in_the_wheel(packaged_tree: Path) -> None:
         if path.is_file() and path.suffix in {".j2", ".md"} and "prompts" in path.parts
     }
     assert expected
-    missing = sorted(str(path) for path in expected if not (packaged_tree / path).is_file())
+    missing = sorted(
+        str(path) for path in expected if not (packaged_tree.installed / path).is_file()
+    )
     assert not missing, f"Prompts missing from wheel: {missing}"
 
 
-def test_every_packaged_prompt_renders_without_checkout_fallback(packaged_tree: Path) -> None:
+def test_every_packaged_prompt_renders_without_checkout_fallback(
+    packaged_tree: _PackagedTree,
+) -> None:
     """Run real rendering in a child whose package imports come from the wheel."""
     assert_every_source_prompt_is_in_the_wheel(packaged_tree)
     script = (
@@ -135,11 +140,11 @@ def test_every_packaged_prompt_renders_without_checkout_fallback(packaged_tree: 
             "-S",
             "-c",
             script,
-            str(packaged_tree),
+            str(packaged_tree.installed),
             sysconfig.get_path("purelib"),
             str(Path(__file__)),
         ],
-        cwd=packaged_tree,
+        cwd=packaged_tree.installed,
         check=False,
         capture_output=True,
         text=True,
